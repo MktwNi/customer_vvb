@@ -9,9 +9,10 @@
  */
 import type { ContactEdit, Crm, LogEntry, StageKey, Task } from './types';
 
-/** `id` identifies this queued change locally (for acknowledging it across tabs) and `t` (ms) orders
- *  changes to the same record; the server ignores both. */
-export interface SyncOp { id?: string; t?: number; k: string; v?: unknown; del?: boolean; by?: string }
+/** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
+ *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
+ *  ignores all three. */
+export interface SyncOp { id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
 /** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
@@ -130,6 +131,28 @@ export function legacyLogId(e: LogEntry) {
     h = Math.imul(h, 0x01000193);
   }
   return 'L' + (h >>> 0).toString(36) + (Date.parse(e.at) || 0).toString(36);
+}
+
+/**
+ * Make task ids unique (an older uid() could repeat within one millisecond, e.g. bulk plans); every
+ * task must be its own record. The last task with an id keeps it (that is the one that was shared);
+ * earlier ones get an id derived from their company, so devices holding the same data agree.
+ * Returns how many were renamed.
+ */
+export function uniqueTaskIds(tasks: Task[]) {
+  const taken = new Set<string>();
+  let renamed = 0;
+  for (let i = tasks.length - 1; i >= 0; i--) {
+    const t = tasks[i];
+    let id = t.id;
+    for (let n = 1; taken.has(id); n++) id = `${t.id}.${t.gid}${n > 1 ? '.' + n : ''}`;
+    if (id !== t.id) {
+      t.id = id;
+      renamed++;
+    }
+    taken.add(id);
+  }
+  return renamed;
 }
 
 export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string> }
