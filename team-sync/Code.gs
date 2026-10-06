@@ -57,7 +57,8 @@ function doPost(e) {
     if (req.key !== TEAM_KEY) return json_({ ok: false, error: 'unauthorized' });
     switch (req.action) {
       case 'ping':
-        withLock_(() => sheet_());
+        // only creating / repairing the sheet needs the lock; a ready sheet is just read
+        if (!sheetReady_()) withLock_(() => sheet_());
         return json_({ ok: true, seq: seq_() });
       case 'pull':
         return json_(pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL)));
@@ -94,6 +95,11 @@ function withLock_(fn) {
 }
 
 /** The "sync" sheet; creates it (6 columns, header row) or repairs a missing header. */
+function sheetReady_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  return !!sh && String(sh.getRange(1, 1).getValue()) === 'seq';
+}
+
 function sheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName(SHEET_NAME);

@@ -11,7 +11,6 @@ import type { ContactEdit, Crm, LogEntry, StageKey, Task } from './types';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs); the server ignores it. */
 export interface SyncOp { id?: string; k: string; v?: unknown; del?: boolean; by?: string }
-export interface PendingStore { url: string; ops: SyncOp[] }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
 /** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
@@ -20,7 +19,16 @@ export interface TeamState { status: TeamStatus; msg: string; last: string }
 
 export type Transport = (url: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
-export class TeamSyncError extends Error {}
+export class TeamSyncError extends Error {
+  constructor(msg: string, readonly code = '') {
+    super(msg);
+  }
+}
+
+/** Collision-free id for a queued change (thousands are created within one millisecond). */
+let opN = 0;
+export const opId = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${(++opN).toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 const ERR_TH: Record<string, string> = {
   unauthorized: 'รหัสทีมไม่ถูกต้อง',
@@ -28,14 +36,21 @@ const ERR_TH: Record<string, string> = {
   busy: 'ชีตกำลังบันทึกข้อมูลของคนอื่นอยู่ จะลองใหม่อัตโนมัติ',
   too_many_ops: 'ส่งข้อมูลครั้งละมากเกินไป',
 };
-export const errText = (e: unknown) => {
-  if (e instanceof TeamSyncError) return e.message;
+/**
+ * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
+ * a network error usually means a deployment setting); `sync` = background sync of a working setup.
+ */
+export const errText = (e: unknown, ctx: 'connect' | 'sync' = 'sync') => {
   const name = (e as Error)?.name;
-  if (name === 'TimeoutError' || name === 'AbortError') return 'ชีตไม่ตอบกลับ (หมดเวลา) จะลองใหม่อัตโนมัติ';
+  const transient = name === 'TimeoutError' || name === 'AbortError' || (e instanceof TeamSyncError && e.code === 'busy');
+  if (transient) return ctx === 'connect' ? 'ชีตไม่ตอบกลับตอนนี้ ลองกดอีกครั้งในอีกสักครู่' : 'ชีตไม่ตอบกลับ จะลองใหม่อัตโนมัติ';
+  if (e instanceof TeamSyncError) return e.message;
   if (e instanceof TypeError) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
     // a cross-origin redirect to Google sign-in (access not "Anyone", or a /dev URL) surfaces as a network error
-    return 'เชื่อมต่อไม่ได้ — ตรวจว่าใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้ง Who has access เป็น "Anyone (ทุกคน)" แล้ว';
+    return ctx === 'connect'
+      ? 'เชื่อมต่อไม่ได้ — ตรวจว่าใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้ง Who has access เป็น "Anyone (ทุกคน)" แล้ว'
+      : 'เชื่อมต่อชีตไม่ได้ชั่วคราว จะลองใหม่อัตโนมัติ';
   }
   return String((e as Error)?.message || e);
 };
@@ -54,14 +69,14 @@ export const deploymentId = (u: string) => (/\/s\/([\w-]+)\/exec$/.exec(u)?.[1] 
 export const fetchTransport: Transport = async (url, body) => {
   const ctl = new AbortController();
   const to = setTimeout(() => ctl.abort(new DOMException('timeout', 'TimeoutError')), 45000);
-  let r: Response;
+  let t: string;
   try {
-    r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl.signal });
+    const r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl.signal });
+    if (!r.ok) throw new TeamSyncError(`เซิร์ฟเวอร์ตอบกลับผิดพลาด (HTTP ${r.status})`);
+    t = await r.text(); // the timeout also covers a body download that stalls
   } finally {
     clearTimeout(to);
   }
-  if (!r.ok) throw new TeamSyncError(`เซิร์ฟเวอร์ตอบกลับผิดพลาด (HTTP ${r.status})`);
-  const t = await r.text();
   try {
     return JSON.parse(t);
   } catch {
@@ -75,7 +90,7 @@ export async function call<T extends Record<string, unknown>>(t: Transport, url:
   const r = await t(url, { ...body, key });
   if (!r || r.ok !== true) {
     const code = String((r && r.error) || 'unknown');
-    throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code);
+    throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code, code);
   }
   return r as T;
 }

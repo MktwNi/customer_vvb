@@ -32,6 +32,8 @@ function indexedDbStore(dbName = 'gcc-registry', store = 'kv'): KVStore {
           const q = f(t.objectStore(store));
           t.oncomplete = () => res((q && q.result) as T);
           t.onerror = () => rej(t.error);
+          // quota errors and similar abort the transaction without an error event
+          t.onabort = () => rej(t.error || new DOMException('Transaction aborted', 'AbortError'));
         }),
     );
   return {
@@ -47,26 +49,34 @@ function indexedDbStore(dbName = 'gcc-registry', store = 'kv'): KVStore {
             let next: T;
             const g = os.get(k);
             g.onsuccess = () => {
-              next = fn(g.result === undefined ? null : (g.result as T));
-              os.put(next, k);
+              try {
+                next = fn(g.result === undefined ? null : (g.result as T));
+                os.put(next, k);
+              } catch (e) {
+                rej(e);
+                t.abort();
+              }
             };
             t.oncomplete = () => res(next);
             t.onerror = () => rej(t.error);
+            t.onabort = () => rej(t.error || new DOMException('Transaction aborted', 'AbortError'));
           }),
       ),
   };
 }
 
-/** In-memory store (no IndexedDB / tests — each call is an isolated "browser"). */
+/** In-memory store (no IndexedDB / tests — each call is an isolated "browser"). Values are
+ *  copied in and out like IndexedDB does, so callers never share objects with the store. */
 export function memoryStore(): KVStore {
   const m = new Map<string, unknown>();
+  const out = <T>(k: string) => (m.has(k) ? (structuredClone(m.get(k)) as T) : null);
   return {
-    get: async <T>(k: string) => (m.has(k) ? (m.get(k) as T) : null),
-    set: async (k, v) => void m.set(k, v),
+    get: async <T>(k: string) => out<T>(k),
+    set: async (k, v) => void m.set(k, structuredClone(v)),
     del: async (k) => void m.delete(k),
     update: async <T>(k: string, fn: (cur: T | null) => T) => {
-      const next = fn(m.has(k) ? (m.get(k) as T) : null);
-      m.set(k, next);
+      const next = fn(out<T>(k));
+      m.set(k, structuredClone(next));
       return next;
     },
   };

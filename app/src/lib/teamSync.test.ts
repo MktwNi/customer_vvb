@@ -255,7 +255,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     B.setStage(c4.id, 'won');
     await B.teamSync();
     expect(B.team.status).toBe('error');
-    expect(B.team.msg).toContain('เชื่อมต่อไม่ได้');
+    expect(B.team.msg).toBe('เชื่อมต่อชีตไม่ได้ชั่วคราว จะลองใหม่อัตโนมัติ');
     expect(B.teamPendingN).toBeGreaterThan(0);
     B.transport = real;
     await B.teamSync();
@@ -409,8 +409,165 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     expect(isTeamUrl('https://script.google.com/macros/s/AKfy/dev')).toBe(false);
     expect(isTeamUrl('https://evil.example/collect')).toBe(false);
     expect(isTeamUrl('http://localhost:8787')).toBe(false); // only when the app itself runs on localhost
-    expect(errText(new TypeError('Failed to fetch'))).toContain('/exec');
-    expect(errText(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toContain('หมดเวลา');
+    // connecting: a network error usually means a deployment setting; nothing retries by itself
+    expect(errText(new TypeError('Failed to fetch'), 'connect')).toContain('/exec');
+    expect(errText(Object.assign(new Error('x'), { name: 'TimeoutError' }), 'connect')).toContain('ลองกดอีกครั้ง');
+    // background sync of a working setup: transient, retried automatically
+    expect(errText(new TypeError('Failed to fetch'))).not.toContain('/exec');
+    expect(errText(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toContain('ลองใหม่อัตโนมัติ');
+  });
+
+  it('a large first upload reaches the sheet completely (no lost ops between batches)', async () => {
+    const D = mk();
+    const many = D.B.companies.slice(0, 1300);
+    many.forEach((c) => D.toggleWatch(c.id)); // > 4 push batches, all queued within a few ms
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    expect(D.teamPendingN).toBe(0);
+    const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
+    expect(many.filter((c) => !keys.has(`watch/${c.id}`)).length).toBe(0);
+    D.dispose();
+  });
+
+  it('a change made while its previous value is being sent stays queued', async () => {
+    const [c1] = cos();
+    const real = A.transport;
+    A.transport = async (u, body) => {
+      if (body.action === 'push') A.setStage(c1.id, 'won'); // user edits again mid-request
+      return real(u, body);
+    };
+    A.setStage(c1.id, 'proposal');
+    await A.teamSync();
+    A.transport = real;
+    // acknowledging the 'proposal' push must not drop the newer 'won' (same key, newer op)
+    expect(A.teamPendingN).toBe(0);
+    const last = sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.filter((r) => r.k === `stage/${c1.id}`).pop()!;
+    expect(last.v).toBe('won');
+    await B.teamSync();
+    expect(B.stage(c1.id)).toBe('won');
+  });
+
+  it('each sheet keeps its own queue: switching sheets never drops the other sheet\'s unsent edits', async () => {
+    const URL2 = 'https://script.google.com/macros/s/y/exec';
+    const sim2 = createGasSim({ teamKey: KEY });
+    const D = mk();
+    let down = false;
+    D.transport = async (u, body) => {
+      if (down) throw new TypeError('Failed to fetch');
+      return (u === URL2 ? sim2 : sim).post(body);
+    };
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    const [, , , , , , c7] = D.B.companies.filter((c) => c.ids.length === 1);
+    D.setStage(c7.id, 'interested');
+    await D.teamSync(); // sheet 1 has a value for this key
+    down = true;
+    D.setStage(c7.id, 'proposal'); // queued for sheet 1, can't send
+    await D.teamSync();
+    down = false;
+    D.teamDisconnect();
+    expect(await D.teamConnect(URL2, KEY)).toBe(true); // a different sheet
+    D.setStage(c7.id, 'won'); // edit while on sheet 2
+    await D.teamSync();
+    expect(sim2.post({ action: 'pull', key: KEY, since: 0 }).rows!.some((r) => r.k === `stage/${c7.id}` && r.v === 'won')).toBe(true);
+    D.teamDisconnect();
+    D.setStage(c7.id, 'proposal'); // local only (not connected)
+    expect(await D.teamConnect(URL, KEY)).toBe(true); // back on sheet 1: its queued edit is still sent
+    expect(D.stage(c7.id)).toBe('proposal');
+    expect(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.some((r) => r.k === `stage/${c7.id}` && r.v === 'proposal')).toBe(true);
+    D.dispose();
+  });
+
+  it('still uploads and syncs when browser storage cannot be written', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    D.store = { ...mem, update: () => Promise.reject(new DOMException('blocked', 'UnknownError')) };
+    const [, , , , , , , c8] = D.B.companies.filter((c) => c.ids.length === 1);
+    D.addTeam('คุณดี');
+    D.setOwner(c8.id, 'คุณดี');
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    D.setStage(c8.id, 'interested');
+    await D.teamSync();
+    expect(D.team.status).toBe('ok');
+    expect(D.teamPendingN).toBe(0);
+    const rows = sim.post({ action: 'pull', key: KEY, since: 0 }).rows!;
+    expect(rows.some((r) => r.k === `owner/${c8.id}` && r.v === 'คุณดี')).toBe(true);
+    expect(rows.some((r) => r.k === `stage/${c8.id}` && r.v === 'interested')).toBe(true);
+    D.dispose();
+  });
+
+  it('applying team rows never erases local-only records another tab saved', async () => {
+    const shared = memoryStore();
+    const T1 = mk(), T2 = mk();
+    T1.store = T2.store = shared;
+    expect(await T1.teamConnect(URL, KEY)).toBe(true);
+    T2.teamCfg = { ...T1.teamCfg! };
+    T1.crm.stages[900007] = 'none';
+    T1.setStage(900007, 'won'); // TGO-added company: saved locally by T1 only
+    await vi.waitFor(async () => expect(((await shared.get<{ stages: Record<string, string> }>('crm'))!.stages[900007])).toBe('won'));
+    const [c1] = cos();
+    sim.post({ action: 'push', key: KEY, ops: [{ k: `owner/${c1.id}`, v: 'คุณซี' }] });
+    await T2.teamSync(); // T2 never saw T1's record; saving the pulled row must not drop it
+    expect(T2.crm.owners[c1.id]).toBe('คุณซี');
+    await vi.waitFor(async () => {
+      const crm = (await shared.get<{ stages: Record<string, string>; owners: Record<string, string> }>('crm'))!;
+      expect(crm.owners[c1.id]).toBe('คุณซี');
+      expect(crm.stages[900007]).toBe('won');
+    });
+    T1.dispose();
+    T2.dispose();
+  });
+
+  it('tabs follow a disconnect / new sheet made in another tab instead of undoing it', async () => {
+    const ls = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v) });
+    try {
+      const shared = memoryStore();
+      const T1 = mk(), T2 = mk();
+      T1.store = T2.store = shared;
+      expect(await T1.teamConnect(URL, KEY)).toBe(true);
+      T2.teamCfg = { ...T1.teamCfg! };
+      await T2.teamSync();
+      expect(T2.team.status).toBe('ok');
+      T1.teamDisconnect();
+      await T2.teamSync(); // T2's poll: adopts the disconnect, doesn't write its config back
+      expect(T2.teamCfg).toBeNull();
+      expect(T2.team.status).toBe('off');
+      expect(JSON.parse(ls.get('gcc-team-sync')!)).toBeNull();
+      // a new connection made in T1 is picked up by T2 (storage event)
+      expect(await T1.teamConnect(URL, KEY)).toBe(true);
+      (T2 as unknown as { teamPrefsChanged: (e: { key: string }) => void }).teamPrefsChanged({ key: 'gcc-team-sync' });
+      expect(T2.teamCfg?.url).toBe(URL);
+      // a key change in T2 while a stale ping is in flight in T1 doesn't resurrect anything
+      T1.teamDisconnect();
+      T2.teamDisconnect();
+      T1.dispose();
+      T2.dispose();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a new team code entered just before disconnecting does not reconnect later', async () => {
+    const ls = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v) });
+    try {
+      const D = mk();
+      expect(await D.teamConnect(URL, KEY)).toBe(true);
+      let release!: () => void;
+      D.transport = async (_u, body) => {
+        if (body.action === 'ping') await new Promise<void>((r) => (release = r));
+        return sim.post({ ...body, key: KEY });
+      };
+      const p = D.teamSetKey('another-code-1');
+      D.teamDisconnect();
+      release();
+      expect(await p).toBe(false);
+      expect(D.teamCfg).toBeNull();
+      expect(D.team.status).toBe('off');
+      expect(JSON.parse(ls.get('gcc-team-sync')!)).toBeNull(); // the next page load stays disconnected
+      D.dispose();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('disconnecting stops sharing but keeps local data', async () => {

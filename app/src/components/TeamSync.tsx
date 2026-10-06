@@ -25,6 +25,7 @@ export function TeamSyncCard() {
   useEngineVersion();
   const [copied, setCopied] = useState(false);
   const [newKey, setNewKey] = useState('');
+  const [busy, setBusy] = useState<'' | 'key' | 'leave'>('');
   const cfg = e.teamCfg, t = e.team;
   const [label, dot] = TEAM_ST[t.status];
   const btn: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 };
@@ -45,6 +46,32 @@ export function TeamSyncCard() {
       window.prompt('คัดลอกลิงก์นี้ส่งให้ทีม', inviteLink(cfg.url));
     }
   };
+  const setKey = async (ev: FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    setBusy('key');
+    try {
+      if (await e.teamSetKey(newKey)) setNewKey('');
+    } finally {
+      setBusy('');
+    }
+  };
+  const disconnect = async () => {
+    // queued edits belong to this sheet's link: try to send them before leaving it
+    if (e.teamPendingN && navigator.onLine !== false) {
+      setBusy('leave');
+      try {
+        await e.teamSyncNow();
+      } finally {
+        setBusy('');
+      }
+    }
+    if (!e.teamCfg) return;
+    const n = e.teamPendingN;
+    const warn = n
+      ? `\n\nยังมี ${fmtN(n)} รายการที่ส่งขึ้นชีตไม่ได้ จะเก็บไว้ในเครื่องนี้และส่งให้เมื่อเชื่อมกับลิงก์ชีตนี้อีกครั้ง (ถ้าไปเชื่อมกับลิงก์อื่น รายการเหล่านี้จะไม่ถูกส่งไปที่นั่น)`
+      : '';
+    if (window.confirm('ยกเลิกการเชื่อมต่อกับชีตของทีม? ข้อมูลในเครื่องนี้ยังอยู่ แต่จะไม่ซิงก์กับทีมแล้ว' + warn)) e.teamDisconnect();
+  };
 
   return (
     <section id="team-sync" style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -55,7 +82,7 @@ export function TeamSyncCard() {
             เชื่อมกับ Google Sheet ของทีม แล้ว ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ เบอร์ที่แก้ รายชื่อทีม และผลตรวจข้อมูลซ้ำ จะซิงก์ระหว่างทุกเครื่องอัตโนมัติ ทันทีที่แก้ไข และดึงของคนอื่นทุก 30 วินาที
           </span>
         </div>
-        <span role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 32, padding: '0 12px', borderRadius: 999, background: '#F4F6FC', fontSize: 13, color: '#384155' }}>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center', height: 32, padding: '0 12px', borderRadius: 999, background: '#F4F6FC', fontSize: 13, color: '#384155' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: dot }} />
           {cfg ? label : TEAM_ST.off[0]}
           {cfg && t.status === 'ok' && t.last ? ` ${hhmm(t.last)}` : ''}
@@ -95,53 +122,47 @@ export function TeamSyncCard() {
             {([
               ['ซิงก์ล่าสุด', t.last ? dtTh(t.last) : '—'],
               ['รอส่งขึ้นชีต', fmtN(e.teamPendingN) + ' รายการ'],
-              ['ชีตของทีม', cfg.url.replace(/^https:\/\/script\.google\.com\/macros\/s\//, '…/').slice(0, 40) + (cfg.url.length > 40 ? '…' : '')],
+              ['รหัสชีตของทีม', '…' + deploymentId(cfg.url)],
             ] as const).map(([k, v]) => (
               <div key={k} style={{ background: '#F4F6FC', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: '#475069' }}>{k}</span>
-                <span style={{ fontSize: 14.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={k === 'ชีตของทีม' ? cfg.url : undefined}>{v}</span>
+                <span style={{ fontSize: 14.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={k === 'รหัสชีตของทีม' ? cfg.url : undefined}>{v}</span>
               </div>
             ))}
           </div>
           {e.teamJoinUrl && e.teamJoinUrl !== cfg.url && (
             <Notice kind="error" role="alert">
-              ลิงก์เชิญที่เปิดมาชี้ไปชีตอื่น (…{deploymentId(e.teamJoinUrl)}) ไม่ใช่ชีตที่เชื่อมอยู่ (…{deploymentId(cfg.url)}) ถ้าหัวหน้าทีมย้ายชีตจริง ให้กด ยกเลิกการเชื่อมต่อ แล้วเชื่อมใหม่ด้วยลิงก์เชิญ
+              ลิงก์เชิญที่เปิดมาชี้ไปชีตอื่น (…{deploymentId(e.teamJoinUrl)}) ไม่ใช่ชีตที่เชื่อมอยู่ (…{deploymentId(cfg.url)}) ถ้าหัวหน้าทีมย้ายชีตจริง ให้กด ยกเลิกการเชื่อมต่อ (ระบบจะส่งรายการที่ค้างให้ชีตเดิมก่อน) แล้วเชื่อมใหม่ด้วยลิงก์เชิญ
             </Notice>
           )}
-          {(t.status === 'error' || t.status === 'offline') && t.msg && (
+          {t.status !== 'ok' && t.msg && (
             <Notice kind="error" role="alert">{t.msg} — ข้อมูลที่แก้ไว้ยังอยู่ในเครื่อง{t.msg === 'รหัสทีมไม่ถูกต้อง' ? ' ใส่รหัสทีมใหม่ด้านล่างเพื่อส่งต่อ' : ' และจะส่งให้เองเมื่อเชื่อมต่อได้'}</Notice>
           )}
           {t.msg === 'รหัสทีมไม่ถูกต้อง' && (
             <form
-              onSubmit={async (ev) => {
-                ev.preventDefault();
-                if (await e.teamSetKey(newKey)) setNewKey('');
-              }}
+              onSubmit={setKey}
               style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}
             >
               <label style={labelCol}>
                 รหัสทีมใหม่ (หัวหน้าทีมเปลี่ยนรหัสแล้ว)
                 <input type="password" value={newKey} onChange={(ev) => setNewKey(ev.target.value)} style={inputStyle} autoComplete="off" />
               </label>
-              <button type="submit" style={btn}>ใช้รหัสใหม่</button>
+              <button type="submit" disabled={!!busy} style={btn}>{busy === 'key' ? 'กำลังตรวจรหัส…' : 'ใช้รหัสใหม่'}</button>
             </form>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button onClick={() => e.teamSync()} disabled={t.status === 'syncing'} style={btn}>{t.status === 'syncing' ? 'กำลังซิงก์…' : 'ซิงก์ตอนนี้'}</button>
+            <button onClick={() => e.teamSync()} disabled={t.status === 'syncing' || !!busy} style={btn}>{t.status === 'syncing' ? 'กำลังซิงก์…' : 'ซิงก์ตอนนี้'}</button>
             <button onClick={copy} style={ghost}>{copied ? 'คัดลอกลิงก์แล้ว ✓' : 'คัดลอกลิงก์เชิญทีม'}</button>
             <button
-              onClick={() => {
-                const n = e.teamPendingN;
-                const warn = n ? `\n\nมี ${fmtN(n)} รายการที่ยังไม่ได้ส่งขึ้นชีต จะส่งให้ถ้าเชื่อมกลับมาที่ชีตเดิม` : '';
-                if (window.confirm('ยกเลิกการเชื่อมต่อกับชีตของทีม? ข้อมูลในเครื่องนี้ยังอยู่ แต่จะไม่ซิงก์กับทีมแล้ว' + warn)) e.teamDisconnect();
-              }}
+              onClick={disconnect}
+              disabled={!!busy}
               style={{ cursor: 'pointer', height: 40, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}
             >
-              ยกเลิกการเชื่อมต่อ
+              {busy === 'leave' ? 'กำลังส่งรายการที่ค้าง…' : 'ยกเลิกการเชื่อมต่อ'}
             </button>
           </div>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
-            ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก · ถ้าสองคนแก้รายการเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง
+            ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก และบอก รหัสชีตของทีม ด้านบนให้เพื่อนตรวจว่าลิงก์ถูกต้อง · ถ้าสองคนแก้รายการเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง
           </span>
         </div>
       )}
