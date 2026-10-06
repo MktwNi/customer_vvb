@@ -3,6 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
 import { Notice, Opts, PageHead, card, inputStyle, labelCol, selectStyle } from '../components/ui';
+import { TeamSyncCard } from '../components/TeamSync';
 
 const section: CSSProperties = { ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 14 };
 const intro: CSSProperties = { fontSize: 13.5, color: '#475069', fontWeight: 300, lineHeight: 1.65, textWrap: 'pretty' };
@@ -41,6 +42,7 @@ export function Update() {
   return (
     <>
       <PageHead title="อัปเดตข้อมูล" sub={dataLine} />
+      <TeamSyncCard />
       <section style={section}>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 260 }}>
@@ -136,7 +138,9 @@ export function Update() {
       <section style={section}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>ทีมขายและข้อมูลที่บันทึก</span>
-          <span style={intro}>ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บอยู่ในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร)</span>
+          <span style={intro}>{e.teamCfg
+            ? 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ แชร์กับทีมผ่าน Google Sheet แล้ว ส่วน "ฉันคือ" ตั้งแยกในแต่ละเครื่อง ไฟล์สำรองยังส่งออก/นำเข้าได้ (นำเข้าจะเพิ่มเฉพาะรายการที่ทีมยังไม่มี รายการที่ทีมมีแล้วใช้ค่าของทีม) · ข้อมูลของบริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้'
+            : 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บอยู่ในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร) หรือเชื่อม Google Sheet ด้านบนเพื่อให้ทุกเครื่องเห็นเหมือนกัน'}</span>
         </div>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label style={labelCol}>

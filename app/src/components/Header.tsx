@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { addMonths, fmtN, isoTh, todayISO } from '../lib/format';
+import { TeamChip } from './TeamSync';
 
 export const TABS: [Tab, string][] = [
   ['overview', 'ภาพรวม'], ['search', 'ค้นหา'], ['track', 'ติดตาม'], ['plan', 'แผนติดต่อ'],
@@ -41,6 +42,8 @@ export function Header() {
               <span style={{ fontSize: 13, color: '#B9C8FF', fontWeight: 300 }}>{dataLine}</span>
             </div>
           </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {ready && <TeamChip onClick={() => go('update')} />}
           <div style={{ position: 'relative' }}>
             <button onClick={() => setDateOpen(!dateOpen)} aria-expanded={dateOpen} style={{ cursor: 'pointer', height: 38, padding: '0 14px', borderRadius: 999, border: '1px solid rgba(185,200,255,.45)', background: 'rgba(4,10,60,.3)', color: '#fff', fontSize: 13.5, display: 'flex', gap: 8, alignItems: 'center' }}>
               <span style={{ color: '#C9D4FF' }}>สถานะ ณ</span>
@@ -71,6 +74,7 @@ export function Header() {
                 <button onClick={() => setDateOpen(false)} style={{ cursor: 'pointer', alignSelf: 'flex-end', height: 34, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13 }}>เสร็จ</button>
               </div>
             )}
+          </div>
           </div>
         </div>
         <nav style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>

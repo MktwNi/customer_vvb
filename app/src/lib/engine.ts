@@ -10,8 +10,21 @@ import type {
 import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, status, type ParsedUpload } from './core';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
-import { kv, prefs, PREF } from './storage';
+import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
+import {
+  LOCAL_ID_MIN, TeamSyncError, applyRow, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, noEffects, opId,
+  type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
+} from './teamSync';
+
+/** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
+ *  can never drop or mix up another sheet's unsent changes. */
+const pendKey = (url: string) => 'teamPending:' + url;
+/** Longest free text (notes) shared through the sheet; one cell holds 50,000 characters. */
+const TEXT_MAX = 5000;
+/** Whether queued change `a` is at least as recent as `b` (same record). */
+const newer = (a: SyncOp, b: SyncOp) => (a.t || 0) >= (b.t || 0);
+const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
 export interface UploadState { status?: 'busy' | 'error' | 'done' | 'preview'; msg?: string; head?: string; preview?: { k: string; v: string }[] }
@@ -60,6 +73,48 @@ export class GccEngine {
   private pendingUpload: ParsedUpload | null = null;
   pendingSync: PendingSync | null = null;
 
+  // ---- team sync (shared CRM data via Google Apps Script; see lib/teamSync.ts)
+  team: TeamState = { status: 'off', msg: '', last: '' };
+  teamCfg: TeamCfg | null = null;
+  /** Invite link target (#team=<url>) waiting for the user to enter the team code. */
+  teamJoinUrl = '';
+  transport: Transport = fetchTransport;
+  /** Browser storage (IndexedDB); injectable so tests can give each simulated browser its own. */
+  store: KVStore = kv;
+  /** Local changes not yet acknowledged by the server, latest op per key. The copy in
+   *  `store` (pendKey(url)) is the source of truth shared by all tabs of this browser. */
+  private pending = new Map<string, SyncOp>();
+  /** Queued ops this tab could not write to storage (quota, blocked IndexedDB); kept in memory. */
+  private unsaved = new Map<string, SyncOp>();
+  private opT = 0;
+  /** The sheet rejected the team code; the "new code" form stays until a sync succeeds. */
+  teamNeedKey = false;
+  /** The team config as last written/read by this tab (raw localStorage text), to notice changes
+   *  made by other tabs (connect, disconnect, new code). */
+  private teamRaw = '';
+  private pq: Promise<unknown> = Promise.resolve();
+  private importing = false;
+  private teamBusy = false;
+  private teamAgain = false;
+  /** The round in flight (resolves when it ends, successful or not). */
+  private teamRunning: Promise<unknown> = Promise.resolve();
+  /** Bumped on connect/disconnect so a stale in-flight sync can't touch the new session. */
+  private teamGen = 0;
+  private teamTimer: ReturnType<typeof setInterval> | null = null;
+  private teamFlush: ReturnType<typeof setTimeout> | null = null;
+  private teamWake = () => {
+    if (this.teamCfg && !(typeof document !== 'undefined' && document.hidden)) this.teamSync();
+  };
+  private teamPrefsChanged = (e: StorageEvent) => {
+    if (e.key !== PREF.team && e.key !== null) return;
+    this.adoptTeamPrefs();
+    if (this.teamCfg && this.team.status === 'error') this.teamSync(); // e.g. a new code entered in another tab
+  };
+  /** Storage events are not delivered to a page kept in the back/forward cache. */
+  private teamPageShow = (e: PageTransitionEvent) => {
+    if (e.persisted) this.adoptTeamPrefs();
+  };
+
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -87,16 +142,19 @@ export class GccEngine {
     if (this.started) return;
     this.started = true;
     try {
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources] = await Promise.all([
+      this.teamRaw = prefs.getRaw(PREF.team);
+      const team0 = prefs.get<TeamCfg | null>(PREF.team, null);
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending] = await Promise.all([
         loadBase(),
-        kv.get<Record<string, string>>('dedup'),
-        kv.get<Record<string, ContactEdit>>('contacts'),
-        kv.get<Partial<Crm>>('crm'),
-        kv.get<Partial<RawCompany>[]>('addedCos'),
-        kv.get<Partial<Cert>[]>('tgoCerts'),
-        kv.get<SetSnap>('setSnap'),
+        this.store.get<Record<string, string>>('dedup'),
+        this.store.get<Record<string, ContactEdit>>('contacts'),
+        this.store.get<Partial<Crm>>('crm'),
+        this.store.get<Partial<RawCompany>[]>('addedCos'),
+        this.store.get<Partial<Cert>[]>('tgoCerts'),
+        this.store.get<SetSnap>('setSnap'),
         fetch(dataUrl('rounds.json')).then((r) => r.json()).catch(() => []) as Promise<RoundRaw[]>,
         fetch(dataUrl('gcc-sources.json')).then((r) => r.json()).catch(() => []) as Promise<unknown[][]>,
+        team0 && team0.url ? this.store.get<SyncOp[]>(pendKey(team0.url)) : null,
       ]);
       this.base = base;
       this.dec = dec || {};
@@ -115,10 +173,23 @@ export class GccEngine {
           mv++;
         }),
       );
+      // every log entry needs a stable id to be shared as its own record
+      Object.values(C.log).forEach((a) =>
+        (a || []).forEach((e) => {
+          if (!e.id) {
+            e.id = legacyLogId(e);
+            mv++;
+          }
+        }),
+      );
       if (mv) {
         C.notes = {};
         this.persist('crm', C);
       }
+      // the cursor lives in localStorage while the data lives in IndexedDB; they can drift apart
+      // (failed write, another tab), so every page load re-reads the (compacted) team log once
+      this.teamCfg = team0 && team0.url ? { ...team0, seq: 0 } : null;
+      if (this.teamCfg && Array.isArray(pending)) pending.forEach((op) => this.pending.set(op.k, op));
       this.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) })).sort((a, b) => a.annT - b.annT);
       this.loadMsg = 'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…';
       this.emit();
@@ -129,6 +200,12 @@ export class GccEngine {
       this.emit();
       this.timer = setInterval(() => this.tick(), 6e5);
       if (this.syncDue(this.syncCfg())) setTimeout(() => this.runSync(true), 1500);
+      if (this.teamCfg) this.startTeam();
+      if (typeof window !== 'undefined') {
+        window.addEventListener('storage', this.teamPrefsChanged);
+        window.addEventListener('pageshow', this.teamPageShow);
+      }
+      this.adoptTeamPrefs(); // another tab may have connected / disconnected while this one loaded
     } catch (e) {
       this.loadMsg = 'โหลดข้อมูลไม่สำเร็จ: ' + ((e as Error)?.message || e);
       this.emit();
@@ -136,6 +213,11 @@ export class GccEngine {
   }
   dispose() {
     if (this.timer) clearInterval(this.timer);
+    this.stopTeam();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('storage', this.teamPrefsChanged);
+      window.removeEventListener('pageshow', this.teamPageShow);
+    }
   }
   private tick() {
     const d = todayISO();
@@ -150,7 +232,7 @@ export class GccEngine {
     this.emit();
   }
   persist(k: string, v: unknown) {
-    kv.set(k, v).catch(() => {});
+    this.store.set(k, v).catch(() => {});
   }
   saveCrm() {
     this.persist('crm', this.crm);
@@ -494,8 +576,8 @@ export class GccEngine {
     this.up = { status: 'busy', msg: 'กำลังบันทึกและคำนวณใหม่…' };
     this.emit();
     try {
-      await kv.set('details', r.details);
-      await kv.set('dataset', r.base);
+      await this.store.set('details', r.details);
+      await this.store.set('dataset', r.base);
     } catch {
       /* ignore */
     }
@@ -512,8 +594,8 @@ export class GccEngine {
   }
   async revertUpload() {
     try {
-      await kv.del('dataset');
-      await kv.del('details');
+      await this.store.del('dataset');
+      await this.store.del('details');
     } catch {
       /* ignore */
     }
@@ -528,6 +610,7 @@ export class GccEngine {
   decide(key: string, v: 'merge' | 'split' | null) {
     if (v == null) delete this.dec[key];
     else this.dec[key] = v;
+    this.op(keyOf.dedup(key), v ?? undefined);
     this.persist('dedup', this.dec);
     this.rebuild();
     this.emit();
@@ -541,9 +624,12 @@ export class GccEngine {
     prefs.set(PREF.me, v);
     this.emit();
   }
-  logAct(id: number, e: Omit<LogEntry, 'at' | 'by'>) {
+  logAct(id: number, e: Omit<LogEntry, 'at' | 'by' | 'id'>) {
     const L = this.crm.log;
-    (L[id] || (L[id] = [])).push({ at: new Date().toISOString(), by: this.me(), ...e });
+    const entry: LogEntry = { id: uid(), at: new Date().toISOString(), by: this.me(), ...e };
+    entry.text = cap(entry.text);
+    (L[id] || (L[id] = [])).push(entry);
+    this.op(keyOf.log(id, entry.id!), { ...entry });
   }
   stage(id: number): StageKey {
     return this.crm.stages[id] || 'none';
@@ -552,6 +638,7 @@ export class GccEngine {
     const C = this.crm;
     if ((C.stages[id] || 'none') === v) return;
     C.stages[id] = v;
+    this.op(keyOf.stage(id), v);
     this.logAct(id, { type: 'stage', text: 'เปลี่ยนสถานะการขายเป็น "' + (STG.find((x) => x[0] === v) || STG[0])[1] + '"' });
     this.saveCrm();
   }
@@ -560,6 +647,7 @@ export class GccEngine {
     if ((C.owners[id] || '') === v) return;
     if (v) C.owners[id] = v;
     else delete C.owners[id];
+    this.op(keyOf.owner(id), v || undefined);
     this.logAct(id, { type: 'owner', text: v ? 'กำหนดผู้รับผิดชอบ: ' + v : 'ยกเลิกผู้รับผิดชอบ' });
     this.saveCrm();
   }
@@ -568,6 +656,7 @@ export class GccEngine {
     const i = w.indexOf(id);
     if (i >= 0) w.splice(i, 1);
     else w.push(id);
+    this.op(keyOf.watch(id), i < 0 ? 1 : undefined);
     const c = this.B.byId.get(id);
     if (c) c.fl.watch = i < 0;
     this.saveCrm();
@@ -580,28 +669,36 @@ export class GccEngine {
   }
   delLog(id: number, l: LogEntry) {
     this.crm.log[id] = (this.crm.log[id] || []).filter((x) => x !== l);
+    if (l.id) this.op(keyOf.log(id, l.id));
     this.saveCrm();
   }
   addTeam(name: string) {
     const C = this.crm;
     if (name && !C.team.includes(name)) {
       C.team.push(name);
+      this.op(keyOf.team(name), 1);
       if (!this.me()) prefs.set(PREF.me, name);
     }
     this.saveCrm();
   }
   delTeam(name: string) {
     this.crm.team = this.crm.team.filter((x) => x !== name);
+    this.op(keyOf.team(name));
     this.saveCrm();
   }
   saveContact(c: Company, v: { phone: string; email: string; web: string; note: string }) {
-    const e = { ...v, at: new Date().toISOString() };
+    const e = { ...v, note: cap(v.note), at: new Date().toISOString() };
     this.contacts[c.id] = e;
+    this.op(keyOf.contact(c.id), { ...e });
     this.persist('contacts', this.contacts);
-    Object.assign(c, { phone: v.phone, email: v.email, web: v.web, cEdited: e, hasPh: !!v.phone });
+    this.patchContact(c, e);
+    this.emit();
+  }
+  /** Apply a contact edit to an already-built company (avoids a full rebuild). */
+  private patchContact(c: Company, e: ContactEdit) {
+    Object.assign(c, { phone: e.phone, email: e.email, web: e.web, cEdited: e, hasPh: !!e.phone });
     c.fl.noContact = c.tgt <= 7 && !c.hasPh;
     c.hay = [c.name, c.jur, c.set, c.phone, c.code, c.email, c.ids.map((i) => gccCode(i)).join(' ')].join(' ').toLowerCase();
-    this.emit();
   }
 
   // ---- tasks
@@ -610,7 +707,10 @@ export class GccEngine {
   }
   updateTask(taskId: string, p: Pick<Task, 'type' | 'date' | 'time' | 'note'>) {
     const t = this.crm.tasks.find((x) => x.id === taskId);
-    if (t) Object.assign(t, p);
+    if (t) {
+      Object.assign(t, p, { note: cap(p.note) });
+      this.op(keyOf.task(t.id), { ...t });
+    }
     this.saveCrm();
   }
   /** Create one task per company; with `perDay` > 0 spread them across working days. */
@@ -624,7 +724,9 @@ export class GccEngine {
       }
       if (perDay && n === 0) d = nextWork(d);
       n++;
-      this.crm.tasks.push({ id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: d, time: p.time, note: p.note, done: false });
+      const t: Task = { id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: d, time: p.time, note: cap(p.note), done: false };
+      this.crm.tasks.push(t);
+      this.op(keyOf.task(t.id), { ...t });
     });
     this.saveCrm();
   }
@@ -636,17 +738,21 @@ export class GccEngine {
         n = 0;
       }
       n++;
-      this.crm.tasks.push({ id: uid(), gid: c.id, title: c.name, type: 'call', date: d, time: '', note: 'นัดอัตโนมัติ', done: false });
+      const t: Task = { id: uid(), gid: c.id, title: c.name, type: 'call', date: d, time: '', note: 'นัดอัตโนมัติ', done: false };
+      this.crm.tasks.push(t);
+      this.op(keyOf.task(t.id), { ...t });
     });
     this.saveCrm();
   }
   toggleTask(t: Task) {
     t.done = !t.done;
+    this.op(keyOf.task(t.id), { ...t });
     if (t.done) this.logAct(this.canonical(t.gid), { type: t.type, text: 'ทำนัดเสร็จ' + (t.note ? ': ' + t.note : '') });
     this.saveCrm();
   }
   delTask(t: Task) {
     this.crm.tasks = this.crm.tasks.filter((x) => x !== t);
+    if (t.gid < LOCAL_ID_MIN) this.op(keyOf.task(t.id));
     this.saveCrm();
   }
 
@@ -657,6 +763,9 @@ export class GccEngine {
   }
   /** Merge a teammate's backup into local data — never deletes; newer contact edits win. */
   async importCrm(f: File) {
+    // While connected, a backup only fills gaps: instead of pushing every value in the file (which
+    // could revert newer team values or resurrect deleted items), re-run the first-connect merge.
+    this.importing = !!this.teamCfg;
     try {
       const d = JSON.parse(await f.text());
       if (d.kind !== 'gcc-crm-backup') throw new Error('ไม่ใช่ไฟล์สำรองของระบบนี้');
@@ -665,25 +774,34 @@ export class GccEngine {
       Object.entries(I.stages || {}).forEach(([k, v]) => {
         if (v && v !== 'none') {
           C.stages[k] = v;
+          this.op(keyOf.stage(k), v);
           n++;
         }
       });
       Object.entries(I.owners || {}).forEach(([k, v]) => {
         if (v) {
           C.owners[k] = v;
+          this.op(keyOf.owner(k), v);
           n++;
         }
       });
       (I.team || []).forEach((t) => {
-        if (!C.team.includes(t)) C.team.push(t);
+        if (!C.team.includes(t)) {
+          C.team.push(t);
+          this.op(keyOf.team(t), 1);
+        }
       });
       (I.watch || []).forEach((w) => {
-        if (!C.watch.includes(w)) C.watch.push(w);
+        if (!C.watch.includes(w)) {
+          C.watch.push(w);
+          this.op(keyOf.watch(w), 1);
+        }
       });
       const ids = new Set(C.tasks.map((t) => t.id));
       (I.tasks || []).forEach((t) => {
         if (!ids.has(t.id)) {
           C.tasks.push(t);
+          this.op(keyOf.task(t.id), { ...t });
           n++;
         }
       });
@@ -692,27 +810,391 @@ export class GccEngine {
         const ks = new Set(L.map((x) => x.at + '|' + x.text));
         (a || []).forEach((x) => {
           if (!ks.has(x.at + '|' + x.text)) {
-            L.push(x);
+            const e = { ...x, id: x.id || legacyLogId(x) };
+            L.push(e);
+            this.op(keyOf.log(k, e.id), { ...e });
             n++;
           }
         });
       });
       Object.entries((d.contacts || {}) as Record<string, ContactEdit>).forEach(([k, v]) => {
         const o = this.contacts[k];
-        if (!o || (v.at || '') > (o.at || '')) this.contacts[k] = v;
+        if (!o || (v.at || '') > (o.at || '')) {
+          this.contacts[k] = v;
+          this.op(keyOf.contact(k), { ...v });
+        }
       });
       Object.entries((d.dedup || {}) as Record<string, string>).forEach(([k, v]) => {
-        if (!(k in this.dec)) this.dec[k] = v;
+        if (!(k in this.dec)) {
+          this.dec[k] = v;
+          this.op(keyOf.dedup(k), v);
+        }
       });
       this.persist('crm', C);
       this.persist('contacts', this.contacts);
       this.persist('dedup', this.dec);
       this.rebuild();
       this.tmMsg = 'นำเข้าแล้ว ' + fmtN(n) + ' รายการ จากไฟล์ของ ' + (d.by || 'ไม่ระบุชื่อ') + ' (' + dtTh(d.at) + ')';
+      if (this.teamCfg) {
+        this.tmMsg += ' · รายการที่ทีมยังไม่มีจะส่งขึ้นชีต ส่วนรายการที่ทีมมีแล้วใช้ค่าของทีม';
+        this.teamCfg.seq = 0;
+        this.teamCfg.seeded = false;
+        this.saveTeamCfg(this.teamCfg);
+        this.importing = false;
+        this.teamSync();
+      }
     } catch (err) {
       this.tmMsg = 'นำเข้าไม่สำเร็จ: ' + ((err as Error)?.message || err);
+    } finally {
+      this.importing = false;
     }
     this.emit();
+  }
+
+  // ------------------------------------------------------------------ team sync
+  /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
+   *  uploads everything local that the team sheet doesn't have yet. */
+  private op(k: string, v?: unknown) {
+    const cfg = this.teamCfg;
+    if (!cfg || this.importing || isLocalOnly(k, v)) return;
+    const o = this.mkOp(k, v);
+    this.pending.set(k, o);
+    this.unsaved.delete(k);
+    this.writePending(cfg.url, (ops) => ops.filter((x) => x.k !== k).concat(o)).catch(() => {
+      if (this.teamCfg === cfg) this.keepUnsaved(o);
+    });
+    if (this.teamFlush) clearTimeout(this.teamFlush);
+    this.teamFlush = setTimeout(() => {
+      this.teamFlush = null;
+      this.teamSync();
+    }, 700);
+  }
+  /** A queued change (v === undefined → delete); `t` orders this browser's changes to one record. */
+  private mkOp(k: string, v?: unknown): SyncOp {
+    const t = (this.opT = Math.max(Date.now(), this.opT + 1));
+    return v === undefined ? { id: opId(), t, k, del: true, by: this.me() } : { id: opId(), t, k, v, by: this.me() };
+  }
+  /** Keep an op whose storage write failed in memory, unless a newer one for its record is kept. */
+  private keepUnsaved(o: SyncOp) {
+    const u = this.unsaved.get(o.k);
+    if (!u || newer(o, u)) this.unsaved.set(o.k, o);
+  }
+  /** Add this tab's unstored ops to a queue, except where the queue already has a newer change. */
+  private withUnsaved(m: Map<string, SyncOp>) {
+    this.unsaved.forEach((o, k) => {
+      const c = m.get(k);
+      if (c && c !== o && !newer(o, c)) this.unsaved.delete(k);
+      else m.set(k, o);
+    });
+    return m;
+  }
+  /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
+  private async storedShared(): Promise<SharedState> {
+    const [crm, contacts, dec] = await Promise.all([
+      this.store.get<Partial<Crm>>('crm'),
+      this.store.get<Record<string, ContactEdit>>('contacts'),
+      this.store.get<Record<string, string>>('dedup'),
+    ]);
+    return { crm: crm ? { ...emptyCrm(), ...crm } : this.crm, contacts: contacts || this.contacts, dec: dec || this.dec };
+  }
+  /** Read-modify-write of a sheet's stored queue (one transaction, so tabs don't overwrite each other). */
+  private writePending(url: string, fn: (ops: SyncOp[]) => SyncOp[]): Promise<SyncOp[]> {
+    const p = this.pq.then(() => this.store.update<SyncOp[]>(pendKey(url), (cur) => fn(Array.isArray(cur) ? cur : [])));
+    this.pq = p.catch(() => {});
+    return p;
+  }
+  get teamPendingN() {
+    return this.pending.size;
+  }
+  private setTeam(p: Partial<TeamState>) {
+    this.team = { ...this.team, ...p };
+    this.emit();
+  }
+  private saveTeamCfg(cfg: TeamCfg | null) {
+    prefs.set(PREF.team, cfg);
+    this.teamRaw = prefs.getRaw(PREF.team);
+    if (cfg) prefs.set(PREF.teamLast, cfg.url);
+  }
+  /**
+   * Every tab shares the team config (localStorage). If another tab connected, disconnected,
+   * switched sheet or entered a new team code, follow it instead of writing this tab's stale
+   * config back. Returns false when this tab's current session has ended.
+   */
+  private adoptTeamPrefs() {
+    const raw = prefs.getRaw(PREF.team);
+    if (raw === this.teamRaw) return true; // unchanged (or localStorage unavailable)
+    this.teamRaw = raw;
+    const s = prefs.get<TeamCfg | null>(PREF.team, null);
+    const cfg = this.teamCfg;
+    if (s && s.url && cfg && s.url === cfg.url) {
+      // other tabs also save their own cursor and seeding state here; only the code matters
+      // (a seeding round reads what this browser has stored, so a following tab may seed too)
+      cfg.key = s.key;
+      return true;
+    }
+    if (!cfg && !(s && s.url)) return true;
+    this.endTeam();
+    if (s && s.url) {
+      this.teamCfg = { ...s, seq: 0 };
+      this.setTeam({ status: 'syncing', msg: '', last: '' });
+      this.startTeam();
+    } else this.setTeam({ status: 'off', msg: '', last: '' });
+    return false;
+  }
+
+  /**
+   * One sync round: pull rows newer than the cursor and apply them (skipping keys with local
+   * changes still queued), then push the queue. Until `cfg.seeded`, local records the sheet
+   * doesn't know yet are queued for upload first; records the sheet already has take its value.
+   * Rounds are serialized across tabs with the Web Locks API when available.
+   */
+  async teamSync(opts: { first?: boolean } = {}) {
+    if (this.teamCfg && !this.adoptTeamPrefs()) return;
+    const cfg = this.teamCfg;
+    if (!cfg || !this.B) return;
+    if (this.teamBusy) {
+      this.teamAgain = true;
+      return;
+    }
+    const gen = this.teamGen;
+    this.teamBusy = true;
+    this.setTeam({ status: this.team.status === 'connecting' ? 'connecting' : 'syncing' });
+    const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+    const round = () => this.syncRound(cfg, gen, !!opts.first);
+    const run = locks ? locks.request('gcc-team-sync', round) : round();
+    this.teamRunning = run.catch(() => {});
+    try {
+      await run;
+      if (gen === this.teamGen) {
+        this.teamNeedKey = false;
+        this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
+      }
+    } catch (e) {
+      if (gen === this.teamGen) {
+        if (e instanceof TeamSyncError && e.code === 'unauthorized') this.teamNeedKey = true;
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        this.setTeam({ status: offline ? 'offline' : 'error', msg: errText(e) });
+      }
+    } finally {
+      if (gen === this.teamGen) {
+        this.teamBusy = false;
+        if (this.teamAgain) {
+          this.teamAgain = false;
+          setTimeout(() => this.teamSync(), 50);
+        }
+      }
+    }
+  }
+
+  /** Wait for a round in flight, then run a full one (e.g. to send what is queued before leaving). */
+  async teamSyncNow() {
+    for (let i = 0; i < 3 && this.teamBusy; i++) await this.teamRunning;
+    await this.teamSync();
+  }
+
+  private async syncRound(cfg: TeamCfg, gen: number, first: boolean) {
+    const live = () => this.teamCfg === cfg && gen === this.teamGen;
+    // the stored queue is shared by every tab: start from it (another tab may have pushed or added
+    // ops), plus this tab's ops that could not be stored
+    await this.pq;
+    const stored = await this.store.get<SyncOp[]>(pendKey(cfg.url));
+    if (!live()) return;
+    this.pending = this.withUnsaved(Array.isArray(stored) ? new Map(stored.map((o) => [o.k, o])) : this.pending);
+    const seeding = first || !cfg.seeded;
+    const rows: SyncRow[] = [];
+    let since = seeding ? 0 : cfg.seq;
+    for (;;) {
+      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, cfg.key, { action: 'pull', since });
+      rows.push(...r.rows);
+      if (r.rows.length) since = r.rows[r.rows.length - 1].seq;
+      if (!r.more || !r.rows.length) break;
+    }
+    if (!live()) return;
+    let seeded = false;
+    if (seeding) {
+      // seed from what this browser has stored (shared by all tabs), not from this tab's copy,
+      // which may be older than another tab's edits (e.g. a deletion made there before connecting)
+      const mine = await this.storedShared();
+      if (!live()) return;
+      const remote = new Set(rows.map((r) => r.k));
+      const add: SyncOp[] = [];
+      localRecords(mine).forEach((v, k) => {
+        if (!remote.has(k) && !this.pending.has(k)) add.push(this.mkOp(k, v));
+      });
+      add.forEach((o) => this.pending.set(o.k, o));
+      // once the upload is queued durably it survives a reload; if storage fails it is kept in
+      // memory (pushed below), and the session counts as seeded only after a complete round
+      const keys = new Set(add.map((o) => o.k));
+      seeded =
+        !add.length ||
+        (await this.writePending(cfg.url, (ops) => ops.filter((x) => !keys.has(x.k)).concat(add)).then(
+          () => true,
+          () => {
+            add.forEach((o) => this.keepUnsaved(o));
+            return false;
+          },
+        ));
+      if (!live()) return;
+    }
+    this.applyRows(rows.filter((r) => !this.pending.has(r.k)));
+    cfg.seq = since;
+    // only a round that seeded may mark the session seeded (an import may have reset it meanwhile)
+    if (seeding && seeded) cfg.seeded = true;
+    if (!this.adoptTeamPrefs() || !live()) return;
+    this.saveTeamCfg(cfg);
+    let rejected = 0;
+    while (this.pending.size && live()) {
+      const batch = [...this.pending.values()].slice(0, 300);
+      const r = await call<{ rejected?: string[] }>(this.transport, cfg.url, cfg.key, { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+      rejected += (r.rejected || []).length;
+      // done: the op that was sent, or an older change to a record whose newer value was sent;
+      // a change made while the request was in flight stays queued
+      const sent = new Map(batch.map((o) => [o.k, o]));
+      const done = (o: SyncOp) => {
+        const x = sent.get(o.k);
+        return !!x && (x.id === o.id || !newer(o, x));
+      };
+      this.unsaved.forEach((o, k) => done(o) && this.unsaved.delete(k));
+      // acknowledged in this sheet's own queue even if the session changed meanwhile (they were delivered)
+      const left = await this.writePending(cfg.url, (ops) => ops.filter((o) => !done(o))).catch(() => null);
+      if (!live()) return;
+      this.pending = this.withUnsaved(new Map((left || [...this.pending.values()].filter((o) => !done(o))).map((o) => [o.k, o])));
+    }
+    if (seeding && !cfg.seeded && live()) {
+      cfg.seeded = true; // everything local was pushed from memory
+      this.saveTeamCfg(cfg);
+    }
+    if (rejected) throw new Error(`มี ${fmtN(rejected)} รายการยาวเกินกว่าที่ชีตเก็บได้ จึงไม่ได้แชร์ (เก็บไว้ในเครื่องนี้)`);
+  }
+
+  /** Apply pulled rows (oldest first) and refresh whatever they affect. */
+  private applyRows(rows: SyncRow[]) {
+    if (!rows.length) return;
+    const fx = noEffects();
+    rows.forEach((r) => applyRow(this, r, fx));
+    // Save by applying the same rows to what is stored rather than writing this tab's whole copy:
+    // another tab may have stored records this tab has never seen (e.g. local-only TGO companies).
+    const merged = (s: SharedState) => {
+      rows.forEach((r) => applyRow(s, r, noEffects()));
+      return s;
+    };
+    const none = { crm: emptyCrm(), contacts: {}, dec: {} };
+    if (fx.crm) this.store.update<Partial<Crm>>('crm', (cur) => (cur ? merged({ ...none, crm: { ...emptyCrm(), ...cur } }).crm : this.crm)).catch(() => {});
+    if (fx.contacts.size || fx.contactDel)
+      this.store.update<Record<string, ContactEdit>>('contacts', (cur) => (cur ? merged({ ...none, contacts: cur }).contacts : this.contacts)).catch(() => {});
+    if (fx.dedup) this.store.update<Record<string, string>>('dedup', (cur) => (cur ? merged({ ...none, dec: cur }).dec : this.dec)).catch(() => {});
+    if (fx.dedup || fx.contactDel) {
+      this.rebuild(); // regroups companies / restores original contact data
+    } else {
+      // records are keyed by the company id they were made on; on this device that id may be an
+      // alias of a merged company, which shows only its own id's records
+      fx.contacts.forEach((id) => {
+        const c = this.B.byId.get(id), e = this.contacts[id];
+        if (c && e) this.patchContact(c, e);
+      });
+      if (fx.watch.size) {
+        const w = new Set(this.crm.watch);
+        this.B.companies.forEach((c) => (c.fl.watch = w.has(c.id)));
+      }
+    }
+    this.emit();
+  }
+
+  /** Check the web-app URL + team code, then do a first full sync. Returns true on success. */
+  async teamConnect(url: string, key: string) {
+    url = url.trim();
+    key = key.trim();
+    if (!isTeamUrl(url)) {
+      this.setTeam({ status: 'error', msg: 'ลิงก์ต้องเป็น Web app ของ Google Apps Script (https://script.google.com/macros/s/…/exec)' });
+      return false;
+    }
+    if (!key) {
+      this.setTeam({ status: 'error', msg: 'กรุณาใส่รหัสทีม' });
+      return false;
+    }
+    this.setTeam({ status: 'connecting', msg: '' });
+    try {
+      await call(this.transport, url, key, { action: 'ping' });
+    } catch (e) {
+      this.setTeam({ status: 'error', msg: errText(e, 'connect') });
+      return false;
+    }
+    this.endTeam();
+    // Changes still queued for this sheet (e.g. from before a disconnect), and those left unsent for
+    // the link this browser used before (a re-deployed sheet gets a new link), are re-queued with
+    // their current local value, so the first pull can't overwrite them with older team values.
+    const last = prefs.getRaw(PREF.teamLast); // stored as plain text
+    const moved = last && last !== url ? (await this.store.get<SyncOp[]>(pendKey(last))) || [] : [];
+    const local = localRecords(await this.storedShared());
+    const requeue = (cur: SyncOp[]) => [...new Map([...moved, ...cur].map((o) => [o.k, o])).keys()].map((k) => this.mkOp(k, local.get(k)));
+    let ops: SyncOp[];
+    try {
+      ops = await this.writePending(url, requeue);
+      if (moved.length) await this.writePending(last, () => []).catch(() => {});
+    } catch {
+      ops = requeue((await this.store.get<SyncOp[]>(pendKey(url))) || []);
+      ops.forEach((o) => this.keepUnsaved(o));
+    }
+    this.pending = new Map(ops.map((o) => [o.k, o]));
+    this.teamCfg = { url, key, seq: 0, seeded: false };
+    this.teamJoinUrl = '';
+    this.saveTeamCfg(this.teamCfg);
+    await this.teamSync({ first: true });
+    if (this.teamCfg) this.startTeam(false);
+    return this.team.status === 'ok';
+  }
+  /** Replace the team code in place (after the lead changed TEAM_KEY), keeping everything queued. */
+  async teamSetKey(key: string) {
+    const cfg = this.teamCfg;
+    key = key.trim();
+    if (!cfg || !key) return false;
+    try {
+      await call(this.transport, cfg.url, key, { action: 'ping' });
+    } catch (e) {
+      if (this.teamCfg === cfg) this.setTeam({ status: 'error', msg: errText(e, 'connect') }); // the form stays (teamNeedKey)
+      return false;
+    }
+    if (this.teamCfg !== cfg) return false; // disconnected (or switched sheet) meanwhile
+    cfg.key = key;
+    this.saveTeamCfg(cfg);
+    await this.teamSync();
+    return this.team.status === 'ok';
+  }
+  /** Stop sharing. Queued changes stay stored and are sent with the next connect (this sheet or a new link). */
+  teamDisconnect() {
+    this.endTeam();
+    this.saveTeamCfg(null);
+    this.setTeam({ status: 'off', msg: '', last: '' });
+  }
+  /** End this tab's session; a sync still in flight sees the new generation and stops. */
+  private endTeam() {
+    this.stopTeam();
+    this.teamGen++;
+    this.teamBusy = this.teamAgain = false;
+    this.teamCfg = null;
+    this.pending = new Map();
+    this.unsaved = new Map();
+    this.teamNeedKey = false;
+  }
+  /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */
+  private startTeam(now = true) {
+    this.stopTeam();
+    this.teamTimer = setInterval(this.teamWake, 30000);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', this.teamWake);
+      window.addEventListener('online', this.teamWake);
+    }
+    if (now) this.teamSync();
+  }
+  private stopTeam() {
+    if (this.teamTimer) clearInterval(this.teamTimer);
+    this.teamTimer = null;
+    if (this.teamFlush) clearTimeout(this.teamFlush);
+    this.teamFlush = null;
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', this.teamWake);
+      window.removeEventListener('online', this.teamWake);
+    }
   }
 
   // ---- details

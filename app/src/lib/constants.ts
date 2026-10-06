@@ -5,6 +5,8 @@ export const CONFIG = {
   pageSize: 50,
   density: 'comfortable' as 'comfortable' | 'compact',
   soonWindow: 90,
+  /** Setup guide for the shared team sheet (team-sync/README.md). */
+  teamGuideUrl: 'https://github.com/MktwNi/customer_vvb/blob/main/team-sync/README.md',
 };
 
 /** Source bit order: TGO=1, GI=2, กรอ.=4, SET=8 → [label, bg, fg] */

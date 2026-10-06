@@ -54,9 +54,9 @@ export function Pager({ page, pages, onPrev, onNext, wrap, color }: { page: numb
   );
 }
 
-export function Notice({ kind, children }: { kind: 'error' | 'ok'; children: ReactNode }) {
+export function Notice({ kind, children, role }: { kind: 'error' | 'ok'; children: ReactNode; role?: 'alert' | 'status' }) {
   const [bg, fg] = kind === 'error' ? ['#FBE3DC', '#8A2B12'] : ['#DDF5F1', '#0B6E66'];
-  return <div style={{ background: bg, color: fg, borderRadius: 12, padding: '12px 14px', fontSize: 13.5 }}>{children}</div>;
+  return <div role={role} style={{ background: bg, color: fg, borderRadius: 12, padding: '12px 14px', fontSize: 13.5 }}>{children}</div>;
 }
 
 export function Dot({ color, size = 8 }: { color: string; size?: number }) {

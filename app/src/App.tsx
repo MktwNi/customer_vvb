@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useApp, useEngineVersion } from './state';
+import { isTeamUrl } from './lib/teamSync';
 import { Banners, Header } from './components/Header';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
@@ -34,6 +35,29 @@ export default function App() {
     e.load();
     return () => e.dispose();
   }, [e]);
+
+  // invite link: #team=<web-app url> → prefill the team-sync card on the update tab.
+  // Only Apps Script web-app URLs are accepted, so a forged link can't collect the team code.
+  useEffect(() => {
+    const onHash = () => {
+      const m = /^#team=(.+)$/.exec(window.location.hash);
+      if (!m) return;
+      let url = '';
+      try {
+        url = decodeURIComponent(m[1]).trim();
+      } catch {
+        /* ignore */
+      }
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      if (!isTeamUrl(url)) return;
+      e.teamJoinUrl = url;
+      set({ tab: 'update', sel: null });
+      e.emit();
+    };
+    onHash();
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [e, set]);
 
   useEffect(() => {
     const kd = (ev: KeyboardEvent) => {

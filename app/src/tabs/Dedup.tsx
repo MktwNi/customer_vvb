@@ -30,7 +30,7 @@ export function Dedup() {
 
   return (
     <>
-      <PageHead title="ตรวจข้อมูลซ้ำ" wrapSub sub="ชื่อบริษัทเทียบหลังตัดคำนำหน้า/สาขา · เบอร์โทรเทียบ 9 หลักแรก · การตัดสินใจบันทึกในเครื่องนี้และใช้กับทุกหน้า" />
+      <PageHead title="ตรวจข้อมูลซ้ำ" wrapSub sub={`ชื่อบริษัทเทียบหลังตัดคำนำหน้า/สาขา · เบอร์โทรเทียบ 9 หลักแรก · การตัดสินใจ${e.teamCfg ? "แชร์กับทีม" : "บันทึกในเครื่องนี้"}และใช้กับทุกหน้า`} />
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
         {kp.map(([k, label, n, sub]) => {
           const on = ui.ddF === k;

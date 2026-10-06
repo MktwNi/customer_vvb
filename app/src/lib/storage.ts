@@ -9,6 +9,8 @@ export interface KVStore {
   get<T = unknown>(key: string): Promise<T | null>;
   set(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
+  /** Read-modify-write in a single transaction (safe across tabs). Returns the stored value. */
+  update<T>(key: string, fn: (cur: T | null) => T): Promise<T>;
 }
 
 /** IndexedDB database/object-store names are kept identical to the prototype so existing browser data carries over. */
@@ -30,22 +32,53 @@ function indexedDbStore(dbName = 'gcc-registry', store = 'kv'): KVStore {
           const q = f(t.objectStore(store));
           t.oncomplete = () => res((q && q.result) as T);
           t.onerror = () => rej(t.error);
+          // quota errors and similar abort the transaction without an error event
+          t.onabort = () => rej(t.error || new DOMException('Transaction aborted', 'AbortError'));
         }),
     );
   return {
     get: <T>(k: string) => tx<T>('readonly', (s) => s.get(k)).then((v) => (v === undefined ? null : v)).catch(() => null),
     set: (k, v) => tx<void>('readwrite', (s) => s.put(v, k)),
     del: (k) => tx<void>('readwrite', (s) => s.delete(k)),
+    update: <T>(k: string, fn: (cur: T | null) => T) =>
+      db().then(
+        (d) =>
+          new Promise<T>((res, rej) => {
+            const t = d.transaction(store, 'readwrite');
+            const os = t.objectStore(store);
+            let next: T;
+            const g = os.get(k);
+            g.onsuccess = () => {
+              try {
+                next = fn(g.result === undefined ? null : (g.result as T));
+                os.put(next, k);
+              } catch (e) {
+                rej(e);
+                t.abort();
+              }
+            };
+            t.oncomplete = () => res(next);
+            t.onerror = () => rej(t.error);
+            t.onabort = () => rej(t.error || new DOMException('Transaction aborted', 'AbortError'));
+          }),
+      ),
   };
 }
 
-/** In-memory fallback (private mode / tests). */
-function memoryStore(): KVStore {
+/** In-memory store (no IndexedDB / tests — each call is an isolated "browser"). Values are
+ *  copied in and out like IndexedDB does, so callers never share objects with the store. */
+export function memoryStore(): KVStore {
   const m = new Map<string, unknown>();
+  const out = <T>(k: string) => (m.has(k) ? (structuredClone(m.get(k)) as T) : null);
   return {
-    get: async <T>(k: string) => (m.has(k) ? (m.get(k) as T) : null),
-    set: async (k, v) => void m.set(k, v),
+    get: async <T>(k: string) => out<T>(k),
+    set: async (k, v) => void m.set(k, structuredClone(v)),
     del: async (k) => void m.delete(k),
+    update: async <T>(k: string, fn: (cur: T | null) => T) => {
+      const next = fn(out<T>(k));
+      m.set(k, structuredClone(next));
+      return next;
+    },
   };
 }
 
@@ -83,4 +116,7 @@ export const PREF = {
   me: 'gcc-me',
   monitor: 'gcc-monitor',
   sync: 'gcc-tgo-sync',
+  team: 'gcc-team-sync',
+  /** Web-app link of the last connected team sheet (its unsent changes move to the next link). */
+  teamLast: 'gcc-team-last',
 } as const;
