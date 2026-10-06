@@ -117,4 +117,6 @@ export const PREF = {
   monitor: 'gcc-monitor',
   sync: 'gcc-tgo-sync',
   team: 'gcc-team-sync',
+  /** Web-app link of the last connected team sheet (its unsent changes move to the next link). */
+  teamLast: 'gcc-team-last',
 } as const;

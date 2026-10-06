@@ -9,8 +9,9 @@
  */
 import type { ContactEdit, Crm, LogEntry, StageKey, Task } from './types';
 
-/** `id` identifies this queued change locally (for acknowledging it across tabs); the server ignores it. */
-export interface SyncOp { id?: string; k: string; v?: unknown; del?: boolean; by?: string }
+/** `id` identifies this queued change locally (for acknowledging it across tabs) and `t` (ms) orders
+ *  changes to the same record; the server ignores both. */
+export interface SyncOp { id?: string; t?: number; k: string; v?: unknown; del?: boolean; by?: string }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
 /** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
@@ -46,7 +47,8 @@ export const errText = (e: unknown, ctx: 'connect' | 'sync' = 'sync') => {
   if (transient) return ctx === 'connect' ? 'ชีตไม่ตอบกลับตอนนี้ ลองกดอีกครั้งในอีกสักครู่' : 'ชีตไม่ตอบกลับ จะลองใหม่อัตโนมัติ';
   if (e instanceof TeamSyncError) return e.message;
   if (e instanceof TypeError) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
+    if (typeof navigator !== 'undefined' && navigator.onLine === false)
+      return ctx === 'connect' ? 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วกดอีกครั้ง' : 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
     // a cross-origin redirect to Google sign-in (access not "Anyone", or a /dev URL) surfaces as a network error
     return ctx === 'connect'
       ? 'เชื่อมต่อไม่ได้ — ตรวจว่าใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้ง Who has access เป็น "Anyone (ทุกคน)" แล้ว'

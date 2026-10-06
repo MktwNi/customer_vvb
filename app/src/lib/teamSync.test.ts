@@ -306,8 +306,18 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     A.toggleWatch(c2.id);
     await A.teamSync();
     expect(A.team.msg).toBe('รหัสทีมไม่ถูกต้อง');
+    expect(A.teamNeedKey).toBe(true);
     expect(A.teamPendingN).toBeGreaterThanOrEqual(2);
+    const ok = A.transport;
+    A.transport = async () => {
+      throw Object.assign(new Error('t'), { name: 'TimeoutError' });
+    };
+    expect(await A.teamSetKey(NEW)).toBe(false); // the check timed out
+    expect(A.team.msg).toContain('ลองกดอีกครั้ง');
+    expect(A.teamNeedKey).toBe(true); // the new-code form stays
+    A.transport = ok;
     expect(await A.teamSetKey(NEW)).toBe(true);
+    expect(A.teamNeedKey).toBe(false);
     expect(A.teamPendingN).toBe(0);
     expect(A.stage(c1.id)).toBe('won');
     await B.teamSync();
@@ -415,6 +425,13 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     // background sync of a working setup: transient, retried automatically
     expect(errText(new TypeError('Failed to fetch'))).not.toContain('/exec');
     expect(errText(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toContain('ลองใหม่อัตโนมัติ');
+    vi.stubGlobal('navigator', { onLine: false });
+    try {
+      expect(errText(new TypeError('Failed to fetch'), 'connect')).toContain('กดอีกครั้ง'); // nothing retries a connect
+      expect(errText(new TypeError('Failed to fetch'))).toContain('เมื่อกลับมาออนไลน์');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a large first upload reaches the sheet completely (no lost ops between batches)', async () => {
@@ -446,35 +463,169 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     expect(B.stage(c1.id)).toBe('won');
   });
 
-  it('each sheet keeps its own queue: switching sheets never drops the other sheet\'s unsent edits', async () => {
-    const URL2 = 'https://script.google.com/macros/s/y/exec';
+  const URL2 = 'https://script.google.com/macros/s/y/exec';
+  /** Run with a working localStorage (shared by every engine of the test, like tabs of one browser). */
+  const withLocalStorage = async (fn: (ls: Map<string, string>) => Promise<void>) => {
+    const ls = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v) });
+    try {
+      await fn(ls);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  };
+  const sheetValue = (g: GasSim, k: string) => g.post({ action: 'pull', key: KEY, since: 0 }).rows!.filter((r) => r.k === k).pop();
+
+  it('unsent edits move with you to the next link (e.g. the lead re-deployed the sheet)', () =>
+    withLocalStorage(async () => {
+      const sim2 = createGasSim({ teamKey: KEY });
+      const D = mk();
+      let down = false;
+      D.transport = async (u, body) => {
+        if (down) throw new TypeError('Failed to fetch');
+        return (u === URL2 ? sim2 : sim).post(body);
+      };
+      expect(await D.teamConnect(URL, KEY)).toBe(true);
+      const [, , , , , , c7] = D.B.companies.filter((c) => c.ids.length === 1);
+      sim2.post({ action: 'push', key: KEY, ops: [{ k: `stage/${c7.id}`, v: 'lost' }] }); // the new link already has a value
+      down = true;
+      D.setStage(c7.id, 'proposal'); // queued for link 1, can't send
+      await D.teamSync();
+      down = false;
+      D.teamDisconnect();
+      expect(await D.teamConnect(URL2, KEY)).toBe(true);
+      expect(D.stage(c7.id)).toBe('proposal'); // not overwritten by the new sheet's older value
+      expect(sheetValue(sim2, `stage/${c7.id}`)!.v).toBe('proposal');
+      expect(D.teamPendingN).toBe(0);
+      D.dispose();
+    }));
+
+  it('a tab on another sheet never takes or sends this sheet\'s queue', async () => {
     const sim2 = createGasSim({ teamKey: KEY });
-    const D = mk();
+    const shared = memoryStore();
+    const T1 = mk(), T2 = mk();
+    T1.store = T2.store = shared;
     let down = false;
-    D.transport = async (u, body) => {
+    T1.transport = async (_u, body) => {
       if (down) throw new TypeError('Failed to fetch');
-      return (u === URL2 ? sim2 : sim).post(body);
+      return sim.post(body);
+    };
+    T2.transport = async (_u, body) => sim2.post(body);
+    expect(await T1.teamConnect(URL, KEY)).toBe(true);
+    expect(await T2.teamConnect(URL2, KEY)).toBe(true);
+    const [, , , , , , , , c9] = T1.B.companies.filter((c) => c.ids.length === 1);
+    down = true;
+    T1.setStage(c9.id, 'won'); // queued for sheet 1 only
+    await T1.teamSync();
+    await T2.teamSync();
+    expect(sheetValue(sim2, `stage/${c9.id}`)).toBeUndefined();
+    down = false;
+    await T1.teamSync();
+    expect(sheetValue(sim, `stage/${c9.id}`)!.v).toBe('won');
+    T1.dispose();
+    T2.dispose();
+  });
+
+  it('an older queued change never overwrites a newer one that could not be stored', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    let failQueue = false;
+    D.store = { ...mem, update: (k, fn) => (failQueue && k.startsWith('teamPending') ? Promise.reject(new DOMException('full', 'QuotaExceededError')) : mem.update(k, fn)) };
+    let down = false;
+    D.transport = async (_u, body) => {
+      if (down) throw new TypeError('Failed to fetch');
+      return sim.post(body);
     };
     expect(await D.teamConnect(URL, KEY)).toBe(true);
-    const [, , , , , , c7] = D.B.companies.filter((c) => c.ids.length === 1);
-    D.setStage(c7.id, 'interested');
-    await D.teamSync(); // sheet 1 has a value for this key
+    const [, , , , , , , , , c10] = D.B.companies.filter((c) => c.ids.length === 1);
     down = true;
-    D.setStage(c7.id, 'proposal'); // queued for sheet 1, can't send
+    D.setStage(c10.id, 'proposal'); // stored in the queue
     await D.teamSync();
+    failQueue = true;
+    D.setStage(c10.id, 'won'); // newer, kept in memory only
+    await Promise.resolve();
+    failQueue = false;
     down = false;
-    D.teamDisconnect();
-    expect(await D.teamConnect(URL2, KEY)).toBe(true); // a different sheet
-    D.setStage(c7.id, 'won'); // edit while on sheet 2
     await D.teamSync();
-    expect(sim2.post({ action: 'pull', key: KEY, since: 0 }).rows!.some((r) => r.k === `stage/${c7.id}` && r.v === 'won')).toBe(true);
-    D.teamDisconnect();
-    D.setStage(c7.id, 'proposal'); // local only (not connected)
-    expect(await D.teamConnect(URL, KEY)).toBe(true); // back on sheet 1: its queued edit is still sent
-    expect(D.stage(c7.id)).toBe('proposal');
-    expect(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.some((r) => r.k === `stage/${c7.id}` && r.v === 'proposal')).toBe(true);
+    await D.teamSync();
+    expect(D.teamPendingN).toBe(0);
+    expect(sheetValue(sim, `stage/${c10.id}`)!.v).toBe('won');
     D.dispose();
   });
+
+  it('a large first upload survives a queue write that fails only for big writes', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    D.store = {
+      ...mem,
+      update: (k, fn) =>
+        mem.update(k, (cur) => {
+          const next = fn(cur as never);
+          if (k.startsWith('teamPending') && Array.isArray(next) && next.length > 100) throw new DOMException('full', 'QuotaExceededError');
+          return next;
+        }),
+    };
+    const many = D.B.companies.slice(2000, 2700);
+    many.forEach((c) => D.toggleWatch(c.id));
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    await D.teamSync();
+    const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
+    expect(many.filter((c) => !keys.has(`watch/${c.id}`)).length).toBe(0);
+    expect(D.teamPendingN).toBe(0);
+    D.dispose();
+  });
+
+  it('importing while a sync is in flight still fills the gaps afterwards', async () => {
+    const D = mk();
+    D.transport = async (_u, body) => sim.post(body);
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    const [c11] = D.B.companies.filter((c) => c.ids.length === 1).slice(20, 21);
+    let release!: () => void;
+    let hold = true;
+    D.transport = async (_u, body) => {
+      if (hold && body.action === 'pull') {
+        hold = false;
+        await new Promise<void>((r) => (release = r));
+      }
+      return sim.post(body);
+    };
+    const inflight = D.teamSync(); // e.g. started by the window regaining focus after the file picker
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    const backup = { kind: 'gcc-crm-backup', v: 1, at: '2026-09-01T00:00:00.000Z', by: 'old', crm: { stages: { [c11.id]: 'interested' }, tasks: [], watch: [], owners: {}, team: [], log: {} }, contacts: {}, dedup: {} };
+    await D.importCrm({ text: async () => JSON.stringify(backup) } as unknown as File);
+    release();
+    await inflight;
+    await vi.advanceTimersByTimeAsync(100); // the follow-up round queued by the import
+    await vi.waitFor(() => expect((D as unknown as { teamBusy: boolean }).teamBusy).toBe(false));
+    expect(sheetValue(sim, `stage/${c11.id}`)!.v).toBe('interested');
+    D.dispose();
+  });
+
+  it('a tab that follows another tab\'s connect seeds from stored data, not its stale copy', () =>
+    withLocalStorage(async () => {
+      const shared = memoryStore();
+      const T1 = mk(), T2 = mk();
+      T1.store = T2.store = shared;
+      const starred = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
+      const x = T1.B.companies.find((c) => c.ids.length === 1 && !starred.has(`watch/${c.id}`))!;
+      T2.crm.watch.push(x.id); // T2 still shows a star that T1 removed before connecting
+      T1.saveCrm();
+      let release!: () => void;
+      T1.transport = async (_u, body) => {
+        if (body.action === 'pull' && !release) await new Promise<void>((r) => (release = r));
+        return sim.post(body);
+      };
+      const connecting = T1.teamConnect(URL, KEY);
+      await vi.waitFor(() => expect(release).toBeTypeOf('function')); // T1's first round is in flight (seeded: false)
+      (T2 as unknown as { teamPrefsChanged: (e: { key: string }) => void }).teamPrefsChanged({ key: 'gcc-team-sync' });
+      expect(T2.teamCfg).toMatchObject({ url: URL, seeded: false });
+      await vi.waitFor(() => expect((T2 as unknown as { teamBusy: boolean }).teamBusy).toBe(false));
+      release();
+      expect(await connecting).toBe(true);
+      expect(sheetValue(sim, `watch/${x.id}`)).toBeUndefined();
+      T1.dispose();
+      T2.dispose();
+    }));
 
   it('still uploads and syncs when browser storage cannot be written', async () => {
     const D = mk();
