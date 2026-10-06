@@ -1,0 +1,29 @@
+name: TGO CFO sync
+on:
+  schedule:
+    - cron: '0 23 * * *'   # ทุกวัน 06:00 น. เวลาไทย
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'ไล่ทุกหน้า (1 = ใช่)'
+        default: ''
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm i playwright@1 && npx playwright install --with-deps chromium
+      - run: node tools/tgo-sync.mjs
+        env:
+          FULL: ${{ github.event.inputs.full }}
+          SOON_DAYS: 90
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      - run: |
+          git config user.name "cfo-sync-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/cfo.json data/expiry-report.json data/sync-log.json
+          git diff --cached --quiet || git commit -m "sync TGO CFO $(date -u +%F)" && git push

@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<script src="cfo-import.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#eef0eb;color:#0f1a16;font-family:'Kanit',system-ui,sans-serif;font-weight:400;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#1b5745}a:hover{color:#0d2f25}
+input,select,button{font-family:inherit}
+input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.8;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column">
+
+<div style="background:#0a241c;color:#a9bdb4;font-size:12.5px">
+  <div style="max-width:1320px;margin:0 auto;padding:8px 28px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <span style="display:flex;gap:8px;align-items:center"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.89 0.16 128)"></span>ข้อมูลสาธารณะจากเว็บไซต์ฉลากคาร์บอน อบก.</span>
+    <span style="flex:1"></span>
+    <span>{{ dataLine }}</span>
+  </div>
+</div>
+
+<header style="background:#0d2f25;color:#f3f5f0;position:relative;overflow:hidden">
+  <div style="position:absolute;right:-120px;top:-160px;width:520px;height:520px;border-radius:50%;border:1px solid rgba(197,236,106,.14)"></div>
+  <div style="position:absolute;right:-40px;top:-80px;width:360px;height:360px;border-radius:50%;border:1px solid rgba(197,236,106,.1)"></div>
+  <div style="position:relative;max-width:1320px;margin:0 auto;padding:30px 28px 22px;display:flex;flex-direction:column;gap:26px">
+    <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end;justify-content:space-between">
+      <div style="display:flex;flex-direction:column;gap:12px;flex:1;min-width:300px;max-width:720px">
+        <div style="display:flex;gap:10px;align-items:center">
+          <span style="font-size:12px;font-weight:600;letter-spacing:.14em;background:oklch(0.89 0.16 128);color:#16300a;padding:4px 10px;border-radius:999px">CFO REGISTRY</span>
+          <span style="font-size:13px;color:#a9bdb4">Carbon Footprint for Organization</span>
+        </div>
+        <h1 style="margin:0;font-size:34px;line-height:1.25;font-weight:600;letter-spacing:-.005em;text-wrap:pretty">ทะเบียนองค์กรที่ได้รับการรับรอง<br><span style="color:oklch(0.89 0.16 128)">คาร์บอนฟุตพริ้นท์ขององค์กร</span></h1>
+        <span style="font-size:15px;font-weight:300;color:#c4d3cc">ค้นหา ตรวจสอบสถานะ และติดตามวันหมดอายุของใบรับรอง CFO</span>
+      </div>
+      <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:300px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <span style="font-size:12px;font-weight:500;letter-spacing:.08em;color:#a9bdb4">วันที่อ้างอิงสถานะ</span>
+          <span style="font-size:13px;color:oklch(0.89 0.16 128)">{{ refTh }}</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input type="date" value="{{ refISO }}" onChange="{{ onRef }}" style="height:42px;flex:1;min-width:150px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:#0a241c;color:#fff;padding:0 12px;font-size:15px;color-scheme:dark"></input>
+          <select value="{{ win }}" onChange="{{ onWin }}" style="height:42px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:#0a241c;color:#fff;padding:0 10px;font-size:14px">
+            <option value="30">ใกล้หมด ≤ 30 วัน</option>
+            <option value="60">ใกล้หมด ≤ 60 วัน</option>
+            <option value="90">ใกล้หมด ≤ 90 วัน</option>
+            <option value="180">ใกล้หมด ≤ 180 วัน</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <sc-for list="{{ quickDates }}" as="d" hint-placeholder-count="4">
+            <button onClick="{{ d.go }}" style="cursor:pointer;height:28px;padding:0 11px;border-radius:999px;font-size:12.5px;border:1px solid {{ d.border }};background:{{ d.bg }};color:{{ d.fg }}">{{ d.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    <nav style="display:flex;gap:6px;flex-wrap:wrap;background:rgba(0,0,0,.18);padding:5px;border-radius:999px;align-self:flex-start">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+        <button onClick="{{ t.go }}" style="border:0;cursor:pointer;height:38px;padding:0 18px;font-size:14.5px;font-weight:500;background:{{ t.bg }};color:{{ t.fg }};border-radius:999px;display:flex;gap:8px;align-items:center">{{ t.label }}<sc-if value="{{ t.badge }}"><span style="font-size:11.5px;font-weight:600;background:oklch(0.89 0.16 128);color:#16300a;min-width:20px;height:20px;padding:0 6px;border-radius:10px;display:flex;align-items:center;justify-content:center">{{ t.badge }}</span></sc-if></button>
+      </sc-for>
+    </nav>
+  </div>
+</header>
+
+<main style="flex:1;width:100%;max-width:1320px;margin:0 auto;padding:28px 28px 64px;display:flex;flex-direction:column;gap:20px">
+
+<sc-if value="{{ loading }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:80px 0;text-align:center;color:#5c605a;font-size:15px">กำลังโหลดข้อมูลทะเบียน…</div>
+</sc-if>
+
+<sc-if value="{{ isSearch }}" hint-placeholder-val="{{ true }}">
+  <section style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch">
+    <button onClick="{{ hero.go }}" style="flex:1 1 340px;text-align:left;cursor:pointer;background:#0d2f25;color:#fff;border:2px solid {{ hero.border }};border-radius:18px;padding:22px 24px;display:flex;flex-direction:column;justify-content:space-between;gap:14px;min-width:0">
+      <span style="font-size:13.5px;color:#c4d3cc">ใบรับรองที่อยู่ในอายุ ณ {{ refTh }}</span>
+      <span style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:44px;line-height:1;font-weight:600;color:oklch(0.89 0.16 128);font-variant-numeric:tabular-nums">{{ hero.value }}</span><span style="font-size:14px;color:#c4d3cc">จาก {{ hero.total }} รายการ · {{ hero.pct }}</span></span>
+      <span style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.12)">
+        <span style="width:{{ hero.wa }}%;background:oklch(0.89 0.16 128)"></span><span style="width:{{ hero.ws }}%;background:oklch(0.8 0.14 75)"></span>
+      </span>
+      <span style="display:flex;gap:16px;font-size:12.5px;color:#c4d3cc"><span style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:oklch(0.89 0.16 128)"></span>อยู่ในอายุ</span><span style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:oklch(0.8 0.14 75)"></span>ใกล้หมดอายุ</span></span>
+    </button>
+    <div style="flex:2 1 520px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
+    <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+      <button onClick="{{ k.go }}" style="text-align:left;cursor:pointer;background:#fff;border:2px solid {{ k.border }};border-radius:18px;padding:14px 18px;min-height:96px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-width:0" style-hover="border-color:#b9c3b4">
+        <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5c605a;line-height:1.35"><span style="width:10px;height:10px;border-radius:50%;flex:none;background:{{ k.dot }}"></span>{{ k.label }}</span>
+        <span style="font-size:28px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums">{{ k.value }}</span>
+      </button>
+    </sc-for>
+    </div>
+  </section>
+
+  <section style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px;display:flex;align-items:center;gap:10px;height:52px;border:1.5px solid #d3d8cd;border-radius:14px;padding:0 6px 0 18px;background:#f7f8f4">
+        <span style="width:14px;height:14px;border:2px solid #5c605a;border-radius:50%;flex:none"></span>
+        <input ref="{{ searchRef }}" value="{{ q }}" onChange="{{ onQ }}" placeholder="ค้นหาชื่อองค์กร เลขที่ใบรับรอง กิจกรรม ที่อยู่ หรือรหัสไปรษณีย์" style="flex:1;min-width:0;height:100%;border:0;background:transparent;font-size:16px;color:#0f1a16;outline:none"></input>
+        <span title="กด / เพื่อค้นหา" style="font-size:12px;color:#5c605a;border:1px solid #d3d8cd;border-radius:6px;padding:1px 7px;margin-right:8px;background:#fff">/</span>
+      </div>
+    </div>
+    <sc-if value="{{ showExamples }}">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:-4px">
+        <span style="font-size:12.5px;color:#7a7e77">ลองค้นหา:</span>
+        <sc-for list="{{ examples }}" as="x" hint-placeholder-count="5"><button onClick="{{ x.go }}" style="cursor:pointer;height:26px;padding:0 10px;border-radius:999px;border:0;background:#eef5e6;color:#1b5745;font-size:12.5px" style-hover="background:#dcebcc">{{ x.t }}</button></sc-for>
+      </div>
+    </sc-if>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 14px">
+      <sc-for list="{{ filters }}" as="f" hint-placeholder-count="7">
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">{{ f.label }}
+          <select value="{{ f.value }}" onChange="{{ f.onChange }}" style="height:40px;border:1.5px solid {{ f.border }};border-radius:10px;padding:0 10px;font-size:14px;background:{{ f.bg }};color:#0f1a16">
+            <option value="">ทั้งหมด</option>
+            <sc-for list="{{ f.options }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for>
+          </select>
+        </label>
+      </sc-for>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">เรียงลำดับ
+        <select value="{{ sort }}" onChange="{{ onSort }}" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0f1a16">
+          <option value="default">วันที่อนุมัติ ใหม่ → เก่า</option>
+          <option value="old">วันที่อนุมัติ เก่า → ใหม่</option>
+          <option value="exp">วันหมดอายุ ใกล้ที่สุด</option>
+          <option value="name">ชื่อองค์กร ก → ฮ</option>
+        </select>
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <sc-for list="{{ chips }}" as="c" hint-placeholder-count="3">
+        <button onClick="{{ c.go }}" style="cursor:pointer;height:34px;padding:0 15px;border-radius:999px;font-size:13.5px;border:1.5px solid {{ c.border }};background:{{ c.bg }};color:{{ c.fg }}">{{ c.label }}</button>
+      </sc-for>
+      <span style="flex:1"></span>
+      <sc-if value="{{ hasFilter }}"><button onClick="{{ clearAll }}" style="cursor:pointer;height:34px;padding:0 12px;border:0;background:transparent;color:#1b5745;font-size:13.5px;text-decoration:underline">ล้างตัวกรองทั้งหมด</button></sc-if>
+      <button onClick="{{ exportCsv }}" style="cursor:pointer;height:34px;padding:0 16px;border-radius:999px;border:0;background:#0d2f25;color:#fff;font-size:13.5px;font-weight:500">ส่งออก CSV · {{ countText }}</button>
+    </div>
+  </section>
+
+  <section style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;overflow:hidden">
+    <div style="padding:16px 20px;display:flex;align-items:baseline;gap:10px;border-bottom:1px solid #e1e4dc;flex-wrap:wrap">
+      <span style="font-size:18px;font-weight:600">ผลการค้นหา</span>
+      <span style="font-size:14px;color:#5c605a">พบ <b style="color:#0f1a16;font-weight:600">{{ countText }}</b> รายการ</span>
+      <span style="flex:1"></span>
+      <span style="font-size:13px;color:#5c605a">{{ rangeText }}</span>
+    </div>
+    <div style="overflow-x:auto">
+      <div style="min-width:1200px">
+        <div style="display:grid;grid-template-columns:140px minmax(280px,1fr) 100px 140px 130px 120px 120px 36px;gap:14px;padding:11px 20px;background:#f5f6f2;font-size:12.5px;color:#5c605a;font-weight:500;border-bottom:1px solid #e1e4dc">
+          <span>เลขที่ใบรับรอง</span><span>องค์กร / กิจกรรม</span><span>จังหวัด</span><span>อุตสาหกรรม</span><span>อนุมัติ → หมดอายุ</span><span>สัดส่วน 1·2·3</span><span>สถานะ</span><span></span>
+        </div>
+        <sc-for list="{{ pageRows }}" as="r" hint-placeholder-count="8">
+          <div onClick="{{ r.open }}" style="display:grid;grid-template-columns:140px minmax(280px,1fr) 100px 140px 130px 120px 120px 36px;gap:14px;padding:14px 20px;border-bottom:1px solid #eef0ea;align-items:center;cursor:pointer;font-size:14px" style-hover="background:#f7f9f3">
+            <span style="font-size:13px;font-weight:500;color:#1b5745;word-break:break-all">{{ r.cert }}</span>
+            <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+              <span style="font-weight:500;color:#0f1a16;line-height:1.4;text-wrap:pretty"><sc-for list="{{ r.orgParts }}" as="p"><span style="background:{{ p.bg }};border-radius:3px">{{ p.t }}</span></sc-for><sc-if value="{{ r.cBadge }}"><span title="มีเบอร์โทรหรืออีเมลติดต่อ" style="display:inline-block;margin-left:8px;font-size:11px;font-weight:500;color:#16300a;background:oklch(0.93 0.13 128);padding:0 7px;border-radius:999px;vertical-align:2px">{{ r.cBadge }}</span></sc-if><sc-if value="{{ r.gBadge }}"><span title="จำนวนใบรับรองขององค์กรนี้ในทะเบียน" style="display:inline-block;margin-left:8px;font-size:11px;font-weight:500;color:#1b5745;background:#eef5e6;padding:0 7px;border-radius:999px;vertical-align:2px">{{ r.gBadge }}</span></sc-if></span>
+              <span style="font-size:12.5px;font-weight:300;color:#5c605a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.act }}</span>
+            </span>
+            <span style="color:#3a3f39">{{ r.prov }}</span>
+            <span style="color:#3a3f39;font-size:13px;line-height:1.35">{{ r.ind }}</span>
+            <span style="font-size:13px;color:#3a3f39;font-variant-numeric:tabular-nums;display:flex;flex-direction:column;gap:1px"><span>{{ r.apTh }}</span><span style="color:#7a7e77">→ {{ r.exTh }}</span></span>
+            <span style="display:flex;flex-direction:column;gap:5px">
+              <sc-if value="{{ r.hasScope }}">
+                <span style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:#eceee8;gap:1px">
+                  <span style="width:{{ r.w1 }}%;background:oklch(0.68 0.14 40)"></span><span style="width:{{ r.w2 }}%;background:oklch(0.68 0.14 250)"></span><span style="width:{{ r.w3 }}%;background:oklch(0.68 0.14 150)"></span>
+                </span>
+                <span style="font-size:11.5px;color:#7a7e77">{{ r.scopeText }}</span>
+              </sc-if>
+              <sc-if value="{{ r.noScope }}"><span style="font-size:12px;color:#a1a49c">ไม่มีข้อมูล</span></sc-if>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
+              <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ r.stBg }};color:{{ r.stFg }};display:flex;gap:6px;align-items:center"><span style="width:6px;height:6px;border-radius:50%;background:{{ r.stFg }}"></span>{{ r.stLabel }}</span>
+              <sc-if value="{{ r.daysText }}"><span style="font-size:11.5px;color:#7a7e77">{{ r.daysText }}</span></sc-if>
+            </span>
+            <button onClick="{{ r.toggle }}" title="ติดตามรายการนี้" style="cursor:pointer;width:34px;height:34px;border-radius:50%;border:1.5px solid {{ r.wBorder }};background:{{ r.wBg }};color:{{ r.wFg }};font-size:15px;line-height:1">{{ r.wIcon }}</button>
+          </div>
+        </sc-for>
+        <sc-if value="{{ empty }}"><div style="padding:56px 18px;text-align:center;color:#5c605a;font-size:14px">ไม่พบรายการที่ตรงกับเงื่อนไข ลองลดตัวกรองหรือเปลี่ยนคำค้น</div></sc-if>
+      </div>
+    </div>
+    <div style="padding:14px 20px;display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap;border-top:1px solid #e1e4dc;background:#f9faf7">
+      <button onClick="{{ prev }}" style="cursor:pointer;height:36px;padding:0 14px;border:1.5px solid #d3d8cd;border-radius:999px;background:#fff;font-size:13px;color:#0f1a16">‹ ก่อนหน้า</button>
+      <sc-for list="{{ pages }}" as="p" hint-placeholder-count="5">
+        <button onClick="{{ p.go }}" style="cursor:pointer;min-width:36px;height:36px;padding:0 8px;border:1.5px solid {{ p.border }};border-radius:999px;background:{{ p.bg }};color:{{ p.fg }};font-size:13px;font-weight:500">{{ p.label }}</button>
+      </sc-for>
+      <button onClick="{{ next }}" style="cursor:pointer;height:36px;padding:0 14px;border:1.5px solid #d3d8cd;border-radius:999px;background:#fff;font-size:13px;color:#0f1a16">ถัดไป ›</button>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:24px;font-weight:600">ภาพรวมข้อมูล</h2>
+    <span style="font-size:14px;color:#5c605a">{{ countText }} รายการ · สถานะ ณ {{ refTh }}</span>
+  </div>
+  <div style="position:sticky;top:0;z-index:5;background:rgba(238,240,235,.92);backdrop-filter:blur(8px);margin:-8px -8px 0;padding:10px 8px;border-radius:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:13px;color:#5c605a">ตัวกรอง:</span>
+    <sc-for list="{{ ovChips }}" as="c" hint-placeholder-count="0">
+      <button onClick="{{ c.go }}" style="cursor:pointer;height:32px;padding:0 8px 0 14px;border-radius:999px;border:0;background:#0d2f25;color:#fff;font-size:13px;display:flex;gap:8px;align-items:center">{{ c.label }}<span style="width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:13px">×</span></button>
+    </sc-for>
+    <sc-if value="{{ ovNoChips }}"><span style="font-size:13px;color:#7a7e77">ยังไม่ได้เลือก · คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งแดชบอร์ด (คลิกซ้ำเพื่อยกเลิก)</span></sc-if>
+    <span style="flex:1"></span>
+    <sc-if value="{{ hasFilter }}"><button onClick="{{ clearAll }}" style="cursor:pointer;height:32px;padding:0 10px;border:0;background:transparent;color:#1b5745;font-size:13px;text-decoration:underline">ล้างทั้งหมด</button></sc-if>
+    <button onClick="{{ goTable }}" style="cursor:pointer;height:32px;padding:0 16px;border-radius:999px;border:1.5px solid #0d2f25;background:#fff;color:#0d2f25;font-size:13px;font-weight:500">ดูรายชื่อ {{ countText }} รายการในตาราง →</button>
+  </div>
+  <div style="background:#0d2f25;color:#fff;border-radius:20px;padding:24px;margin-bottom:-4px;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:19px;font-weight:600">ใบรับรองที่จะหมดอายุใน 12 เดือนข้างหน้า</span>
+          <span style="font-size:13.5px;color:#c4d3cc">นับจาก {{ refTh }} ถึง {{ expEndTh }} · คลิกที่เดือนเพื่อกรองทั้งแดชบอร์ด · สีเหลือง = อยู่ในช่วงใกล้หมดอายุ ({{ win }} วัน)</span>
+        </div>
+        <div style="display:flex;gap:24px">
+          <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-end"><span style="font-size:12.5px;color:#a9bdb4">รวม 12 เดือน</span><span style="font-size:30px;font-weight:600;line-height:1;color:oklch(0.89 0.16 128)">{{ expTotal }}</span></div>
+          <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-end"><span style="font-size:12.5px;color:#a9bdb4">ภายใน {{ win }} วัน</span><span style="font-size:30px;font-weight:600;line-height:1;color:oklch(0.8 0.14 75)">{{ expSoon }}</span></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;align-items:end;height:200px">
+        <sc-for list="{{ expMonths }}" as="m" hint-placeholder-count="12">
+          <button onClick="{{ m.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%">
+            <span style="font-size:13px;font-weight:500;color:#fff">{{ m.count }}</span>
+            <span style="width:100%;height:{{ m.h }}%;min-height:3px;background:{{ m.color }};opacity:{{ m.op }};outline:{{ m.ol }};outline-offset:2px;border-radius:8px 8px 3px 3px" style-hover="opacity:.85"></span>
+          </button>
+        </sc-for>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;margin-top:-8px;border-top:1px solid rgba(255,255,255,.14);padding-top:8px">
+        <sc-for list="{{ expMonths }}" as="m" hint-placeholder-count="12"><span style="font-size:12px;color:#c4d3cc;text-align:center;line-height:1.25">{{ m.label }}</span></sc-for>
+      </div>
+    </div>
+  <section style="columns:2 460px;column-gap:16px">
+
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;break-inside:avoid;margin-bottom:16px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <span style="font-size:17px;font-weight:600">ใกล้หมดอายุที่สุด</span>
+        <button onClick="{{ goSoon }}" style="cursor:pointer;border:0;background:transparent;color:#1b5745;font-size:13.5px;text-decoration:underline;padding:0">ดูทั้งหมด {{ soonFiltered }} รายการ</button>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{ nextUp }}" as="r" hint-placeholder-count="6">
+          <button onClick="{{ r.open }}" style="cursor:pointer;border:0;border-bottom:1px solid #eef0ea;background:transparent;padding:11px 0;display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;color:#0f1a16">
+            <span style="display:flex;flex-direction:column;align-items:center;background:#fdecc8;color:#8a5300;border-radius:12px;padding:6px 0"><span style="font-size:18px;font-weight:600;line-height:1.1">{{ r.days }}</span><span style="font-size:10.5px">วัน</span></span>
+            <span style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.org }}</span><span style="font-size:12.5px;color:#7a7e77">{{ r.cert }} · {{ r.prov }}</span></span>
+            <span style="font-size:12.5px;color:#3a3f39">{{ r.exTh }}</span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ nextUpEmpty }}"><span style="font-size:14px;color:#7a7e77;padding:18px 0">ไม่มีรายการที่จะหมดอายุภายใน {{ win }} วัน</span></sc-if>
+      </div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;break-inside:avoid;margin-bottom:16px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <span style="font-size:17px;font-weight:600">อนุมัติใหม่ใน 30 วันล่าสุด</span>
+        <span style="font-size:13px;color:#5c605a">{{ recentCount }} รายการ</span>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{ recent }}" as="r" hint-placeholder-count="6">
+          <button onClick="{{ r.open }}" style="cursor:pointer;border:0;border-bottom:1px solid #eef0ea;background:transparent;padding:11px 0;display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;color:#0f1a16">
+            <span style="display:flex;align-items:center;justify-content:center;background:#e2f2d0;color:#2f6a12;border-radius:12px;padding:8px 0;font-size:12px;font-weight:600">ใหม่</span>
+            <span style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.org }}</span><span style="font-size:12.5px;color:#7a7e77">{{ r.cert }} · {{ r.ind }}</span></span>
+            <span style="font-size:12.5px;color:#3a3f39">{{ r.apTh }}</span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ recentEmpty }}"><span style="font-size:14px;color:#7a7e77;padding:18px 0">ไม่มีรายการที่อนุมัติใน 30 วันก่อนวันที่อ้างอิง</span></sc-if>
+      </div>
+    </div>
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;break-inside:avoid;margin-bottom:16px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <span style="font-size:17px;font-weight:600">สัดส่วนคาร์บอนฟุตพริ้นท์เฉลี่ย</span>
+        <span style="font-size:13px;color:#5c605a">ค่าเฉลี่ยร้อยละ จาก {{ scope.n }} รายการที่มีข้อมูลสัดส่วน (เว็บไม่แสดงปริมาณ tCO2e)</span>
+      </div>
+      <div style="display:flex;height:38px;border-radius:12px;overflow:hidden;gap:2px">
+        <span style="width:{{ scope.w1 }}%;background:oklch(0.68 0.14 40)"></span><span style="width:{{ scope.w2 }}%;background:oklch(0.68 0.14 250)"></span><span style="width:{{ scope.w3 }}%;background:oklch(0.68 0.14 150)"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#5c605a;display:flex;gap:6px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:oklch(0.68 0.14 40)"></span>ประเภทที่ 1</span><span style="font-size:24px;font-weight:600;font-variant-numeric:tabular-nums">{{ scope.t1 }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#5c605a;display:flex;gap:6px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:oklch(0.68 0.14 250)"></span>ประเภทที่ 2</span><span style="font-size:24px;font-weight:600;font-variant-numeric:tabular-nums">{{ scope.t2 }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#5c605a;display:flex;gap:6px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:oklch(0.68 0.14 150)"></span>ประเภทที่ 3</span><span style="font-size:24px;font-weight:600;font-variant-numeric:tabular-nums">{{ scope.t3 }}</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;padding-top:14px;border-top:1px solid #eef0ea">
+        <span style="font-size:13px;color:#5c605a">สถานะ ณ {{ refTh }}</span>
+        <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px">
+          <sc-for list="{{ statusMix }}" as="x" hint-placeholder-count="4"><span style="width:{{ x.w }}%;background:{{ x.color }};opacity:{{ x.op }}"></span></sc-for>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <sc-for list="{{ statusMix }}" as="x" hint-placeholder-count="4"><button onClick="{{ x.go }}" style="cursor:pointer;font-size:12.5px;color:#3a3f39;display:flex;gap:6px;align-items:center;height:28px;padding:0 10px;border-radius:999px;border:1.5px solid {{ x.border }};background:{{ x.bg }}"><span style="width:9px;height:9px;border-radius:50%;background:{{ x.color }}"></span>{{ x.label }} {{ x.text }}</button></sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;break-inside:avoid;margin-bottom:16px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <span style="font-size:17px;font-weight:600">จำนวนตามอุตสาหกรรม</span>
+        <span style="display:flex;gap:12px;font-size:12.5px;color:#5c605a"><span style="display:flex;gap:5px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#1b5745"></span>อยู่ในอายุ</span><span style="display:flex;gap:5px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#d4ddd4"></span>ทั้งหมด</span></span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ indBars }}" as="b" hint-placeholder-count="10">
+          <button onClick="{{ b.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;display:grid;grid-template-columns:170px minmax(0,1fr) 76px;gap:10px;align-items:center;font-size:13px;text-align:left;color:#0f1a16">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:{{ b.fw }}">{{ b.label }}</span>
+            <span style="position:relative;height:14px;background:#f1f3ee;border-radius:7px">
+              <span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.w }}%;background:{{ b.ct }};border-radius:7px"></span>
+              <span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.wa }}%;background:{{ b.ca }};border-radius:7px"></span>
+            </span>
+            <span style="font-size:12.5px;color:#3a3f39;text-align:right;font-variant-numeric:tabular-nums">{{ b.active }}/{{ b.total }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:contents">
+      <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;break-inside:avoid;margin-bottom:16px;display:flex;flex-direction:column;gap:14px">
+        <span style="font-size:17px;font-weight:600">จังหวัดที่มีรายการมากที่สุด</span>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ provBars }}" as="b" hint-placeholder-count="10">
+            <button onClick="{{ b.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;display:grid;grid-template-columns:130px minmax(0,1fr) 76px;gap:10px;align-items:center;font-size:13px;text-align:left;color:#0f1a16">
+              <span style="font-weight:{{ b.fw }}">{{ b.label }}</span>
+              <span style="position:relative;height:14px;background:#f1f3ee;border-radius:7px">
+                <span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.w }}%;background:{{ b.ct }};border-radius:7px"></span>
+                <span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.wa }}%;background:{{ b.ca }};border-radius:7px"></span>
+              </span>
+              <span style="font-size:12.5px;color:#3a3f39;text-align:right;font-variant-numeric:tabular-nums">{{ b.active }}/{{ b.total }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;break-inside:avoid;margin-bottom:16px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:17px;font-weight:600">จำนวนตามปีงบประมาณ</span>
+          <span style="font-size:13px;color:#5c605a">จากเลขที่ใบรับรอง ไม่รวมรายการที่ไม่อยู่ในรูปแบบ TGO CFO FYxx</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;height:180px">
+          <sc-for list="{{ fyCols }}" as="c" hint-placeholder-count="10">
+            <button onClick="{{ c.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%">
+              <span style="font-size:11.5px;color:#3a3f39">{{ c.count }}</span>
+              <span style="width:100%;height:{{ c.h }}%;min-height:3px;background:{{ c.color }};border-radius:6px 6px 2px 2px"></span>
+              <span style="font-size:11.5px;font-weight:500;color:#5c605a">{{ c.label }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isWatch }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:24px;font-weight:600">รายการติดตาม</h2>
+    <span style="font-size:14px;color:#5c605a">กด ☆ ในหน้าค้นหาเพื่อเพิ่ม · บันทึกในเบราว์เซอร์นี้ · เรียงตามวันหมดอายุ · สถานะ ณ {{ refTh }}</span>
+  </div>
+  <sc-if value="{{ watchEmpty }}">
+    <div style="background:#fff;border:1.5px dashed #c9cfc2;border-radius:20px;padding:52px 24px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center">
+      <span style="font-size:16px;color:#3a3f39">ยังไม่มีรายการติดตาม</span>
+      <button onClick="{{ goSoon }}" style="cursor:pointer;height:40px;padding:0 18px;border-radius:999px;border:0;background:#0d2f25;color:#fff;font-size:14px">ดูรายการที่จะหมดอายุภายใน {{ win }} วัน ({{ soonCount }})</button>
+    </div>
+  </sc-if>
+  <section style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:14px">
+    <sc-for list="{{ watchRows }}" as="r" hint-placeholder-count="0">
+      <div onClick="{{ r.open }}" style="cursor:pointer;background:#fff;border:1px solid #e1e4dc;border-radius:18px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;position:relative;overflow:hidden" style-hover="border-color:#b9c3b4">
+        <span style="position:absolute;left:0;top:0;right:0;height:4px;background:{{ r.stFg }}"></span>
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+          <span style="font-size:13px;font-weight:500;color:#1b5745">{{ r.cert }}</span>
+          <button onClick="{{ r.toggle }}" style="cursor:pointer;border:0;background:transparent;color:#a07a1c;font-size:13px;padding:0">★ เลิกติดตาม</button>
+        </div>
+        <span style="font-weight:500;font-size:16px;line-height:1.4">{{ r.org }}</span>
+        <span style="font-size:13px;color:#5c605a">{{ r.prov }} · {{ r.ind }}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:10px;border-top:1px solid #eef0ea">
+          <span style="font-size:13px;color:#3a3f39">หมดอายุ {{ r.exTh }}</span>
+          <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ r.stBg }};color:{{ r.stFg }}">{{ r.stLong }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isUpdate }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:24px;font-weight:600">อัปเดตข้อมูล</h2>
+    <span style="font-size:14px;color:#5c605a">เพิ่มรายการใหม่ได้ 3 วิธี เลือกวิธีที่สะดวก</span>
+  </div>
+  <section style="background:#0d2f25;color:#fff;border-radius:20px;padding:22px 24px;display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+    <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:260px">
+      <span style="font-size:12.5px;letter-spacing:.06em;color:#a9bdb4">ข้อมูลที่ใช้อยู่ตอนนี้</span>
+      <span style="font-size:18px;font-weight:600">{{ upd.sourceLabel }}</span>
+      <span style="font-size:13.5px;color:#c4d3cc">{{ upd.summary }}</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onClick="{{ upd.exportJson }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:0;background:oklch(0.89 0.16 128);color:#16300a;font-size:14px;font-weight:500">ดาวน์โหลดไฟล์ข้อมูลสำหรับเผยแพร่</button>
+      <sc-if value="{{ upd.canRevert }}"><button onClick="{{ upd.revert }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1px solid rgba(255,255,255,.3);background:transparent;color:#fff;font-size:14px">กลับไปใช้ข้อมูลต้นฉบับ</button></sc-if>
+    </div>
+  </section>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:16px;align-items:start">
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;gap:12px;align-items:center"><span style="width:32px;height:32px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">1</span><span style="font-size:17px;font-weight:600">อัปโหลดไฟล์ Excel หรือ CSV</span></div>
+      <span style="font-size:13.5px;color:#3a3f39;line-height:1.65">เหมาะกับการอัปเดตทีละมาก ๆ ใช้ไฟล์รูปแบบเดียวกับ TGO_CFO_list (ชีต "ข้อมูล CFO") ระบบอ่านจากชื่อหัวคอลัมน์ จึงสลับลำดับคอลัมน์ได้ ใช้รหัสรายการในเว็บเป็นตัวจับคู่รายการเดิม</span>
+      <label style="cursor:pointer;border:2px dashed #b9c9a6;background:#f7fbf1;border-radius:16px;padding:26px 16px;display:flex;flex-direction:column;gap:6px;align-items:center;text-align:center" style-hover="border-color:#1b5745">
+        <span style="font-size:15px;font-weight:500;color:#0d2f25">คลิกเพื่อเลือกไฟล์ .xlsx หรือ .csv</span>
+        <span style="font-size:12.5px;color:#5c605a">{{ upd.fileHint }}</span>
+        <input type="file" accept=".xlsx,.csv" onChange="{{ upd.onFile }}" style="display:none"></input>
+      </label>
+      <sc-if value="{{ upd.parsing }}"><span style="font-size:13.5px;color:#5c605a">กำลังอ่านไฟล์…</span></sc-if>
+      <sc-if value="{{ upd.error }}"><div style="background:#fbe3dc;color:#8a2b12;border-radius:12px;padding:12px 14px;font-size:13.5px">{{ upd.error }}</div></sc-if>
+      <sc-if value="{{ upd.ready }}">
+        <div style="display:flex;flex-direction:column;gap:12px;background:#f5f6f2;border-radius:14px;padding:14px">
+          <span style="font-size:13.5px;font-weight:500">ตรวจไฟล์แล้ว: {{ upd.st.name }} · ชีต {{ upd.st.sheet }}</span>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+            <sc-for list="{{ upd.st.boxes }}" as="b"><div style="background:#fff;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:2px"><span style="font-size:11.5px;color:#5c605a">{{ b.k }}</span><span style="font-size:20px;font-weight:600;color:{{ b.c }}">{{ b.v }}</span></div></sc-for>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onClick="{{ upd.applyMerge }}" style="cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:0;background:#0d2f25;color:oklch(0.89 0.16 128);font-size:13.5px;font-weight:500">รวมกับข้อมูลเดิม (เพิ่มใหม่ + อัปเดตรายการเดิม)</button>
+            <button onClick="{{ upd.applyReplace }}" style="cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:1.5px solid #0d2f25;background:#fff;color:#0d2f25;font-size:13.5px">แทนที่ทั้งหมดด้วยไฟล์นี้</button>
+            <button onClick="{{ upd.cancel }}" style="cursor:pointer;height:38px;padding:0 12px;border:0;background:transparent;color:#5c605a;font-size:13.5px;text-decoration:underline">ยกเลิก</button>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ upd.done }}"><div style="background:#e2f2d0;color:#2f6a12;border-radius:12px;padding:12px 14px;font-size:13.5px">{{ upd.done }}</div></sc-if>
+      <button onClick="{{ upd.template }}" style="align-self:flex-start;cursor:pointer;border:0;background:transparent;padding:0;color:#1b5745;font-size:13px;text-decoration:underline">ดาวน์โหลดไฟล์แม่แบบ (CSV หัวคอลัมน์)</button>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;gap:12px;align-items:center"><span style="width:32px;height:32px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">2</span><span style="font-size:17px;font-weight:600">เพิ่มทีละรายการ</span></div>
+      <form onSubmit="{{ upd.addManual }}" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+        <label style="grid-column:1 / -1;display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ชื่อองค์กร *<input name="org" required="{{ true }}" placeholder="บริษัท ตัวอย่าง จำกัด (สำนักงานใหญ่)" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">เลขที่ใบรับรอง<input name="cert" placeholder="TGO CFO FY27-0001" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">สาขา/รหัสสาขา<input name="branch" placeholder="สำนักงานใหญ่" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="grid-column:1 / -1;display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ชื่อกิจกรรม/ประเภทธุรกิจ<input name="act" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">จังหวัด<input name="prov" list="cfo-prov-list" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input><datalist id="cfo-prov-list"><sc-for list="{{ upd.provs }}" as="p"><option value="{{ p }}"></option></sc-for></datalist></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">รหัสไปรษณีย์<input name="zip" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="grid-column:1 / -1;display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ที่อยู่<input name="addr" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">อุตสาหกรรม<select name="ind" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"><option value="">— เลือก —</option><sc-for list="{{ upd.inds }}" as="p"><option value="{{ p }}">{{ p }}</option></sc-for></select></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ขนาดอุตสาหกรรม<select name="size" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"><option value="">— เลือก —</option><option value="ใหญ่">ใหญ่</option><option value="SME">SME</option><option value="มหาชน">มหาชน</option></select></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">วันที่อนุมัติ<input name="ap" type="date" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">วันที่หมดอายุ<input name="ex" type="date" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <div style="grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ประเภทที่ 1 (%)<input name="s1" type="number" step="0.01" min="0" max="100" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ประเภทที่ 2 (%)<input name="s2" type="number" step="0.01" min="0" max="100" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">ประเภทที่ 3 (%)<input name="s3" type="number" step="0.01" min="0" max="100" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        </div>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">เบอร์โทรศัพท์<input name="phone" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5c605a">อีเมล<input name="email" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0f1a16;width:100%"></input></label>
+        <div style="grid-column:1 / -1;display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap">
+          <sc-if value="{{ upd.formMsg }}"><span style="font-size:13px;color:#2f6a12;margin-right:auto">{{ upd.formMsg }}</span></sc-if>
+          <button type="reset" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #d3d8cd;background:#fff;font-size:13.5px">ล้างฟอร์ม</button>
+          <button type="submit" style="cursor:pointer;height:40px;padding:0 20px;border-radius:999px;border:0;background:#0d2f25;color:oklch(0.89 0.16 128);font-size:14px;font-weight:500">+ เพิ่มรายการ</button>
+        </div>
+      </form>
+      <sc-if value="{{ upd.hasManual }}">
+        <div style="display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid #eef0ea">
+          <span style="font-size:13px;font-weight:500;color:#5c605a">รายการที่เพิ่มเอง ({{ upd.manualCount }})</span>
+          <sc-for list="{{ upd.manual }}" as="m">
+            <div style="display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:10px;background:#f5f6f2">
+              <span style="display:flex;flex-direction:column;min-width:0;flex:1"><span style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.org }}</span><span style="font-size:12px;color:#5c605a">{{ m.cert }} · หมดอายุ {{ m.exBE }}</span></span>
+              <button onClick="{{ m.open }}" style="cursor:pointer;border:0;background:transparent;color:#1b5745;font-size:12.5px">ดู</button>
+              <button onClick="{{ m.del }}" style="cursor:pointer;border:0;background:transparent;color:#a33a1a;font-size:12.5px">ลบ</button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+  </section>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:16px">
+    <div style="background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;gap:12px;align-items:center"><span style="width:32px;height:32px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">3</span><span style="font-size:17px;font-weight:600">เพิ่ม/แก้ไขเบอร์ติดต่อของบริษัทที่มีอยู่</span></div>
+      <span style="font-size:13.5px;color:#3a3f39;line-height:1.65">ค้นหาบริษัทในหน้าค้นหาทะเบียน กดเปิดรายละเอียด แล้วกดปุ่ม "แก้ไขข้อมูลติดต่อ" ในการ์ดข้อมูลติดต่อ แก้ไขไปแล้ว {{ upd.editCount }} รายการ</span>
+    </div>
+    <div style="background:#fdecc8;border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:8px;color:#5a3a00">
+      <span style="font-size:15px;font-weight:600">การเปลี่ยนแปลงถูกบันทึกในเบราว์เซอร์นี้เท่านั้น</span>
+      <span style="font-size:13.5px;line-height:1.7">ถ้าต้องการให้คนอื่นเห็นข้อมูลใหม่ด้วย ให้กด "ดาวน์โหลดไฟล์ข้อมูลสำหรับเผยแพร่" จะได้ไฟล์ cfo.json และ contacts.json แล้วนำไปวางแทนไฟล์เดิมในโฟลเดอร์ data/ ของเว็บไซต์</span>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isNotes }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:24px;font-weight:600">วิธีใช้งาน</h2>
+    <span style="font-size:14px;color:#5c605a">ทุกฟังก์ชันของเว็บไซต์ พร้อมภาพประกอบ · กดหัวข้อเพื่อไปยังส่วนนั้น</span>
+  </div>
+  <nav style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="#g1" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">1</span>ส่วนหัว เมนู และวันที่อ้างอิงสถานะ</a>
+      <a href="#g2" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">2</span>ค้นหาและกรองข้อมูล</a>
+      <a href="#g3" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">3</span>ตารางผลการค้นหา</a>
+      <a href="#g4" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">4</span>หน้ารายละเอียด: ข้อมูลติดต่อ</a>
+      <a href="#g5" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">5</span>หน้ารายละเอียด: อายุใบรับรอง สัดส่วน และประวัติ</a>
+      <a href="#g6" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">6</span>ภาพรวม: ใบรับรองที่จะหมดอายุใน 12 เดือน</a>
+      <a href="#g7" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">7</span>ภาพรวม: แดชบอร์ดกรองได้</a>
+      <a href="#g8" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">8</span>รายการติดตาม</a>
+      <a href="#g9" style="display:flex;gap:8px;align-items:center;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;border:1px solid #e1e4dc;color:#0f1a16;font-size:13px;text-decoration:none"><span style="width:22px;height:22px;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">9</span>อัปเดตข้อมูล</a>
+      <a href="#notes" style="display:flex;align-items:center;height:34px;padding:0 14px;border-radius:999px;background:#0d2f25;color:#fff;font-size:13px;text-decoration:none">หมายเหตุและที่มาของข้อมูล</a>
+  </nav>
+  <section style="display:flex;flex-direction:column;gap:16px">
+    <div id="g1" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">1</span><span style="font-size:18px;font-weight:600;line-height:1.35">ส่วนหัว เมนู และวันที่อ้างอิงสถานะ</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">แถบเมนูมี 5 หน้า: ค้นหาทะเบียน · ภาพรวม · รายการติดตาม · อัปเดตข้อมูล · วิธีใช้ & หมายเหตุ</li>
+          <li style="text-wrap:pretty">กล่อง "วันที่อ้างอิงสถานะ" ใช้เลือกวันที่สำหรับคำนวณสถานะ อยู่ในอายุ / ใกล้หมดอายุ / หมดอายุ ค่าเริ่มต้นคือวันนี้</li>
+          <li style="text-wrap:pretty">ปุ่มลัด วันนี้ · +3 เดือน · +6 เดือน · +1 ปี ใช้ดูล่วงหน้าว่าใบรับรองใดจะหมดอายุ</li>
+          <li style="text-wrap:pretty">ช่อง "ใกล้หมด ≤ … วัน" ใช้กำหนดช่วงเตือนใกล้หมดอายุ (30 / 60 / 90 / 180 วัน)</li>
+          <li style="text-wrap:pretty">การ์ดเขียวเข้มแสดงจำนวนใบรับรองที่อยู่ในอายุ ณ วันที่เลือก กดเพื่อกรองเฉพาะรายการที่อยู่ในอายุ</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g1-header.png" alt="ส่วนหัว เมนู และวันที่อ้างอิงสถานะ" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g2" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">2</span><span style="font-size:18px;font-weight:600;line-height:1.35">ค้นหาและกรองข้อมูล</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">พิมพ์ชื่อองค์กร เลขที่ใบรับรอง กิจกรรม ที่อยู่ รหัสไปรษณีย์ เบอร์โทร หรืออีเมล ในช่องค้นหา ค้นหลายคำพร้อมกันได้โดยเว้นวรรค</li>
+          <li style="text-wrap:pretty">กดปุ่ม / บนคีย์บอร์ดเพื่อไปที่ช่องค้นหาได้ทันที หรือกดคำใน "ลองค้นหา"</li>
+          <li style="text-wrap:pretty">ตัวกรอง 8 ช่อง: อุตสาหกรรม · จังหวัด · ขนาด · ปีงบประมาณ · ประเภทที่มีสัดส่วนสูงสุด · สถานะ · ข้อมูลติดต่อ · เรียงลำดับ ตัวเลขในวงเล็บเปลี่ยนตามตัวกรองอื่นที่เลือกอยู่</li>
+          <li style="text-wrap:pretty">ปุ่มด่วน: หมดอายุภายใน … วัน · มีข้อสังเกตข้อมูล · หมดอายุและยังไม่ต่ออายุ · ไม่มีข้อมูลสัดส่วน</li>
+          <li style="text-wrap:pretty">การ์ดตัวเลขสรุปด้านบนกดเพื่อกรองได้ทุกใบ กด "ล้างตัวกรองทั้งหมด" เพื่อเริ่มใหม่</li>
+          <li style="text-wrap:pretty">กด "ส่งออก CSV" เพื่อดาวน์โหลดรายการตามตัวกรองปัจจุบัน รวมเบอร์โทรและอีเมล เปิดด้วย Excel ได้</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g2-search.png" alt="ค้นหาและกรองข้อมูล" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g3" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">3</span><span style="font-size:18px;font-weight:600;line-height:1.35">ตารางผลการค้นหา</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">คำที่ค้นหาจะถูกไฮไลต์สีเขียวในชื่อองค์กร</li>
+          <li style="text-wrap:pretty">ป้าย "☎ ติดต่อได้" แสดงว่ามีเบอร์โทรหรืออีเมล ป้าย "N ใบ" แสดงจำนวนใบรับรองขององค์กรเดียวกันในทะเบียน</li>
+          <li style="text-wrap:pretty">คอลัมน์สถานะบอกจำนวนวันที่เหลือ แถบสีแสดงสัดส่วนประเภทที่ 1 · 2 · 3</li>
+          <li style="text-wrap:pretty">กด ☆ ท้ายแถวเพื่อเพิ่มเข้ารายการติดตาม กดที่แถวเพื่อเปิดหน้ารายละเอียด</li>
+          <li style="text-wrap:pretty">ใช้ปุ่มเลขหน้าด้านล่างเพื่อดูหน้าถัดไป (หน้าละ 25 รายการ)</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g3-table.png" alt="ตารางผลการค้นหา" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g4" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">4</span><span style="font-size:18px;font-weight:600;line-height:1.35">หน้ารายละเอียด: ข้อมูลติดต่อ</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">กดเบอร์โทรเพื่อโทรออกได้ทันที (บนมือถือ) กดอีเมลเพื่อเปิดโปรแกรมอีเมลพร้อมหัวเรื่องเลขที่ใบรับรอง</li>
+          <li style="text-wrap:pretty">"คัดลอกข้อมูลติดต่อ" คัดลอกชื่อบริษัท เบอร์ และอีเมลไปวางที่อื่น ปุ่ม "คัดลอก" ข้างเลขที่ใบรับรองใช้คัดลอกเลขที่</li>
+          <li style="text-wrap:pretty">"แก้ไขข้อมูลติดต่อ" หรือ "+ เพิ่มข้อมูลติดต่อ" ใช้เพิ่มหรือแก้เบอร์และอีเมล ใส่หลายเบอร์ได้โดยคั่นด้วย ;</li>
+          <li style="text-wrap:pretty">ถ้ายังไม่มีข้อมูล จะมีปุ่ม "ค้นหาข้อมูลติดต่อใน Google"</li>
+          <li style="text-wrap:pretty">ด้านล่างแสดงแหล่งที่มาและลิงก์อ้างอิง กด × หรือปุ่ม Esc เพื่อปิด</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g4-contact.png" alt="หน้ารายละเอียด: ข้อมูลติดต่อ" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g5" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">5</span><span style="font-size:18px;font-weight:600;line-height:1.35">หน้ารายละเอียด: อายุใบรับรอง สัดส่วน และประวัติ</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">แถบอายุใบรับรองแสดงว่าผ่านไปแล้วเท่าไร และเหลืออีกกี่วันนับจากวันที่อ้างอิง</li>
+          <li style="text-wrap:pretty">สัดส่วนคาร์บอนฟุตพริ้นท์ประเภทที่ 1–3 เป็นร้อยละตามที่เว็บ อบก. แสดง</li>
+          <li style="text-wrap:pretty">"ประวัติใบรับรองขององค์กร" รวมใบเก่าและใบใหม่ขององค์กรเดียวกัน กดเพื่อสลับไปดูใบอื่น</li>
+          <li style="text-wrap:pretty">ด้านบนของประวัติจะบอกว่าองค์กรยังมีใบรับรองที่อยู่ในอายุหรือไม่ ใช้ติดตามการต่ออายุ</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g5-history.png" alt="หน้ารายละเอียด: อายุใบรับรอง สัดส่วน และประวัติ" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g6" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">6</span><span style="font-size:18px;font-weight:600;line-height:1.35">ภาพรวม: ใบรับรองที่จะหมดอายุใน 12 เดือน</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">กราฟนับจากวันที่อ้างอิงไปอีก 12 เดือน เปลี่ยนวันที่ที่ส่วนหัวแล้วกราฟจะเลื่อนตาม</li>
+          <li style="text-wrap:pretty">แท่งสีเหลืองคือเดือนที่มีรายการอยู่ในช่วงใกล้หมดอายุ กดที่เดือนเพื่อกรองเฉพาะเดือนนั้น</li>
+          <li style="text-wrap:pretty">การ์ด "ใกล้หมดอายุที่สุด" และ "อนุมัติใหม่ใน 30 วันล่าสุด" กดที่ชื่อเพื่อเปิดรายละเอียด</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g6-overview.png" alt="ภาพรวม: ใบรับรองที่จะหมดอายุใน 12 เดือน" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g7" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">7</span><span style="font-size:18px;font-weight:600;line-height:1.35">ภาพรวม: แดชบอร์ดกรองได้</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">กดแถบอุตสาหกรรม จังหวัด ปีงบประมาณ เดือน หรือป้ายสถานะ เพื่อกรองทุกกราฟในหน้าเดียวกัน กดซ้ำเพื่อยกเลิก</li>
+          <li style="text-wrap:pretty">เลือกได้หลายเงื่อนไขพร้อมกัน ตัวกรองที่เลือกจะแสดงในแถบด้านบน กด × เพื่อเอาออก</li>
+          <li style="text-wrap:pretty">กด "ดูรายชื่อ … รายการในตาราง" เพื่อไปดูรายชื่อตามตัวกรองเดียวกันในหน้าค้นหา</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g7-crossfilter.png" alt="ภาพรวม: แดชบอร์ดกรองได้" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g8" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">8</span><span style="font-size:18px;font-weight:600;line-height:1.35">รายการติดตาม</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">แสดงรายการที่กด ☆ ไว้ เรียงตามวันหมดอายุ แถบสีบนการ์ดบอกสถานะ</li>
+          <li style="text-wrap:pretty">กด "เลิกติดตาม" เพื่อเอาออก รายการติดตามบันทึกไว้ในเบราว์เซอร์นี้</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g8-watch.png" alt="รายการติดตาม" style="display:block;width:100%;height:auto"></div>
+    </div>
+    <div id="g9" style="scroll-margin-top:16px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:12px;align-items:center"><span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-weight:600">9</span><span style="font-size:18px;font-weight:600;line-height:1.35">อัปเดตข้อมูล</span></div>
+        <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:300;line-height:1.7;color:#262a25">
+          <li style="text-wrap:pretty">วิธีที่ 1 อัปโหลดไฟล์ Excel (.xlsx) หรือ CSV รูปแบบเดียวกับ TGO_CFO_list ระบบจะสรุปจำนวนรายการใหม่และรายการเดิมให้ตรวจก่อน แล้วเลือก "รวมกับข้อมูลเดิม" หรือ "แทนที่ทั้งหมด"</li>
+          <li style="text-wrap:pretty">วิธีที่ 2 กรอกฟอร์ม "เพิ่มทีละรายการ" รายการที่เพิ่มเองจะอยู่บนสุดของตารางและลบได้</li>
+          <li style="text-wrap:pretty">วิธีที่ 3 เปิดหน้ารายละเอียดของบริษัท แล้วกด "แก้ไขข้อมูลติดต่อ"</li>
+          <li style="text-wrap:pretty">การเปลี่ยนแปลงบันทึกในเบราว์เซอร์นี้เท่านั้น กด "ดาวน์โหลดไฟล์ข้อมูลสำหรับเผยแพร่" เพื่อให้คนอื่นเห็น แล้วนำไฟล์ cfo.json และ contacts.json ไปวางแทนในโฟลเดอร์ data/</li>
+          <li style="text-wrap:pretty">กด "กลับไปใช้ข้อมูลต้นฉบับ" เมื่อต้องการยกเลิกไฟล์ที่อัปโหลด</li>
+        </ul>
+      </div>
+      <div style="border-radius:14px;overflow:hidden;border:1px solid #e1e4dc;background:#f5f6f2;box-shadow:0 8px 24px rgba(13,47,37,.08)"><img src="guide/g9-update.png" alt="อัปเดตข้อมูล" style="display:block;width:100%;height:auto"></div>
+    </div>
+  </section>
+  <section id="notes" style="scroll-margin-top:16px;max-width:880px;background:#fff;border:1px solid #e1e4dc;border-radius:20px;padding:30px 34px;display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0;font-size:24px;font-weight:600">หมายเหตุและที่มาของข้อมูล</h2>
+    <a href="https://thaicarbonlabel.tgo.or.th/index.php?lang=TH&amp;mod=YjNKbllXNXBlbUYwYVc5dVgyRndjSEp2ZG1Gcw" target="_blank" rel="noopener" style="font-size:14px">เปิดหน้ารายชื่อบนเว็บไซต์ฉลากคาร์บอน อบก. ↗</a>
+    <ol style="margin:0;padding-left:22px;display:flex;flex-direction:column;gap:10px;font-size:14.5px;font-weight:300;line-height:1.75;color:#262a25">
+      <sc-for list="{{ notes }}" as="n" hint-placeholder-count="10"><li style="text-wrap:pretty">{{ n }}</li></sc-for>
+    </ol>
+  </section>
+</sc-if>
+
+</main>
+
+<footer style="background:#0a241c;color:#a9bdb4;padding:20px 28px;font-size:12.5px;text-align:center;line-height:1.6">ตัวเลขทั้งหมดเป็นข้อมูลตามที่เว็บไซต์ อบก. เผยแพร่ ไม่ได้ผ่านการตรวจสอบเพิ่มเติม · สถานะคำนวณจากวันหมดอายุเทียบกับวันที่อ้างอิงที่เลือก</footer>
+
+<sc-if value="{{ sel }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ close }}" style="position:fixed;inset:0;background:rgba(8,24,18,.5);z-index:20"></div>
+  <aside style="position:fixed;top:12px;right:12px;bottom:12px;width:min(560px,calc(100% - 24px));background:#fff;z-index:21;overflow-y:auto;border-radius:22px;box-shadow:0 20px 60px rgba(0,0,0,.25);display:flex;flex-direction:column">
+    <div style="background:#0d2f25;color:#f3f5f0;padding:22px 26px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <span style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;font-weight:600;letter-spacing:.04em;color:oklch(0.89 0.16 128)">{{ sel.cert }}</span><button onClick="{{ sel.copy }}" style="cursor:pointer;height:24px;padding:0 9px;border-radius:999px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#d6e2dc;font-size:11.5px">{{ sel.copyText }}</button></span>
+        <button onClick="{{ close }}" style="cursor:pointer;border:1px solid rgba(255,255,255,.3);background:transparent;color:#fff;width:34px;height:34px;border-radius:50%;font-size:17px">×</button>
+      </div>
+      <span style="font-size:21px;line-height:1.45;font-weight:600;text-wrap:pretty">{{ sel.org }}</span>
+      <span style="font-size:14px;font-weight:300;color:#c4d3cc;line-height:1.5">{{ sel.act }}</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">
+        <span style="font-size:12.5px;font-weight:500;padding:4px 11px;border-radius:999px;background:{{ sel.stBg }};color:{{ sel.stFg }}">{{ sel.stLong }}</span>
+        <button onClick="{{ sel.toggle }}" style="cursor:pointer;font-size:12.5px;padding:4px 12px;border-radius:999px;border:1px solid oklch(0.89 0.16 128);background:transparent;color:oklch(0.89 0.16 128)">{{ sel.wText }}</button>
+      </div>
+    </div>
+    <div style="padding:22px 26px;display:flex;flex-direction:column;gap:24px">
+      <div style="display:flex;flex-direction:column;gap:12px;border:1.5px solid #d9e6c8;background:#f7fbf1;border-radius:16px;padding:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-size:15px;font-weight:600;color:#0d2f25">ข้อมูลติดต่อ</span>
+          <span style="display:flex;gap:6px;flex-wrap:wrap"><sc-if value="{{ sel.hasContact }}"><button onClick="{{ sel.copyContact }}" style="cursor:pointer;height:28px;padding:0 12px;border-radius:999px;border:1px solid #c9dbb1;background:#fff;color:#1b5745;font-size:12.5px">{{ sel.copyContactText }}</button></sc-if><button onClick="{{ sel.editContact }}" style="cursor:pointer;height:28px;padding:0 12px;border-radius:999px;border:0;background:#0d2f25;color:#fff;font-size:12.5px">{{ sel.editText }}</button></span>
+        </div>
+        <sc-if value="{{ sel.editing }}">
+          <form onSubmit="{{ sel.saveContact }}" style="display:flex;flex-direction:column;gap:10px;background:#fff;border:1px solid #e1e4dc;border-radius:12px;padding:14px">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#5c605a">เบอร์โทรศัพท์ (คั่นหลายเบอร์ด้วย ; และใส่ป้ายในวงเล็บได้)<input name="phone" defaultValue="{{ sel.phone }}" placeholder="0-2xxx-xxxx (สำนักงานใหญ่) ; 08x-xxx-xxxx" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#5c605a">อีเมล<input name="email" type="text" defaultValue="{{ sel.email }}" placeholder="contact@company.co.th" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#5c605a">หมายเหตุ / แหล่งที่มา<input name="note" defaultValue="{{ sel.cnoteRaw }}" placeholder="เช่น โทรยืนยันแล้ว 10 ต.ค. 2569" style="height:40px;border:1.5px solid #d3d8cd;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+            <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" onClick="{{ sel.editContact }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:1.5px solid #d3d8cd;background:#fff;font-size:13px">ยกเลิก</button><button type="submit" style="cursor:pointer;height:34px;padding:0 16px;border-radius:999px;border:0;background:#0d2f25;color:oklch(0.89 0.16 128);font-size:13px;font-weight:500">บันทึกข้อมูลติดต่อ</button></div>
+          </form>
+        </sc-if>
+        <sc-if value="{{ sel.hasPhones }}">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ sel.phones }}" as="p">
+              <a href="{{ p.href }}" style="display:flex;align-items:center;gap:12px;text-decoration:none;color:#0f1a16;background:#fff;border:1px solid #e1e4dc;border-radius:12px;padding:10px 12px" style-hover="border-color:#1b5745">
+                <span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:15px">☎</span>
+                <span style="display:flex;flex-direction:column;gap:0;min-width:0"><span style="font-size:16px;font-weight:600;font-variant-numeric:tabular-nums">{{ p.num }}</span><sc-if value="{{ p.label }}"><span style="font-size:12px;color:#5c605a">{{ p.label }}</span></sc-if></span>
+                <span style="margin-left:auto;font-size:12.5px;color:#1b5745">โทร</span>
+              </a>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ sel.hasEmails }}">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ sel.emails }}" as="m">
+              <a href="{{ m.href }}" style="display:flex;align-items:center;gap:12px;text-decoration:none;color:#0f1a16;background:#fff;border:1px solid #e1e4dc;border-radius:12px;padding:10px 12px" style-hover="border-color:#1b5745">
+                <span style="width:34px;height:34px;flex:none;border-radius:50%;background:#0d2f25;color:oklch(0.89 0.16 128);display:flex;align-items:center;justify-content:center;font-size:15px">@</span>
+                <span style="font-size:14.5px;font-weight:500;word-break:break-all;min-width:0">{{ m.e }}</span>
+                <span style="margin-left:auto;font-size:12.5px;color:#1b5745;flex:none">ส่งอีเมล</span>
+              </a>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ sel.noContact }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <span style="font-size:13.5px;color:#3a3f39">ยังไม่มีเบอร์โทรหรืออีเมลสำหรับรายการนี้</span>
+            <a href="{{ sel.gSearch }}" target="_blank" rel="noopener" style="align-self:flex-start;display:flex;align-items:center;height:34px;padding:0 14px;border-radius:999px;background:#0d2f25;color:#fff;font-size:13px;text-decoration:none">ค้นหาข้อมูลติดต่อใน Google ↗</a>
+          </div>
+        </sc-if>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#5c605a;line-height:1.55;padding-top:10px;border-top:1px solid #dfe9d2">
+          <sc-if value="{{ sel.csrc }}"><span><b style="font-weight:500;color:#3a3f39">แหล่งที่มา:</b> {{ sel.csrc }}</span></sc-if>
+          <sc-if value="{{ sel.hasUrls }}"><span style="display:flex;gap:10px;flex-wrap:wrap"><sc-for list="{{ sel.urls }}" as="u"><a href="{{ u.u }}" target="_blank" rel="noopener" style="font-size:12.5px">{{ u.host }} ↗</a></sc-for></span></sc-if>
+          <span>{{ sel.cnote }}</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;background:#f5f6f2;border-radius:16px;padding:16px">
+        <span style="font-size:12.5px;font-weight:600;color:#5c605a">อายุใบรับรอง ณ {{ refTh }}</span>
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-variant-numeric:tabular-nums;gap:10px"><span>อนุมัติ {{ sel.apTh }}</span><span>หมดอายุ {{ sel.exTh }}</span></div>
+        <div style="height:10px;background:#e1e4dc;border-radius:5px;overflow:hidden"><div style="height:100%;width:{{ sel.elapsed }}%;background:{{ sel.stFg }};border-radius:5px"></div></div>
+        <span style="font-size:13px;color:#3a3f39">{{ sel.daysLong }}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:12.5px;font-weight:600;color:#5c605a">สัดส่วนคาร์บอนฟุตพริ้นท์ขององค์กร</span>
+        <sc-if value="{{ sel.hasScope }}">
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <sc-for list="{{ sel.scopes }}" as="s">
+              <div style="display:grid;grid-template-columns:90px minmax(0,1fr) 64px;gap:10px;align-items:center;font-size:14px">
+                <span>{{ s.label }}</span>
+                <span style="height:12px;background:#f1f3ee;border-radius:6px;overflow:hidden"><span style="display:block;height:100%;width:{{ s.w }}%;background:{{ s.color }};border-radius:6px"></span></span>
+                <span style="font-size:14px;font-weight:500;text-align:right">{{ s.text }}</span>
+              </div>
+            </sc-for>
+            <span style="font-size:13px;color:#5c605a">สัดส่วนสูงสุด: {{ sel.top }}</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ sel.noScope }}"><span style="font-size:14px;color:#7a7e77">เว็บไม่แสดงข้อมูลสัดส่วนสำหรับรายการนี้</span></sc-if>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <span style="font-size:12.5px;font-weight:600;color:#5c605a">ประวัติใบรับรองขององค์กร</span>
+          <span style="font-size:12.5px;color:{{ sel.orgStateFg }}">{{ sel.orgState }}</span>
+        </div>
+        <sc-if value="{{ sel.hasHist }}">
+          <div style="display:flex;flex-direction:column;gap:6px;position:relative">
+            <sc-for list="{{ sel.hist }}" as="h">
+              <button onClick="{{ h.open }}" style="cursor:pointer;text-align:left;display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 12px;border-radius:12px;border:1.5px solid {{ h.ring }};background:{{ h.bg }};color:#0f1a16">
+                <span style="width:10px;height:10px;border-radius:50%;background:{{ h.stFg }}"></span>
+                <span style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-size:13px;font-weight:500;color:#1b5745">{{ h.cert }}</span><span style="font-size:12.5px;color:#5c605a">{{ h.apTh }} → {{ h.exTh }} {{ h.branch }}</span></span>
+                <span style="font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;background:{{ h.stBg }};color:{{ h.stFg }}">{{ h.stLabel }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ sel.noHist }}"><span style="font-size:13.5px;color:#7a7e77">มีใบรับรองนี้เพียงใบเดียวในทะเบียน</span></sc-if>
+      </div>
+      <div style="display:grid;grid-template-columns:140px minmax(0,1fr);gap:10px 16px;font-size:14px;line-height:1.55">
+        <sc-for list="{{ sel.fields }}" as="f">
+          <span style="color:#5c605a;font-size:13px">{{ f.k }}</span><span style="color:#0f1a16;word-break:break-word">{{ f.v }}</span>
+        </sc-for>
+      </div>
+      <sc-if value="{{ sel.note }}">
+        <div style="background:#fdecc8;border-radius:14px;padding:13px 15px;font-size:13.5px;color:#6b4100;line-height:1.6"><b style="font-weight:600">ข้อสังเกตข้อมูล:</b> {{ sel.note }}</div>
+      </sc-if>
+    </div>
+  </aside>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const PER=25;
+const LIME='oklch(0.89 0.16 128)',AMB='oklch(0.8 0.14 75)';
+const ST={active:{bg:'#e2f2d0',fg:'#2f6a12',label:'อยู่ในอายุ'},soon:{bg:'#fdecc8',fg:'#9a5a00',label:'ใกล้หมดอายุ'},exp:{bg:'#ebece8',fg:'#5c605a',label:'หมดอายุ'},unk:{bg:'#f2f1ec',fg:'#8b8d86',label:'ไม่ระบุ'}};
+const NOTES=[
+'แหล่งข้อมูล: เว็บไซต์ฉลากคาร์บอน องค์การบริหารจัดการก๊าซเรือนกระจก (อบก.) หน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" (คาร์บอนฟุตพริ้นท์ขององค์กร)',
+'วันที่ดึงข้อมูล: 5 ตุลาคม 2569',
+'จำนวนรายการในไฟล์: 4367 รายการ ตรงกับยอดทั้งหมดที่เว็บแสดง (4367 รายการ)',
+'วิธีดึงข้อมูล: (1) ไล่หน้ารายการหลักครบ 364 หน้า ได้รายการไม่ซ้ำ 3058 รายการ (2) ไล่ตัวกรองประเภทอุตสาหกรรม 23 กลุ่มและจังหวัด 77 จังหวัดทุกหน้า (3) ค้นด้วยเลขที่ใบรับรองทีละช่วงตัวเลขให้ผลไม่เกิน 12 รายการต่อการค้น พบเพิ่มอีก 43 รายการ แล้วรวมผลโดยตัดรายการซ้ำด้วยรหัสรายการของเว็บ',
+'เหตุที่ต้องใช้หลายวิธี: เว็บเรียงรายการตามวันที่ซึ่งมีค่าซ้ำกันมาก ลำดับในแต่ละหน้าจึงไม่คงที่ บางรายการปรากฏซ้ำหลายหน้า บางรายการไม่ปรากฏเลย จึงไม่ได้ใส่เลขหน้าในเว็บไว้ในไฟล์',
+'ไฟล์เรียงตามวันที่อนุมัติจากใหม่ไปเก่า (รายการที่ไม่มีวันที่อนุมัติหรือวันที่ผิดรูปแบบอยู่ท้ายสุด)',
+'ข้อมูลจากการ์ดในหน้ารายการ: เลขที่ใบรับรอง ชื่อกิจกรรม ชื่อองค์กร จังหวัด วันที่อนุมัติ วันที่หมดอายุ',
+'ข้อมูลจากหน้ารายละเอียด (popup): ที่อยู่ อุตสาหกรรม ขนาดอุตสาหกรรม และกราฟ "% สัดส่วนคาร์บอนฟุตพริ้นท์ขององค์กร" ประเภทที่ 1–3 (เว็บแสดงเป็นร้อยละเท่านั้น ไม่มีปริมาณ tCO2e)',
+'กราฟสัดส่วนที่เว็บแสดงเป็น 0% ทุกประเภท (177 รายการ) ถือว่าไม่มีข้อมูล เว้นช่องว่างไว้ ไม่นำไปคิดค่าเฉลี่ยในชีตสรุป',
+'คอลัมน์ข้อสังเกตจะระบุ "สัดส่วนรวม X%" เฉพาะกรณีผลรวมประเภทที่ 1–3 ต่างจาก 100% เกิน 1 จุดร้อยละ',
+'เว็บไม่แสดง: ปริมาณการปล่อย (tCO2e) ชื่อหน่วยงานทวนสอบ ชื่อที่ปรึกษา ปีฐาน/ปีที่รายงาน จึงไม่มีในไฟล์นี้',
+'คอลัมน์ "สาขา/รหัสสาขา" แยกจากวงเล็บท้ายชื่อองค์กร เฉพาะกรณีเป็น สำนักงานใหญ่ / รหัส 5 หลัก / สาขา…; ชื่อองค์กรเต็มยังคงอยู่ในคอลัมน์ชื่อองค์กร',
+'วันที่ ค.ศ. แปลงจากวันที่ พ.ศ. ที่เว็บแสดง (ลบ 543) ถ้าวันที่ผิดรูปแบบหรือว่าง จะเว้นไว้และระบุในคอลัมน์ข้อสังเกตข้อมูล',
+'สถานะ ณ วันที่ดึงข้อมูล = เทียบวันหมดอายุ (ค.ศ.) กับวันที่ในชีต สรุป เซลล์ B3 แก้วันที่ในเซลล์นั้นเพื่อคำนวณสถานะใหม่ได้',
+'ปีงบประมาณ (FY) ดึงจากเลขที่ใบรับรอง เช่น TGO CFO FY26-1239 → FY26',
+'ตัวเลขทั้งหมดเป็นข้อมูลตามที่เว็บเผยแพร่ ไม่ได้ผ่านการตรวจสอบเพิ่มเติม',
+'การทำความสะอาดข้อมูล (5 ต.ค. 2569): ตัดช่องว่างซ้อน/หน้า-ท้าย และอักขระที่มองไม่เห็นในคอลัมน์ข้อความ (ชื่อกิจกรรม 44, ชื่อองค์กร 77, ที่อยู่ 1,316 แถว); ในที่อยู่ลบสระ/วรรณยุกต์ที่หลุดหน้าคำ และเครื่องหมาย "-" ที่เว็บใส่แทนช่องว่าง ข้อมูลก่อนแก้เก็บไว้ในชีต "ข้อมูล CFO (ต้นฉบับ)"',
+'คอลัมน์ ตำบล/แขวง, อำเภอ/เขต, จังหวัด (จากที่อยู่), รหัสไปรษณีย์ แยกจากท้ายข้อความที่อยู่ (ลำดับ ตำบล อำเภอ จังหวัด รหัสไปรษณีย์) แยกได้ครบ 4,299 แถวที่มีที่อยู่ จังหวัดทุกค่าตรงกับรายชื่อ 77 จังหวัด; คอลัมน์ "จังหวัด" เดิมเป็นค่าจากการ์ดในเว็บ อาจต่างจากจังหวัดในที่อยู่ (เช่น ที่อยู่สำนักงานใหญ่) ประมาณ 70 แถว',
+'คอลัมน์ข้อมูลติดต่อ (ชีต ข้อมูล CFO คอลัมน์ AB–AF) เพิ่มเมื่อ 5 ตุลาคม 2569: เบอร์โทรศัพท์ / Email / แหล่งที่มา / URL แหล่งที่มา / สถานะการค้นหา',
+'ค้นจากอินเทอร์เน็ตทีละบริษัท ใช้เฉพาะช่องทางติดต่อของบริษัทที่เปิดเผยต่อสาธารณะ (เว็บไซต์บริษัท, ข้อมูลบริษัทจดทะเบียนของ ก.ล.ต., ประกาศรับสมัครงาน, ไดเรกทอรีโรงแรม/สถานที่จัดงาน) ไม่ใช้เบอร์หรืออีเมลส่วนตัวของพนักงาน',
+'เบอร์ของบริษัทที่มีหลายสาขาเป็นเบอร์สำนักงานใหญ่หรือเบอร์หลักที่พบ แถวที่ระบุ "ยังไม่ได้ค้น" คือรายการที่ยังไม่ถึงรอบการค้น',
+'ลำดับการค้น: ใบรับรองที่อนุมัติปี 2567 ขึ้นไป (ช่วงปี 2567–2570) เรียงจากวันหมดอายุใกล้ที่สุดก่อน; บริษัทมหาชนที่จดทะเบียนในตลาดฯ ใช้ข้อมูลจาก ก.ล.ต./ตลาดหลักทรัพย์ฯ เป็นหลัก',
+'หมายเหตุเว็บไซต์นี้: สถานะในเว็บไซต์คำนวณใหม่จากวันหมดอายุ (ค.ศ.) เทียบกับ "วันที่อ้างอิงสถานะ" ที่เลือกด้านบน ค่าเริ่มต้นคือวันนี้'];
+const fmtN=n=>Number(n).toLocaleString('en-US');
+const beTh=s=>{const m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s||'');return m?`${+m[1]} ${TH_M[+m[2]-1]||'?'} ${m[3]}`:(s||'—')};
+const isoTh=iso=>{const [y,m,d]=iso.split('-').map(Number);return `${d} ${TH_M[m-1]} ${y+543}`};
+const pctT=v=>v==null?'—':(Math.round(v*10)/10).toFixed(1)+'%';
+const todayISO=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const addMonths=(iso,n)=>{const [y,m,d]=iso.split('-').map(Number);const t=new Date(Date.UTC(y,m-1+n,d));return t.toISOString().slice(0,10)};
+
+class Component extends DCLogic {
+  state={loading:true,tab:'search',ref:todayISO(),win:90,q:'',ind:'',prov:'',size:'',fy:'',status:'',top:'',noted:false,soon:false,scopeless:false,renew:false,ct:'',expM:'',sort:'default',page:0,sel:null,watch:[],copied:''};
+  searchRef=React.createRef();
+  componentDidMount(){
+    this._kd=e=>{if(e.key==='/'&&!/INPUT|SELECT|TEXTAREA/.test(document.activeElement&&document.activeElement.tagName)){e.preventDefault();if(this.state.tab!=='search')this.setState({tab:'search'},()=>this.searchRef.current&&this.searchRef.current.focus());else this.searchRef.current&&this.searchRef.current.focus()}else if(e.key==='Escape'&&this.state.sel)this.setState({sel:null})};
+    document.addEventListener('keydown',this._kd);
+    try{this.setState({watch:JSON.parse(localStorage.getItem('cfo-watch')||'[]')})}catch(e){}
+    this.loadAll();
+  }
+  async waitImport(){for(let i=0;i<80&&!window.CFOImport;i++)await new Promise(r=>setTimeout(r,50));return window.CFOImport}
+  async fetchBase(){const [j,c]=await Promise.all([fetch('data/cfo.json').then(r=>r.json()),fetch('data/contacts.json').then(r=>r.json()).catch(()=>({}))]);return {data:j,contacts:c,meta:{source:'file'}}}
+  async loadAll(){
+    const I=await this.waitImport();let ds=null;
+    try{ds=I&&await I.idb.get('dataset')}catch(e){}
+    this.base=ds&&ds.data?{data:ds.data,contacts:ds.contacts||{},meta:ds.meta||{}}:await this.fetchBase();
+    try{this.manual=(I&&await I.idb.get('manual'))||[];this.cEdits=(I&&await I.idb.get('contactEdits'))||{}}catch(e){this.manual=[];this.cEdits={}}
+    this.build();
+  }
+  build(){
+    const b=this.base.data;const dicts={};Object.keys(b.dicts).forEach(k=>dicts[k]=b.dicts[k].slice());
+    const di=(k,v)=>{v=v||'';let i=dicts[k].indexOf(v);if(i<0){dicts[k].push(v);i=dicts[k].length-1}return i};
+    const man=this.manual.map(o=>['—',o.cert||'',o.act||'',o.org,o.branch||'',di('prov',o.prov),o.addr||'','','',o.prov||'',o.zip||'',di('ind',o.ind),di('size',o.size),o.apBE||'',o.exBE||'',o.ap||'',o.ex||'',o.s1,o.s2,o.s3,di('top',o.top),0,di('fy',o.fy),'เพิ่มด้วยตนเองในเว็บไซต์',o.id,o.extra||'']);
+    const contacts={...this.base.contacts};
+    this.manual.forEach(o=>{if(o.phone||o.email)contacts[o.id]=[o.phone||'',o.email||'','เพิ่มด้วยตนเองในเว็บไซต์','','']});
+    Object.entries(this.cEdits).forEach(([id,c])=>contacts[id]=c);
+    this.contacts=contacts;this._sk=null;this._k=null;this._fk=null;this._ov=null;
+    this._built={asOf:b.asOf,dicts,rows:man.concat(b.rows)};
+    this.init(this._built);
+  }
+  async persist(k,v){const I=window.CFOImport;if(I)try{await I.idb.set(k,v)}catch(e){}}
+  onFile(e){
+    const file=e.target.files&&e.target.files[0];e.target.value='';if(!file)return;
+    const I=window.CFOImport;if(!I)return;
+    this.setState({up:{status:'parsing'}});
+    I.parseFile(file).then(res=>{
+      const cur=new Set(this.base.data.rows.map(r=>String(r[24])));const ids=new Set(res.objs.map(o=>o.id));
+      const nw=res.objs.filter(o=>!cur.has(o.id)).length;const same=res.objs.length-nw;let removed=0;cur.forEach(id=>{if(!ids.has(id))removed++});
+      this._pending={...res,name:file.name};
+      this.setState({up:{status:'ready',st:{name:file.name,sheet:res.sheetName,boxes:[{k:'รายการในไฟล์',v:fmtN(res.objs.length),c:'#0f1a16'},{k:'รายการใหม่',v:fmtN(nw),c:'#2f6a12'},{k:'ตรงกับรายการเดิม',v:fmtN(same),c:'#1b5745'},{k:'มีข้อมูลติดต่อ',v:fmtN(res.objs.filter(o=>o.phone||o.email).length),c:'#9a5a00'}],removed}}});
+    }).catch(err=>this.setState({up:{status:'error',msg:'อ่านไฟล์ไม่สำเร็จ: '+(err&&err.message||err)}}));
+  }
+  async applyUpload(mode){
+    const I=window.CFOImport,p=this._pending;if(!I||!p)return;
+    let objs=p.objs;
+    if(mode==='merge'){const cur=I.datasetToObjects(this.base.data,this.base.contacts);const m=new Map(cur.map(o=>[o.id,o]));
+      objs.forEach(o=>{const prev=m.get(o.id);m.set(o.id,prev?{...prev,...Object.fromEntries(Object.entries(o).filter(([k,v])=>v!==''&&v!=null))}:o)});objs=[...m.values()]}
+    const asOf=p.asOf||todayISO();const {data,contacts}=I.objectsToDataset(objs,asOf);
+    const meta={source:'upload',fileName:p.name,importedAt:todayISO(),mode,count:objs.length};
+    this.base={data,contacts,meta};await this.persist('dataset',{data,contacts,meta});
+    this._pending=null;this.build();
+    this.setState({up:{status:'done',msg:`อัปเดตเรียบร้อย ตอนนี้มี ${fmtN(objs.length)} รายการ (${mode==='merge'?'รวมกับข้อมูลเดิม':'แทนที่ทั้งหมด'})`}});
+  }
+  async revertBase(){const I=window.CFOImport;if(I)try{await I.idb.del('dataset')}catch(e){}this.base=await this.fetchBase();this.build();this.setState({up:{status:'done',msg:'กลับไปใช้ข้อมูลต้นฉบับแล้ว'}})}
+  addManual(e){
+    e.preventDefault();const fd=new FormData(e.target);const g=k=>String(fd.get(k)||'').trim();if(!g('org'))return;
+    const I=window.CFOImport;const be=iso=>I?I.isoBE(iso):iso;const num=k=>g(k)===''?null:+g(k);
+    const o={id:'M'+Date.now().toString(36),org:g('org'),cert:g('cert'),branch:g('branch'),act:g('act'),prov:g('prov'),zip:g('zip'),addr:g('addr'),ind:g('ind'),size:g('size'),ap:g('ap'),ex:g('ex'),apBE:be(g('ap')),exBE:be(g('ex')),s1:num('s1'),s2:num('s2'),s3:num('s3'),phone:g('phone'),email:g('email')};
+    if(o.s1!=null||o.s2!=null||o.s3!=null){const a=[o.s1||0,o.s2||0,o.s3||0];o.top='ประเภทที่ '+(a.indexOf(Math.max(...a))+1)}else o.top='';
+    const m=/FY(\d\d)/i.exec(o.cert);o.fy=m?'FY'+m[1]:'';
+    this.manual=[o,...this.manual];this.persist('manual',this.manual);this.build();e.target.reset();
+    this.setState({formMsg:'✓ เพิ่ม "'+o.org+'" แล้ว'});clearTimeout(this._fm);this._fm=setTimeout(()=>this.setState({formMsg:''}),4000);
+  }
+  delManual(id){this.manual=this.manual.filter(o=>o.id!==id);this.persist('manual',this.manual);this.build();this.setState({sel:null})}
+  saveContact(e,r){
+    e.preventDefault();const fd=new FormData(e.target);const g=k=>String(fd.get(k)||'').trim();const old=this.contacts[r.id]||[];
+    this.cEdits={...this.cEdits,[r.id]:[g('phone'),g('email'),old[2]&&!/แก้ไขด้วยตนเอง/.test(old[2])?old[2]+' · แก้ไขด้วยตนเอง '+isoTh(todayISO()):'แก้ไขด้วยตนเอง '+isoTh(todayISO()),old[3]||'',g('note')||'แก้ไขด้วยตนเอง']};
+    this.persist('contactEdits',this.cEdits);this.build();this.setState({editC:null});
+  }
+  exportJson(){
+    const I=window.CFOImport;if(!I||!this._built)return;
+    const objs=I.datasetToObjects(this._built,this.contacts).map(o=>({...o,id:o.id}));
+    const {data,contacts}=I.objectsToDataset(objs,this._built.asOf);
+    data.source='https://thaicarbonlabel.tgo.or.th/index.php?lang=TH&mod=YjNKbllXNXBlbUYwYVc5dVgyRndjSEp2ZG1Gcw';
+    I.download('cfo.json',JSON.stringify(data));setTimeout(()=>I.download('contacts.json',JSON.stringify(contacts)),400);
+  }
+  init(j){
+    const D=j.dicts;this.D=D;this.dataISO=j.asOf;this.dataCount=j.rows.length;
+    this.rows=j.rows.map(a=>{
+      const [n,cert,act,org,branch,provI,addr,tambon,amphoe,provAddr,zip,indI,sizeI,apBE,exBE,ap,ex,s1,s2,s3,topI,stI,fyI,note,id,extra]=a;
+      const sum=(s1||0)+(s2||0)+(s3||0);const hasScope=s1!=null&&sum>0;
+      return {n,cert:cert||'—',act,org,branch,provI,prov:D.prov[provI]||'(ไม่ระบุ)',addr,tambon,amphoe,provAddr,zip,indI,ind:D.ind[indI]||'—',sizeI,size:D.size[sizeI]||'—',apBE,exBE,ap,ex,s1,s2,s3,topI,top:D.top[topI]||'—',fyI,fy:D.fy[fyI]||'',note,id:String(id),extra,hasScope,sum,
+        apTh:beTh(apBE),exTh:beTh(exBE),apT:ap?Date.parse(ap):-Infinity,exT:ex?Date.parse(ex):Infinity,
+        hay:[cert,act,org,addr,zip,D.prov[provI],D.ind[indI]].join(' ').toLowerCase()};
+    });
+    const count=(key,dict)=>{const c={};this.rows.forEach(r=>{c[r[key]]=(c[r[key]]||0)+1});return dict.map((v,i)=>({v:String(i),name:v||'(ไม่ระบุ)',c:c[i]||0})).filter(o=>o.c)};
+    this.opts={
+      ind:count('indI',D.ind).sort((a,b)=>b.c-a.c),
+      prov:count('provI',D.prov).sort((a,b)=>a.name.localeCompare(b.name,'th')),
+      size:count('sizeI',D.size).sort((a,b)=>b.c-a.c),
+      fy:count('fyI',D.fy).sort((a,b)=>{const p=s=>/^FY\d\d$/.test(s)?+s.slice(2):-1;return p(b.name)-p(a.name)}),
+      top:count('topI',D.top).sort((a,b)=>a.name.localeCompare(b.name,'th')),
+    };
+    const CT=this.contacts||{};
+    this.rows.forEach(r=>{const c=CT[r.id];if(c){const [ph,em,src,url,cn]=c;r.phone=ph;r.email=em;r.csrc=src;r.curl=url;r.cnote=cn}r.hasContact=!!(r.phone||r.email);r.cst=r.hasContact?'found':/^ค้นแล้ว/.test(r.cnote||'')?'notfound':'pending';if(r.hasContact)r.hay+=' '+(r.phone||'')+' '+(r.email||'').toLowerCase()});
+    const G={};
+    this.rows.forEach(r=>{const k=r.org.replace(/\((สำนักงานใหญ่|สาขา[^)]*|\d{5}[^)]*)\)/g,'').replace(/บริษัท|จำกัด|\(มหาชน\)|มหาชน|[\s.,()]/g,'').toLowerCase()||r.id;r.gk=k;(G[k]||(G[k]=[])).push(r)});
+    Object.values(G).forEach(g=>{g.sort((a,b)=>b.exT-a.exT||b.apT-a.apT);g.forEach(r=>r.gN=g.length)});
+    this.groups=G;
+    this.setState({loading:false});
+  }
+  componentWillUnmount(){document.removeEventListener('keydown',this._kd)}
+  hl(text,q){
+    if(!q.length)return [{t:text,bg:'transparent'}];
+    const low=text.toLowerCase(),mk=new Array(text.length).fill(false);
+    q.forEach(t=>{let i=low.indexOf(t);while(i>=0&&t){for(let j=i;j<i+t.length;j++)mk[j]=true;i=low.indexOf(t,i+t.length)}});
+    const out=[];let cur=null;
+    for(let i=0;i<text.length;i++){if(!cur||cur.m!==mk[i]){cur={m:mk[i],t:''};out.push(cur)}cur.t+=text[i]}
+    return out.map(p=>({t:p.t,bg:p.m?'oklch(0.93 0.13 128)':'transparent'}));
+  }
+  ensureStatus(){
+    const s=this.state;const key=s.ref+'|'+s.win;if(this._sk===key)return;
+    const refT=Date.parse(s.ref);this.refT=refT;
+    let a=0,so=0,e=0,u=0;
+    for(const r of this.rows){
+      r.days=r.ex?Math.round((r.exT-refT)/864e5):null;
+      if(r.days==null){r.stI=2;r.active=false}else if(r.days>=0){r.stI=0;r.active=true}else{r.stI=1;r.active=false}
+      r.soon=r.active&&r.days<=s.win;
+    }
+    Object.values(this.groups).forEach(g=>{const act=g.some(r=>r.active);g.forEach((r,i)=>{r.orgActive=act;r.unrenewed=!act&&i===0&&r.stI===1})});
+    this._sk=key;this._k=null;this._fk=null;this._ov=null;
+    this.soonTotal=this.rows.filter(r=>r.soon).length;
+  }
+  set(p){this.setState({...p,page:0})}
+  saveWatch(w){try{localStorage.setItem('cfo-watch',JSON.stringify(w))}catch(e){}this.setState({watch:w})}
+  toggleWatch(id){const w=this.state.watch.includes(id)?this.state.watch.filter(x=>x!==id):[...this.state.watch,id];this.saveWatch(w)}
+  match(r,s,q,skip){
+    return (skip==='ind'||s.ind===''||r.indI==s.ind)&&(skip==='prov'||s.prov===''||r.provI==s.prov)&&(skip==='size'||s.size===''||r.sizeI==s.size)&&(skip==='fy'||s.fy===''||r.fyI==s.fy)&&(skip==='top'||s.top===''||r.topI==s.top)
+      &&(skip==='status'||s.status===''||(s.status==='soon'?r.soon:r.stI==s.status))&&(skip==='status'||!s.noted||r.note)&&(!s.soon||r.soon)&&(!s.scopeless||!r.hasScope)&&(!s.renew||r.unrenewed)&&(skip==='ct'||!s.ct||(s.ct==='any'?r.hasContact:s.ct==='phone'?!!r.phone:s.ct==='email'?!!r.email:s.ct==='both'?!!(r.phone&&r.email):s.ct==='notfound'?r.cst==='notfound':s.ct==='pending'?r.cst==='pending':true))&&(skip==='expM'||!s.expM||(r.active&&r.ex&&r.ex.startsWith(s.expM)))&&q.every(t=>r.hay.includes(t));
+  }
+  fkey(){const s=this.state;return [s.ref,s.win,s.q,s.ind,s.prov,s.size,s.fy,s.status,s.top,s.noted,s.soon,s.scopeless,s.renew,s.ct,s.expM].join('|')}
+  facets(){
+    const s=this.state;const key=this.fkey();
+    if(this._fk===key)return this._fc;
+    const q=s.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const fc={};
+    for(const [k,col] of [['ind','indI'],['prov','provI'],['size','sizeI'],['fy','fyI'],['top','topI']]){const c={};this.rows.forEach(r=>{if(this.match(r,s,q,k))c[r[col]]=(c[r[col]]||0)+1});fc[k]=c}
+    {const c={any:0,phone:0,email:0,both:0,notfound:0,pending:0};this.rows.forEach(r=>{if(!this.match(r,s,q,'ct'))return;if(r.hasContact)c.any++;if(r.phone)c.phone++;if(r.email)c.email++;if(r.phone&&r.email)c.both++;if(r.cst==='notfound')c.notfound++;if(r.cst==='pending')c.pending++});fc.ct=c}
+    const st=this.rows.filter(r=>this.match(r,s,q,'status'));
+    const inSt=r=>s.status===''||(s.status==='soon'?r.soon:r.stI==s.status);
+    fc.kpi={total:st.length,active:st.filter(r=>r.active).length,soon:st.filter(r=>r.soon).length,expired:st.filter(r=>r.stI===1).length,unknown:st.filter(r=>r.stI===2).length,noted:st.filter(r=>r.note&&inSt(r)).length};
+    const sc={'0':0,soon:0,'1':0,'2':0};st.forEach(r=>{if(s.noted&&!r.note)return;sc[r.stI]++;if(r.soon)sc.soon++});fc.status=sc;
+    this._fk=key;this._fc=fc;return fc;
+  }
+  filtered(){
+    const s=this.state;const key=this.fkey()+'|'+s.sort;
+    if(this._k===key)return this._f;
+    const q=s.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let f=this.rows.filter(r=>this.match(r,s,q,null));
+    if(s.sort==='old')f=[...f].sort((a,b)=>(a.apT===-Infinity?1:0)-(b.apT===-Infinity?1:0)||a.apT-b.apT);
+    else if(s.sort==='exp')f=[...f].sort((a,b)=>(b.active-a.active)||(a.active?a.exT-b.exT:b.exT-a.exT));
+    else if(s.sort==='name')f=[...f].sort((a,b)=>a.org.localeCompare(b.org,'th'));
+    this._k=key;this._f=f;this._ov=null;return f;
+  }
+  stat(r){
+    if(r.soon)return {...ST.soon,long:`ใกล้หมดอายุ · เหลือ ${r.days} วัน`};
+    if(r.active)return {...ST.active,long:'อยู่ในอายุ'};
+    if(r.stI===1)return {...ST.exp,long:'หมดอายุแล้ว'};
+    return {...ST.unk,long:'ไม่ระบุวันหมดอายุ'};
+  }
+  view(r){
+    const s=this.stat(r);const w=this.state.watch.includes(r.id);const k=r.sum||1;
+    return {...r,stBg:s.bg,stFg:s.fg,stLabel:s.label,stLong:s.long,orgParts:this.hl(r.org,this._q||[]),cBadge:r.hasContact?'☎ ติดต่อได้':'',gBadge:r.gN>1?`${r.gN} ใบ`:'',
+      daysText:r.active?`เหลือ ${fmtN(r.days)} วัน`:'',
+      noScope:!r.hasScope,w1:r.hasScope?r.s1/k*100:0,w2:r.hasScope?r.s2/k*100:0,w3:r.hasScope?r.s3/k*100:0,
+      scopeText:r.hasScope?`${Math.round(r.s1)} · ${Math.round(r.s2)} · ${Math.round(r.s3)}`:'',
+      wIcon:w?'★':'☆',wBg:w?'#fdecc8':'#fff',wFg:w?'#a07a1c':'#a1a49c',wBorder:w?'#efd69a':'#e1e4dc',
+      open:()=>this.setState({sel:r.id}),toggle:e=>{e&&e.stopPropagation();this.toggleWatch(r.id)}};
+  }
+  overview(f){
+    if(this._ov)return this._ov;
+    const D=this.D,s=this.state;const q=this._q||[];const fx=dim=>this.rows.filter(r=>this.match(r,s,q,dim));
+    const group=(key,dict,lim,filterKey)=>{const m={};const sel=s[filterKey];fx(filterKey).forEach(r=>{const g=m[r[key]]||(m[r[key]]={t:0,a:0});g.t++;if(r.active)g.a++});
+      const arr=Object.entries(m).map(([i,g])=>({i,label:dict[i]||'(ไม่ระบุ)',total:g.t,active:g.a})).sort((a,b)=>b.total-a.total).slice(0,lim);
+      const mx=Math.max(1,...arr.map(a=>a.total));
+      if(sel&&!arr.some(a=>a.i===sel)){const g=m[sel];if(g)arr.push({i:sel,label:dict[sel]||'(ไม่ระบุ)',total:g.t,active:g.a})}
+      return arr.map(a=>{const on=sel===a.i,dim=sel&&!on;return {...a,w:a.total/mx*100,wa:a.active/mx*100,ca:dim?'#a9bfb4':'#1b5745',ct:dim?'#e6ebe5':(on?'#b7d08f':'#d4ddd4'),fw:on?'600':'400',go:()=>this.set({[filterKey]:on?'':a.i})}});};
+    const indBars=group('indI',D.ind,24,'ind');
+    const provBars=group('provI',D.prov,12,'prov');
+    const fyM={};fx('fy').forEach(r=>{if(/^FY\d\d$/.test(r.fy)&&+r.fy.slice(2)>=17&&+r.fy.slice(2)<=30)fyM[r.fy]=(fyM[r.fy]||0)+1});
+    const fyArr=Object.entries(fyM).sort((a,b)=>a[0].localeCompare(b[0]));const fmx=Math.max(1,...fyArr.map(x=>x[1]));
+    const fyCols=fyArr.map(([l,c])=>({label:l,count:fmtN(c),h:c/fmx*84,color:s.fy&&s.fy!==String(D.fy.indexOf(l))?'#bccbc2':(s.fy?'oklch(0.62 0.15 128)':'#1b5745'),go:()=>{const v=String(D.fy.indexOf(l));this.set({fy:s.fy===v?'':v})}}));
+    const [ry,rm]=s.ref.split('-').map(Number);const endISO=addMonths(s.ref,12);const endT=Date.parse(endISO);
+    const months=[];for(let i=0;i<12;i++){const d=new Date(Date.UTC(ry,rm-1+i,1));months.push({y:d.getUTCFullYear(),m:d.getUTCMonth(),count:0,soon:0})}
+    let expTotal=0;
+    const exSet=fx('expM');exSet.forEach(r=>{if(!r.active||!r.ex||r.exT>=endT)return;const d=new Date(r.ex);const mo=months.find(x=>x.y===d.getUTCFullYear()&&x.m===d.getUTCMonth());if(mo){mo.count++;expTotal++;if(r.soon)mo.soon++}});
+    const mmx=Math.max(1,...months.map(m=>m.count));
+    const expMonths=months.map(m=>{const key=`${m.y}-${String(m.m+1).padStart(2,'0')}`;return {label:`${TH_M[m.m]} ${String((m.y+543)%100).padStart(2,'0')}`,count:m.count,h:m.count/mmx*80,color:m.soon?AMB:LIME,op:s.expM&&s.expM!==key?'.35':'1',ol:s.expM===key?'2px solid #fff':'none',go:()=>this.set({expM:s.expM===key?'':key})}});
+    const sc=f.filter(r=>r.hasScope);const avg=k=>sc.length?sc.reduce((a,r)=>a+(r[k]||0),0)/sc.length:0;
+    const a1=avg('s1'),a2=avg('s2'),a3=avg('s3'),t=(a1+a2+a3)||1;
+    const scope={n:fmtN(sc.length),w1:a1/t*100,w2:a2/t*100,w3:a3/t*100,t1:pctT(a1),t2:pctT(a2),t3:pctT(a3)};
+    const fs=fx('status').filter(r=>!s.noted||r.note);
+    const nA=fs.filter(r=>r.active&&!r.soon).length,nS=fs.filter(r=>r.soon).length,nE=fs.filter(r=>r.stI===1).length,nU=fs.filter(r=>r.stI===2).length,tt=fs.length||1;
+    const statusMix=[['อยู่ในอายุ',nA,'#1b5745','0'],['ใกล้หมดอายุ',nS,AMB,'soon'],['หมดอายุ',nE,'#c9ccc4','1'],['ไม่ระบุ',nU,'#e6e7e2','2']].filter(x=>x[1]).map(([label,n,color,v])=>{const on=s.status===v;return {label,color,w:n/tt*100,text:fmtN(n),op:s.status&&!on?'.35':'1',border:on?'#0d2f25':'transparent',bg:on?'#eef5e6':'transparent',go:()=>this.set({status:on?'':v})}});
+    const from=this.refT-30*864e5;const rec=f.filter(r=>r.apT<=this.refT&&r.apT>from).sort((a,b)=>b.apT-a.apT);
+    const recent=rec.slice(0,6).map(r=>this.view(r));
+    const nextUp=f.filter(r=>r.soon).sort((a,b)=>a.exT-b.exT).slice(0,7).map(r=>this.view(r));
+    this._ov={indBars,provBars,fyCols,expMonths,expTotal:fmtN(expTotal),expSoon:fmtN(exSet.filter(r=>r.soon).length),soonFiltered:fmtN(f.filter(r=>r.soon).length),expEndTh:isoTh(endISO),scope,statusMix,nextUp,nextUpEmpty:nextUp.length===0,recent,recentCount:fmtN(rec.length),recentEmpty:rec.length===0};return this._ov;
+  }
+  exportCsv(){
+    const f=this.filtered();const H=['ลำดับ','เลขที่ใบรับรอง','ชื่อกิจกรรม/ประเภทธุรกิจ','ชื่อองค์กร','สาขา/รหัสสาขา','จังหวัด','ที่อยู่','รหัสไปรษณีย์','อุตสาหกรรม','ขนาดอุตสาหกรรม','วันที่อนุมัติ (พ.ศ.)','วันที่หมดอายุ (พ.ศ.)','ประเภทที่ 1 (%)','ประเภทที่ 2 (%)','ประเภทที่ 3 (%)','ประเภทที่มีสัดส่วนสูงสุด',`สถานะ ณ ${this.state.ref}`,'วันคงเหลือ','ปีงบประมาณ','ข้อสังเกตข้อมูล','รหัสรายการในเว็บ','เบอร์โทรศัพท์','Email','แหล่งที่มาของข้อมูลติดต่อ','URL แหล่งที่มา'];
+    const esc=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+    const lines=[H.join(',')].concat(f.map(r=>[r.n,r.cert,r.act,r.org,r.branch,r.prov,r.addr,r.zip,r.ind,r.size,r.apBE,r.exBE,r.s1,r.s2,r.s3,r.top,this.stat(r).label,r.days,r.fy,r.note,r.id,r.phone,r.email,r.csrc,r.curl].map(esc).join(',')));
+    const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`TGO_CFO_${this.state.ref}.csv`;document.body.appendChild(a);a.click();a.remove();
+  }
+  renderVals(){
+    const s=this.state;
+    const tabDefs=[['search','ค้นหาทะเบียน'],['overview','ภาพรวม'],['watch','รายการติดตาม'],['update','อัปเดตข้อมูล'],['notes','วิธีใช้ & หมายเหตุ']];
+    const tabs=tabDefs.map(([id,label])=>({label,badge:id==='watch'&&s.watch.length?String(s.watch.length):'',bg:s.tab===id?'#fff':'transparent',fg:s.tab===id?'#0d2f25':'#d6e2dc',go:()=>this.setState({tab:id})}));
+    const today=todayISO();
+    const qd=[['วันนี้',today],['วันที่ดึงข้อมูล',this.dataISO||'2026-10-05'],['+3 เดือน',addMonths(today,3)],['+6 เดือน',addMonths(today,6)],['+1 ปี',addMonths(today,12)]];
+    const seen={};const quickDates=qd.filter(([l,v])=>{if(seen[v]&&l!=='วันนี้')return false;seen[v]=1;return true}).map(([label,v])=>{const on=s.ref===v;return {label,border:on?LIME:'rgba(255,255,255,.22)',bg:on?LIME:'transparent',fg:on?'#16300a':'#e2ebe6',go:()=>this.set({ref:v})}});
+    const base={tabs,quickDates,refISO:s.ref,refTh:isoTh(s.ref),win:String(s.win),onRef:e=>{if(e.target.value)this.set({ref:e.target.value})},onWin:e=>this.set({win:+e.target.value}),
+      loading:s.loading,isSearch:false,isOverview:false,isWatch:false,isUpdate:false,isNotes:s.tab==='notes',
+      dataLine:this.dataISO?`ข้อมูล ณ ${isoTh(this.dataISO)} · ${fmtN(this.dataCount)} รายการ${this.base&&this.base.meta&&this.base.meta.source==='upload'?' · อัปเดตจากไฟล์':''}`:'กำลังโหลด…',notes:NOTES,sel:null,close:()=>this.setState({sel:null})};
+    if(s.loading)return base;
+    this.ensureStatus();
+    this._q=s.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const f=this.filtered();const FC=this.facets();const K=FC.kpi;
+    const hero={value:fmtN(K.active),total:fmtN(K.total),pct:K.total?(K.active/K.total*100).toFixed(1)+'%':'0%',wa:K.total?(K.active-K.soon)/K.total*100:0,ws:K.total?K.soon/K.total*100:0,border:s.status==='0'&&!s.noted?LIME:'#0d2f25',go:()=>this.set({status:s.status==='0'?'':'0',noted:false})};
+    const kdef=[['','ทั้งหมด',K.total,'#0f1a16'],['soon',`ใกล้หมดอายุ ≤ ${s.win} วัน`,K.soon,AMB],['1','หมดอายุ',K.expired,'#b4b8ae'],['2','ไม่ระบุวันหมดอายุ',K.unknown,'#dcded8']];
+    const kpis=kdef.map(([v,label,n,dot])=>({label,value:fmtN(n),dot,border:s.status===v&&!s.noted?'#1b5745':'#e1e4dc',go:()=>this.set({status:v,noted:false})}));
+    kpis.push({label:'☎ มีข้อมูลติดต่อแล้ว',value:fmtN(FC.ct.any),dot:'oklch(0.75 0.16 128)',border:s.ct==='any'?'#1b5745':'#e1e4dc',go:()=>this.set({ct:s.ct==='any'?'':'any'})});
+    kpis.push({label:'มีข้อสังเกตข้อมูล',value:fmtN(K.noted),dot:'#c0802a',border:s.noted?'#1b5745':'#e1e4dc',go:()=>this.set({noted:!s.noted})});
+    const fdef=[['ind','อุตสาหกรรม'],['prov','จังหวัด'],['size','ขนาดอุตสาหกรรม'],['fy','ปีงบประมาณ (FY)'],['top','ประเภทที่มีสัดส่วนสูงสุด']];
+    const on=v=>({border:v?'#1b5745':'#d3d8cd',bg:v?'#eef5e6':'#fff'});
+    const filters=fdef.map(([k,label])=>({label,value:s[k],...on(s[k]),options:this.opts[k].map(o=>({...o,c:FC[k][o.v]||0})).filter(o=>o.c||o.v===s[k]).map(o=>({v:o.v,label:`${o.name} (${fmtN(o.c)})`})),onChange:e=>this.set({[k]:e.target.value})}));
+    filters.push({label:'สถานะ',value:s.status,...on(s.status),options:[{v:'0',label:`อยู่ในอายุ (${fmtN(FC.status['0'])})`},{v:'soon',label:`ใกล้หมดอายุ ≤ ${s.win} วัน (${fmtN(FC.status.soon)})`},{v:'1',label:`หมดอายุ (${fmtN(FC.status['1'])})`},{v:'2',label:`ไม่ระบุวันหมดอายุ (${fmtN(FC.status['2'])})`}],onChange:e=>this.set({status:e.target.value})});
+    filters.push({label:'☎ ข้อมูลติดต่อ',value:s.ct,...on(s.ct),options:[['any','มีเบอร์หรืออีเมล'],['phone','มีเบอร์โทร'],['email','มีอีเมล'],['both','มีทั้งเบอร์และอีเมล'],['notfound','ค้นแล้ว ไม่พบ'],['pending','ยังไม่ได้ค้น']].map(([v,l])=>({v,label:`${l} (${fmtN(FC.ct[v])})`})),onChange:e=>this.set({ct:e.target.value})});
+    const chip=(k,label)=>({label:(s[k]?'✓ ':'')+label,border:s[k]?'#0d2f25':'#d3d8cd',bg:s[k]?'#0d2f25':'#fff',fg:s[k]?LIME:'#3a3f39',go:()=>this.set({[k]:!s[k]})});
+    const chips=[chip('soon',`หมดอายุภายใน ${s.win} วัน`),chip('noted','มีข้อสังเกตข้อมูล'),chip('renew','หมดอายุและยังไม่ต่ออายุ'),chip('scopeless','ไม่มีข้อมูลสัดส่วน')];
+    if(s.expM){const [y,m]=s.expM.split('-').map(Number);chips.unshift({label:`หมดอายุเดือน ${TH_M[m-1]} ${y+543} ×`,border:AMB,bg:'#fdecc8',fg:'#8a5300',go:()=>this.set({expM:''})})}
+    const hasFilter=!!(s.q||s.ind||s.prov||s.size||s.fy||s.status||s.top||s.noted||s.soon||s.scopeless||s.renew||s.ct||s.expM);
+    const total=f.length,pc=Math.max(1,Math.ceil(total/PER)),page=Math.min(s.page,pc-1);
+    const pageRows=f.slice(page*PER,page*PER+PER).map(r=>this.view(r));
+    const nums=[];const add=i=>{if(!nums.includes(i)&&i>=0&&i<pc)nums.push(i)};
+    add(0);for(let i=page-2;i<=page+2;i++)add(i);add(pc-1);nums.sort((a,b)=>a-b);
+    const pages=[];nums.forEach((i,j)=>{if(j&&i-nums[j-1]>1)pages.push({label:'…',go:()=>{},bg:'transparent',fg:'#a1a49c',border:'transparent'});
+      pages.push({label:String(i+1),go:()=>this.setState({page:i}),bg:i===page?'#0d2f25':'#fff',fg:i===page?LIME:'#0f1a16',border:i===page?'#0d2f25':'#d3d8cd'})});
+    const byId=id=>this.rows.find(r=>r.id===id);
+    const watchRows=s.watch.map(byId).filter(Boolean).sort((a,b)=>a.exT-b.exT).map(r=>this.view(r));
+    let sel=null;
+    if(s.sel){const r=byId(s.sel);if(r){const v=this.view(r);const k=r.sum||1;
+      let elapsed=0,daysLong='ไม่มีข้อมูลวันที่';
+      if(r.ap&&r.ex){elapsed=Math.max(0,Math.min(100,(this.refT-r.apT)/(r.exT-r.apT)*100));daysLong=r.days>=0?`เหลืออีก ${fmtN(r.days)} วัน นับจาก ${isoTh(s.ref)}`:`หมดอายุมาแล้ว ${fmtN(-r.days)} วัน ณ ${isoTh(s.ref)}`}
+      const hist=this.groups[r.gk].slice().sort((a,b)=>b.apT-a.apT).map(h=>{const hs=this.stat(h);return {cert:h.cert,apTh:h.apTh,exTh:h.exTh,branch:h.branch,stLabel:hs.label,stBg:hs.bg,stFg:hs.fg,ring:h.id===r.id?'#0d2f25':'#e1e4dc',bg:h.id===r.id?'#f5f6f2':'#fff',open:()=>this.setState({sel:h.id})}});
+      const tel=p=>{const m=/0[\d\-\s]{7,}/.exec(p);if(!m)return '';let d=m[0].replace(/\D/g,'');d=d.slice(0,/^0[689]/.test(d)?10:9);return 'tel:'+d};
+      const phones=(r.phone||'').split(/\s*;\s*/).filter(Boolean).map(p=>{const m=/^(.*?)\s*(\(.*\))?$/.exec(p);return {num:m[1]||p,label:(m[2]||'').replace(/[()]/g,''),href:tel(p)}});
+      const emails=(r.email||'').split(/\s*[;,]\s*/).filter(Boolean).map(e=>({e,href:'mailto:'+e+'?subject='+encodeURIComponent('สอบถามเรื่องใบรับรอง CFO '+(r.cert!=='—'?r.cert:''))}));
+      const urls=(r.curl||'').split(/\s*;\s*/).filter(Boolean).map(u=>{let host=u;try{host=new URL(u).hostname.replace(/^www\./,'')}catch(e){}return {u,host}});
+      const orgQ=r.org.replace(/\((สำนักงานใหญ่|\d{5})\)/g,'').trim();
+      Object.assign(v,{phones,emails,urls,hasPhones:phones.length>0,hasEmails:emails.length>0,hasUrls:urls.length>0,noContact:!r.hasContact,
+        csrc:r.csrc||'',cnote:r.cnote||'ยังไม่มีข้อมูลการค้นหา',
+        gSearch:'https://www.google.com/search?q='+encodeURIComponent(orgQ+' เบอร์โทร ติดต่อ'),
+        copyContact:()=>{const t=[r.org,r.phone&&('โทร '+r.phone),r.email&&('อีเมล '+r.email)].filter(Boolean).join('\n');try{navigator.clipboard.writeText(t)}catch(e){}this.setState({copied:'c'+r.id});clearTimeout(this._ct);this._ct=setTimeout(()=>this.setState({copied:''}),1500)},
+        copyContactText:s.copied==='c'+r.id?'✓ คัดลอกแล้ว':'คัดลอกข้อมูลติดต่อ',
+        editing:s.editC===r.id,editText:s.editC===r.id?'ปิดการแก้ไข':(r.hasContact?'แก้ไขข้อมูลติดต่อ':'+ เพิ่มข้อมูลติดต่อ'),
+        editContact:()=>this.setState({editC:s.editC===r.id?null:r.id}),saveContact:e=>this.saveContact(e,r),
+        phone:r.phone||'',email:r.email||'',cnoteRaw:(this.cEdits&&this.cEdits[r.id]&&this.cEdits[r.id][4])||''});
+      sel={...v,elapsed,daysLong,hist,hasHist:hist.length>1,noHist:hist.length<=1,histN:String(hist.length),
+        orgState:r.orgActive?'องค์กรนี้มีใบรับรองที่อยู่ในอายุ ณ วันที่อ้างอิง':'องค์กรนี้ไม่มีใบรับรองที่อยู่ในอายุ ณ วันที่อ้างอิง',orgStateFg:r.orgActive?'#2f6a12':'#9a5a00',
+        copyText:s.copied===r.id?'✓ คัดลอกแล้ว':'คัดลอก',copy:()=>{try{navigator.clipboard.writeText(r.cert)}catch(e){}this.setState({copied:r.id});clearTimeout(this._ct);this._ct=setTimeout(()=>this.setState({copied:''}),1500)},
+        wText:s.watch.includes(r.id)?'★ กำลังติดตาม':'☆ ติดตามรายการนี้',
+        scopes:[['ประเภทที่ 1',r.s1,'oklch(0.68 0.14 40)'],['ประเภทที่ 2',r.s2,'oklch(0.68 0.14 250)'],['ประเภทที่ 3',r.s3,'oklch(0.68 0.14 150)']].map(([label,val,color])=>({label,color,w:(val||0)/Math.max(100,k)*100,text:pctT(val)})),
+        fields:[['สาขา/รหัสสาขา',r.branch],['ที่อยู่',r.addr],['ตำบล/แขวง',r.tambon],['อำเภอ/เขต',r.amphoe],['จังหวัด (การ์ด)',r.prov],['จังหวัด (ที่อยู่)',r.provAddr],['รหัสไปรษณีย์',r.zip],['อุตสาหกรรม',r.ind],['ขนาดอุตสาหกรรม',r.size],['ปีงบประมาณ',r.fy],['วันที่อนุมัติ (ค.ศ.)',r.ap],['วันที่หมดอายุ (ค.ศ.)',r.ex],['ข้อความเพิ่มเติม',r.extra],['รหัสรายการในเว็บ',r.id],['ลำดับในไฟล์',String(r.n)]].filter(([,v])=>v).map(([k,v])=>({k,v}))};}}
+    const fnames=[];fdef.forEach(([k])=>{if(s[k]){const o=this.opts[k].find(o=>o.v===s[k]);if(o)fnames.push(o.name)}});
+    if(s.q)fnames.unshift(`“${s.q}”`);
+    const ov=s.tab==='overview'?this.overview(f):{indBars:[],provBars:[],fyCols:[],expMonths:[],scope:{},statusMix:[],nextUp:[],recent:[]};
+    const meta=(this.base&&this.base.meta)||{};const up=s.up||{};
+    const upd={sourceLabel:meta.source==='upload'?`ไฟล์ที่อัปโหลด: ${meta.fileName}`:'ไฟล์ข้อมูลต้นฉบับของเว็บไซต์',
+      summary:`${fmtN(this.dataCount)} รายการ · ข้อมูล ณ ${isoTh(this.dataISO)}${meta.importedAt?' · อัปโหลดเมื่อ '+isoTh(meta.importedAt):''} · เพิ่มเอง ${this.manual.length} · แก้ไขข้อมูลติดต่อ ${Object.keys(this.cEdits).length}`,
+      canRevert:meta.source==='upload',revert:()=>this.revertBase(),exportJson:()=>this.exportJson(),
+      onFile:e=>this.onFile(e),parsing:up.status==='parsing',ready:up.status==='ready',error:up.status==='error'?up.msg:'',done:up.status==='done'?up.msg:'',st:up.st||{boxes:[]},
+      fileHint:'ไฟล์ใหม่ที่ดึงจากเว็บ อบก. หรือไฟล์ที่มีเฉพาะรายการเพิ่ม',
+      applyMerge:()=>this.applyUpload('merge'),applyReplace:()=>this.applyUpload('replace'),cancel:()=>{this._pending=null;this.setState({up:{}})},
+      template:()=>window.CFOImport&&window.CFOImport.download('CFO_template.csv',window.CFOImport.templateCsv(),'text/csv;charset=utf-8'),
+      provs:this.D.prov.filter(Boolean).slice().sort((a,b)=>a.localeCompare(b,'th')),inds:this.D.ind.filter(x=>x&&x!=='-'),
+      addManual:e=>this.addManual(e),formMsg:s.formMsg||'',hasManual:this.manual.length>0,manualCount:String(this.manual.length),
+      manual:this.manual.map(o=>({org:o.org,cert:o.cert||'—',exBE:o.exBE||'—',open:()=>this.setState({sel:o.id}),del:()=>this.delManual(o.id)})),
+      editCount:String(Object.keys(this.cEdits).length)};
+    const ovChips=[];
+    if(s.q)ovChips.push({label:'ค้นหา “'+s.q+'”',go:()=>this.set({q:''})});
+    fdef.forEach(([k,lab])=>{if(s[k]){const o=this.opts[k].find(o=>o.v===s[k]);ovChips.push({label:lab+': '+(o?o.name:s[k]),go:()=>this.set({[k]:''})})}});
+    if(s.status)ovChips.push({label:'สถานะ: '+({'0':'อยู่ในอายุ',soon:'ใกล้หมดอายุ','1':'หมดอายุ','2':'ไม่ระบุ'}[s.status]),go:()=>this.set({status:''})});
+    if(s.expM){const [y,m]=s.expM.split('-').map(Number);ovChips.push({label:'หมดอายุเดือน '+TH_M[m-1]+' '+(y+543),go:()=>this.set({expM:''})})}
+    [['soon','หมดอายุภายใน '+s.win+' วัน'],['noted','มีข้อสังเกตข้อมูล'],['renew','ยังไม่ต่ออายุ'],['scopeless','ไม่มีข้อมูลสัดส่วน']].forEach(([k,l])=>{if(s[k])ovChips.push({label:l,go:()=>this.set({[k]:false})})});
+    if(s.ct)ovChips.push({label:'ข้อมูลติดต่อ',go:()=>this.set({ct:''})});
+    return {...base,isSearch:s.tab==='search',isUpdate:s.tab==='update',upd,ovChips,ovNoChips:ovChips.length===0,goTable:()=>this.setState({tab:'search'}),isOverview:s.tab==='overview',isWatch:s.tab==='watch',
+      hero,kpis,filters,chips,hasFilter,q:s.q,sort:s.sort,
+      onQ:e=>this.set({q:e.target.value}),onSort:e=>this.set({sort:e.target.value}),
+      clearAll:()=>this.set({q:'',ind:'',prov:'',size:'',fy:'',status:'',top:'',noted:false,soon:false,scopeless:false,renew:false,ct:'',expM:''}),
+      searchRef:this.searchRef,showExamples:!s.q,
+      examples:['ไดกิ้น','อาหาร','สมุทรปราการ','FY26','10540'].map(t=>({t,go:()=>this.set({q:t})})),
+      exportCsv:()=>this.exportCsv(),
+      countText:fmtN(total),rangeText:total?`แสดง ${fmtN(page*PER+1)}–${fmtN(Math.min(total,page*PER+PER))} · หน้า ${page+1} จาก ${fmtN(pc)}`:'',
+      pageRows,empty:total===0,pages,
+      prev:()=>this.setState({page:Math.max(0,page-1)}),next:()=>this.setState({page:Math.min(pc-1,page+1)}),
+      ...ov,filterNote:fnames.length?` · ${fnames.join(' · ')}`:'',
+      watchRows,watchEmpty:watchRows.length===0,soonCount:fmtN(this.soonTotal),goSoon:()=>this.set({tab:'search',soon:true,sort:'exp'}),
+      sel};
+  }
+}
+</script>
+</body>
+</html>

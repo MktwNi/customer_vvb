@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F4F6FC;color:#0E1430;font-family:'Kanit',sans-serif;-webkit-font-smoothing:antialiased}
+input,select,button{font-family:inherit}
+a{color:#1A3FE0}a:hover{color:#0A1A86}
+*{box-sizing:border-box}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column">
+<header style="background:linear-gradient(135deg,#040A3C 0%,#0A1A86 55%,#1A3FE0 100%);color:#fff">
+  <div style="max-width:1360px;margin:0 auto;padding:18px 28px 0;display:flex;flex-direction:column;gap:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="width:38px;height:38px;border-radius:10px;background:#fff;color:#0A1A86;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">GCC</span>
+        <div style="display:flex;flex-direction:column;line-height:1.25">
+          <span style="font-size:18px;font-weight:500">ฐานข้อมูลลูกค้าเป้าหมาย</span>
+          <span style="font-size:13px;color:#B9C8FF;font-weight:300">รวม TGO · GI · กรอ. · SET · ข้อมูล ณ {{ asOfTh }}</span>
+        </div>
+      </div>
+      <a href="CFO Registry.dc.html" style="color:#C9D4FF;font-size:13.5px;text-decoration:none;border:1px solid rgba(201,212,255,.4);border-radius:999px;padding:7px 14px">เปิด CFO Registry</a>
+    </div>
+    <nav style="display:flex;gap:4px;flex-wrap:wrap">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+        <button onClick="{{ t.go }}" style="cursor:pointer;border:0;padding:12px 20px;border-radius:14px 14px 0 0;font-size:15px;font-weight:{{ t.fw }};background:{{ t.bg }};color:{{ t.fg }}">{{ t.label }}</button>
+      </sc-for>
+    </nav>
+  </div>
+</header>
+
+<main style="flex:1;max-width:1360px;width:100%;margin:0 auto;padding:28px 28px 64px;display:flex;flex-direction:column;gap:28px">
+<sc-if value="{{ loading }}" hint-placeholder-val="{{ false }}">
+  <div style="background:#fff;border:1px solid #E3E7F1;border-radius:20px;padding:40px;text-align:center;color:#475069;font-size:15px">{{ loadMsg }}</div>
+</sc-if>
+
+<sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+  <section style="background:linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%);color:#fff;border-radius:28px;padding:32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:28px;align-items:end">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <span style="font-size:14px;color:#B9C8FF;letter-spacing:.04em">บริษัท/ผู้ประกอบการทั้งหมด</span>
+      <span style="font-size:72px;font-weight:600;line-height:1;letter-spacing:-.01em">{{ ov.total }}</span>
+      <span style="font-size:15px;color:#DCE6FF;font-weight:300;text-wrap:pretty;max-width:520px">1 แถว = 1 บริษัท รวมข้อมูลจาก 4 แหล่งเข้าด้วยกันด้วยเลขนิติบุคคลและชื่อบริษัท CFO อยู่ในอายุ {{ ov.cfoActive }} ราย · มีเบอร์โทรศัพท์ {{ ov.phone }} ราย</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+      <sc-for list="{{ ov.sources }}" as="s" hint-placeholder-count="4">
+        <button onClick="{{ s.go }}" style="cursor:pointer;text-align:left;border:1px solid rgba(185,200,255,.28);background:rgba(255,255,255,.08);color:#fff;border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:13px;color:#B9C8FF">{{ s.label }}</span>
+          <span style="font-size:28px;font-weight:500">{{ s.n }}</span>
+          <span style="font-size:12px;color:#C9D4FF;font-weight:300">{{ s.sub }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:600;color:#2A4BE0">01</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500">กลุ่มเป้าหมายสำหรับทีมขาย</h2>
+      <span style="font-size:14px;color:#475069;font-weight:300">จัดลำดับตามข้อแรกที่เข้าเงื่อนไข · คำนวณ ณ {{ asOfTh }}</span>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow:hidden">
+      <sc-for list="{{ ov.groups }}" as="g" hint-placeholder-count="8">
+        <button onClick="{{ g.go }}" style="cursor:pointer;width:100%;border:0;border-bottom:1px solid #EEF1F8;background:#fff;text-align:left;padding:16px 22px;display:grid;grid-template-columns:44px minmax(0,1.3fr) minmax(0,1fr) 110px 110px 24px;gap:16px;align-items:center" style-hover="background:#F4F6FC">
+          <span style="width:36px;height:36px;border-radius:50%;background:{{ g.badgeBg }};color:{{ g.badgeFg }};display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px">{{ g.no }}</span>
+          <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+            <span style="font-size:16px;font-weight:500;color:#0E1430">{{ g.name }}</span>
+            <span style="font-size:13px;color:#475069;font-weight:300;text-wrap:pretty">{{ g.desc }}</span>
+          </span>
+          <span style="height:10px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ g.w }};background:{{ g.bar }};border-radius:999px"></span></span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end"><span style="font-size:22px;font-weight:500;font-variant-numeric:tabular-nums">{{ g.n }}</span><span style="font-size:12px;color:#475069">บริษัท</span></span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end"><span style="font-size:18px;font-weight:500;color:#1A3FE0;font-variant-numeric:tabular-nums">{{ g.ph }}</span><span style="font-size:12px;color:#475069">มีเบอร์โทร</span></span>
+          <span style="color:#A8B0C8;font-size:18px">›</span>
+        </button>
+      </sc-for>
+      <sc-if value="{{ ov.showOther }}">
+        <button onClick="{{ ov.other.go }}" style="cursor:pointer;width:100%;border:0;background:#F7F8FC;text-align:left;padding:14px 22px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:14px;color:#475069">
+          <span>9. อื่นๆ · ไม่เข้าเงื่อนไขข้อ 1–8 (ส่วนใหญ่เป็น GI ระดับ 1)</span>
+          <span style="font-variant-numeric:tabular-nums">{{ ov.other.n }} บริษัท · มีเบอร์ {{ ov.other.ph }}</span>
+        </button>
+      </sc-if>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:600;color:#2A4BE0">02</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500">กลุ่มอุตสาหกรรม</h2>
+      <span style="font-size:14px;color:#475069;font-weight:300">กดแถวเพื่อดูรายชื่อในกลุ่มนั้น</span>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto">
+      <div style="min-width:860px">
+        <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) repeat(5,96px);gap:12px;padding:14px 22px;font-size:12.5px;color:#475069;border-bottom:1px solid #E3E7F1;background:#F7F8FC">
+          <span>อุตสาหกรรม</span><span>ทั้งหมด</span><span style="text-align:right">CFO อยู่ในอายุ</span><span style="text-align:right">CFO หมดอายุ</span><span style="text-align:right">ยังไม่มี CFO</span><span style="text-align:right">GI 3–5</span><span style="text-align:right">มีเบอร์โทร</span>
+        </div>
+        <sc-for list="{{ ov.inds }}" as="r" hint-placeholder-count="10">
+          <button onClick="{{ r.go }}" style="cursor:pointer;width:100%;border:0;border-bottom:1px solid #EEF1F8;background:#fff;text-align:left;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) repeat(5,96px);gap:12px;padding:11px 22px;align-items:center;font-size:14px;font-variant-numeric:tabular-nums" style-hover="background:#F4F6FC">
+            <span style="color:#0E1430">{{ r.name }}</span>
+            <span style="display:flex;align-items:center;gap:10px"><span style="flex:1;height:8px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ r.w }};background:#4D72FF;border-radius:999px"></span></span><span style="width:52px;text-align:right">{{ r.n }}</span></span>
+            <span style="text-align:right;color:#0E8A9A;font-weight:500">{{ r.act }}</span>
+            <span style="text-align:right;color:#475069">{{ r.exp }}</span>
+            <span style="text-align:right;color:#475069">{{ r.none }}</span>
+            <span style="text-align:right;color:#1A3FE0">{{ r.gi }}</span>
+            <span style="text-align:right;color:#475069">{{ r.ph }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:20px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+        <span style="font-size:15px;font-weight:600;color:#2A4BE0">03</span>
+        <h2 style="margin:0;font-size:28px;font-weight:500">จังหวัด</h2>
+      </div>
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:8px 0">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) 80px 70px;gap:12px;padding:8px 22px;font-size:12.5px;color:#475069">
+          <span>จังหวัด</span><span>ทั้งหมด</span><span style="text-align:right">CFO ในอายุ</span><span style="text-align:right">GI 3–5</span>
+        </div>
+        <sc-for list="{{ ov.provs }}" as="r" hint-placeholder-count="15">
+          <button onClick="{{ r.go }}" style="cursor:pointer;width:100%;border:0;background:transparent;text-align:left;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) 80px 70px;gap:12px;padding:8px 22px;align-items:center;font-size:14px;font-variant-numeric:tabular-nums" style-hover="background:#F4F6FC">
+            <span>{{ r.name }}</span>
+            <span style="display:flex;align-items:center;gap:10px"><span style="flex:1;height:8px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ r.w }};background:#1A3FE0;border-radius:999px"></span></span><span style="width:48px;text-align:right">{{ r.n }}</span></span>
+            <span style="text-align:right;color:#0E8A9A;font-weight:500">{{ r.act }}</span>
+            <span style="text-align:right;color:#1A3FE0">{{ r.gi }}</span>
+          </button>
+        </sc-for>
+        <button onClick="{{ ov.toggleProv }}" style="cursor:pointer;margin:8px 22px 6px;border:0;background:transparent;color:#1A3FE0;font-size:13.5px;padding:4px 0;text-decoration:underline">{{ ov.provLabel }}</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+        <span style="font-size:15px;font-weight:600;color:#2A4BE0">04</span>
+        <h2 style="margin:0;font-size:28px;font-weight:500">พบในแหล่งใดบ้าง</h2>
+      </div>
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:18px 22px;display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:13.5px;color:#475069;font-weight:300;text-wrap:pretty">ยิ่งพบในหลายแหล่ง ข้อมูลยิ่งครบ (เช่น SET ให้เบอร์และเว็บไซต์ กรอ. ให้เงินลงทุน)</span>
+        <sc-for list="{{ ov.combos }}" as="c" hint-placeholder-count="8">
+          <button onClick="{{ c.go }}" style="cursor:pointer;border:0;background:transparent;text-align:left;padding:4px 0;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 64px;gap:12px;align-items:center;font-size:14px;font-variant-numeric:tabular-nums">
+            <span style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ c.tags }}" as="t"><span style="font-size:11.5px;font-weight:500;padding:2px 8px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for></span>
+            <span style="height:8px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ c.w }};background:#7C93FF;border-radius:999px"></span></span>
+            <span style="text-align:right">{{ c.n }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:20px 22px;display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input value="{{ f.q }}" onChange="{{ f.onQ }}" placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" style="flex:1;min-width:260px;height:48px;border:1.5px solid #D5DBEA;border-radius:14px;padding:0 16px;font-size:15px;color:#0E1430;background:#fff;outline:none"></input>
+      <button onClick="{{ f.exportCsv }}" style="cursor:pointer;height:48px;padding:0 18px;border-radius:14px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:14px">ส่งออก CSV ({{ f.countN }})</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <sc-for list="{{ f.tgtChips }}" as="c" hint-placeholder-count="10">
+        <button onClick="{{ c.go }}" style="cursor:pointer;height:34px;padding:0 12px;border-radius:999px;border:1.5px solid {{ c.bd }};background:{{ c.bg }};color:{{ c.fg }};font-size:13px;display:flex;gap:6px;align-items:center"><span>{{ c.label }}</span><span style="opacity:.75;font-variant-numeric:tabular-nums">{{ c.n }}</span></button>
+      </sc-for>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 12px">
+      <sc-for list="{{ f.selects }}" as="s" hint-placeholder-count="8">
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">{{ s.label }}
+          <select value="{{ s.value }}" onChange="{{ s.onChange }}" style="height:42px;border:1.5px solid {{ s.bd }};border-radius:12px;padding:0 10px;font-size:14px;background:{{ s.bg }};color:#0E1430">
+            <option value="">ทั้งหมด</option>
+            <sc-for list="{{ s.options }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for>
+          </select>
+        </label>
+      </sc-for>
+    </div>
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:15px"><span style="font-weight:600;font-size:20px">{{ f.countN }}</span> บริษัท <span style="color:#475069;font-size:13.5px">· มีเบอร์โทร {{ f.phN }}</span></span>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <sc-if value="{{ f.hasFilter }}"><button onClick="{{ f.clear }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:13.5px;text-decoration:underline">ล้างตัวกรอง</button></sc-if>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:#475069">เรียงตาม
+          <select value="{{ f.sort }}" onChange="{{ f.onSort }}" style="height:38px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:13.5px;background:#fff;color:#0E1430">
+            <option value="default">กลุ่มเป้าหมาย</option><option value="cfoEx">CFO หมดอายุก่อน</option><option value="invest">เงินลงทุนโรงงานใหม่สูงสุด</option><option value="gi">GI ระดับสูงสุด</option><option value="fac">จำนวนโรงงานมากสุด</option><option value="name">ชื่อ ก–ฮ</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto">
+    <div style="min-width:980px">
+      <div style="display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1.3fr) 150px 150px 90px minmax(0,1.1fr);gap:14px;padding:13px 22px;font-size:12.5px;color:#475069;background:#F7F8FC;border-bottom:1px solid #E3E7F1">
+        <span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ</span>
+      </div>
+      <sc-for list="{{ f.rows }}" as="r" hint-placeholder-count="12">
+        <button onClick="{{ r.open }}" style="cursor:pointer;width:100%;border:0;border-bottom:1px solid #EEF1F8;background:#fff;text-align:left;display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1.3fr) 150px 150px 90px minmax(0,1.1fr);gap:14px;padding:{{ rowPad }};align-items:center" style-hover="background:#F4F6FC">
+          <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+            <span style="font-size:14.5px;font-weight:500;color:#0E1430;text-wrap:pretty">{{ r.name }}</span>
+            <span style="font-size:12px;color:#475069;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="padding:1px 7px;border-radius:6px;background:{{ r.tgtBg }};color:{{ r.tgtFg }}">{{ r.tgtShort }}</span><span>{{ r.code }}</span><span>{{ r.typeName }}</span><sc-if value="{{ r.set }}"><span style="font-weight:500;color:#0E1F7A">{{ r.set }}</span></sc-if></span>
+          </span>
+          <span style="display:flex;flex-direction:column;gap:2px;font-size:13.5px;min-width:0"><span>{{ r.provName }}</span><span style="font-size:12px;color:#475069">{{ r.indName }}</span></span>
+          <span style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ r.tags }}" as="t"><span style="font-size:11px;font-weight:500;padding:2px 7px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for></span>
+          <span style="display:flex;flex-direction:column;gap:2px;font-size:13px"><span style="color:{{ r.cfoFg }};font-weight:500">{{ r.cfoText }}</span><span style="font-size:12px;color:#475069">{{ r.cfoSub }}</span></span>
+          <span style="display:flex;flex-direction:column;gap:2px"><sc-if value="{{ r.giNow }}"><span style="font-size:12.5px;font-weight:500;padding:2px 8px;border-radius:8px;background:{{ r.giBg }};color:{{ r.giFg }};align-self:flex-start">ระดับ {{ r.giNow }}</span></sc-if><sc-if value="{{ r.noGi }}"><span style="font-size:12.5px;color:#A8B0C8">—</span></sc-if></span>
+          <span style="font-size:13px;color:#0E1430;word-break:break-word">{{ r.contact }}</span>
+        </button>
+      </sc-for>
+      <sc-if value="{{ f.empty }}"><div style="padding:40px;text-align:center;color:#475069">ไม่พบบริษัทตามเงื่อนไข</div></sc-if>
+    </div>
+  </section>
+  <div style="display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap">
+    <button onClick="{{ f.prev }}" disabled="{{ f.noPrev }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;color:#0E1430;font-size:14px">‹ ก่อนหน้า</button>
+    <span style="font-size:14px;color:#475069">หน้า {{ f.pageN }} / {{ f.pages }}</span>
+    <button onClick="{{ f.next }}" disabled="{{ f.noNext }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;color:#0E1430;font-size:14px">ถัดไป ›</button>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isSources }}" hint-placeholder-val="{{ false }}">
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:600;color:#2A4BE0">01</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500">นิยามกลุ่มเป้าหมาย</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr));gap:12px">
+      <sc-for list="{{ src.defs }}" as="d" hint-placeholder-count="8">
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;gap:14px">
+          <span style="width:32px;height:32px;flex:none;border-radius:50%;background:{{ d.badgeBg }};color:{{ d.badgeFg }};display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">{{ d.no }}</span>
+          <span style="display:flex;flex-direction:column;gap:4px"><span style="font-size:15px;font-weight:500">{{ d.name }}</span><span style="font-size:13.5px;color:#475069;font-weight:300;line-height:1.6;text-wrap:pretty">{{ d.desc }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:600;color:#2A4BE0">02</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500">ไฟล์ต้นทาง</h2>
+      <span style="font-size:14px;color:#475069;font-weight:300">{{ src.count }} ไฟล์ · ทุกแถวเชื่อมกลับมาที่ทะเบียนบริษัทด้วยรหัส GCC</span>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto">
+      <div style="min-width:860px">
+        <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 110px 90px minmax(0,2fr);gap:14px;padding:13px 22px;font-size:12.5px;color:#475069;background:#F7F8FC;border-bottom:1px solid #E3E7F1">
+          <span>แหล่งข้อมูล</span><span>หน่วยงาน / ไฟล์</span><span>ข้อมูล ณ</span><span style="text-align:right">แถว</span><span>หมายเหตุ</span>
+        </div>
+        <sc-for list="{{ src.rows }}" as="r" hint-placeholder-count="10">
+          <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 110px 90px minmax(0,2fr);gap:14px;padding:11px 22px;font-size:13px;border-bottom:1px solid #EEF1F8;align-items:start">
+            <span style="font-weight:500">{{ r.name }}</span>
+            <span style="display:flex;flex-direction:column;gap:2px;color:#475069"><span>{{ r.org }}</span><span style="font-size:12px;color:#7A829A;word-break:break-all">{{ r.file }}</span></span>
+            <span>{{ r.date }}</span>
+            <span style="text-align:right;font-variant-numeric:tabular-nums">{{ r.n }}</span>
+            <span style="color:#475069;font-size:12.5px;line-height:1.55">{{ r.note }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+</sc-if>
+</main>
+
+<sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeSel }}" style="position:fixed;inset:0;background:rgba(4,10,60,.38);z-index:40"></div>
+  <aside style="position:fixed;top:0;right:0;bottom:0;width:min(640px,100vw);background:#F4F6FC;z-index:41;overflow-y:auto;box-shadow:-20px 0 60px -20px rgba(4,10,60,.4);display:flex;flex-direction:column">
+    <div style="background:linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%);color:#fff;padding:22px 24px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+        <span style="font-size:13px;color:#B9C8FF">{{ sel.code }} · {{ sel.typeName }}</span>
+        <button onClick="{{ closeSel }}" style="cursor:pointer;width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:18px">×</button>
+      </div>
+      <span style="font-size:24px;font-weight:500;line-height:1.35;text-wrap:pretty">{{ sel.name }}</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:12.5px;padding:3px 10px;border-radius:999px;background:#fff;color:#0A1A86;font-weight:500">{{ sel.tgtName }}</span>
+        <sc-for list="{{ sel.tags }}" as="t"><span style="font-size:11.5px;font-weight:500;padding:3px 9px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for>
+      </div>
+    </div>
+    <div style="padding:20px 24px 40px;display:flex;flex-direction:column;gap:14px">
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:9px">
+        <sc-for list="{{ sel.facts }}" as="x"><div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px;font-size:14px"><span style="color:#475069">{{ x.k }}</span><span style="word-break:break-word">{{ x.v }}</span></div></sc-for>
+      </div>
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:13px;font-weight:600;color:#2A4BE0">ข้อมูลติดต่อ</span>
+        <sc-if value="{{ sel.noContact }}"><span style="font-size:14px;color:#475069">ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span></sc-if>
+        <sc-for list="{{ sel.phones }}" as="p"><a href="{{ p.href }}" style="font-size:16px;font-weight:500;text-decoration:none">{{ p.t }}</a></sc-for>
+        <sc-for list="{{ sel.emails }}" as="p"><a href="{{ p.href }}" style="font-size:14px">{{ p.t }}</a></sc-for>
+        <sc-if value="{{ sel.web }}"><a href="{{ sel.web }}" target="_blank" rel="noopener" style="font-size:14px;word-break:break-all">{{ sel.web }}</a></sc-if>
+        <sc-if value="{{ sel.ctSrc }}"><span style="font-size:12px;color:#475069">แหล่งข้อมูลติดต่อ: {{ sel.ctSrc }}</span></sc-if>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+        <sc-for list="{{ sel.kpis }}" as="k"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:2px"><span style="font-size:12px;color:#475069">{{ k.k }}</span><span style="font-size:19px;font-weight:500;color:{{ k.c }}">{{ k.v }}</span><span style="font-size:11.5px;color:#7A829A">{{ k.sub }}</span></div></sc-for>
+      </div>
+      <sc-if value="{{ sel.loadingDet }}"><span style="font-size:13.5px;color:#475069">กำลังโหลดรายละเอียดรายแหล่ง…</span></sc-if>
+      <sc-for list="{{ sel.blocks }}" as="b">
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><span style="font-size:13px;font-weight:600;color:#2A4BE0">{{ b.title }}</span><span style="font-size:12px;color:#475069">{{ b.count }}</span></div>
+          <sc-for list="{{ b.items }}" as="it">
+            <div style="border-top:1px solid #EEF1F8;padding-top:9px;display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap"><span style="font-size:14px;font-weight:500">{{ it.h }}</span><sc-if value="{{ it.badge }}"><span style="font-size:11.5px;padding:2px 8px;border-radius:999px;background:{{ it.bBg }};color:{{ it.bFg }}">{{ it.badge }}</span></sc-if></div>
+              <span style="font-size:13px;color:#475069;line-height:1.55;word-break:break-word">{{ it.s }}</span>
+            </div>
+          </sc-for>
+          <sc-if value="{{ b.more }}"><button onClick="{{ b.showMore }}" style="cursor:pointer;align-self:flex-start;border:0;background:transparent;color:#1A3FE0;font-size:13px;text-decoration:underline;padding:0">{{ b.more }}</button></sc-if>
+        </div>
+      </sc-for>
+      <span style="font-size:12px;color:#7A829A">การจับคู่ข้อมูล: {{ sel.match }}</span>
+    </div>
+  </aside>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pageSize&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;25&quot;,&quot;50&quot;,&quot;100&quot;],&quot;default&quot;:&quot;50&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;รายชื่อ&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;รายชื่อ&quot;},&quot;showOther&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;ภาพรวม&quot;}}">
+const fmtN=n=>n==null?'—':Number(n).toLocaleString('en-US');
+const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const isoTh=s=>{if(!s)return '—';const [y,m,d]=s.split('-');return `${+d} ${TH_M[+m-1]} ${+y+543}`};
+const ymTh=s=>{if(!s)return '';const [y,m]=s.split('-');return `${TH_M[+m-1]} ${y}`};
+const money=n=>n==null?'—':n>=1e6?(n/1e6).toLocaleString('en-US',{maximumFractionDigits:1})+' ล้านบาท':fmtN(n)+' บาท';
+const SRC=[['TGO','#1A3FE0','#fff'],['GI','#BFF3EE','#0B6E66'],['กรอ.','#E6ECFD','#1A2FB0'],['SET','#0E1F7A','#fff']];
+const GDESC=['ใบล่าสุดยังไม่หมดอายุ แต่จะหมดภายใน 90 วัน ถึงรอบทวนสอบปีถัดไป','ไม่มีใบที่ยังใช้ได้ ใบล่าสุดหมดอายุไม่เกิน 365 วัน เคยทำแล้ว ยังไม่ต่อ','ใบล่าสุดหมดอายุเกิน 365 วัน หรือไม่ระบุวันหมดอายุ','มีใบที่ยังใช้ได้และเหลือมากกว่า 90 วัน','บริษัทจดทะเบียน SET/mai ที่ยังไม่เคยมี CFO','ได้ GI ระดับ 3–5 ที่ยังใช้ได้ แต่ยังไม่มี CFO','โรงงานเริ่มประกอบกิจการตั้งแต่ ม.ค. 2567 เงินลงทุนรวม ≥ 5 ล้านบาท','ได้ GI ระดับ 2 ที่ยังใช้ได้ แต่ยังไม่มี CFO','ไม่เข้าเงื่อนไขข้อ 1–8'];
+const GCOL=[['#1A3FE0','#fff','#1A3FE0'],['#2A63FF','#fff','#2A63FF'],['#7C93FF','#fff','#7C93FF'],['#34D1C4','#0B4E48','#34D1C4'],['#0E1F7A','#fff','#0E1F7A'],['#1FB5C9','#fff','#1FB5C9'],['#4E9BFF','#fff','#4E9BFF'],['#B9C8FF','#0A1A86','#B9C8FF'],['#E3E7F1','#475069','#C9D1E6']];
+const GI_COL={5:['#0B6E66','#fff'],4:['#1FB5C9','#fff'],3:['#BFF3EE','#0B6E66'],2:['#E6ECFD','#1A2FB0'],1:['#EEF1F8','#475069']};
+
+class Component extends DCLogic {
+  state={tab:'overview',loading:true,loadMsg:'กำลังโหลดข้อมูล 55,645 บริษัท…',q:'',tgt:'',src:'',ind:'',prov:'',type:'',cfo:'',gi:'',ph:'',inv:'',sort:'default',page:0,sel:null,det:{},more:{},allProv:false,sources:[]};
+  componentDidMount(){
+    try{const s=JSON.parse(localStorage.getItem('gcc-ui')||'{}');if(s.tab)this.setState({tab:s.tab})}catch(e){}
+    this._kd=e=>{if(e.key==='Escape'&&this.state.sel)this.setState({sel:null})};document.addEventListener('keydown',this._kd);
+    Promise.all([fetch('data/gcc.json').then(r=>r.json()),fetch('data/gcc-sources.json').then(r=>r.json()).catch(()=>[])]).then(([j,s])=>{this.init(j);this.setState({loading:false,sources:s})}).catch(e=>this.setState({loadMsg:'โหลดข้อมูลไม่สำเร็จ: '+e.message}));
+  }
+  componentWillUnmount(){document.removeEventListener('keydown',this._kd)}
+  init(j){
+    const D=j.dicts;this.D=D;this.asOf=j.asOf;const t=Date.parse(new Date().toISOString().slice(0,10));
+    this.rows=j.rows.map(a=>{const o={};j.cols.forEach((c,i)=>o[c]=a[i]);
+      o.code='GCC-'+String(o.id).padStart(6,'0');o.days=o.cfoEx?Math.round((Date.parse(o.cfoEx)-t)/864e5):null;
+      o.hasPh=!!o.phone;o.hay=[o.name,o.jur,o.set,o.phone,o.code,o.email].join(' ').toLowerCase();return o});
+    this.byId=new Map(this.rows.map(r=>[r.id,r]));
+    const ov={total:this.rows.length,src:[0,0,0,0],cfoA:0,ph:0,g:D.tgt.map(()=>[0,0]),ind:{},prov:{},combo:{}};
+    this.rows.forEach(r=>{for(let i=0;i<4;i++)if(r.src&1<<i)ov.src[i]++;const cs=D.cfo[r.cfo];if(cs==='อยู่ในอายุ')ov.cfoA++;if(r.hasPh)ov.ph++;ov.g[r.tgt][0]++;if(r.hasPh)ov.g[r.tgt][1]++;
+      const gi35=r.giNow>=3;const add=(m,k)=>{const x=m[k]||(m[k]={n:0,act:0,exp:0,none:0,gi:0,ph:0});x.n++;if(cs==='อยู่ในอายุ')x.act++;else if(cs)x.exp++;else x.none++;if(gi35)x.gi++;if(r.hasPh)x.ph++};
+      add(ov.ind,r.ind);if(D.prov[r.prov])add(ov.prov,r.prov);ov.combo[r.src]=(ov.combo[r.src]||0)+1});
+    this.ov=ov;
+  }
+  setF(p){this.setState({...p,page:0,tab:'list'},()=>this.persist())}
+  persist(){try{localStorage.setItem('gcc-ui',JSON.stringify({tab:this.state.tab}))}catch(e){}}
+  tagsOf(m){return SRC.filter((s,i)=>m&1<<i).map(([t,bg,fg])=>({t,bg,fg}))}
+  match(r,s,q,skip){
+    if(skip!=='tgt'&&s.tgt!==''&&r.tgt!==+s.tgt)return false;
+    if(s.src!==''&&!(r.src&1<<+s.src))return false;
+    if(s.ind!==''&&r.ind!==+s.ind)return false;
+    if(s.prov!==''&&r.prov!==+s.prov)return false;
+    if(s.type!==''&&r.type!==+s.type)return false;
+    if(s.cfo!==''&&r.cfo!==+s.cfo)return false;
+    if(s.gi){if(s.gi==='35'){if(!(r.giNow>=3))return false}else if(s.gi==='none'){if(r.giMax)return false}else if(r.giNow!==+s.gi)return false}
+    if(s.ph==='1'&&!r.hasPh)return false;if(s.ph==='0'&&r.hasPh)return false;
+    if(s.inv&&!(r.invest>=+s.inv))return false;
+    for(const w of q)if(!r.hay.includes(w))return false;return true;
+  }
+  filtered(){
+    const s=this.state;const key=[s.q,s.tgt,s.src,s.ind,s.prov,s.type,s.cfo,s.gi,s.ph,s.inv,s.sort].join('|');if(this._fk===key)return this._f;
+    const q=s.q.toLowerCase().split(/\s+/).filter(Boolean);const tc=this.D.tgt.map(()=>0);const out=[];
+    this.rows.forEach(r=>{if(this.match(r,s,q,'tgt')){tc[r.tgt]++;if(s.tgt===''||r.tgt===+s.tgt)out.push(r)}});
+    const S={cfoEx:(a,b)=>(a.days??1e9)-(b.days??1e9),invest:(a,b)=>(b.invest||0)-(a.invest||0),gi:(a,b)=>(b.giNow||0)-(a.giNow||0)||(b.giMax||0)-(a.giMax||0),fac:(a,b)=>(b.fac||0)-(a.fac||0),name:(a,b)=>a.name.localeCompare(b.name,'th')}[s.sort];
+    if(S)out.sort(S);this._fk=key;this._f={out,tc,ph:out.reduce((n,r)=>n+(r.hasPh?1:0),0)};return this._f;
+  }
+  exportCsv(){
+    const {out}=this.filtered();const D=this.D;const esc=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+    const H=['รหัส','ชื่อบริษัท','เลขนิติบุคคล','ประเภท','จังหวัด','ที่อยู่','กลุ่มอุตสาหกรรม','กิจการ','แหล่งข้อมูล','กลุ่มเป้าหมาย','CFO สถานะ','CFO ใบรับรอง','CFO หมดอายุล่าสุด','GI ระดับที่ยังใช้ได้','GI ระดับสูงสุด','GI ใช้ได้ถึง','โรงงานใหม่ เริ่ม','เงินลงทุนโรงงานใหม่','จำนวนโรงงาน','SET','ตลาด','โทรศัพท์','อีเมล','เว็บไซต์'];
+    const L=[H.join(',')].concat(out.map(r=>[r.code,r.name,r.jur,D.type[r.type],D.prov[r.prov],r.addr,D.ind[r.ind],r.biz,this.tagsOf(r.src).map(t=>t.t).join(' '),D.tgt[r.tgt],D.cfo[r.cfo],r.cfoN,r.cfoEx,r.giNow,r.giMax,r.giUntil,r.newYm,r.invest,r.fac,r.set,r.mkt,r.phone,r.email,r.web].map(esc).join(',')));
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+L.join('\n')],{type:'text/csv;charset=utf-8'}));a.download=`GCC_ลูกค้า_${out.length}_ราย.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  }
+  open(id){
+    this.setState({sel:id});const b=Math.floor(id/2000);if(this.state.det[b]||this._ld===b)return;this._ld=b;
+    fetch(`data/gcc-detail/${b}.json`).then(r=>r.json()).then(d=>this.setState(s=>({det:{...s.det,[b]:d}}))).catch(()=>this.setState(s=>({det:{...s.det,[b]:{}}}))).finally(()=>{this._ld=null});
+  }
+  cfoView(r){
+    const st=this.D.cfo[r.cfo];if(!st)return {t:'ยังไม่มี CFO',fg:'#A8B0C8',sub:''};
+    if(st==='อยู่ในอายุ')return r.days!=null&&r.days<=90?{t:'ใกล้หมดอายุ',fg:'#B26A00',sub:`เหลือ ${fmtN(r.days)} วัน · ${isoTh(r.cfoEx)}`}:{t:'อยู่ในอายุ',fg:'#0E8A9A',sub:'ถึง '+isoTh(r.cfoEx)};
+    if(st==='หมดอายุ')return {t:'หมดอายุ',fg:'#475069',sub:isoTh(r.cfoEx)};return {t:st,fg:'#475069',sub:''};
+  }
+  selVals(){
+    const r=this.byId&&this.byId.get(this.state.sel);if(!r)return {tags:[],facts:[],phones:[],emails:[],kpis:[],blocks:[]};
+    const D=this.D;const b=Math.floor(r.id/2000);const det=this.state.det[b];const d=det&&det[r.id]||{};const cv=this.cfoView(r);
+    const facts=[['เลขนิติบุคคล',r.jur],['จังหวัด',D.prov[r.prov]],['ที่อยู่',r.addr],['กลุ่มอุตสาหกรรม',D.ind[r.ind]],['กิจการ',r.biz],['จำนวนโรงงาน',r.fac?fmtN(r.fac)+' แห่ง':''],['SET',r.set?`${r.set} · ตลาด ${r.mkt}`:'']].filter(x=>x[1]).map(([k,v])=>({k,v}));
+    const kpis=[{k:'CFO',v:cv.t,c:cv.fg,sub:r.cfoN?`${fmtN(r.cfoN)} ใบ · ${cv.sub}`:'ไม่พบใน TGO'},{k:'GI ที่ยังใช้ได้',v:r.giNow?'ระดับ '+r.giNow:'—',c:'#0B6E66',sub:r.giMax?`สูงสุดที่เคยได้ ระดับ ${r.giMax}${r.giUntil?' · ถึง '+isoTh(r.giUntil):''}`:'ไม่พบใน GI'},{k:'โรงงานใหม่ (กรอ.)',v:r.invest?money(r.invest):'—',c:'#1A3FE0',sub:r.newYm?'เริ่ม '+ymTh(r.newYm):'ไม่พบในรายชื่อโรงงานใหม่'}];
+    const more=this.state.more;const lim=(k,a)=>more[k]?a:a.slice(0,6);
+    const blk=(k,title,a,map)=>a&&a.length?{title,count:fmtN(a.length)+' รายการ',items:lim(k,a).map(map),more:!more[k]&&a.length>6?`ดูทั้งหมด ${fmtN(a.length)} รายการ`:'',showMore:()=>this.setState(s=>({more:{...s.more,[k]:true}}))}:null;
+    const stc=s=>s==='อยู่ในอายุ'?['#BFF3EE','#0B6E66']:['#EEF1F8','#475069'];
+    const blocks=[
+      blk('t','ใบรับรอง CFO (TGO)',(d.t||[]).slice().sort((a,b)=>(b[5]||'').localeCompare(a[5]||'')),x=>({h:x[0]||'ไม่มีเลขที่ใบรับรอง',badge:x[6],bBg:stc(x[6])[0],bFg:stc(x[6])[1],s:`${x[1]} · ${x[2]} · ${x[3]} · อนุมัติ ${isoTh(x[4])} · หมดอายุ ${isoTh(x[5])}${x[8]!=null?` · ประเภท 1/2/3 = ${[x[8],x[9],x[10]].map(v=>v==null?'—':(v*100).toFixed(1)+'%').join(' / ')}`:''}`})),
+      blk('g','อุตสาหกรรมสีเขียว (GI)',(d.g||[]).slice().sort((a,b)=>(b[0]-a[0])||(b[1]-a[1])),x=>({h:`ระดับ ${x[1]} · ปีงบ ${x[0]} · ${x[2]}`,badge:x[9],bBg:stc(x[9])[0],bFg:stc(x[9])[1],s:`${x[3]} · ${x[6]}${x[4]?' · ทะเบียนโรงงาน '+x[4]:''} · รับรอง ${isoTh(x[7])}${x[8]?' · หมดอายุ '+isoTh(x[8]):''}`})),
+      blk('f','โรงงานที่เริ่มประกอบกิจการ (กรอ.)',d.f,x=>({h:`${x[2]}`,badge:'เริ่ม '+ymTh(x[0]),bBg:'#E6ECFD',bFg:'#1A2FB0',s:`${x[3]} · ${x[4]} · เงินทุน ${money(x[7])}${x[8]?` · คนงาน ${fmtN(x[8])}`:''}${x[5]?' · โทร '+x[5]:''}`})),
+      blk('s','บริษัทจดทะเบียน (SET)',d.s,x=>({h:`${x[0]} · ${x[1]}`,badge:x[2],bBg:'#0E1F7A',bFg:'#fff',s:`${x[3]}${x[4]?' · '+x[4]:''} · ${x[5]}`}))
+    ].filter(Boolean);
+    const ph=(r.phone||'').split('|').map(s=>s.trim()).filter(Boolean);const em=(r.email||'').split('|').map(s=>s.trim()).filter(Boolean);
+    return {code:r.code,typeName:D.type[r.type],name:r.name,tgtName:D.tgt[r.tgt],tags:this.tagsOf(r.src),facts,kpis,blocks,loadingDet:!det,
+      phones:ph.map(t=>({t,href:'tel:'+t.split(/[,\s]/)[0].replace(/[^\d+]/g,'')})),emails:em.map(t=>({t,href:'mailto:'+t})),web:r.web,ctSrc:D.ct[r.ct],noContact:!ph.length&&!em.length&&!r.web,match:D.match[r.match]};
+  }
+  renderVals(){
+    const s=this.state,D=this.D;const ready=!!this.rows;
+    const tabs=[['overview','ภาพรวม'],['list','รายชื่อบริษัท'],['sources','นิยามและแหล่งข้อมูล']].map(([k,label])=>({label,fw:s.tab===k?500:400,bg:s.tab===k?'#F4F6FC':'transparent',fg:s.tab===k?'#0A1A86':'#C9D4FF',go:()=>this.setState({tab:k},()=>this.persist())}));
+    const base={tabs,loading:s.loading,loadMsg:s.loadMsg,asOfTh:isoTh(this.asOf||'2026-10-06'),isOverview:s.tab==='overview'&&ready,isList:s.tab==='list'&&ready,isSources:s.tab==='sources',hasSel:s.sel!=null,closeSel:()=>this.setState({sel:null,more:{}}),rowPad:this.props.density==='compact'?'8px 22px':'13px 22px'};
+    const defs=GDESC.map((desc,i)=>({no:i+1,name:(D?D.tgt[i]:'').replace(/^\d+\.\s*/,''),desc,badgeBg:GCOL[i][0],badgeFg:GCOL[i][1]}));
+    const src={defs,count:fmtN(s.sources.length),rows:s.sources.map(x=>({name:x[0],org:x[1],file:x[2],date:x[3],n:fmtN(x[4]),note:x[6]||''}))};
+    if(!ready)return {...base,src,ov:{sources:[],groups:[],inds:[],provs:[],combos:[],other:{}},f:{tgtChips:[],selects:[],rows:[]},sel:this.selVals()};
+    const ov=this.ov;
+    const gmax=Math.max(...ov.g.slice(0,8).map(x=>x[0]));
+    const groups=ov.g.slice(0,8).map(([n,ph],i)=>({no:i+1,name:D.tgt[i].replace(/^\d+\.\s*/,''),desc:GDESC[i],n:fmtN(n),ph:fmtN(ph),w:(n/gmax*100).toFixed(1)+'%',bar:GCOL[i][2],badgeBg:GCOL[i][0],badgeFg:GCOL[i][1],go:()=>this.setF({tgt:String(i)})}));
+    const sub=['ใบรับรอง CFO','อุตสาหกรรมสีเขียว','โรงงานใหม่ 2567–2569','บริษัทจดทะเบียน'];
+    const sources=ov.src.map((n,i)=>({label:SRC[i][0],n:fmtN(n),sub:sub[i],go:()=>this.setF({src:String(i),tgt:''})}));
+    const inds=Object.entries(ov.ind).sort((a,b)=>b[1].n-a[1].n);const imax=inds[0]?inds[0][1].n:1;
+    const indRows=inds.map(([k,x])=>({name:D.ind[k],n:fmtN(x.n),act:fmtN(x.act),exp:fmtN(x.exp),none:fmtN(x.none),gi:fmtN(x.gi),ph:fmtN(x.ph),w:(x.n/imax*100).toFixed(1)+'%',go:()=>this.setF({ind:k,tgt:''})}));
+    const provs=Object.entries(ov.prov).sort((a,b)=>b[1].n-a[1].n);const pmax=provs[0]?provs[0][1].n:1;
+    const provRows=(s.allProv?provs:provs.slice(0,15)).map(([k,x])=>({name:D.prov[k],n:fmtN(x.n),act:fmtN(x.act),gi:fmtN(x.gi),w:(x.n/pmax*100).toFixed(1)+'%',go:()=>this.setF({prov:k,tgt:''})}));
+    const combos=Object.entries(ov.combo).sort((a,b)=>b[1]-a[1]);const cmax=combos[0]?Math.log10(combos[0][1]+1):1;
+    const comboRows=combos.map(([m,n])=>({tags:this.tagsOf(+m),n:fmtN(n),w:(Math.log10(n+1)/cmax*100).toFixed(1)+'%',go:()=>{const i=SRC.findIndex((x,i)=>+m&1<<i);this.setF({src:String(i),tgt:''})}}));
+    // list
+    const F=this.filtered();const ps=+(this.props.pageSize||50);const pages=Math.max(1,Math.ceil(F.out.length/ps));const page=Math.min(s.page,pages-1);
+    const rows=F.out.slice(page*ps,page*ps+ps).map(r=>{const cv=this.cfoView(r);const g=GI_COL[r.giNow]||GI_COL[1];const c=GCOL[r.tgt];
+      return {name:r.name,code:r.code,typeName:D.type[r.type],set:r.set,provName:D.prov[r.prov]||'—',indName:D.ind[r.ind],tags:this.tagsOf(r.src),
+        tgtShort:'กลุ่ม '+(r.tgt+1),tgtBg:c[0],tgtFg:c[1],cfoText:cv.t,cfoFg:cv.fg,cfoSub:cv.sub,giNow:r.giNow||'',noGi:!r.giNow,giBg:g[0],giFg:g[1],
+        contact:r.phone?r.phone.split('|')[0].trim():(r.web?r.web.replace(/^https?:\/\//,''):'—'),open:()=>this.open(r.id)}});
+    const on=v=>v!==''?{bd:'#1A3FE0',bg:'#EEF2FF'}:{bd:'#D5DBEA',bg:'#fff'};
+    const opt=(arr,cnt)=>arr.map((l,i)=>({v:String(i),label:l+(cnt?` (${fmtN(cnt[i]||0)})`:''),i})).filter(o=>o.label&&arr[o.i]!=='');
+    const indCnt={},provCnt={},typeCnt={},cfoCnt={};this.rows.forEach(r=>{indCnt[r.ind]=(indCnt[r.ind]||0)+1;provCnt[r.prov]=(provCnt[r.prov]||0)+1;typeCnt[r.type]=(typeCnt[r.type]||0)+1;cfoCnt[r.cfo]=(cfoCnt[r.cfo]||0)+1});
+    const sortBy=(o,c)=>o.sort((a,b)=>(c[b.v]||0)-(c[a.v]||0));
+    const selects=[
+      {label:'พบในแหล่งข้อมูล',value:s.src,options:SRC.map(([t],i)=>({v:String(i),label:`${t} (${fmtN(ov.src[i])})`})),onChange:e=>this.setF({src:e.target.value})},
+      {label:'กลุ่มอุตสาหกรรม',value:s.ind,options:sortBy(opt(D.ind,indCnt),indCnt),onChange:e=>this.setF({ind:e.target.value})},
+      {label:'จังหวัด',value:s.prov,options:opt(D.prov,provCnt).sort((a,b)=>D.prov[a.v].localeCompare(D.prov[b.v],'th')),onChange:e=>this.setF({prov:e.target.value})},
+      {label:'ประเภทผู้ประกอบการ',value:s.type,options:sortBy(opt(D.type,typeCnt),typeCnt),onChange:e=>this.setF({type:e.target.value})},
+      {label:'สถานะ CFO',value:s.cfo,options:opt(D.cfo,cfoCnt).map(o=>D.cfo[o.v]===''?{...o,label:`ยังไม่มี CFO (${fmtN(cfoCnt[o.v])})`}:o).concat(D.cfo.indexOf('')>=0?[{v:String(D.cfo.indexOf('')),label:`ยังไม่มี CFO (${fmtN(cfoCnt[D.cfo.indexOf('')]||0)})`}]:[]).filter((o,i,a)=>a.findIndex(x=>x.v===o.v)===i),onChange:e=>this.setF({cfo:e.target.value})},
+      {label:'GI ระดับที่ยังใช้ได้',value:s.gi,options:[{v:'35',label:'ระดับ 3–5'},{v:'5',label:'ระดับ 5'},{v:'4',label:'ระดับ 4'},{v:'3',label:'ระดับ 3'},{v:'2',label:'ระดับ 2'},{v:'1',label:'ระดับ 1'},{v:'none',label:'ไม่เคยได้ GI'}],onChange:e=>this.setF({gi:e.target.value})},
+      {label:'เงินลงทุนโรงงานใหม่',value:s.inv,options:[{v:'5000000',label:'≥ 5 ล้านบาท'},{v:'50000000',label:'≥ 50 ล้านบาท'},{v:'500000000',label:'≥ 500 ล้านบาท'},{v:'1000000000',label:'≥ 1,000 ล้านบาท'}],onChange:e=>this.setF({inv:e.target.value})},
+      {label:'ข้อมูลติดต่อ',value:s.ph,options:[{v:'1',label:'มีเบอร์โทร'},{v:'0',label:'ยังไม่มีเบอร์โทร'}],onChange:e=>this.setF({ph:e.target.value})}
+    ].map(x=>({...x,...on(x.value)}));
+    const tgtChips=[{label:'ทุกกลุ่ม',n:fmtN(F.tc.reduce((a,b)=>a+b,0)),act:s.tgt===''},...D.tgt.map((l,i)=>({label:l.replace(/\s*\(.*\)$/,'').replace('ยังไม่มี CFO – ',''),n:fmtN(F.tc[i]),act:s.tgt===String(i),i}))].map(c=>({...c,bd:c.act?'#0A1A86':'#D5DBEA',bg:c.act?'#0A1A86':'#fff',fg:c.act?'#fff':'#0E1430',go:()=>this.setF({tgt:c.i==null?'':String(c.i)})}));
+    const hasFilter=!!(s.q||s.tgt!==''||s.src||s.ind||s.prov||s.type||s.cfo||s.gi||s.ph||s.inv);
+    const f={q:s.q,onQ:e=>this.setF({q:e.target.value}),tgtChips,selects,rows,countN:fmtN(F.out.length),phN:fmtN(F.ph),empty:!F.out.length,hasFilter,
+      clear:()=>this.setF({q:'',tgt:'',src:'',ind:'',prov:'',type:'',cfo:'',gi:'',ph:'',inv:''}),sort:s.sort,onSort:e=>this.setF({sort:e.target.value}),
+      exportCsv:()=>this.exportCsv(),pageN:fmtN(page+1),pages:fmtN(pages),noPrev:page<=0,noNext:page>=pages-1,
+      prev:()=>{this.setState({page:page-1});window.scrollTo(0,0)},next:()=>{this.setState({page:page+1});window.scrollTo(0,0)}};
+    const oth=ov.g[8]||[0,0];
+    return {...base,src,f,sel:this.selVals(),
+      ov:{total:fmtN(ov.total),cfoActive:fmtN(ov.cfoA),phone:fmtN(ov.ph),sources,groups,inds:indRows,provs:provRows,combos:comboRows,showOther:this.props.showOther!==false,other:{n:fmtN(oth[0]),ph:fmtN(oth[1]),go:()=>this.setF({tgt:'8'})},
+        toggleProv:()=>this.setState({allProv:!s.allProv}),provLabel:s.allProv?'แสดง 15 จังหวัดแรก':`แสดงทั้ง ${provs.length} จังหวัด`}};
+  }
+}
+</script>
+</body>
+</html>

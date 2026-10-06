@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>แผนที่ CFO</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f6fb;color:#0d1526;font-family:'Kanit',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,select{font-family:inherit}
+.wrap{display:flex;flex-direction:column;gap:16px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid #e3e9f2;border-radius:22px;padding:16px 18px;box-shadow:0 14px 34px -16px rgba(31,80,160,.16)}
+.lbl{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#5b6478}
+select{height:40px;border:1.5px solid #d5deea;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0d1526;min-width:180px}
+.seg{display:flex;gap:4px;flex-wrap:wrap;background:#eef2f8;padding:4px;border-radius:999px}
+.seg button{border:0;cursor:pointer;height:32px;padding:0 13px;border-radius:999px;font-size:13px;background:transparent;color:#384155}
+.seg button.on{background:#0b1b3a;color:#fff}
+.grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border:1px solid #e3e9f2;border-radius:22px;box-shadow:0 14px 34px -16px rgba(31,80,160,.16)}
+.mapcard{position:relative;overflow:hidden;background:linear-gradient(180deg,#f7faff,#eef4fd)}
+.zoom{position:absolute;right:14px;top:14px;display:flex;flex-direction:column;gap:6px;z-index:2}
+.zoom button{width:36px;height:36px;border-radius:50%;border:1px solid #d5deea;background:#fff;cursor:pointer;font-size:17px;color:#0d1526;box-shadow:0 4px 12px rgba(31,80,160,.12)}
+.legend{position:absolute;left:16px;bottom:14px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border:1px solid #e3e9f2;border-radius:14px;padding:10px 12px;font-size:11.5px;color:#5b6478;display:flex;flex-direction:column;gap:6px}
+.tip{position:absolute;pointer-events:none;background:#0b1b3a;color:#fff;border-radius:12px;padding:10px 12px;font-size:12.5px;line-height:1.5;opacity:0;transition:opacity .12s;z-index:3;min-width:170px;box-shadow:0 12px 28px rgba(10,25,60,.3)}
+.panel{padding:22px;display:flex;flex-direction:column;gap:18px}
+.hero{border-radius:18px;padding:18px 20px;color:#fff;background:linear-gradient(155deg,#6db6f8 0%,#3488f2 45%,#1d63e6 100%);display:flex;flex-direction:column;gap:12px}
+.k4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.k4 div{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.k4 span:first-child{font-size:11.5px;color:#eaf2ff}.k4 span:last-child{font-size:20px;font-weight:600}
+h3{margin:0;font-size:15.5px;font-weight:600}
+.sub{font-size:12.5px;color:#5b6478;line-height:1.5}
+.stack{display:flex;height:30px;border-radius:10px;overflow:hidden;gap:2px;background:#e9eef6}
+.s3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.s3 div{display:flex;flex-direction:column;gap:1px}.s3 b{font-size:20px;font-weight:600}
+.dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px}
+.rows{display:flex;flex-direction:column;gap:7px}
+.row{display:grid;grid-template-columns:150px minmax(0,1fr) 54px;gap:10px;align-items:center;font-size:13px}
+.row .t{height:12px;background:#eef2f8;border-radius:6px;overflow:hidden}.row .t span{display:block;height:100%;background:#1f6bf0;border-radius:6px}
+.row .n{text-align:right;color:#384155;font-variant-numeric:tabular-nums}
+.org{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #edf1f7;cursor:pointer;background:none;border-left:0;border-right:0;border-top:0;text-align:left;font:inherit;color:inherit;width:100%}
+.org:hover .on{color:#1f6bf0}
+.pill{font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.btn{cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:0;background:#0b1b3a;color:#fff;font-size:13.5px;font-weight:500}
+.btn2{cursor:pointer;height:38px;padding:0 14px;border-radius:999px;border:1.5px solid #d5deea;background:#fff;color:#0d1526;font-size:13.5px}
+.rank{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.rk{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.rk button{cursor:pointer;display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 12px;border-radius:12px;border:1px solid #e3e9f2;background:#fff;font:inherit;font-size:13px;color:#0d1526;text-align:left}
+.rk button:hover{border-color:#b3c6e6}
+.rk .i{width:24px;height:24px;border-radius:50%;background:#e8f1ff;color:#1f6bf0;font-size:11.5px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.note{font-size:12.5px;color:#7a8396;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="bar">
+    <div class="lbl">ระบายสีแผนที่ตาม
+      <div class="seg" id="metric"></div>
+    </div>
+    <span style="flex:1"></span>
+    <label class="lbl">อุตสาหกรรม<select id="fInd"><option value="">ทั้งหมด</option></select></label>
+    <label class="lbl">ปีที่ยื่นขอการรับรอง<select id="fYr"><option value="">ทั้งหมด</option></select></label>
+  </div>
+  <div class="grid">
+    <div class="card mapcard" id="mapcard">
+      <div class="zoom"><button id="zin" title="ขยาย">+</button><button id="zout" title="ย่อ">−</button><button id="zreset" title="รีเซ็ต" style="font-size:13px">⟲</button></div>
+      <svg id="map" style="display:block;width:100%"></svg>
+      <div class="legend" id="legend"></div>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="card panel" id="panel"><span class="sub">กำลังโหลดข้อมูล…</span></div>
+  </div>
+  <div class="card rank">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h3 id="rkTitle">อันดับจังหวัด</h3><span class="sub">กดเพื่อดูรายละเอียดจังหวัด</span></div>
+    <div class="rk" id="rank"></div>
+    <span class="note">ข้อมูลการปล่อยที่เว็บไซต์ อบก. เผยแพร่เป็นร้อยละของคาร์บอนฟุตพริ้นท์ประเภทที่ 1–3 เท่านั้น ไม่มีปริมาณ tCO2e · ค่าเฉลี่ยคิดจากรายการที่มีข้อมูลสัดส่วน · จังหวัดใช้ค่าจากการ์ดในเว็บ อบก.</span>
+  </div>
+</div>
+<script>
+(async function(){
+const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const SC=['oklch(0.68 0.14 40)','oklch(0.68 0.14 250)','oklch(0.68 0.14 150)'];
+const fmt=n=>Number(n).toLocaleString('en-US');
+const P=new URLSearchParams(location.search);
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const REF=P.get('ref')||today(),WIN=+(P.get('win')||90),refT=Date.parse(REF);
+const isoTh=iso=>{const [y,m,d]=iso.split('-').map(Number);return `${d} ${TH_M[m-1]} ${y+543}`};
+const beTh=s=>{const m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s||'');return m?`${+m[1]} ${TH_M[+m[2]-1]} ${m[3]}`:'—'};
+const alias=n=>n==='กรุงเทพฯ'?'กรุงเทพมหานคร':n;
+const post=m=>{try{parent.postMessage(m,'*')}catch(e){}};
+
+function idbGet(k){return new Promise(res=>{setTimeout(()=>res(null),1200);try{const r=indexedDB.open('cfo-registry',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>{try{const t=r.result.transaction('kv').objectStore('kv').get(k);t.onsuccess=()=>res(t.result);t.onerror=()=>res(null)}catch(e){res(null)}};r.onerror=()=>res(null)}catch(e){res(null)}})}
+const [geo,ds,man]=await Promise.all([fetch('data/th-provinces.json').then(r=>r.json()),idbGet('dataset').then(d=>d&&d.data?d.data:fetch('data/cfo.json').then(r=>r.json())),idbGet('manual')]);
+const D=ds.dicts;
+let rows=ds.rows.map(a=>{const [n,cert,act,org,branch,provI,addr,,,provAddr,zip,indI,sizeI,apBE,exBE,ap,ex,s1,s2,s3,topI,,fyI,note,id]=a;return {cert,act,org,prov:D.prov[provI]||'',ind:D.ind[indI]||'',ap,ex,exBE,s1,s2,s3,fy:D.fy[fyI]||'',id:String(id)}});
+(man||[]).forEach(o=>rows.unshift({cert:o.cert,act:o.act,org:o.org,prov:o.prov||'',ind:o.ind||'',ap:o.ap,ex:o.ex,exBE:o.exBE,s1:o.s1,s2:o.s2,s3:o.s3,fy:(/FY(\d\d)/i.exec(o.cert||'')||[])[0]||'',id:o.id}));
+rows.forEach(r=>{const days=r.ex?Math.round((Date.parse(r.ex)-refT)/864e5):null;r.days=days;r.active=days!=null&&days>=0;r.soon=r.active&&days<=WIN;r.expired=days!=null&&days<0;
+  const m=/^FY(\d\d)$/.exec(r.fy);if(m){const v=+m[1];r.yr=String(v>=50?2500+v:2543+v)}else if(r.ap){const [y,mo]=r.ap.split('-').map(Number);r.yr=String(y+543+(mo>=10?1:0))}else r.yr='';
+  r.has=r.s1!=null&&((r.s1||0)+(r.s2||0)+(r.s3||0))>0;r.pk=alias(r.prov)});
+
+const METRICS=[['all','จำนวนใบรับรองทั้งหมด'],['active','อยู่ในอายุ'],['soon',`ใกล้หมดอายุ ≤ ${WIN} วัน`],['s1','สัดส่วนประเภท 1 เฉลี่ย'],['s2','สัดส่วนประเภท 2 เฉลี่ย'],['s3','สัดส่วนประเภท 3 เฉลี่ย']];
+let metric='all',fInd='',fYr='',sel=null;
+const mEl=document.getElementById('metric');
+METRICS.forEach(([k,l])=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>{metric=k;render()};b.dataset.k=k;mEl.appendChild(b)});
+const cnt=(key)=>{const c={};rows.forEach(r=>{if(r[key])c[r[key]]=(c[r[key]]||0)+1});return c};
+const ic=cnt('ind');Object.keys(ic).filter(x=>x!=='-').sort((a,b)=>ic[b]-ic[a]).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=`${k} (${fmt(ic[k])})`;document.getElementById('fInd').appendChild(o)});
+const yc=cnt('yr');Object.keys(yc).sort((a,b)=>b-a).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=`${k} (${fmt(yc[k])})`;document.getElementById('fYr').appendChild(o)});
+document.getElementById('fInd').onchange=e=>{fInd=e.target.value;render()};
+document.getElementById('fYr').onchange=e=>{fYr=e.target.value;render()};
+
+// geometry: fix winding for d3
+geo.features.forEach(f=>{f.geometry.coordinates=f.geometry.coordinates.map(poly=>{const t={type:'Polygon',coordinates:poly};if(d3.geoArea(t)>2*Math.PI)return poly.map(r=>r.slice().reverse());return poly})});
+const svg=d3.select('#map'),card=document.getElementById('mapcard');
+const W=()=>card.clientWidth,H=()=>Math.min(860,Math.max(560,W()*1.45));
+const g=svg.append('g');
+let proj,path;
+const zoom=d3.zoom().scaleExtent([1,10]).on('zoom',e=>{g.attr('transform',e.transform);g.selectAll('path').attr('stroke-width',0.8/e.transform.k)});
+svg.call(zoom).on('dblclick.zoom',null);
+document.getElementById('zin').onclick=()=>svg.transition().duration(300).call(zoom.scaleBy,1.6);
+document.getElementById('zout').onclick=()=>svg.transition().duration(300).call(zoom.scaleBy,1/1.6);
+document.getElementById('zreset').onclick=()=>svg.transition().duration(400).call(zoom.transform,d3.zoomIdentity);
+function layout(){const w=W(),h=H();svg.attr('viewBox',`0 0 ${w} ${h}`).attr('height',h);proj=d3.geoMercator().fitExtent([[20,20],[w-20,h-20]],geo);path=d3.geoPath(proj);g.selectAll('path').attr('d',path)}
+const tip=document.getElementById('tip');
+
+function agg(list){const a={n:list.length,active:0,soon:0,expired:0,sc:[0,0,0],ns:0,top:[0,0,0],ind:{}};
+  list.forEach(r=>{if(r.active)a.active++;if(r.soon)a.soon++;if(r.expired)a.expired++;if(r.has){a.ns++;a.sc[0]+=r.s1||0;a.sc[1]+=r.s2||0;a.sc[2]+=r.s3||0;const v=[r.s1||0,r.s2||0,r.s3||0];a.top[v.indexOf(Math.max(...v))]++}a.ind[r.ind]=(a.ind[r.ind]||0)+1});
+  a.avg=a.ns?a.sc.map(x=>x/a.ns):[0,0,0];return a}
+function val(a){if(!a)return 0;if(metric==='all')return a.n;if(metric==='active')return a.active;if(metric==='soon')return a.soon;const i=+metric[1]-1;return a.ns?a.avg[i]:null}
+
+function render(){
+  mEl.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.k===metric));
+  const list=rows.filter(r=>(!fInd||r.ind===fInd)&&(!fYr||r.yr===fYr));
+  const by={};list.forEach(r=>{(by[r.pk]||(by[r.pk]=[])).push(r)});
+  const A={};Object.entries(by).forEach(([k,v])=>A[k]=agg(v));
+  const isPct=metric[0]==='s';
+  const vals=geo.features.map(f=>val(A[f.properties.th])).filter(v=>v!=null&&v>0);
+  const mx=Math.max(1,...vals);
+  const ramp=d3.interpolateRgb('#dcebff','#1340c0');
+  const color=isPct?d3.scaleSequential([0,100],t=>ramp(t)):d3.scaleSequentialLog([1,Math.max(2,mx)],ramp);
+  const fill=v=>v==null||v<=0?'#eef2f8':color(isPct?v:Math.max(1,v));
+  const ps=g.selectAll('path').data(geo.features,f=>f.properties.th);
+  ps.enter().append('path').attr('d',path).attr('stroke','#fff').attr('stroke-width',0.8).style('cursor','pointer')
+    .on('mousemove',(e,f)=>{const a=A[f.properties.th];const r=card.getBoundingClientRect();
+      tip.innerHTML=`<b style="font-size:14px">${f.properties.th}</b><br>ใบรับรอง ${fmt(a?a.n:0)} · อยู่ในอายุ ${fmt(a?a.active:0)}<br>ใกล้หมดอายุ ${fmt(a?a.soon:0)}${a&&a.ns?`<br>เฉลี่ย ป.1 ${a.avg[0].toFixed(1)}% · ป.2 ${a.avg[1].toFixed(1)}% · ป.3 ${a.avg[2].toFixed(1)}%`:''}`;
+      let x=e.clientX-r.left+14,y=e.clientY-r.top+14;if(x>r.width-200)x-=220;tip.style.left=x+'px';tip.style.top=y+'px';tip.style.opacity=1})
+    .on('mouseleave',()=>tip.style.opacity=0)
+    .on('click',(e,f)=>{sel=sel===f.properties.th?null:f.properties.th;render()})
+    .merge(ps).transition().duration(250).attr('fill',f=>fill(val(A[f.properties.th])))
+    .attr('stroke',f=>f.properties.th===sel?'#0b1b3a':'#fff');
+  g.selectAll('path').filter(f=>f.properties.th===sel).raise().attr('stroke-width',2/(d3.zoomTransform(svg.node()).k));
+  // legend
+  const lg=document.getElementById('legend');
+  const ticks=isPct?[0,25,50,75,100]:[1,10,100,1000].filter(t=>t<=mx*1.5);
+  lg.innerHTML=`<span style="font-weight:500;color:#0d1526">${METRICS.find(m=>m[0]===metric)[1]}${isPct?' (%)':''}</span><span style="display:block;width:190px;height:10px;border-radius:5px;background:linear-gradient(90deg,${d3.range(0,1.01,.1).map(t=>ramp(t)).join(',')})"></span><span style="display:flex;justify-content:space-between;width:190px">${ticks.map(t=>`<span>${fmt(t)}</span>`).join('')}</span>`;
+  // rank
+  const order=Object.keys(A).filter(k=>k&&geo.features.some(f=>f.properties.th===k)).map(k=>[k,val(A[k])]).filter(x=>x[1]!=null).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  document.getElementById('rkTitle').textContent='อันดับจังหวัด · '+METRICS.find(m=>m[0]===metric)[1];
+  document.getElementById('rank').innerHTML=order.map(([k,v],i)=>`<button data-p="${k}" style="${k===sel?'border-color:#0b1b3a;background:#f4f8ff':''}"><span class="i">${i+1}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k}</span><b style="font-weight:600">${isPct?v.toFixed(1)+'%':fmt(v)}</b></button>`).join('');
+  document.querySelectorAll('#rank button').forEach(b=>b.onclick=()=>{sel=b.dataset.p;render()});
+  panel(sel?by[sel]||[]:list,sel);
+  requestAnimationFrame(()=>post({type:'cfo-map-height',h:document.getElementById('app').scrollHeight+4}));
+}
+function panel(list,name){
+  const a=agg(list);const t=a.avg.reduce((x,y)=>x+y,0)||1;
+  const inds=Object.entries(a.ind).filter(([k])=>k&&k!=='-').sort((x,y)=>y[1]-x[1]).slice(0,6);const im=Math.max(1,...inds.map(x=>x[1]));
+  const orgs=list.slice().sort((x,y)=>(y.active-x.active)||((x.days??1e9)-(y.days??1e9))).filter((r,i,arr)=>arr.findIndex(z=>z.org===r.org)===i).slice(0,8);
+  const st=r=>r.soon?['ใกล้หมดอายุ','#fdecc8','#9a5a00']:r.active?['อยู่ในอายุ','#e2f2d0','#2f6a12']:r.expired?['หมดอายุ','#ebece8','#5b6478']:['ไม่ระบุ','#f2f1ec','#8b8d86'];
+  const scope=['ประเภทที่ 1','ประเภทที่ 2','ประเภทที่ 3'];
+  document.getElementById('panel').innerHTML=`
+  <div class="hero">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#eaf2ff">${name?'จังหวัด':'ภาพรวม'} · สถานะ ณ ${isoTh(REF)}</span><span style="font-size:24px;font-weight:600;line-height:1.3">${name||'ทั้งประเทศ'}</span></div>
+      ${name?'<button id="clr" style="cursor:pointer;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.14);color:#fff;height:30px;padding:0 12px;border-radius:999px;font-size:12.5px">ดูทั้งประเทศ</button>':''}
+    </div>
+    <div class="k4"><div><span>ใบรับรอง</span><span>${fmt(a.n)}</span></div><div><span>อยู่ในอายุ</span><span>${fmt(a.active)}</span></div><div><span>ใกล้หมดอายุ</span><span>${fmt(a.soon)}</span></div><div><span>หมดอายุ</span><span>${fmt(a.expired)}</span></div></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <h3>รายละเอียดการปล่อย (สัดส่วนเฉลี่ย)</h3>
+    <span class="sub">จาก ${fmt(a.ns)} รายการที่มีข้อมูลสัดส่วน</span>
+    <div class="stack">${a.avg.map((v,i)=>`<span style="width:${v/t*100}%;background:${SC[i]}"></span>`).join('')}</div>
+    <div class="s3">${a.avg.map((v,i)=>`<div><span class="sub"><span class="dot" style="background:${SC[i]}"></span>${scope[i]}</span><b>${a.ns?v.toFixed(1)+'%':'—'}</b></div>`).join('')}</div>
+    <span class="sub">ประเภทที่ 1 = การปล่อยทางตรง · ประเภทที่ 2 = การใช้พลังงานไฟฟ้า/ความร้อน · ประเภทที่ 3 = ทางอ้อมอื่น ๆ</span>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <h3>ประเภทที่มีสัดส่วนสูงสุดขององค์กร</h3>
+    <div class="rows">${a.top.map((c,i)=>`<div class="row"><span><span class="dot" style="background:${SC[i]}"></span>${scope[i]} สูงสุด</span><span class="t"><span style="width:${a.ns?c/a.ns*100:0}%;background:${SC[i]}"></span></span><span class="n">${fmt(c)}</span></div>`).join('')}</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <h3>อุตสาหกรรมหลัก</h3>
+    <div class="rows">${inds.map(([k,c])=>`<div class="row"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k}</span><span class="t"><span style="width:${c/im*100}%"></span></span><span class="n">${fmt(c)}</span></div>`).join('')||'<span class="sub">ไม่มีข้อมูล</span>'}</div>
+  </div>
+  ${name?`<div style="display:flex;flex-direction:column;gap:4px">
+    <h3>องค์กรในจังหวัด</h3>
+    <div>${orgs.map(r=>{const s=st(r);return `<button class="org" data-id="${r.id}"><span style="display:flex;flex-direction:column;min-width:0"><span class="on" style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.org}</span><span class="sub">หมดอายุ ${beTh(r.exBE)}</span></span><span class="pill" style="background:${s[1]};color:${s[2]}">${s[0]}</span></button>`}).join('')}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="goTable">ดูรายชื่อทั้งหมด ${fmt(a.n)} รายการในตาราง →</button></div>`:'<span class="sub">กดที่จังหวัดบนแผนที่หรือในอันดับด้านล่าง เพื่อดูรายละเอียดและรายชื่อองค์กร</span>'}`;
+  const c=document.getElementById('clr');if(c)c.onclick=()=>{sel=null;render()};
+  const gt=document.getElementById('goTable');if(gt)gt.onclick=()=>post({type:'cfo-filter',prov:name==='กรุงเทพมหานคร'?'กรุงเทพฯ':name,ind:fInd,yr:fYr});
+  document.querySelectorAll('.org').forEach(b=>b.onclick=()=>post({type:'cfo-open',id:b.dataset.id}));
+}
+layout();render();
+let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{layout();render()},150)});
+})();
+</script>
+</body>
+</html>

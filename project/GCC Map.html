@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>แผนที่ลูกค้า GCC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
+<script src="gcc-core.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#F4F6FC;color:#0E1430;font-family:'Kanit',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,select{font-family:inherit}
+.wrap{display:flex;flex-direction:column;gap:16px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:16px 18px}
+.lbl{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069}
+select{height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430;min-width:200px}
+.seg{display:flex;gap:4px;flex-wrap:wrap;background:#E6ECFD;padding:4px;border-radius:999px}
+.seg button{border:0;cursor:pointer;height:32px;padding:0 13px;border-radius:999px;font-size:13px;background:transparent;color:#1A2FB0}
+.seg button.on{background:#0A1A86;color:#fff}
+.grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border:1px solid #E3E7F1;border-radius:22px}
+.mapcard{position:relative;overflow:hidden;background:#EEF2FF}
+.zoom{position:absolute;right:14px;top:14px;display:flex;flex-direction:column;gap:6px;z-index:2}
+.zoom button{width:36px;height:36px;border-radius:50%;border:1px solid #D5DBEA;background:#fff;cursor:pointer;font-size:17px;color:#0E1430}
+.legend{position:absolute;left:16px;bottom:14px;background:rgba(255,255,255,.94);border:1px solid #E3E7F1;border-radius:14px;padding:10px 12px;font-size:11.5px;color:#475069;display:flex;flex-direction:column;gap:6px}
+.tip{position:absolute;pointer-events:none;background:#081247;color:#fff;border-radius:12px;padding:10px 12px;font-size:12.5px;line-height:1.5;opacity:0;transition:opacity .12s;z-index:3;min-width:180px}
+.panel{padding:22px;display:flex;flex-direction:column;gap:18px}
+.hero{border-radius:18px;padding:18px 20px;color:#fff;background:linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%);display:flex;flex-direction:column;gap:12px}
+.k4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.k4 div{background:rgba(255,255,255,.1);border:1px solid rgba(185,200,255,.3);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.k4 span:first-child{font-size:11.5px;color:#C9D4FF}.k4 span:last-child{font-size:20px;font-weight:500}
+h3{margin:0;font-size:15.5px;font-weight:500}
+.sub{font-size:12.5px;color:#475069;line-height:1.5}
+.rows{display:flex;flex-direction:column;gap:7px}
+.row{display:grid;grid-template-columns:170px minmax(0,1fr) 54px;gap:10px;align-items:center;font-size:13px}
+.row .t{height:10px;background:#EEF1F8;border-radius:6px;overflow:hidden}.row .t span{display:block;height:100%;background:#1A3FE0;border-radius:6px}
+.row .n{text-align:right;color:#475069;font-variant-numeric:tabular-nums}
+.org{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border:0;border-bottom:1px solid #EEF1F8;cursor:pointer;background:none;text-align:left;font:inherit;color:inherit;width:100%}
+.org:hover .on{color:#1A3FE0}
+.pill{font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.btn{cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px;font-weight:500}
+.rank{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.rk{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.rk button{cursor:pointer;display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 12px;border-radius:12px;border:1px solid #E3E7F1;background:#fff;font:inherit;font-size:13px;color:#0E1430;text-align:left}
+.rk .i{width:24px;height:24px;border-radius:50%;background:#E6ECFD;color:#1A3FE0;font-size:11.5px;font-weight:600;display:flex;align-items:center;justify-content:center}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="bar">
+    <div class="lbl">ระบายสีแผนที่ตาม<div class="seg" id="metric"></div></div>
+    <span style="flex:1"></span>
+    <label class="lbl">กลุ่มอุตสาหกรรม<select id="fInd"><option value="">ทั้งหมด</option></select></label>
+    <label class="lbl">กลุ่มเป้าหมาย<select id="fTgt"><option value="">ทั้งหมด</option></select></label>
+  </div>
+  <div class="grid">
+    <div class="card mapcard" id="mapcard">
+      <div class="zoom"><button id="zin">+</button><button id="zout">−</button><button id="zreset" style="font-size:13px">⟲</button></div>
+      <svg id="map" style="display:block;width:100%"></svg>
+      <div class="legend" id="legend"></div>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="card panel" id="panel"><span class="sub">กำลังโหลดข้อมูล…</span></div>
+  </div>
+  <div class="card rank">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h3 id="rkTitle">อันดับจังหวัด</h3><span class="sub">กดเพื่อดูรายละเอียดจังหวัด</span></div>
+    <div class="rk" id="rank"></div>
+  </div>
+</div>
+<script>
+(async function(){
+const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const fmt=n=>Number(n).toLocaleString('en-US');
+const P=new URLSearchParams(location.search);
+const REF=P.get('ref')||GCC.todayISO(),WIN=+(P.get('win')||90),T=Date.parse(REF);
+const isoTh=iso=>{if(!iso)return '—';const [y,m,d]=iso.split('-').map(Number);return `${d} ${TH_M[m-1]} ${y+543}`};
+const post=m=>{try{parent.postMessage(m,'*')}catch(e){}};
+const [geo,base,dec]=await Promise.all([fetch('data/th-provinces.json').then(r=>r.json()),GCC.loadBase(),GCC.idb.get('dedup')]);
+const B=GCC.build(base,dec||{},{added:(await GCC.idb.get('addedCos'))||[]});const D=B.D;
+const rows=B.companies.map(c=>{GCC.status(c,T,WIN);return {id:c.id,name:c.name,prov:D.prov[c.prov]||'',ind:D.ind[c.ind]||'',tgt:c.tgt,cfoSt:c.cfoSt,days:c.days,cfoEx:c.cfoEx,gi:c.giLive||0,hasPh:c.hasPh}});
+const METRICS=[['all','บริษัททั้งหมด'],['act','CFO อยู่ในอายุ'],['soon',`CFO ใกล้หมดอายุ ≤ ${WIN} วัน`],['exp','CFO หมดอายุยังไม่ต่อ'],['opp','ยังไม่มี CFO (กลุ่ม 5–8)'],['gi','GI ระดับ 3–5']];
+let metric='all',fInd='',fTgt='',sel=null;
+const mEl=document.getElementById('metric');
+METRICS.forEach(([k,l])=>{const b=document.createElement('button');b.textContent=l;b.dataset.k=k;b.onclick=()=>{metric=k;render()};mEl.appendChild(b)});
+const ic={};rows.forEach(r=>ic[r.ind]=(ic[r.ind]||0)+1);Object.keys(ic).sort((a,b)=>ic[b]-ic[a]).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=`${k} (${fmt(ic[k])})`;document.getElementById('fInd').appendChild(o)});
+GCC.TGT.forEach((l,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent=`${i+1}. ${l}`;document.getElementById('fTgt').appendChild(o)});
+document.getElementById('fInd').onchange=e=>{fInd=e.target.value;render()};
+document.getElementById('fTgt').onchange=e=>{fTgt=e.target.value;render()};
+geo.features.forEach(f=>{f.geometry.coordinates=f.geometry.coordinates.map(poly=>{const t={type:'Polygon',coordinates:poly};if(d3.geoArea(t)>2*Math.PI)return poly.map(r=>r.slice().reverse());return poly})});
+const svg=d3.select('#map'),card=document.getElementById('mapcard');
+const W=()=>card.clientWidth,H=()=>Math.min(860,Math.max(560,W()*1.45));
+const g=svg.append('g');let path;
+const zoom=d3.zoom().scaleExtent([1,10]).on('zoom',e=>{g.attr('transform',e.transform);g.selectAll('path').attr('stroke-width',0.8/e.transform.k)});
+svg.call(zoom).on('dblclick.zoom',null);
+document.getElementById('zin').onclick=()=>svg.transition().duration(300).call(zoom.scaleBy,1.6);
+document.getElementById('zout').onclick=()=>svg.transition().duration(300).call(zoom.scaleBy,1/1.6);
+document.getElementById('zreset').onclick=()=>svg.transition().duration(400).call(zoom.transform,d3.zoomIdentity);
+function layout(){const w=W(),h=H();svg.attr('viewBox',`0 0 ${w} ${h}`).attr('height',h);path=d3.geoPath(d3.geoMercator().fitExtent([[20,20],[w-20,h-20]],geo));g.selectAll('path').attr('d',path)}
+const tip=document.getElementById('tip');
+function agg(list){const a={n:list.length,act:0,soon:0,exp:0,opp:0,gi:0,ph:0,tg:Array(9).fill(0),ind:{}};
+  list.forEach(r=>{if(r.cfoSt==='active'||r.cfoSt==='soon')a.act++;if(r.cfoSt==='soon')a.soon++;if(r.cfoSt==='expired')a.exp++;if(r.tgt>=4&&r.tgt<=7)a.opp++;if(r.gi>=3)a.gi++;if(r.hasPh)a.ph++;a.tg[r.tgt]++;a.ind[r.ind]=(a.ind[r.ind]||0)+1});return a}
+const val=a=>!a?0:metric==='all'?a.n:a[metric];
+function render(){
+  mEl.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.k===metric));
+  const list=rows.filter(r=>(!fInd||r.ind===fInd)&&(fTgt===''||r.tgt===+fTgt));
+  const by={};list.forEach(r=>{(by[r.prov]||(by[r.prov]=[])).push(r)});
+  const A={};Object.entries(by).forEach(([k,v])=>A[k]=agg(v));
+  const mx=Math.max(2,...geo.features.map(f=>val(A[f.properties.th])));
+  const ramp=d3.interpolateRgb('#DCE6FF','#0A1A86');const color=d3.scaleSequentialLog([1,mx],ramp);
+  const fill=v=>!v?'#EEF1F8':color(Math.max(1,v));
+  const ps=g.selectAll('path').data(geo.features,f=>f.properties.th);
+  ps.enter().append('path').attr('d',path).attr('stroke','#fff').attr('stroke-width',0.8).style('cursor','pointer')
+    .on('mousemove',(e,f)=>{const a=A[f.properties.th];const r=card.getBoundingClientRect();
+      tip.innerHTML=`<b style="font-size:14px;font-weight:500">${f.properties.th}</b><br>บริษัท ${fmt(a?a.n:0)} · CFO ในอายุ ${fmt(a?a.act:0)}<br>ใกล้หมดอายุ ${fmt(a?a.soon:0)} · ยังไม่มี CFO ${fmt(a?a.opp:0)}`;
+      let x=e.clientX-r.left+14,y=e.clientY-r.top+14;if(x>r.width-210)x-=230;tip.style.left=x+'px';tip.style.top=y+'px';tip.style.opacity=1})
+    .on('mouseleave',()=>tip.style.opacity=0)
+    .on('click',(e,f)=>{sel=sel===f.properties.th?null:f.properties.th;render()})
+    .merge(ps).transition().duration(250).attr('fill',f=>fill(val(A[f.properties.th]))).attr('stroke',f=>f.properties.th===sel?'#081247':'#fff');
+  g.selectAll('path').filter(f=>f.properties.th===sel).raise().attr('stroke-width',2/(d3.zoomTransform(svg.node()).k));
+  const ticks=[1,10,100,1000,10000].filter(t=>t<=mx*1.5);
+  document.getElementById('legend').innerHTML=`<span style="font-weight:500;color:#0E1430">${METRICS.find(m=>m[0]===metric)[1]}</span><span style="display:block;width:190px;height:10px;border-radius:5px;background:linear-gradient(90deg,${d3.range(0,1.01,.1).map(t=>ramp(t)).join(',')})"></span><span style="display:flex;justify-content:space-between;width:190px">${ticks.map(t=>`<span>${fmt(t)}</span>`).join('')}</span>`;
+  const order=Object.keys(A).filter(k=>k&&geo.features.some(f=>f.properties.th===k)).map(k=>[k,val(A[k])]).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  document.getElementById('rkTitle').textContent='อันดับจังหวัด · '+METRICS.find(m=>m[0]===metric)[1];
+  document.getElementById('rank').innerHTML=order.map(([k,v],i)=>`<button data-p="${k}" style="${k===sel?'border-color:#081247;background:#EEF2FF':''}"><span class="i">${i+1}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k}</span><b style="font-weight:500">${fmt(v)}</b></button>`).join('');
+  document.querySelectorAll('#rank button').forEach(b=>b.onclick=()=>{sel=b.dataset.p;render()});
+  panel(sel?by[sel]||[]:list,sel);
+  requestAnimationFrame(()=>post({type:'gcc-map-height',h:document.getElementById('app').scrollHeight+4}));
+}
+function panel(list,name){
+  const a=agg(list);const tm=Math.max(1,...a.tg.slice(0,8));
+  const inds=Object.entries(a.ind).sort((x,y)=>y[1]-x[1]).slice(0,6);const im=Math.max(1,...inds.map(x=>x[1]));
+  const orgs=list.filter(r=>r.tgt<=1).sort((x,y)=>(x.tgt-y.tgt)||((x.days??1e9)-(y.days??1e9))).slice(0,8);
+  const st=r=>r.tgt===0?['ใกล้หมดอายุ','#FDECC8','#9A5A00']:['หมดอายุไม่เกิน 12 เดือน','#EEF1F8','#475069'];
+  document.getElementById('panel').innerHTML=`
+  <div class="hero">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#B9C8FF">${name?'จังหวัด':'ภาพรวม'} · สถานะ ณ ${isoTh(REF)}</span><span style="font-size:24px;font-weight:500;line-height:1.3">${name||'ทั้งประเทศ'}</span></div>
+      ${name?'<button id="clr" style="cursor:pointer;border:1px solid rgba(185,200,255,.5);background:rgba(255,255,255,.1);color:#fff;height:30px;padding:0 12px;border-radius:999px;font-size:12.5px">ดูทั้งประเทศ</button>':''}
+    </div>
+    <div class="k4"><div><span>บริษัท</span><span>${fmt(a.n)}</span></div><div><span>CFO ในอายุ</span><span>${fmt(a.act)}</span></div><div><span>ใกล้หมดอายุ</span><span>${fmt(a.soon)}</span></div><div><span>มีเบอร์โทร</span><span>${fmt(a.ph)}</span></div></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px"><h3>กลุ่มเป้าหมาย</h3>
+    <div class="rows">${a.tg.slice(0,8).map((c,i)=>`<div class="row"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i+1}. ${GCC.TGT[i]}</span><span class="t"><span style="width:${c/tm*100}%"></span></span><span class="n">${fmt(c)}</span></div>`).join('')}</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px"><h3>กลุ่มอุตสาหกรรมหลัก</h3>
+    <div class="rows">${inds.map(([k,c])=>`<div class="row"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k}</span><span class="t"><span style="width:${c/im*100}%;background:#4D72FF"></span></span><span class="n">${fmt(c)}</span></div>`).join('')}</div>
+  </div>
+  ${name?`<div style="display:flex;flex-direction:column;gap:4px"><h3>ต้องติดต่อก่อน (กลุ่ม 1–2)</h3>
+    <div>${orgs.map(r=>{const s=st(r);return `<button class="org" data-id="${r.id}"><span style="display:flex;flex-direction:column;min-width:0"><span class="on" style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</span><span class="sub">CFO หมดอายุ ${isoTh(r.cfoEx)}</span></span><span class="pill" style="background:${s[1]};color:${s[2]}">${s[0]}</span></button>`}).join('')||'<span class="sub">ไม่มี</span>'}</div>
+  </div>
+  <div><button class="btn" id="goTable">ดูรายชื่อทั้งหมด ${fmt(a.n)} บริษัท →</button></div>`:'<span class="sub">กดจังหวัดบนแผนที่หรือในอันดับด้านล่างเพื่อดูรายละเอียด</span>'}`;
+  const c=document.getElementById('clr');if(c)c.onclick=()=>{sel=null;render()};
+  const gt=document.getElementById('goTable');if(gt)gt.onclick=()=>post({type:'gcc-filter',prov:name,ind:fInd,tgt:fTgt});
+  document.querySelectorAll('.org').forEach(b=>b.onclick=()=>post({type:'gcc-open',id:+b.dataset.id}));
+}
+layout();render();
+let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{layout();render()},150)});
+})();
+</script>
+</body>
+</html>

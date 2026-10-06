@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="gcc-core.js"></script>
+<script src="tgo-sync.js"></script>
+<style>
+body{margin:0;background:#F4F6FC;color:#0E1430;font-family:'Kanit',sans-serif;-webkit-font-smoothing:antialiased}
+input,select,button,textarea{font-family:inherit}
+a{color:#1A3FE0}a:hover{color:#0A1A86}
+*{box-sizing:border-box}
+:focus-visible{outline:2px solid #1A3FE0;outline-offset:2px;border-radius:6px}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column">
+<header style="background:linear-gradient(135deg,#040A3C 0%,#0A1A86 55%,#1A3FE0 100%);color:#fff">
+  <div style="max-width:1400px;margin:0 auto;padding:18px 28px 0;display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="width:40px;height:40px;border-radius:11px;background:#fff;color:#0A1A86;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">GCC</span>
+        <div style="display:flex;flex-direction:column;line-height:1.3">
+          <span style="font-size:19px;font-weight:500">ฐานข้อมูลลูกค้า GCC</span>
+          <span style="font-size:13px;color:#B9C8FF;font-weight:300">{{ dataLine }}</span>
+        </div>
+      </div>
+      <div style="position:relative">
+        <button onClick="{{ toggleDate }}" style="cursor:pointer;height:38px;padding:0 14px;border-radius:999px;border:1px solid rgba(185,200,255,.45);background:rgba(4,10,60,.3);color:#fff;font-size:13.5px;display:flex;gap:8px;align-items:center"><span style="color:#C9D4FF">สถานะ ณ</span><span style="font-weight:500">{{ refTh }}</span><span style="color:#C9D4FF">· ใกล้หมด ≤ {{ win }} วัน ▾</span></button>
+        <sc-if value="{{ dateOpen }}">
+          <div style="position:absolute;top:46px;right:0;z-index:30;background:#fff;color:#0E1430;border-radius:18px;padding:18px;box-shadow:0 24px 60px -16px rgba(4,10,60,.5);display:flex;flex-direction:column;gap:14px;width:min(340px,86vw)">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#475069">ดูสถานะ ณ วันที่<input type="date" value="{{ refISO }}" onChange="{{ onRef }}" style="height:42px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;color:#0E1430"></input></label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{ quickDates }}" as="d" hint-placeholder-count="5"><button onClick="{{ d.go }}" style="cursor:pointer;height:30px;padding:0 12px;border-radius:999px;font-size:12.5px;border:1.5px solid {{ d.bd }};background:{{ d.bg }};color:{{ d.fg }}">{{ d.label }}</button></sc-for></div>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#475069">ช่วง "ใกล้หมดอายุ"<select value="{{ win }}" onChange="{{ onWin }}" style="height:42px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="30">30 วัน</option><option value="60">60 วัน</option><option value="90">90 วัน</option><option value="180">180 วัน</option></select></label>
+            <span style="font-size:12.5px;color:#5E6680;line-height:1.55;text-wrap:pretty">ใช้ดูล่วงหน้าหรือย้อนหลัง สถานะ กลุ่มเป้าหมาย และรอบ อบก. จะคำนวณใหม่ทั้งเว็บ</span>
+            <button onClick="{{ toggleDate }}" style="cursor:pointer;align-self:flex-end;height:34px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13px">เสร็จ</button>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <nav style="display:flex;gap:2px;flex-wrap:wrap">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="8">
+        <button onClick="{{ t.go }}" style="cursor:pointer;border:0;padding:11px 16px;border-radius:14px 14px 0 0;font-size:14.5px;font-weight:{{ t.fw }};background:{{ t.bg }};color:{{ t.fg }};display:flex;gap:7px;align-items:center">{{ t.label }}<sc-if value="{{ t.hasBadge }}"><span style="font-size:11px;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:{{ t.badgeBg }};color:{{ t.badgeFg }};display:flex;align-items:center;justify-content:center">{{ t.badge }}</span></sc-if></button>
+      </sc-for>
+    </nav>
+  </div>
+</header>
+
+<sc-if value="{{ notToday }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1400px;width:100%;margin:16px auto 0;padding:0 28px">
+    <div style="background:#FFF4DC;border:1px solid #F3D9A4;border-radius:16px;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:13.5px;color:#6B4100;flex:1;min-width:220px">กำลังดูสถานะ ณ <b style="font-weight:600">{{ refTh }}</b> ซึ่งไม่ใช่วันนี้ ตัวเลขทั้งหมดคำนวณตามวันที่นี้ และการตรวจสถานะอัตโนมัติหยุดไว้ชั่วคราว</span>
+      <button onClick="{{ backToday }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:0;background:#6B4100;color:#fff;font-size:13px">กลับไปวันนี้</button>
+    </div>
+  </div>
+</sc-if>
+<sc-if value="{{ ev.banner }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1400px;width:100%;margin:16px auto 0;padding:0 28px">
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:16px;padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <span style="width:8px;height:8px;border-radius:50%;background:#E8A23B;flex:none"></span>
+      <span style="font-size:13.5px;flex:1;min-width:240px;text-wrap:pretty">{{ ev.bannerText }}</span>
+      <button onClick="{{ ev.go }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13px">ดูเหตุการณ์</button>
+      <button onClick="{{ ev.ack }}" style="cursor:pointer;height:34px;padding:0 10px;border:0;background:transparent;color:#475069;font-size:13px;text-decoration:underline">รับทราบ</button>
+    </div>
+  </div>
+</sc-if>
+
+<main style="flex:1;max-width:1400px;width:100%;margin:0 auto;padding:24px 28px 64px;display:flex;flex-direction:column;gap:26px">
+<sc-if value="{{ loading }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="height:210px;border-radius:28px;background:linear-gradient(135deg,#0D2390,#1C3FE6);opacity:.25"></div>
+    <span style="font-size:14px;color:#475069">{{ loadMsg }}</span>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"><div style="height:64px;border-radius:16px;background:#E6EAF4"></div><div style="height:64px;border-radius:16px;background:#E6EAF4"></div><div style="height:64px;border-radius:16px;background:#E6EAF4"></div><div style="height:64px;border-radius:16px;background:#E6EAF4"></div></div>
+    <div style="height:320px;border-radius:22px;background:#E6EAF4"></div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h2 style="margin:0;font-size:28px;font-weight:500">ภาพรวมลูกค้าทั้งหมด (GCC)</h2><span style="font-size:14px;color:#475069;font-weight:300">นับระดับบริษัท รวมทุกแหล่ง · สถานะ ณ {{ refTh }}</span></div>
+  <section style="background:linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%);color:#fff;border-radius:28px;padding:32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:28px;align-items:end">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <span style="font-size:14px;color:#B9C8FF">บริษัท/ผู้ประกอบการ หลังตัดข้อมูลซ้ำ</span>
+      <span style="font-size:72px;font-weight:600;line-height:1.15">{{ ov.total }}</span>
+      <span style="font-size:15px;color:#DCE6FF;font-weight:300;text-wrap:pretty;max-width:540px">{{ ov.subline }}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+      <sc-for list="{{ ov.sources }}" as="s" hint-placeholder-count="4">
+        <button onClick="{{ s.go }}" style="cursor:pointer;text-align:left;border:1px solid rgba(185,200,255,.28);background:rgba(255,255,255,.08);color:#fff;border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:13px;color:#B9C8FF">{{ s.label }}</span>
+          <span style="font-size:28px;font-weight:500">{{ s.n }}</span>
+          <span style="font-size:12px;color:#C9D4FF;font-weight:300">{{ s.sub }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#2A4BE0">01</span><h2 style="margin:0;font-size:28px;font-weight:500">สิ่งที่ต้องติดตาม</h2><span style="font-size:14px;color:#475069;font-weight:300">กดตัวเลขเพื่อดูรายชื่อในแท็บค้นหา</span></div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:2px">
+      <sc-for list="{{ ov.feeds }}" as="x" hint-placeholder-count="8">
+        <button onClick="{{ x.go }}" style="cursor:pointer;text-align:left;border:0;background:transparent;border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;color:#0E1430" style-hover="background:#F4F6FC"><span style="display:flex;gap:8px;align-items:center;font-size:14px;color:#384155;min-width:0"><span style="width:8px;height:8px;flex:none;border-radius:50%;background:{{ x.dot }}"></span>{{ x.label }}</span><span style="font-size:20px;font-weight:500;font-variant-numeric:tabular-nums">{{ x.n }}</span></button>
+      </sc-for>
+    </div>
+    <button onClick="{{ ov.goTrack }}" style="cursor:pointer;align-self:flex-start;border:0;background:transparent;color:#1A3FE0;font-size:14px;text-decoration:underline;padding:0">เปิดแท็บติดตาม: กราฟใบรับรองหมดอายุ 12 เดือน และรายชื่อแต่ละรายการ →</button>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#2A4BE0">02</span><h2 style="margin:0;font-size:28px;font-weight:500">กลุ่มเป้าหมายสำหรับทีมขาย</h2><span style="font-size:14px;color:#475069;font-weight:300">จัดลำดับตามข้อแรกที่เข้าเงื่อนไข</span></div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow:hidden">
+      <sc-for list="{{ ov.groups }}" as="g" hint-placeholder-count="9">
+        <button onClick="{{ g.go }}" style="cursor:pointer;width:100%;border:0;border-bottom:1px solid #EEF1F8;background:#fff;text-align:left;padding:15px 22px;display:grid;grid-template-columns:44px minmax(0,1.3fr) minmax(0,1fr) 110px 110px 24px;gap:16px;align-items:center" style-hover="background:#F4F6FC">
+          <span style="width:36px;height:36px;border-radius:50%;background:{{ g.badgeBg }};color:{{ g.badgeFg }};display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px">{{ g.no }}</span>
+          <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:16px;font-weight:500">{{ g.name }}</span><span style="font-size:13px;color:#475069;font-weight:300;text-wrap:pretty">{{ g.desc }}</span></span>
+          <span style="height:10px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ g.w }};background:{{ g.bar }};border-radius:999px"></span></span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end"><span style="font-size:22px;font-weight:500;font-variant-numeric:tabular-nums">{{ g.n }}</span><span style="font-size:12px;color:#475069">บริษัท</span></span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end"><span style="font-size:18px;font-weight:500;color:#1A3FE0;font-variant-numeric:tabular-nums">{{ g.ph }}</span><span style="font-size:12px;color:#475069">มีเบอร์โทร</span></span>
+          <span style="color:#6B7390;font-size:18px">›</span>
+        </button>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:20px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:14px"><span style="font-size:15px;font-weight:600;color:#2A4BE0">03</span><h2 style="margin:0;font-size:28px;font-weight:500">กลุ่มอุตสาหกรรม</h2></div>
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto">
+        <div style="min-width:560px">
+          <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1.2fr) 80px 80px 70px;gap:12px;padding:12px 20px;font-size:12px;color:#475069;background:#F7F8FC;border-bottom:1px solid #E3E7F1"><span>อุตสาหกรรม</span><span>ทั้งหมด</span><span style="text-align:right">CFO ในอายุ</span><span style="text-align:right">ยังไม่มี CFO</span><span style="text-align:right">GI 3–5</span></div>
+          <sc-for list="{{ ov.inds }}" as="r" hint-placeholder-count="12">
+            <button onClick="{{ r.go }}" style="cursor:pointer;width:100%;border:0;border-bottom:1px solid #EEF1F8;background:#fff;text-align:left;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1.2fr) 80px 80px 70px;gap:12px;padding:9px 20px;align-items:center;font-size:13.5px;font-variant-numeric:tabular-nums" style-hover="background:#F4F6FC">
+              <span>{{ r.name }}</span>
+              <span style="display:flex;align-items:center;gap:8px"><span style="flex:1;height:8px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ r.w }};background:#4D72FF;border-radius:999px"></span></span><span style="width:48px;text-align:right">{{ r.n }}</span></span>
+              <span style="text-align:right;color:#0E8A9A;font-weight:500">{{ r.act }}</span><span style="text-align:right;color:#475069">{{ r.none }}</span><span style="text-align:right;color:#1A3FE0">{{ r.gi }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:14px;justify-content:space-between;flex-wrap:wrap"><div style="display:flex;align-items:baseline;gap:14px"><span style="font-size:15px;font-weight:600;color:#2A4BE0">04</span><h2 style="margin:0;font-size:28px;font-weight:500">จังหวัด</h2></div><button onClick="{{ ov.goMap }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:14px;text-decoration:underline">เปิดแผนที่</button></div>
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:6px 0">
+        <sc-for list="{{ ov.provs }}" as="r" hint-placeholder-count="15">
+          <button onClick="{{ r.go }}" style="cursor:pointer;width:100%;border:0;background:transparent;text-align:left;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 80px;gap:12px;padding:8px 20px;align-items:center;font-size:13.5px;font-variant-numeric:tabular-nums" style-hover="background:#F4F6FC">
+            <span>{{ r.name }}</span>
+            <span style="display:flex;align-items:center;gap:8px"><span style="flex:1;height:8px;background:#EEF1F8;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:{{ r.w }};background:#1A3FE0;border-radius:999px"></span></span><span style="width:48px;text-align:right">{{ r.n }}</span></span>
+            <span style="text-align:right;color:#0E8A9A;font-weight:500">{{ r.act }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isSearch }}" hint-placeholder-val="{{ false }}">
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;background:#E6ECFD;border-radius:999px;padding:4px;gap:2px">
+        <sc-for list="{{ f.viewBtns }}" as="v" hint-placeholder-count="2"><button onClick="{{ v.go }}" style="cursor:pointer;border:0;height:40px;padding:0 18px;border-radius:999px;font-size:14px;background:{{ v.bg }};color:{{ v.fg }}">{{ v.label }}</button></sc-for>
+      </div>
+      <input value="{{ f.q }}" onChange="{{ f.onQ }}" placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" style="flex:1;min-width:260px;height:48px;border:1.5px solid #D5DBEA;border-radius:14px;padding:0 16px;font-size:15px;color:#0E1430;background:#fff;outline:none"></input>
+      <button onClick="{{ f.exportCsv }}" style="cursor:pointer;height:48px;padding:0 18px;border-radius:14px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:14px">ส่งออก CSV</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <sc-for list="{{ f.tgtChips }}" as="c" hint-placeholder-count="10"><button onClick="{{ c.go }}" style="cursor:pointer;height:34px;padding:0 12px;border-radius:999px;border:1.5px solid {{ c.bd }};background:{{ c.bg }};color:{{ c.fg }};font-size:13px;display:flex;gap:6px;align-items:center"><span>{{ c.label }}</span><span style="opacity:.75;font-variant-numeric:tabular-nums">{{ c.n }}</span></button></sc-for>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 12px">
+      <sc-for list="{{ f.selects }}" as="s" hint-placeholder-count="10">
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">{{ s.label }}
+          <select value="{{ s.value }}" onChange="{{ s.onChange }}" style="height:42px;border:1.5px solid {{ s.bd }};border-radius:12px;padding:0 10px;font-size:14px;background:{{ s.bg }};color:#0E1430"><option value="">ทั้งหมด</option><sc-for list="{{ s.options }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select>
+        </label>
+      </sc-for>
+    </div>
+    <sc-if value="{{ f.hasChips }}"><div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{ f.activeChips }}" as="c"><button onClick="{{ c.go }}" style="cursor:pointer;height:30px;padding:0 12px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:12.5px">{{ c.label }} ×</button></sc-for></div></sc-if>
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:15px"><span style="font-weight:600;font-size:20px">{{ f.countN }}</span> {{ f.unit }} <span style="color:#475069;font-size:13.5px">{{ f.subCount }}</span></span>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <sc-if value="{{ f.hasFilter }}"><button onClick="{{ f.clear }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:13.5px;text-decoration:underline">ล้างตัวกรอง</button></sc-if>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:#475069">เรียงตาม<select value="{{ f.sort }}" onChange="{{ f.onSort }}" style="height:38px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:13.5px;background:#fff;color:#0E1430"><sc-for list="{{ f.sortOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+      </div>
+    </div>
+  </section>
+
+  <sc-if value="{{ f.cardsCo }}">
+    <section style="display:flex;flex-direction:column;gap:10px">
+      <sc-for list="{{ f.rows }}" as="r" hint-placeholder-count="6">
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <button onClick="{{ r.open }}" style="cursor:pointer;flex:1;border:0;background:transparent;text-align:left;padding:0;display:flex;flex-direction:column;gap:4px;min-width:0;color:#0E1430"><span style="font-size:15px;font-weight:500;text-wrap:pretty">{{ r.name }}</span><span style="font-size:12px;color:#475069">{{ r.code }} · {{ r.provName }}</span></button>
+            <button onClick="{{ r.toggleStar }}" aria-label="ติดตาม" style="cursor:pointer;width:44px;height:44px;flex:none;border:0;background:transparent;font-size:22px;color:{{ r.starFg }}">{{ r.star }}</button>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"><span style="font-size:11.5px;padding:2px 8px;border-radius:6px;background:{{ r.tgtBg }};color:{{ r.tgtFg }}">{{ r.tgtShort }}</span><sc-for list="{{ r.tags }}" as="t"><span style="font-size:11px;font-weight:500;padding:2px 7px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for><sc-if value="{{ r.hasGi }}"><span style="font-size:11.5px;font-weight:500;padding:2px 8px;border-radius:8px;background:{{ r.giBg }};color:{{ r.giFg }}">GI {{ r.giText }}</span></sc-if></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid #EEF1F8;padding-top:10px;font-size:13px">
+            <span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:11.5px;color:#5E6680">CFO</span><span style="color:{{ r.cfoFg }};font-weight:500">{{ r.cfoText }}</span><span style="font-size:12px;color:#475069">{{ r.cfoSub }}</span></span>
+            <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:11.5px;color:#5E6680">ติดต่อ</span><span style="word-break:break-word">{{ r.contact }}</span><sc-if value="{{ r.owner }}"><span style="font-size:12px;color:#475069">ผู้รับผิดชอบ {{ r.owner }}</span></sc-if></span>
+          </div>
+        </div>
+      </sc-for>
+      <sc-if value="{{ f.empty }}"><div style="padding:32px;text-align:center;color:#475069;background:#fff;border-radius:18px">ไม่พบรายการตามเงื่อนไข</div></sc-if>
+    </section>
+  </sc-if>
+  <sc-if value="{{ f.cardsCert }}">
+    <section style="display:flex;flex-direction:column;gap:10px">
+      <sc-for list="{{ f.crows }}" as="r" hint-placeholder-count="6">
+        <button onClick="{{ r.open }}" style="cursor:pointer;text-align:left;background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;color:#0E1430">
+          <span style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="font-size:12.5px;font-weight:500;color:#0A1A86">{{ r.cert }}</span><span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ r.stBg }};color:{{ r.stFg }}">{{ r.stText }}</span></span>
+          <span style="font-size:15px;font-weight:500;text-wrap:pretty">{{ r.org }}</span>
+          <span style="font-size:12.5px;color:#475069">{{ r.provName }} · อนุมัติ {{ r.apTh }} · หมดอายุ {{ r.exTh }}</span>
+        </button>
+      </sc-for>
+      <sc-if value="{{ f.empty }}"><div style="padding:32px;text-align:center;color:#475069;background:#fff;border-radius:18px">ไม่พบรายการตามเงื่อนไข</div></sc-if>
+    </section>
+  </sc-if>
+  <sc-if value="{{ f.viewCo }}">
+    <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto">
+      <div style="min-width:1060px">
+        <div style="display:grid;grid-template-columns:32px minmax(0,2.3fr) minmax(0,1.2fr) 140px 160px 80px minmax(0,1.2fr);gap:14px;padding:13px 20px;font-size:12.5px;color:#475069;background:#F7F8FC;border-bottom:1px solid #E3E7F1"><span></span><span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ · สถานะการขาย</span></div>
+        <sc-for list="{{ f.rows }}" as="r" hint-placeholder-count="12">
+          <div style="display:grid;grid-template-columns:32px minmax(0,2.3fr) minmax(0,1.2fr) 140px 160px 80px minmax(0,1.2fr);gap:14px;padding:{{ rowPad }};border-bottom:1px solid #EEF1F8;align-items:center">
+            <button onClick="{{ r.toggleStar }}" title="ติดตาม" style="cursor:pointer;border:0;background:transparent;font-size:19px;color:{{ r.starFg }};padding:0">{{ r.star }}</button>
+            <button onClick="{{ r.open }}" style="cursor:pointer;border:0;background:transparent;text-align:left;padding:0;display:flex;flex-direction:column;gap:3px;min-width:0;color:#0E1430">
+              <span style="font-size:14.5px;font-weight:500;text-wrap:pretty">{{ r.name }}</span>
+              <span style="font-size:12px;color:#475069;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="padding:1px 7px;border-radius:6px;background:{{ r.tgtBg }};color:{{ r.tgtFg }}">{{ r.tgtShort }}</span><span>{{ r.code }}</span><span>{{ r.typeName }}</span><sc-if value="{{ r.set }}"><span style="font-weight:500;color:#0E1F7A">{{ r.set }}</span></sc-if><sc-if value="{{ r.merged }}"><span style="color:#1A3FE0">รวม {{ r.mergedN }} แถว</span></sc-if></span>
+            </button>
+            <span style="display:flex;flex-direction:column;gap:2px;font-size:13.5px;min-width:0"><span>{{ r.provName }}</span><span style="font-size:12px;color:#475069">{{ r.indName }}</span></span>
+            <span style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ r.tags }}" as="t"><span style="font-size:11px;font-weight:500;padding:2px 7px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for></span>
+            <span style="display:flex;flex-direction:column;gap:3px;font-size:13px;align-items:flex-start"><span style="color:{{ r.cfoFg }};font-weight:500">{{ r.cfoText }}</span><span style="font-size:12px;color:#475069">{{ r.cfoSub }}</span><sc-if value="{{ r.hasRnd }}"><span style="font-size:11px;padding:1px 7px;border-radius:999px;background:{{ r.rndBg }};color:{{ r.rndFg }}">{{ r.rndLabel }}</span></sc-if></span>
+            <span><sc-if value="{{ r.hasGi }}"><span style="font-size:12.5px;font-weight:500;padding:2px 8px;border-radius:8px;background:{{ r.giBg }};color:{{ r.giFg }}">{{ r.giText }}</span></sc-if></span>
+            <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;font-size:13px;min-width:0"><span style="word-break:break-word">{{ r.contact }}</span><span style="display:flex;gap:4px;flex-wrap:wrap"><sc-if value="{{ r.hasStage }}"><span style="font-size:11.5px;padding:1px 8px;border-radius:999px;background:{{ r.stBg }};color:{{ r.stFg }}">{{ r.stLabel }}</span></sc-if><sc-if value="{{ r.owner }}"><span style="font-size:11.5px;padding:1px 8px;border-radius:999px;background:#F4F6FC;color:#384155">{{ r.owner }}</span></sc-if></span></span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ f.empty }}"><div style="padding:40px;text-align:center;color:#475069">ไม่พบรายการตามเงื่อนไข</div></sc-if>
+      </div>
+    </section>
+  </sc-if>
+  <sc-if value="{{ f.viewCert }}">
+    <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto">
+      <div style="min-width:1000px">
+        <div style="display:grid;grid-template-columns:32px 160px minmax(0,2.2fr) minmax(0,1fr) 110px 150px 120px;gap:14px;padding:13px 20px;font-size:12.5px;color:#475069;background:#F7F8FC;border-bottom:1px solid #E3E7F1"><span></span><span>เลขที่ใบรับรอง</span><span>องค์กร · กิจกรรม</span><span>จังหวัด</span><span>วันที่อนุมัติ</span><span>วันหมดอายุ</span><span>สถานะ</span></div>
+        <sc-for list="{{ f.crows }}" as="r" hint-placeholder-count="12">
+          <div style="display:grid;grid-template-columns:32px 160px minmax(0,2.2fr) minmax(0,1fr) 110px 150px 120px;gap:14px;padding:{{ rowPad }};border-bottom:1px solid #EEF1F8;align-items:center;font-size:13.5px">
+            <button onClick="{{ r.toggleStar }}" style="cursor:pointer;border:0;background:transparent;font-size:19px;color:{{ r.starFg }};padding:0">{{ r.star }}</button>
+            <span style="font-weight:500;color:#0A1A86">{{ r.cert }}</span>
+            <button onClick="{{ r.open }}" style="cursor:pointer;border:0;background:transparent;text-align:left;padding:0;display:flex;flex-direction:column;gap:2px;min-width:0;color:#0E1430"><span style="font-weight:500;text-wrap:pretty">{{ r.org }}</span><span style="font-size:12px;color:#475069">{{ r.act }}</span></button>
+            <span>{{ r.provName }}</span>
+            <span style="font-variant-numeric:tabular-nums">{{ r.apTh }}</span>
+            <span style="display:flex;flex-direction:column;gap:3px;align-items:flex-start"><span style="font-variant-numeric:tabular-nums">{{ r.exTh }}</span><sc-if value="{{ r.hasRnd }}"><span style="font-size:11px;padding:1px 7px;border-radius:999px;background:{{ r.rndBg }};color:{{ r.rndFg }}">{{ r.rndLabel }}</span></sc-if><sc-if value="{{ r.bad }}"><span style="font-size:11px;padding:1px 7px;border-radius:999px;background:#FDECC8;color:#9A5A00">วันหมดอายุผิดปกติ</span></sc-if></span>
+            <span><span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ r.stBg }};color:{{ r.stFg }}">{{ r.stText }}</span></span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ f.empty }}"><div style="padding:40px;text-align:center;color:#475069">ไม่พบรายการตามเงื่อนไข</div></sc-if>
+      </div>
+    </section>
+  </sc-if>
+  <div style="display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap">
+    <button onClick="{{ f.prev }}" disabled="{{ f.noPrev }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;color:#0E1430;font-size:14px">‹ ก่อนหน้า</button>
+    <span style="font-size:14px;color:#475069">หน้า {{ f.pageN }} / {{ f.pages }}</span>
+    <button onClick="{{ f.next }}" disabled="{{ f.noNext }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;color:#0E1430;font-size:14px">ถัดไป ›</button>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isTrack }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h2 style="margin:0;font-size:28px;font-weight:500">ใบรับรอง CFO ที่ต้องติดตาม</h2><span style="font-size:14px;color:#475069;font-weight:300">{{ ob.countText }} ใบรับรอง · สถานะ ณ {{ refTh }}</span></div>
+  <div style="position:sticky;top:0;z-index:5;background:rgba(244,246,252,.92);backdrop-filter:blur(8px);margin:-8px -8px 0;padding:10px 8px;border-radius:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:13px;color:#475069">ตัวกรอง:</span>
+    <sc-for list="{{ ob.chips }}" as="c" hint-placeholder-count="0"><button onClick="{{ c.go }}" style="cursor:pointer;height:32px;padding:0 8px 0 14px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13px;display:flex;gap:8px;align-items:center">{{ c.label }}<span style="width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:13px">×</span></button></sc-for>
+    <sc-if value="{{ ob.noChips }}"><span style="font-size:13px;color:#5E6680">ยังไม่ได้เลือก · คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งแดชบอร์ด (คลิกซ้ำเพื่อยกเลิก)</span></sc-if>
+    <span style="flex:1"></span>
+    <sc-if value="{{ ob.hasFilter }}"><button onClick="{{ ob.clear }}" style="cursor:pointer;height:32px;padding:0 10px;border:0;background:transparent;color:#1A3FE0;font-size:13px;text-decoration:underline">ล้างทั้งหมด</button></sc-if>
+    <button onClick="{{ ob.goTable }}" style="cursor:pointer;height:32px;padding:0 16px;border-radius:999px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:13px;font-weight:500">ดูรายชื่อ {{ ob.countText }} รายการในตาราง →</button>
+  </div>
+  <div style="background:linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%);color:#fff;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:18px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span style="font-size:20px;font-weight:500">ใบรับรองที่จะหมดอายุใน 12 เดือนข้างหน้า</span>
+        <span style="font-size:13.5px;color:#C9D4FF;font-weight:300">นับจาก {{ refTh }} ถึง {{ ob.expEndTh }} · คลิกที่เดือนเพื่อกรองทั้งแดชบอร์ด · สีเหลือง = อยู่ในช่วงใกล้หมดอายุ ({{ win }} วัน)</span>
+      </div>
+      <div style="display:flex;gap:24px">
+        <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-end"><span style="font-size:12.5px;color:#B9C8FF">รวม 12 เดือน</span><span style="font-size:30px;font-weight:600;line-height:1">{{ ob.expTotal }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-end"><span style="font-size:12.5px;color:#B9C8FF">ภายใน {{ win }} วัน</span><span style="font-size:30px;font-weight:600;line-height:1;color:#F2B84B">{{ ob.expSoon }}</span></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;align-items:end;height:200px">
+      <sc-for list="{{ ob.expMonths }}" as="m" hint-placeholder-count="12">
+        <button onClick="{{ m.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%">
+          <span style="font-size:13px;font-weight:500;color:#fff">{{ m.count }}</span>
+          <span style="width:100%;height:{{ m.h }}%;min-height:3px;background:{{ m.color }};opacity:{{ m.op }};outline:{{ m.ol }};outline-offset:2px;border-radius:8px 8px 3px 3px" style-hover="opacity:.85"></span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;margin-top:-8px;border-top:1px solid rgba(185,200,255,.3);padding-top:8px">
+      <sc-for list="{{ ob.expMonths }}" as="m" hint-placeholder-count="12"><span style="font-size:12px;color:#C9D4FF;text-align:center;line-height:1.25">{{ m.label }}</span></sc-for>
+    </div>
+  </div>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:stretch">
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:17px;font-weight:500">ใกล้หมดอายุที่สุด</span><button onClick="{{ ob.goSoon }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:13.5px;text-decoration:underline;padding:0;white-space:nowrap">ดูทั้งหมด {{ ob.soonN }} รายการ</button></div>
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{ ob.nextUp }}" as="r" hint-placeholder-count="6">
+          <button onClick="{{ r.open }}" style="cursor:pointer;border:0;border-bottom:1px solid #EEF1F8;background:transparent;padding:11px 0;display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;color:#0E1430">
+            <span style="display:flex;flex-direction:column;align-items:center;background:#FDECC8;color:#8A5300;border-radius:12px;padding:6px 0"><span style="font-size:18px;font-weight:600;line-height:1.1">{{ r.days }}</span><span style="font-size:10.5px">วัน</span></span>
+            <span style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.org }}</span><span style="font-size:12.5px;color:#5E6680">{{ r.cert }} · {{ r.prov }}</span></span>
+            <span style="font-size:12.5px;color:#384155">{{ r.exTh }}</span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ ob.nextUpEmpty }}"><span style="font-size:14px;color:#5E6680;padding:18px 0">ไม่มีรายการที่จะหมดอายุภายใน {{ win }} วัน</span></sc-if>
+      </div>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:17px;font-weight:500">อนุมัติใหม่ใน 30 วันล่าสุด</span><span style="font-size:13px;color:#475069">{{ ob.recentN }} รายการ</span></div>
+      <div style="display:flex;flex-direction:column;flex:1">
+        <sc-for list="{{ ob.recent }}" as="r" hint-placeholder-count="6">
+          <button onClick="{{ r.open }}" style="cursor:pointer;border:0;border-bottom:1px solid #EEF1F8;background:transparent;padding:11px 0;display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;color:#0E1430">
+            <span style="display:flex;align-items:center;justify-content:center;background:#DDF5F1;color:#0B6E66;border-radius:12px;padding:8px 0;font-size:12px;font-weight:600">ใหม่</span>
+            <span style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.org }}</span><span style="font-size:12.5px;color:#5E6680">{{ r.cert }} · {{ r.ind }}</span></span>
+            <span style="font-size:12.5px;color:#384155">{{ r.apTh }}</span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ ob.recentEmpty }}"><div style="flex:1;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:#F7F8FC;border-radius:16px;text-align:center;padding:20px"><span style="font-size:15px;font-weight:500;color:#475069">ไม่มีใบรับรองที่อนุมัติใน 30 วันล่าสุด</span><span style="font-size:13px;color:#5E6680">{{ ob.lastApText }}</span></div></sc-if>
+      </div>
+    </div>
+  </section>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:stretch">
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:17px;font-weight:500">สัดส่วนคาร์บอนฟุตพริ้นท์เฉลี่ย</span><span style="font-size:13px;color:#475069;font-weight:300">ค่าเฉลี่ยร้อยละ จาก {{ ob.scope.n }} รายการที่มีข้อมูลสัดส่วน (เว็บไม่แสดงปริมาณ tCO2e)</span></div>
+      <div style="display:flex;height:38px;border-radius:12px;overflow:hidden;gap:2px"><span style="width:{{ ob.scope.w1 }}%;background:#0A1A86"></span><span style="width:{{ ob.scope.w2 }}%;background:#4D72FF"></span><span style="width:{{ ob.scope.w3 }}%;background:#34D1C4"></span></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#475069;display:flex;gap:6px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#0A1A86"></span>ประเภทที่ 1</span><span style="font-size:24px;font-weight:500">{{ ob.scope.t1 }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#475069;display:flex;gap:6px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#4D72FF"></span>ประเภทที่ 2</span><span style="font-size:24px;font-weight:500">{{ ob.scope.t2 }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;color:#475069;display:flex;gap:6px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#34D1C4"></span>ประเภทที่ 3</span><span style="font-size:24px;font-weight:500">{{ ob.scope.t3 }}</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;padding-top:14px;border-top:1px solid #EEF1F8">
+        <span style="font-size:13px;color:#475069">สถานะ ณ {{ refTh }}</span>
+        <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px"><sc-for list="{{ ob.statusMix }}" as="x" hint-placeholder-count="4"><span style="width:{{ x.w }}%;background:{{ x.color }};opacity:{{ x.op }}"></span></sc-for></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><sc-for list="{{ ob.statusMix }}" as="x" hint-placeholder-count="4"><button onClick="{{ x.go }}" style="cursor:pointer;font-size:12.5px;color:#384155;display:flex;gap:6px;align-items:center;height:28px;padding:0 10px;border-radius:999px;border:1.5px solid {{ x.border }};background:{{ x.bg }}"><span style="width:9px;height:9px;border-radius:50%;background:{{ x.color }}"></span>{{ x.label }} {{ x.text }}</button></sc-for></div>
+      </div>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:17px;font-weight:500">จำนวนองค์กรที่ยื่นขอการรับรองในแต่ละปี</span><span style="font-size:13px;color:#475069;font-weight:300">ปี พ.ศ. ที่ยื่นขอการรับรอง (ปีงบประมาณ อบก.) จากเลขที่ใบรับรอง หรือจากวันที่อนุมัติเมื่อไม่มีเลข FY</span></div>
+      <div style="display:flex;gap:4px;align-items:flex-end;height:220px;flex:1">
+        <sc-for list="{{ ob.fyCols }}" as="c" hint-placeholder-count="10">
+          <button onClick="{{ c.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%">
+            <span style="font-size:10.5px;color:#384155;white-space:nowrap">{{ c.count }}</span>
+            <span style="width:100%;height:{{ c.h }}%;min-height:3px;background:{{ c.color }};border-radius:6px 6px 2px 2px"></span>
+            <span style="font-size:10.5px;font-weight:500;color:#475069">{{ c.label }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:stretch">
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:17px;font-weight:500">จำนวนตามอุตสาหกรรม</span><span style="display:flex;gap:12px;font-size:12.5px;color:#475069"><span style="display:flex;gap:5px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#1A3FE0"></span>อยู่ในอายุ</span><span style="display:flex;gap:5px;align-items:center"><span style="width:10px;height:10px;border-radius:3px;background:#DCE6FF"></span>ทั้งหมด</span></span></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ ob.indBars }}" as="b" hint-placeholder-count="10">
+          <button onClick="{{ b.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;display:grid;grid-template-columns:170px minmax(0,1fr) 76px;gap:10px;align-items:center;font-size:13px;text-align:left;color:#0E1430">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:{{ b.fw }}">{{ b.label }}</span>
+            <span style="position:relative;height:14px;background:#EEF1F8;border-radius:7px"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.w }}%;background:{{ b.ct }};border-radius:7px"></span><span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.wa }}%;background:{{ b.ca }};border-radius:7px"></span></span>
+            <span style="font-size:12.5px;color:#384155;text-align:right;font-variant-numeric:tabular-nums">{{ b.active }}/{{ b.total }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+      <span style="font-size:17px;font-weight:500">จังหวัดที่มีรายการมากที่สุด</span>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ ob.provBars }}" as="b" hint-placeholder-count="10">
+          <button onClick="{{ b.go }}" style="cursor:pointer;border:0;background:transparent;padding:0;display:grid;grid-template-columns:130px minmax(0,1fr) 76px;gap:10px;align-items:center;font-size:13px;text-align:left;color:#0E1430">
+            <span style="font-weight:{{ b.fw }}">{{ b.label }}</span>
+            <span style="position:relative;height:14px;background:#EEF1F8;border-radius:7px"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.w }}%;background:{{ b.ct }};border-radius:7px"></span><span style="position:absolute;left:0;top:0;bottom:0;width:{{ b.wa }}%;background:{{ b.ca }};border-radius:7px"></span></span>
+            <span style="font-size:12.5px;color:#384155;text-align:right;font-variant-numeric:tabular-nums">{{ b.active }}/{{ b.total }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+  <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding-top:8px;border-top:1px solid #E3E7F1"><h2 style="margin:16px 0 0;font-size:28px;font-weight:500">รายการติดตามระดับบริษัท</h2><span style="font-size:14px;color:#475069;font-weight:300">{{ tr.line }}</span></div>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:stretch">
+    <sc-for list="{{ tr.feeds }}" as="x" hint-placeholder-count="8">
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;min-height:52px">
+          <div style="display:flex;flex-direction:column;gap:3px"><span style="display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:{{ x.dot }}"></span><span style="font-size:16px;font-weight:500">{{ x.label }}</span></span><span style="font-size:12.5px;color:#475069;font-weight:300;text-wrap:pretty">{{ x.desc }}</span></div>
+          <span style="font-size:28px;font-weight:500;font-variant-numeric:tabular-nums">{{ x.n }}</span>
+        </div>
+        <sc-if value="{{ x.hasMonths }}"><div style="display:flex;gap:6px;overflow-x:auto;scrollbar-width:none"><sc-for list="{{ x.months }}" as="m"><button onClick="{{ m.go }}" style="cursor:pointer;height:30px;padding:0 10px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;font-size:12.5px;color:#0E1430;white-space:nowrap;flex:none">{{ m.label }} · {{ m.n }}</button></sc-for></div></sc-if>
+        <div style="display:flex;flex-direction:column;flex:1;min-height:205px">
+          <sc-for list="{{ x.items }}" as="it"><button onClick="{{ it.open }}" style="cursor:pointer;border:0;border-top:1px solid #EEF1F8;background:transparent;text-align:left;padding:9px 0;display:flex;justify-content:space-between;gap:10px;align-items:baseline;color:#0E1430" style-hover="color:#1A3FE0"><span style="font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.name }}</span><span style="font-size:12px;color:#475069;white-space:nowrap">{{ it.meta }}</span></button></sc-for>
+          <sc-if value="{{ x.empty }}"><span style="font-size:13px;color:#5E6680;border-top:1px solid #EEF1F8;padding-top:9px">{{ x.emptyText }}</span></sc-if>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:4px;min-height:40px">
+          <sc-if value="{{ x.hasN }}"><button onClick="{{ x.go }}" style="cursor:pointer;height:36px;padding:0 14px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13px">ดูทั้งหมด</button></sc-if>
+          <sc-if value="{{ x.hasN }}"><button onClick="{{ x.plan }}" style="cursor:pointer;height:36px;padding:0 14px;border-radius:999px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:13px">วางแผนติดต่อ</button></sc-if>
+        </div>
+      </div>
+    </sc-for>
+  </section>
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:17px;font-weight:500">เหตุการณ์จากการตรวจสถานะอัตโนมัติ</span><span style="font-size:13px;color:#475069;font-weight:300">{{ tr.monLine }}</span></div>
+      <button onClick="{{ tr.runCheck }}" style="cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:13.5px">ตรวจเดี๋ยวนี้</button>
+    </div>
+    <sc-if value="{{ tr.noEvents }}"><span style="font-size:13.5px;color:#475069">{{ tr.emptyText }}</span></sc-if>
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:360px;overflow:auto">
+      <sc-for list="{{ tr.events }}" as="e"><button onClick="{{ e.open }}" style="cursor:pointer;text-align:left;border:1px solid #EEF1F8;background:#fff;border-radius:12px;padding:9px 12px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><span style="font-size:11.5px;font-weight:500;padding:2px 8px;border-radius:999px;background:{{ e.bg }};color:{{ e.fg }}">{{ e.tag }}</span><span style="font-size:13.5px;color:#0E1430">{{ e.name }}</span><span style="font-size:12.5px;color:#475069">{{ e.meta }}</span></button></sc-for>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isPlan }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><h2 style="margin:0;font-size:28px;font-weight:500">แผนติดต่อ</h2><span style="font-size:14px;color:#475069;font-weight:300">นัดโทร ส่งอีเมล หรือเข้าพบ บันทึกในเครื่องนี้</span></div>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+    <sc-for list="{{ pl.kpis }}" as="k" hint-placeholder-count="4"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:14px 18px;display:flex;flex-direction:column;gap:2px"><span style="display:flex;gap:8px;align-items:center;font-size:13px;color:#475069"><span style="width:8px;height:8px;border-radius:50%;background:{{ k.dot }}"></span>{{ k.label }}</span><span style="font-size:28px;font-weight:500">{{ k.value }}</span></div></sc-for>
+  </section>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:16px;align-items:start">
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><button onClick="{{ pl.prevM }}" style="cursor:pointer;width:36px;height:36px;border-radius:50%;border:1.5px solid #D5DBEA;background:#fff;font-size:16px">‹</button><span style="font-size:17px;font-weight:500">{{ pl.monthLabel }}</span><button onClick="{{ pl.nextM }}" style="cursor:pointer;width:36px;height:36px;border-radius:50%;border:1.5px solid #D5DBEA;background:#fff;font-size:16px">›</button></div>
+      <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px"><sc-for list="{{ pl.weekdays }}" as="w"><span style="text-align:center;font-size:12px;color:#475069;padding:4px 0">{{ w }}</span></sc-for>
+        <sc-for list="{{ pl.cells }}" as="c" hint-placeholder-count="35"><button onClick="{{ c.go }}" style="cursor:pointer;min-height:62px;border-radius:12px;border:1.5px solid {{ c.bd }};background:{{ c.bg }};color:{{ c.fg }};padding:6px;display:flex;flex-direction:column;gap:4px;align-items:flex-start;opacity:{{ c.op }}"><span style="font-size:13px;font-weight:{{ c.fw }}">{{ c.num }}</span><span style="display:flex;gap:3px;flex-wrap:wrap"><sc-for list="{{ c.dots }}" as="d"><span style="width:7px;height:7px;border-radius:50%;background:{{ d.c }}"></span></sc-for></span><sc-if value="{{ c.hasMore }}"><span style="font-size:10.5px;color:#475069">+{{ c.more }}</span></sc-if></button></sc-for>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap"><sc-for list="{{ pl.legend }}" as="l"><span style="display:flex;gap:6px;align-items:center;font-size:12px;color:#475069"><span style="width:8px;height:8px;border-radius:50%;background:{{ l.color }}"></span>{{ l.label }}</span></sc-for></div>
+    </div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><span style="font-size:17px;font-weight:500">{{ pl.dayTh }}</span><span style="font-size:12.5px;color:#475069">{{ pl.dayCount }}</span></div>
+      <sc-if value="{{ pl.dayEmpty }}"><span style="font-size:13.5px;color:#475069">ไม่มีงานในวันนี้</span></sc-if>
+      <sc-for list="{{ pl.dayTasks }}" as="t">
+        <div style="display:flex;gap:10px;align-items:flex-start;border-top:1px solid #EEF1F8;padding-top:10px">
+          <button onClick="{{ t.toggle }}" style="cursor:pointer;width:22px;height:22px;flex:none;border-radius:6px;border:1.5px solid {{ t.color }};background:{{ t.doneBg }};color:#fff;font-size:13px;padding:0">{{ t.doneMark }}</button>
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><button onClick="{{ t.open }}" style="cursor:pointer;border:0;background:transparent;text-align:left;padding:0;font-size:14px;font-weight:500;color:#0E1430;text-decoration:{{ t.deco }}">{{ t.title }}</button><span style="font-size:12.5px;color:#475069">{{ t.meta }}</span><sc-if value="{{ t.note }}"><span style="font-size:12.5px;color:#384155">{{ t.note }}</span></sc-if></div>
+          <div style="display:flex;gap:6px;flex:none"><sc-if value="{{ t.tel }}"><a href="{{ t.tel }}" style="font-size:12.5px;text-decoration:none;border:1.5px solid #D5DBEA;border-radius:999px;padding:4px 10px">โทร</a></sc-if><button onClick="{{ t.edit }}" style="cursor:pointer;border:1.5px solid #D5DBEA;background:#fff;border-radius:999px;padding:4px 10px;font-size:12.5px">เลื่อน</button><button onClick="{{ t.del }}" style="cursor:pointer;border:0;background:transparent;color:#A33A1A;font-size:12.5px">ลบ</button></div>
+        </div>
+      </sc-for>
+      <span style="font-size:14px;font-weight:500;padding-top:8px">งานที่กำลังจะถึง</span>
+      <sc-for list="{{ pl.upcoming }}" as="t"><button onClick="{{ t.goDay }}" style="cursor:pointer;border:0;border-top:1px solid #EEF1F8;background:transparent;text-align:left;padding:8px 0;display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#0E1430"><span style="display:flex;gap:8px;align-items:center;min-width:0"><span style="width:7px;height:7px;border-radius:50%;background:{{ t.color }};flex:none"></span>{{ t.title }}</span><span style="color:#475069;white-space:nowrap">{{ t.when }}</span></button></sc-for>
+    </div>
+  </section>
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:17px;font-weight:500">รายชื่อที่ต้องติดต่อ</span><span style="font-size:13px;color:#475069;font-weight:300">{{ pl.tgtSummary }}</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">รายการ<select value="{{ pl.feed }}" onChange="{{ pl.onFeed }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><sc-for list="{{ pl.feedOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">สถานะการขาย<select value="{{ pl.stageF }}" onChange="{{ pl.onStageF }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="">ทั้งหมด</option><sc-for list="{{ stageOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">ผู้รับผิดชอบ<select value="{{ pl.ownerF }}" onChange="{{ pl.onOwnerF }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="">ทั้งหมด</option><sc-for list="{{ ownerOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+        <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">นัดอัตโนมัติวันละ<select value="{{ pl.perDay }}" onChange="{{ pl.onPerDay }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="3">3 ราย</option><option value="5">5 ราย</option><option value="10">10 ราย</option><option value="20">20 ราย</option></select></label>
+        <button onClick="{{ pl.autoPlan }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">นัดรายที่ยังไม่มีแผน ({{ pl.unplanned }})</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#F4F6FC;border-radius:12px;padding:8px 12px">
+      <button onClick="{{ pl.pickAll }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:13px;text-decoration:underline">{{ pl.pickAllText }}</button>
+      <span style="font-size:13px;color:#475069;flex:1">{{ pl.pickText }}</span>
+      <sc-if value="{{ pl.hasPick }}"><button onClick="{{ pl.bulk }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:0;background:#1A3FE0;color:#fff;font-size:13px">นัดที่เลือก {{ pl.pickN }} ราย</button></sc-if>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ pl.targets }}" as="r" hint-placeholder-count="8">
+        <div style="display:grid;grid-template-columns:26px minmax(0,2fr) minmax(0,1fr) 150px 150px;gap:12px;align-items:center;padding:9px 0;border-top:1px solid #EEF1F8">
+          <button onClick="{{ r.pick }}" style="cursor:pointer;width:20px;height:20px;border-radius:5px;border:1.5px solid {{ r.pkBd }};background:{{ r.pkBg }};color:#fff;font-size:12px;padding:0">{{ r.pkMark }}</button>
+          <button onClick="{{ r.open }}" style="cursor:pointer;border:0;background:transparent;text-align:left;padding:0;display:flex;flex-direction:column;gap:1px;min-width:0;color:#0E1430"><span style="font-size:14px;font-weight:500">{{ r.name }}</span><span style="font-size:12px;color:#475069">{{ r.meta }}</span></button>
+          <span style="font-size:12.5px;color:#384155;word-break:break-word">{{ r.phone }}</span>
+          <select value="{{ r.stage }}" onChange="{{ r.onStage }}" style="height:32px;border-radius:999px;border:0;padding:0 10px;font-size:12.5px;background:{{ r.sbg }};color:{{ r.sfg }}"><sc-for list="{{ stageOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select>
+          <span style="display:flex;justify-content:flex-end"><sc-if value="{{ r.planned }}"><button onClick="{{ r.edit }}" style="cursor:pointer;border:0;font-size:12px;padding:5px 10px;border-radius:999px;background:#E6ECFD;color:#1A2FB0">{{ r.planned }}</button></sc-if><sc-if value="{{ r.noPlan }}"><button onClick="{{ r.plan }}" style="cursor:pointer;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:12.5px;padding:5px 12px;border-radius:999px">+ นัด</button></sc-if></span>
+        </div>
+      </sc-for>
+      <sc-if value="{{ pl.tgtEmpty }}"><span style="font-size:13.5px;color:#475069;padding:16px 0">ไม่มีรายชื่อในรายการนี้</span></sc-if>
+      <sc-if value="{{ pl.hasMoreT }}"><button onClick="{{ pl.moreT }}" style="cursor:pointer;align-self:center;margin-top:10px;border:0;background:transparent;color:#1A3FE0;font-size:13.5px;text-decoration:underline">{{ pl.moreTText }}</button></sc-if>
+    </div>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isMap }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><h2 style="margin:0;font-size:28px;font-weight:500">แผนที่ลูกค้ารายจังหวัด</h2><span style="font-size:14px;color:#475069;font-weight:300">กดจังหวัดเพื่อดูกลุ่มเป้าหมายและรายชื่อที่ต้องติดต่อก่อน</span></div>
+  <iframe src="{{ mapSrc }}" title="แผนที่ประเทศไทย" style="width:100%;height:{{ mapH }}px;border:0;display:block;background:transparent"></iframe>
+</sc-if>
+
+<sc-if value="{{ isDedup }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><h2 style="margin:0;font-size:28px;font-weight:500">ตรวจข้อมูลซ้ำ</h2><span style="font-size:14px;color:#475069;font-weight:300;text-wrap:pretty">ชื่อบริษัทเทียบหลังตัดคำนำหน้า/สาขา · เบอร์โทรเทียบ 9 หลักแรก · การตัดสินใจบันทึกในเครื่องนี้และใช้กับทุกหน้า</span></div>
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+    <sc-for list="{{ dd.kpis }}" as="k" hint-placeholder-count="5"><button onClick="{{ k.go }}" style="cursor:pointer;text-align:left;background:{{ k.bg }};border:1.5px solid {{ k.bd }};border-radius:18px;padding:14px 18px;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;color:#475069">{{ k.k }}</span><span style="font-size:28px;font-weight:500;color:#0E1430">{{ k.v }}</span><span style="font-size:12px;color:#475069;font-weight:300">{{ k.sub }}</span></button></sc-for>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:12px">
+    <sc-for list="{{ dd.groups }}" as="g" hint-placeholder-count="5">
+      <div style="background:#fff;border:1px solid #E3E7F1;border-radius:20px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ g.whyBg }};color:{{ g.whyFg }}">{{ g.whyLabel }}</span><span style="font-size:12.5px;color:#475069">{{ g.stateLabel }}</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <sc-if value="{{ g.canMerge }}"><button onClick="{{ g.merge }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13px">รวมเป็นบริษัทเดียว</button></sc-if>
+            <sc-if value="{{ g.canSplit }}"><button onClick="{{ g.split }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:13px">{{ g.splitText }}</button></sc-if>
+            <sc-if value="{{ g.canUndo }}"><button onClick="{{ g.undo }}" style="cursor:pointer;height:34px;padding:0 10px;border:0;background:transparent;color:#475069;font-size:13px;text-decoration:underline">ยกเลิกการตัดสินใจ</button></sc-if>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:10px">
+          <sc-for list="{{ g.items }}" as="it">
+            <button onClick="{{ it.open }}" style="cursor:pointer;text-align:left;border:1px solid #EEF1F8;background:#F7F8FC;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:5px;color:#0E1430">
+              <span style="font-size:14px;font-weight:500;text-wrap:pretty">{{ it.name }}</span>
+              <span style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ it.tags }}" as="t"><span style="font-size:11px;font-weight:500;padding:2px 7px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for></span>
+              <sc-for list="{{ it.facts }}" as="x"><span style="font-size:12.5px;color:#475069;display:flex;gap:6px"><span style="min-width:84px;color:#5E6680">{{ x.k }}</span><span style="word-break:break-word">{{ x.v }}</span></span></sc-for>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+    <sc-if value="{{ dd.empty }}"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:20px;padding:32px;text-align:center;color:#475069">ไม่มีรายการในหมวดนี้</div></sc-if>
+  </section>
+  <div style="display:flex;justify-content:center;align-items:center;gap:10px">
+    <button onClick="{{ dd.prev }}" disabled="{{ dd.noPrev }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;font-size:14px">‹ ก่อนหน้า</button>
+    <span style="font-size:14px;color:#475069">หน้า {{ dd.pageN }} / {{ dd.pages }}</span>
+    <button onClick="{{ dd.next }}" disabled="{{ dd.noNext }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #D5DBEA;background:#fff;font-size:14px">ถัดไป ›</button>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isUpdate }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><h2 style="margin:0;font-size:28px;font-weight:500">อัปเดตข้อมูล</h2><span style="font-size:14px;color:#475069;font-weight:300">{{ up.sourceLine }}</span></div>
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px"><span style="font-size:17px;font-weight:500">อัปโหลดฐานข้อมูลลูกค้าฉบับใหม่</span><span style="font-size:13.5px;color:#475069;font-weight:300;line-height:1.65;text-wrap:pretty">ไฟล์ Excel รูปแบบเดียวกับ ฐานข้อมูลลูกค้า_GCC (ชีต ทะเบียนบริษัท, TGO_CFO, GI, กรอ., SET) ระบบจะแทนข้อมูลบริษัททั้งหมด ส่วนที่เก็บในเครื่อง (ดาว สถานะการขาย โน้ต นัด ข้อมูลติดต่อที่แก้ไข การตัดสินข้อมูลซ้ำ) ยังอยู่ครบ</span></div>
+      <label style="cursor:pointer;height:44px;padding:0 20px;border-radius:999px;background:#0A1A86;color:#fff;font-size:14.5px;display:flex;align-items:center">เลือกไฟล์ .xlsx<input type="file" accept=".xlsx" onChange="{{ up.onFile }}" style="display:none"></input></label>
+    </div>
+    <sc-if value="{{ up.busy }}"><span style="font-size:13.5px;color:#1A3FE0">{{ up.msg }}</span></sc-if>
+    <sc-if value="{{ up.error }}"><div style="background:#FBE3DC;color:#8A2B12;border-radius:12px;padding:12px 14px;font-size:13.5px">{{ up.error }}</div></sc-if>
+    <sc-if value="{{ up.done }}"><div style="background:#DDF5F1;color:#0B6E66;border-radius:12px;padding:12px 14px;font-size:13.5px">{{ up.done }}</div></sc-if>
+    <sc-if value="{{ up.hasPreview }}">
+      <div style="background:#F4F6FC;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px">
+        <span style="font-size:14px;font-weight:500">{{ up.previewHead }}</span>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px"><sc-for list="{{ up.preview }}" as="b"><div style="background:#fff;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px"><span style="font-size:12px;color:#475069">{{ b.k }}</span><span style="font-size:20px;font-weight:500">{{ b.v }}</span></div></sc-for></div>
+        <div style="display:flex;gap:8px"><button onClick="{{ up.apply }}" style="cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">ใช้ข้อมูลชุดนี้</button><button onClick="{{ up.cancel }}" style="cursor:pointer;height:38px;padding:0 12px;border:0;background:transparent;color:#475069;font-size:13.5px;text-decoration:underline">ยกเลิก</button></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ up.canRevert }}"><button onClick="{{ up.revert }}" style="cursor:pointer;align-self:flex-start;border:0;background:transparent;color:#1A3FE0;font-size:13.5px;text-decoration:underline;padding:0">กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button></sc-if>
+  </section>
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px"><span style="font-size:17px;font-weight:500">ดึงใบรับรอง CFO ใหม่จากเว็บไซต์ TGO</span><span style="font-size:13.5px;color:#475069;font-weight:300;line-height:1.65;text-wrap:pretty">อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO) ทำงานเมื่อถึงรอบหรือเมื่อกดปุ่ม</span></div>
+      <button onClick="{{ sy.run }}" disabled="{{ sy.running }}" style="cursor:pointer;height:44px;padding:0 20px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:14.5px">{{ sy.btnLabel }}</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px"><sc-for list="{{ sy.boxes }}" as="b" hint-placeholder-count="3"><div style="background:#F4F6FC;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:3px"><span style="font-size:12px;color:#475069">{{ b.k }}</span><span style="font-size:14.5px;font-weight:500">{{ b.v }}</span></div></sc-for></div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">รอบอัปเดตอัตโนมัติ<select value="{{ sy.freq }}" onChange="{{ sy.onFreq }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px;background:#fff;color:#0E1430"><option value="open">ทุกครั้งที่เปิดเว็บ</option><option value="daily">วันละครั้ง</option><option value="weekly">สัปดาห์ละครั้ง</option><option value="off">ปิด (กดเองเท่านั้น)</option></select></label>
+      <label style="display:flex;gap:8px;align-items:center;height:40px;font-size:13.5px;cursor:pointer"><input type="checkbox" checked="{{ sy.autoApply }}" onChange="{{ sy.onAutoApply }}" style="width:18px;height:18px"></input>เมื่อถึงรอบ ให้อัปเดตทันทีโดยไม่ต้องยืนยัน</label>
+    </div>
+    <details style="font-size:13px;color:#475069"><summary style="cursor:pointer">ตั้งค่าขั้นสูง: Proxy</summary><div style="display:flex;flex-direction:column;gap:6px;padding-top:10px"><span style="line-height:1.6">ใช้ {u} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ tools/tgo-proxy-worker.js</span><input defaultValue="{{ sy.proxy }}" onBlur="{{ sy.onProxy }}" placeholder="https://tgo-proxy.example.workers.dev/?url={u}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px;max-width:560px"></input></div></details>
+    <sc-if value="{{ sy.running }}"><span style="font-size:13.5px;color:#1A3FE0">{{ sy.msg }}</span></sc-if>
+    <sc-if value="{{ sy.error }}"><div style="background:#FBE3DC;color:#8A2B12;border-radius:12px;padding:12px 14px;font-size:13.5px">{{ sy.error }}</div></sc-if>
+    <sc-if value="{{ sy.done }}"><div style="background:#DDF5F1;color:#0B6E66;border-radius:12px;padding:12px 14px;font-size:13.5px">{{ sy.done }}</div></sc-if>
+    <sc-if value="{{ sy.ready }}">
+      <div style="background:#F4F6FC;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:14px;font-weight:500">{{ sy.head }}</span>
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow:auto"><sc-for list="{{ sy.list }}" as="it"><div style="background:#fff;border-radius:10px;padding:9px 12px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><span style="font-size:11.5px;font-weight:500;padding:2px 8px;border-radius:999px;background:{{ it.bg }};color:{{ it.fg }}">{{ it.tag }}</span><span style="font-size:13.5px">{{ it.org }}</span><span style="font-size:12.5px;color:#475069">{{ it.meta }}</span></div></sc-for></div>
+        <div style="display:flex;gap:8px"><button onClick="{{ sy.apply }}" style="cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">อัปเดตเข้าระบบ</button><button onClick="{{ sy.cancel }}" style="cursor:pointer;height:38px;padding:0 12px;border:0;background:transparent;color:#475069;font-size:13.5px;text-decoration:underline">ยกเลิก</button></div>
+      </div>
+    </sc-if>
+  </section>
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:17px;font-weight:500">ทีมขายและข้อมูลที่บันทึก</span><span style="font-size:13.5px;color:#475069;font-weight:300;line-height:1.65;text-wrap:pretty">ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บอยู่ในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร)</span></div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">ฉันคือ<select value="{{ tm.me }}" onChange="{{ tm.onMe }}" style="height:40px;min-width:200px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="">ยังไม่เลือก</option><sc-for list="{{ teamOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+      <form onSubmit="{{ tm.add }}" style="display:flex;gap:8px;align-items:flex-end"><label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px"></input></label><button type="submit" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">เพิ่ม</button></form>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{ tm.members }}" as="m"><span style="display:flex;gap:6px;align-items:center;height:32px;padding:0 6px 0 12px;border-radius:999px;background:#E6ECFD;color:#1A2FB0;font-size:13px">{{ m.name }} · {{ m.n }} บริษัท<button onClick="{{ m.del }}" aria-label="ลบ" style="cursor:pointer;width:22px;height:22px;border-radius:50%;border:0;background:rgba(10,26,134,.12);color:#1A2FB0;font-size:13px;padding:0">×</button></span></sc-for><sc-if value="{{ tm.noTeam }}"><span style="font-size:13px;color:#5E6680">ยังไม่มีรายชื่อทีม เพิ่มชื่อเพื่อกำหนดผู้รับผิดชอบบริษัท</span></sc-if></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px"><sc-for list="{{ tm.stats }}" as="b"><div style="background:#F4F6FC;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px"><span style="font-size:12px;color:#475069">{{ b.k }}</span><span style="font-size:20px;font-weight:500">{{ b.v }}</span></div></sc-for></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button onClick="{{ tm.exp }}" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">ส่งออกไฟล์สำรอง (.json)</button>
+      <label style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:1.5px solid #0A1A86;color:#0A1A86;font-size:13.5px;display:flex;align-items:center">นำเข้าไฟล์สำรอง<input type="file" accept=".json" onChange="{{ tm.imp }}" style="display:none"></input></label>
+      <sc-if value="{{ tm.msg }}"><span style="font-size:13.5px;color:#0B6E66">{{ tm.msg }}</span></sc-if>
+    </div>
+  </section>
+  <section style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:12px">
+    <span style="font-size:17px;font-weight:500">ตรวจสถานะหมดอายุอัตโนมัติ</span>
+    <span style="font-size:13.5px;color:#475069;font-weight:300;line-height:1.65;text-wrap:pretty">ตรวจทุกบริษัทเทียบกับวันนี้ ทุกครั้งที่เปิดเว็บ หลังอัปเดตข้อมูล ทุก 10 นาทีที่เปิดค้าง และเมื่อขึ้นวันใหม่ บันทึกเหตุการณ์ CFO ใกล้หมดอายุ / หมดอายุ / ต่ออายุแล้ว และ GI หมดอายุหรือถูกลดระดับ ดูได้ในแท็บติดตาม</span>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13.5px;cursor:pointer"><input type="checkbox" checked="{{ mon.notify }}" onChange="{{ mon.onNotify }}" style="width:18px;height:18px"></input>แจ้งเตือนผ่านเบราว์เซอร์เมื่อมีเหตุการณ์ใหม่</label>
+    <span style="font-size:13px;color:#475069">{{ mon.line }}</span>
+  </section>
+</sc-if>
+
+<sc-if value="{{ isNotes }}" hint-placeholder-val="{{ false }}">
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px"><span style="font-size:15px;font-weight:600;color:#2A4BE0">01</span><h2 style="margin:0;font-size:28px;font-weight:500">นิยามกลุ่มเป้าหมาย</h2></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr));gap:12px">
+      <sc-for list="{{ nt.defs }}" as="d" hint-placeholder-count="9"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;gap:14px"><span style="width:32px;height:32px;flex:none;border-radius:50%;background:{{ d.badgeBg }};color:{{ d.badgeFg }};display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">{{ d.no }}</span><span style="display:flex;flex-direction:column;gap:4px"><span style="font-size:15px;font-weight:500">{{ d.name }}</span><span style="font-size:13.5px;color:#475069;font-weight:300;line-height:1.6;text-wrap:pretty">{{ d.desc }}</span></span></div></sc-for>
+    </div>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px"><span style="font-size:15px;font-weight:600;color:#2A4BE0">02</span><h2 style="margin:0;font-size:28px;font-weight:500">การรวมข้อมูลและตัดข้อมูลซ้ำ</h2></div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:20px;padding:18px 20px;display:flex;flex-direction:column;gap:8px">
+      <sc-for list="{{ nt.dedup }}" as="t" hint-placeholder-count="4"><span style="font-size:14px;color:#384155;line-height:1.65;text-wrap:pretty">{{ t }}</span></sc-for>
+    </div>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#2A4BE0">03</span><h2 style="margin:0;font-size:28px;font-weight:500">รอบการพิจารณาของ อบก.</h2><span style="font-size:14px;color:#475069;font-weight:300">รอบที่ต้องยื่นต่ออายุ = รอบสุดท้ายที่ประกาศผลไม่เกินวันหมดอายุ ถ้าปิดรับเอกสารแล้วเลื่อนไปรอบถัดไป</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px">
+      <sc-for list="{{ nt.rounds }}" as="c" hint-placeholder-count="6">
+        <div style="background:{{ c.bg }};border:{{ c.bd }};border-radius:20px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:22px;font-weight:500;color:#0A1A86">รอบ {{ c.no }}</span><span style="font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:999px;background:{{ c.stBg }};color:{{ c.stFg }}">{{ c.stT }}</span></div>
+          <sc-for list="{{ c.dates }}" as="d"><div style="display:flex;justify-content:space-between;gap:10px;font-size:13px"><span style="color:#475069">{{ d.k }}</span><span style="font-weight:500;text-align:right">{{ d.v }}</span></div></sc-for>
+          <div style="border-top:1px solid #EEF1F8;padding-top:10px;display:flex;justify-content:space-between;align-items:center;gap:10px"><span style="font-size:13px;color:#475069">ต้องยื่นรอบนี้ <span style="font-size:20px;font-weight:500;color:#1A3FE0">{{ c.n }}</span> บริษัท</span><sc-if value="{{ c.hasN }}"><button onClick="{{ c.go }}" style="cursor:pointer;height:32px;padding:0 12px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:12.5px">ดูรายชื่อ</button></sc-if></div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#2A4BE0">04</span><h2 style="margin:0;font-size:28px;font-weight:500">ไฟล์ต้นทาง</h2><span style="font-size:14px;color:#475069;font-weight:300">{{ nt.srcCount }} ไฟล์</span></div>
+    <div style="background:#fff;border:1px solid #E3E7F1;border-radius:22px;overflow-x:auto"><div style="min-width:860px">
+      <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 110px 90px minmax(0,2fr);gap:14px;padding:13px 22px;font-size:12.5px;color:#475069;background:#F7F8FC;border-bottom:1px solid #E3E7F1"><span>แหล่งข้อมูล</span><span>หน่วยงาน / ไฟล์</span><span>ข้อมูล ณ</span><span style="text-align:right">แถว</span><span>หมายเหตุ</span></div>
+      <sc-for list="{{ nt.sources }}" as="r" hint-placeholder-count="8"><div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 110px 90px minmax(0,2fr);gap:14px;padding:11px 22px;font-size:13px;border-bottom:1px solid #EEF1F8"><span style="font-weight:500">{{ r.name }}</span><span style="display:flex;flex-direction:column;gap:2px;color:#475069"><span>{{ r.org }}</span><span style="font-size:12px;color:#5E6680;word-break:break-all">{{ r.file }}</span></span><span>{{ r.date }}</span><span style="text-align:right">{{ r.n }}</span><span style="color:#475069;font-size:12.5px;line-height:1.55">{{ r.note }}</span></div></sc-for>
+    </div></div>
+  </section>
+</sc-if>
+</main>
+
+<sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeSel }}" style="position:fixed;inset:0;background:rgba(4,10,60,.38);z-index:40"></div>
+  <aside style="position:fixed;top:0;right:0;bottom:0;width:min(680px,100vw);background:#F4F6FC;z-index:41;overflow-y:auto;box-shadow:-20px 0 60px -20px rgba(4,10,60,.4)">
+    <div style="background:linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%);color:#fff;padding:20px 24px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><span style="font-size:13px;color:#C9D4FF">{{ sel.code }} · {{ sel.typeName }}</span><div style="display:flex;gap:8px"><button onClick="{{ sel.toggleStar }}" style="cursor:pointer;height:36px;padding:0 14px;border-radius:999px;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:13px">{{ sel.starText }}</button><button onClick="{{ closeSel }}" aria-label="ปิด" style="cursor:pointer;width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:18px">×</button></div></div>
+      <span style="font-size:24px;font-weight:500;line-height:1.35;text-wrap:pretty">{{ sel.name }}</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:12.5px;padding:3px 10px;border-radius:999px;background:#fff;color:#0A1A86;font-weight:500">{{ sel.tgtName }}</span><sc-for list="{{ sel.tags }}" as="t"><span style="font-size:11.5px;font-weight:500;padding:3px 9px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:#DCE6FF"><span>สถานะการขาย <b style="font-weight:500;color:#fff">{{ sel.stLabel }}</b></span><span>ผู้รับผิดชอบ <b style="font-weight:500;color:#fff">{{ sel.ownerLabel }}</b></span><span>{{ sel.lastContact }}</span></div>
+    </div>
+    <div style="position:sticky;top:0;z-index:2;background:#F4F6FC;padding:8px 24px 0;display:flex;gap:2px;border-bottom:1px solid #E3E7F1;overflow-x:auto">
+      <sc-for list="{{ sel.dTabs }}" as="t"><button onClick="{{ t.go }}" style="cursor:pointer;flex:none;border:0;background:transparent;padding:12px 12px 10px;font-size:14px;font-weight:{{ t.fw }};color:{{ t.fg }};border-bottom:2.5px solid {{ t.bd }};display:flex;gap:6px;align-items:center">{{ t.label }}<sc-if value="{{ t.hasN }}"><span style="font-size:11px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#E6ECFD;color:#1A2FB0;display:flex;align-items:center;justify-content:center">{{ t.n }}</span></sc-if></button></sc-for>
+    </div>
+    <div style="padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+      <sc-if value="{{ sel.tInfo }}">
+        <sc-if value="{{ sel.merged }}"><div style="background:#E6ECFD;border-radius:16px;padding:12px 16px;display:flex;flex-direction:column;gap:6px"><span style="font-size:13.5px;font-weight:500;color:#0A1A86">{{ sel.mergedText }}</span><sc-for list="{{ sel.mergedRows }}" as="m"><span style="font-size:12.5px;color:#1A2FB0;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-weight:500">{{ m.code }}</span><span>{{ m.name }}</span><sc-for list="{{ m.tags }}" as="t"><span style="font-size:10.5px;padding:1px 6px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</span></sc-for></span></sc-for></div></sc-if>
+        <sc-if value="{{ sel.hasDup }}"><button onClick="{{ sel.goDup }}" style="cursor:pointer;text-align:left;background:#FFF7E6;border:1px solid #F3D9A4;border-radius:14px;padding:10px 14px;font-size:13px;color:#6B4100">{{ sel.dupText }}</button></sc-if>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px"><sc-for list="{{ sel.kpis }}" as="k"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:2px"><span style="font-size:12px;color:#475069">{{ k.k }}</span><span style="font-size:18px;font-weight:500;color:{{ k.c }}">{{ k.v }}</span><span style="font-size:11.5px;color:#5E6680">{{ k.sub }}</span></div></sc-for></div>
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="font-size:13px;font-weight:600;color:#2A4BE0">ข้อมูลติดต่อ</span><button onClick="{{ sel.toggleEdit }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:13px;text-decoration:underline">{{ sel.editText }}</button></div>
+          <sc-if value="{{ sel.noContact }}"><span style="font-size:14px;color:#475069">ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span></sc-if>
+          <sc-for list="{{ sel.phones }}" as="p"><a href="{{ p.href }}" style="font-size:16px;font-weight:500;text-decoration:none">{{ p.t }}</a></sc-for>
+          <sc-for list="{{ sel.emails }}" as="p"><a href="{{ p.href }}" style="font-size:14px">{{ p.t }}</a></sc-for>
+          <sc-if value="{{ sel.web }}"><a href="{{ sel.web }}" target="_blank" rel="noopener" style="font-size:14px;word-break:break-all">{{ sel.web }}</a></sc-if>
+          <sc-if value="{{ sel.ctSrc }}"><span style="font-size:12px;color:#475069">{{ sel.ctSrc }}</span></sc-if>
+          <sc-if value="{{ sel.editing }}">
+            <form onSubmit="{{ sel.saveContact }}" style="display:flex;flex-direction:column;gap:10px;background:#F4F6FC;border-radius:12px;padding:14px">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">เบอร์โทร (คั่นหลายเบอร์ด้วย |)<input name="phone" defaultValue="{{ sel.phoneRaw }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">อีเมล<input name="email" defaultValue="{{ sel.emailRaw }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">เว็บไซต์<input name="web" defaultValue="{{ sel.webRaw }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">ผู้ติดต่อ / หมายเหตุ<input name="note" defaultValue="{{ sel.cnoteRaw }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px"></input></label>
+              <button type="submit" style="cursor:pointer;align-self:flex-start;height:38px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">บันทึก</button>
+            </form>
+          </sc-if>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:9px"><sc-for list="{{ sel.facts }}" as="x"><div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px;font-size:14px"><span style="color:#475069">{{ x.k }}</span><span style="word-break:break-word">{{ x.v }}</span></div></sc-for></div>
+        <span style="font-size:12px;color:#5E6680">การจับคู่ข้อมูล: {{ sel.match }}</span>
+      </sc-if>
+      <sc-if value="{{ sel.tBlocks }}">
+        <sc-if value="{{ sel.showRnd }}"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:14px 18px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#2A4BE0">รอบ อบก. ที่ต้องยื่นต่ออายุ</span><span style="font-size:15px;font-weight:500">{{ sel.rndText }}</span><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px"><sc-for list="{{ sel.rndDates }}" as="d"><div style="background:#F4F6FC;border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px"><span style="font-size:11.5px;color:#475069">{{ d.k }}</span><span style="font-size:13px;font-weight:500">{{ d.v }}</span></div></sc-for></div><sc-if value="{{ sel.rndWarn }}"><span style="font-size:13px;color:#8A2B12;background:#FBE3DC;border-radius:10px;padding:8px 10px">{{ sel.rndWarn }}</span></sc-if></div></sc-if>
+        <sc-if value="{{ sel.loadingDet }}"><span style="font-size:13.5px;color:#475069">กำลังโหลดรายละเอียดรายแหล่ง…</span></sc-if>
+        <sc-for list="{{ sel.blocks }}" as="b">
+          <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><span style="display:flex;gap:8px;align-items:center"><span style="font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:{{ b.srcBg }};color:{{ b.srcFg }}">{{ b.src }}</span><span style="font-size:13.5px;font-weight:500">{{ b.title }}</span></span><span style="font-size:12px;color:#475069">{{ b.count }}</span></div>
+            <sc-for list="{{ b.items }}" as="it"><div style="border-top:1px solid #EEF1F8;padding-top:9px;display:flex;flex-direction:column;gap:3px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap"><span style="font-size:14px;font-weight:500">{{ it.h }}</span><sc-if value="{{ it.badge }}"><span style="font-size:11.5px;padding:2px 8px;border-radius:999px;background:{{ it.bBg }};color:{{ it.bFg }}">{{ it.badge }}</span></sc-if></div><span style="font-size:13px;color:#475069;line-height:1.55;word-break:break-word">{{ it.s }}</span><sc-if value="{{ it.from }}"><span style="font-size:11.5px;color:#5E6680">{{ it.from }}</span></sc-if></div></sc-for>
+            <sc-if value="{{ b.more }}"><button onClick="{{ b.showMore }}" style="cursor:pointer;align-self:flex-start;border:0;background:transparent;color:#1A3FE0;font-size:13px;text-decoration:underline;padding:0">{{ b.more }}</button></sc-if>
+          </div>
+        </sc-for>
+        <sc-if value="{{ sel.blocksEmpty }}"><div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:24px;text-align:center;font-size:14px;color:#475069">{{ sel.blocksEmptyText }}</div></sc-if>
+      </sc-if>
+      <sc-if value="{{ sel.tCrm }}">
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">สถานะการขาย<select value="{{ sel.stage }}" onChange="{{ sel.onStage }}" style="height:40px;border-radius:10px;border:0;padding:0 12px;font-size:14px;background:{{ sel.sbg }};color:{{ sel.sfg }}"><sc-for list="{{ stageOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#475069">ผู้รับผิดชอบ<select value="{{ sel.owner }}" onChange="{{ sel.onOwner }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="">ยังไม่มีผู้รับผิดชอบ</option><sc-for list="{{ teamOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+          <sc-if value="{{ sel.noTeam }}"><button onClick="{{ sel.goTeam }}" style="cursor:pointer;grid-column:1/-1;text-align:left;border:0;background:transparent;color:#1A3FE0;font-size:13px;text-decoration:underline;padding:0">ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล</button></sc-if>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:#2A4BE0">นัดหมาย</span><button onClick="{{ sel.plan }}" style="cursor:pointer;height:34px;padding:0 14px;border-radius:999px;border:1.5px solid #0A1A86;background:#fff;color:#0A1A86;font-size:13px">+ เพิ่มนัด</button></div>
+          <sc-if value="{{ sel.noTasks }}"><span style="font-size:13.5px;color:#5E6680">ยังไม่มีนัด</span></sc-if>
+          <sc-for list="{{ sel.tasks }}" as="t"><div style="display:flex;gap:10px;align-items:center;border-top:1px solid #EEF1F8;padding-top:8px"><button onClick="{{ t.toggle }}" aria-label="ทำเสร็จ" style="cursor:pointer;width:22px;height:22px;flex:none;border-radius:6px;border:1.5px solid {{ t.color }};background:{{ t.doneBg }};color:#fff;font-size:12px;padding:0">{{ t.doneMark }}</button><span style="flex:1;font-size:13.5px;text-decoration:{{ t.deco }}">{{ t.meta }}<sc-if value="{{ t.note }}"> · {{ t.note }}</sc-if></span><button onClick="{{ t.edit }}" style="cursor:pointer;border:0;background:transparent;color:#1A3FE0;font-size:12.5px">เลื่อน</button><button onClick="{{ t.del }}" style="cursor:pointer;border:0;background:transparent;color:#A33A1A;font-size:12.5px">ลบ</button></div></sc-for>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E7F1;border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+          <span style="font-size:13px;font-weight:600;color:#2A4BE0">บันทึกการติดต่อ</span>
+          <form onSubmit="{{ sel.addLog }}" style="display:flex;flex-direction:column;gap:8px;background:#F4F6FC;border-radius:14px;padding:12px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <select name="type" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="call">โทร</option><option value="email">อีเมล</option><option value="meet">นัดพบ</option><option value="note">โน้ต</option></select>
+              <select name="result" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px;background:#fff;color:#0E1430"><option value="">ผลการติดต่อ</option><option value="ติดต่อได้">ติดต่อได้</option><option value="ไม่รับสาย">ไม่รับสาย</option><option value="ขอข้อมูลเพิ่ม">ขอข้อมูลเพิ่ม</option><option value="นัดคุยต่อ">นัดคุยต่อ</option><option value="ส่งใบเสนอราคาแล้ว">ส่งใบเสนอราคาแล้ว</option><option value="ไม่สนใจ">ไม่สนใจ</option></select>
+            </div>
+            <div style="display:flex;gap:8px"><input name="text" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" style="flex:1;min-width:0;height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 12px;font-size:14px"></input><button type="submit" style="cursor:pointer;height:40px;padding:0 16px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:13.5px">บันทึก</button></div>
+          </form>
+          <sc-if value="{{ sel.noLog }}"><span style="font-size:13.5px;color:#5E6680">ยังไม่มีประวัติการติดต่อ</span></sc-if>
+          <div style="display:flex;flex-direction:column">
+            <sc-for list="{{ sel.timeline }}" as="l">
+              <div style="display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:12px;padding:10px 0;border-top:1px solid #EEF1F8">
+                <span style="width:10px;height:10px;border-radius:50%;background:{{ l.color }};margin-top:6px"></span>
+                <span style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:12.5px;font-weight:500;color:{{ l.color }}">{{ l.tag }}</span><sc-if value="{{ l.result }}"><span style="font-size:11.5px;padding:1px 8px;border-radius:999px;background:#F4F6FC;color:#384155">{{ l.result }}</span></sc-if></span><sc-if value="{{ l.text }}"><span style="font-size:13.5px;white-space:pre-wrap;word-break:break-word">{{ l.text }}</span></sc-if><span style="font-size:11.5px;color:#5E6680">{{ l.meta }}</span></span>
+                <button onClick="{{ l.del }}" style="cursor:pointer;border:0;background:transparent;color:#A33A1A;font-size:12px;align-self:flex-start">ลบ</button>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </aside>
+</sc-if>
+
+<sc-if value="{{ hasSched }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ sc.cancel }}" style="position:fixed;inset:0;background:rgba(4,10,60,.45);z-index:50"></div>
+  <form onSubmit="{{ sc.save }}" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(480px,94vw);background:#fff;border-radius:22px;padding:22px;z-index:51;display:flex;flex-direction:column;gap:12px">
+    <span style="font-size:18px;font-weight:500">{{ sc.title }}</span>
+    <span style="font-size:13px;color:#475069">{{ sc.sub }}</span>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">ประเภท<select name="type" defaultValue="{{ sc.type }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px"><sc-for list="{{ typeOpts }}" as="o"><option value="{{ o.v }}">{{ o.label }}</option></sc-for></select></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">วันที่<input name="date" type="date" defaultValue="{{ sc.date }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px"></input></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">เวลา<input name="time" type="time" defaultValue="{{ sc.time }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px"></input></label>
+    </div>
+    <sc-if value="{{ sc.isMulti }}"><label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">กระจายนัด<select name="spread" defaultValue="5" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px"><option value="0">ทั้งหมดในวันเดียว</option><option value="3">วันละ 3 ราย (วันทำการ)</option><option value="5">วันละ 5 ราย (วันทำการ)</option><option value="10">วันละ 10 ราย (วันทำการ)</option></select></label></sc-if>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#475069">หมายเหตุ<input name="note" defaultValue="{{ sc.note }}" style="height:40px;border:1.5px solid #D5DBEA;border-radius:10px;padding:0 10px;font-size:14px"></input></label>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" onClick="{{ sc.cancel }}" style="cursor:pointer;height:40px;padding:0 14px;border:0;background:transparent;color:#475069;font-size:14px">ยกเลิก</button><button type="submit" style="cursor:pointer;height:40px;padding:0 18px;border-radius:999px;border:0;background:#0A1A86;color:#fff;font-size:14px">บันทึกนัด</button></div>
+  </form>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pageSize&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;25&quot;,&quot;50&quot;,&quot;100&quot;],&quot;default&quot;:&quot;50&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;รายชื่อ&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;รายชื่อ&quot;},&quot;soonWindow&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;30&quot;,&quot;60&quot;,&quot;90&quot;,&quot;180&quot;],&quot;default&quot;:&quot;90&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;การติดตาม&quot;}}">
+const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const fmtN=n=>n==null?'—':Number(n).toLocaleString('en-US');
+const isoTh=s=>{if(!s)return '—';const [y,m,d]=s.split('-');return `${+d} ${TH_M[+m-1]} ${+y+543}`};
+const ymTh=s=>{if(!s)return '';const [y,m]=s.split('-');return `${TH_M[+m-1]} ${y}`};
+const money=n=>n==null?'—':n>=1e6?(n/1e6).toLocaleString('en-US',{maximumFractionDigits:1})+' ล้านบาท':fmtN(n)+' บาท';
+const pad=n=>String(n).padStart(2,'0');
+const addDays=(iso,n)=>{const d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
+const dow=iso=>new Date(iso+'T00:00:00Z').getUTCDay();
+const nextWork=d=>{while([0,6].includes(dow(d)))d=addDays(d,1);return d};
+const telHref=p=>{const m=String(p||'').split(/[|,]/)[0].replace(/[^\d+]/g,'');return m?'tel:'+m:''};
+const dtTh=iso=>{const d=new Date(iso);return `${d.getDate()} ${TH_M[d.getMonth()]} ${d.getFullYear()+543} ${pad(d.getHours())}:${pad(d.getMinutes())} น.`};
+const SRCC=[['TGO','#1A3FE0','#fff'],['GI','#BFF3EE','#0B6E66'],['กรอ.','#E6ECFD','#1A2FB0'],['SET','#0E1F7A','#fff']];
+const GDESC=['ใบล่าสุดยังไม่หมดอายุ แต่จะหมดภายในช่วงที่ตั้งไว้ ถึงรอบทวนสอบปีถัดไป','ไม่มีใบที่ยังใช้ได้ ใบล่าสุดหมดอายุไม่เกิน 365 วัน เคยทำแล้ว ยังไม่ต่อ','ใบล่าสุดหมดอายุเกิน 365 วัน หรือไม่ระบุวันหมดอายุ','มีใบที่ยังใช้ได้และเหลือมากกว่าช่วงที่ตั้งไว้','บริษัทจดทะเบียน SET/mai ที่ยังไม่เคยมี CFO','ได้ GI ระดับ 3–5 ที่ยังใช้ได้ แต่ยังไม่มี CFO','โรงงานเริ่มประกอบกิจการตั้งแต่ ม.ค. 2567 เงินลงทุนรวม ≥ 5 ล้านบาท','ได้ GI ระดับ 2 ที่ยังใช้ได้ แต่ยังไม่มี CFO','ไม่เข้าเงื่อนไขข้อ 1–8 (ส่วนใหญ่เป็น GI ระดับ 1)'];
+const GCOL=[['#1A3FE0','#fff','#1A3FE0'],['#2A63FF','#fff','#2A63FF'],['#7C93FF','#fff','#7C93FF'],['#34D1C4','#0B4E48','#34D1C4'],['#0E1F7A','#fff','#0E1F7A'],['#1FB5C9','#fff','#1FB5C9'],['#4E9BFF','#fff','#4E9BFF'],['#B9C8FF','#0A1A86','#B9C8FF'],['#E3E7F1','#475069','#C9D1E6']];
+const GI_COL={5:['#0B6E66','#fff'],4:['#1FB5C9','#fff'],3:['#BFF3EE','#0B6E66'],2:['#E6ECFD','#1A2FB0'],1:['#EEF1F8','#475069']};
+const STG=[['none','ยังไม่ติดต่อ','#EEF1F8','#475069'],['contacted','ติดต่อแล้ว','#E6ECFD','#1A2FB0'],['interested','สนใจ','#DDF5F1','#0B6E66'],['proposal','ส่งใบเสนอราคา','#FDECC8','#9A5A00'],['won','ได้งาน','#0B6E66','#fff'],['lost','ไม่สนใจ','#F2E3E0','#8A2B12']];
+const TT=[['call','โทร','#1A3FE0'],['email','อีเมล','#1FB5C9'],['meet','นัดพบ','#E8A23B'],['follow','ติดตามผล','#7C93FF']];
+const FEEDS=[['watch','รายการติดตามของฉัน','#E8A23B','บริษัทที่กดดาวไว้'],['cfoSoon','CFO ใกล้หมดอายุ','#1A3FE0','ใบล่าสุดจะหมดอายุภายในช่วงที่ตั้งไว้'],['cfoExp','CFO หมดอายุแล้วยังไม่ต่อ','#7C93FF','ไม่มีใบที่ยังใช้ได้ เรียงจากที่เพิ่งหมด'],['giSoon','GI ใกล้หมดอายุ','#1FB5C9','ระดับ 2–5 ที่จะหมดอายุภายใน 90 วัน'],['giDown','GI ถูกลดระดับ / หมดอายุ','#0B6E66','เคยได้ระดับสูงกว่าระดับที่ยังใช้ได้ตอนนี้'],['newFac','โรงงานใหม่ กรอ.','#4E9BFF','เริ่มประกอบกิจการใน 6 เดือนล่าสุดของข้อมูล'],['setNew','บริษัทที่เพิ่งเข้า SET','#0E1F7A','ชื่อย่อที่ไม่เคยมีในข้อมูลชุดก่อน (180 วันล่าสุด)'],['noContact','ข้อมูลติดต่อยังไม่ครบ','#A8B0C8','กลุ่มเป้าหมาย 1–8 ที่ยังไม่มีเบอร์โทร']];
+const CST={active:['อยู่ในอายุ','#0E8A9A'],soon:['ใกล้หมดอายุ','#B26A00'],expired:['หมดอายุ','#475069'],unknown:['ไม่ระบุวันหมดอายุ','#475069'],none:['ยังไม่มี CFO','#6B7390']};
+const PILL={active:['#DDF5F1','#0B6E66'],soon:['#FDECC8','#9A5A00'],expired:['#EEF1F8','#475069'],unknown:['#EEF1F8','#475069']};
+
+const localToday=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
+const addMonths=(iso,n)=>{const [y,m,d]=iso.split('-').map(Number);const t=new Date(Date.UTC(y,m-1+n,d));return t.toISOString().slice(0,10)};
+class Component extends DCLogic {
+  state={dateOpen:false,dTab:'info',narrow:typeof window!=='undefined'&&window.innerWidth<760,owner:'',plOwner:'',tmMsg:'',ref:localToday(),win:+(this.props.soonWindow||90),oInd:'',oProv:'',oExpM:'',oFy:'',oSt:'',expM:'',cInd:'',cFy:'',loading:true,loadMsg:'กำลังโหลดข้อมูลบริษัท…',tab:'overview',view:'co',q:'',tgt:'',src:'',ind:'',prov:'',type:'',cfo:'',gi:'',ph:'',inv:'',feed:'',ym:'',rnd:'',stage:'',sort:'default',page:0,
+    sel:null,det:null,more:{},editC:false,sched:null,calM:'',calDay:'',plFeed:'cfoSoon',plStage:'',perDay:5,picked:{},plLim:60,ddF:'pending',ddPage:0,up:{},sy:{},mapH:1500,v:0};
+  componentDidMount(){
+    try{const s=JSON.parse(localStorage.getItem('gcc-ui')||'{}');if(s.tab)this.setState({tab:s.tab,view:s.view||'co'})}catch(e){}
+    this._kd=e=>{if(e.key==='Escape'){if(this.state.sched)this.setState({sched:null});else if(this.state.sel!=null)this.setState({sel:null})}};document.addEventListener('keydown',this._kd);
+    this._msg=e=>{const d=e.data||{};if(d.type==='gcc-map-height'&&d.h)this.setState({mapH:Math.ceil(d.h)});else if(d.type==='gcc-open')this.open(d.id);else if(d.type==='gcc-filter'&&this.D){const D=this.D;const p=D.prov.indexOf(d.prov),i=D.ind.indexOf(d.ind);this.setF({prov:p>=0?String(p):'',ind:i>=0?String(i):'',tgt:d.tgt||'',view:'co'})}};
+    window.addEventListener('message',this._msg);this._rs=()=>{const n=window.innerWidth<760;if(n!==this.state.narrow)this.setState({narrow:n})};window.addEventListener('resize',this._rs);this.load();
+  }
+  componentDidUpdate(pp){if(pp.soonWindow!==this.props.soonWindow)this.setRef(null,+(this.props.soonWindow||90))}
+  setRef(ref,win){this.setState(s=>({ref:ref||s.ref,win:win||s.win,page:0}),()=>{if(this.B)this.recalc()})}
+  componentWillUnmount(){document.removeEventListener('keydown',this._kd);window.removeEventListener('message',this._msg);clearInterval(this._t)}
+  async load(){
+    try{
+      for(let i=0;i<100&&!window.GCC;i++)await new Promise(r=>setTimeout(r,50));
+      const G=window.GCC;if(!G)throw new Error('โหลดตัวประมวลผลข้อมูลไม่สำเร็จ');
+      const [base,dec,contacts,crm,added,tgoCerts,setSnap,R,sources]=await Promise.all([G.loadBase(),G.idb.get('dedup'),G.idb.get('contacts'),G.idb.get('crm'),G.idb.get('addedCos'),G.idb.get('tgoCerts'),G.idb.get('setSnap'),fetch('data/rounds.json').then(r=>r.json()).catch(()=>[]),fetch('data/gcc-sources.json').then(r=>r.json()).catch(()=>[])]);
+      Object.assign(this,{base,dec:dec||{},contacts:contacts||{},crm:{stages:{},notes:{},tasks:[],watch:[],owners:{},team:[],log:{},...(crm||{})},added:added||[],tgoCerts:tgoCerts||[],setSnap:setSnap||null,sources});
+      {const C=this.crm;C.owners=C.owners||{};C.team=C.team||[];C.log=C.log||{};let mv=0;Object.entries(C.notes||{}).forEach(([id,a])=>{(a||[]).forEach(n=>{(C.log[id]||(C.log[id]=[])).push({at:n.at,type:'note',text:n.text,by:''});mv++})});if(mv){C.notes={};this.persist('crm',C)}}
+      this.R=R.map(x=>({...x,annT:Date.parse(x.ann),docT:Date.parse(x.doc)})).sort((a,b)=>a.annT-b.annT);
+      this.setState({loadMsg:'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…'});await new Promise(r=>setTimeout(r,30));
+      this.rebuild();this._day=G.todayISO();
+      this.setState({loading:false});
+      this._t=setInterval(()=>this.tick(),6e5);
+      if(this.syncDue(this.syncCfg()))setTimeout(()=>this.runSync(true),1500);
+    }catch(e){this.setState({loadMsg:'โหลดข้อมูลไม่สำเร็จ: '+(e&&e.message||e)})}
+  }
+  tick(){const d=GCC.todayISO();if(d!==this._day){this._day=d;this.recalc()}else this.checkMonitor();const c=this.syncCfg();if(c.freq!=='open'&&this.syncDue(c))this.runSync(true);this.forceUpdate()}
+  persist(k,v){try{GCC.idb.set(k,v)}catch(e){}}
+  saveCrm(){this.persist('crm',this.crm);this.forceUpdate()}
+  me(){try{return localStorage.getItem('gcc-me')||''}catch(e){return ''}}
+  logAct(id,e){const L=this.crm.log;(L[id]||(L[id]=[])).push({at:new Date().toISOString(),by:this.me(),...e})}
+  setStage(id,v){const C=this.crm;if((C.stages[id]||'none')===v)return;C.stages[id]=v;this.logAct(id,{type:'stage',text:'เปลี่ยนสถานะการขายเป็น "'+((STG.find(x=>x[0]===v)||STG[0])[1])+'"'});this.saveCrm()}
+  setOwner(id,v){const C=this.crm;if((C.owners[id]||'')===v)return;if(v)C.owners[id]=v;else delete C.owners[id];this.logAct(id,{type:'owner',text:v?'กำหนดผู้รับผิดชอบ: '+v:'ยกเลิกผู้รับผิดชอบ'});this._fk=null;this.saveCrm()}
+  exportCrm(){const data={kind:'gcc-crm-backup',v:1,at:new Date().toISOString(),by:this.me(),crm:this.crm,contacts:this.contacts,dedup:this.dec};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));a.download='GCC_ข้อมูลทีม_'+GCC.todayISO()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)}
+  async importCrm(e){const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;
+    try{const d=JSON.parse(await f.text());if(d.kind!=='gcc-crm-backup')throw new Error('ไม่ใช่ไฟล์สำรองของระบบนี้');const C=this.crm,I=d.crm||{};let n=0;
+      Object.entries(I.stages||{}).forEach(([k,v])=>{if(v&&v!=='none'){C.stages[k]=v;n++}});Object.entries(I.owners||{}).forEach(([k,v])=>{if(v){C.owners[k]=v;n++}});
+      (I.team||[]).forEach(t=>{if(!C.team.includes(t))C.team.push(t)});(I.watch||[]).forEach(w=>{if(!C.watch.includes(w))C.watch.push(w)});
+      const ids=new Set(C.tasks.map(t=>t.id));(I.tasks||[]).forEach(t=>{if(!ids.has(t.id)){C.tasks.push(t);n++}});
+      Object.entries(I.log||{}).forEach(([k,a])=>{const L=C.log[k]||(C.log[k]=[]);const ks=new Set(L.map(x=>x.at+'|'+x.text));(a||[]).forEach(x=>{if(!ks.has(x.at+'|'+x.text)){L.push(x);n++}})});
+      Object.entries(d.contacts||{}).forEach(([k,v])=>{const o=this.contacts[k];if(!o||(v.at||'')>(o.at||''))this.contacts[k]=v});Object.entries(d.dedup||{}).forEach(([k,v])=>{if(!(k in this.dec))this.dec[k]=v});
+      this.persist('crm',C);this.persist('contacts',this.contacts);this.persist('dedup',this.dec);this.rebuild();this.setState({tmMsg:'นำเข้าแล้ว '+fmtN(n)+' รายการ จากไฟล์ของ '+(d.by||'ไม่ระบุชื่อ')+' ('+dtTh(d.at)+')'})}
+    catch(err){this.setState({tmMsg:'นำเข้าไม่สำเร็จ: '+(err&&err.message||err)})}}
+  saveUi(){try{localStorage.setItem('gcc-ui',JSON.stringify({tab:this.state.tab,view:this.state.view}))}catch(e){}}
+  go(tab,p){this.setState({tab,...(p||{})},()=>this.saveUi());window.scrollTo(0,0)}
+  setF(p){this.setState({...p,page:0,tab:'search'},()=>this.saveUi());window.scrollTo(0,0)}
+  rebuild(){
+    const B=GCC.build(this.base,this.dec,{added:this.added,contacts:this.contacts,certs:this.tgoCerts.map(c=>({...c,tgo:true}))});
+    this.B=B;this.D=B.D;this.CD=B.CD;
+    B.certs.forEach(ct=>{if(!ct.tgo)return;const c=B.byId.get(ct.gid);if(!c)return;c.src|=1;c.cfoN=(c.cfoN||0)+1;if(ct.ex&&ct.ex>(c.cfoEx||''))c.cfoEx=ct.ex});
+    this.certsBy=new Map();B.certs.forEach(ct=>{const a=this.certsBy.get(ct.gid)||[];a.push(ct);this.certsBy.set(ct.gid,a)});
+    this.byNorm=new Map();B.companies.forEach(c=>{const k=GCC.norm(c.name);if(k&&!this.byNorm.has(k))this.byNorm.set(k,c.id)});
+    this.certKeys=new Set(B.certs.map(ct=>window.TGOSync?TGOSync.key(ct.cert,ct.org):ct.cert+'|'+ct.org));
+    // SET snapshot
+    const syms=[...new Set(B.companies.map(c=>c.set).filter(Boolean))];const today=GCC.todayISO();
+    if(!this.setSnap){this.setSnap={syms,at:today,newSyms:{}};this.persist('setSnap',this.setSnap)}
+    else{const old=new Set(this.setSnap.syms);const nw=syms.filter(s=>!old.has(s));if(nw.length||syms.length!==this.setSnap.syms.length){nw.forEach(s=>this.setSnap.newSyms[s]=today);this.setSnap.syms=syms;this.setSnap.at=today;this.persist('setSnap',this.setSnap)}}
+    this.recalc();
+  }
+  roundOf(ex,T){
+    const R=this.R||[];if(!ex||!R.length)return null;const exT=Date.parse(ex);
+    if(exT<T-365*864e5)return {key:'old'};if(!R.some(x=>x.annT>exT))return {key:'later'};
+    let ideal=null;for(const x of R)if(x.annT<=exT)ideal=x;
+    const rn=ideal&&ideal.docT>=T?ideal:R.find(x=>x.docT>=T);if(!rn)return {key:'later'};
+    return {key:rn.no,r:rn,ideal:ideal&&ideal.no,lapse:Math.max(0,Math.round((rn.annT-exT)/864e5))};
+  }
+  recalc(){
+    const B=this.B,D=this.D;const T=Date.parse(this.state.ref||GCC.todayISO());const W=+(this.state.win||90);this.T=T;this.W=W;
+    let maxYm='';B.companies.forEach(c=>{if(c.newYm>maxYm)maxYm=c.newYm});
+    let minYm='';if(maxYm){let [y,m]=maxYm.split('-').map(Number);m-=5;while(m<1){m+=12;y--}minYm=`${y}-${pad(m)}`}this.maxYm=maxYm;this.minYm=minYm;
+    const ns=(this.setSnap&&this.setSnap.newSyms)||{};const nsCut=addDays(GCC.todayISO(),-180);
+    const watch=new Set(this.crm.watch);
+    B.companies.forEach(c=>{GCC.status(c,T,W);c.code=c.id>=900000?'TGO-'+(c.id-900000):'GCC-'+String(c.id).padStart(6,'0');
+      c.hay=[c.name,c.jur,c.set,c.phone,c.code,c.email,c.ids.map(i=>'gcc-'+String(i).padStart(6,'0')).join(' ')].join(' ').toLowerCase();
+      c.fl={watch:watch.has(c.id),cfoSoon:c.cfoSt==='soon',cfoExp:c.cfoSt==='expired',giSoon:c.giDays!=null&&c.giDays>=0&&c.giDays<=90&&c.giLive>=2,giDown:(c.giMax||0)>=2&&(c.giLive||0)<c.giMax,
+        newFac:!!(c.newYm&&c.newYm>=minYm),setNew:!!(c.set&&ns[c.set]&&ns[c.set]>=nsCut),noContact:c.tgt<=7&&!c.hasPh};
+      const r=(c.cfoSt==='soon'||c.cfoSt==='active'||c.cfoSt==='expired')?this.roundOf(c.cfoEx,T):null;c.rnd=r&&r.r?r.key:'';c.rndKey=r?r.key:'';c.rndR=r&&r.r;c.rndLapse=r&&r.lapse||0;c.rndIdeal=r&&r.ideal;});
+    B.certs.forEach(ct=>{ct.days=ct.ex?Math.round((Date.parse(ct.ex)-T)/864e5):null;ct.st=ct.days==null?'unknown':ct.days<0?'expired':ct.days<=W?'soon':'active';
+      ct.bad=!!(ct.ap&&ct.ex&&(Date.parse(ct.ex)-Date.parse(ct.ap))/864e5<300);const c=B.byId.get(ct.gid);ct.co=c;ct.isLatest=!!(c&&c.cfoEx===ct.ex);
+      ct.hay=(ct.cert+' '+ct.org+' '+ct.act).toLowerCase();ct.provName=ct.provTxt||this.CD.prov[ct.prov]||'';ct.indName=this.CD.ind[ct.ind]||'';ct.apT=ct.ap?Date.parse(ct.ap):0;ct.exM=ct.ex?ct.ex.slice(0,7):'';
+      const fy=this.CD.fy[ct.fy]||(/FY(\d\d)/i.exec(ct.cert||'')||[])[0]||'';const m=/^FY(\d\d)$/i.exec(fy);if(m){const v=+m[1];ct.yr=String(v>=50?2500+v:2543+v)}else if(ct.ap){const [y,mo]=ct.ap.split('-').map(Number);ct.yr=String(y+543+(mo>=10?1:0))}else ct.yr='';
+      ct.hasScope=ct.s1!=null&&((ct.s1||0)+(ct.s2||0)+(ct.s3||0))>0});
+    this._fk=null;this._ov=null;this.checkMonitor();this.setState(s=>({v:s.v+1}));
+  }
+  monCfg(){const d={snap:null,events:[],last:null,seenAt:null,notify:false};try{return {...d,...JSON.parse(localStorage.getItem('gcc-monitor')||'{}')}}catch(e){return d}}
+  saveMon(p){const c={...this.monCfg(),...p};try{localStorage.setItem('gcc-monitor',JSON.stringify(c))}catch(e){}return c}
+  checkMonitor(manual){
+    if(!this.B||this.state.ref!==GCC.todayISO())return;const c=this.monCfg();const now=new Date().toISOString();const snap={};const ev=[];
+    this.B.companies.forEach(o=>{if(o.cfoSt==='none'&&!((o.giMax||0)>=2))return;const k=o.cfoSt[0]+(o.giLive||0);snap[o.id]=k;const p=c.snap&&c.snap[o.id];if(!c.snap||!p||p===k)return;
+      const ps={a:'active',s:'soon',e:'expired',u:'unknown',n:'none'}[p[0]],pg=+p.slice(1);
+      if(o.cfoSt!==ps){if(o.cfoSt==='soon'&&ps==='active')ev.push(['cfoSoon',o.id]);else if(o.cfoSt==='expired'&&(ps==='active'||ps==='soon'))ev.push(['cfoExpired',o.id]);else if((o.cfoSt==='active'||o.cfoSt==='soon')&&(ps==='expired'||ps==='none'||ps==='unknown'))ev.push(['cfoRenewed',o.id])}
+      const g=o.giLive||0;if(g<pg)ev.push(['giDown',o.id]);else if(g>pg)ev.push(['giUp',o.id])});
+    const events=ev.map(([t,id])=>({t,id,at:now})).concat(c.events||[]).slice(0,400);
+    this.saveMon({snap,events,last:now,seenAt:c.snap?c.seenAt:now});
+    if(ev.length&&c.notify&&'Notification' in window&&Notification.permission==='granted'){try{new Notification('GCC: ตรวจสถานะอัตโนมัติ',{body:`พบเหตุการณ์ใหม่ ${ev.length} รายการ`})}catch(e){}}
+    if(manual)this.setState({monMsg:ev.length?`พบเหตุการณ์ใหม่ ${fmtN(ev.length)} รายการ`:'ไม่มีการเปลี่ยนแปลงสถานะ'});
+  }
+  syncCfg(){const d={freq:'daily',proxy:'',autoApply:true};try{return {...d,...JSON.parse(localStorage.getItem('gcc-tgo-sync')||'{}')}}catch(e){return d}}
+  saveSync(p){const c={...this.syncCfg(),...p};try{localStorage.setItem('gcc-tgo-sync',JSON.stringify(c))}catch(e){}this.forceUpdate();return c}
+  syncDue(c){if(c.freq==='off'||!window.TGOSync)return false;if(!c.last||c.freq==='open')return true;return Date.now()-Date.parse(c.last)>=(c.freq==='weekly'?168:24)*36e5}
+  async runSync(auto){
+    if(this._syncing||!this.B||!window.TGOSync)return;const c=this.syncCfg();this._syncing=true;this.setState({sy:{status:'running',msg:'กำลังเชื่อมต่อเว็บไซต์ TGO…'}});
+    try{
+      const res=await TGOSync.fetchAll({proxy:c.proxy,maxPages:3,isKnown:it=>this.certKeys.has(TGOSync.key(it.cert,it.org)),onProgress:m=>this.setState({sy:{status:'running',msg:m}})});
+      const nw=res.items.filter(it=>!this.certKeys.has(TGOSync.key(it.cert,it.org))).map(it=>({...it,gid:this.byNorm.get(GCC.norm(it.org))||null}));
+      this._sync={...res,nw,at:new Date().toISOString()};
+      if(!nw.length){this.saveSync({last:this._sync.at,lastMsg:'ไม่มีใบรับรองใหม่',total:res.total});this._sync=null;this.setState({sy:{status:auto?'':'done',msg:`ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)`}})}
+      else if(auto&&c.autoApply)this.applySync(true);else{this.saveSync({total:res.total});this.setState({sy:{status:'ready'}})}
+    }catch(e){this.setState({sy:{status:'error',msg:(auto?'ซิงก์อัตโนมัติไม่สำเร็จ: ':'')+(e&&e.message||e)}})}finally{this._syncing=false}
+  }
+  applySync(auto){
+    const st=this._sync;if(!st)return;const D=this.D;let made=0;
+    st.nw.forEach(it=>{let gid=it.gid;if(!gid){gid=900001+this.added.length;made++;const pi=D.prov.indexOf(it.prov);
+        this.added.push({id:gid,name:it.org,jur:'',type:Math.max(0,D.type.indexOf('ไม่ระบุ')),prov:pi>=0?pi:D.prov.indexOf(''),addr:'',ind:Math.max(0,D.ind.indexOf('ไม่ระบุ')),biz:it.act,src:1,tgt:0,cfo:Math.max(0,D.cfo.indexOf('อยู่ในอายุ')),cfoN:0,cfoEx:'',giNow:null,giMax:null,giUntil:'',newYm:'',invest:null,fac:null,set:'',mkt:'',phone:'',email:'',web:'',ct:0,match:0});this.byNorm.set(GCC.norm(it.org),gid)}
+      this.tgoCerts.push({gid,cert:it.cert,org:it.org,branch:it.branch,act:it.act,ind:-1,size:-1,addr:'',prov:-1,provTxt:it.prov,zip:'',ap:it.ap,ex:it.ex,fy:-1,s1:null,s2:null,s3:null,phone:'',email:'',webId:it.id,note:'ดึงจากเว็บไซต์ TGO อัตโนมัติ '+isoTh(GCC.todayISO())})});
+    this.persist('addedCos',this.added);this.persist('tgoCerts',this.tgoCerts);this.rebuild();
+    const msg=`${auto?'อัปเดตอัตโนมัติ':'อัปเดต'}จาก TGO แล้ว: ใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ · ผูกกับบริษัทเดิม ${fmtN(st.nw.length-made)} · สร้างบริษัทใหม่ ${fmtN(made)}`;
+    this.saveSync({last:st.at,lastMsg:`ใหม่ ${fmtN(st.nw.length)} ใบ`,total:st.total});this._sync=null;this.setState({sy:{status:'done',msg}});
+  }
+  async onFile(e){
+    const file=e.target.files&&e.target.files[0];e.target.value='';if(!file)return;
+    this.setState({up:{status:'busy',msg:'กำลังอ่านไฟล์…'}});
+    try{const r=await GCC.parseXlsx(file,m=>this.setState({up:{status:'busy',msg:m}}));
+      const oldIds=new Set(this.base.rows.map(a=>a[0]));const newIds=new Set(r.base.rows.map(a=>a[0]));
+      const oldSet=new Set(this.base.rows.map(a=>a[19]).filter(Boolean));const setN=r.base.rows.filter(a=>a[19]&&!oldSet.has(a[19])).length;
+      this._up=r;this.setState({up:{status:'preview',head:`${file.name} · ข้อมูล ณ ${isoTh(r.base.asOf)}`,preview:[['แถวบริษัท',r.base.rows.length],['รหัสใหม่',r.base.rows.filter(a=>!oldIds.has(a[0])).length],['รหัสที่หายไป',[...oldIds].filter(i=>!newIds.has(i)).length],['ใบรับรอง CFO',r.base.certs.length],['ชื่อย่อ SET ใหม่',setN]].map(([k,v])=>({k,v:fmtN(v)}))}})
+    }catch(err){this.setState({up:{status:'error',msg:err&&err.message||String(err)}})}
+  }
+  async applyUpload(){const r=this._up;if(!r)return;this.setState({up:{status:'busy',msg:'กำลังบันทึกและคำนวณใหม่…'}});
+    try{await GCC.idb.set('details',r.details);await GCC.idb.set('dataset',r.base)}catch(e){}
+    this.base=r.base;this._up=null;this.rebuild();this.setState({up:{status:'done',msg:`ใช้ข้อมูลชุดใหม่แล้ว ${fmtN(this.B.companies.length)} บริษัท (หลังตัดข้อมูลซ้ำ)`}})}
+  async revertUpload(){try{await GCC.idb.del('dataset');await GCC.idb.del('details')}catch(e){}this.base=await GCC.loadBase();this.rebuild();this.setState({up:{status:'done',msg:'กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บแล้ว'}})}
+  decide(key,v){if(v==null)delete this.dec[key];else this.dec[key]=v;this.persist('dedup',this.dec);const sel=this.state.sel;this.rebuild();if(sel!=null){const a=this.B.alias.get(sel);if(a!=null&&a!==sel)this.setState({sel:a})}}
+  toggleWatch(id){const w=this.crm.watch;const i=w.indexOf(id);if(i>=0)w.splice(i,1);else w.push(id);const c=this.B.byId.get(id);if(c)c.fl.watch=i<0;this._fk=null;this.saveCrm()}
+  async open(id){
+    const c=this.B&&this.B.byId.get(this.B.alias.get(id)??id);if(!c)return;this.setState({sel:c.id,det:null,more:{},editC:false,dTab:'info'});
+    const d=await GCC.getDetail(c.ids);if(this.state.sel===c.id)this.setState({det:{id:c.id,d}});
+  }
+  saveContact(e,c){e.preventDefault();const fd=new FormData(e.target);const g=k=>String(fd.get(k)||'').trim();
+    this.contacts[c.id]={phone:g('phone'),email:g('email'),web:g('web'),note:g('note'),at:new Date().toISOString()};this.persist('contacts',this.contacts);
+    Object.assign(c,{phone:g('phone'),email:g('email'),web:g('web'),cEdited:this.contacts[c.id],hasPh:!!g('phone')});c.fl.noContact=c.tgt<=7&&!c.hasPh;c.hay=[c.name,c.jur,c.set,c.phone,c.code,c.email].join(' ').toLowerCase();this._fk=null;this.setState({editC:false})}
+  openSched(o){this.setState({sched:o})}
+  saveSched(e){e.preventDefault();const fd=new FormData(e.target);const g=k=>String(fd.get(k)||'').trim();const o=this.state.sched;if(!o)return;
+    const type=g('type')||'call',date=g('date')||GCC.todayISO(),time=g('time'),note=g('note');
+    if(o.taskId){const t=this.crm.tasks.find(x=>x.id===o.taskId);if(t)Object.assign(t,{type,date,time,note})}
+    else{const per=+(g('spread')||0);let d=date,n=0;o.ids.forEach(id=>{const c=this.B.byId.get(id);if(per&&n>=per){d=nextWork(addDays(d,1));n=0}if(per&&n===0)d=nextWork(d);n++;
+      this.crm.tasks.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),gid:id,title:c?c.name:String(id),type,date:d,time,note,done:false});
+      if(c&&(!this.crm.stages[id]||this.crm.stages[id]==='none'))this.crm.stages[id]='none'})}
+    this.setState({sched:null,picked:{}});this.saveCrm()}
+  autoPlan(list){const per=this.state.perDay||5;let d=nextWork(addDays(GCC.todayISO(),1)),n=0;
+    list.forEach(c=>{if(n>=per){d=nextWork(addDays(d,1));n=0}n++;this.crm.tasks.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),gid:c.id,title:c.name,type:'call',date:d,time:'',note:'นัดอัตโนมัติ',done:false})});this.saveCrm()}
+  tagsOf(m){return SRCC.filter((s,i)=>m&1<<i).map(([t,bg,fg])=>({t,bg,fg}))}
+  matchCo(c,s,q,skipTgt,skipCfo){
+    if(!skipTgt&&s.tgt!==''&&c.tgt!==+s.tgt)return false;
+    if(s.src!==''&&!(c.src&1<<+s.src))return false;if(s.ind!==''&&c.ind!==+s.ind)return false;if(s.prov!==''&&c.prov!==+s.prov)return false;if(s.type!==''&&c.type!==+s.type)return false;
+    if(!skipCfo&&s.cfo&&c.cfoSt!==s.cfo)return false;
+    if(s.gi){if(s.gi==='35'){if(!(c.giLive>=3))return false}else if(s.gi==='none'){if(c.giMax)return false}else if(c.giLive!==+s.gi)return false}
+    if(s.ph==='1'&&!c.hasPh)return false;if(s.ph==='0'&&c.hasPh)return false;if(s.inv&&!((c.invest||0)>=+s.inv))return false;
+    if(s.feed&&!c.fl[s.feed])return false;if(s.ym&&c.newYm!==s.ym)return false;if(s.rnd&&c.rndKey!==s.rnd)return false;
+    if(s.stage&&(this.crm.stages[c.id]||'none')!==s.stage)return false;if(s.owner&&(s.owner==='-'?!!this.crm.owners[c.id]:this.crm.owners[c.id]!==s.owner))return false;
+    if(q)for(const w of q)if(!c.hay.includes(w))return false;return true;
+  }
+  filtered(){
+    const s=this.state;const key=[s.v,s.view,s.expM,s.cInd,s.cFy,s.cProv,s.q,s.tgt,s.src,s.ind,s.prov,s.type,s.cfo,s.gi,s.ph,s.inv,s.feed,s.ym,s.rnd,s.stage,s.owner,s.sort].join('|');if(this._fk===key)return this._f;
+    const q=s.q.toLowerCase().split(/\s+/).filter(Boolean);const tc=Array(9).fill(0);let out=[];
+    if(s.view==='cert'){
+      this.B.certs.forEach(ct=>{const c=ct.co;if(!c)return;if(s.cfo&&ct.st!==s.cfo)return;if(s.expM&&ct.exM!==s.expM)return;if(s.cInd!==''&&String(ct.ind)!==s.cInd)return;if(s.cFy&&ct.yr!==s.cFy)return;if(s.cProv&&ct.provName!==s.cProv)return;const qq=q.filter(w=>!ct.hay.includes(w));if(!this.matchCo(c,s,qq.length?qq:null,true,true))return;tc[c.tgt]++;if(s.tgt===''||c.tgt===+s.tgt)out.push(ct)});
+      const S={exp:(a,b)=>(a.days??1e9)-(b.days??1e9),ap:(a,b)=>(b.ap||'').localeCompare(a.ap||''),name:(a,b)=>a.org.localeCompare(b.org,'th')}[s.sort]||((a,b)=>(b.ap||'').localeCompare(a.ap||''));out.sort(S);
+    }else{
+      this.B.companies.forEach(c=>{if(s.expM&&(c.cfoEx||'').slice(0,7)!==s.expM)return;if(!this.matchCo(c,s,q,true))return;tc[c.tgt]++;if(s.tgt===''||c.tgt===+s.tgt)out.push(c)});
+      const S={default:(a,b)=>a.tgt-b.tgt||(a.days??1e9)-(b.days??1e9),exp:(a,b)=>(a.days??1e9)-(b.days??1e9),invest:(a,b)=>(b.invest||0)-(a.invest||0),gi:(a,b)=>(b.giLive||0)-(a.giLive||0)||(b.giMax||0)-(a.giMax||0),fac:(a,b)=>(b.fac||0)-(a.fac||0),name:(a,b)=>a.name.localeCompare(b.name,'th')}[s.sort];
+      if(S)out.sort(S);
+    }
+    this._fk=key;this._f={out,tc,ph:s.view==='cert'?0:out.reduce((n,c)=>n+(c.hasPh?1:0),0)};return this._f;
+  }
+  exportCsv(){
+    const {out}=this.filtered();const D=this.D,CD=this.CD;const esc=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};let H,L;
+    if(this.state.view==='cert'){H=['เลขที่ใบรับรอง','องค์กร','กิจกรรม','จังหวัด','วันที่อนุมัติ','วันหมดอายุ','สถานะ','รอบที่ต้องยื่น','รหัสบริษัท','โทรศัพท์บริษัท'];L=out.map(ct=>[ct.cert,ct.org,ct.act,ct.provTxt||CD.prov[ct.prov],ct.ap,ct.ex,CST[ct.st][0],ct.isLatest?ct.co.rnd:'',ct.co.code,ct.co.phone])}
+    else{H=['รหัส','ชื่อบริษัท','เลขนิติบุคคล','ประเภท','จังหวัด','ที่อยู่','กลุ่มอุตสาหกรรม','กิจการ','แหล่งข้อมูล','กลุ่มเป้าหมาย','สถานะ CFO','CFO หมดอายุล่าสุด','รอบที่ต้องยื่น','GI ระดับที่ยังใช้ได้','GI ใช้ได้ถึง','โรงงานใหม่ เริ่ม','เงินลงทุนโรงงานใหม่','SET','โทรศัพท์','อีเมล','เว็บไซต์','สถานะการขาย','รวมจากรหัส'];
+      L=out.map(c=>[c.code,c.name,c.jur,D.type[c.type],D.prov[c.prov],c.addr,D.ind[c.ind],c.biz,this.tagsOf(c.src).map(t=>t.t).join(' '),(c.tgt+1)+'. '+GCC.TGT[c.tgt],CST[c.cfoSt][0],c.cfoEx,c.rnd,c.giLive,c.giUntil,c.newYm,c.invest,c.set,c.phone,c.email,c.web,(STG.find(x=>x[0]===(this.crm.stages[c.id]||'none'))||STG[0])[1],c.ids.length>1?c.ids.map(i=>'GCC-'+String(i).padStart(6,'0')).join(' '):''])}
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+[H.join(',')].concat(L.map(r=>r.map(esc).join(','))).join('\n')],{type:'text/csv;charset=utf-8'}));a.download=`GCC_${this.state.view==='cert'?'ใบรับรอง':'บริษัท'}_${out.length}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  }
+  cfoView(c){const [t,fg]=CST[c.cfoSt];return {t,fg,sub:c.cfoSt==='none'?'':c.cfoSt==='soon'?`เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}`:c.cfoEx?isoTh(c.cfoEx):''}}
+  stageOf(id){return STG.find(x=>x[0]===(this.crm.stages[id]||'none'))||STG[0]}
+  taskView(t){const today=GCC.todayISO();const ty=TT.find(x=>x[0]===t.type)||TT[0];const c=this.B.byId.get(this.B.alias.get(t.gid)??t.gid);const over=!t.done&&t.date<today;
+    return {title:c?c.name:t.title,meta:[ty[1],t.time,isoTh(t.date),over?'เกินกำหนด':''].filter(Boolean).join(' · '),note:t.note||'',color:ty[2],doneBg:t.done?ty[2]:'#fff',doneMark:t.done?'✓':'',deco:t.done?'line-through':'none',tel:c&&c.phone?telHref(c.phone):'',
+      toggle:()=>{t.done=!t.done;if(t.done)this.logAct(B.alias.get(t.gid)??t.gid,{type:t.type,text:'ทำนัดเสร็จ'+(t.note?': '+t.note:'')});this.saveCrm()},del:()=>{this.crm.tasks=this.crm.tasks.filter(x=>x!==t);this.saveCrm()},open:()=>c&&this.open(c.id),edit:()=>this.openSched({taskId:t.id,ids:[t.gid]}),
+      goDay:()=>this.setState({calDay:t.date,calM:t.date.slice(0,7)}),when:`${isoTh(t.date)}${t.time?' '+t.time:''}`}}
+  renderVals(){return this.vals()}
+  vals(){
+    const s=this.state,B=this.B;const today=GCC.todayISO();const ready=!!B&&!s.loading;
+    const empty={ov:{sources:[],feeds:[],groups:[],inds:[],provs:[]},f:{viewBtns:[],tgtChips:[],selects:[],rows:[],crows:[],sortOpts:[],activeChips:[]},tr:{feeds:[],events:[]},pl:{kpis:[],cells:[],weekdays:[],legend:[],dayTasks:[],upcoming:[],targets:[],feedOpts:[]},dd:{kpis:[],groups:[]},up:{preview:[]},sy:{boxes:[],list:[]},mon:{},nt:{defs:[],dedup:[],rounds:[],sources:[]},sel:{tags:[],facts:[],phones:[],emails:[],kpis:[],blocks:[],mergedRows:[],rndDates:[],tasks:[],notes:[]},sc:{}};
+    const stageOpts=STG.map(([v,label])=>({v,label})),typeOpts=TT.map(([v,label])=>({v,label}));
+    const qd=[['วันนี้',today],['วันที่ข้อมูล',this.base&&this.base.asOf],['+3 เดือน',addMonths(today,3)],['+6 เดือน',addMonths(today,6)],['+1 ปี',addMonths(today,12)]].filter(x=>x[1]);
+    const quickDates=qd.filter((x,i)=>qd.findIndex(y=>y[1]===x[1])===i).map(([label,v])=>{const on=s.ref===v;return {label,bd:on?'#0A1A86':'#D5DBEA',bg:on?'#0A1A86':'#fff',fg:on?'#fff':'#0E1430',go:()=>this.setRef(v)}});
+    const base={dateOpen:s.dateOpen,toggleDate:()=>this.setState({dateOpen:!s.dateOpen}),notToday:s.ref!==today,backToday:()=>this.setRef(today),ownerOpts:[],teamOpts:[],refISO:s.ref,refTh:isoTh(s.ref),win:String(s.win),onRef:e=>{if(e.target.value)this.setRef(e.target.value)},onWin:e=>this.setRef(null,+e.target.value),quickDates,ob:{chips:[],expMonths:[],nextUp:[],recent:[],scope:{},statusMix:[],indBars:[],provBars:[],fyCols:[]},loading:!ready,loadMsg:s.loadMsg,todayTh:isoTh(today),stageOpts,typeOpts,rowPad:this.props.density==='compact'?'8px 20px':'12px 20px',hasSel:false,hasSched:false,closeSel:()=>this.setState({sel:null}),ev:{banner:false},dataLine:'กำลังโหลด…'};
+    const tabDef=[['overview','ภาพรวม'],['search','ค้นหา'],['track','ติดตาม'],['plan','แผนติดต่อ'],['map','แผนที่'],['dedup','ตรวจข้อมูลซ้ำ'],['update','อัปเดตข้อมูล'],['notes','หมายเหตุ']];
+    if(!ready)return {...base,...empty,tabs:tabDef.map(([k,label])=>({label,fw:400,bg:'transparent',fg:'#C9D4FF',go:()=>{},hasBadge:false}))};
+    const D=this.D,CD=this.CD,C=this.crm,W=this.W;const cos=B.companies;
+    const mon=this.monCfg();const unseen=(mon.events||[]).filter(e=>e.at>(mon.seenAt||''));
+    const pending=B.groups.filter(g=>g.state==='pending').length;
+    const taskDue=C.tasks.filter(t=>!t.done&&t.date<=today).length;
+    const badges={track:unseen.length,plan:taskDue,dedup:pending};
+    const tabs=tabDef.map(([k,label])=>{const on=s.tab===k;const b=badges[k]||0;return {label,fw:on?500:400,bg:on?'#F4F6FC':'transparent',fg:on?'#0A1A86':'#C9D4FF',go:()=>this.go(k),hasBadge:b>0,badge:fmtN(b),badgeBg:on?'#0A1A86':'#fff',badgeFg:on?'#fff':'#0A1A86'}});
+    const evLbl={cfoSoon:['CFO ใกล้หมดอายุ','#FDECC8','#9A5A00'],cfoExpired:['CFO หมดอายุ','#EEF1F8','#475069'],cfoRenewed:['CFO ต่ออายุแล้ว','#DDF5F1','#0B6E66'],giDown:['GI หมดอายุ/ลดระดับ','#E6ECFD','#1A2FB0'],giUp:['GI ระดับสูงขึ้น','#DDF5F1','#0B6E66']};
+    const nEv=k=>unseen.filter(e=>e.t===k).length;
+    const ev={banner:unseen.length>0,bannerText:'ตรวจสถานะอัตโนมัติพบเหตุการณ์ใหม่: '+Object.keys(evLbl).filter(k=>nEv(k)).map(k=>`${evLbl[k][0]} ${fmtN(nEv(k))}`).join(' · '),go:()=>this.go('track'),ack:()=>{this.saveMon({seenAt:new Date().toISOString()});this.forceUpdate()}};
+    const srcLine=this.base.source==='upload'?`ไฟล์ที่อัปโหลด ${this.base.fileName||''}`:'ไฟล์ข้อมูลต้นฉบับของเว็บ';
+    const dataLine=`ข้อมูล ณ ${isoTh(this.base.asOf)} · ${srcLine} · ${fmtN(cos.length)} บริษัท · ${fmtN(B.certs.length)} ใบรับรอง CFO`;
+    const teamOpts=C.team.map(v=>({v,label:v}));
+    const out={...base,...empty,tabs,ev,dataLine,teamOpts,ownerOpts:[{v:'-',label:'ยังไม่มีผู้รับผิดชอบ'}].concat(teamOpts),isOverview:s.tab==='overview',isSearch:s.tab==='search',isTrack:s.tab==='track',isPlan:s.tab==='plan',isMap:s.tab==='map',isDedup:s.tab==='dedup',isUpdate:s.tab==='update',isNotes:s.tab==='notes',
+      mapSrc:`GCC Map.html?ref=${today}&win=${W}`,mapH:String(s.mapH)};
+    const feedCount=k=>cos.reduce((n,c)=>n+(c.fl[k]?1:0),0);
+    const feedItems=(k,n)=>{let l=cos.filter(c=>c.fl[k]);
+      if(k==='cfoSoon')l.sort((a,b)=>a.days-b.days);else if(k==='cfoExp')l.sort((a,b)=>b.days-a.days);else if(k==='giSoon')l.sort((a,b)=>a.giDays-b.giDays);else if(k==='newFac')l.sort((a,b)=>b.newYm.localeCompare(a.newYm)||(b.invest||0)-(a.invest||0));else if(k==='noContact')l.sort((a,b)=>a.tgt-b.tgt);
+      return n?l.slice(0,n):l};
+    const metaOf=(k,c)=>k==='cfoSoon'?`เหลือ ${fmtN(c.days)} วัน`:k==='cfoExp'?`หมด ${isoTh(c.cfoEx)}`:k==='giSoon'?`ระดับ ${c.giLive} · ${isoTh(c.giUntil)}`:k==='giDown'?`เคยได้ ${c.giMax} → ${c.giLive||'หมดอายุ'}`:k==='newFac'?`${ymTh(c.newYm)} · ${money(c.invest)}`:k==='setNew'?c.set:k==='noContact'?`กลุ่ม ${c.tgt+1}`:D.prov[c.prov];
+
+    if(s.tab==='track'){
+      const AMB='#F2B84B',NORM='#B9C8FF';const certs=B.certs;
+      const okey=[s.v,s.oInd,s.oProv,s.oExpM,s.oFy,s.oSt].join('|');
+      if(this._obk!==okey){this._obk=okey;
+        const m=(ct,skip)=>(skip==='ind'||s.oInd===''||String(ct.ind)===s.oInd)&&(skip==='prov'||!s.oProv||ct.provName===s.oProv)&&(skip==='expM'||!s.oExpM||ct.exM===s.oExpM)&&(skip==='fy'||!s.oFy||ct.yr===s.oFy)&&(skip==='st'||!s.oSt||ct.st===s.oSt);
+        const fx=skip=>certs.filter(ct=>m(ct,skip));const f=fx();
+        const group=(get,lim,key,sel)=>{const mm={};fx(key).forEach(ct=>{const k=get(ct);if(k==null||k==='')return;const g=mm[k]||(mm[k]={t:0,a:0});g.t++;if(ct.st==='active'||ct.st==='soon')g.a++});
+          const arr=Object.entries(mm).map(([i,g])=>({i,total:g.t,active:g.a})).sort((a,b)=>b.total-a.total).slice(0,lim);if(sel&&!arr.some(a=>a.i===sel)&&mm[sel])arr.push({i:sel,total:mm[sel].t,active:mm[sel].a});const mx=Math.max(1,...arr.map(a=>a.total));
+          return arr.map(a=>{const on=sel===a.i,dim=sel&&!on;return {label:key==='ind'?(CD.ind[+a.i]||'(ไม่ระบุ)'):a.i,total:fmtN(a.total),active:fmtN(a.active),w:a.total/mx*100,wa:a.active/mx*100,ca:dim?'#B9C8FF':'#1A3FE0',ct:dim?'#EEF1F8':(on?'#7C93FF':'#DCE6FF'),fw:on?'600':'400',go:()=>this.setState({[key==='ind'?'oInd':'oProv']:on?'':a.i})}})};
+        const indBars=group(ct=>String(ct.ind),12,'ind',s.oInd),provBars=group(ct=>ct.provName,12,'prov',s.oProv);
+        const fyM={};fx('fy').forEach(ct=>{if(/^\d{4}$/.test(ct.yr)&&+ct.yr>=2555&&+ct.yr<=2575)fyM[ct.yr]=(fyM[ct.yr]||0)+1});const fyA=Object.entries(fyM).sort((a,b)=>a[0].localeCompare(b[0]));const fmx=Math.max(1,...fyA.map(x=>x[1]));
+        const fyCols=fyA.map(([l,c])=>({label:l,count:fmtN(c),h:c/fmx*84,color:s.oFy&&s.oFy!==l?'#C9D1E6':(s.oFy?'#0A1A86':'#1A3FE0'),go:()=>this.setState({oFy:s.oFy===l?'':l})}));
+        const [ry,rm]=s.ref.split('-').map(Number);const endISO=addMonths(s.ref,12);const endT=Date.parse(endISO);
+        const months=[];for(let i=0;i<12;i++){const d=new Date(Date.UTC(ry,rm-1+i,1));months.push({y:d.getUTCFullYear(),m:d.getUTCMonth(),count:0,soon:0})}
+        let expTotal=0,expSoon=0;fx('expM').forEach(ct=>{if(ct.days==null||ct.days<0||Date.parse(ct.ex)>=endT)return;const [y,mo]=ct.ex.split('-').map(Number);const x=months.find(z=>z.y===y&&z.m===mo-1);if(x){x.count++;expTotal++;if(ct.st==='soon'){x.soon++;expSoon++}}});
+        const mmx=Math.max(1,...months.map(x=>x.count));
+        const expMonths=months.map(x=>{const key=`${x.y}-${pad(x.m+1)}`;return {label:`${TH_M[x.m]} ${String((x.y+543)%100).padStart(2,'0')}`,count:String(x.count),h:x.count/mmx*80,color:x.soon?AMB:NORM,op:s.oExpM&&s.oExpM!==key?'.35':'1',ol:s.oExpM===key?'2px solid #fff':'none',go:()=>this.setState({oExpM:s.oExpM===key?'':key})}});
+        const sc=f.filter(ct=>ct.hasScope);const avg=k=>sc.length?sc.reduce((a,ct)=>a+(ct[k]||0),0)/sc.length*100:0;const a1=avg('s1'),a2=avg('s2'),a3=avg('s3'),t=(a1+a2+a3)||1;const pct=v=>sc.length?v.toFixed(1)+'%':'—';
+        const fs=fx('st');const tt=fs.length||1;const cnt=k=>fs.filter(ct=>ct.st===k).length;
+        const statusMix=[['อยู่ในอายุ','active','#1A3FE0'],['ใกล้หมดอายุ','soon',AMB],['หมดอายุ','expired','#C9D1E6'],['ไม่ระบุ','unknown','#E3E7F1']].map(([label,v,color])=>[label,v,color,cnt(v)]).filter(x=>x[3]).map(([label,v,color,n])=>{const on=s.oSt===v;return {label,color,w:n/tt*100,text:fmtN(n),op:s.oSt&&!on?'.35':'1',border:on?'#0A1A86':'transparent',bg:on?'#EEF2FF':'transparent',go:()=>this.setState({oSt:on?'':v})}});
+        const cv=ct=>({org:ct.org,cert:ct.cert||'—',prov:ct.provName,ind:ct.indName,exTh:isoTh(ct.ex),apTh:isoTh(ct.ap),days:String(ct.days),open:()=>this.open(ct.gid)});
+        const from=this.T-30*864e5;const rec=f.filter(ct=>ct.apT<=this.T&&ct.apT>from).sort((a,b)=>b.apT-a.apT);const soonL=f.filter(ct=>ct.st==='soon').sort((a,b)=>a.days-b.days);
+        this._ob={countText:fmtN(f.length),indBars,provBars,fyCols,expMonths,expTotal:fmtN(expTotal),expSoon:fmtN(expSoon),expEndTh:isoTh(endISO),scope:{n:fmtN(sc.length),w1:a1/t*100,w2:a2/t*100,w3:a3/t*100,t1:pct(a1),t2:pct(a2),t3:pct(a3)},statusMix,
+          nextUp:soonL.slice(0,7).map(cv),nextUpEmpty:!soonL.length,soonN:fmtN(soonL.length),recent:rec.slice(0,6).map(cv),recentN:fmtN(rec.length),recentEmpty:!rec.length,lastApText:(()=>{const l=f.filter(ct=>ct.apT&&ct.apT<=this.T).sort((a,b)=>b.apT-a.apT)[0];return l?`อนุมัติล่าสุด ${isoTh(l.ap)} (${fmtN(f.filter(ct=>ct.ap===l.ap).length)} ใบ)`:''})()}}
+      const chips=[];if(s.oExpM){const [y,mo]=s.oExpM.split('-').map(Number);chips.push({label:`หมดอายุ ${TH_M[mo-1]} ${y+543}`,go:()=>this.setState({oExpM:''})})}
+      if(s.oSt)chips.push({label:'สถานะ: '+CST[s.oSt][0],go:()=>this.setState({oSt:''})});if(s.oInd!=='')chips.push({label:CD.ind[+s.oInd]||'(ไม่ระบุ)',go:()=>this.setState({oInd:''})});
+      if(s.oProv)chips.push({label:s.oProv,go:()=>this.setState({oProv:''})});if(s.oFy)chips.push({label:'ปีที่ยื่น '+s.oFy,go:()=>this.setState({oFy:''})});
+      out.ob={...this._ob,chips,noChips:!chips.length,hasFilter:chips.length>0,clear:()=>this.setState({oInd:'',oProv:'',oExpM:'',oFy:'',oSt:''}),
+        goTable:()=>this.setF({view:'cert',tgt:'',cfo:s.oSt,expM:s.oExpM,cInd:s.oInd,cFy:s.oFy,cProv:s.oProv,sort:s.oExpM||s.oSt==='soon'?'exp':'ap'}),
+        goSoon:()=>this.setF({view:'cert',tgt:'',cfo:'soon',expM:'',cInd:s.oInd,cFy:s.oFy,cProv:s.oProv,sort:'exp'})};
+    }
+    if(s.tab==='overview'){
+      const ov=this._ov||(this._ov=(()=>{const src=[0,0,0,0],g=Array(9).fill(0).map(()=>[0,0]),ind={},prov={};let act=0,ph=0;
+        cos.forEach(c=>{for(let i=0;i<4;i++)if(c.src&1<<i)src[i]++;g[c.tgt][0]++;if(c.hasPh){g[c.tgt][1]++;ph++}const a=c.cfoSt==='active'||c.cfoSt==='soon';if(a)act++;
+          const add=(m,k)=>{const x=m[k]||(m[k]={n:0,act:0,none:0,gi:0});x.n++;if(a)x.act++;if(c.cfoSt==='none')x.none++;if(c.giLive>=3)x.gi++};add(ind,c.ind);if(D.prov[c.prov])add(prov,c.prov)});
+        return {src,g,ind,prov,act,ph}})());
+      const gmax=Math.max(...ov.g.slice(0,8).map(x=>x[0]));const merged=cos.filter(c=>c.ids.length>1).length;
+      const inds=Object.entries(ov.ind).sort((a,b)=>b[1].n-a[1].n);const im=inds[0]?inds[0][1].n:1;const provs=Object.entries(ov.prov).sort((a,b)=>b[1].n-a[1].n).slice(0,15);const pm=provs[0]?provs[0][1].n:1;
+      out.ov={total:fmtN(cos.length),subline:`รวม TGO · GI · กรอ. · SET เข้าเป็นบริษัทเดียว ${fmtN(merged)} รายรวมจากหลายแถว · CFO อยู่ในอายุ ${fmtN(ov.act)} ราย · มีเบอร์โทร ${fmtN(ov.ph)} ราย · รอตรวจข้อมูลซ้ำ ${fmtN(pending)} กลุ่ม`,
+        sources:ov.src.map((n,i)=>({label:SRCC[i][0],n:fmtN(n),sub:['ใบรับรอง CFO','อุตสาหกรรมสีเขียว','โรงงานใหม่ 2567–2569','บริษัทจดทะเบียน'][i],go:()=>this.setF({src:String(i),tgt:'',view:'co'})})),
+        feeds:FEEDS.map(([k,label,dot,desc])=>({label,dot,n:fmtN(feedCount(k)),sub:k==='cfoSoon'?`ภายใน ${W} วัน`:desc,go:()=>this.setF({feed:k,tgt:'',view:'co',sort:k==='cfoSoon'||k==='cfoExp'?'exp':'default'})})),
+        groups:ov.g.map(([n,ph],i)=>({no:i+1,name:i===0?`CFO ใกล้หมดอายุ (≤ ${W} วัน)`:i===3?`CFO อยู่ในอายุ (> ${W} วัน)`:GCC.TGT[i],desc:GDESC[i],n:fmtN(n),ph:fmtN(ph),w:Math.min(100,n/gmax*100).toFixed(1)+'%',bar:GCOL[i][2],badgeBg:GCOL[i][0],badgeFg:GCOL[i][1],go:()=>this.setF({tgt:String(i),view:'co'})})),
+        inds:inds.map(([k,x])=>({name:D.ind[k],n:fmtN(x.n),act:fmtN(x.act),none:fmtN(x.none),gi:fmtN(x.gi),w:(x.n/im*100).toFixed(1)+'%',go:()=>this.setF({ind:k,tgt:'',view:'co'})})),
+        provs:provs.map(([k,x])=>({name:D.prov[k],n:fmtN(x.n),act:fmtN(x.act),w:(x.n/pm*100).toFixed(1)+'%',go:()=>this.setF({prov:k,tgt:'',view:'co'})})),goMap:()=>this.go('map'),goTrack:()=>this.go('track')};
+    }
+
+    if(s.tab==='search'){
+      const F=this.filtered();const ps=+(this.props.pageSize||50);const pages=Math.max(1,Math.ceil(F.out.length/ps));const page=Math.min(s.page,pages-1);const sl=F.out.slice(page*ps,page*ps+ps);
+      const rndPill=c=>c.rnd?{hasRnd:true,rndLabel:(c.cfoSt==='expired'?'ยื่นใหม่รอบ ':'ยื่นรอบ ')+c.rnd,rndBg:c.rndLapse?'#FBE3DC':'#E6ECFD',rndFg:c.rndLapse?'#8A2B12':'#1A2FB0'}:{hasRnd:false};
+      const star=id=>{const on=C.watch.includes(id);return {star:on?'★':'☆',starFg:on?'#E8A23B':'#C9D1E6',toggleStar:()=>this.toggleWatch(id)}};
+      const rows=s.view==='co'?sl.map(c=>{const cv=this.cfoView(c);const g=GI_COL[c.giLive]||GI_COL[1];const st=this.stageOf(c.id);
+        return {...star(c.id),name:c.name,code:c.code,typeName:D.type[c.type],set:c.set,merged:c.ids.length>1,mergedN:String(c.ids.length),tgtShort:'กลุ่ม '+(c.tgt+1),tgtBg:GCOL[c.tgt][0],tgtFg:GCOL[c.tgt][1],provName:D.prov[c.prov]||'—',indName:D.ind[c.ind],tags:this.tagsOf(c.src),
+          cfoText:cv.t,cfoFg:cv.fg,cfoSub:cv.sub,...rndPill(c),hasGi:!!c.giLive,giText:'ระดับ '+c.giLive,giBg:g[0],giFg:g[1],contact:c.phone?c.phone.split('|')[0].trim():(c.web?c.web.replace(/^https?:\/\//,''):'—'),
+          owner:C.owners[c.id]||'',hasStage:st[0]!=='none',stLabel:st[1],stBg:st[2],stFg:st[3],open:()=>this.open(c.id)}}):[];
+      const crows=s.view==='cert'?sl.map(ct=>{const [bg,fg]=PILL[ct.st];return {...star(ct.gid),cert:ct.cert||'—',org:ct.org,act:ct.act,provName:ct.provTxt||CD.prov[ct.prov]||'—',apTh:isoTh(ct.ap),exTh:isoTh(ct.ex),stText:CST[ct.st][0],stBg:bg,stFg:fg,bad:ct.bad,...(ct.isLatest&&!ct.bad?rndPill(ct.co):{hasRnd:false}),open:()=>this.open(ct.gid)}}):[];
+      const on=v=>v!==''?{bd:'#1A3FE0',bg:'#EEF2FF'}:{bd:'#D5DBEA',bg:'#fff'};
+      const cnt=k=>{const m={};cos.forEach(c=>m[c[k]]=(m[c[k]]||0)+1);return m};const ic=this._ic||(this._ic={ind:cnt('ind'),prov:cnt('prov'),type:cnt('type')});
+      const dictOpts=(arr,m,byName)=>arr.map((l,i)=>({v:String(i),label:`${l} (${fmtN(m[i]||0)})`,l,n:m[i]||0})).filter(o=>o.l&&o.n).sort((a,b)=>byName?a.l.localeCompare(b.l,'th'):b.n-a.n);
+      const rndOpts=(this.R||[]).filter(x=>x.docT>=this.T-0||x.annT>=this.T).map(x=>({v:x.no,label:'รอบ '+x.no})).concat([{v:'later',label:'หลังรอบในตาราง'}]);
+      const selects=[
+        ['พบในแหล่งข้อมูล','src',SRCC.map(([t],i)=>({v:String(i),label:t}))],['กลุ่มอุตสาหกรรม','ind',dictOpts(D.ind,ic.ind)],['จังหวัด','prov',dictOpts(D.prov,ic.prov,true)],['ประเภทผู้ประกอบการ','type',dictOpts(D.type,ic.type)],
+        [s.view==='cert'?'สถานะใบรับรอง':'สถานะ CFO','cfo',Object.entries(CST).filter(([k])=>s.view!=='cert'||k!=='none').map(([v,[l]])=>({v,label:v==='soon'?`${l} ≤ ${W} วัน`:l}))],
+        ['GI ระดับที่ยังใช้ได้','gi',[['35','ระดับ 3–5'],['5','ระดับ 5'],['4','ระดับ 4'],['3','ระดับ 3'],['2','ระดับ 2'],['1','ระดับ 1'],['none','ไม่เคยได้ GI']].map(([v,label])=>({v,label}))],
+        ['รอบ อบก. ที่ต้องยื่น','rnd',rndOpts],['ติดตาม','feed',FEEDS.map(([v,label])=>({v,label}))],['สถานะการขาย','stage',stageOpts],['ผู้รับผิดชอบ','owner',[{v:'-',label:'ยังไม่มีผู้รับผิดชอบ'}].concat(C.team.map(v=>({v,label:v})))],
+        ['เงินลงทุนโรงงานใหม่','inv',[['5000000','≥ 5 ล้านบาท'],['50000000','≥ 50 ล้านบาท'],['500000000','≥ 500 ล้านบาท']].map(([v,label])=>({v,label}))],['ข้อมูลติดต่อ','ph',[{v:'1',label:'มีเบอร์โทร'},{v:'0',label:'ยังไม่มีเบอร์โทร'}]]
+      ].map(([label,k,options])=>({label,value:s[k],options,...on(s[k]),onChange:e=>this.setF({[k]:e.target.value})}));
+      const tgtChips=[{label:'ทุกกลุ่ม',n:fmtN(F.tc.reduce((a,b)=>a+b,0)),act:s.tgt===''}].concat(GCC.TGT.map((l,i)=>({label:`${i+1}. ${l.replace('ยังไม่มี CFO · ','')}`,n:fmtN(F.tc[i]),act:s.tgt===String(i),i}))).map(c=>({...c,bd:c.act?'#0A1A86':'#D5DBEA',bg:c.act?'#0A1A86':'#fff',fg:c.act?'#fff':'#0E1430',go:()=>this.setF({tgt:c.i==null?'':String(c.i)})}));
+      const activeChips=[];if(s.ym)activeChips.push({label:'โรงงานใหม่ '+ymTh(s.ym),go:()=>this.setF({ym:''})});
+      if(s.expM)activeChips.push({label:'หมดอายุเดือน '+ymTh(String(+s.expM.slice(0,4)+543)+s.expM.slice(4)),go:()=>this.setF({expM:''})});
+      if(s.cInd!=='')activeChips.push({label:'อุตสาหกรรม (TGO): '+CD.ind[+s.cInd],go:()=>this.setF({cInd:''})});
+      if(s.cFy)activeChips.push({label:'ปีที่ยื่น '+s.cFy,go:()=>this.setF({cFy:''})});
+      if(s.cProv)activeChips.push({label:'จังหวัด (TGO): '+s.cProv,go:()=>this.setF({cProv:''})});
+      const hasFilter=!!(s.expM||s.cInd!==''||s.cFy||s.cProv||s.q||s.tgt!==''||s.src||s.ind||s.prov||s.type||s.cfo||s.gi||s.ph||s.inv||s.feed||s.ym||s.rnd||s.stage||s.owner);
+      const sortOpts=s.view==='cert'?[['ap','อนุมัติล่าสุด'],['exp','หมดอายุก่อน'],['name','ชื่อ ก–ฮ']]:[['default','กลุ่มเป้าหมาย'],['exp','CFO หมดอายุก่อน'],['invest','เงินลงทุนโรงงานใหม่สูงสุด'],['gi','GI ระดับสูงสุด'],['fac','จำนวนโรงงานมากสุด'],['name','ชื่อ ก–ฮ']];
+      out.f={viewCo:s.view==='co'&&!s.narrow,viewCert:s.view==='cert'&&!s.narrow,cardsCo:s.view==='co'&&s.narrow,cardsCert:s.view==='cert'&&s.narrow,viewBtns:[['co','บริษัท'],['cert','ใบรับรอง CFO']].map(([k,label])=>({label,bg:s.view===k?'#0A1A86':'transparent',fg:s.view===k?'#fff':'#1A2FB0',go:()=>this.setF({view:k,sort:k==='cert'?'ap':'default'})})),
+        q:s.q,onQ:e=>this.setF({q:e.target.value}),tgtChips,selects,activeChips,hasChips:activeChips.length>0,countN:fmtN(F.out.length),unit:s.view==='cert'?'ใบรับรอง':'บริษัท',subCount:s.view==='cert'?'· ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง':`· มีเบอร์โทร ${fmtN(F.ph)}`,
+        hasFilter,clear:()=>this.setF({expM:'',cInd:'',cFy:'',cProv:'',q:'',tgt:'',src:'',ind:'',prov:'',type:'',cfo:'',gi:'',ph:'',inv:'',feed:'',ym:'',rnd:'',stage:'',owner:''}),sort:s.sort,sortOpts:sortOpts.map(([v,label])=>({v,label})),onSort:e=>this.setF({sort:e.target.value}),
+        exportCsv:()=>this.exportCsv(),rows,crows,empty:!F.out.length,pageN:fmtN(page+1),pages:fmtN(pages),noPrev:page<=0,noNext:page>=pages-1,prev:()=>{this.setState({page:page-1});window.scrollTo(0,0)},next:()=>{this.setState({page:page+1});window.scrollTo(0,0)}};
+    }
+
+    if(s.tab==='track'){
+      out.tr={line:`ช่วงใกล้หมดอายุ CFO ${W} วัน · นับระดับบริษัทหลังตัดข้อมูลซ้ำ`,
+        feeds:FEEDS.map(([k,label,dot,desc])=>{const all=feedItems(k);const months=k==='newFac'?(()=>{const m={};all.forEach(c=>m[c.newYm]=(m[c.newYm]||0)+1);return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0])).map(([ym,n])=>({label:ymTh(ym),n:fmtN(n),go:()=>this.setF({ym,feed:'',tgt:'',view:'co',sort:'invest'})}))})():[];
+          return {label,dot,desc:k==='cfoSoon'?`ใบล่าสุดจะหมดอายุภายใน ${W} วัน`:desc,n:fmtN(all.length),hasN:all.length>0,items:all.slice(0,5).map(c=>({name:c.name,meta:metaOf(k,c),open:()=>this.open(c.id)})),empty:!all.length,emptyText:k==='watch'?'กดดาวที่รายชื่อเพื่อเพิ่ม':k==='setNew'?'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป':'ไม่มีรายการ',
+            hasMonths:months.length>0,months,go:()=>this.setF({feed:k,tgt:'',view:'co',sort:k==='cfoSoon'||k==='cfoExp'?'exp':k==='newFac'?'invest':'default'}),plan:()=>this.go('plan',{plFeed:k,picked:{},plLim:60})}}),
+        monLine:mon.last?`ตรวจล่าสุด ${dtTh(mon.last)} · ${s.monMsg||'ตรวจเองทุก 10 นาทีที่เปิดเว็บค้างไว้ และเมื่อขึ้นวันใหม่'}`:'ยังไม่เคยตรวจ',runCheck:()=>{this.checkMonitor(true);this.forceUpdate()},
+        noEvents:!(mon.events||[]).length,emptyText:'ระบบบันทึกสถานะตั้งต้นแล้ว จะเริ่มบันทึกเหตุการณ์เมื่อสถานะบริษัทเปลี่ยน',
+        events:(mon.events||[]).slice(0,60).map(e=>{const c=B.byId.get(B.alias.get(e.id)??e.id);const [tag,bg,fg]=evLbl[e.t]||['เหตุการณ์','#EEF1F8','#475069'];return {tag,bg,fg,name:c?c.name:String(e.id),meta:`${c&&c.cfoEx?'CFO หมดอายุ '+isoTh(c.cfoEx)+' · ':''}บันทึก ${dtTh(e.at)}`,open:()=>c&&this.open(c.id)}})};
+    }
+
+    if(s.tab==='plan'){
+      const open=C.tasks.filter(t=>!t.done);const wk=addDays(today,7);
+      const calM=s.calM||today.slice(0,7);const [y,m]=calM.split('-').map(Number);const first=`${calM}-01`;const start=addDays(first,-dow(first));const selISO=s.calDay||today;
+      const byDay={};C.tasks.forEach(t=>(byDay[t.date]||(byDay[t.date]=[])).push(t));
+      const cells=Array.from({length:42},(_,i)=>{const d=addDays(start,i);const ts=byDay[d]||[];const inM=d.slice(0,7)===calM;const isSel=d===selISO;
+        return {num:String(+d.slice(8)),op:inM?'1':'.4',fw:d===today?'600':'400',bd:isSel?'#0A1A86':d===today?'#7C93FF':'#EEF1F8',bg:isSel?'#EEF2FF':'#fff',fg:'#0E1430',dots:ts.slice(0,6).map(t=>({c:(TT.find(x=>x[0]===t.type)||TT[0])[2]})),hasMore:ts.length>6,more:String(ts.length-6),go:()=>this.setState({calDay:d})}}).filter((c,i)=>i<35||addDays(start,35).slice(0,7)===calM);
+      const dayT=(byDay[selISO]||[]).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+      const plannedBy={};open.forEach(t=>{const g=B.alias.get(t.gid)??t.gid;if(!plannedBy[g]||t.date<plannedBy[g].date)plannedBy[g]=t});
+      let tg=feedItems(s.plFeed||'cfoSoon');if(s.plStage)tg=tg.filter(c=>(C.stages[c.id]||'none')===s.plStage);if(s.plOwner)tg=tg.filter(c=>s.plOwner==='-'?!C.owners[c.id]:C.owners[c.id]===s.plOwner);
+      const unpl=tg.filter(c=>!plannedBy[c.id]);const shown=tg.slice(0,s.plLim||60);const pk=s.picked||{};const pkIds=Object.keys(pk).map(Number);const allOn=shown.length&&shown.every(c=>pk[c.id]);
+      out.pl={kpis:[['งานเกินกำหนด',open.filter(t=>t.date<today).length,'#A33A1A'],['งานวันนี้',open.filter(t=>t.date===today).length,'#E8A23B'],['7 วันข้างหน้า',open.filter(t=>t.date>today&&t.date<=wk).length,'#1A3FE0'],['งานค้างทั้งหมด',open.length,'#7C93FF']].map(([label,v,dot])=>({label,value:fmtN(v),dot})),
+        monthLabel:`${TH_M[m-1]} ${y+543}`,prevM:()=>{const d=new Date(Date.UTC(y,m-2,1)).toISOString().slice(0,7);this.setState({calM:d})},nextM:()=>{const d=new Date(Date.UTC(y,m,1)).toISOString().slice(0,7);this.setState({calM:d})},
+        weekdays:['อา','จ','อ','พ','พฤ','ศ','ส'],cells,legend:TT.map(([,label,color])=>({label,color})),
+        dayTh:selISO===today?`วันนี้ · ${isoTh(selISO)}`:isoTh(selISO),dayCount:`${fmtN(dayT.length)} งาน`,dayTasks:dayT.map(t=>this.taskView(t)),dayEmpty:!dayT.length,
+        upcoming:open.filter(t=>t.date>=today).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8).map(t=>{const v=this.taskView(t);return {...v,title:v.title}}),
+        feed:s.plFeed||'cfoSoon',feedOpts:FEEDS.map(([v,label])=>({v,label})).concat(GCC.TGT.slice(0,8).map((l,i)=>({v:'t'+i,label:`กลุ่ม ${i+1}. ${l}`}))).filter(o=>o.v[0]!=='t'),onFeed:e=>this.setState({plFeed:e.target.value,picked:{},plLim:60}),
+        ownerF:s.plOwner,onOwnerF:e=>this.setState({plOwner:e.target.value,picked:{}}),stageF:s.plStage,onStageF:e=>this.setState({plStage:e.target.value,picked:{}}),perDay:String(s.perDay),onPerDay:e=>this.setState({perDay:+e.target.value}),
+        tgtSummary:`${fmtN(tg.length)} บริษัท · ยังไม่มีนัด ${fmtN(unpl.length)}`,unplanned:fmtN(unpl.length),autoPlan:()=>this.autoPlan(unpl),
+        pickAll:()=>{const p={...pk};if(allOn)shown.forEach(c=>delete p[c.id]);else shown.forEach(c=>p[c.id]=1);this.setState({picked:p})},pickAllText:allOn?'ยกเลิกเลือกทั้งหมด':`เลือก ${fmtN(shown.length)} รายที่แสดง`,
+        pickText:pkIds.length?`เลือกแล้ว ${fmtN(pkIds.length)} ราย`:'ติ๊กช่องหน้าชื่อเพื่อนัดหลายรายพร้อมกัน',hasPick:pkIds.length>0,pickN:fmtN(pkIds.length),bulk:()=>this.openSched({ids:pkIds}),
+        targets:shown.map(c=>{const st=this.stageOf(c.id);const ot=plannedBy[c.id];const p=!!pk[c.id];return {name:c.name,meta:[D.prov[c.prov],metaOf(s.plFeed||'cfoSoon',c),C.owners[c.id]].filter(Boolean).join(' · '),phone:c.phone||'ยังไม่มีเบอร์',stage:st[0],sbg:st[2],sfg:st[3],onStage:e=>this.setStage(c.id,e.target.value),
+          planned:ot?'นัดแล้ว '+isoTh(ot.date):'',noPlan:!ot,plan:()=>this.openSched({ids:[c.id]}),edit:()=>this.openSched({taskId:ot.id,ids:[c.id]}),open:()=>this.open(c.id),
+          pick:()=>{const q={...pk};if(q[c.id])delete q[c.id];else q[c.id]=1;this.setState({picked:q})},pkMark:p?'✓':'',pkBg:p?'#1A3FE0':'#fff',pkBd:p?'#1A3FE0':'#C9D1E6'}}),
+        tgtEmpty:!tg.length,hasMoreT:tg.length>shown.length,moreTText:`แสดงเพิ่ม (อีก ${fmtN(tg.length-shown.length)} ราย)`,moreT:()=>this.setState({plLim:(s.plLim||60)+120})};
+    }
+
+    if(s.tab==='dedup'){
+      const G=B.groups;const by=k=>G.filter(g=>k==='pending'?g.state==='pending':k==='auto'?g.why==='auto':k==='decided'?(g.why!=='auto'&&g.state!=='pending'):true);
+      const WHY={auto:['ชื่อตรงกัน · มีเลขนิติบุคคลแถวเดียว','#DDF5F1','#0B6E66'],nojur:['ชื่อตรงกัน · ไม่มีเลขนิติบุคคล','#FDECC8','#9A5A00'],diffjur:['ชื่อตรงกัน · เลขนิติบุคคลต่างกัน','#FBE3DC','#8A2B12'],phone:['ใช้เบอร์โทรเดียวกัน','#E6ECFD','#1A2FB0']};
+      const list=by(s.ddF);const ps=20;const pages=Math.max(1,Math.ceil(list.length/ps));const page=Math.min(s.ddPage,pages-1);
+      const kp=[['pending','รอตรวจ',by('pending').length,'กดรวมหรือแยกเอง'],['auto','รวมอัตโนมัติ',by('auto').length,'กดแยกออกได้ถ้าไม่ใช่บริษัทเดียวกัน'],['decided','ตัดสินแล้ว',by('decided').length,'รวมหรือแยกด้วยตนเอง'],['all','ทั้งหมด',G.length,'ทุกกลุ่มที่ระบบพบ']];
+      out.dd={kpis:kp.map(([k,label,n,sub])=>({k:label,v:fmtN(n),sub,bg:s.ddF===k?'#EEF2FF':'#fff',bd:s.ddF===k?'#1A3FE0':'#E3E7F1',go:()=>this.setState({ddF:k,ddPage:0})})),
+        groups:list.slice(page*ps,page*ps+ps).map(g=>{const [whyLabel,whyBg,whyFg]=WHY[g.why];const decided=g.state!=='pending';
+          return {whyLabel,whyBg,whyFg,stateLabel:g.state==='merged'?'รวมเป็นบริษัทเดียวแล้ว':g.state==='merge'?'รวมแล้ว (ตัดสินเอง)':g.state==='split'?'แยกเป็นคนละบริษัท':'รอตรวจ',
+            canMerge:g.state==='pending'||g.state==='split',canSplit:g.state==='pending'||g.state==='merged'||g.state==='merge',splitText:g.state==='pending'?'ไม่ซ้ำ แยกกัน':'แยกออก',canUndo:decided&&!(g.why==='auto'&&g.state==='merged'),
+            merge:()=>this.decide(g.key,g.why==='auto'?null:'merge'),split:()=>this.decide(g.key,'split'),undo:()=>this.decide(g.key,null),
+            items:g.ids.map(id=>{const r=B.rawById.get(id);return {name:r.name,tags:this.tagsOf(r.src),open:()=>this.open(id),facts:[['รหัส','GCC-'+String(id).padStart(6,'0')],['เลขนิติบุคคล',r.jur||'—'],['ประเภท',D.type[r.type]],['จังหวัด',D.prov[r.prov]||'—'],['โทรศัพท์',r.phone||'—']].map(([k,v])=>({k,v}))}})}}),
+        empty:!list.length,pageN:fmtN(page+1),pages:fmtN(pages),noPrev:page<=0,noNext:page>=pages-1,prev:()=>this.setState({ddPage:page-1}),next:()=>this.setState({ddPage:page+1})};
+    }
+
+    if(s.tab==='update'){
+      const u=s.up||{};const sc=this.syncCfg();const st=this._sync;const y=s.sy||{};
+      out.up={sourceLine:dataLine,onFile:e=>this.onFile(e),busy:u.status==='busy',msg:u.msg||'',error:u.status==='error'?u.msg:'',done:u.status==='done'?u.msg:'',hasPreview:u.status==='preview',previewHead:u.head||'',preview:u.preview||[],
+        apply:()=>this.applyUpload(),cancel:()=>{this._up=null;this.setState({up:{}})},canRevert:this.base.source==='upload',revert:()=>this.revertUpload()};
+      out.sy={run:()=>this.runSync(false),running:y.status==='running',btnLabel:y.status==='running'?'กำลังดึงข้อมูล…':'ดึงข้อมูลล่าสุดตอนนี้',msg:y.msg||'',error:y.status==='error'?y.msg:'',done:y.status==='done'?y.msg:'',ready:y.status==='ready'&&!!st,
+        boxes:[['ซิงก์ล่าสุด',sc.last?dtTh(sc.last):'ยังไม่เคยซิงก์'],['ผลล่าสุด',sc.lastMsg||'—'],['บนเว็บไซต์ TGO',sc.total?fmtN(sc.total)+' รายการ':'—'],['ใบรับรองที่ดึงเพิ่มไว้',fmtN(this.tgoCerts.length)+' ใบ']].map(([k,v])=>({k,v})),
+        freq:sc.freq,onFreq:e=>this.saveSync({freq:e.target.value}),autoApply:!!sc.autoApply,onAutoApply:e=>this.saveSync({autoApply:e.target.checked}),proxy:sc.proxy,onProxy:e=>this.saveSync({proxy:e.target.value.trim()}),
+        head:st?`พบใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ จาก ${fmtN(st.items.length)} รายการล่าสุด (ผ่าน ${st.via})`:'',list:st?st.nw.slice(0,60).map(it=>({tag:it.gid?'ผูกกับบริษัทเดิม':'บริษัทใหม่',bg:it.gid?'#E6ECFD':'#DDF5F1',fg:it.gid?'#1A2FB0':'#0B6E66',org:it.org,meta:`${it.cert} · ${it.prov} · อนุมัติ ${it.apBE}`})):[],
+        apply:()=>this.applySync(false),cancel:()=>{this._sync=null;this.setState({sy:{}})}};
+      const me=this.me();const ownN={};Object.values(C.owners).forEach(v=>ownN[v]=(ownN[v]||0)+1);
+      out.tm={me,onMe:e=>{try{localStorage.setItem('gcc-me',e.target.value)}catch(x){}this.forceUpdate()},members:C.team.map(name=>({name,n:fmtN(ownN[name]||0),del:()=>{C.team=C.team.filter(x=>x!==name);this.saveCrm()}})),noTeam:!C.team.length,
+        add:e=>{e.preventDefault();const v=String(new FormData(e.target).get('name')||'').trim();if(v&&!C.team.includes(v)){C.team.push(v);if(!me){try{localStorage.setItem('gcc-me',v)}catch(x){}}}e.target.reset();this.saveCrm()},
+        stats:[['บริษัทที่มีผู้รับผิดชอบ',Object.keys(C.owners).length],['สถานะการขาย (ไม่ใช่ยังไม่ติดต่อ)',Object.values(C.stages).filter(v=>v&&v!=='none').length],['นัดทั้งหมด',C.tasks.length],['บันทึกการติดต่อ',Object.values(C.log).reduce((n,a)=>n+a.length,0)],['ติดดาว',C.watch.length]].map(([k,v])=>({k,v:fmtN(v)})),
+        exp:()=>this.exportCrm(),imp:e=>this.importCrm(e),msg:s.tmMsg};
+      out.mon={notify:!!mon.notify,onNotify:e=>{const v=e.target.checked;if(v&&'Notification' in window&&Notification.permission!=='granted')Notification.requestPermission();this.saveMon({notify:v});this.forceUpdate()},line:mon.last?`ตรวจล่าสุด ${dtTh(mon.last)} · เหตุการณ์ทั้งหมด ${fmtN((mon.events||[]).length)}`:'ยังไม่เคยตรวจ'};
+    }
+
+    if(s.tab==='notes'){
+      const by={};cos.forEach(c=>{if(c.rnd)by[c.rnd]=(by[c.rnd]||0)+1});const no=(this.R||[]).find(x=>x.docT>=this.T);
+      out.nt={defs:GDESC.map((desc,i)=>({no:String(i+1),name:i===0?`CFO ใกล้หมดอายุ (≤ ${W} วัน)`:GCC.TGT[i],desc,badgeBg:GCOL[i][0],badgeFg:GCOL[i][1]})),
+        dedup:['1 บริษัท = 1 แถว รวมทุกแหล่ง (TGO, GI, กรอ., SET) ด้วยเลขนิติบุคคลและชื่อบริษัทจากไฟล์ต้นทาง','ระบบตรวจซ้ำอีกชั้น: ชื่อเหมือนกันหลังตัดคำนำหน้า (บริษัท จำกัด มหาชน) และชื่อสาขา ถ้ามีเลขนิติบุคคลแค่แถวเดียวจะรวมให้อัตโนมัติ ที่เหลือ (ไม่มีเลขทั้งคู่ เลขต่างกัน หรือใช้เบอร์เดียวกัน) ส่งเข้าคิวตรวจข้อมูลซ้ำ','ชื่อจาก TGO ที่ขึ้นต้นด้วย "บริษัท บริษัท" ถูกแก้เป็น "บริษัท" ก่อนเทียบ','บริษัทที่รวมแล้วจะแสดงว่ามาจากรหัสใด และรายละเอียดทุกรายการระบุแหล่งที่มา (TGO / GI / กรอ. / SET) พร้อมรหัสแถวต้นทาง'],
+        rounds:(this.R||[]).map(x=>{const left=Math.round((x.docT-this.T)/864e5);const st=x.docT>=this.T?['เปิดรับเอกสาร · เหลือ '+fmtN(left)+' วัน',left<=14?'#FDECC8':'#DDF5F1',left<=14?'#9A5A00':'#0B6E66']:x.annT>=this.T?['ปิดรับเอกสาร · รอประกาศผล','#E6ECFD','#1A2FB0']:['ประกาศผลแล้ว','#EEF1F8','#475069'];
+          return {no:x.no,stT:st[0],stBg:st[1],stFg:st[2],bg:x.annT<this.T?'#F7F8FC':'#fff',bd:no&&no.no===x.no?'2px solid #1A3FE0':'1px solid #E3E7F1',dates:[['ส่งเอกสาร',isoTh(x.doc)],['ชำระค่าธรรมเนียม',isoTh(x.fee)],['ประชุมครั้งที่ 1',isoTh(x.m1)],['ประกาศผล',isoTh(x.ann)],['ดาวน์โหลดใบรับรอง',isoTh(x.dl)]].map(([k,v])=>({k,v})),n:fmtN(by[x.no]||0),hasN:!!by[x.no],go:()=>this.setF({rnd:x.no,view:'co',sort:'exp',tgt:''})}}),
+        srcCount:fmtN(this.sources.length),sources:this.sources.map(x=>({name:x[0],org:x[1],file:x[2],date:x[3],n:fmtN(x[4]),note:x[6]||''}))};
+    }
+
+    if(s.sel!=null&&B.byId.get(s.sel)){
+      const c=B.byId.get(s.sel);const det=s.det&&s.det.id===c.id?s.det.d:null;const cv=this.cfoView(c);const st=this.stageOf(c.id);const w=C.watch.includes(c.id);
+      const mr=c.ids.length>1?c.ids.map(id=>{const r=B.rawById.get(id);return {code:'GCC-'+String(id).padStart(6,'0'),name:r.name,tags:this.tagsOf(r.src)}}):[];
+      const myG=B.groups.filter(g=>g.state==='pending'&&g.ids.some(i=>c.ids.includes(i)));
+      const more=s.more;const lim=(k,a)=>more[k]?a:a.slice(0,6);const code=id=>'GCC-'+String(id).padStart(6,'0');const multi=c.ids.length>1;
+      const blk=(k,src,title,a,map)=>a&&a.length?{src:SRCC[src][0],srcBg:SRCC[src][1],srcFg:SRCC[src][2],title,count:fmtN(a.length)+' รายการ',items:lim(k,a).map(map),more:!more[k]&&a.length>6?`ดูทั้งหมด ${fmtN(a.length)} รายการ`:'',showMore:()=>this.setState({more:{...more,[k]:true}})}:null;
+      const pill=x=>/อยู่ในอายุ/.test(x)?['#DDF5F1','#0B6E66']:['#EEF1F8','#475069'];
+      const certs=(this.certsBy.get(c.id)||[]).slice().sort((a,b)=>(b.ex||'').localeCompare(a.ex||''));
+      const allBlocks=[
+        blk('t',0,'ใบรับรอง CFO',certs,x=>{const sc=x.s1!=null&&((x.s1||0)+(x.s2||0)+(x.s3||0))>0;const tot=sc?(x.s1||0)+(x.s2||0)+(x.s3||0):1;const p=v=>v==null?'—':(v*100).toFixed(1)+'%';
+          return {h:x.cert||'ไม่มีเลขที่ใบรับรอง',badge:CST[x.st][0],bBg:PILL[x.st][0],bFg:PILL[x.st][1],t1:x.org,t2:x.act&&x.act!==x.org?x.act:'',
+            kv:[['อนุมัติ',isoTh(x.ap)],['หมดอายุ',isoTh(x.ex)],['จังหวัด',x.provTxt||CD.prov[x.prov]||'—']].map(([k,v])=>({k,v})),hasScope:sc,w1:(x.s1||0)/tot*100,w2:(x.s2||0)/tot*100,w3:(x.s3||0)/tot*100,p1:p(x.s1),p2:p(x.s2),p3:p(x.s3),
+            from:x.tgo?x.note:(multi?'จาก '+code(x.gid0):'')}}),
+        det&&blk('g',1,'อุตสาหกรรมสีเขียว (GI)',det.g.slice().sort((a,b)=>(b.x[0]-a.x[0])||(b.x[1]-a.x[1])),({src,x})=>({h:`ระดับ ${x[1]} · ปีงบ ${x[0]}`,badge:x[9],bBg:pill(x[9])[0],bFg:pill(x[9])[1],t1:x[3],t2:x[2],
+          kv:[['รับรอง',isoTh(x[7])],['หมดอายุ',x[8]?isoTh(x[8]):'ไม่มีกำหนด'],['จังหวัด',x[6]||'—']].concat(x[4]?[['ทะเบียนโรงงาน',x[4]]]:[]).map(([k,v])=>({k,v})),hasScope:false,from:multi?'จาก '+code(src):''})),
+        det&&blk('f',2,'โรงงานที่เริ่มประกอบกิจการ (กรอ.)',det.f,({src,x})=>({h:x[2],badge:'เริ่ม '+ymTh(x[0]),bBg:'#E6ECFD',bFg:'#1A2FB0',t1:x[3],t2:x[4],
+          kv:[['เงินทุน',money(x[7])]].concat(x[8]?[['คนงาน',fmtN(x[8])+' คน']]:[]).concat(x[5]?[['โทร',x[5]]]:[]).map(([k,v])=>({k,v})),hasScope:false,from:multi?'จาก '+code(src):''})),
+        det&&blk('s',3,'บริษัทจดทะเบียน (SET)',det.s,({src,x})=>({h:x[0],badge:x[2],bBg:'#0E1F7A',bFg:'#fff',t1:x[1],t2:x[5],
+          kv:[['กลุ่มอุตสาหกรรม',x[3]||'—']].concat(x[4]?[['หมวดธุรกิจ',x[4]]]:[]).map(([k,v])=>({k,v})),hasScope:false,from:multi?'จาก '+code(src):''}))
+      ].filter(Boolean);
+      const dt=s.dTab||'info';const blocks=allBlocks.filter(b=>dt==='cfo'?b.src==='TGO':dt==='src'?b.src!=='TGO':false);
+      const ph=(c.phone||'').split('|').map(x=>x.trim()).filter(Boolean),em=(c.email||'').split('|').map(x=>x.trim()).filter(Boolean);const ce=c.cEdited;
+      const tasks=C.tasks.filter(t=>(B.alias.get(t.gid)??t.gid)===c.id).sort((a,b)=>a.date.localeCompare(b.date)).map(t=>this.taskView(t));
+      const r=c.rndR;
+      const LT={call:['โทร','#1A3FE0'],email:['อีเมล','#1FB5C9'],meet:['นัดพบ','#C27A12'],follow:['ติดตามผล','#5B6FE0'],note:['โน้ต','#5E6680'],stage:['สถานะการขาย','#0B6E66'],owner:['ผู้รับผิดชอบ','#0E1F7A']};
+      const logs=(C.log[c.id]||[]).slice().sort((a,b)=>b.at.localeCompare(a.at));const lastC=logs.find(l=>['call','email','meet','follow'].includes(l.type));
+      const nOpenT=C.tasks.filter(t=>!t.done&&(B.alias.get(t.gid)??t.gid)===c.id).length;
+      const selX={dTabs:[['info','ข้อมูลบริษัท',0],['cfo','CFO · รอบ อบก.',certs.length],['src','GI · โรงงาน · SET',det?det.g.length+det.f.length+det.s.length:0],['crm','การติดต่อ',logs.length+nOpenT]].map(([k,label,n])=>({label,n:fmtN(n),hasN:n>0,fw:dt===k?'600':'400',fg:dt===k?'#0A1A86':'#475069',bd:dt===k?'#0A1A86':'transparent',go:()=>this.setState({dTab:k})})),
+        tInfo:dt==='info',tCfo:dt==='cfo',tSrc:dt==='src',tCrm:dt==='crm',tBlocks:dt==='cfo'||dt==='src',showRnd:dt==='cfo'&&!!c.rndR,
+        blocksEmpty:dt!=='info'&&dt!=='crm'&&!blocks.length&&!(dt==='src'&&!det),blocksEmptyText:dt==='cfo'?'ไม่พบใบรับรอง CFO ของบริษัทนี้ใน TGO':'ไม่พบข้อมูลใน GI, กรอ. หรือ SET',
+        stLabel:st[1],owner:C.owners[c.id]||'',ownerLabel:C.owners[c.id]||'ยังไม่มี',onOwner:e=>this.setOwner(c.id,e.target.value),noTeam:!C.team.length,goTeam:()=>this.go('update',{sel:null}),
+        lastContact:lastC?'ติดต่อล่าสุด '+isoTh(lastC.at.slice(0,10)):'ยังไม่เคยติดต่อ',noTasks:false,
+        timeline:logs.map(l=>{const [tag,color]=LT[l.type]||LT.note;return {tag,color,text:l.text||'',result:l.result||'',meta:[dtTh(l.at),l.by].filter(Boolean).join(' · '),del:()=>{C.log[c.id]=(C.log[c.id]||[]).filter(x=>x!==l);this.saveCrm()}}}),noLog:!logs.length,
+        addLog:e=>{e.preventDefault();const fd=new FormData(e.target);const g=k=>String(fd.get(k)||'').trim();const type=g('type')||'note',result=g('result'),text=g('text');if(!text&&!result)return;
+          this.logAct(c.id,{type,result,text});e.target.reset();if(type!=='note'&&(C.stages[c.id]||'none')==='none')this.setStage(c.id,result==='ไม่สนใจ'?'lost':'contacted');else this.saveCrm()}};
+      out.hasSel=true;out.sel={...selX,code:c.code,typeName:D.type[c.type],name:c.name,tgtName:`กลุ่ม ${c.tgt+1} · ${GCC.TGT[c.tgt]}`,tags:this.tagsOf(c.src),starText:w?'★ ติดตามอยู่':'☆ ติดตาม',toggleStar:()=>this.toggleWatch(c.id),
+        stage:st[0],sbg:st[2],sfg:st[3],onStage:e=>this.setStage(c.id,e.target.value),
+        merged:mr.length>0,mergedText:`รวมจาก ${mr.length} แถวในไฟล์ต้นทาง`,mergedRows:mr,hasDup:myG.length>0,dupText:`มีข้อมูลที่อาจซ้ำกับบริษัทนี้ ${myG.length} กลุ่ม รอตรวจ · กดเพื่อไปที่ตรวจข้อมูลซ้ำ`,goDup:()=>this.go('dedup',{sel:null,ddF:'pending',ddPage:Math.floor(B.groups.filter(g=>g.state==='pending').indexOf(myG[0])/20)}),
+        facts:[['เลขนิติบุคคล',c.jur],['จังหวัด',D.prov[c.prov]],['ที่อยู่',c.addr],['กลุ่มอุตสาหกรรม',D.ind[c.ind]],['กิจการ',c.biz],['จำนวนโรงงาน',c.fac?fmtN(c.fac)+' แห่ง':''],['SET',c.set?`${c.set} · ตลาด ${c.mkt}`:'']].filter(x=>x[1]).map(([k,v])=>({k,v})),
+        phones:ph.map(t=>({t,href:telHref(t)})),emails:em.map(t=>({t,href:'mailto:'+t})),web:c.web,noContact:!ph.length&&!em.length&&!c.web,ctSrc:ce?`แก้ไขด้วยตนเอง ${isoTh(ce.at.slice(0,10))}${ce.note?' · '+ce.note:''}`:(D.ct[c.ct]?'แหล่งข้อมูลติดต่อ: '+D.ct[c.ct]:''),
+        editing:s.editC,editText:s.editC?'ปิดการแก้ไข':'แก้ไข',toggleEdit:()=>this.setState({editC:!s.editC}),saveContact:e=>this.saveContact(e,c),phoneRaw:c.phone||'',emailRaw:c.email||'',webRaw:c.web||'',cnoteRaw:ce&&ce.note||'',
+        kpis:[{k:'CFO',v:cv.t,c:cv.fg,sub:c.cfoN?`${fmtN(c.cfoN)} ใบ${cv.sub?' · '+cv.sub:''}`:'ไม่พบใน TGO'},{k:'GI ที่ยังใช้ได้',v:c.giLive?'ระดับ '+c.giLive:'—',c:'#0B6E66',sub:c.giMax?`สูงสุดที่เคยได้ ${c.giMax}${c.giUntil?' · ถึง '+isoTh(c.giUntil):''}`:'ไม่พบใน GI'},{k:'โรงงานใหม่ (กรอ.)',v:c.invest?money(c.invest):'—',c:'#1A3FE0',sub:c.newYm?'เริ่ม '+ymTh(c.newYm):'ไม่พบในรายชื่อโรงงานใหม่'}],
+        hasRnd:!!r,rndText:r?`รอบ ${c.rnd}`:'',rndDates:r?[['ส่งเอกสารภายใน',isoTh(r.doc)],['ชำระค่าธรรมเนียม',isoTh(r.fee)],['ประกาศผล',isoTh(r.ann)]].map(([k,v])=>({k,v})):[],rndWarn:r&&c.rndLapse?`${c.rndIdeal&&c.rndIdeal!==c.rnd?`รอบที่ควรยื่น (${c.rndIdeal}) ปิดรับเอกสารแล้ว `:''}ใบรับรองจะขาดช่วง ${fmtN(c.rndLapse)} วัน`:'',
+        loadingDet:dt==='src'&&!det,blocks,tasks,noTasks:!tasks.length,plan:()=>this.openSched({ids:[c.id]}),
+        notes:(C.notes[c.id]||[]).slice().reverse().map(n=>({text:n.text,at:dtTh(n.at),del:()=>{C.notes[c.id]=C.notes[c.id].filter(x=>x!==n);this.saveCrm()}})),
+        addNote:e=>{e.preventDefault();const t=String(new FormData(e.target).get('text')||'').trim();if(!t)return;(C.notes[c.id]||(C.notes[c.id]=[])).push({at:new Date().toISOString(),text:t});e.target.reset();if((C.stages[c.id]||'none')==='none')C.stages[c.id]='contacted';this.saveCrm()},
+        match:c.merged?'รวมจากหลายแถว (ชื่อตรงกัน)':(D.match[c.match]||'—')};
+    }
+    if(s.sched){const o=s.sched;const t=o.taskId&&C.tasks.find(x=>x.id===o.taskId);const c=o.ids&&o.ids.length===1&&B.byId.get(B.alias.get(o.ids[0])??o.ids[0]);
+      out.hasSched=true;out.sc={title:t?'เลื่อน / แก้ไขนัด':o.ids.length>1?`นัดติดต่อ ${fmtN(o.ids.length)} บริษัท`:'นัดติดต่อ',sub:c?c.name:o.ids.length>1?'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก':'',type:t?t.type:'call',date:t?t.date:nextWork(addDays(today,1)),time:t?t.time:'',note:t?t.note:'',isMulti:!t&&o.ids.length>1,save:e=>this.saveSched(e),cancel:()=>this.setState({sched:null})}}
+    return out;
+  }
+}
+</script>
+</body>
+</html>
