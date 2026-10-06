@@ -9,9 +9,12 @@
  */
 import type { ContactEdit, Crm, LogEntry, StageKey, Task } from './types';
 
-export interface SyncOp { k: string; v?: unknown; del?: boolean; by?: string }
+/** `id` identifies this queued change locally (for acknowledging it across tabs); the server ignores it. */
+export interface SyncOp { id?: string; k: string; v?: unknown; del?: boolean; by?: string }
+export interface PendingStore { url: string; ops: SyncOp[] }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
-export interface TeamCfg { url: string; key: string; seq: number }
+/** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
+export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
 export type TeamStatus = 'off' | 'connecting' | 'syncing' | 'ok' | 'error' | 'offline';
 export interface TeamState { status: TeamStatus; msg: string; last: string }
 
@@ -21,25 +24,49 @@ export class TeamSyncError extends Error {}
 
 const ERR_TH: Record<string, string> = {
   unauthorized: 'รหัสทีมไม่ถูกต้อง',
-  no_team_key: 'ยังไม่ได้ตั้งรหัสทีมในสคริปต์ (TEAM_KEY อย่างน้อย 6 ตัวอักษร)',
+  no_team_key: 'สคริปต์ยังไม่มีรหัสทีม (TEAM_KEY อย่างน้อย 8 ตัวอักษร) — ตั้งรหัสแล้วกด Deploy → Manage deployments → Edit → New version',
   busy: 'ชีตกำลังบันทึกข้อมูลของคนอื่นอยู่ จะลองใหม่อัตโนมัติ',
   too_many_ops: 'ส่งข้อมูลครั้งละมากเกินไป',
 };
-export const errText = (e: unknown) =>
-  e instanceof TeamSyncError ? e.message
-  : e instanceof TypeError ? 'เชื่อมต่อไม่ได้ (ออฟไลน์ หรือลิงก์ไม่ถูกต้อง)'
-  : String((e as Error)?.message || e);
+export const errText = (e: unknown) => {
+  if (e instanceof TeamSyncError) return e.message;
+  const name = (e as Error)?.name;
+  if (name === 'TimeoutError' || name === 'AbortError') return 'ชีตไม่ตอบกลับ (หมดเวลา) จะลองใหม่อัตโนมัติ';
+  if (e instanceof TypeError) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
+    // a cross-origin redirect to Google sign-in (access not "Anyone", or a /dev URL) surfaces as a network error
+    return 'เชื่อมต่อไม่ได้ — ตรวจว่าใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้ง Who has access เป็น "Anyone (ทุกคน)" แล้ว';
+  }
+  return String((e as Error)?.message || e);
+};
 
-/** POST JSON as text/plain (no CORS preflight — required by Apps Script web apps). */
+/** Only Apps Script web-app URLs are accepted (blocks invite links that would send the team code
+ *  elsewhere). A localhost dev server is allowed when the app itself runs on localhost. */
+export function isTeamUrl(u: string) {
+  if (/^https:\/\/script\.google\.com\/(?:a\/macros\/[^/\s]+|macros)\/s\/[\w-]+\/exec$/.test(u)) return true;
+  const host = typeof location !== 'undefined' ? location.hostname : '';
+  return /^(localhost|127\.0\.0\.1)$/.test(host) && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(u);
+}
+/** Short deployment id shown to users so they can check an invite with the team lead. */
+export const deploymentId = (u: string) => (/\/s\/([\w-]+)\/exec$/.exec(u)?.[1] || u).slice(-10);
+
+/** POST JSON as text/plain (no CORS preflight — required by Apps Script web apps); 45 s timeout. */
 export const fetchTransport: Transport = async (url, body) => {
-  const r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow' });
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(new DOMException('timeout', 'TimeoutError')), 45000);
+  let r: Response;
+  try {
+    r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl.signal });
+  } finally {
+    clearTimeout(to);
+  }
   if (!r.ok) throw new TeamSyncError(`เซิร์ฟเวอร์ตอบกลับผิดพลาด (HTTP ${r.status})`);
   const t = await r.text();
   try {
     return JSON.parse(t);
   } catch {
-    // typically Google's sign-in page: the web app is not shared with "Anyone"
-    throw new TeamSyncError('ลิงก์ไม่ถูกต้อง หรือสคริปต์ยังไม่ได้ตั้งให้ "ทุกคน (Anyone)" เข้าถึงได้');
+    // typically Google's sign-in page: the web app is not shared with "Anyone", or not deployed yet
+    throw new TeamSyncError('ลิงก์ไม่ถูกต้อง หรือสคริปต์ยังไม่ได้ Deploy ให้ "ทุกคน (Anyone)" เข้าถึงได้');
   }
 };
 
@@ -54,6 +81,16 @@ export async function call<T extends Record<string, unknown>>(t: Transport, url:
 }
 
 // ------------------------------------------------------------------ records
+
+/** Companies created from the TGO website sync (id ≥ 900000) get per-device ids, so their records
+ *  must not be shared — the same id is a different company on another device. */
+export const LOCAL_ID_MIN = 900000;
+export function isLocalOnly(k: string, v?: unknown) {
+  const m = /^(stage|owner|watch|contact|log)\/(\d+)/.exec(k);
+  if (m) return +m[2] >= LOCAL_ID_MIN;
+  if (k.startsWith('task/') && v && typeof v === 'object') return Number((v as Task).gid) >= LOCAL_ID_MIN;
+  return false;
+}
 
 export const keyOf = {
   stage: (id: number | string) => `stage/${id}`,
@@ -92,6 +129,7 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   Object.entries(C.log || {}).forEach(([cid, a]) => (a || []).forEach((e) => e.id && m.set(keyOf.log(cid, e.id), { ...e })));
   Object.entries(s.contacts || {}).forEach(([id, v]) => m.set(keyOf.contact(id), { ...v }));
   Object.entries(s.dec || {}).forEach(([k, v]) => m.set(keyOf.dedup(k), v));
+  [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
@@ -101,7 +139,7 @@ export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(),
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
   const i = row.k.indexOf('/');
-  if (i < 0) return;
+  if (i < 0 || isLocalOnly(row.k, row.v)) return;
   const type = row.k.slice(0, i), rest = row.k.slice(i + 1);
   const C = s.crm, del = row.del || row.v == null;
   switch (type) {

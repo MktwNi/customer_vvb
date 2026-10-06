@@ -2,7 +2,7 @@ import { useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { CONFIG } from '../lib/constants';
 import { dtTh, fmtN } from '../lib/format';
-import type { TeamStatus } from '../lib/teamSync';
+import { deploymentId, type TeamStatus } from '../lib/teamSync';
 import { Notice, card, inputStyle, labelCol } from './ui';
 
 /** [label, dot colour on white, dot colour on the dark header] */
@@ -24,6 +24,7 @@ export function TeamSyncCard() {
   const { engine: e } = useApp();
   useEngineVersion();
   const [copied, setCopied] = useState(false);
+  const [newKey, setNewKey] = useState('');
   const cfg = e.teamCfg, t = e.team;
   const [label, dot] = TEAM_ST[t.status];
   const btn: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 };
@@ -54,7 +55,7 @@ export function TeamSyncCard() {
             เชื่อมกับ Google Sheet ของทีม แล้ว ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ เบอร์ที่แก้ รายชื่อทีม และผลตรวจข้อมูลซ้ำ จะซิงก์ระหว่างทุกเครื่องอัตโนมัติ ทันทีที่แก้ไข และดึงของคนอื่นทุก 30 วินาที
           </span>
         </div>
-        <span style={{ display: 'flex', gap: 8, alignItems: 'center', height: 32, padding: '0 12px', borderRadius: 999, background: '#F4F6FC', fontSize: 13, color: '#384155' }}>
+        <span role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 32, padding: '0 12px', borderRadius: 999, background: '#F4F6FC', fontSize: 13, color: '#384155' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: dot }} />
           {cfg ? label : TEAM_ST.off[0]}
           {cfg && t.status === 'ok' && t.last ? ` ${hhmm(t.last)}` : ''}
@@ -63,7 +64,11 @@ export function TeamSyncCard() {
 
       {!cfg && (
         <form onSubmit={connect} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {e.teamJoinUrl && <Notice kind="ok">คุณได้รับลิงก์เชิญเข้าทีม ใส่รหัสทีมที่ได้รับจากหัวหน้าทีมแล้วกด เชื่อมต่อ</Notice>}
+          {e.teamJoinUrl && (
+            <Notice kind="ok">
+              คุณได้รับลิงก์เชิญเข้าทีม (ชีตรหัส …{deploymentId(e.teamJoinUrl)}) ตรวจกับหัวหน้าทีมว่าตรงกัน แล้วใส่รหัสทีมและกด เชื่อมต่อ
+            </Notice>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,260px),1fr))', gap: 10 }}>
             <label style={labelCol}>
               ลิงก์ Web app ของ Google Apps Script
@@ -98,13 +103,37 @@ export function TeamSyncCard() {
               </div>
             ))}
           </div>
-          {(t.status === 'error' || t.status === 'offline') && t.msg && <Notice kind="error">{t.msg} — ข้อมูลที่แก้ไว้ยังอยู่ในเครื่อง และจะส่งให้เองเมื่อเชื่อมต่อได้</Notice>}
+          {e.teamJoinUrl && e.teamJoinUrl !== cfg.url && (
+            <Notice kind="error" role="alert">
+              ลิงก์เชิญที่เปิดมาชี้ไปชีตอื่น (…{deploymentId(e.teamJoinUrl)}) ไม่ใช่ชีตที่เชื่อมอยู่ (…{deploymentId(cfg.url)}) ถ้าหัวหน้าทีมย้ายชีตจริง ให้กด ยกเลิกการเชื่อมต่อ แล้วเชื่อมใหม่ด้วยลิงก์เชิญ
+            </Notice>
+          )}
+          {(t.status === 'error' || t.status === 'offline') && t.msg && (
+            <Notice kind="error" role="alert">{t.msg} — ข้อมูลที่แก้ไว้ยังอยู่ในเครื่อง{t.msg === 'รหัสทีมไม่ถูกต้อง' ? ' ใส่รหัสทีมใหม่ด้านล่างเพื่อส่งต่อ' : ' และจะส่งให้เองเมื่อเชื่อมต่อได้'}</Notice>
+          )}
+          {t.msg === 'รหัสทีมไม่ถูกต้อง' && (
+            <form
+              onSubmit={async (ev) => {
+                ev.preventDefault();
+                if (await e.teamSetKey(newKey)) setNewKey('');
+              }}
+              style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}
+            >
+              <label style={labelCol}>
+                รหัสทีมใหม่ (หัวหน้าทีมเปลี่ยนรหัสแล้ว)
+                <input type="password" value={newKey} onChange={(ev) => setNewKey(ev.target.value)} style={inputStyle} autoComplete="off" />
+              </label>
+              <button type="submit" style={btn}>ใช้รหัสใหม่</button>
+            </form>
+          )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => e.teamSync()} disabled={t.status === 'syncing'} style={btn}>{t.status === 'syncing' ? 'กำลังซิงก์…' : 'ซิงก์ตอนนี้'}</button>
             <button onClick={copy} style={ghost}>{copied ? 'คัดลอกลิงก์แล้ว ✓' : 'คัดลอกลิงก์เชิญทีม'}</button>
             <button
               onClick={() => {
-                if (window.confirm('ยกเลิกการเชื่อมต่อกับชีตของทีม? ข้อมูลในเครื่องนี้ยังอยู่ แต่จะไม่ซิงก์กับทีมแล้ว')) e.teamDisconnect();
+                const n = e.teamPendingN;
+                const warn = n ? `\n\nมี ${fmtN(n)} รายการที่ยังไม่ได้ส่งขึ้นชีต จะส่งให้ถ้าเชื่อมกลับมาที่ชีตเดิม` : '';
+                if (window.confirm('ยกเลิกการเชื่อมต่อกับชีตของทีม? ข้อมูลในเครื่องนี้ยังอยู่ แต่จะไม่ซิงก์กับทีมแล้ว' + warn)) e.teamDisconnect();
               }}
               style={{ cursor: 'pointer', height: 40, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}
             >
@@ -116,7 +145,7 @@ export function TeamSyncCard() {
           </span>
         </div>
       )}
-      {!cfg && t.status === 'error' && t.msg && <Notice kind="error">{t.msg}</Notice>}
+      {!cfg && t.status === 'error' && t.msg && <Notice kind="error" role="alert">{t.msg}</Notice>}
     </section>
   );
 }

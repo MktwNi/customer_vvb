@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
-import { legacyLogId } from './teamSync';
+import { errText, isLocalOnly, isTeamUrl, legacyLogId } from './teamSync';
+import { memoryStore } from './storage';
 import type { Dataset, RoundRaw } from './types';
 
 const KEY = 'test-key-123';
+const URL = 'https://script.google.com/macros/s/x/exec';
 const DATA = join(__dirname, '..', '..', '..', 'project', 'data');
 const json = (f: string) => JSON.parse(readFileSync(join(DATA, f), 'utf8'));
 
@@ -19,7 +21,7 @@ describe('Code.gs (Apps Script backend, run through the simulator)', () => {
   it('rejects a wrong key and a script without TEAM_KEY', () => {
     expect(s.post({ action: 'ping', key: 'nope' })).toEqual({ ok: false, error: 'unauthorized' });
     expect(createGasSim({ teamKey: '' }).post({ action: 'ping', key: '' }).error).toBe('no_team_key');
-    expect(createGasSim({ teamKey: '12345' }).post({ action: 'ping', key: '12345' }).error).toBe('no_team_key');
+    expect(createGasSim({ teamKey: '1234567' }).post({ action: 'ping', key: '1234567' }).error).toBe('no_team_key');
     expect(s.post('not json').error).toBe('bad_json');
   });
 
@@ -75,6 +77,8 @@ describe('Code.gs (Apps Script backend, run through the simulator)', () => {
     expect(Object.values(final).every((v) => v === 'v5')).toBe(true);
     const seqs = rows.map((r) => r.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    // (compaction threshold is remembered so later pushes don't re-read the whole sheet)
+    expect(Number(s.props.COMPACT_AT)).toBeGreaterThanOrEqual(5000);
     // a client whose cursor was mid-way still converges
     const mid: Record<string, unknown> = {};
     let cur = 2500, more = true;
@@ -86,6 +90,34 @@ describe('Code.gs (Apps Script backend, run through the simulator)', () => {
     }
     expect(Object.keys(mid).length).toBe(1000);
     expect(Object.values(mid).every((v) => v === 'v5')).toBe(true);
+  });
+});
+
+describe('Code.gs on a real-size sheet', () => {
+  it('grows past the default 1000 rows and trims unused columns', () => {
+    const s = createGasSim({ teamKey: KEY });
+    for (let b = 0; b < 5; b++) {
+      const r = s.post({ action: 'push', key: KEY, ops: Array.from({ length: 300 }, (_, i) => ({ k: `task/b${b}-${i}`, v: { i } })) });
+      expect(r).toMatchObject({ ok: true, n: 300 });
+    }
+    const sh = s.sheet()!;
+    expect(sh.getLastRow()).toBe(1501);
+    expect(sh.getMaxRows()).toBeGreaterThanOrEqual(1501);
+    expect(sh.getMaxColumns()).toBe(6);
+    expect(s.post({ action: 'pull', key: KEY, since: 1400 }).rows!.length).toBe(100);
+  });
+  it('repairs an existing "sync" sheet that has no header row', () => {
+    const s = createGasSim({ teamKey: KEY });
+    s.addSheet('sync');
+    s.post({ action: 'push', key: KEY, ops: [{ k: 'stage/1', v: 'won' }] });
+    expect(s.sheet()!.rows[0][0]).toBe('seq');
+    expect(s.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k)).toEqual(['stage/1']);
+  });
+  it('rejects oversized values instead of storing a placeholder', () => {
+    const s = createGasSim({ teamKey: KEY });
+    const r = s.post({ action: 'push', key: KEY, ops: [{ k: 'contact/1', v: { note: 'x'.repeat(50000) } }, { k: 'stage/1', v: 'won' }] });
+    expect(r).toMatchObject({ ok: true, n: 1, rejected: ['contact/1'] });
+    expect(s.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((x) => x.k)).toEqual(['stage/1']);
   });
 });
 
@@ -102,6 +134,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     e.rebuild();
     e.loading = false;
     e.transport = async (_url, body) => sim.post(body);
+    e.store = memoryStore(); // each engine is its own browser
     return e;
   };
   beforeAll(() => {
@@ -122,7 +155,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
   const cos = () => A.B.companies.filter((c) => c.ids.length === 1).slice(0, 6);
 
   it('refuses a wrong team code', async () => {
-    expect(await A.teamConnect('https://script.google.com/macros/s/x/exec', 'wrong')).toBe(false);
+    expect(await A.teamConnect(URL, 'wrong')).toBe(false);
     expect(A.team).toMatchObject({ status: 'error', msg: 'รหัสทีมไม่ถูกต้อง' });
     expect(A.teamCfg).toBeNull();
   });
@@ -138,7 +171,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     A.saveContact(c2, { phone: '02-111-2222', email: 'a@x.co', web: '', note: 'คุณบี' });
     const g = A.B.groups.find((x) => x.state === 'pending')!;
     A.decide(g.key, 'merge');
-    expect(await A.teamConnect('https://script.google.com/macros/s/x/exec', KEY)).toBe(true);
+    expect(await A.teamConnect(URL, KEY)).toBe(true);
     expect(A.team.status).toBe('ok');
     expect(A.teamPendingN).toBe(0);
     const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
@@ -153,7 +186,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     // B already has its own local note for c1 and a different stage for c1
     B.setStage(c1.id, 'lost');
     B.addLog(c2.id, 'note', '', 'โน้ตจากเครื่อง B');
-    expect(await B.teamConnect('https://script.google.com/macros/s/x/exec', KEY)).toBe(true);
+    expect(await B.teamConnect(URL, KEY)).toBe(true);
     expect(B.stage(c1.id)).toBe('interested'); // the sheet's value wins for keys it already has
     expect(B.crm.owners[c1.id]).toBe('คุณเอ');
     expect(B.crm.watch).toContain(c2.id);
@@ -240,6 +273,144 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     await A.teamSync();
     expect(A.dec[g.key]).toBeUndefined();
     expect(A.B.companies.length).toBe(before + g.ids.length - 1);
+  });
+
+  it('a failed first pull still uploads pre-connect data on the next successful sync', async () => {
+    const C = mk();
+    const [, , , , c5] = cos();
+    C.setStage(c5.id, 'proposal');
+    C.toggleWatch(c5.id);
+    let fail = true;
+    C.transport = async (_u, body) => (fail && body.action === 'pull' ? { ok: false, error: 'busy' } : sim.post(body));
+    expect(await C.teamConnect(URL, KEY)).toBe(false);
+    expect(C.teamCfg?.seeded).toBe(false);
+    fail = false;
+    await C.teamSync();
+    expect(C.team.status).toBe('ok');
+    const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
+    expect(keys.has(`watch/${c5.id}`)).toBe(true);
+    C.dispose();
+  });
+
+  it('after a team-code change, queued edits survive and are sent with the new code', async () => {
+    const [c1, c2] = cos();
+    let rotated = false;
+    const NEW = 'new-team-code-99';
+    const real = A.transport;
+    A.transport = async (u, body) => {
+      if (!rotated) return real(u, body);
+      return body.key === NEW ? real(u, { ...body, key: KEY }) : { ok: false, error: 'unauthorized' };
+    };
+    rotated = true;
+    A.setStage(c1.id, 'won');
+    A.toggleWatch(c2.id);
+    await A.teamSync();
+    expect(A.team.msg).toBe('รหัสทีมไม่ถูกต้อง');
+    expect(A.teamPendingN).toBeGreaterThanOrEqual(2);
+    expect(await A.teamSetKey(NEW)).toBe(true);
+    expect(A.teamPendingN).toBe(0);
+    expect(A.stage(c1.id)).toBe('won');
+    await B.teamSync();
+    expect(B.stage(c1.id)).toBe('won');
+    A.transport = real;
+    A.teamCfg!.key = KEY;
+  });
+
+  it('disconnect + reconnect to the same sheet keeps queued edits instead of reverting them', async () => {
+    const [c1] = cos();
+    const real = A.transport;
+    A.transport = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    A.setStage(c1.id, 'lost'); // queued, can't send
+    await A.teamSync();
+    A.teamDisconnect();
+    A.transport = real;
+    expect(await A.teamConnect(URL, KEY)).toBe(true);
+    expect(A.stage(c1.id)).toBe('lost');
+    await B.teamSync();
+    expect(B.stage(c1.id)).toBe('lost');
+  });
+
+  it('importing an old backup while connected only fills gaps (no reverts, no resurrected deletions)', async () => {
+    const [c1, , c3] = cos();
+    const t = { id: 'imp-task-1', gid: c3.id, title: 'x', type: 'call' as const, date: '2026-10-20', time: '', note: 'จากไฟล์สำรอง', done: false };
+    A.setStage(c1.id, 'won');
+    A.crm.tasks.push(t);
+    await A.teamSync();
+    A.delTask(A.crm.tasks.find((x) => x.id === t.id)!); // team deletes the task
+    await A.teamSync();
+    await B.teamSync();
+    const [c6] = A.B.companies.filter((c) => c.ids.length === 1).slice(10, 11);
+    const backup = { kind: 'gcc-crm-backup', v: 1, at: '2026-09-01T00:00:00.000Z', by: 'old', crm: { stages: { [c1.id]: 'contacted', [c6.id]: 'interested' }, tasks: [t], watch: [], owners: {}, team: [], log: {} }, contacts: {}, dedup: {} };
+    const file = { text: async () => JSON.stringify(backup) } as unknown as File;
+    await B.importCrm(file); // starts the merge sync in the background
+    await vi.waitFor(() => {
+      if ((B as unknown as { teamBusy: boolean }).teamBusy) throw new Error('still syncing');
+    });
+    await B.teamSync();
+    expect(B.team.status).toBe('ok');
+    await A.teamSync();
+    expect(A.stage(c1.id)).toBe('won'); // not reverted to the backup's 'contacted'
+    expect(B.stage(c1.id)).toBe('won');
+    expect(A.crm.tasks.some((x) => x.id === t.id)).toBe(false); // deletion not undone
+    expect(B.crm.tasks.some((x) => x.id === t.id)).toBe(false);
+    expect(A.stage(c6.id)).toBe('interested'); // a gap the team didn't have is filled
+  });
+
+  it('never shares records of companies added from the TGO website (per-device ids)', () => {
+    expect(isLocalOnly('stage/900003')).toBe(true);
+    expect(isLocalOnly('log/900001/abc')).toBe(true);
+    expect(isLocalOnly('task/x', { gid: 900002 })).toBe(true);
+    expect(isLocalOnly('stage/1234')).toBe(false);
+    const before = A.teamPendingN;
+    A.crm.stages[900001] = 'none';
+    A.setStage(900001, 'won');
+    expect(A.teamPendingN).toBe(before);
+  });
+
+  it('two tabs of one browser share the queue and never re-send stale changes', async () => {
+    const [, , , , , c6] = cos();
+    const shared = memoryStore();
+    const T1 = mk(), T2 = mk();
+    T1.store = T2.store = shared;
+    expect(await T1.teamConnect(URL, KEY)).toBe(true);
+    T2.teamCfg = { ...T1.teamCfg! };
+    const real = T1.transport;
+    T1.transport = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    T1.setStage(c6.id, 'contacted'); // queued in shared storage while offline
+    await T1.teamSync();
+    T1.transport = real;
+    await T1.teamSync(); // pushes 'contacted'
+    T1.setStage(c6.id, 'won');
+    await T1.teamSync(); // pushes 'won'
+    await T2.teamSync(); // must not push the stale 'contacted' it saw at startup
+    await A.teamSync();
+    expect(A.stage(c6.id)).toBe('won');
+    expect(T2.stage(c6.id)).toBe('won');
+    T1.dispose();
+    T2.dispose();
+  });
+
+  it('a star on a company that is merged on this device updates the right flags', async () => {
+    const merged = A.B.companies.find((c) => c.ids.length > 1)!;
+    const alias = merged.ids.find((i) => i !== merged.id)!;
+    sim.post({ action: 'push', key: KEY, ops: [{ k: `watch/${alias}`, v: 1 }] });
+    await A.teamSync();
+    expect(A.crm.watch).toContain(alias);
+    expect(merged.fl.watch).toBe(A.crm.watch.includes(merged.id));
+  });
+
+  it('only accepts Apps Script web-app URLs and explains network failures', () => {
+    expect(isTeamUrl('https://script.google.com/macros/s/AKfycbx_abc-123/exec')).toBe(true);
+    expect(isTeamUrl('https://script.google.com/a/macros/acme.co.th/s/AKfy/exec')).toBe(true);
+    expect(isTeamUrl('https://script.google.com/macros/s/AKfy/dev')).toBe(false);
+    expect(isTeamUrl('https://evil.example/collect')).toBe(false);
+    expect(isTeamUrl('http://localhost:8787')).toBe(false); // only when the app itself runs on localhost
+    expect(errText(new TypeError('Failed to fetch'))).toContain('/exec');
+    expect(errText(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toContain('หมดเวลา');
   });
 
   it('disconnecting stops sharing but keeps local data', async () => {

@@ -9,6 +9,8 @@ export interface KVStore {
   get<T = unknown>(key: string): Promise<T | null>;
   set(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
+  /** Read-modify-write in a single transaction (safe across tabs). Returns the stored value. */
+  update<T>(key: string, fn: (cur: T | null) => T): Promise<T>;
 }
 
 /** IndexedDB database/object-store names are kept identical to the prototype so existing browser data carries over. */
@@ -36,16 +38,37 @@ function indexedDbStore(dbName = 'gcc-registry', store = 'kv'): KVStore {
     get: <T>(k: string) => tx<T>('readonly', (s) => s.get(k)).then((v) => (v === undefined ? null : v)).catch(() => null),
     set: (k, v) => tx<void>('readwrite', (s) => s.put(v, k)),
     del: (k) => tx<void>('readwrite', (s) => s.delete(k)),
+    update: <T>(k: string, fn: (cur: T | null) => T) =>
+      db().then(
+        (d) =>
+          new Promise<T>((res, rej) => {
+            const t = d.transaction(store, 'readwrite');
+            const os = t.objectStore(store);
+            let next: T;
+            const g = os.get(k);
+            g.onsuccess = () => {
+              next = fn(g.result === undefined ? null : (g.result as T));
+              os.put(next, k);
+            };
+            t.oncomplete = () => res(next);
+            t.onerror = () => rej(t.error);
+          }),
+      ),
   };
 }
 
-/** In-memory fallback (private mode / tests). */
-function memoryStore(): KVStore {
+/** In-memory store (no IndexedDB / tests — each call is an isolated "browser"). */
+export function memoryStore(): KVStore {
   const m = new Map<string, unknown>();
   return {
     get: async <T>(k: string) => (m.has(k) ? (m.get(k) as T) : null),
     set: async (k, v) => void m.set(k, v),
     del: async (k) => void m.delete(k),
+    update: async <T>(k: string, fn: (cur: T | null) => T) => {
+      const next = fn(m.has(k) ? (m.get(k) as T) : null);
+      m.set(k, next);
+      return next;
+    },
   };
 }
 
