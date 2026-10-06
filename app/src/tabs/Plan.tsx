@@ -77,7 +77,7 @@ export function Plan() {
 
   return (
     <>
-      <PageHead title="แผนติดต่อ" sub="นัดโทร ส่งอีเมล หรือเข้าพบ บันทึกในเครื่องนี้" />
+      <PageHead title="แผนติดต่อ" sub={`นัดโทร ส่งอีเมล หรือเข้าพบ ${e.teamCfg ? "แชร์กับทีม" : "บันทึกในเครื่องนี้"}`} />
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
         {kpis.map(([label, n, dot]) => (
           <div key={label} style={{ background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 2 }}>

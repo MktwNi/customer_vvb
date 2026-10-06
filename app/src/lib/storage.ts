@@ -83,4 +83,5 @@ export const PREF = {
   me: 'gcc-me',
   monitor: 'gcc-monitor',
   sync: 'gcc-tgo-sync',
+  team: 'gcc-team-sync',
 } as const;

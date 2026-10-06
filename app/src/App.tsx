@@ -35,6 +35,20 @@ export default function App() {
     return () => e.dispose();
   }, [e]);
 
+  // invite link: #team=<web-app url> → prefill the team-sync card on the update tab
+  useEffect(() => {
+    const m = /^#team=(.+)$/.exec(window.location.hash);
+    if (!m) return;
+    try {
+      e.teamJoinUrl = decodeURIComponent(m[1]);
+    } catch {
+      return;
+    }
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    set({ tab: 'update' });
+    e.emit();
+  }, [e, set]);
+
   useEffect(() => {
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;

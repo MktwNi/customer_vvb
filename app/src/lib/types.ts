@@ -77,7 +77,7 @@ export interface RoundRaw { no: string; m1: string; ann: string; doc: string; do
 export interface Round extends RoundRaw { annT: number; docT: number }
 
 export interface Task { id: string; gid: number; title: string; type: TaskType; date: string; time: string; note: string; done: boolean }
-export interface LogEntry { at: string; by: string; type: string; text?: string; result?: string }
+export interface LogEntry { id?: string; at: string; by: string; type: string; text?: string; result?: string }
 export interface Crm {
   stages: Record<string, StageKey>;
   notes: Record<string, { at: string; text: string }[]>;

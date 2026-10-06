@@ -12,6 +12,10 @@ import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF } from './storage';
 import * as TGOSync from './tgoSync';
+import {
+  applyRow, call, errText, fetchTransport, keyOf, legacyLogId, localRecords, noEffects,
+  type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
+} from './teamSync';
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
 export interface UploadState { status?: 'busy' | 'error' | 'done' | 'preview'; msg?: string; head?: string; preview?: { k: string; v: string }[] }
@@ -60,6 +64,22 @@ export class GccEngine {
   private pendingUpload: ParsedUpload | null = null;
   pendingSync: PendingSync | null = null;
 
+  // ---- team sync (shared CRM data via Google Apps Script; see lib/teamSync.ts)
+  team: TeamState = { status: 'off', msg: '', last: '' };
+  teamCfg: TeamCfg | null = null;
+  /** Invite link target (#team=<url>) waiting for the user to enter the team code. */
+  teamJoinUrl = '';
+  transport: Transport = fetchTransport;
+  /** Local changes not yet acknowledged by the server, latest op per key. */
+  private pending = new Map<string, SyncOp>();
+  private teamBusy = false;
+  private teamAgain = false;
+  private teamTimer: ReturnType<typeof setInterval> | null = null;
+  private teamFlush: ReturnType<typeof setTimeout> | null = null;
+  private teamWake = () => {
+    if (this.teamCfg && !(typeof document !== 'undefined' && document.hidden)) this.teamSync();
+  };
+
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -87,7 +107,7 @@ export class GccEngine {
     if (this.started) return;
     this.started = true;
     try {
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending] = await Promise.all([
         loadBase(),
         kv.get<Record<string, string>>('dedup'),
         kv.get<Record<string, ContactEdit>>('contacts'),
@@ -97,6 +117,7 @@ export class GccEngine {
         kv.get<SetSnap>('setSnap'),
         fetch(dataUrl('rounds.json')).then((r) => r.json()).catch(() => []) as Promise<RoundRaw[]>,
         fetch(dataUrl('gcc-sources.json')).then((r) => r.json()).catch(() => []) as Promise<unknown[][]>,
+        kv.get<SyncOp[]>('teamPending'),
       ]);
       this.base = base;
       this.dec = dec || {};
@@ -115,10 +136,22 @@ export class GccEngine {
           mv++;
         }),
       );
+      // every log entry needs a stable id to be shared as its own record
+      Object.values(C.log).forEach((a) =>
+        (a || []).forEach((e) => {
+          if (!e.id) {
+            e.id = legacyLogId(e);
+            mv++;
+          }
+        }),
+      );
       if (mv) {
         C.notes = {};
         this.persist('crm', C);
       }
+      this.teamCfg = prefs.get<TeamCfg | null>(PREF.team, null);
+      if (this.teamCfg && !this.teamCfg.url) this.teamCfg = null;
+      (pending || []).forEach((op) => this.pending.set(op.k, op));
       this.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) })).sort((a, b) => a.annT - b.annT);
       this.loadMsg = 'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…';
       this.emit();
@@ -129,6 +162,7 @@ export class GccEngine {
       this.emit();
       this.timer = setInterval(() => this.tick(), 6e5);
       if (this.syncDue(this.syncCfg())) setTimeout(() => this.runSync(true), 1500);
+      if (this.teamCfg) this.startTeam();
     } catch (e) {
       this.loadMsg = 'โหลดข้อมูลไม่สำเร็จ: ' + ((e as Error)?.message || e);
       this.emit();
@@ -136,6 +170,7 @@ export class GccEngine {
   }
   dispose() {
     if (this.timer) clearInterval(this.timer);
+    this.stopTeam();
   }
   private tick() {
     const d = todayISO();
@@ -528,6 +563,7 @@ export class GccEngine {
   decide(key: string, v: 'merge' | 'split' | null) {
     if (v == null) delete this.dec[key];
     else this.dec[key] = v;
+    this.op(keyOf.dedup(key), v ?? undefined);
     this.persist('dedup', this.dec);
     this.rebuild();
     this.emit();
@@ -541,9 +577,12 @@ export class GccEngine {
     prefs.set(PREF.me, v);
     this.emit();
   }
-  logAct(id: number, e: Omit<LogEntry, 'at' | 'by'>) {
+  logAct(id: number, e: Omit<LogEntry, 'at' | 'by' | 'id'>) {
     const L = this.crm.log;
-    (L[id] || (L[id] = [])).push({ at: new Date().toISOString(), by: this.me(), ...e });
+    const entry: LogEntry = { id: uid(), at: new Date().toISOString(), by: this.me(), ...e };
+    if (entry.text && entry.text.length > 5000) entry.text = entry.text.slice(0, 5000);
+    (L[id] || (L[id] = [])).push(entry);
+    this.op(keyOf.log(id, entry.id!), { ...entry });
   }
   stage(id: number): StageKey {
     return this.crm.stages[id] || 'none';
@@ -552,6 +591,7 @@ export class GccEngine {
     const C = this.crm;
     if ((C.stages[id] || 'none') === v) return;
     C.stages[id] = v;
+    this.op(keyOf.stage(id), v);
     this.logAct(id, { type: 'stage', text: 'เปลี่ยนสถานะการขายเป็น "' + (STG.find((x) => x[0] === v) || STG[0])[1] + '"' });
     this.saveCrm();
   }
@@ -560,6 +600,7 @@ export class GccEngine {
     if ((C.owners[id] || '') === v) return;
     if (v) C.owners[id] = v;
     else delete C.owners[id];
+    this.op(keyOf.owner(id), v || undefined);
     this.logAct(id, { type: 'owner', text: v ? 'กำหนดผู้รับผิดชอบ: ' + v : 'ยกเลิกผู้รับผิดชอบ' });
     this.saveCrm();
   }
@@ -568,6 +609,7 @@ export class GccEngine {
     const i = w.indexOf(id);
     if (i >= 0) w.splice(i, 1);
     else w.push(id);
+    this.op(keyOf.watch(id), i < 0 ? 1 : undefined);
     const c = this.B.byId.get(id);
     if (c) c.fl.watch = i < 0;
     this.saveCrm();
@@ -580,28 +622,36 @@ export class GccEngine {
   }
   delLog(id: number, l: LogEntry) {
     this.crm.log[id] = (this.crm.log[id] || []).filter((x) => x !== l);
+    if (l.id) this.op(keyOf.log(id, l.id));
     this.saveCrm();
   }
   addTeam(name: string) {
     const C = this.crm;
     if (name && !C.team.includes(name)) {
       C.team.push(name);
+      this.op(keyOf.team(name), 1);
       if (!this.me()) prefs.set(PREF.me, name);
     }
     this.saveCrm();
   }
   delTeam(name: string) {
     this.crm.team = this.crm.team.filter((x) => x !== name);
+    this.op(keyOf.team(name));
     this.saveCrm();
   }
   saveContact(c: Company, v: { phone: string; email: string; web: string; note: string }) {
     const e = { ...v, at: new Date().toISOString() };
     this.contacts[c.id] = e;
+    this.op(keyOf.contact(c.id), { ...e });
     this.persist('contacts', this.contacts);
-    Object.assign(c, { phone: v.phone, email: v.email, web: v.web, cEdited: e, hasPh: !!v.phone });
+    this.patchContact(c, e);
+    this.emit();
+  }
+  /** Apply a contact edit to an already-built company (avoids a full rebuild). */
+  private patchContact(c: Company, e: ContactEdit) {
+    Object.assign(c, { phone: e.phone, email: e.email, web: e.web, cEdited: e, hasPh: !!e.phone });
     c.fl.noContact = c.tgt <= 7 && !c.hasPh;
     c.hay = [c.name, c.jur, c.set, c.phone, c.code, c.email, c.ids.map((i) => gccCode(i)).join(' ')].join(' ').toLowerCase();
-    this.emit();
   }
 
   // ---- tasks
@@ -610,7 +660,10 @@ export class GccEngine {
   }
   updateTask(taskId: string, p: Pick<Task, 'type' | 'date' | 'time' | 'note'>) {
     const t = this.crm.tasks.find((x) => x.id === taskId);
-    if (t) Object.assign(t, p);
+    if (t) {
+      Object.assign(t, p);
+      this.op(keyOf.task(t.id), { ...t });
+    }
     this.saveCrm();
   }
   /** Create one task per company; with `perDay` > 0 spread them across working days. */
@@ -624,7 +677,9 @@ export class GccEngine {
       }
       if (perDay && n === 0) d = nextWork(d);
       n++;
-      this.crm.tasks.push({ id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: d, time: p.time, note: p.note, done: false });
+      const t: Task = { id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: d, time: p.time, note: p.note, done: false };
+      this.crm.tasks.push(t);
+      this.op(keyOf.task(t.id), { ...t });
     });
     this.saveCrm();
   }
@@ -636,17 +691,21 @@ export class GccEngine {
         n = 0;
       }
       n++;
-      this.crm.tasks.push({ id: uid(), gid: c.id, title: c.name, type: 'call', date: d, time: '', note: 'นัดอัตโนมัติ', done: false });
+      const t: Task = { id: uid(), gid: c.id, title: c.name, type: 'call', date: d, time: '', note: 'นัดอัตโนมัติ', done: false };
+      this.crm.tasks.push(t);
+      this.op(keyOf.task(t.id), { ...t });
     });
     this.saveCrm();
   }
   toggleTask(t: Task) {
     t.done = !t.done;
+    this.op(keyOf.task(t.id), { ...t });
     if (t.done) this.logAct(this.canonical(t.gid), { type: t.type, text: 'ทำนัดเสร็จ' + (t.note ? ': ' + t.note : '') });
     this.saveCrm();
   }
   delTask(t: Task) {
     this.crm.tasks = this.crm.tasks.filter((x) => x !== t);
+    this.op(keyOf.task(t.id));
     this.saveCrm();
   }
 
@@ -665,25 +724,34 @@ export class GccEngine {
       Object.entries(I.stages || {}).forEach(([k, v]) => {
         if (v && v !== 'none') {
           C.stages[k] = v;
+          this.op(keyOf.stage(k), v);
           n++;
         }
       });
       Object.entries(I.owners || {}).forEach(([k, v]) => {
         if (v) {
           C.owners[k] = v;
+          this.op(keyOf.owner(k), v);
           n++;
         }
       });
       (I.team || []).forEach((t) => {
-        if (!C.team.includes(t)) C.team.push(t);
+        if (!C.team.includes(t)) {
+          C.team.push(t);
+          this.op(keyOf.team(t), 1);
+        }
       });
       (I.watch || []).forEach((w) => {
-        if (!C.watch.includes(w)) C.watch.push(w);
+        if (!C.watch.includes(w)) {
+          C.watch.push(w);
+          this.op(keyOf.watch(w), 1);
+        }
       });
       const ids = new Set(C.tasks.map((t) => t.id));
       (I.tasks || []).forEach((t) => {
         if (!ids.has(t.id)) {
           C.tasks.push(t);
+          this.op(keyOf.task(t.id), { ...t });
           n++;
         }
       });
@@ -692,17 +760,25 @@ export class GccEngine {
         const ks = new Set(L.map((x) => x.at + '|' + x.text));
         (a || []).forEach((x) => {
           if (!ks.has(x.at + '|' + x.text)) {
-            L.push(x);
+            const e = { ...x, id: x.id || legacyLogId(x) };
+            L.push(e);
+            this.op(keyOf.log(k, e.id), { ...e });
             n++;
           }
         });
       });
       Object.entries((d.contacts || {}) as Record<string, ContactEdit>).forEach(([k, v]) => {
         const o = this.contacts[k];
-        if (!o || (v.at || '') > (o.at || '')) this.contacts[k] = v;
+        if (!o || (v.at || '') > (o.at || '')) {
+          this.contacts[k] = v;
+          this.op(keyOf.contact(k), { ...v });
+        }
       });
       Object.entries((d.dedup || {}) as Record<string, string>).forEach(([k, v]) => {
-        if (!(k in this.dec)) this.dec[k] = v;
+        if (!(k in this.dec)) {
+          this.dec[k] = v;
+          this.op(keyOf.dedup(k), v);
+        }
       });
       this.persist('crm', C);
       this.persist('contacts', this.contacts);
@@ -713,6 +789,166 @@ export class GccEngine {
       this.tmMsg = 'นำเข้าไม่สำเร็จ: ' + ((err as Error)?.message || err);
     }
     this.emit();
+  }
+
+  // ------------------------------------------------------------------ team sync
+  /** Queue a shared-record change (v === undefined → delete). No-op until connected:
+   *  connecting uploads everything local that the team sheet doesn't have yet. */
+  private op(k: string, v?: unknown) {
+    if (!this.teamCfg) return;
+    this.pending.set(k, v === undefined ? { k, del: true, by: this.me() } : { k, v, by: this.me() });
+    this.savePending();
+    if (this.teamFlush) clearTimeout(this.teamFlush);
+    this.teamFlush = setTimeout(() => {
+      this.teamFlush = null;
+      this.teamSync();
+    }, 700);
+  }
+  private savePending() {
+    this.persist('teamPending', [...this.pending.values()]);
+  }
+  get teamPendingN() {
+    return this.pending.size;
+  }
+  private setTeam(p: Partial<TeamState>) {
+    this.team = { ...this.team, ...p };
+    this.emit();
+  }
+
+  /**
+   * One sync round: pull rows newer than the cursor and apply them (skipping keys with local
+   * changes still queued), then push the queue. With `first`, local records the sheet doesn't
+   * know yet are queued for upload; records the sheet already has take the sheet's value.
+   */
+  async teamSync(opts: { first?: boolean } = {}) {
+    const cfg = this.teamCfg;
+    if (!cfg || !this.B) return;
+    if (this.teamBusy) {
+      this.teamAgain = true;
+      return;
+    }
+    this.teamBusy = true;
+    this.setTeam({ status: 'syncing' });
+    try {
+      const rows: SyncRow[] = [];
+      let since = cfg.seq;
+      for (;;) {
+        const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, cfg.key, { action: 'pull', since });
+        rows.push(...r.rows);
+        if (r.rows.length) since = r.rows[r.rows.length - 1].seq;
+        if (!r.more || !r.rows.length) break;
+      }
+      if (this.teamCfg !== cfg) return; // disconnected/reconnected meanwhile
+      if (opts.first) {
+        const remote = new Set(rows.map((r) => r.k));
+        const me = this.me();
+        localRecords(this).forEach((v, k) => {
+          if (!remote.has(k) && !this.pending.has(k)) this.pending.set(k, { k, v, by: me });
+        });
+        this.savePending();
+      }
+      this.applyRows(rows.filter((r) => !this.pending.has(r.k)));
+      cfg.seq = since;
+      prefs.set(PREF.team, cfg);
+      while (this.pending.size && this.teamCfg === cfg) {
+        const batch = [...this.pending.values()].slice(0, 300);
+        await call(this.transport, cfg.url, cfg.key, { action: 'push', ops: batch });
+        batch.forEach((op) => {
+          if (this.pending.get(op.k) === op) this.pending.delete(op.k);
+        });
+        this.savePending();
+      }
+      this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
+    } catch (e) {
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      this.setTeam({ status: offline ? 'offline' : 'error', msg: errText(e) });
+    } finally {
+      this.teamBusy = false;
+      if (this.teamAgain) {
+        this.teamAgain = false;
+        setTimeout(() => this.teamSync(), 50);
+      }
+    }
+  }
+
+  /** Apply pulled rows (oldest first) and refresh whatever they affect. */
+  private applyRows(rows: SyncRow[]) {
+    if (!rows.length) return;
+    const fx = noEffects();
+    rows.forEach((r) => applyRow(this, r, fx));
+    if (fx.crm) this.persist('crm', this.crm);
+    if (fx.contacts.size || fx.contactDel) this.persist('contacts', this.contacts);
+    if (fx.dedup) this.persist('dedup', this.dec);
+    if (fx.dedup || fx.contactDel) {
+      this.rebuild(); // regroups companies / restores original contact data
+    } else {
+      fx.contacts.forEach((id) => {
+        const c = this.company(id), e = this.contacts[id];
+        if (c && e) this.patchContact(c, e);
+      });
+      fx.watch.forEach((id) => {
+        const c = this.company(id);
+        if (c) c.fl.watch = this.crm.watch.includes(id);
+      });
+    }
+    this.emit();
+  }
+
+  /** Check the web-app URL + team code, then do a first full sync. Returns true on success. */
+  async teamConnect(url: string, key: string) {
+    url = url.trim();
+    key = key.trim();
+    if (!/^https?:\/\/\S+$/.test(url)) {
+      this.setTeam({ status: 'error', msg: 'ลิงก์ไม่ถูกต้อง ต้องขึ้นต้นด้วย https://' });
+      return false;
+    }
+    if (!key) {
+      this.setTeam({ status: 'error', msg: 'กรุณาใส่รหัสทีม' });
+      return false;
+    }
+    this.setTeam({ status: 'connecting', msg: '' });
+    try {
+      await call(this.transport, url, key, { action: 'ping' });
+    } catch (e) {
+      this.setTeam({ status: 'error', msg: errText(e) });
+      return false;
+    }
+    this.stopTeam();
+    this.pending.clear();
+    this.teamCfg = { url, key, seq: 0 };
+    this.teamJoinUrl = '';
+    prefs.set(PREF.team, this.teamCfg);
+    await this.teamSync({ first: true });
+    this.startTeam(false);
+    return this.team.status === 'ok';
+  }
+  teamDisconnect() {
+    this.stopTeam();
+    this.teamCfg = null;
+    this.pending.clear();
+    this.savePending();
+    prefs.set(PREF.team, null);
+    this.setTeam({ status: 'off', msg: '', last: '' });
+  }
+  /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */
+  private startTeam(now = true) {
+    this.stopTeam();
+    this.teamTimer = setInterval(this.teamWake, 30000);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', this.teamWake);
+      window.addEventListener('online', this.teamWake);
+    }
+    if (now) this.teamSync();
+  }
+  private stopTeam() {
+    if (this.teamTimer) clearInterval(this.teamTimer);
+    this.teamTimer = null;
+    if (this.teamFlush) clearTimeout(this.teamFlush);
+    this.teamFlush = null;
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', this.teamWake);
+      window.removeEventListener('online', this.teamWake);
+    }
   }
 
   // ---- details
