@@ -13,7 +13,7 @@ import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, 
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import {
-  LOCAL_ID_MIN, TeamSyncError, applyRow, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, noEffects, opId,
+  LOCAL_ID_MIN, TeamSyncError, applyRow, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, noEffects, opId, uniqueTaskIds,
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 
@@ -87,6 +87,15 @@ export class GccEngine {
   /** Queued ops this tab could not write to storage (quota, blocked IndexedDB); kept in memory. */
   private unsaved = new Map<string, SyncOp>();
   private opT = 0;
+  /** Pushed ops whose acknowledgement could not be written to storage (so the stored queue still
+   *  lists them); never pushed again. Latest per record. */
+  private delivered = new Map<string, SyncOp>();
+  /** Unsent in-memory ops of an ended session, re-queued by the next connect. */
+  private carry = new Map<string, SyncOp>();
+  /** Bumped by an import that needs a re-seed; a seeding round that started earlier can't mark it done. */
+  private seedGen = 0;
+  /** Shared stores ('crm', 'contacts', 'dedup') whose last save from this tab failed. */
+  private unstored = new Set<string>();
   /** The sheet rejected the team code; the "new code" form stays until a sync succeeds. */
   teamNeedKey = false;
   /** The team config as last written/read by this tab (raw localStorage text), to notice changes
@@ -182,6 +191,9 @@ export class GccEngine {
           }
         }),
       );
+      // task ids made by an older version could repeat (bulk plans in the same millisecond)
+      const renamed = uniqueTaskIds(C.tasks);
+      mv += renamed;
       if (mv) {
         C.notes = {};
         this.persist('crm', C);
@@ -189,6 +201,7 @@ export class GccEngine {
       // the cursor lives in localStorage while the data lives in IndexedDB; they can drift apart
       // (failed write, another tab), so every page load re-reads the (compacted) team log once
       this.teamCfg = team0 && team0.url ? { ...team0, seq: 0 } : null;
+      if (this.teamCfg && renamed) this.teamCfg.seeded = false; // upload the renamed tasks
       if (this.teamCfg && Array.isArray(pending)) pending.forEach((op) => this.pending.set(op.k, op));
       this.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) })).sort((a, b) => a.annT - b.annT);
       this.loadMsg = 'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…';
@@ -232,7 +245,10 @@ export class GccEngine {
     this.emit();
   }
   persist(k: string, v: unknown) {
-    this.store.set(k, v).catch(() => {});
+    this.store.set(k, v).then(
+      () => this.unstored.delete(k),
+      () => this.unstored.add(k),
+    );
   }
   saveCrm() {
     this.persist('crm', this.crm);
@@ -839,6 +855,7 @@ export class GccEngine {
         this.tmMsg += ' · รายการที่ทีมยังไม่มีจะส่งขึ้นชีต ส่วนรายการที่ทีมมีแล้วใช้ค่าของทีม';
         this.teamCfg.seq = 0;
         this.teamCfg.seeded = false;
+        this.seedGen++;
         this.saveTeamCfg(this.teamCfg);
         this.importing = false;
         this.teamSync();
@@ -860,7 +877,12 @@ export class GccEngine {
     const o = this.mkOp(k, v);
     this.pending.set(k, o);
     this.unsaved.delete(k);
-    this.writePending(cfg.url, (ops) => ops.filter((x) => x.k !== k).concat(o)).catch(() => {
+    this.writePending(cfg.url, (ops) => {
+      // a change replacing another tab's queued change to the same record is always the newer one
+      const p = ops.find((x) => x.k === k);
+      if (p && p.id !== o.id && !newer(o, p)) o.t = this.opT = Math.max(this.opT, (p.t || 0) + 1);
+      return ops.filter((x) => x.k !== k).concat(o);
+    }).catch(() => {
       if (this.teamCfg === cfg) this.keepUnsaved(o);
     });
     if (this.teamFlush) clearTimeout(this.teamFlush);
@@ -870,8 +892,11 @@ export class GccEngine {
     }, 700);
   }
   /** A queued change (v === undefined → delete); `t` orders this browser's changes to one record. */
-  private mkOp(k: string, v?: unknown): SyncOp {
-    const t = (this.opT = Math.max(Date.now(), this.opT + 1));
+  private opTick() {
+    return (this.opT = Math.max(Date.now(), this.opT + 1));
+  }
+  /** `t` is shared by a burst (seeding, re-queue) so this tab's clock never runs ahead of real time. */
+  private mkOp(k: string, v?: unknown, t = this.opTick()): SyncOp {
     return v === undefined ? { id: opId(), t, k, del: true, by: this.me() } : { id: opId(), t, k, v, by: this.me() };
   }
   /** Keep an op whose storage write failed in memory, unless a newer one for its record is kept. */
@@ -888,6 +913,10 @@ export class GccEngine {
     });
     return m;
   }
+  private wasDelivered(o: SyncOp) {
+    const d = this.delivered.get(o.k);
+    return !!d && (d.id === o.id || !newer(o, d));
+  }
   /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
   private async storedShared(): Promise<SharedState> {
     const [crm, contacts, dec] = await Promise.all([
@@ -895,7 +924,13 @@ export class GccEngine {
       this.store.get<Record<string, ContactEdit>>('contacts'),
       this.store.get<Record<string, string>>('dedup'),
     ]);
-    return { crm: crm ? { ...emptyCrm(), ...crm } : this.crm, contacts: contacts || this.contacts, dec: dec || this.dec };
+    // where this tab's own last save failed, the stored copy is older than this tab's: use this tab's
+    const ok = (k: string, v: unknown) => !!v && !this.unstored.has(k);
+    return {
+      crm: ok('crm', crm) ? { ...emptyCrm(), ...crm } : this.crm,
+      contacts: ok('contacts', contacts) ? contacts! : this.contacts,
+      dec: ok('dedup', dec) ? dec! : this.dec,
+    };
   }
   /** Read-modify-write of a sheet's stored queue (one transaction, so tabs don't overwrite each other). */
   private writePending(url: string, fn: (ops: SyncOp[]) => SyncOp[]): Promise<SyncOp[]> {
@@ -930,6 +965,10 @@ export class GccEngine {
       // other tabs also save their own cursor and seeding state here; only the code matters
       // (a seeding round reads what this browser has stored, so a following tab may seed too)
       cfg.key = s.key;
+      if (s.seeded === false && cfg.seeded) {
+        cfg.seeded = false; // another tab imported a backup or reconnected: seed again (harmless)
+        this.seedGen++;
+      }
       return true;
     }
     if (!cfg && !(s && s.url)) return true;
@@ -999,7 +1038,8 @@ export class GccEngine {
     await this.pq;
     const stored = await this.store.get<SyncOp[]>(pendKey(cfg.url));
     if (!live()) return;
-    this.pending = this.withUnsaved(Array.isArray(stored) ? new Map(stored.map((o) => [o.k, o])) : this.pending);
+    const fresh = Array.isArray(stored) ? stored.filter((o) => !this.wasDelivered(o)) : null;
+    this.pending = this.withUnsaved(fresh ? new Map(fresh.map((o) => [o.k, o])) : this.pending);
     const seeding = first || !cfg.seeded;
     const rows: SyncRow[] = [];
     let since = seeding ? 0 : cfg.seq;
@@ -1010,16 +1050,30 @@ export class GccEngine {
       if (!r.more || !r.rows.length) break;
     }
     if (!live()) return;
+    // A push whose reply was lost (tab closed, timeout) may still have reached the sheet. An op sent
+    // when the sheet was at seq S is settled once the sheet has a later row for its record: it was
+    // either delivered, or someone changed the record after it was sent (the later change wins).
+    const lastSeq = new Map(rows.map((r) => [r.k, r.seq]));
+    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent;
+    if ([...this.pending.values()].some(settled)) {
+      this.pending.forEach((o, k) => settled(o) && this.pending.delete(k));
+      this.unsaved.forEach((o, k) => settled(o) && this.unsaved.delete(k));
+      await this.writePending(cfg.url, (ops) => ops.filter((o) => !settled(o))).catch(() => {});
+      if (!live()) return;
+    }
     let seeded = false;
+    let sg = -1;
     if (seeding) {
       // seed from what this browser has stored (shared by all tabs), not from this tab's copy,
       // which may be older than another tab's edits (e.g. a deletion made there before connecting)
+      sg = this.seedGen; // an import after this read is not included in it
       const mine = await this.storedShared();
       if (!live()) return;
       const remote = new Set(rows.map((r) => r.k));
       const add: SyncOp[] = [];
+      const t = this.opTick();
       localRecords(mine).forEach((v, k) => {
-        if (!remote.has(k) && !this.pending.has(k)) add.push(this.mkOp(k, v));
+        if (!remote.has(k) && !this.pending.has(k)) add.push(this.mkOp(k, v, t));
       });
       add.forEach((o) => this.pending.set(o.k, o));
       // once the upload is queued durably it survives a reload; if storage fails it is kept in
@@ -1038,13 +1092,20 @@ export class GccEngine {
     }
     this.applyRows(rows.filter((r) => !this.pending.has(r.k)));
     cfg.seq = since;
-    // only a round that seeded may mark the session seeded (an import may have reset it meanwhile)
-    if (seeding && seeded) cfg.seeded = true;
+    // only a round that seeded may mark the session seeded, not while part of the upload exists only
+    // in memory, and not if an import asked for a new seed after this round read the data
+    if (seeding && seeded && sg === this.seedGen && !this.unsaved.size) cfg.seeded = true;
     if (!this.adoptTeamPrefs() || !live()) return;
     this.saveTeamCfg(cfg);
     let rejected = 0;
     while (this.pending.size && live()) {
       const batch = [...this.pending.values()].slice(0, 300);
+      // remember the sheet's position when sending, to recognise a delivery whose reply is lost
+      const at = cfg.seq;
+      const ids = new Set(batch.map((o) => o.id));
+      batch.forEach((o) => (o.sent = at));
+      await this.writePending(cfg.url, (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
+      if (!live()) return;
       const r = await call<{ rejected?: string[] }>(this.transport, cfg.url, cfg.key, { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
       rejected += (r.rejected || []).length;
       // done: the op that was sent, or an older change to a record whose newer value was sent;
@@ -1056,11 +1117,23 @@ export class GccEngine {
       };
       this.unsaved.forEach((o, k) => done(o) && this.unsaved.delete(k));
       // acknowledged in this sheet's own queue even if the session changed meanwhile (they were delivered)
-      const left = await this.writePending(cfg.url, (ops) => ops.filter((o) => !done(o))).catch(() => null);
+      const left = await this.writePending(cfg.url, (ops) => ops.filter((o) => !done(o) && !this.wasDelivered(o))).then(
+        (l) => {
+          this.delivered.clear(); // the stored queue no longer lists them
+          return l;
+        },
+        () => {
+          batch.forEach((o) => {
+            const d = this.delivered.get(o.k);
+            if (!d || newer(o, d)) this.delivered.set(o.k, o);
+          });
+          return null;
+        },
+      );
       if (!live()) return;
       this.pending = this.withUnsaved(new Map((left || [...this.pending.values()].filter((o) => !done(o))).map((o) => [o.k, o])));
     }
-    if (seeding && !cfg.seeded && live()) {
+    if (seeding && !cfg.seeded && sg === this.seedGen && live()) {
       cfg.seeded = true; // everything local was pushed from memory
       this.saveTeamCfg(cfg);
     }
@@ -1125,8 +1198,11 @@ export class GccEngine {
     // their current local value, so the first pull can't overwrite them with older team values.
     const last = prefs.getRaw(PREF.teamLast); // stored as plain text
     const moved = last && last !== url ? (await this.store.get<SyncOp[]>(pendKey(last))) || [] : [];
+    const carried = [...this.carry.values()]; // unsent changes that could not be stored
+    this.carry = new Map();
     const local = localRecords(await this.storedShared());
-    const requeue = (cur: SyncOp[]) => [...new Map([...moved, ...cur].map((o) => [o.k, o])).keys()].map((k) => this.mkOp(k, local.get(k)));
+    const t = this.opTick();
+    const requeue = (cur: SyncOp[]) => [...new Map([...moved, ...carried, ...cur].map((o) => [o.k, o])).keys()].map((k) => this.mkOp(k, local.get(k), t));
     let ops: SyncOp[];
     try {
       ops = await this.writePending(url, requeue);
@@ -1173,7 +1249,9 @@ export class GccEngine {
     this.teamBusy = this.teamAgain = false;
     this.teamCfg = null;
     this.pending = new Map();
+    this.unsaved.forEach((o, k) => this.carry.set(k, o));
     this.unsaved = new Map();
+    this.delivered = new Map();
     this.teamNeedKey = false;
   }
   /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */

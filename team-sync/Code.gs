@@ -30,19 +30,28 @@ const MAX_OPS = 1000;
 const MAX_CELL = 45000; // Google Sheets limit is 50,000 characters per cell
 const COMPACT_MIN_ROWS = 5000;
 
-function doGet() {
-  return json_({ ok: true, app: 'gcc-team-sync', hint: 'use POST' });
-}
-
+// setup is the first function in the file, so the editor's Run button selects it by default.
 /** กด Run ฟังก์ชันนี้ครั้งแรก เพื่ออนุญาตสิทธิ์และสร้างชีต "sync" */
 function setup() {
   if (!keyOk_()) throw new Error('ตั้งค่า TEAM_KEY ด้านบนก่อน (สุ่มเอง อย่างน้อย ' + MIN_KEY + ' ตัวอักษร) แล้วกดบันทึก');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('สคริปต์นี้ต้องสร้างจากไฟล์ Google Sheet: เปิดไฟล์ชีต → ส่วนขยาย (Extensions) → Apps Script แล้ววางโค้ดที่นั่น');
   sheet_();
-  Logger.log('พร้อมใช้งาน: สร้างชีต "' + SHEET_NAME + '" แล้ว ขั้นต่อไปคือ Deploy เป็น Web app');
+  const msg = 'พร้อมใช้งาน: สร้างชีต "' + SHEET_NAME + '" แล้ว ขั้นต่อไปคือ Deploy เป็น Web app';
+  Logger.log(msg);
+  try {
+    ss.toast(msg, 'GCC ข้อมูลทีม', 10); // shown in the open spreadsheet
+  } catch (err) {
+    /* no spreadsheet window open */
+  }
 }
 
 function keyOk_() {
   return !!TEAM_KEY && String(TEAM_KEY).length >= MIN_KEY;
+}
+
+function doGet() {
+  return json_({ ok: true, app: 'gcc-team-sync', hint: 'use POST' });
 }
 
 function doPost(e) {

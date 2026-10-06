@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
-import { errText, isLocalOnly, isTeamUrl, legacyLogId } from './teamSync';
+import { errText, isLocalOnly, isTeamUrl, legacyLogId, uniqueTaskIds } from './teamSync';
 import { memoryStore } from './storage';
 import type { Dataset, RoundRaw } from './types';
 
@@ -626,6 +626,204 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
       T1.dispose();
       T2.dispose();
     }));
+
+  const fresh = (e: GccEngine, n = 1, skip = 0) => {
+    const used = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k.split('/')[1]));
+    return e.B.companies.filter((c) => c.ids.length === 1 && !used.has(String(c.id))).slice(skip, skip + n);
+  };
+  const idle = (e: GccEngine) => vi.waitFor(() => expect((e as unknown as { teamBusy: boolean }).teamBusy).toBe(false));
+  const backupOf = (stages: Record<number, string>) =>
+    ({ text: async () => JSON.stringify({ kind: 'gcc-crm-backup', v: 1, at: '2026-09-01T00:00:00.000Z', by: 'x', crm: { stages, tasks: [], watch: [], owners: {}, team: [], log: {} }, contacts: {}, dedup: {} }) }) as unknown as File;
+
+  it('a second import during the first import\'s upload still uploads its own gaps', async () => {
+    const D = mk();
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    const [a, b] = fresh(D, 2);
+    let release: (() => void) | null = null;
+    let hold = true;
+    D.transport = async (_u, body) => {
+      if (hold && body.action === 'push') {
+        hold = false;
+        await new Promise<void>((r) => (release = r));
+      }
+      return sim.post(body);
+    };
+    await D.importCrm(backupOf({ [a.id]: 'interested' })); // starts a re-seed round
+    await vi.waitFor(() => expect(release).toBeTypeOf('function')); // its push is in flight
+    await D.importCrm(backupOf({ [b.id]: 'proposal' }));
+    release!();
+    await idle(D);
+    await vi.advanceTimersByTimeAsync(100);
+    await idle(D);
+    expect(sheetValue(sim, `stage/${a.id}`)!.v).toBe('interested');
+    expect(sheetValue(sim, `stage/${b.id}`)!.v).toBe('proposal');
+    D.dispose();
+  });
+
+  it('an upload kept only in memory is not marked done until it is sent (reload in between)', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    D.store = {
+      ...mem,
+      update: (k, fn) =>
+        mem.update(k, (cur) => {
+          const next = fn(cur as never);
+          if (k.startsWith('teamPending') && Array.isArray(next) && next.length > 100) throw new DOMException('full', 'QuotaExceededError');
+          return next;
+        }),
+    };
+    const many = fresh(D, 700, 5);
+    many.forEach((c) => D.toggleWatch(c.id));
+    let pushes = 0, failAll = false;
+    D.transport = async (_u, body) => {
+      if (body.action === 'push' && (failAll || ++pushes === 2)) return { ok: false, error: 'busy' };
+      return sim.post(body);
+    };
+    expect(await D.teamConnect(URL, KEY)).toBe(false); // round 1: 300 sent, then busy
+    failAll = true;
+    await D.teamSync(); // round 2 can't push either
+    expect(D.teamCfg!.seeded).toBe(false);
+    // the page is reloaded: a new engine on the same browser storage and saved config
+    const E = mk();
+    E.store = D.store;
+    E.teamCfg = { ...D.teamCfg!, seq: 0 };
+    E.transport = async (_u, body) => sim.post(body);
+    await E.teamSync();
+    const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
+    expect(many.filter((c) => !keys.has(`watch/${c.id}`)).length).toBe(0);
+    D.dispose();
+    E.dispose();
+  });
+
+  it('a delivered push whose reply was lost never reverts a teammate\'s later change', async () => {
+    const D = mk();
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    const [x] = fresh(D);
+    D.transport = async (_u, body) => {
+      const r = sim.post(body);
+      if (body.action === 'push') throw Object.assign(new Error('t'), { name: 'TimeoutError' }); // reached the sheet, reply lost
+      return r;
+    };
+    D.setStage(x.id, 'proposal');
+    await D.teamSync();
+    expect(D.teamPendingN).toBeGreaterThan(0); // not acknowledged
+    B.setStage(x.id, 'won'); // teammate changes it afterwards
+    await B.teamSync();
+    D.transport = async (_u, body) => sim.post(body);
+    await D.teamSync();
+    expect(sheetValue(sim, `stage/${x.id}`)!.v).toBe('won');
+    expect(D.stage(x.id)).toBe('won');
+    expect(D.teamPendingN).toBe(0);
+    D.dispose();
+  });
+
+  it('a delivered push whose acknowledgement could not be stored is not sent again', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    let failQueue = false;
+    D.store = { ...mem, update: (k, fn) => (failQueue && k.startsWith('teamPending') ? Promise.reject(new DOMException('full', 'QuotaExceededError')) : mem.update(k, fn)) };
+    D.transport = async (_u, body) => sim.post(body);
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    const [x] = fresh(D);
+    let down = true;
+    D.transport = async (_u, body) => {
+      if (down) throw new TypeError('Failed to fetch');
+      return sim.post(body);
+    };
+    D.setStage(x.id, 'proposal'); // stored in the queue
+    await D.teamSync();
+    failQueue = true; // from now on the queue can be read but not written
+    down = false;
+    await D.teamSync(); // delivered; the acknowledgement can't be stored
+    B.setStage(x.id, 'won');
+    await B.teamSync();
+    await D.teamSync();
+    await D.teamSync();
+    expect(sheetValue(sim, `stage/${x.id}`)!.v).toBe('won');
+    expect(D.stage(x.id)).toBe('won');
+    D.dispose();
+  });
+
+  it('a change that replaces another tab\'s queued change is newer even if that tab\'s clock ran ahead', async () => {
+    const shared = memoryStore();
+    const T1 = mk(), T2 = mk();
+    T1.store = T2.store = shared;
+    T1.transport = T2.transport = async (_u, body) => sim.post(body);
+    expect(await T1.teamConnect(URL, KEY)).toBe(true);
+    T2.teamCfg = { ...T1.teamCfg! };
+    const [x] = fresh(T1);
+    (T1 as unknown as { opT: number }).opT = Date.now() + 600000; // e.g. a big burst or a clock correction
+    let once = true;
+    T1.transport = async (_u, body) => {
+      if (once && body.action === 'push') {
+        once = false;
+        T2.setStage(x.id, 'won'); // tab 2 changes the record while tab 1's push is in flight
+        for (let i = 0; i < 10; i++) await Promise.resolve(); // let tab 2's queue write land
+      }
+      return sim.post(body);
+    };
+    T1.setStage(x.id, 'proposal');
+    await T1.teamSync();
+    await T2.teamSync();
+    expect(sheetValue(sim, `stage/${x.id}`)!.v).toBe('won');
+    T1.dispose();
+    T2.dispose();
+  });
+
+  it('seeds this tab\'s own edits when saving them to browser storage failed', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    let failCrm = false;
+    D.store = { ...mem, set: (k, v) => (failCrm && k === 'crm' ? Promise.reject(new DOMException('full', 'QuotaExceededError')) : mem.set(k, v)) };
+    const [x] = fresh(D);
+    D.setStage(x.id, 'contacted'); // saved
+    await Promise.resolve();
+    failCrm = true;
+    D.setStage(x.id, 'won'); // only in memory
+    for (let i = 0; i < 10; i++) await Promise.resolve(); // let the failed save settle
+    D.transport = async (_u, body) => sim.post(body);
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    expect(sheetValue(sim, `stage/${x.id}`)!.v).toBe('won');
+    D.dispose();
+  });
+
+  it('changes that could not be stored survive a disconnect and are sent on the next connect', async () => {
+    const D = mk();
+    const mem = memoryStore();
+    D.store = { ...mem, update: () => Promise.reject(new DOMException('blocked', 'UnknownError')) };
+    D.transport = async (_u, body) => sim.post(body);
+    const [x] = fresh(D);
+    sim.post({ action: 'push', key: KEY, ops: [{ k: `stage/${x.id}`, v: 'contacted' }] });
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    let down = true;
+    D.transport = async (_u, body) => {
+      if (down) throw new TypeError('Failed to fetch');
+      return sim.post(body);
+    };
+    D.setStage(x.id, 'won'); // in memory only
+    await D.teamSync();
+    expect(D.teamPendingN).toBeGreaterThan(0);
+    D.teamDisconnect();
+    down = false;
+    expect(await D.teamConnect(URL, KEY)).toBe(true);
+    expect(D.stage(x.id)).toBe('won');
+    expect(sheetValue(sim, `stage/${x.id}`)!.v).toBe('won');
+    D.dispose();
+  });
+
+  it('repeated task ids from older versions become separate records, the same way on every device', () => {
+    const mkT = (id: string, gid: number) => ({ id, gid, title: '', type: 'call' as const, date: '2026-10-07', time: '', note: '', done: false });
+    const a = [mkT('dup', 79), mkT('dup', 80), mkT('ok', 81), mkT('dup', 79)];
+    const b = structuredClone(a);
+    expect(uniqueTaskIds(a)).toBe(2);
+    uniqueTaskIds(b);
+    expect(a.map((t) => t.id)).toEqual(['dup.79', 'dup.80', 'ok', 'dup']); // the last one keeps the shared id
+    const c = [mkT('d', 5), mkT('d', 5), mkT('d', 5)];
+    uniqueTaskIds(c);
+    expect(c.map((t) => t.id)).toEqual(['d.5.2', 'd.5', 'd']);
+    expect(b).toEqual(a);
+    expect(new Set(a.map((t) => t.id)).size).toBe(4);
+  });
 
   it('still uploads and syncs when browser storage cannot be written', async () => {
     const D = mk();
