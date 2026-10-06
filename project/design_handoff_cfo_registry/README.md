@@ -90,7 +90,7 @@ create table profiles (
 - `data/cfo.json` = `{asOf, source, dicts:{ind,size,prov,status,fy,top}, rows:[[...26 ฟิลด์]]}` ลำดับฟิลด์ใน rows:
   `seq, cert_no, activity, org_name, branch, provI, address, tambon, amphoe, province_addr, zipcode, indI, sizeI, approved_be, expires_be, approved_on, expires_on, s1, s2, s3, topI, statusI(ไม่ใช้), fyI, data_note, id, card_extra` (ฟิลด์ที่ลงท้าย I เป็น index ใน dicts)
 - `data/contacts.json` = `{ [id]: [phone, email, source, source_url, search_note] }`
-- เขียน seed script อ่านสองไฟล์นี้ หรืออ่าน xlsx ต้นฉบับ `uploads/TGO_CFO_list_2569-10-05_contacts.xlsx` (ชีต "ข้อมูล CFO" คอลัมน์ A–AF)
+- เขียน seed script อ่านสองไฟล์นี้ หรืออ่าน xlsx ต้นฉบับ ไฟล์ xlsx ต้นฉบับ `TGO_CFO_list_2569-10-05_contacts.xlsx` (ไม่ได้เก็บใน repo) (ชีต "ข้อมูล CFO" คอลัมน์ A–AF)
 
 ---
 

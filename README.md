@@ -1,25 +1,33 @@
-# CODING AGENTS: READ THIS FIRST
+# ฐานข้อมูลลูกค้า GCC (GCC Registry)
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+เว็บสำหรับทีมขายใช้ติดตามลูกค้า CFO / GI / โรงงานใหม่ (กรอ.) / บริษัทจดทะเบียน (SET) ในที่เดียว
+สร้างจากแบบที่ออกแบบใน Claude Design
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+**เว็บ:** https://mktwni.github.io/customer_vvb/
 
-## What you should do — IMPORTANT
+> ⚠️ เว็บนี้เป็นสาธารณะ ใครมีลิงก์ก็เปิดดูข้อมูลบริษัท เบอร์โทร และอีเมลในเว็บได้
 
-**Read the chat transcripts first.** There are 2 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+## โครงสร้าง
 
-**Read `project/GCC Registry.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+| โฟลเดอร์ | คืออะไร |
+| --- | --- |
+| `app/` | ตัวเว็บ (React + Vite + TypeScript) — ดูวิธีรันและโครงสร้างโค้ดใน [`app/README.md`](app/README.md) |
+| `project/data/` | ไฟล์ข้อมูลที่เว็บใช้ (`gcc.json`, `gcc-certs.json`, `gcc-detail/`, `rounds.json`, …) |
+| `project/*.dc.html`, `project/*.js` | ไฟล์ต้นแบบจาก Claude Design (ใช้อ้างอิงหน้าตาและการทำงาน) |
+| `.github/workflows/deploy-pages.yml` | build และขึ้นเว็บบน GitHub Pages อัตโนมัติทุกครั้งที่ push เข้า `main` |
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+ไฟล์ Excel ต้นฉบับ (`project/uploads/`) และบันทึกการคุยออกแบบ (`chats/`) ไม่ได้เก็บไว้ใน repo นี้
 
-## About the design files
+## รันบนเครื่อง
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+```bash
+cd app
+npm install
+npm run dev     # http://localhost:5173
+npm test
+```
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+## อัปเดตข้อมูลบนเว็บ
 
-## Bundle contents
-
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `CFO Registry website` project files (HTML prototypes, assets, components)
+แก้หรือแทนที่ไฟล์ใน `project/data/` แล้ว push เข้า `main` — ระบบจะ build และขึ้นเว็บใหม่ให้เอง
+(การอัปโหลด Excel ในแท็บ "อัปเดตข้อมูล" บนเว็บ จะเก็บไว้ในเบราว์เซอร์เครื่องนั้นเท่านั้น)
