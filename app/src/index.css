@@ -1,0 +1,21 @@
+body{margin:0;background:#F4F6FC;color:#0E1430;font-family:'Kanit',sans-serif;-webkit-font-smoothing:antialiased}
+input,select,button,textarea{font-family:inherit}
+a{color:#1A3FE0}a:hover{color:#0A1A86}
+*{box-sizing:border-box}
+:focus-visible{outline:2px solid #1A3FE0;outline-offset:2px;border-radius:6px}
+
+/* hover states from the design's style-hover attributes */
+.h-bg:hover{background:#F4F6FC!important}
+.h-op:hover{opacity:.85!important}
+.h-blue:hover{color:#1A3FE0!important}
+.no-scrollbar{scrollbar-width:none}
+.no-scrollbar::-webkit-scrollbar{display:none}
+
+/* map */
+.map-tip{position:absolute;pointer-events:none;background:#081247;color:#fff;border-radius:12px;padding:10px 12px;font-size:12.5px;line-height:1.5;transition:opacity .12s;z-index:3;min-width:180px}
+.map-zoom button{width:36px;height:36px;border-radius:50%;border:1px solid #D5DBEA;background:#fff;cursor:pointer;font-size:17px;color:#0E1430}
+.map-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
+/* the prototype map lived in an iframe the width of <main>, so break on the container, not the window */
+.map-wrap{container-type:inline-size}
+@container (max-width:900px){.map-grid{grid-template-columns:1fr}}
+.map-org:hover .on{color:#1A3FE0}
