@@ -295,6 +295,109 @@ describe('a person with two tabs, and pushes that fail', () => {
     done(A, B);
   });
 
+  it('a delivered push whose own row was compacted away is not sent again over a teammate\'s later change', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const c = A.B.companies[9];
+    const t = A.transport;
+    A.transport = async (u, body) => {
+      const r = await t(u, body);
+      if (body.action === 'push') throw new TypeError('Failed to fetch'); // reached the sheet, reply lost
+      return r;
+    };
+    A.setStage(c.id, 'proposal');
+    await A.teamSync();
+    A.transport = t;
+    await B.teamSync();
+    B.setStage(c.id, 'won');
+    await B.teamSync();
+    sim.props.COMPACT_AT = '10'; // the sheet is compacted: A's superseded row goes
+    sim.post({ action: 'push', key: KEY, ops: Array.from({ length: 60 }, (_, i) => ({ k: 'team/Z', v: 1, by: 'Z' + i })) });
+    await settle(A, B);
+    expect(sheet('stage/' + c.id)).toBe('won');
+    for (const e of [A, B]) expect(e.stage(c.id)).toBe('won');
+    done(A, B);
+  });
+
+  it('a record the other tab already saw deleted stays deleted when it sends a stale tab\'s edit', async () => {
+    const [{ e: T1 }, { e: T2 }, { e: B }] = await team({ name: 'A' }, { name: 'A', tab: true }, { name: 'B' });
+    const d = B.addDeal({ client: 'ลบแล้วแท็บเก่า', section: 'Partner', year: '2569' });
+    B.addTasks([B.B.companies[0].id], { type: 'call', date: '2026-10-08', time: '', note: '' });
+    await settle(B, T1, T2);
+    const tid = B.crm.tasks[B.crm.tasks.length - 1].id;
+    B.deleteDeal(d.id);
+    B.delTask(B.crm.tasks.find((x) => x.id === tid)!);
+    await B.teamSync();
+    await T2.teamSync(); // T2 pulls the deletions; T1 has not
+    T1.updateDeal(d.id, { phone: '021112222' });
+    T1.toggleTask(T1.crm.tasks.find((x) => x.id === tid)!);
+    await stored(T1);
+    await T2.teamSync(); // T2 sends T1's queued changes
+    await settle(T1, T2, B);
+    expect(sheet('deal/' + d.id)).toBeNull();
+    expect(sheet('task/' + tid)).toBeNull();
+    for (const e of [T1, T2, B]) {
+      expect(e.sales.deals[d.id]).toBeUndefined();
+      expect(e.crm.tasks.some((x) => x.id === tid)).toBe(false);
+    }
+    done(T1, T2, B);
+  });
+
+  it('a stage set automatically in one tab yields to the stage set by hand in the other', async () => {
+    const [{ e: T1, net }, { e: T2 }, { e: B }] = await team({ name: 'A' }, { name: 'A', tab: true }, { name: 'B' });
+    const c = T1.B.companies[11];
+    net.offline = true;
+    T2.setStage(c.id, 'proposal');
+    await stored(T2);
+    T1.addLog(c.id, 'call', '', 'โทรแล้ว'); // T1 still shows no stage: sets "contacted" automatically
+    await stored(T1);
+    net.offline = false;
+    await settle(T1, T2, B);
+    expect(sheet('stage/' + c.id)).toBe('proposal');
+    for (const e of [T1, T2, B]) expect(e.stage(c.id)).toBe('proposal');
+    done(T1, T2, B);
+  });
+
+  it('SOURCE ticks queued before a disconnect still merge with a teammate\'s after reconnecting', async () => {
+    const [{ e: A, net }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const src = A.sales.cfg.sources;
+    const d = A.addDeal({ client: 'ต่อใหม่', section: 'Partner', year: '2569', source: [src[0]], service: [] });
+    await settle(A, B);
+    net.offline = true;
+    A.updateDeal(d.id, { source: [src[0], src[1]] });
+    await stored(A);
+    B.updateDeal(d.id, { source: [src[0], src[2]] });
+    await B.teamSync();
+    A.teamDisconnect();
+    net.offline = false;
+    expect(await A.teamConnect(URL, KEY)).toBe(true);
+    await settle(A, B);
+    for (const e of [A, B]) expect([...e.sales.deals[d.id].source].sort()).toEqual([src[0], src[1], src[2]].sort());
+    done(A, B);
+  });
+
+  it('ticking and unticking an item on an imported deal not shared yet leaves it as imported', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const s0 = A.sales.cfg.sources[0], s1 = A.sales.cfg.sources[1];
+    const f = () => Object.assign(new Blob([JSON.stringify({ sources: [s0], rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'นำเข้าซ้ำ', source: [s0] }] })]), { name: 'same.json' }) as File;
+    await A.importTracker(f(), '2561');
+    await A.teamSync();
+    await B.importTracker(f(), '2561'); // B has not pulled A's import: create-only rows
+    await stored(B);
+    const d = Object.values(B.sales.deals).find((x) => x.client === 'นำเข้าซ้ำ')!;
+    const before = [...d.source];
+    B.updateDeal(d.id, { source: [...before, s1] });
+    await stored(B);
+    B.updateDeal(d.id, { source: before });
+    await stored(B);
+    B.updateDeal(d.id, { source: before.filter((x) => x !== s0) });
+    await stored(B);
+    B.updateDeal(d.id, { source: before });
+    await stored(B);
+    await settle(B, A);
+    for (const e of [A, B]) expect(e.sales.deals[d.id].source).toEqual(before);
+    done(A, B);
+  });
+
   it('a push that was delivered but whose reply was lost is not sent again over a teammate\'s later change', async () => {
     const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
     const c = A.B.companies[9];

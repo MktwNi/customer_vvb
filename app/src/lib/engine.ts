@@ -671,7 +671,8 @@ export class GccEngine {
     if ((C.stages[id] || 'none') === v) return;
     C.stages[id] = v;
     this.op(keyOf.stage(id), v, { nx: auto });
-    this.logAct(id, { type: 'stage', text: 'เปลี่ยนสถานะการขายเป็น "' + (STG.find((x) => x[0] === v) || STG[0])[1] + '"' });
+    // an automatic stage may yield to a teammate's: the logged call that set it is the history
+    if (!auto) this.logAct(id, { type: 'stage', text: 'เปลี่ยนสถานะการขายเป็น "' + (STG.find((x) => x[0] === v) || STG[0])[1] + '"' });
     this.saveCrm();
   }
   setOwner(id: number, v: string) {
@@ -1627,8 +1628,8 @@ export class GccEngine {
         // a person's edit of an import row not shared yet: if the team has that row, their record wins
         // except for the fields edited here (rebaseOp), so the edit isn't lost
         o.nx = true;
-        o.f = [...new Set([...(prev!.f || []), ...opt.f])];
-        const fl = mergeFieldLists(prev, opt.f, opt.fl);
+        o.f = [...new Set([...(mp?.f || []), ...opt.f])]; // and queueOps adds the stored import row's
+        const fl = mergeFieldLists(mp, opt.f, opt.fl);
         if (fl) o.fl = fl;
       }
       if (!o.nx) {
@@ -1682,10 +1683,16 @@ export class GccEngine {
   private queueOps(cfg: TeamCfg, list: SyncOp[]) {
     const byK = new Map(list.map((o) => [o.k, o])); // the latest op per record
     const drop = new Set<string>();
+    // merged into copies, which replace this tab's ops only once the queue is stored: after a failed
+    // write the ops stay as they were (merging them again on the next write would apply an edit twice)
+    const out = new Map<string, SyncOp>();
     this.writePending(cfg.url, (ops) => {
       drop.clear();
+      out.clear();
       const stored = new Map(ops.map((x) => [x.k, x]));
-      byK.forEach((o, k) => {
+      byK.forEach((o0, k) => {
+        const o: SyncOp = { ...o0 };
+        out.set(k, o);
         const p = stored.get(k);
         if (!p || p.id === o.id) return;
         // a change replacing another tab's queued change to the same record is always the newer one
@@ -1697,6 +1704,10 @@ export class GccEngine {
         }
         if (o.base !== undefined && p.base === undefined) {
           drop.add(k); // that tab wrote the note by hand: a document's automatic note yields
+          return;
+        }
+        if (o.nx && !o.f && !p.nx && !p.del && k.startsWith('stage/') && p.v !== 'none') {
+          drop.add(k); // that tab set the stage by hand: one set automatically by a logged call yields
           return;
         }
         if (o.f && !p.f && !p.del && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object' && !p.nx) {
@@ -1739,8 +1750,15 @@ export class GccEngine {
           else delete o.lst;
         }
       });
-      return ops.filter((x) => !byK.has(x.k) || drop.has(x.k)).concat([...byK.values()].filter((o) => !drop.has(o.k)));
-    }).then(() => drop.forEach((k) => byK.get(k) && this.pending.get(k) === byK.get(k) && this.pending.delete(k))).catch(() => {
+      return ops.filter((x) => !byK.has(x.k) || drop.has(x.k)).concat([...out.values()].filter((o) => !drop.has(o.k)));
+    }).then(() => {
+      out.forEach((n, k) => {
+        const o = byK.get(k)! as unknown as Record<string, unknown>;
+        Object.keys(o).forEach((x) => !(x in n) && delete o[x]);
+        Object.assign(o, n);
+      });
+      drop.forEach((k) => byK.get(k) && this.pending.get(k) === byK.get(k) && this.pending.delete(k));
+    }).catch(() => {
       if (this.teamCfg === cfg) byK.forEach((o) => this.keepUnsaved(o));
     });
   }
@@ -1883,6 +1901,8 @@ export class GccEngine {
     }
   }
 
+  /** Records this tab saw deleted in pulled rows (see syncRound). */
+  private goneKeys = new Set<string>();
   /** This tab's copy of a record edited field by field (see syncRound); a stage step not there is empty. */
   private localRecord(k: string): Record<string, unknown> | undefined {
     const i = k.indexOf('/'), type = k.slice(0, i), rest = k.slice(i + 1);
@@ -1931,7 +1951,13 @@ export class GccEngine {
     const lastSeq = new Map(rows.map((r) => [r.k, r.seq]));
     const own = (o: SyncOp) =>
       rows.some((r) => r.k === o.k && r.seq > o.sent! && r.by === String(o.by || '').slice(0, 100) && (o.del ? r.del : !r.del && JSON.stringify(r.v) === JSON.stringify(o.v)));
-    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent && own(o);
+    // Compaction drops a row once a later one for its record exists, so a delivered whole value can
+    // have no own row left: where the rows since it was sent have gaps, the earlier rule applies to it.
+    const gap = (o: SyncOp) => {
+      const n = rows.filter((r) => r.seq > o.sent!).length;
+      return n > 0 && rows[rows.length - 1].seq - o.sent! !== n;
+    };
+    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent && (own(o) || (!(o.f || o.lst) && gap(o)));
     if ([...this.pending.values()].some(settled)) {
       this.pending.forEach((o, k) => settled(o) && this.pending.delete(k));
       this.unsaved.forEach((o, k) => settled(o) && this.unsaved.delete(k));
@@ -2015,7 +2041,12 @@ export class GccEngine {
     this.pending.forEach((o, k) => {
       if (lastRow.has(k) || !o.f || o.nx || o.del || o.base !== undefined || o.seen == null || o.seen >= cfg.seq || dropped.includes(o)) return;
       const cur = this.localRecord(k);
-      if (!cur) return;
+      if (!cur) {
+        // deleted by a teammate in a row this tab already pulled: the deletion wins over an edit
+        const deal = /^(?:deal|ddoc)\/([^/]+)/.exec(k)?.[1];
+        if (this.goneKeys.has(k) || (deal && this.sales.gone?.[deal])) dropped.push(o);
+        return;
+      }
       const v = withFields(cur, o);
       revised.set(k, { ...o, v, seen: since });
     });
@@ -2107,6 +2138,7 @@ export class GccEngine {
     // a teammate deleted a document: its Drive file goes (whoever deleted it may not have known the
     // file yet) and so does this browser's copy of it
     const delDocs = rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('ddoc/')).map((r) => this.sales.docs[r.k.slice(5)]).filter(Boolean);
+    rows.forEach((r) => (r.del || r.v == null ? this.goneKeys.add(r.k) : this.goneKeys.delete(r.k)));
     rows.forEach((r) => applyRow(this, r, fx));
     delDocs.forEach((doc) => !this.sales.docs[`${doc.deal}/${doc.id}`] && this.dropDocFile(doc));
     // a teammate deleted a deal: the notes and documents this browser has for it go too — also those
@@ -2192,7 +2224,10 @@ export class GccEngine {
     const requeue = (cur: SyncOp[]) =>
       [...new Map([...moved, ...carried, ...cur].map((o) => [o.k, o])).values()].map((p) => {
         const o = this.mkOp(p.k, local.get(p.k), t);
-        if (o.v !== undefined && p.f && !p.del) o.f = p.f; // still only those fields of ours
+        if (o.v !== undefined && p.f && !p.del) {
+          o.f = p.f; // still only those fields of ours
+          if (p.fl) o.fl = p.fl;
+        }
         if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
         if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
         if (p.base !== undefined) o.base = p.base; // still only over what was seen there

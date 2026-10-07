@@ -91,7 +91,7 @@ function doPost(e) {
       case 'ping':
         // only creating / repairing the sheet needs the lock; a ready sheet is just read
         if (!sheetReady_()) withLock_(() => sheet_());
-        return json_({ ok: true, seq: curSeq_(), files: true });
+        return json_({ ok: true, seq: cachedSeq_() ?? seq_(), files: true });
       case 'pull':
         return json_(pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL)));
       case 'push':
@@ -163,16 +163,41 @@ function seq_() {
 /**
  * The last seq, for the check every poll makes ("anything new?"). Read from the script cache so idle
  * polls use none of the daily Properties quota; push_ writes it there, under the lock, before the rows.
- * When the cache has lost it, it is read back from Properties under the lock (no push can be halfway).
+ * When the cache has lost it, it is read from Properties and put back only while holding the lock (no
+ * push can be halfway) — taken without waiting, so a poll never queues behind a push for this.
  */
 function curSeq_() {
-  const v = CacheService.getScriptCache().get('SEQ');
-  if (v != null && v !== '') return Number(v);
-  return withLock_(() => {
-    const s = seq_();
+  const c = cachedSeq_();
+  if (c != null) return c;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(0)) return seq_();
+  try {
+    return lockedSeq_();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** The last seq while holding the script lock (puts it back in the cache if it was lost). */
+function lockedSeq_() {
+  const c = cachedSeq_();
+  if (c != null) return c;
+  const s = seq_();
+  try {
     CacheService.getScriptCache().put('SEQ', String(s), SEQ_CACHE_S);
-    return s;
-  });
+  } catch (err) {
+    // the cache is only a shortcut
+  }
+  return s;
+}
+
+function cachedSeq_() {
+  try {
+    const v = CacheService.getScriptCache().get('SEQ');
+    return v != null && v !== '' ? Number(v) : null;
+  } catch (err) {
+    return null;
+  }
 }
 
 function rowOut_(r) {
@@ -193,7 +218,7 @@ function pull_(since, limit) {
   return withLock_(() => {
     const sh = sheet_();
     const last = sh.getLastRow();
-    const now = curSeq_();
+    const now = lockedSeq_(); // already holding the lock
     if (last < 2) return { ok: true, seq: now, rows: [], more: false };
     const seqs = sh.getRange(2, 1, last - 1, 1).getValues();
     // linear scan: tolerant of stray blank rows (Number('') would break a binary search)

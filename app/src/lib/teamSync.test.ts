@@ -159,6 +159,15 @@ describe('Code.gs (Apps Script backend, run through the simulator)', () => {
     expect(push([{ k: 'stage/3', v: 'c' }]).seq).toBe(3);
     expect(pull(2).rows!.map((r) => r.k)).toEqual(['stage/3']);
     expect(s.post({ action: 'ping', key: KEY })).toMatchObject({ ok: true, seq: 3 });
+    // lost while a pull waits for the lock: read back without taking the lock a second time
+    s.beforeLock(() => s.evictCache());
+    expect(pull(0).rows!.map((r) => r.k)).toEqual(['stage/1', 'stage/2', 'stage/3']);
+    // a poll that finds the cache empty while a push holds the lock doesn't wait for it
+    s.evictCache();
+    const release = s.holdLock();
+    expect(pull(3)).toEqual({ ok: true, seq: 3, rows: [], more: false });
+    expect(s.post({ action: 'ping', key: KEY })).toMatchObject({ ok: true, seq: 3 });
+    release();
   });
 });
 
@@ -246,7 +255,8 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
     for (const k of [`stage/${c1.id}`, `owner/${c1.id}`, `watch/${c2.id}`, 'team/คุณเอ', `contact/${c2.id}`, `dedup/${g.key}`]) expect(keys.has(k)).toBe(true);
     expect([...keys].some((k) => k.startsWith('task/'))).toBe(true);
-    expect([...keys].filter((k) => k.startsWith(`log/${c3.id}/`)).length).toBeGreaterThanOrEqual(2); // call + auto stage change
+    expect([...keys].filter((k) => k.startsWith(`log/${c3.id}/`)).length).toBe(1); // the call (the stage it set has no line of its own)
+    expect(keys.has(`stage/${c3.id}`)).toBe(true); // set by the call
   });
 
   it('a second browser sees the same data after connecting', async () => {

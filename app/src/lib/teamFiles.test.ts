@@ -263,8 +263,8 @@ describe('attached documents through Code.gs (run in the simulator)', () => {
 
   it('recognises a deployed script from before attachments', async () => {
     const code = readFileSync(join(TEAM_SYNC, 'Code.gs'), 'utf8');
-    const oldCode = code.replace('seq: curSeq_(), files: true', 'seq: curSeq_()').replace(/ {6}case 'upload':[\s\S]*?(?= {6}default:)/, '');
-    expect(oldCode).not.toMatch(/Seq_\(\), files|case '(upload|file|delfile)'/);
+    const oldCode = code.replace(', files: true })', ' })').replace(/ {6}case 'upload':[\s\S]*?(?= {6}default:)/, '');
+    expect(oldCode).not.toMatch(/seq_\(\), files: true|case '(upload|file|delfile)'/);
     const old = createGasSim({ teamKey: KEY, code: oldCode });
     const ot = via(old);
     expect(old.post({ action: 'ping', key: KEY })).toEqual({ ok: true, seq: 0 });

@@ -69,16 +69,18 @@ export function StepEditor({ dealId, stage, onClose }: { dealId: string; stage: 
  * doesn't replace what is being typed; on leaving, if the saved value changed since the box got focus,
  * the person is asked before theirs goes over it (as StepEditor does).
  */
-function useEditBox<T extends HTMLInputElement | HTMLTextAreaElement>(value: string, commit: (typed: string, el: T) => void) {
+function useEditBox<T extends HTMLInputElement | HTMLTextAreaElement>(value: string, commit: (typed: string, el: T) => void, valid?: (typed: string) => boolean) {
   const ref = useRef<T>(null);
   const atFocus = useRef<string | null>(null); // the saved value when the box got focus
+  // set once: React re-applies a changed defaultValue even to a focused box nobody has typed in yet
+  const [first] = useState(value);
   useEffect(() => {
     const el = ref.current;
     if (el && atFocus.current === null && el.value !== value) el.value = value;
   }, [value]);
   return {
     ref,
-    defaultValue: value,
+    defaultValue: first,
     onFocus: () => {
       atFocus.current = value;
     },
@@ -86,7 +88,8 @@ function useEditBox<T extends HTMLInputElement | HTMLTextAreaElement>(value: str
       const was = atFocus.current ?? value, el = ev.currentTarget, typed = el.value;
       atFocus.current = null;
       if (typed === value) return;
-      if (typed === was || (value !== was && !window.confirm(`มีคนแก้ช่องนี้ระหว่างที่พิมพ์อยู่:\n"${value || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`))) {
+      // what can't be saved anyway (commit refuses it) is not worth the question
+      if (typed === was || (value !== was && (!valid || valid(typed)) && !window.confirm(`มีคนแก้ช่องนี้ระหว่างที่พิมพ์อยู่:\n"${value || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`))) {
         el.value = value; // untouched here, or theirs kept: show the saved value
         return;
       }
@@ -113,7 +116,7 @@ function StepNote({ label, value, onSave }: { label: string; value: string; onSa
 
 /** The customer's name in the panel's header. */
 function ClientName({ value, onSave }: { value: string; onSave: (v: string) => void }) {
-  const box = useEditBox<HTMLInputElement>(value, (v, el) => (v.trim() ? onSave(v) : (el.value = value)));
+  const box = useEditBox<HTMLInputElement>(value, (v, el) => (v.trim() ? onSave(v) : (el.value = value)), (v) => !!v.trim());
   return <input {...box} aria-label="ชื่อลูกค้า" onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={{ fontSize: 22, fontWeight: 500, background: 'transparent', border: 0, borderBottom: '1px dashed rgba(255,255,255,.35)', color: '#fff', padding: '2px 0', fontFamily: 'inherit' }} />;
 }
 
@@ -138,7 +141,7 @@ function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: st
     }
     setErr('');
     onSave(v);
-  });
+  }, (typed) => parseAmount(typed) !== undefined);
   return (
     <label style={labelCol}>
       {label}
