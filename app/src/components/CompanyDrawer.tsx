@@ -10,7 +10,7 @@ import { Opts, SrcTags, heroGrad, inputStyle } from './ui';
 import { useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
-const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#2A4BE0' };
+const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#1F5BD8' };
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: '#475069' };
 
 interface BlockItem { key: string; h: string; badge: string; bBg: string; bFg: string; t1: string; t2: string; kv: [string, string][]; scope?: [number, number, number, string, string, string]; from: string }
@@ -95,7 +95,7 @@ export function CompanyDrawer() {
     blocks.push({
       k: 'f', src: 2, title: 'โรงงานที่เริ่มประกอบกิจการ (กรอ.)',
       items: d.f.map(({ src, x }, i) => ({
-        key: 'f' + i, h: s(x[2]), badge: 'เริ่ม ' + ymTh(s(x[0])), bBg: '#E6ECFD', bFg: '#1A2FB0', t1: s(x[3]), t2: s(x[4]),
+        key: 'f' + i, h: s(x[2]), badge: 'เริ่ม ' + ymTh(s(x[0])), bBg: '#E6ECFD', bFg: '#1745B8', t1: s(x[3]), t2: s(x[4]),
         kv: ([['เงินทุน', money(x[7] as number | null)]] as [string, string][]).concat(x[8] ? [['คนงาน', fmtN(x[8] as number) + ' คน']] : []).concat(x[5] ? [['โทร', s(x[5])]] : []),
         from: from(src),
       })),
@@ -104,7 +104,7 @@ export function CompanyDrawer() {
     blocks.push({
       k: 's', src: 3, title: 'บริษัทจดทะเบียน (SET)',
       items: d.s.map(({ src, x }, i) => ({
-        key: 's' + i, h: s(x[0]), badge: s(x[2]), bBg: '#0E1F7A', bFg: '#fff', t1: s(x[1]), t2: s(x[5]),
+        key: 's' + i, h: s(x[0]), badge: s(x[2]), bBg: '#1745B8', bFg: '#fff', t1: s(x[1]), t2: s(x[5]),
         kv: ([['กลุ่มอุตสาหกรรม', s(x[3]) || '—']] as [string, string][]).concat(x[4] ? [['หมวดธุรกิจ', s(x[4])]] : []),
         from: from(src),
       })),
@@ -118,7 +118,7 @@ export function CompanyDrawer() {
   const kpis = [
     { k: 'CFO', v: cvT[0], c: cvT[1], sub: c.cfoN ? `${fmtN(c.cfoN)} ใบ${cvSub ? ' · ' + cvSub : ''}` : 'ไม่พบใน TGO' },
     { k: 'GI ที่ยังใช้ได้', v: c.giLive ? 'ระดับ ' + c.giLive : '—', c: '#0B6E66', sub: c.giMax ? `สูงสุดที่เคยได้ ${c.giMax}${c.giUntil ? ' · ถึง ' + isoTh(c.giUntil) : ''}` : 'ไม่พบใน GI' },
-    { k: 'โรงงานใหม่ (กรอ.)', v: c.invest ? money(c.invest) : '—', c: '#1A3FE0', sub: c.newYm ? 'เริ่ม ' + ymTh(c.newYm) : 'ไม่พบในรายชื่อโรงงานใหม่' },
+    { k: 'โรงงานใหม่ (กรอ.)', v: c.invest ? money(c.invest) : '—', c: '#1F5BD8', sub: c.newYm ? 'เริ่ม ' + ymTh(c.newYm) : 'ไม่พบในรายชื่อโรงงานใหม่' },
   ];
   const facts = ([['เลขนิติบุคคล', c.jur], ['จังหวัด', D.prov[c.prov]], ['ที่อยู่', c.addr], ['กลุ่มอุตสาหกรรม', D.ind[c.ind]], ['กิจการ', c.biz], ['จำนวนโรงงาน', c.fac ? fmtN(c.fac) + ' แห่ง' : ''], ['SET', c.set ? `${c.set} · ตลาด ${c.mkt}` : '']] as [string, string][]).filter((x) => x[1]);
   const ph = (c.phone || '').split('|').map((x) => x.trim()).filter(Boolean);
@@ -153,10 +153,10 @@ export function CompanyDrawer() {
   return (
     <>
       <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.38)', zIndex: 40 }} />
-      <aside ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={c.name} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(680px,100vw)', background: '#F4F6FC', zIndex: 41, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
-        <div style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <aside ref={ref} className="panel" tabIndex={-1} role="dialog" aria-modal="true" aria-label={c.name} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(680px,100vw)', background: '#F6F8FE', zIndex: 41, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
+        <div className="hero" style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-            <span style={{ fontSize: 13, color: '#C9D4FF' }}>{c.code} · {D.type[c.type]}</span>
+            <span style={{ fontSize: 13, color: '#E4ECFF' }}>{c.code} · {D.type[c.type]}</span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => e.toggleWatch(c.id)} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 13 }}>{watched ? '★ ติดตามอยู่' : '☆ ติดตาม'}</button>
               <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 18 }}>×</button>
@@ -164,10 +164,10 @@ export function CompanyDrawer() {
           </div>
           <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.35, textWrap: 'pretty' }}>{c.name}</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 12.5, padding: '3px 10px', borderRadius: 999, background: '#fff', color: '#0A1A86', fontWeight: 500 }}>{`กลุ่ม ${c.tgt + 1} · ${TGT[c.tgt]}`}</span>
+            <span style={{ fontSize: 12.5, padding: '3px 10px', borderRadius: 999, background: '#fff', color: '#1F5BD8', fontWeight: 500 }}>{`กลุ่ม ${c.tgt + 1} · ${TGT[c.tgt]}`}</span>
             <SrcTags mask={c.src} size="lg" />
           </div>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#DCE6FF' }}>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#E4ECFF' }}>
             {deal ? (
               <span>สถานะการขาย <b style={{ fontWeight: 500, color: '#fff' }}>{trackerStatus(e.sales, deal)}</b> (Sales Tracker ปี {deal.year})</span>
             ) : (
@@ -179,13 +179,13 @@ export function CompanyDrawer() {
           </div>
         </div>
 
-        <div role="tablist" style={{ position: 'sticky', top: 0, zIndex: 2, background: '#F4F6FC', padding: '8px 24px 0', display: 'flex', gap: 2, borderBottom: '1px solid #E3E7F1', overflowX: 'auto' }}>
+        <div role="tablist" style={{ position: 'sticky', top: 0, zIndex: 2, background: '#F6F8FE', padding: '8px 24px 0', display: 'flex', gap: 2, borderBottom: '1px solid #E3E7F1', overflowX: 'auto' }}>
           {dTabs.map(([k, label, n]) => {
             const on = dt === k;
             return (
-              <button key={k} role="tab" aria-selected={on} onClick={() => set({ dTab: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '12px 12px 10px', fontSize: 14, fontWeight: on ? 600 : 400, color: on ? '#0A1A86' : '#475069', borderBottom: `2.5px solid ${on ? '#0A1A86' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button key={k} role="tab" aria-selected={on} onClick={() => set({ dTab: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '12px 12px 10px', fontSize: 14, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
                 {label}
-                {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
+                {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
               </button>
             );
           })}
@@ -197,11 +197,11 @@ export function CompanyDrawer() {
               <SalesBox c={c} />
               {multi && (
                 <div style={{ background: '#E6ECFD', borderRadius: 16, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 500, color: '#0A1A86' }}>รวมจาก {c.ids.length} แถวในไฟล์ต้นทาง</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 500, color: '#1F5BD8' }}>รวมจาก {c.ids.length} แถวในไฟล์ต้นทาง</span>
                   {c.ids.map((id) => {
                     const rr = e.B.rawById.get(id)!;
                     return (
-                      <span key={id} style={{ fontSize: 12.5, color: '#1A2FB0', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span key={id} style={{ fontSize: 12.5, color: '#1745B8', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                         <span style={{ fontWeight: 500 }}>{gccCode(id)}</span>
                         <span>{rr.name}</span>
                         <SrcTags mask={rr.src} size="sm" />
@@ -227,7 +227,7 @@ export function CompanyDrawer() {
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                   <span style={kicker}>ข้อมูลติดต่อ</span>
-                  <button onClick={() => setEditC(!editC)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>
+                  <button onClick={() => setEditC(!editC)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>
                 </div>
                 {!ph.length && !em.length && !c.web && !dc && <span style={{ fontSize: 14, color: '#475069' }}>ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span>}
                 {ph.map((t) => <a key={t} href={telHref(t)} style={{ fontSize: 16, fontWeight: 500, textDecoration: 'none' }}>{t}</a>)}
@@ -243,12 +243,12 @@ export function CompanyDrawer() {
                 )}
                 {ctSrc && <span style={{ fontSize: 12, color: '#475069' }}>{ctSrc}</span>}
                 {editC && (
-                  <form onSubmit={saveContact} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#F4F6FC', borderRadius: 12, padding: 14 }}>
+                  <form onSubmit={saveContact} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#F6F8FE', borderRadius: 12, padding: 14 }}>
                     <label style={field}>เบอร์โทร (คั่นหลายเบอร์ด้วย |)<input name="phone" defaultValue={c.phone || ''} style={inputStyle} /></label>
                     <label style={field}>อีเมล<input name="email" defaultValue={c.email || ''} style={inputStyle} /></label>
                     <label style={field}>เว็บไซต์<input name="web" defaultValue={c.web || ''} style={inputStyle} /></label>
                     <label style={field}>ผู้ติดต่อ / หมายเหตุ<input name="note" defaultValue={(ce && ce.note) || ''} style={inputStyle} /></label>
-                    <button type="submit" style={{ cursor: 'pointer', alignSelf: 'flex-start', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 }}>บันทึก</button>
+                    <button type="submit" style={{ cursor: 'pointer', alignSelf: 'flex-start', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>บันทึก</button>
                   </form>
                 )}
               </div>
@@ -272,7 +272,7 @@ export function CompanyDrawer() {
                   <span style={{ fontSize: 15, fontWeight: 500 }}>รอบ {c.rnd}</span>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 6 }}>
                     {([['ส่งเอกสารภายใน', isoTh(r.doc)], ['ชำระค่าธรรมเนียม', isoTh(r.fee)], ['ประกาศผล', isoTh(r.ann)]] as const).map(([k, v]) => (
-                      <div key={k} style={{ background: '#F4F6FC', borderRadius: 10, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div key={k} style={{ background: '#F6F8FE', borderRadius: 10, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={{ fontSize: 11.5, color: '#475069' }}>{k}</span>
                         <span style={{ fontSize: 13, fontWeight: 500 }}>{v}</span>
                       </div>
@@ -295,7 +295,7 @@ export function CompanyDrawer() {
                     </div>
                     {all.map((it) => <BlockRow key={it.key} it={it} />)}
                     {!more[b.k] && b.items.length > 6 && (
-                      <button onClick={() => setMore({ ...more, [b.k]: true })} style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13, textDecoration: 'underline', padding: 0 }}>ดูทั้งหมด {fmtN(b.items.length)} รายการ</button>
+                      <button onClick={() => setMore({ ...more, [b.k]: true })} style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline', padding: 0 }}>ดูทั้งหมด {fmtN(b.items.length)} รายการ</button>
                     )}
                   </div>
                 );
@@ -321,12 +321,12 @@ export function CompanyDrawer() {
                     <Opts all="ยังไม่มีผู้รับผิดชอบ" options={C.team.map((v) => ({ v, label: v }))} />
                   </select>
                 </label>
-                {!C.team.length && <button onClick={() => go('update', { sel: null })} style={{ cursor: 'pointer', gridColumn: '1/-1', textAlign: 'left', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13, textDecoration: 'underline', padding: 0 }}>ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล</button>}
+                {!C.team.length && <button onClick={() => go('update', { sel: null })} style={{ cursor: 'pointer', gridColumn: '1/-1', textAlign: 'left', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline', padding: 0 }}>ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล</button>}
               </div>
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <span style={kicker}>นัดหมาย</span>
-                  <button onClick={() => openSched({ ids: [c.id] })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 }}>+ เพิ่มนัด</button>
+                  <button onClick={() => openSched({ ids: [c.id] })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>+ เพิ่มนัด</button>
                 </div>
                 {!tasks.length && <span style={{ fontSize: 13.5, color: '#5E6680' }}>ยังไม่มีนัด</span>}
                 {tasks.map((t) => {
@@ -335,7 +335,7 @@ export function CompanyDrawer() {
                     <div key={t.id} style={{ display: 'flex', gap: 10, alignItems: 'center', borderTop: '1px solid #EEF1F8', paddingTop: 8 }}>
                       <DoneBox t={t} color={ti.color} onToggle={() => e.toggleTask(t)} size={12} />
                       <span style={{ flex: 1, fontSize: 13.5, textDecoration: t.done ? 'line-through' : 'none' }}>{ti.meta}{t.note ? ' · ' + t.note : ''}</span>
-                      <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 12.5 }}>เลื่อน</button>
+                      <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 12.5 }}>เลื่อน</button>
                       <button onClick={() => e.delTask(t)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12.5 }}>ลบ</button>
                     </div>
                   );
@@ -343,7 +343,7 @@ export function CompanyDrawer() {
               </div>
               <div style={{ ...box, gap: 12 }}>
                 <span style={kicker}>บันทึกการติดต่อ</span>
-                <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F4F6FC', borderRadius: 14, padding: 12 }}>
+                <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F6F8FE', borderRadius: 14, padding: 12 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <select name="type" aria-label="ประเภท" style={{ height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' }}>
                       <Opts options={[{ v: 'call', label: 'โทร' }, { v: 'email', label: 'อีเมล' }, { v: 'meet', label: 'นัดพบ' }, { v: 'note', label: 'โน้ต' }]} />
@@ -354,7 +354,7 @@ export function CompanyDrawer() {
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input name="text" aria-label="รายละเอียด" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
-                    <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 }}>บันทึก</button>
+                    <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>บันทึก</button>
                   </div>
                 </form>
                 {!logs.length && <span style={{ fontSize: 13.5, color: '#5E6680' }}>ยังไม่มีประวัติการติดต่อ</span>}
@@ -367,7 +367,7 @@ export function CompanyDrawer() {
                         <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                           <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                             <span style={{ fontSize: 12.5, fontWeight: 500, color }}>{tag}</span>
-                            {l.result && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F4F6FC', color: '#384155' }}>{l.result}</span>}
+                            {l.result && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F6F8FE', color: '#384155' }}>{l.result}</span>}
                           </span>
                           {l.text && <span style={{ fontSize: 13.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</span>}
                           <span style={{ fontSize: 11.5, color: '#5E6680' }}>{[dtTh(l.at), l.by].filter(Boolean).join(' · ')}</span>
@@ -432,14 +432,14 @@ function SalesBox({ c }: { c: Company }) {
   const { engine: e, set } = useApp();
   const deals = newestFirst(e.dealsOf(c.id));
   const custom = e.custom[c.id];
-  const btn: CSSProperties = { cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 };
+  const btn: CSSProperties = { cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 };
   return (
     <div style={{ ...box, gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={kicker}>Sales Tracker</span>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {custom && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} style={{ ...btn, borderColor: '#D5DBEA', color: '#0E1430' }}>แก้ไขข้อมูลลูกค้า</button>}
-          <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btn, background: '#0A1A86', color: '#fff' }}>+ ส่งเข้า Sales Tracker</button>
+          <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btn, background: '#1F5BD8', color: '#fff' }}>+ ส่งเข้า Sales Tracker</button>
         </span>
       </div>
       {!deals.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่อยู่ในตารางติดตามการขาย — กดส่งเข้า แล้วข้อมูลติดต่อจะถูกกรอกให้อัตโนมัติ</span>}

@@ -69,7 +69,7 @@ export function Plan() {
   const kpis: [string, number, string][] = [
     ['งานเกินกำหนด', open_.filter((t) => t.date < today).length, '#A33A1A'],
     ['งานวันนี้', open_.filter((t) => t.date === today).length, '#E8A23B'],
-    ['7 วันข้างหน้า', open_.filter((t) => t.date > today && t.date <= wk).length, '#1A3FE0'],
+    ['7 วันข้างหน้า', open_.filter((t) => t.date > today && t.date <= wk).length, '#1F5BD8'],
     ['งานค้างทั้งหมด', open_.length, '#7C93FF'],
   ];
   const upcoming = open_.filter((t) => t.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
@@ -100,7 +100,7 @@ export function Plan() {
               const ts = byDay[d] || [];
               const inM = d.slice(0, 7) === calM, isSel = d === selISO;
               return (
-                <button key={d} onClick={() => set({ calDay: d })} aria-label={`${isoTh(d)} · ${ts.length} งาน`} style={{ cursor: 'pointer', minHeight: 62, borderRadius: 12, border: `1.5px solid ${isSel ? '#0A1A86' : d === today ? '#7C93FF' : '#EEF1F8'}`, background: isSel ? '#EEF2FF' : '#fff', color: '#0E1430', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', opacity: inM ? 1 : 0.4 }}>
+                <button key={d} onClick={() => set({ calDay: d })} aria-label={`${isoTh(d)} · ${ts.length} งาน`} style={{ cursor: 'pointer', minHeight: 62, borderRadius: 12, border: `1.5px solid ${isSel ? '#1F5BD8' : d === today ? '#7C93FF' : '#EEF1F8'}`, background: isSel ? '#EEF2FF' : '#fff', color: '#0E1430', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', opacity: inM ? 1 : 0.4 }}>
                   <span style={{ fontSize: 13, fontWeight: d === today ? 600 : 400 }}>{+d.slice(8)}</span>
                   <span style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                     {ts.slice(0, 6).map((t) => <span key={t.id} style={{ width: 7, height: 7, borderRadius: '50%', background: (TT.find((x) => x[0] === t.type) || TT[0])[2] }} />)}
@@ -163,10 +163,10 @@ export function Plan() {
             <label style={labelCol}>สถานะการขาย<select value={ui.plStage} onChange={(ev) => set({ plStage: ev.target.value as StageKey | '', picked: {} })} style={sel}><Opts all="ทั้งหมด" options={STG.map(([v, label]) => ({ v, label }))} /></select></label>
             <label style={labelCol}>ผู้รับผิดชอบ<select value={ui.plOwner} onChange={(ev) => set({ plOwner: ev.target.value, picked: {} })} style={sel}><Opts all="ทั้งหมด" options={teamOpts} /></select></label>
             <label style={labelCol}>นัดอัตโนมัติวันละ<select value={String(ui.perDay)} onChange={(ev) => set({ perDay: +ev.target.value })} style={sel}>{[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n} ราย</option>)}</select></label>
-            <button onClick={() => unpl.length && e.autoPlan(unpl, ui.perDay || 5)} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 }}>นัดรายที่ยังไม่มีแผน ({fmtN(unpl.length)})</button>
+            <button onClick={() => unpl.length && e.autoPlan(unpl, ui.perDay || 5)} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>นัดรายที่ยังไม่มีแผน ({fmtN(unpl.length)})</button>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F4F6FC', borderRadius: 12, padding: '8px 12px' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F6F8FE', borderRadius: 12, padding: '8px 12px' }}>
           <button
             onClick={() => {
               const p = { ...pk };
@@ -174,13 +174,13 @@ export function Plan() {
               else shown.forEach((c) => (p[c.id] = 1));
               set({ picked: p });
             }}
-            style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13, textDecoration: 'underline' }}
+            style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}
           >
             {allOn ? 'ยกเลิกเลือกทั้งหมด' : `เลือก ${fmtN(shown.length)} รายที่แสดง`}
           </button>
           <span style={{ fontSize: 13, color: '#475069', flex: 1 }}>{pkIds.length ? `เลือกแล้ว ${fmtN(pkIds.length)} ราย` : 'ติ๊กช่องหน้าชื่อเพื่อนัดหลายรายพร้อมกัน'}</span>
-          {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1A3FE0', color: '#fff', fontSize: 13 }}>นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
-          {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
+          {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
+          {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {shown.map((c) => {
@@ -197,7 +197,7 @@ export function Plan() {
                     set({ picked: q });
                   }}
                   aria-label="เลือก" aria-pressed={p}
-                  style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: `1.5px solid ${p ? '#1A3FE0' : '#C9D1E6'}`, background: p ? '#1A3FE0' : '#fff', color: '#fff', fontSize: 12, padding: 0 }}
+                  style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: `1.5px solid ${p ? '#1F5BD8' : '#C9D1E6'}`, background: p ? '#1F5BD8' : '#fff', color: '#fff', fontSize: 12, padding: 0 }}
                 >
                   {p ? '✓' : ''}
                 </button>
@@ -211,16 +211,16 @@ export function Plan() {
                 </select>
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {ot ? (
-                    <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} style={{ cursor: 'pointer', border: 0, fontSize: 12, padding: '5px 10px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0' }}>นัดแล้ว {isoTh(ot.date)}</button>
+                    <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} style={{ cursor: 'pointer', border: 0, fontSize: 12, padding: '5px 10px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8' }}>นัดแล้ว {isoTh(ot.date)}</button>
                   ) : (
-                    <button onClick={() => openSched({ ids: [c.id] })} style={{ cursor: 'pointer', border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 12.5, padding: '5px 12px', borderRadius: 999 }}>+ นัด</button>
+                    <button onClick={() => openSched({ ids: [c.id] })} style={{ cursor: 'pointer', border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 12.5, padding: '5px 12px', borderRadius: 999 }}>+ นัด</button>
                   )}
                 </span>
               </div>
             );
           })}
           {!tg.length && <span style={{ fontSize: 13.5, color: '#475069', padding: '16px 0' }}>ไม่มีรายชื่อในรายการนี้</span>}
-          {tg.length > shown.length && <button onClick={() => set({ plLim: (ui.plLim || 60) + 120 })} style={{ cursor: 'pointer', alignSelf: 'center', marginTop: 10, border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13.5, textDecoration: 'underline' }}>{`แสดงเพิ่ม (อีก ${fmtN(tg.length - shown.length)} ราย)`}</button>}
+          {tg.length > shown.length && <button onClick={() => set({ plLim: (ui.plLim || 60) + 120 })} style={{ cursor: 'pointer', alignSelf: 'center', marginTop: 10, border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline' }}>{`แสดงเพิ่ม (อีก ${fmtN(tg.length - shown.length)} ราย)`}</button>}
         </div>
       </section>
     </>

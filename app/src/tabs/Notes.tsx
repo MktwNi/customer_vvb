@@ -54,14 +54,14 @@ export function Notes() {
             const left = Math.round((x.docT - T) / 864e5);
             const st: [string, string, string] =
               x.docT >= T ? ['เปิดรับเอกสาร · เหลือ ' + fmtN(left) + ' วัน', left <= 14 ? '#FDECC8' : '#DDF5F1', left <= 14 ? '#9A5A00' : '#0B6E66']
-              : x.annT >= T ? ['ปิดรับเอกสาร · รอประกาศผล', '#E6ECFD', '#1A2FB0']
+              : x.annT >= T ? ['ปิดรับเอกสาร · รอประกาศผล', '#E6ECFD', '#1745B8']
               : ['ประกาศผลแล้ว', '#EEF1F8', '#475069'];
             const n = by[x.no] || 0;
             const dates: [string, string][] = [['ส่งเอกสาร', isoTh(x.doc)], ['ชำระค่าธรรมเนียม', isoTh(x.fee)], ['ประชุมครั้งที่ 1', isoTh(x.m1)], ['ประกาศผล', isoTh(x.ann)], ['ดาวน์โหลดใบรับรอง', isoTh(x.dl)]];
             return (
-              <div key={x.no} style={{ background: x.annT < T ? '#F7F8FC' : '#fff', border: nextOpen && nextOpen.no === x.no ? '2px solid #1A3FE0' : '1px solid #E3E7F1', borderRadius: 20, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div key={x.no} style={{ background: x.annT < T ? '#F7F8FC' : '#fff', border: nextOpen && nextOpen.no === x.no ? '2px solid #1F5BD8' : '1px solid #E3E7F1', borderRadius: 20, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 22, fontWeight: 500, color: '#0A1A86' }}>รอบ {x.no}</span>
+                  <span style={{ fontSize: 22, fontWeight: 500, color: '#1F5BD8' }}>รอบ {x.no}</span>
                   <span style={{ fontSize: 11.5, fontWeight: 500, padding: '3px 10px', borderRadius: 999, background: st[1], color: st[2] }}>{st[0]}</span>
                 </div>
                 {dates.map(([k, v]) => (
@@ -71,8 +71,8 @@ export function Notes() {
                   </div>
                 ))}
                 <div style={{ borderTop: '1px solid #EEF1F8', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 13, color: '#475069' }}>ต้องยื่นรอบนี้ <span style={{ fontSize: 20, fontWeight: 500, color: '#1A3FE0' }}>{fmtN(n)}</span> บริษัท</span>
-                  {n > 0 && <button onClick={() => setF({ rnd: x.no, view: 'co', sort: 'exp', tgt: '' })} style={{ cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 12.5 }}>ดูรายชื่อ</button>}
+                  <span style={{ fontSize: 13, color: '#475069' }}>ต้องยื่นรอบนี้ <span style={{ fontSize: 20, fontWeight: 500, color: '#1F5BD8' }}>{fmtN(n)}</span> บริษัท</span>
+                  {n > 0 && <button onClick={() => setF({ rnd: x.no, view: 'co', sort: 'exp', tgt: '' })} style={{ cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 12.5 }}>ดูรายชื่อ</button>}
                 </div>
               </div>
             );

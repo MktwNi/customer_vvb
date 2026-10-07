@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { Icon, type IconName } from './icons';
-import { overdueDays } from '../lib/sales';
+import { dealResult, overdueDays } from '../lib/sales';
 import mark from '../assets/gcc-mark.png';
 
 export interface NavItem { key: Tab; label: string; icon: IconName }
@@ -36,6 +36,8 @@ export const TABS: [Tab, string][] = NAV.flatMap((g) => g.items.map((i): [Tab, s
 
 /** Matches the CSS breakpoint where the sidebar becomes a slide-out drawer. */
 export const MOBILE_NAV = '(max-width: 900px)';
+/** From this width the full menu can stay docked beside the page. */
+export const WIDE_NAV = '(min-width: 1280px)';
 export function useMedia(q: string) {
   const get = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(q).matches;
   const [m, setM] = useState(get);
@@ -59,26 +61,30 @@ export function useDataLine() {
 }
 
 /**
- * Desktop: an icon rail; the ☰ button slides the full menu out over the page, and choosing an item,
- * clicking outside or Escape folds it back. Phones (<= 900px): a drawer opened from the top bar.
+ * Wide screens: the full menu docked beside the page (☰ in the top bar folds it to an icon rail).
+ * 901–1279px: an icon rail; ☰ slides the full menu out over the page, and choosing an item, clicking
+ * outside or Escape folds it back. Phones (<= 900px): a drawer opened from the top bar.
  */
-export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }) {
-  const { engine: e, ui, go } = useApp();
+export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; docked: boolean; mobile: boolean; onClose: () => void }) {
+  const { engine: e, ui, go, set } = useApp();
   useEngineVersion();
-  const mobile = useMedia(MOBILE_NAV);
-  const dataLine = useDataLine();
   const closeRef = useRef<HTMLButtonElement>(null);
   const ready = e.ready;
-  const rail = !mobile && !open; // icons only
+  const rail = !mobile && !docked && !open; // icons only
+  const mode = mobile ? '' : docked ? ' dock tabs' : open ? ' over' : ' rail tabs';
 
   const badges: Partial<Record<Tab, number>> = {};
+  let won = 0, deals = 0;
   if (ready) {
     const today = todayISO();
     const mon = e.monCfg();
     badges.track = (mon.events || []).filter((x) => x.at > (mon.seenAt || '')).length;
     badges.plan = e.crm.tasks.filter((t) => !t.done && t.date <= today).length;
     badges.dedup = e.B.groups.filter((g) => g.state === 'pending').length;
-    badges.sales = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear && overdueDays(e.sales, d, today) != null).length; // follow-ups overdue
+    const yearDeals = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear);
+    badges.sales = yearDeals.filter((d) => overdueDays(e.sales, d, today) != null).length; // follow-ups overdue
+    deals = yearDeals.length;
+    won = yearDeals.filter((d) => dealResult(e.sales, d) === 'YES').length;
   }
 
   // open menu: Escape folds it and focus returns to the button that opened it;
@@ -99,7 +105,7 @@ export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: 
   return (
     <>
       <div className={'side-backdrop' + (open ? ' open' : '')} onClick={onClose} />
-      <aside id="side-nav" className={'side' + (open ? ' open' : '')} aria-label="เมนูหลัก">
+      <aside id="side-nav" className={'side' + mode + (open ? ' open' : '')} aria-label="เมนูหลัก">
         <div className="side-brand">
           <img className="side-mark" src={mark} alt="Global Carbon Corporation" width={36} height={36} />
           <span className="side-brand-text lbl">
@@ -110,12 +116,19 @@ export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: 
             <Icon name="close" />
           </button>
         </div>
-        <div className="side-toggle">
-          <button id="rail-btn" className="side-item" onClick={onToggle} aria-label={open ? 'ย่อเมนู' : 'ขยายเมนู'} title={open ? undefined : 'ขยายเมนู'} aria-expanded={open} aria-controls="side-nav">
-            <span className="side-ico">
-              <Icon name={open ? 'collapse' : 'menu'} />
-            </span>
-            <span className="side-label lbl">ย่อเมนู</span>
+        <div className="side-cta">
+          <button
+            className="side-add"
+            disabled={!ready}
+            title={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
+            aria-label={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
+            onClick={() => {
+              set({ addCust: { deal: false } });
+              onClose();
+            }}
+          >
+            <Icon name="plus" />
+            <span className="lbl">เพิ่มลูกค้าใหม่</span>
           </button>
         </div>
         <nav className="side-nav">
@@ -149,9 +162,20 @@ export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: 
             </div>
           ))}
         </nav>
-        {mobile && (
-          <div className="side-foot">
-            <span className="side-data">{dataLine}</span>
+        {ready && (
+          <div className="side-foot lbl">
+            <span className="side-foot-title">ข้อมูลในระบบ</span>
+            <span className="side-stat"><span>บริษัท</span><b>{fmtN(e.B.companies.length)}</b></span>
+            <span className="side-stat"><span>ใบรับรอง CFO</span><b>{fmtN(e.B.certs.length)}</b></span>
+            {deals > 0 && (
+              <>
+                <span className="side-stat" style={{ marginTop: 4 }}><span>ปิดการขายปี {ui.slYear}</span><b>{fmtN(won)}/{fmtN(deals)}</b></span>
+                <span className="side-bar" role="img" aria-label={`ปิดการขายได้ ${fmtN(won)} จาก ${fmtN(deals)} ราย`}>
+                  <i style={{ width: `${Math.round((won / deals) * 100)}%` }} />
+                </span>
+              </>
+            )}
+            <span className="side-foot-sub">ข้อมูล ณ {isoTh(e.base.asOf)}</span>
           </div>
         )}
       </aside>

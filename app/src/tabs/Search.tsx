@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, type CSSProperties } from 'react';
-import { useApp, useEngineVersion, useNarrow } from '../state';
+import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
 import { CONFIG, CST, FEEDS, GCOL, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
 import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
@@ -78,7 +78,7 @@ export function Search() {
     return { star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => e.toggleWatch(id) };
   };
   const rndPill = (c: Company) =>
-    c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1A2FB0' } : null;
+    c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1745B8' } : null;
   const cfoView = (c: Company) => {
     const [t, fg] = CST[c.cfoSt];
     return { t, fg, sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' };
@@ -86,7 +86,7 @@ export function Search() {
   const contactOf = (c: Company) => (c.phone ? c.phone.split('|')[0].trim() : c.web ? c.web.replace(/^https?:\/\//, '') : '—');
   const go = (p: number) => {
     set({ page: p });
-    window.scrollTo(0, 0);
+    scrollTop();
   };
   const sel: CSSProperties = { height: 42, borderRadius: 12, padding: '0 10px', fontSize: 14, color: '#0E1430' };
 
@@ -99,16 +99,16 @@ export function Search() {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ display: 'flex', background: '#E6ECFD', borderRadius: 999, padding: 4, gap: 2 }}>
             {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
-              <button key={k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })} style={{ cursor: 'pointer', border: 0, height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14, background: s.view === k ? '#0A1A86' : 'transparent', color: s.view === k ? '#fff' : '#1A2FB0' }}>{label}</button>
+              <button key={k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })} style={{ cursor: 'pointer', border: 0, height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14, background: s.view === k ? '#1F5BD8' : 'transparent', color: s.view === k ? '#fff' : '#1745B8' }}>{label}</button>
             ))}
           </div>
           <input value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" style={{ flex: 1, minWidth: 260, height: 48, border: '1.5px solid #D5DBEA', borderRadius: 14, padding: '0 16px', fontSize: 15, color: '#0E1430', background: '#fff', outline: 'none' }} />
-          <button onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)} style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 14 }}>ส่งออก CSV</button>
-          <button onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน" style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: 0, background: '#0A1A86', color: '#fff', fontSize: 14 }}>+ เพิ่มลูกค้าใหม่</button>
+          <button onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)} style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 14 }}>ส่งออก CSV</button>
+          <button onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน" style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 14 }}>+ เพิ่มลูกค้าใหม่</button>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {tgtChips.map((c) => (
-            <button key={c.label} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })} style={{ cursor: 'pointer', height: 34, padding: '0 12px', borderRadius: 999, border: `1.5px solid ${c.act ? '#0A1A86' : '#D5DBEA'}`, background: c.act ? '#0A1A86' : '#fff', color: c.act ? '#fff' : '#0E1430', fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button key={c.label} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })} style={{ cursor: 'pointer', height: 34, padding: '0 12px', borderRadius: 999, border: `1.5px solid ${c.act ? '#1F5BD8' : '#D5DBEA'}`, background: c.act ? '#1F5BD8' : '#fff', color: c.act ? '#fff' : '#0E1430', fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
               <span>{c.label}</span>
               <span style={{ opacity: 0.75, ...tabular }}>{fmtN(c.n)}</span>
             </button>
@@ -121,7 +121,7 @@ export function Search() {
             return (
               <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
                 {label}
-                <select value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)} style={{ ...sel, border: `1.5px solid ${on ? '#1A3FE0' : '#D5DBEA'}`, background: on ? '#EEF2FF' : '#fff' }}>
+                <select value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)} style={{ ...sel, border: `1.5px solid ${on ? '#1F5BD8' : '#D5DBEA'}`, background: on ? '#EEF2FF' : '#fff' }}>
                   <Opts options={options} all="ทั้งหมด" />
                 </select>
               </label>
@@ -131,7 +131,7 @@ export function Search() {
         {activeChips.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {activeChips.map((c) => (
-              <button key={c.label} onClick={() => setF(c.p)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 12.5 }}>{c.label} ×</button>
+              <button key={c.label} onClick={() => setF(c.p)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 12.5 }}>{c.label} ×</button>
             ))}
           </div>
         )}
@@ -141,7 +141,7 @@ export function Search() {
             <span style={{ color: '#475069', fontSize: 13.5 }}>{s.view === 'cert' ? '· ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `· มีเบอร์โทร ${fmtN(F.ph)}`}</span>
           </span>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {hasFilter && <button onClick={() => setF(CLEAR_FILTERS)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13.5, textDecoration: 'underline' }}>ล้างตัวกรอง</button>}
+            {hasFilter && <button onClick={() => setF(CLEAR_FILTERS)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline' }}>ล้างตัวกรอง</button>}
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#475069' }}>
               เรียงตาม
               <select value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })} style={{ height: 38, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 13.5, background: '#fff', color: '#0E1430' }}>
@@ -196,7 +196,7 @@ export function Search() {
             return (
               <button key={ct.cid} onClick={() => open(ct.gid)} style={{ cursor: 'pointer', textAlign: 'left', background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, color: '#0E1430' }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 500, color: '#0A1A86' }}>{ct.cert || '—'}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <span style={{ fontSize: 12, fontWeight: 500, padding: '3px 10px', borderRadius: 999, background: bg, color: fg }}>{CST[ct.st][0]}</span>
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
@@ -226,8 +226,8 @@ export function Search() {
                       <span style={{ padding: '1px 7px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
                       <span>{c.code}</span>
                       <span>{D.type[c.type]}</span>
-                      {c.set && <span style={{ fontWeight: 500, color: '#0E1F7A' }}>{c.set}</span>}
-                      {c.ids.length > 1 && <span style={{ color: '#1A3FE0' }}>รวม {c.ids.length} แถว</span>}
+                      {c.set && <span style={{ fontWeight: 500, color: '#1745B8' }}>{c.set}</span>}
+                      {c.ids.length > 1 && <span style={{ color: '#1F5BD8' }}>รวม {c.ids.length} แถว</span>}
                     </span>
                   </button>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13.5, minWidth: 0 }}>
@@ -245,7 +245,7 @@ export function Search() {
                     <span style={{ wordBreak: 'break-word' }}>{contactOf(c)}</span>
                     <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {sg[0] !== 'none' && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: sg[2], color: sg[3] }}>{sg[1]}</span>}
-                      {owner && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F4F6FC', color: '#384155' }}>{owner}</span>}
+                      {owner && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F6F8FE', color: '#384155' }}>{owner}</span>}
                     </span>
                   </span>
                 </div>
@@ -268,7 +268,7 @@ export function Search() {
               return (
                 <div key={ct.cid} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, borderBottom: '1px solid #EEF1F8', alignItems: 'center', fontSize: 13.5 }}>
                   <button onClick={st.toggle} title="ติดตาม" style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
-                  <span style={{ fontWeight: 500, color: '#0A1A86' }}>{ct.cert || '—'}</span>
+                  <span style={{ fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
                     <span style={{ fontSize: 12, color: '#475069' }}>{ct.act}</span>

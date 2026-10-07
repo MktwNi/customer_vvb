@@ -66,6 +66,12 @@ interface Ctx {
 }
 const AppCtx = createContext<Ctx | null>(null);
 
+/** Back to the top of the page: the content scrolls inside the app window on desktop, with the page on phones. */
+export function scrollTop() {
+  window.scrollTo(0, 0);
+  document.getElementById('scroller')?.scrollTo(0, 0);
+}
+
 export function AppProvider({ engine, children }: { engine: GccEngine; children: ReactNode }) {
   const [ui, setUi] = useState(initial);
   const set = useCallback<Ctx['set']>((p) => setUi((s) => ({ ...s, ...(typeof p === 'function' ? p(s) : p) })), []);
@@ -74,11 +80,11 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
     engine, ui, set,
     go: (tab, p) => {
       set({ tab, ...(p || {}) });
-      window.scrollTo(0, 0);
+      scrollTop();
     },
     setF: (p) => {
       set((s) => ({ f: { ...s.f, ...p }, page: 0, tab: 'search' }));
-      window.scrollTo(0, 0);
+      scrollTop();
     },
     open: (id) => {
       const c = engine.company(id);

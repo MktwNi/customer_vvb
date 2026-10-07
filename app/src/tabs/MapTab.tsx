@@ -160,7 +160,7 @@ export function MapTab() {
             ระบายสีแผนที่ตาม
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', background: '#E6ECFD', padding: 4, borderRadius: 999 }}>
               {METRICS.map(([k, l]) => (
-                <button key={k} onClick={() => setMetric(k)} aria-pressed={metric === k} style={{ border: 0, cursor: 'pointer', height: 32, padding: '0 13px', borderRadius: 999, fontSize: 13, background: metric === k ? '#0A1A86' : 'transparent', color: metric === k ? '#fff' : '#1A2FB0' }}>{l}</button>
+                <button key={k} onClick={() => setMetric(k)} aria-pressed={metric === k} style={{ border: 0, cursor: 'pointer', height: 32, padding: '0 13px', borderRadius: 999, fontSize: 13, background: metric === k ? '#1F5BD8' : 'transparent', color: metric === k ? '#fff' : '#1745B8' }}>{l}</button>
               ))}
             </div>
           </div>
@@ -243,7 +243,7 @@ export function MapTab() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(210px,1fr))', gap: 8 }}>
             {rank.map(([k, n], i) => (
               <button key={k} onClick={() => setSel(k)} style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: '26px minmax(0,1fr) auto', gap: 8, alignItems: 'center', padding: '9px 12px', borderRadius: 12, border: `1px solid ${k === sel ? '#081247' : '#E3E7F1'}`, background: k === sel ? '#EEF2FF' : '#fff', fontSize: 13, color: '#0E1430', textAlign: 'left' }}>
-                <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#E6ECFD', color: '#1A3FE0', fontSize: 11.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#E6ECFD', color: '#1F5BD8', fontSize: 11.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
                 <b style={{ fontWeight: 500 }}>{fmtN(n)}</b>
               </button>
@@ -264,15 +264,15 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
   const h3 = { margin: 0, fontSize: 15.5, fontWeight: 500 } as const;
   const row = { display: 'grid', gridTemplateColumns: '170px minmax(0,1fr) 54px', gap: 10, alignItems: 'center', fontSize: 13 } as const;
   const ell = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
-  const bar = (w: number, c = '#1A3FE0') => (
+  const bar = (w: number, c = '#1F5BD8') => (
     <span style={{ height: 10, background: '#EEF1F8', borderRadius: 6, overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${w}%`, background: c, borderRadius: 6 }} /></span>
   );
   return (
     <div style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ borderRadius: 18, padding: '18px 20px', color: '#fff', background: heroGrad, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="hero" style={{ borderRadius: 22, padding: '18px 20px', color: '#fff', background: heroGrad, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 12.5, color: '#B9C8FF' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
+            <span style={{ fontSize: 12.5, color: '#E4ECFF' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
             <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.3 }}>{name || 'ทั้งประเทศ'}</span>
           </div>
           {name && <button onClick={onClear} style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', background: 'rgba(255,255,255,.1)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
@@ -280,7 +280,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8 }}>
           {([['บริษัท', a.n], ['CFO ในอายุ', a.act], ['ใกล้หมดอายุ', a.soon], ['มีเบอร์โทร', a.ph]] as const).map(([k, n]) => (
             <div key={k} style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(185,200,255,.3)', borderRadius: 12, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 11.5, color: '#C9D4FF' }}>{k}</span>
+              <span style={{ fontSize: 11.5, color: '#fff' }}>{k}</span>
               <span style={{ fontSize: 20, fontWeight: 500 }}>{fmtN(n)}</span>
             </div>
           ))}
@@ -322,7 +322,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
               {!orgs.length && <span style={{ fontSize: 12.5, color: '#475069' }}>ไม่มี</span>}
             </div>
           </div>
-          <div><button onClick={onTable} style={{ cursor: 'pointer', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5, fontWeight: 500 }}>ดูรายชื่อทั้งหมด {fmtN(a.n)} บริษัท →</button></div>
+          <div><button onClick={onTable} style={{ cursor: 'pointer', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5, fontWeight: 500 }}>ดูรายชื่อทั้งหมด {fmtN(a.n)} บริษัท →</button></div>
         </>
       ) : (
         <span style={{ fontSize: 12.5, color: '#475069', lineHeight: 1.5 }}>กดจังหวัดบนแผนที่หรือในอันดับด้านล่างเพื่อดูรายละเอียด</span>

@@ -52,20 +52,20 @@ export function Overview() {
   return (
     <>
       <PageHead gap={12} title="ภาพรวมลูกค้าทั้งหมด (GCC)" sub={`นับระดับบริษัท รวมทุกแหล่ง · สถานะ ณ ${isoTh(e.ref)}`} />
-      <section style={{ background: heroGrad, color: '#fff', borderRadius: 28, padding: 32, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,340px),1fr))', gap: 28, alignItems: 'end' }}>
+      <section className="hero" style={{ background: heroGrad, color: '#fff', borderRadius: 32, padding: 32, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,340px),1fr))', gap: 28, alignItems: 'end' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 14, color: '#B9C8FF' }}>บริษัท/ผู้ประกอบการ หลังตัดข้อมูลซ้ำ</span>
+          <span style={{ fontSize: 14, color: '#E4ECFF' }}>บริษัท/ผู้ประกอบการ หลังตัดข้อมูลซ้ำ</span>
           <span style={{ fontSize: 72, fontWeight: 600, lineHeight: 1.15 }}>{fmtN(e.B.companies.length)}</span>
-          <span style={{ fontSize: 15, color: '#DCE6FF', fontWeight: 300, textWrap: 'pretty', maxWidth: 540 }}>
+          <span style={{ fontSize: 15, color: '#E4ECFF', fontWeight: 300, textWrap: 'pretty', maxWidth: 540 }}>
             {`รวม TGO · GI · กรอ. · SET เข้าเป็นบริษัทเดียว ${fmtN(ov.merged)} รายรวมจากหลายแถว · CFO อยู่ในอายุ ${fmtN(ov.act)} ราย · มีเบอร์โทร ${fmtN(ov.ph)} ราย · รอตรวจข้อมูลซ้ำ ${fmtN(ov.pending)} กลุ่ม`}
           </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 10 }}>
           {ov.src.map((n, i) => (
-            <button key={i} onClick={() => setF({ src: String(i), tgt: '', view: 'co' })} style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid rgba(185,200,255,.28)', background: 'rgba(255,255,255,.08)', color: '#fff', borderRadius: 16, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 13, color: '#B9C8FF' }}>{SRCC[i][0]}</span>
+            <button key={i} onClick={() => setF({ src: String(i), tgt: '', view: 'co' })} style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid rgba(255,255,255,.22)', background: 'rgba(255,255,255,.1)', color: '#fff', borderRadius: 20, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 13, color: '#fff' }}>{SRCC[i][0]}</span>
               <span style={{ fontSize: 28, fontWeight: 500 }}>{fmtN(n)}</span>
-              <span style={{ fontSize: 12, color: '#C9D4FF', fontWeight: 300 }}>{SRC_SUB[i]}</span>
+              <span style={{ fontSize: 12, color: '#fff', fontWeight: 300 }}>{SRC_SUB[i]}</span>
             </button>
           ))}
         </div>
@@ -84,7 +84,7 @@ export function Overview() {
             </button>
           ))}
         </div>
-        <button onClick={() => go('track')} style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 14, textDecoration: 'underline', padding: 0 }}>
+        <button onClick={() => go('track')} style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 14, textDecoration: 'underline', padding: 0 }}>
           เปิดแท็บติดตาม: กราฟใบรับรองหมดอายุ 12 เดือน และรายชื่อแต่ละรายการ →
         </button>
       </section>
@@ -107,7 +107,7 @@ export function Overview() {
                 <span style={{ fontSize: 12, color: '#475069' }}>บริษัท</span>
               </span>
               <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                <span style={{ fontSize: 18, fontWeight: 500, color: '#1A3FE0', ...tabular }}>{fmtN(ph)}</span>
+                <span style={{ fontSize: 18, fontWeight: 500, color: '#1F5BD8', ...tabular }}>{fmtN(ph)}</span>
                 <span style={{ fontSize: 12, color: '#475069' }}>มีเบอร์โทร</span>
               </span>
               <span style={{ color: '#6B7390', fontSize: 18 }}>›</span>
@@ -130,19 +130,19 @@ export function Overview() {
                   <Bar w={(x.n / im) * 100} color="#4D72FF" n={x.n} />
                   <span style={{ textAlign: 'right', color: '#0E8A9A', fontWeight: 500 }}>{fmtN(x.act)}</span>
                   <span style={{ textAlign: 'right', color: '#475069' }}>{fmtN(x.none)}</span>
-                  <span style={{ textAlign: 'right', color: '#1A3FE0' }}>{fmtN(x.gi)}</span>
+                  <span style={{ textAlign: 'right', color: '#1F5BD8' }}>{fmtN(x.gi)}</span>
                 </button>
               ))}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <PageHead no="04" title="จังหวัด" nowrap right={<button onClick={() => go('map')} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 14, textDecoration: 'underline' }}>เปิดแผนที่</button>} />
+          <PageHead no="04" title="จังหวัด" nowrap right={<button onClick={() => go('map')} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 14, textDecoration: 'underline' }}>เปิดแผนที่</button>} />
           <div style={{ ...card, padding: '6px 0' }}>
             {provs.map(([k, x]) => (
               <button key={k} className="h-bg" onClick={() => setF({ prov: k, tgt: '', view: 'co' })} style={{ cursor: 'pointer', width: '100%', border: 0, background: 'transparent', textAlign: 'left', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr) 80px', gap: 12, padding: '8px 20px', alignItems: 'center', fontSize: 13.5, ...tabular }}>
                 <span>{D.prov[+k]}</span>
-                <Bar w={(x.n / pm) * 100} color="#1A3FE0" n={x.n} />
+                <Bar w={(x.n / pm) * 100} color="#1F5BD8" n={x.n} />
                 <span style={{ textAlign: 'right', color: '#0E8A9A', fontWeight: 500 }}>{fmtN(x.act)}</span>
               </button>
             ))}

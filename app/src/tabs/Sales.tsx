@@ -18,7 +18,7 @@ const RES: Record<string, [string, string, string]> = {
   YES: ['ปิดการขายได้', '#DDF5E8', '#14633F'],
   NO: ['ไม่สำเร็จ', '#FBE3DC', '#8A2B12'],
   WAIT: ['รอผล', '#FFF4DC', '#6B4100'],
-  '': ['', '#F4F6FC', '#475069'],
+  '': ['', '#F6F8FE', '#475069'],
 };
 const small: CSSProperties = { cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 12.5 };
 
@@ -74,9 +74,9 @@ export function Sales() {
         {tabs.map(([k, label, n]) => {
           const on = v === k;
           return (
-            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#0A1A86' : '#475069', borderBottom: `2.5px solid ${on ? '#0A1A86' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
               {label}
-              {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
+              {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
             </button>
           );
         })}
@@ -264,7 +264,7 @@ export function Modal({ title, children, onClose, width = 520, focus }: { title:
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: `min(${width}px,94vw)`, maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 22, padding: 22, zIndex: 55, display: 'flex', flexDirection: 'column', gap: 14, outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>{title}</span>
-          <button onClick={onClose} aria-label="ปิด" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, background: '#F4F6FC', fontSize: 18, color: '#475069' }}>×</button>
+          <button onClick={onClose} aria-label="ปิด" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, background: '#F6F8FE', fontSize: 18, color: '#475069' }}>×</button>
         </div>
         {children}
       </div>
@@ -282,7 +282,7 @@ function ListsModal({ onClose }: { onClose: () => void }) {
       <span style={{ fontSize: 12.5, color: '#5E6680' }}>{hint}</span>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {C[name].map((x) => (
-          <span key={x} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, padding: '3px 4px 3px 10px', borderRadius: 999, background: '#F4F6FC', border: '1px solid #E3E7F1' }}>
+          <span key={x} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, padding: '3px 4px 3px 10px', borderRadius: 999, background: '#F6F8FE', border: '1px solid #E3E7F1' }}>
             {x}
             {name === 'sections' && (
               <button title="เปลี่ยนชื่อ" onClick={() => { const n = window.prompt('ชื่อหมวดใหม่', x); if (n) e.renameSection(x, n); }} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#475069', fontSize: 12 }}>✎</button>
@@ -418,7 +418,7 @@ function TableView({ e, S, deals, all, facets, today }: { e: Engine; S: SalesSta
             if (!list.length) return null;
             return (
               <div key={sec} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#2A4BE0', padding: '6px 2px 0' }}>{sec || 'ไม่ระบุหมวด'} · {fmtN(list.length)}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#1F5BD8', padding: '6px 2px 0' }}>{sec || 'ไม่ระบุหมวด'} · {fmtN(list.length)}</span>
                 {list.map((d) => <DealCard key={d.id} S={S} d={d} today={today} onOpen={() => set({ deal: d.id })} />)}
               </div>
             );
@@ -481,12 +481,12 @@ function SectionRows({ sec, list, collapsed, cols, onToggle, onAdd, children }: 
       <tr className="sl-sec">
         <td className="sl-sticky" colSpan={1}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={onToggle} aria-expanded={!collapsed} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#0A1A86', padding: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button onClick={onToggle} aria-expanded={!collapsed} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#1F5BD8', padding: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
               <span aria-hidden="true">{collapsed ? '▶' : '▼'}</span>
               {sec || 'ไม่ระบุหมวด'}
-              <span style={{ fontSize: 11, fontWeight: 500, minWidth: 20, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(list.length)}</span>
+              <span style={{ fontSize: 11, fontWeight: 500, minWidth: 20, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(list.length)}</span>
             </button>
-            <button onClick={onAdd} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 12.5, padding: 0 }}>+ เพิ่มในหมวดนี้</button>
+            <button onClick={onAdd} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 12.5, padding: 0 }}>+ เพิ่มในหมวดนี้</button>
           </div>
         </td>
         <td colSpan={cols - 1} />
@@ -500,7 +500,7 @@ function Chips({ d }: { d: Deal }) {
   if (!d.source.length && !d.service.length) return null;
   return (
     <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-      {d.source.map((x) => <span key={'s' + x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0' }}>{x}</span>)}
+      {d.source.map((x) => <span key={'s' + x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8' }}>{x}</span>)}
       {d.service.map((x) => <span key={'v' + x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 999, background: '#DDF5F1', color: '#0B6E66' }}>{x}</span>)}
     </span>
   );
@@ -591,7 +591,7 @@ function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState
             <button onClick={() => onStep(p)} className="sl-step" title={st.n || STAGE_TH[p] || p} style={{ background: bg, color: fg }}>
               {filled ? (
                 <>
-                  {st.d && <span style={{ fontSize: 11, fontWeight: 500, color: isRes ? fg : '#1A3FE0' }}>{short(st.d)}</span>}
+                  {st.d && <span style={{ fontSize: 11, fontWeight: 500, color: isRes ? fg : '#1F5BD8' }}>{short(st.d)}</span>}
                   {st.n.trim() && <span className="sl-clamp">{st.n}</span>}
                 </>
               ) : (
@@ -663,7 +663,7 @@ function Bars({ title, sub, items, fmt = fmtN, unit = '', keepZero }: { title: s
             <div key={k} role="listitem" title={`${k}: ${fmt(v)}${unit}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,140px) minmax(0,1fr) auto', gap: 10, alignItems: 'center', fontSize: 13 }}>
               <span style={{ color: '#384155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
               <span style={{ height: 12, background: '#F0F2F8', borderRadius: 4, overflow: 'hidden' }}>
-                <span style={{ display: 'block', height: '100%', width: `${Math.max(2, (v / max) * 100)}%`, background: '#1A3FE0', borderRadius: '0 4px 4px 0' }} />
+                <span style={{ display: 'block', height: '100%', width: `${Math.max(2, (v / max) * 100)}%`, background: '#1F5BD8', borderRadius: '0 4px 4px 0' }} />
               </span>
               <span style={{ color: '#0E1430', fontWeight: 500, ...tabular }}>{fmt(v)}{unit}</span>
             </div>
@@ -738,7 +738,7 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
         {kpi.map(([ic, v, l, c]) => (
           <div key={l} style={{ ...card, borderRadius: 16, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span aria-hidden="true" style={{ width: 36, height: 36, flex: 'none', borderRadius: 10, background: '#F0F4FF', color: c || '#1A3FE0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{ic}</span>
+            <span aria-hidden="true" style={{ width: 36, height: 36, flex: 'none', borderRadius: 10, background: '#F0F4FF', color: c || '#1F5BD8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{ic}</span>
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
               <span style={{ fontSize: 21, fontWeight: 500, color: c || '#0E1430', ...tabular }}>{v}</span>
               <span style={{ fontSize: 12, color: '#475069', lineHeight: 1.4 }}>{l}</span>

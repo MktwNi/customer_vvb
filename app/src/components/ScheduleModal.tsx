@@ -57,7 +57,7 @@ export function ScheduleModal() {
         <label style={field}>หมายเหตุ<input name="note" defaultValue={t ? t.note : ''} style={ctl} /></label>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" onClick={cancel} style={{ cursor: 'pointer', height: 40, padding: '0 14px', border: 0, background: 'transparent', color: '#475069', fontSize: 14 }}>ยกเลิก</button>
-          <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 18px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 14 }}>บันทึกนัด</button>
+          <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 18px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 14 }}>บันทึกนัด</button>
         </div>
       </form>
     </>

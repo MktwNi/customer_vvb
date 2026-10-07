@@ -123,7 +123,7 @@ export function AddCustomer() {
             </button>
           )}
           <button type="button" onClick={close} style={small}>ยกเลิก</button>
-          <button type="submit" style={{ ...small, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff' }}>{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>
+          <button type="submit" style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>
         </div>
       </form>
     </Modal>
@@ -184,7 +184,7 @@ export function SendToTracker() {
       </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button onClick={close} style={small}>ยกเลิก</button>
-        <button onClick={send} disabled={!chosen.some((c) => !has(c))} style={{ ...small, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff' }}>
+        <button onClick={send} disabled={!chosen.some((c) => !has(c))} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>
           ส่ง {chosen.filter((c) => !has(c)).length} รายการ
         </button>
       </div>

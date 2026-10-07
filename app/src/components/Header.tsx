@@ -4,10 +4,12 @@ import { addMonths, fmtN, isoTh, todayISO } from '../lib/format';
 import { TeamChip } from './TeamSync';
 import { Icon } from './icons';
 import { TABS, useDataLine } from './Sidebar';
+import { EMPTY_FILTERS } from '../lib/search';
 import mark from '../assets/gcc-mark.png';
 
-/** Top bar of the content area: page name + data line, team status and the reference-date picker. */
-export function TopBar({ navOpen, onMenu }: { navOpen: boolean; onMenu: () => void }) {
+/** Top bar across the window: logo, menu button, page name + data line, quick search, team status,
+ *  the reference-date picker and who is using this browser ("ฉันคือ"). */
+export function TopBar({ navOpen, docked, onMenu, onToggle }: { navOpen: boolean; docked: boolean; onMenu: () => void; onToggle: () => void }) {
   const { engine: e, ui, go, setRef } = useApp();
   useEngineVersion();
   const [dateOpen, setDateOpen] = useState(false);
@@ -23,14 +25,25 @@ export function TopBar({ navOpen, onMenu }: { navOpen: boolean; onMenu: () => vo
 
   return (
     <header className="topbar">
+      <div className="tb-brand">
+        <img src={mark} alt="Global Carbon Corporation" width={38} height={38} />
+        <span className="tb-brand-text">
+          <b>Global Carbon</b>
+          <small>ฐานข้อมูลลูกค้า GCC</small>
+        </span>
+      </div>
+      <button id="rail-btn" className="tb-round" onClick={onToggle} aria-label={docked || navOpen ? 'ย่อเมนู' : 'ขยายเมนู'} title={docked || navOpen ? 'ย่อเมนู' : 'ขยายเมนู'} aria-expanded={docked || navOpen} aria-controls="side-nav">
+        <Icon name={docked || navOpen ? 'collapse' : 'menu'} />
+      </button>
       <button id="menu-btn" className="menu-btn" onClick={onMenu} aria-label="เปิดเมนู" aria-expanded={navOpen} aria-controls="side-nav">
         <Icon name="menu" />
       </button>
-      <img className="tb-mark" src={mark} alt="Global Carbon Corporation" width={30} height={30} />
+      <img className="tb-mark" src={mark} alt="Global Carbon Corporation" width={32} height={32} />
       <div className="tb-title">
         <span className="tb-h">{ready ? title : 'ฐานข้อมูลลูกค้า GCC'}</span>
         <span className="tb-sub" title={dataLine}>{dataLine}</span>
       </div>
+      {ready && ui.tab !== 'search' && <QuickSearch />}
       <div className="tb-actions">
         {ready && <TeamChip onClick={() => go('update')} />}
         <div style={{ position: 'relative' }}>
@@ -50,7 +63,7 @@ export function TopBar({ navOpen, onMenu }: { navOpen: boolean; onMenu: () => vo
                 {quick.map(([label, v]) => {
                   const on = e.ref === v;
                   return (
-                    <button key={label} onClick={() => setRef(v)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5, border: `1.5px solid ${on ? '#0A1A86' : '#D5DBEA'}`, background: on ? '#0A1A86' : '#fff', color: on ? '#fff' : '#0E1430' }}>{label}</button>
+                    <button key={label} onClick={() => setRef(v)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5, border: `1.5px solid ${on ? 'var(--brand)' : '#D5DBEA'}`, background: on ? 'var(--brand)' : '#fff', color: on ? '#fff' : '#0E1430' }}>{label}</button>
                   );
                 })}
               </div>
@@ -61,12 +74,48 @@ export function TopBar({ navOpen, onMenu }: { navOpen: boolean; onMenu: () => vo
                 </select>
               </label>
               <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.55, textWrap: 'pretty' }}>ใช้ดูล่วงหน้าหรือย้อนหลัง สถานะ กลุ่มเป้าหมาย และรอบ อบก. จะคำนวณใหม่ทั้งเว็บ</span>
-              <button onClick={() => setDateOpen(false)} style={{ cursor: 'pointer', alignSelf: 'flex-end', height: 34, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13 }}>เสร็จ</button>
+              <button onClick={() => setDateOpen(false)} style={{ cursor: 'pointer', alignSelf: 'flex-end', height: 34, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>เสร็จ</button>
             </div>
           )}
         </div>
+        {ready && <MeButton />}
       </div>
     </header>
+  );
+}
+
+/** Search box in the top bar: Enter searches all companies on the search tab. */
+function QuickSearch() {
+  const { setF } = useApp();
+  const [q, setQ] = useState('');
+  return (
+    <form
+      className="tb-search"
+      role="search"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        const v = q.trim();
+        if (!v) return;
+        setF({ ...EMPTY_FILTERS, view: 'co', sort: 'default', q: v });
+        setQ('');
+      }}
+    >
+      <Icon name="search" />
+      <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="ค้นหาบริษัท เลขนิติบุคคล เบอร์โทร…" aria-label="ค้นหาบริษัท (กด Enter)" />
+    </form>
+  );
+}
+
+/** Who is using this browser ("ฉันคือ", set on the update tab): shown in the history of changes. */
+function MeButton() {
+  const { engine: e, go } = useApp();
+  const me = e.me();
+  const initial = Array.from(me).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '';
+  return (
+    <button className="tb-me" onClick={() => go('update')} title={me ? `ฉันคือ ${me} · เปลี่ยนชื่อที่แท็บอัปเดตข้อมูล` : 'ใส่ชื่อของคุณที่แท็บอัปเดตข้อมูล'} aria-label={me ? `ฉันคือ ${me} (เปลี่ยนชื่อที่แท็บอัปเดตข้อมูล)` : 'ใส่ชื่อของคุณ (แท็บอัปเดตข้อมูล)'}>
+      <span className="tb-me-name">{me || 'ใส่ชื่อของคุณ'}</span>
+      <span className="tb-ava" aria-hidden="true">{initial ? initial.toUpperCase() : <Icon name="user" />}</span>
+    </button>
   );
 }
 
@@ -102,7 +151,7 @@ export function Banners() {
           <div style={{ background: '#fff', border: '1px solid #E3E7F1', borderRadius: 16, padding: '12px 16px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#E8A23B', flex: 'none' }} />
             <span style={{ fontSize: 13.5, flex: 1, minWidth: 240, textWrap: 'pretty' }}>{ev.text}</span>
-            <button onClick={() => go('track')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13 }}>ดูเหตุการณ์</button>
+            <button onClick={() => go('track')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>ดูเหตุการณ์</button>
             <button onClick={() => e.ackEvents()} style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13, textDecoration: 'underline' }}>รับทราบ</button>
           </div>
         </div>

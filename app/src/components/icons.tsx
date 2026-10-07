@@ -51,6 +51,13 @@ const PATHS = {
       <path d="M14 3v6h6M8 13h8M8 17h6" />
     </>
   ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  user: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </>
+  ),
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
   collapse: <path d="m15 6-6 6 6 6" />,

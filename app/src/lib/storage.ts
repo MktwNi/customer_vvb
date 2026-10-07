@@ -119,4 +119,6 @@ export const PREF = {
   team: 'gcc-team-sync',
   /** Web-app link of the last connected team sheet (its unsent changes move to the next link). */
   teamLast: 'gcc-team-last',
+  /** 'rail' when the menu was folded to icons on a wide screen (default: docked open). */
+  nav: 'gcc-nav',
 } as const;
