@@ -84,18 +84,33 @@ function normalizeText(text: string) {
  *  "subtotal", and OCR's spaced-out or tone-mark-less Thai still matches. */
 const KEY_DROP = /[\s.\-_:()[\]/\\|*'"“”‘’,;!?#]/;
 
+/** Per UTF-16 code: 0 = not seen yet, 1 = left out of match keys, 2 = kept. */
+const KEY_CHAR = new Uint8Array(0x10000);
+/** Every line's key is needed by several finders; analyzeDocText keeps them for one run. */
+let keyMemo: Map<string, { k: string; m: number[] }> | null = null;
+
 /** Match key of `s` plus, for each key character, its index in `s`. */
 function keyMap(s: string) {
+  const hit = keyMemo?.get(s);
+  if (hit) return hit;
   let k = '';
   const m: number[] = [];
   for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (TONE.test(c) || KEY_DROP.test(c)) continue;
-    const l = c.toLowerCase();
-    k += l.length === 1 ? l : c;
+    const code = s.charCodeAt(i);
+    let t = KEY_CHAR[code];
+    if (!t) t = KEY_CHAR[code] = TONE.test(s[i]) || KEY_DROP.test(s[i]) ? 1 : 2;
+    if (t === 1) continue;
+    if (code >= 65 && code <= 90) k += String.fromCharCode(code + 32);
+    else if (code < 128 || (code >= 0x0e00 && code <= 0x0e7f)) k += s[i];
+    else {
+      const l = s[i].toLowerCase();
+      k += l.length === 1 ? l : s[i];
+    }
     m.push(i);
   }
-  return { k, m };
+  const r = { k, m };
+  keyMemo?.set(s, r);
+  return r;
 }
 const key = (s: string) => keyMap(s).k;
 /** Original-text end of the key span ending at key index `e` (exclusive), past trailing tone marks. */
@@ -138,8 +153,11 @@ function fixOcrDigits(line: string) {
       const f = t.replace(/[Oo]/g, '0').replace(/[Il]/g, '1');
       if (MONEY_SHAPE.test(f)) out = out.slice(0, m.index) + f + out.slice(m.index + t.length);
     });
-  // dots for thousands (OCR, some templates), OCR's space for the decimal point: "10.700.00", "4.200 00" → "10,700.00"
-  return out.replace(/(^|[^\d.,])(\d{1,3})((?:\.\d{3})+)[. ](\d{2})(?![\d.,])/g, (_, p, a, b, c) => p + a + b.replace(/\./g, ',') + '.' + c);
+  // dots for thousands (OCR, some templates), OCR's space for the decimal point: "10.700.00", "4.200 00" → "10,700.00";
+  // OCR's space for the thousands separator: "107 000.00", "1 250 000.00" → "107,000.00"
+  return out
+    .replace(/(^|[^\d.,])(\d{1,3})((?:\.\d{3})+)[. ](\d{2})(?![\d.,])/g, (_, p, a, b, c) => p + a + b.replace(/\./g, ',') + '.' + c)
+    .replace(/(^|[^\d.,])(\d{1,3})((?: \d{3})+)\.(\d{2})(?![\d.,])/g, (_, p, a, b, c) => p + a + b.replace(/ /g, ',') + '.' + c);
 }
 
 // ------------------------------------------------------------------ dates
@@ -273,7 +291,7 @@ const RULES: [Field, number, string[], boolean?][] = [
   ['netPay', 90, ['ยอดชำระสุทธิ', 'ยอดเงินชำระสุทธิ', 'จำนวนเงินชำระสุทธิ', 'ยอดชำระเงินสุทธิ', 'ยอดสุทธิที่ต้องชำระ', 'จำนวนเงินที่ต้องชำระ', 'ยอดเงินที่ต้องชำระ', 'ยอดที่ต้องชำระ', 'ชำระสุทธิ', 'net amount payable', 'net payable', 'amount payable', 'net payment', 'net amount to pay', 'total payable']],
   ['netPay', 75, ['ยอดชำระ', 'จำนวนเงินที่ชำระ', 'จำนวนเงินที่ได้รับ', 'ได้รับเงินจำนวน', 'รับเงินจำนวน', 'amount received', 'amount paid']],
   ['discount', 80, ['ส่วนลดพิเศษ', 'หักส่วนลด', 'ส่วนลด', 'discount']],
-  ['deposit', 60, ['หักเงินมัดจำ', 'หักมัดจำ', 'เงินมัดจำ', 'มัดจำ', 'deposit', 'down payment', 'advance payment', 'เงินล่วงหน้า', 'งวดที่', 'installment', 'ชำระแล้ว', 'less paid', 'paid', 'ยอดคงเหลือ', 'คงเหลือ', 'ส่วนที่เหลือ', 'balance due', 'balance', 'remaining']],
+  ['deposit', 60, ['หักเงินมัดจำ', 'หักมัดจำ', 'เงินมัดจำ', 'มัดจำ', 'deposit', 'down payment', 'advance payment', 'เงินล่วงหน้า', 'งวดที่', 'installment', 'ชำระแล้ว', 'less amount paid', 'less amount received', 'less payments', 'less payment', 'less paid', 'paid', 'ยอดคงเหลือ', 'คงเหลือ', 'ส่วนที่เหลือ', 'balance due', 'balance', 'remaining']],
   ['ignore', 0, ['ราคาต่อหน่วย', 'ราคา/หน่วย', 'หน่วยละ', 'unit price', 'price/unit', 'จำนวน', 'qty', 'quantity', 'เลขประจำตัวผู้เสียภาษีอากร', 'เลขประจำตัวผู้เสียภาษี', 'เลขผู้เสียภาษี', 'tax id', 'taxpayer id', 'vat reg', 'vat registration', 'vat no', 'vat id', 'เลขที่', 'no', 'number', 'วันที่', 'date', 'โทรศัพท์', 'โทรสาร', 'โทร', 'tel', 'fax', 'แฟกซ์', 'มือถือ', 'mobile', 'phone', 'สาขา', 'branch', 'เลขที่บัญชี', 'บัญชี', 'account', 'a/c', 'อ้างอิง', 'ref', 'po', 'เครดิต', 'credit', 'ยืนราคา', 'ลำดับ', 'item', 'รหัส', 'code', 'หมู่', 'moo', 'ซอย', 'soi']],
 ];
 /** `bi` = the phrase's character pairs, to skip fuzzy matching on lines that cannot contain it */
@@ -367,6 +385,7 @@ function findPhrases(line: string, phrases: Phrase[], fuzzy: boolean): Hit[] {
 interface Ln { i: number; raw: string; masked: string; nums: Num[]; labs: Lab[]; rest: number; blank: boolean }
 
 function parseLine(raw: string, i: number): Ln {
+  if (!raw.trim()) return { i, raw, masked: raw, nums: [], labs: [], rest: 0, blank: true };
   const masked = maskLine(raw);
   const nums = readNums(masked);
   const hits = findPhrases(raw, PHRASES, /[\u0E00-\u0E7FA-Za-z]{4}/.test(raw));
@@ -758,8 +777,9 @@ function findParty(lines: string[]): string {
 
 // ------------------------------------------------------------------ resolution
 
-/** `w` = weight of the label's rule, `score` = w less pairing / number-shape penalties */
-interface Cand { f: Field | 'words' | 'derived' | 'largest'; w: number; value: number; score: number; label: string; line: string; li: number }
+/** `w` = weight of the label's rule, `score` = w less pairing / number-shape penalties; `under` =
+ *  printed totals a worked-out total must rank below */
+interface Cand { f: Field | 'words' | 'derived' | 'largest'; w: number; value: number; score: number; label: string; line: string; li: number; under?: Cand[] }
 const near = (a: number, b: number, tol = 0.011) => Math.abs(a - b) <= tol;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const vatTol = (base: number) => Math.max(0.06, Math.abs(base) * 0.0003);
@@ -777,15 +797,65 @@ function rateOn(line: string) {
 
 type Amounts = Pick<DocFacts, 'total' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'words' | 'candidates' | 'confidence'> & { quality: number };
 
+/** Lines analysed at most; longer texts (a 50-page PDF has 2,000+ lines) keep the first HEAD_LINES
+ *  (title, number, date, customer) and the last PAGE_TAIL lines of each page, where totals sit —
+ *  pages of a PDF text layer are separated by a blank line — the first and the last pages first. */
+const MAX_LINES = 600, HEAD_LINES = 80, PAGE_TAIL = 40;
+export function capLines(lines: string[]): string[] {
+  if (lines.length <= MAX_LINES) return lines;
+  const pages: [number, number][] = [];
+  for (let i = 0; i < lines.length; ) {
+    while (i < lines.length && !lines[i].trim()) i++;
+    const s = i;
+    while (i < lines.length && lines[i].trim()) i++;
+    if (i > s) pages.push([s, i]);
+  }
+  const keep = new Uint8Array(lines.length);
+  let n = 0;
+  const take = (from: number, to: number) => {
+    for (let i = from; i >= to && n < MAX_LINES; i--) if (!keep[i]) (keep[i] = 1), n++;
+  };
+  take(Math.min(HEAD_LINES, lines.length) - 1, 0);
+  for (const [s, e] of pages.length ? [pages[0], ...pages.slice(1).reverse()] : []) take(e - 1, Math.max(s, e - PAGE_TAIL));
+  take(lines.length - 1, 0); // budget left (a long text without page breaks): its end
+  const out: string[] = [];
+  lines.forEach((l, i) => {
+    if (keep[i]) out.push(l);
+    else if (out.length && out[out.length - 1] !== '') out.push(''); // a cut separates like a page break
+  });
+  return out;
+}
+
+/** A line longer than any printed one (a text layer without line breaks) is cut into pieces at
+ *  spaces, so the per-line patterns stay fast. */
+const MAX_LINE = 1000;
+function splitLong(l: string): string[] {
+  if (l.length <= MAX_LINE) return [l];
+  const out: string[] = [];
+  for (let i = 0; i < l.length; ) {
+    let j = Math.min(l.length, i + MAX_LINE);
+    const sp = j < l.length ? l.lastIndexOf(' ', j) : -1;
+    if (sp > i + MAX_LINE / 2) j = sp;
+    out.push(l.slice(i, j));
+    i = j;
+  }
+  return out;
+}
+
 export function analyzeDocText(text: string): DocFacts {
-  const raw = normalizeText(text).split('\n').map((l) => fixOcrDigits(l.replace(/\s+$/, '')));
-  const words = findWords(raw);
-  const parsed = raw.map(parseLine);
-  const a = amounts(parsed, raw, words, 'next'), b = amounts(parsed, raw, words, 'prev');
-  const { quality: _q, ...best } = b.quality > a.quality + 1e-9 ? b : a;
-  const docNo0 = findDocNo(raw, null);
-  const kind = findKind(raw, docNo0);
-  return { kind, docNo: kind ? findDocNo(raw, kind) : docNo0, docDate: findDocDate(raw), ...best, party: findParty(raw) };
+  keyMemo = new Map();
+  try {
+    const raw = capLines(normalizeText(text).split('\n').flatMap(splitLong)).map((l) => fixOcrDigits(l.replace(/\s+$/, '')));
+    const words = findWords(raw);
+    const parsed = raw.map(parseLine);
+    const a = amounts(parsed, raw, words, 'next'), b = amounts(parsed, raw, words, 'prev');
+    const { quality: _q, ...best } = b.quality > a.quality + 1e-9 ? b : a;
+    const docNo0 = findDocNo(raw, null);
+    const kind = findKind(raw, docNo0);
+    return { kind, docNo: kind ? findDocNo(raw, kind) : docNo0, docDate: findDocDate(raw), ...best, party: findParty(raw) };
+  } finally {
+    keyMemo = null;
+  }
 }
 
 function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' | 'prev'): Amounts {
@@ -806,21 +876,28 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
     }
   const rate = vatRate ?? 0.07;
   const of = (...fs: Cand['f'][]) => cands.filter((c) => fs.includes(c.f));
-  const T = of('total', 'sum', 'netPay');
+  // a total or amount payable of 0 is a blank in a template ("Less Amount Paid 0.00", "หัก ณ ที่จ่าย 0.00")
+  const T = of('total', 'sum', 'netPay').filter((c) => c.value > 0);
   const S = cands.filter((c) => c.f === 'subtotal' || c.f === 'sum' || (c.f === 'total' && c.w < 90));
   const V = of('vat');
   const W = of('wht').filter((c) => c.value > 0);
-  const N = of('netPay');
+  const N = of('netPay').filter((c) => c.value > 0);
+  const byScore = (cs: Cand[]) => [...cs].sort((a, b) => b.score - a.score)[0] as Cand | undefined;
 
-  // a total that is not printed: subtotal + VAT (or subtotal × 1.07 when the price is "excl. VAT")
+  // a total that is not printed: subtotal + VAT. A printed grand total beats it — the sum of the
+  // VAT-able items plus VAT leaves out non-VAT fees and VAT-exempt items — unless that "total" is
+  // the subtotal it was worked out from ("ยอดรวมสุทธิ" before VAT)
+  const printed = of('total').filter((t) => t.w >= 85 && t.value > 0);
   for (const s of S)
     for (const v of V)
       if (v.value > 0 && near(s.value * rate, v.value, vatTol(s.value)) && !T.some((t) => near(t.value, s.value + v.value)))
-        T.push({ f: 'derived', w: 55, value: r2(s.value + v.value), score: 55, label: `${s.label} + ${v.label}`, line: s.line, li: Math.max(s.li, v.li) });
+        T.push({ f: 'derived', w: 55, value: r2(s.value + v.value), score: 55, label: `${s.label} + ${v.label}`, line: s.line, li: Math.max(s.li, v.li), under: printed.filter((t) => !near(t.value, s.value)) });
+  // the price says it excludes VAT and no VAT is printed: the total (else the subtotal) × 1.07 —
+  // offered below a printed total, which may still be the figure the document means
   const exclVat = EXCL_VAT.some((x) => key(raw.join(' ')).includes(x));
-  if (exclVat && !V.length && !of('total').length) {
-    const s = [...S].sort((a, b) => b.score - a.score)[0];
-    if (s) T.push({ f: 'derived', w: 50, value: r2(s.value * (1 + rate)), score: 50, label: `${s.label} + VAT ${Math.round(rate * 100)}%`, line: s.line, li: s.li });
+  if (exclVat && !V.length) {
+    const t = byScore(of('total').filter((c) => c.value > 0)), s = t || byScore(S);
+    if (s) T.push({ f: 'derived', w: 50, value: r2(s.value * (1 + rate)), score: 50, label: `${s.label} + VAT ${Math.round(rate * 100)}%`, line: s.line, li: s.li, under: t ? [t] : undefined });
   }
   const byValue = (ws: WordsHit[]) => [...ws].sort((a, b) => b.v - a.v)[0];
   const wordsBest = words.find((w) => T.some((t) => near(t.value, w.v))) || byValue(words.filter((w) => w.sure)) || byValue(words);
@@ -834,7 +911,8 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
   // pick the total: label strength + how well it agrees with subtotal / VAT / words / WHT
   interface Link { s?: Cand; v?: Cand; sub?: number; vat?: number }
   const n = lines.length || 1;
-  let best: { t: Cand; final: number; link: Link | null; checked: boolean } | null = null;
+  type Scored = { t: Cand; final: number; link: Link | null; checked: boolean };
+  const scored: Scored[] = [];
   const finals = new Map<Cand, number>();
   for (const t of T) {
     let bonus = 0, link: Link | null = null;
@@ -860,9 +938,12 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
     const final = t.score + bonus + (wordsOk ? 20 : 0) + (whtOk ? 10 : 0) + (3 * t.li) / n - (t.f === 'netPay' && W.length ? 30 : 0) + (t.f === 'derived' && link ? -10 : 0);
     finals.set(t, final);
     const checked = (!!link && t.f !== 'derived') || wordsOk || whtOk;
-    if (!best || final > best.final + 1e-9 || (near(final, best.final, 1e-9) && t.value > best.t.value))
-      best = { t, final, link, checked: checked && t.f !== 'largest' };
+    scored.push({ t, final, link, checked: checked && t.f !== 'largest' });
   }
+  for (const x of scored)
+    if (x.t.under?.length) finals.set(x.t, (x.final = Math.min(x.final, Math.max(...x.t.under.map((u) => finals.get(u) ?? u.score)) - 1)));
+  let best: Scored | null = null;
+  for (const x of scored) if (!best || x.final > best.final + 1e-9 || (near(x.final, best.final, 1e-9) && x.t.value > best.t.value)) best = x;
 
   const total = best ? best.t.value : null;
   // baht text that contradicts a total the VAT arithmetic confirms is an OCR misread: offer it last
@@ -873,13 +954,15 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
     subtotal = best.link.sub ?? null;
     vat = best.link.vat ?? null;
   } else {
-    const v = [...V].sort((a, b) => b.score - a.score)[0];
-    const s = of('subtotal').sort((a, b) => b.score - a.score)[0];
+    const v = byScore(V), subs = of('subtotal');
     if (v) vat = v.value;
-    if (s) subtotal = s.value;
-    else if (total !== null && vat !== null && total > vat) subtotal = r2(total - vat);
+    if (total !== null && vat !== null && total > vat) {
+      // the total less VAT — VAT-exempt items and non-VAT fees included — as printed when it is
+      const d = r2(total - vat);
+      subtotal = subs.find((x) => near(x.value, d))?.value ?? d;
+    } else subtotal = byScore(subs)?.value ?? null;
     if (best?.t.f === 'derived' && exclVat && !v && subtotal === null) {
-      subtotal = [...S].sort((a, b) => b.score - a.score)[0]?.value ?? null;
+      subtotal = byScore(S)?.value ?? null;
       if (subtotal !== null && total !== null) vat = r2(total - subtotal);
     }
   }
@@ -908,7 +991,7 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
   let confidence: DocFacts['confidence'] = 'low';
   if (best && best.t.f !== 'largest') {
     const b = best;
-    const strongOthers = of('total').filter((c) => c.score >= 80 && !near(c.value, b.t.value) && c.value !== subtotal && c.value !== netPay);
+    const strongOthers = of('total').filter((c) => c.score >= 80 && c.value > 0 && !near(c.value, b.t.value) && c.value !== subtotal && c.value !== netPay);
     // a weak label ("Total", "รวม") still counts when it is the only labelled amount offered as a total
     const alone = !T.some((c) => (c.f === 'total' || c.f === 'sum' || c.f === 'netPay') && !near(c.value, b.t.value));
     if (best.checked && best.t.f !== 'words' && !strongOthers.length) confidence = 'high';
@@ -923,6 +1006,7 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
     // other amounts rank below every total: the price before VAT first (often what a deal is worth)
     ...cands.filter((c) => !T.includes(c)).map((c) => ({ c, score: c.score * (c.f === 'subtotal' ? 0.6 : c.f === 'deposit' || c.f === 'discount' ? 0.3 : 0.45) })),
   ]
+    .filter(({ c }) => c.value > 0)
     .map(({ c, score }) => ({ value: c.value, label: c.label, source: src(c), score: Math.max(0, Math.min(100, Math.round(score))), line: c.line }))
     .sort((a, b) => b.score - a.score || b.value - a.value);
   if (best) {

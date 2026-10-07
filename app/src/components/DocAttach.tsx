@@ -69,7 +69,10 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     abort.current = ctl;
     setProg({ msg: 'กำลังเปิดไฟล์…' });
     try {
-      const [{ readDocText }, { analyzeDocText, factsScore }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]);
+      const [{ readDocText }, { analyzeDocText, factsScore }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]).catch((e) => {
+        // offline, or this page is older than the site (its chunks were replaced by a new version)
+        throw new Error('โหลดตัวอ่านเอกสารไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้านี้', { cause: e });
+      });
       const t = await readDocText(f, { signal: ctl.signal, forceOcr, onProgress: (msg, pct) => setProg({ msg, pct }), judge: (x) => factsScore(analyzeDocText(x)) });
       if (ctl.signal.aborted) return;
       const fx = analyzeDocText(t.text);
@@ -91,7 +94,9 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
       if (!t.text.trim()) setReadErr('อ่านข้อความจากไฟล์นี้ไม่ได้ — กรอกยอดเงินเองด้านล่าง');
       else if (best == null) setReadErr('ไม่พบยอดเงินที่ชัดเจนในเอกสาร — กรอกยอดเงินเองด้านล่าง');
     } catch (err) {
-      if (!ctl.signal.aborted) setReadErr('อ่านเอกสารไม่สำเร็จ (' + ((err as Error)?.message || err) + ') — กรอกยอดเงินเองด้านล่าง');
+      // readDocText rejects with a Thai message (or an AbortError, after a cancel)
+      const msg = (err as Error)?.message;
+      if (!ctl.signal.aborted) setReadErr('อ่านเอกสารไม่สำเร็จ (' + (msg && /[\u0E00-\u0E7F]/.test(msg) ? msg : 'ข้อผิดพลาดที่ไม่คาดคิด') + ') — กรอกยอดเงินเองด้านล่าง');
     } finally {
       if (!ctl.signal.aborted) setProg(null);
     }

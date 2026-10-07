@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeDocText, bahtTextToNumber, factsScore, repairThaiText } from './docExtract';
+import { analyzeDocText, bahtTextToNumber, capLines, factsScore, repairThaiText } from './docExtract';
 
 // Texts below are shaped like what docText.ts hands over: lines rebuilt from pdf.js item positions
 // (columns separated by 3+ spaces), raw pdf.js items (one per line), or Tesseract output.
@@ -454,6 +454,106 @@ describe('analyzeDocText — dates', () => {
   it('prefers the document date over the due date', () => {
     expect(analyzeDocText(doc('ใบแจ้งหนี้', 'วันที่ครบกำหนด 15/11/2569', 'วันที่ 16/10/2569')).docDate).toBe('2026-10-16');
     expect(analyzeDocText(doc('INVOICE', 'Due Date: 15 Nov 2026', 'Invoice Date: 16 Oct 2026')).docDate).toBe('2026-10-16');
+  });
+});
+
+describe('analyzeDocText — printed totals, blanks and long documents', () => {
+  it('prefers a printed grand total over subtotal + VAT when a non-VAT fee is added after the VAT', () => {
+    const f = analyzeDocText(doc(
+      'ใบแจ้งหนี้',
+      'ค่าบริการทวนสอบ   100,000.00',
+      'รวมเป็นเงิน   100,000.00',
+      'ภาษีมูลค่าเพิ่ม 7%   7,000.00',
+      'ค่าธรรมเนียมขึ้นทะเบียน อบก.   5,000.00',
+      'จำนวนเงินรวมทั้งสิ้น   112,000.00',
+    ));
+    expect(f).toMatchObject({ total: 112000, vat: 7000, subtotal: 105000, confidence: 'medium' });
+    // the sum worked out from the VAT is still offered, below the printed total
+    const values = f.candidates.map((c) => c.value);
+    expect(values[0]).toBe(112000);
+    expect(f.candidates.find((c) => c.value === 107000)?.source).toBe('vat');
+  });
+
+  it('prefers a printed grand total when VAT-exempt and taxable items are mixed', () => {
+    const f = analyzeDocText(doc('ใบกำกับภาษี/ใบเสร็จรับเงิน', 'มูลค่าสินค้ายกเว้นภาษี 1,000.00', 'มูลค่าสินค้าที่เสียภาษี 10,000.00', 'ภาษีมูลค่าเพิ่ม 7% 700.00', 'รวมทั้งสิ้น 11,700.00'));
+    expect(f).toMatchObject({ total: 11700, vat: 700, subtotal: 11000 });
+    expect(f.candidates[0].value).toBe(11700);
+    expect(f.candidates.map((c) => c.value)).toContain(10700);
+  });
+
+  it('still adds the VAT to a "net total" printed before it', () => {
+    expect(analyzeDocText(doc('ใบเสนอราคา', 'ยอดรวมสุทธิ   100,000.00', 'ภาษีมูลค่าเพิ่ม 7%   7,000.00'))).toMatchObject({ total: 107000, subtotal: 100000, vat: 7000 });
+    expect(analyzeDocText(doc('Quotation', 'Net Total   100,000.00', 'VAT 7%   7,000.00'))).toMatchObject({ total: 107000, subtotal: 100000, vat: 7000 });
+  });
+
+  it('reads OCR spaces used as thousands separators', () => {
+    const f = analyzeDocText(doc('ใบเสนอราคา', 'รวมเป็นเงิน   100 000.00', 'ภาษีมูลค่าเพิ่ม 7%   7 000.00', 'รวมทั้งสิ้น   107 000.00'));
+    expect(f).toMatchObject({ total: 107000, subtotal: 100000, vat: 7000, confidence: 'high' });
+    expect(analyzeDocText(doc('ใบเสร็จรับเงิน', 'รวมทั้งสิ้น 12 840.00')).total).toBe(12840);
+    expect(analyzeDocText(doc('ใบเสนอราคา', 'รวมเป็นเงิน 60 000.00', 'ภาษีมูลค่าเพิ่ม 7% 4 200.00', 'รวมทั้งสิ้น 64 200.00'))).toMatchObject({ total: 64200, subtotal: 60000, vat: 4200 });
+    expect(analyzeDocText(doc('Quotation', 'Grand Total 1 250 000.00')).total).toBe(1250000);
+    // a column gap is not a thousands separator
+    expect(analyzeDocText(doc('ใบเสนอราคา', '2   500.00   1,000.00', 'รวมทั้งสิ้น   1,000.00')).total).toBe(1000);
+  });
+
+  it('never takes a total or an amount payable of 0 (blank template fields)', () => {
+    const blank = analyzeDocText(doc('ใบเสนอราคา', 'รวมเป็นเงิน 0.00', 'ภาษีมูลค่าเพิ่ม 0.00', 'รวมทั้งสิ้น 0.00'));
+    expect(blank).toMatchObject({ total: null, confidence: 'low' });
+    expect(blank.candidates).toEqual([]);
+    const f = analyzeDocText(doc('ใบเสนอราคา', 'ส่วนลด   0.00', 'รวมเป็นเงิน   45,000.00', 'ภาษีมูลค่าเพิ่ม 7%   3,150.00', 'รวมทั้งสิ้น   48,150.00', 'หักภาษี ณ ที่จ่าย   0.00', 'ยอดชำระสุทธิ   0.00'));
+    expect(f).toMatchObject({ total: 48150, subtotal: 45000, vat: 3150, wht: null, netPay: null, confidence: 'high' });
+    expect(f.candidates.map((c) => c.value)).not.toContain(0);
+  });
+
+  it('reads Xero\'s "Less Amount Paid" as a payment already made, not as the amount payable', () => {
+    const lines = ['TAX INVOICE', 'Invoice Number INV-0042', 'Subtotal   50,000.00', 'TOTAL VAT 7%   3,500.00', 'TOTAL THB   53,500.00'];
+    const unpaid = analyzeDocText(doc(...lines, 'Less Amount Paid   0.00', 'AMOUNT DUE THB   53,500.00'));
+    expect(unpaid).toMatchObject({ total: 53500, subtotal: 50000, vat: 3500, netPay: null, confidence: 'high' });
+    expect(unpaid.candidates.map((c) => c.value)).not.toContain(0);
+    const part = analyzeDocText(doc(...lines, 'Less Amount Paid   20,000.00', 'AMOUNT DUE THB   33,500.00'));
+    expect(part).toMatchObject({ total: 53500, netPay: null });
+    expect(part.candidates.find((c) => c.value === 20000)?.label).toBe('Less Amount Paid');
+  });
+
+  it('offers the total plus VAT, without choosing it, when the printed total excludes VAT', () => {
+    const f = analyzeDocText(doc('ใบเสนอราคา', 'ค่าบริการ 100,000.00', 'รวมทั้งสิ้น 100,000.00', 'หมายเหตุ ราคาข้างต้นยังไม่รวมภาษีมูลค่าเพิ่ม 7%'));
+    expect(f).toMatchObject({ total: 100000, vat: null, confidence: 'medium' });
+    expect(f.candidates.slice(0, 2).map((c) => [c.value, c.source])).toEqual([[100000, 'keyword'], [107000, 'vat']]);
+  });
+
+  it('reads a 50-page document quickly, keeping its header and the end of each page', () => {
+    const page = (p: number) => doc(
+      `บริษัท โกลบอล คาร์บอน คอร์ปอเรชั่น จำกัด   ใบแจ้งหนี้/ใบกำกับภาษี   หน้า ${p}/50`,
+      ...Array.from({ length: 45 }, (_, i) => `${i + 1}   ค่าบริการทวนสอบคาร์บอนฟุตพริ้นท์องค์กร สาขาที่ ${i}   2   งาน   1,500.00   3,000.00   หมายเหตุ Scope 1 2 3`),
+      'ยอดยกไป   135,000.00',
+    );
+    const head = doc('เลขที่ IV6910-0099   วันที่ 15/10/2569', 'ลูกค้า: บริษัท สยามฟู้ด จำกัด');
+    const text = head + '\n' + Array.from({ length: 50 }, (_, i) => page(i + 1)).join('\n\n') + '\nรวมเป็นเงิน   6,750,000.00\nภาษีมูลค่าเพิ่ม 7%   472,500.00\nจำนวนเงินรวมทั้งสิ้น   7,222,500.00';
+    expect(text.split('\n').length).toBeGreaterThan(2400);
+    analyzeDocText(text); // warm up
+    const t0 = performance.now();
+    const f = analyzeDocText(text);
+    expect(performance.now() - t0).toBeLessThan(800); // was 1.5–2.2 s
+    expect(f).toMatchObject({ kind: 'invoice', docNo: 'IV6910-0099', docDate: '2026-10-15', party: 'บริษัท สยามฟู้ด จำกัด', total: 7222500, subtotal: 6750000, vat: 472500, confidence: 'high' });
+  });
+
+  it('keeps a total printed on page 1 of a long document with annexes', () => {
+    const annex = (p: number) => Array.from({ length: 40 }, (_, i) => `ภาคผนวก ${p} ข้อ ${i + 1} ขอบเขตงานทวนสอบตามมาตรฐาน ISO 14064-3 ผลการตรวจ 12,345.67 ตันคาร์บอนไดออกไซด์เทียบเท่า`).join('\n');
+    const text = doc('ใบเสนอราคา', 'รวมเป็นเงิน   200,000.00', 'ภาษีมูลค่าเพิ่ม 7%   14,000.00', 'รวมทั้งสิ้น   214,000.00') + '\n\n' + Array.from({ length: 30 }, (_, i) => annex(i + 1)).join('\n\n');
+    expect(analyzeDocText(text)).toMatchObject({ kind: 'quotation', total: 214000, subtotal: 200000, vat: 14000 });
+  });
+
+  it('capLines leaves short texts alone and cuts long ones to the head and the end of each page', () => {
+    const short = Array.from({ length: 100 }, (_, i) => `line ${i}`);
+    expect(capLines(short)).toBe(short);
+    const pages = Array.from({ length: 30 }, (_, p) => Array.from({ length: 50 }, (_, i) => `p${p} l${i}`).join('\n')).join('\n\n').split('\n');
+    const out = capLines(pages);
+    expect(out.length).toBeLessThanOrEqual(650);
+    expect(out).toContain('p0 l0'); // head
+    expect(out).toContain('p0 l49'); // end of page 1
+    expect(out).toContain('p29 l49'); // end of the last page
+    expect(out).toContain('p29 l10');
+    expect(out).not.toContain('p15 l0'); // the start of a middle page goes
   });
 });
 
