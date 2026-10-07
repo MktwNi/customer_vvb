@@ -17,7 +17,7 @@ import {
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import {
-  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, lastContact, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
+  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, lastContact, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
   parseTrackerJson, parseTrackerSheet, stepOf,
   type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
@@ -1371,10 +1371,12 @@ export class GccEngine {
     const name = (f.name || '').toLowerCase();
     let data: TrackerData[];
     if (name.endsWith('.json')) data = [parseTrackerJson(JSON.parse(await f.text()), year)];
-    else if (name.endsWith('.csv')) data = parseTrackerSheet(parseCsv(await f.text()));
+    // a CSV re-saved by Excel is often Windows-874 (Thai), not UTF-8
+    else if (name.endsWith('.csv')) data = parseTrackerSheet(parseCsv(decodeTrackerText(await f.arrayBuffer()).text));
     else if (name.endsWith('.xlsx')) data = parseTrackerSheet(await readXlsxRows(f));
     else throw new Error('รองรับไฟล์ .json (สำรองข้อมูลจาก Sales Tracker) หรือ .csv / .xlsx (ดาวน์โหลดจาก Google Sheet ของ Sales Tracker)');
-    if (!data.length || !data.some((x) => x.clients.length)) throw new Error('ไม่พบรายการลูกค้าในไฟล์');
+    if (!data.length || !data.some((x) => x.clients.length))
+      throw new Error('ไม่พบรายการลูกค้าในไฟล์ — ใช้ไฟล์ที่มีคอลัมน์ client (ชื่อลูกค้า) จาก Google Sheet ของ Sales Tracker เดิม หรือไฟล์สำรองข้อมูล (JSON)');
     // everything this import changes is queued for the team in one write
     return this.batchOps(() => this.importTrackerData(data));
   }
