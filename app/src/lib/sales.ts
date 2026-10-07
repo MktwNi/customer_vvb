@@ -79,7 +79,7 @@ export interface DealDoc {
   /** When the amount / what it counts toward was last confirmed (attach or edit); the newest confirmed quotation is the forecast. */
   cAt?: string;
   /** The stage note this document filled in automatically, so it can follow the document's edits and removal. */
-  auto?: { stage: string; n: string };
+  auto?: { stage: string; n: string; d?: string };
 }
 export interface DealLog { id: string; at: string; by: string; action: string; client: string; detail: string; deal: string }
 export interface SalesState {
@@ -92,10 +92,15 @@ export interface SalesState {
   log: Record<string, DealLog>;
   /** Deals deleted (here or by a teammate): id → when. Kept so an import never brings them back. */
   gone: Record<string, string>;
+  /** Deals removed by undoing an import (shared, dundo/<id>): unlike a deletion, importing them again is fine. */
+  undone: Record<string, string>;
+  /** List items added in this browser while not connected to a team (this browser only): merged into
+   *  the team's lists when it connects — and only these, so items the team removed don't come back. */
+  offAdds?: Partial<Record<keyof SalesCfg, string[]>>;
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });
-export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, log: {}, gone: {} });
+export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, log: {}, gone: {}, undone: {} });
 
 /** Current Buddhist-era year as text. */
 export const beYear = (iso = new Date().toISOString()) => String(+iso.slice(0, 4) + 543);
@@ -108,9 +113,56 @@ export function newDeal(p: Partial<Deal> & { id: string; client: string }, by: s
   };
 }
 
+// ---- records from the team sheet or a backup file are checked: one malformed record (a crafted
+// row, an edited backup) must not break the screen or turn amounts into text
+const str = (v: unknown, max = 3000) => (typeof v === 'string' ? v : v == null ? '' : typeof v === 'number' ? String(v) : '').slice(0, max);
+const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? +v : null);
+const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, 200)) : []);
+const iso = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 40) : '');
+/** A deal record as this app can use it, or null. */
+export function toDeal(v: unknown, id: string): Deal | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const d: Deal = {
+    id, year: str(o.year, 4) || beYear(), section: str(o.section, 200), gid: num(o.gid), client: str(o.client, 200) || 'ลูกค้า',
+    contactName: str(o.contactName, 200), phone: str(o.phone, 200), email: str(o.email, 200), resp: str(o.resp, 100), referral: str(o.referral, 200),
+    contactDate: iso(o.contactDate).slice(0, 10), jobStatus: o.jobStatus === 'closed' ? 'closed' : 'open', closedDate: iso(o.closedDate).slice(0, 10),
+    forecast: num(o.forecast), actual: num(o.actual), source: strs(o.source), service: strs(o.service), order: num(o.order) ?? 0,
+    at: iso(o.at), by: str(o.by, 100),
+  };
+  if (iso(o.fcAt)) d.fcAt = iso(o.fcAt);
+  if (typeof o.imp === 'string') d.imp = o.imp.slice(0, 40);
+  return d;
+}
+const KINDS = ['quotation', 'invoice', 'receipt', 'other'];
+const TARGETS = ['forecast', 'actual', 'none'];
+const BASES = ['total', 'subtotal', 'netPay', 'manual'];
+/** A document record as this app can use it, or null. */
+export function toDoc(v: unknown, deal: string, id: string): DealDoc | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const amount = num(o.amount);
+  const doc: DealDoc = {
+    id, deal, kind: (KINDS.includes(o.kind as string) ? o.kind : 'other') as DocKind, name: str(o.name, 120) || 'เอกสาร', mime: str(o.mime, 60), size: num(o.size) ?? 0,
+    fileId: /^[\w-]{0,200}$/.test(str(o.fileId, 200)) ? str(o.fileId, 200) : '', docNo: str(o.docNo, 60), docDate: iso(o.docDate).slice(0, 10), amount,
+    target: amount == null ? 'none' : ((TARGETS.includes(o.target as string) ? o.target : 'none') as DocTarget), detected: num(o.detected),
+    basis: (BASES.includes(o.basis as string) ? o.basis : 'manual') as DealDoc['basis'], stage: str(o.stage, 60), at: iso(o.at), by: str(o.by, 100),
+  };
+  if (iso(o.cAt)) doc.cAt = iso(o.cAt);
+  const a = o.auto as Record<string, unknown> | undefined;
+  if (a && typeof a === 'object' && typeof a.stage === 'string' && typeof a.n === 'string') doc.auto = { stage: a.stage, n: a.n, ...(iso(a.d) ? { d: iso(a.d).slice(0, 10) } : {}) };
+  return doc;
+}
+export const toStep = (v: unknown): DealStep | null => (v && typeof v === 'object' ? { d: iso((v as DealStep).d).slice(0, 10), n: str((v as DealStep).n, NOTE_MAX) } : null);
+export function toLog(v: unknown, id: string): DealLog | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  return { id, at: iso(o.at), by: str(o.by, 100), action: str(o.action, 100), client: str(o.client, 200), detail: str(o.detail, 300), deal: str(o.deal, 100) };
+}
+
 export const stepOf = (s: SalesState, id: string, stage: string): DealStep => s.steps[`${id}/${stage}`] || { d: '', n: '' };
 export const docsOf = (s: SalesState, id: string) =>
-  Object.values(s.docs).filter((d) => d.deal === id).sort((a, b) => a.at.localeCompare(b.at));
+  Object.values(s.docs).filter((d) => d.deal === id).sort((a, b) => (a.at || '').localeCompare(b.at || ''));
 
 /** Plain number from user / imported text ("1,234.50", "฿ 12 000", "") — null when empty or not a number. */
 export function money(v: unknown): number | null {
@@ -144,7 +196,8 @@ export function looseMoney(v: unknown): { value: number | null; exact: boolean }
 export function parseAmount(v: string): number | null | undefined {
   const t = v
     .replace(/[\u0E50-\u0E59]/g, (c) => String(c.charCodeAt(0) - 0x0e50))
-    .replace(/(\.|,)-\s*$/, '')
+    // "120,000.-" and "120,000.- บาท" as printed on Thai invoices
+    .replace(/(\.|,)-(?=\s*(บาท|thb|฿)?\s*$)/i, '')
     .trim();
   if (!t) return null;
   const r = looseMoney(t);
@@ -187,15 +240,15 @@ export function dealMoney(s: SalesState, d: Deal) {
   };
 }
 
-/** Last contact: the typed contact date or the latest stage date, whichever is later (a date in
- *  the future — a planned call — does not count). */
+/** Last contact: the typed contact date or the latest stage date, whichever is later; '' when
+ *  there is none. A date in the future (a planned call) does not count. */
 export function lastContact(s: SalesState, d: Deal, today: string) {
   let last = d.contactDate && d.contactDate <= today ? d.contactDate : '';
   for (const p of s.cfg.stages) {
     const x = s.steps[`${d.id}/${p}`]?.d;
     if (x && x <= today && x > last) last = x;
   }
-  return last || d.contactDate || '';
+  return last;
 }
 
 /** The CLOSED DEAL stage note decides the deal result: YES / NO / anything else = waiting. */
@@ -220,11 +273,12 @@ export function dealStatus(s: SalesState, d: Deal) {
   return { result: r, overall, started };
 }
 
-/** Days since the last contact when an open deal has gone more than OVERDUE_DAYS without one. */
+/** Days since the last contact when an open deal has gone more than OVERDUE_DAYS without one; a
+ *  deal nobody has contacted yet counts from the day it was added (so it isn't forgotten). */
 export function overdueDays(s: SalesState, d: Deal, today: string) {
   if (d.jobStatus === 'closed') return null;
-  const lc = lastContact(s, d, today);
-  if (!lc) return null;
+  const lc = lastContact(s, d, today) || (d.at || '').slice(0, 10);
+  if (!lc || lc > today) return null;
   const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(lc + 'T00:00:00')) / 864e5);
   return isFinite(n) && n > OVERDUE_DAYS ? n : null;
 }

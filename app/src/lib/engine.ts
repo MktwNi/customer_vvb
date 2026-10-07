@@ -13,11 +13,11 @@ import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, 
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeListEdits, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeListEdits, applyListEdit, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import {
-  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, lastContact, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
+  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, toDeal, toDoc, toLog, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
   parseTrackerJson, parseTrackerSheet, stepOf,
   type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
@@ -863,13 +863,26 @@ export class GccEngine {
           const extra = (Array.isArray(IS.cfg![k]) ? IS.cfg![k] : []).map(String).filter((x) => x && !S.cfg[k].includes(x));
           if (extra.length) this.setSalesList(k, [...S.cfg[k], ...extra]);
         });
-      Object.values(IS.deals || {}).forEach((x) => {
-        if (!S.deals[x.id] && !S.gone[x.id]) {
-          S.deals[x.id] = x;
+      // every record checked (toDeal…): a hand-edited backup must not break the screen for the team
+      Object.entries(IS.deals || {}).forEach(([id, x]) => {
+        const deal = toDeal(x, id);
+        if (deal && !S.deals[id] && !S.gone[id]) {
+          S.deals[id] = deal;
           n++;
         }
       });
-      (['steps', 'docs', 'log'] as const).forEach((b) => Object.entries(IS[b] || {}).forEach(([k, v]) => !(k in S[b]) && ((S[b] as Record<string, unknown>)[k] = v)));
+      Object.entries(IS.steps || {}).forEach(([k, v]) => {
+        const st = toStep(v);
+        if (st && k.includes('/') && !(k in S.steps)) S.steps[k] = st;
+      });
+      Object.entries(IS.docs || {}).forEach(([k, v]) => {
+        const j = k.indexOf('/'), doc = j > 0 ? toDoc(v, k.slice(0, j), k.slice(j + 1)) : null;
+        if (doc && !(k in S.docs)) S.docs[k] = doc;
+      });
+      Object.entries(IS.log || {}).forEach(([k, v]) => {
+        const l = toLog(v, k);
+        if (l && !(k in S.log)) S.log[k] = l;
+      });
       Object.values((d.custom || {}) as Record<string, CustomCo>).forEach((c) => {
         if (!this.custom[c.id]) {
           this.custom[c.id] = c;
@@ -948,7 +961,7 @@ export class GccEngine {
     const f = (Object.keys(n) as (keyof CustomCo)[]).filter((k) => n[k] !== c[k]);
     if (!f.length) return;
     this.custom[id] = n;
-    this.op(keyOf.cust(id), { ...n }, f);
+    this.op(keyOf.cust(id), { ...n }, { f });
     this.persist('customCos', this.custom);
     this.rebuild();
     this.emit();
@@ -986,7 +999,7 @@ export class GccEngine {
    *  teammate's concurrent edit, see rebaseOp); without it the whole record is this browser's. */
   private putDeal(d: Deal, f?: (keyof Deal)[]) {
     this.sales.deals[d.id] = d;
-    this.op(keyOf.deal(d.id), { ...d }, f);
+    this.op(keyOf.deal(d.id), { ...d }, { f });
   }
   /** Deals linked to a company (any of its merged ids). A company from the TGO website sync exists
    *  on this device only, so its deals are not linked by id: they are found by name. */
@@ -1021,7 +1034,6 @@ export class GccEngine {
       {
         client: c?.name || '', phone: c?.phone || '', email: c?.email || '', contactName: cc?.contact || '',
         resp: (c && this.crm.owners[c.id]) || this.me(), section, source: [matchSource(this.sales.cfg.sources, section)].filter((x): x is string => !!x),
-        contactDate: todayISO(), // like the old tracker: counts from the day it was added, so it is flagged if nobody follows up
         ...p, id: opId(), gid,
       },
       this.me(),
@@ -1057,12 +1069,15 @@ export class GccEngine {
     const d = this.sales.deals[id];
     if (!d) return;
     const n: Deal = { ...d, ...patch, id };
-    if ('forecast' in patch && patch.forecast !== d.forecast) n.fcAt = new Date().toISOString(); // newer than the quotation: it wins
+    // A forecast typed now is newer than any quotation this browser has seen — also when its clock is
+    // behind the attacher's, and when it equals a figure typed earlier that the quotation hides.
+    const fcTyped = 'forecast' in patch && (patch.forecast !== d.forecast || (patch.forecast != null && !!dealMoney(this.sales, d).fcDoc));
+    if (fcTyped) n.fcAt = this.stampAfter(docsOf(this.sales, id).filter((x) => x.target === 'forecast').map((x) => x.cAt || x.at));
     if (patch.jobStatus === 'closed' && d.jobStatus !== 'closed') n.closedDate = n.closedDate || todayISO();
     if (patch.jobStatus === 'open') n.closedDate = '';
     if ('client' in patch) n.client = String(patch.client || '').trim().slice(0, 200) || d.client;
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
-    const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]));
+    const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
     if (!changed.length) return;
     this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])]);
     const TH: Partial<Record<keyof Deal, string>> = {
@@ -1075,7 +1090,7 @@ export class GccEngine {
   }
   /** Stage date + note; a note without a date gets today's date. Only the step record is written —
    *  the last contact is derived from it (lastContact), so a note never rewrites the deal. */
-  setStep(id: string, stage: string, st: DealStep, quiet = false) {
+  setStep(id: string, stage: string, st: DealStep, quiet = false, auto = false) {
     const d = this.sales.deals[id];
     if (!d) return;
     const k = `${id}/${stage}`;
@@ -1083,12 +1098,15 @@ export class GccEngine {
     const date = st.d || (n.trim() ? todayISO() : '');
     const cur = this.sales.steps[k] || { d: '', n: '' };
     if (cur.d === date && cur.n === n) return;
+    // a note written for a document (auto) only replaces what this browser saw there: a teammate who
+    // wrote in the stage meanwhile keeps their note (rebaseOp)
+    const base = auto ? (cur.d || cur.n ? { d: cur.d, n: cur.n } : null) : undefined;
     if (!date && !n.trim()) {
       delete this.sales.steps[k];
-      this.op(keyOf.dstep(id, stage));
+      this.op(keyOf.dstep(id, stage), undefined, { base });
     } else {
       this.sales.steps[k] = { d: date, n };
-      this.op(keyOf.dstep(id, stage), { d: date, n });
+      this.op(keyOf.dstep(id, stage), { d: date, n }, { base });
     }
     if (!quiet) this.salesLog(d, 'อัปเดต ' + stage, n.trim().slice(0, 120) || isoTh(date));
     this.saveSales();
@@ -1137,8 +1155,12 @@ export class GccEngine {
     const cur = this.sales.cfg[name];
     // queued as what changed, so two people adding at once both keep their item (rebaseOp)
     const lst = { add: v.filter((x) => !cur.includes(x)), rm: cur.filter((x) => !v.includes(x)) };
+    if (!this.teamCfg) {
+      const O = this.sales.offAdds || (this.sales.offAdds = {});
+      O[name] = [...new Set([...(O[name] || []), ...lst.add])].filter((x) => !lst.rm.includes(x));
+    }
     this.sales.cfg[name] = v;
-    this.op(keyOf.scfg(name), v.slice(), undefined, lst);
+    this.op(keyOf.scfg(name), v.slice(), { lst });
     this.saveSales();
   }
   renameSection(from: string, to: string) {
@@ -1178,14 +1200,16 @@ export class GccEngine {
     };
     const stage = info.target === 'forecast' || (info.target === 'none' && info.kind === 'quotation') ? 'QUOTATION' : info.target === 'actual' ? (filled('PAY1') ? 'PAY2' : 'PAY1') : '';
     const at = new Date().toISOString();
+    const cAt = this.stampAfter([d.fcAt, ...docsOf(S, dealId).map((x) => x.cAt || x.at)]);
     const doc: DealDoc = {
       id, deal: dealId, kind: info.kind, name: (file.name || 'เอกสาร').slice(0, 120), mime, size: file.size, fileId: '',
       docNo: info.docNo.slice(0, 60), docDate: info.docDate, amount: info.amount, target: info.amount == null ? 'none' : info.target,
-      detected: info.detected, basis: info.basis, stage, at, cAt: at, by: this.me(),
+      detected: info.detected, basis: info.basis, stage, at, cAt, by: this.me(),
     };
     // fill the stage the document stands for, if empty, and remember the note so it can follow the
     // document (edited amount, deleted document)
-    if (stage && !filled(stage)) doc.auto = { stage, n: this.autoNote(doc) };
+    const ad = info.docDate && info.docDate <= todayISO() ? info.docDate : todayISO();
+    if (stage && !filled(stage)) doc.auto = { stage, n: this.autoNote(doc), d: ad };
     // keep the file in this browser first: it is uploaded to the team's Drive in the background
     let kept = true;
     try {
@@ -1201,11 +1225,17 @@ export class GccEngine {
     S.docs[`${dealId}/${id}`] = doc;
     this.op(keyOf.ddoc(dealId, id), { ...doc });
     // the forecast follows the newest confirmed quotation (dealMoney): the deal record is not touched
-    if (doc.auto) this.setStep(dealId, doc.auto.stage, { d: info.docDate && info.docDate <= todayISO() ? info.docDate : todayISO(), n: doc.auto.n }, true);
+    if (doc.auto) this.setStep(dealId, doc.auto.stage, { d: ad, n: doc.auto.n }, true, true);
     this.salesLog(d, 'แนบ' + KIND_TH[doc.kind], `${doc.name}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}`);
     this.saveSales();
     this.uploadDocs();
     return doc;
+  }
+  /** An ISO time now, but after every given one: the order of "typed forecast" and "confirmed
+   *  quotation" follows what each person saw, not the clocks of different computers. */
+  private stampAfter(after: (string | undefined)[]) {
+    const t = Math.max(Date.now(), ...after.map((x) => (x ? Date.parse(x) + 1 : 0)).filter((x) => isFinite(x)));
+    return new Date(t).toISOString();
   }
   /** The stage note a document fills in: "ใบเสนอราคา QT-1 · 107,000 บาท". */
   private autoNote(doc: Pick<DealDoc, 'kind' | 'docNo' | 'amount'>) {
@@ -1222,25 +1252,46 @@ export class GccEngine {
     if (n.amount == null) n.target = 'none';
     const f = (Object.keys(n) as (keyof DealDoc)[]).filter((x) => JSON.stringify(n[x]) !== JSON.stringify(doc[x]));
     if (!f.length) return;
-    // a changed amount or what it counts toward is a new confirmation: as a quotation it becomes the forecast
-    if (n.amount !== doc.amount || n.target !== doc.target) (n.cAt = new Date().toISOString()), f.push('cAt');
+    // Changing what it counts toward is a new confirmation (as a quotation it becomes the forecast), and
+    // so is a new amount — except on an older quotation a newer one replaced: correcting that record
+    // must not make it the forecast again.
+    const fcs = docsOf(this.sales, dealId).filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at));
+    const superseded = doc.target === 'forecast' && fcs.length > 0 && fcs[fcs.length - 1].id !== docId;
+    if (n.target !== doc.target || (n.amount !== doc.amount && !superseded)) {
+      n.cAt = this.stampAfter([d.fcAt, ...fcs.filter((x) => x.id !== docId).map((x) => x.cAt || x.at)]);
+      f.push('cAt');
+    }
     const note = this.autoNote(n);
     if (doc.auto && note !== doc.auto.n && this.autoStillThere(doc)) {
       const st = stepOf(this.sales, dealId, doc.auto.stage);
-      n.auto = { stage: doc.auto.stage, n: note };
+      n.auto = { ...doc.auto, n: note };
       f.push('auto');
-      this.setStep(dealId, doc.auto.stage, { d: st.d, n: note }, true);
+      this.setStep(dealId, doc.auto.stage, { d: st.d, n: note }, true, true);
     }
     this.sales.docs[k] = n;
-    this.op(keyOf.ddoc(dealId, docId), { ...n }, f);
+    this.op(keyOf.ddoc(dealId, docId), { ...n }, { f });
     this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
     this.saveSales();
   }
   deleteDoc(dealId: string, docId: string) {
     const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
     if (!doc) return;
-    // the stage note it filled in goes with it, unless someone has written in it since
-    if (doc.auto && this.autoStillThere(doc)) this.setStep(dealId, doc.auto.stage, { d: '', n: '' }, true);
+    // The stage note it filled in goes with it, unless someone has written in it since. Another
+    // document for the same stage (a revised quotation, a second invoice) takes the stage over.
+    if (doc.auto && this.autoStillThere(doc)) {
+      const stage = doc.auto.stage, st = stepOf(this.sales, dealId, stage);
+      const heir = docsOf(this.sales, dealId)
+        .filter((x) => x.id !== doc.id && x.stage === stage)
+        .sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at))
+        .pop();
+      const userDate = doc.auto.d && st.d !== doc.auto.d ? st.d : ''; // a date the user corrected stays
+      if (heir) {
+        const hk = `${dealId}/${heir.id}`, note = this.autoNote(heir);
+        this.sales.docs[hk] = { ...heir, auto: { stage, n: note, d: st.d } };
+        this.op(keyOf.ddoc(dealId, heir.id), { ...this.sales.docs[hk] }, { f: ['auto'] });
+        this.setStep(dealId, stage, { d: st.d, n: note }, true, true);
+      } else this.setStep(dealId, stage, { d: userDate, n: '' }, true, true);
+    }
     delete this.sales.docs[k];
     this.op(keyOf.ddoc(dealId, docId));
     this.dropDocFile(doc);
@@ -1301,6 +1352,13 @@ export class GccEngine {
   async uploadDocs() {
     const cfg = this.teamCfg;
     if (!cfg || this.docUploading) return;
+    // one tab of this browser uploads at a time (they share the files); the others skip this round
+    const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+    if (locks) return void (await locks.request('gcc-doc-upload', { ifAvailable: true }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)));
+    return this.uploadDocsNow(cfg);
+  }
+  private async uploadDocsNow(cfg: TeamCfg) {
+    if (this.docUploading || this.teamCfg !== cfg) return;
     this.docUploading = true;
     const failed: string[] = [];
     try {
@@ -1341,7 +1399,7 @@ export class GccEngine {
         }
         this.sales.docs[k] = { ...cur, fileId: r.fileId };
         // only the file link: a teammate's correction of the amount meanwhile is kept (rebaseOp)
-        this.op(keyOf.ddoc(doc.deal, doc.id), { ...this.sales.docs[k] }, ['fileId']);
+        this.op(keyOf.ddoc(doc.deal, doc.id), { ...this.sales.docs[k] }, { f: ['fileId'] });
         this.saveSales();
       }
       this.docFails = 0;
@@ -1390,13 +1448,16 @@ export class GccEngine {
       if (k && !isLocalId(c.id)) (named.get(k) || named.set(k, new Set()).get(k)!).add(this.canonical(c.id));
     });
     let deals = 0, skipped = 0, linked = 0, ambiguous = 0, inexact = 0;
+    const listsAdded: Partial<Record<keyof SalesCfg, string[]>> = {};
     data.forEach((t) => {
-      // lists: keep ours, add what the file has that we don't
+      // lists: keep ours, add what the file has that we don't (remembered, so an undo can take them out)
       (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
         const extra = (t.cfg[k] || []).filter((x) => !S.cfg[k].includes(x));
         if (k === 'sections') t.clients.forEach((c) => c.section && !S.cfg.sections.includes(c.section) && !extra.includes(c.section) && extra.push(c.section));
         if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !extra.includes(p) && extra.push(p)));
-        if (extra.length) this.setSalesList(k, [...S.cfg[k], ...extra]);
+        if (!extra.length) return;
+        this.setSalesList(k, [...S.cfg[k], ...extra]);
+        (listsAdded[k] || (listsAdded[k] = [])).push(...extra.filter((x) => S.cfg[k].includes(x)));
       });
       // clients this year already tracked here, e.g. sent from the registry before importing
       const have = new Map<string, number>();
@@ -1412,8 +1473,9 @@ export class GccEngine {
         const n = (nth.get(key) || 0) + 1;
         nth.set(key, n);
         const id = importId(t.year, c, n);
-        // already imported, deleted by the team since (never brought back), or tracked by hand
-        if (S.deals[id] || S.gone[id] || n <= (have.get(norm(c.client)) || 0)) {
+        // already imported, deleted by the team since (never brought back — unless the deletion was
+        // an undone import), or tracked by hand
+        if (S.deals[id] || (S.gone[id] && !S.undone[id]) || n <= (have.get(norm(c.client)) || 0)) {
           skipped++;
           return;
         }
@@ -1427,11 +1489,22 @@ export class GccEngine {
           resp: c.resp, referral: c.referral, contactDate: c.contactDate, jobStatus: c.jobStatus, closedDate: c.closedDate, forecast: c.forecast, actual: c.actual,
           source: c.source, service: c.service, order: Object.keys(S.deals).length + i, imp: batch,
         };
-        this.putDeal(d);
-        Object.entries(c.progress).forEach(([p, st]) => {
-          S.steps[`${id}/${p}`] = st;
-          this.op(keyOf.dstep(id, p), { ...st });
-        });
+        // create-only (SyncOp.nx): if a teammate imported or deleted this row first, theirs stands
+        this.importNew = true;
+        try {
+          this.putDeal(d);
+          Object.entries(c.progress).forEach(([p, st]) => {
+            S.steps[`${id}/${p}`] = st;
+            this.op(keyOf.dstep(id, p), { ...st });
+          });
+        } finally {
+          this.importNew = false;
+        }
+        if (S.undone[id]) {
+          delete S.undone[id];
+          delete S.gone[id];
+          this.op(keyOf.dundo(id));
+        }
         // an amount like "50,000-80,000" counts as its lower end; keep what was typed in the history
         const raw = [c.forecastText && `Forecast เดิม "${c.forecastText}"`, c.actualText && `Actual เดิม "${c.actualText}"`].filter(Boolean).join(' · ');
         if (raw) {
@@ -1444,8 +1517,11 @@ export class GccEngine {
       this.salesLog({ id: '', client: '' }, 'นำเข้าจาก Sales Tracker เดิม', `ปี ${t.year} · เพิ่ม ${added} ราย` + (t.clients.length > added ? ` · ข้าม ${t.clients.length - added} รายที่มีอยู่แล้ว` : ''));
     });
     this.saveSales();
+    this.importLists[batch] = listsAdded;
     return { deals, skipped, linked, ambiguous, inexact, years: data.map((x) => x.year), batch };
   }
+  /** List items each import of this session added (for undoImport). */
+  private importLists: Record<string, Partial<Record<keyof SalesCfg, string[]>>> = {};
   /** Deals added by one import (see importTracker's `batch`). */
   importedBy(batch: string) {
     return Object.values(this.sales.deals).filter((d) => d.imp === batch);
@@ -1453,9 +1529,26 @@ export class GccEngine {
   /** Undo an import: its deals are removed for the whole team. Unlike deleting by hand, the same
    *  file can be imported again afterwards. */
   undoImport(batch: string) {
-    const ds = this.importedBy(batch);
-    this.batchOps(() => ds.forEach((d) => this.deleteDealNow(d, 'ยกเลิกการนำเข้า')));
-    ds.forEach((d) => delete this.sales.gone[d.id]);
+    const S = this.sales, ds = this.importedBy(batch), at = new Date().toISOString();
+    this.batchOps(() => {
+      ds.forEach((d) => {
+        this.deleteDealNow(d, 'ยกเลิกการนำเข้า');
+        delete S.gone[d.id];
+        // shared, so this browser's own tombstone coming back (and every teammate) knows it was an undo
+        S.undone[d.id] = at;
+        this.op(keyOf.dundo(d.id), at);
+      });
+      // the sections / SOURCE / Services / stages the import added, unless something uses them now
+      const added = this.importLists[batch] || {};
+      (Object.keys(added) as (keyof SalesCfg)[]).forEach((k) => {
+        const used = new Set<string>();
+        Object.values(S.deals).forEach((d) => (k === 'sections' ? used.add(d.section) : k === 'sources' ? d.source.forEach((x) => used.add(x)) : k === 'services' ? d.service.forEach((x) => used.add(x)) : null));
+        if (k === 'stages') Object.keys(S.steps).forEach((x) => used.add(x.slice(x.indexOf('/') + 1)));
+        const rm = (added[k] || []).filter((x) => !used.has(x));
+        if (rm.length) this.setSalesList(k, S.cfg[k].filter((x) => !rm.includes(x)));
+      });
+    });
+    delete this.importLists[batch];
     this.saveSales();
     return ds.length;
   }
@@ -1492,16 +1585,21 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, f?: string[], lst?: ListEdit) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; base?: SyncOp['base'] } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     const o = this.mkOp(k, v);
+    const prev = this.pending.get(k);
     if (v !== undefined) {
-      const fl = mergeFields(this.pending.get(k), f);
+      const fl = mergeFields(prev, opt.f);
       if (fl) o.f = fl;
-      const le = lst && mergeListEdits(this.pending.get(k), lst);
+      const le = opt.lst && mergeListEdits(prev, opt.lst);
       if (le) o.lst = le;
+      // created by an import, and not yet shared: still only filling a gap
+      if (this.importNew || (prev?.nx && !prev.sent)) o.nx = true;
     }
+    // conditional only while every queued write to this record is a document's own (setStep auto)
+    if (opt.base !== undefined && (!prev || prev.base !== undefined)) o.base = prev ? prev.base : opt.base;
     this.pending.set(k, o);
     this.unsaved.delete(k);
     if (this.opBatch) this.opBatch.push(o);
@@ -1514,6 +1612,13 @@ export class GccEngine {
   }
   /** Ops made inside batchOps(), stored in one queue write at the end. */
   private opBatch: SyncOp[] | null = null;
+  /** Set while an import writes the records it creates (create-only ops, see SyncOp.nx). */
+  private importNew = false;
+  /** A deal this browser is (re)creating as a whole, which a teammate's older deletion doesn't remove. */
+  private pendingDealAlive(id: string) {
+    const o = this.pending.get(keyOf.deal(id));
+    return !!o && !o.del && !o.f && !o.nx;
+  }
   /** Run `fn` storing all the changes it queues in one write: an import of hundreds of records
    *  would otherwise rewrite the stored queue once per record. */
   batchOps<T>(fn: () => T): T {
@@ -1531,26 +1636,40 @@ export class GccEngine {
   /** Store queued changes (one read-modify-write of the queue every tab shares). */
   private queueOps(cfg: TeamCfg, list: SyncOp[]) {
     const byK = new Map(list.map((o) => [o.k, o])); // the latest op per record
+    const drop = new Set<string>();
     this.writePending(cfg.url, (ops) => {
+      drop.clear();
       const stored = new Map(ops.map((x) => [x.k, x]));
       byK.forEach((o, k) => {
         const p = stored.get(k);
         if (!p || p.id === o.id) return;
         // a change replacing another tab's queued change to the same record is always the newer one
         if (!newer(o, p)) o.t = this.opT = Math.max(this.opT, (p.t || 0) + 1);
+        // Another tab of this browser queued a change to the record; this tab's copy of it may be older.
+        if (o.f && p.del) {
+          drop.add(k); // that tab deleted it: the deletion wins over an edit (as rebaseOp does)
+          return;
+        }
         if (o.f) {
           const fl = mergeFields(p, o.f);
+          if (fl && p.f && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object') {
+            // keep that tab's values for the fields it changed and this tab didn't
+            const pv = p.v as Record<string, unknown>, v = { ...(o.v as Record<string, unknown>) };
+            p.f.filter((x) => !o.f!.includes(x)).forEach((x) => (x in pv ? (v[x] = pv[x]) : delete v[x]));
+            o.v = v;
+          }
           if (fl) o.f = fl;
           else delete o.f;
         }
         if (o.lst) {
+          if (Array.isArray(p.v)) o.v = applyListEdit((p.v as unknown[]).map(String), o.lst); // that tab's list + ours
           const le = mergeListEdits(p, o.lst);
           if (le) o.lst = le;
           else delete o.lst;
         }
       });
-      return ops.filter((x) => !byK.has(x.k)).concat([...byK.values()]);
-    }).catch(() => {
+      return ops.filter((x) => !byK.has(x.k) || drop.has(x.k)).concat([...byK.values()].filter((o) => !drop.has(o.k)));
+    }).then(() => drop.forEach((k) => byK.get(k) && this.pending.get(k) === byK.get(k) && this.pending.delete(k))).catch(() => {
       if (this.teamCfg === cfg) byK.forEach((o) => this.keepUnsaved(o));
     });
   }
@@ -1722,7 +1841,11 @@ export class GccEngine {
     // when the sheet was at seq S is settled once the sheet has a later row for its record: it was
     // either delivered, or someone changed the record after it was sent (the later change wins).
     const lastSeq = new Map(rows.map((r) => [r.k, r.seq]));
-    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent;
+    // A field or list change is merged with a teammate's (rebaseOp), so a later row for the record only
+    // settles it if it is this change's own row — else it is kept and merged, not lost.
+    const own = (o: SyncOp) =>
+      rows.some((r) => r.k === o.k && r.seq > o.sent! && r.by === String(o.by || '').slice(0, 100) && (o.del ? r.del : !r.del && JSON.stringify(r.v) === JSON.stringify(o.v)));
+    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent && (!(o.f || o.lst) || own(o));
     if ([...this.pending.values()].some(settled)) {
       this.pending.forEach((o, k) => settled(o) && this.pending.delete(k));
       this.unsaved.forEach((o, k) => settled(o) && this.unsaved.delete(k));
@@ -1746,12 +1869,13 @@ export class GccEngine {
         const r = remote.get(k);
         if (!r) add.push(this.mkOp(k, v, t));
         else if (k.startsWith('scfg/') && Array.isArray(v) && Array.isArray(r.v) && !r.del) {
-          // a list both have: add the items this browser added itself (not the starting ones, which
-          // the team may have removed on purpose)
-          const def = (emptyCfg() as unknown as Record<string, string[]>)[k.slice(5)] || [];
-          const extra = (v as string[]).filter((x) => !(r.v as string[]).includes(x) && !def.includes(x));
+          // a list both have: add the items this browser added while it was not connected (not the
+          // starting ones, nor items it got from the team earlier — the team may have removed them)
+          const mineOff = (mine.sales?.offAdds || {})[k.slice(5) as keyof SalesCfg] || [];
+          const extra = (v as string[]).filter((x) => !(r.v as string[]).includes(x) && mineOff.includes(x));
           if (extra.length) {
             const o = this.mkOp(k, [...(r.v as string[]), ...extra], t);
+            o.lst = { add: extra, rm: [] }; // merges with a teammate's change to the list like any list edit
             add.push(o);
             seedMerged.push({ ...r, v: o.v });
           }
@@ -1777,6 +1901,17 @@ export class GccEngine {
     const lastRow = new Map<string, SyncRow>();
     rows.forEach((r) => this.pending.has(r.k) && lastRow.set(r.k, r));
     const merged: SyncRow[] = [], dropped: SyncOp[] = [], revised = new Map<string, SyncOp>();
+    // a deal the team deleted: notes and documents this browser queued for it are dropped too
+    const goneNow = new Set(rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('deal/')).map((r) => r.k.slice(5)));
+    this.pending.forEach((o, k) => {
+      const m = /^(dstep|ddoc)\/([^/]+)\//.exec(k);
+      if (m && goneNow.has(m[2]) && !o.del && !lastRow.has(k) && !this.pendingDealAlive(m[2])) dropped.push(o);
+    });
+    lastRow.forEach((r, k) => {
+      const q = this.pending.get(k)!;
+      // this browser deletes a document a teammate just gave a Drive file: that file goes too
+      if (q.del && k.startsWith('ddoc/') && !r.del && (r.v as DealDoc | null)?.fileId) this.dropDriveFile((r.v as DealDoc).fileId);
+    });
     lastRow.forEach((r, k) => {
       const o = this.pending.get(k)!;
       const res = rebaseOp(r, o);
@@ -1806,7 +1941,13 @@ export class GccEngine {
     cfg.seq = since;
     // only a round that seeded may mark the session seeded, not while part of the upload exists only
     // in memory, and not if an import asked for a new seed after this round read the data
-    if (seeding && seeded && sg === this.seedGen && !this.unsaved.size) cfg.seeded = true;
+    if (seeding && seeded && sg === this.seedGen && !this.unsaved.size) {
+      cfg.seeded = true;
+      if (this.sales.offAdds) {
+        delete this.sales.offAdds; // shared now
+        this.store.update<SalesState>('sales', (cur) => (cur ? (delete cur.offAdds, cur) : this.sales)).catch(() => {});
+      }
+    }
     if (!this.adoptTeamPrefs() || !live()) return;
     this.saveTeamCfg(cfg);
     let rejected = 0;
@@ -1818,7 +1959,17 @@ export class GccEngine {
       batch.forEach((o) => (o.sent = at));
       await this.writePending(cfg.url, (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
       if (!live()) return;
-      const r = await call<{ rejected?: string[] }>(this.transport, cfg.url, cfg.key, { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+      let r: { rejected?: string[] };
+      try {
+        r = await call<{ rejected?: string[] }>(this.transport, cfg.url, cfg.key, { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+      } catch (e) {
+        // the sheet answered and refused (busy, wrong code): these were certainly not delivered
+        if (e instanceof TeamSyncError && e.code) {
+          batch.forEach((o) => delete o.sent);
+          await this.writePending(cfg.url, (ops) => ops.map((x) => (ids.has(x.id) ? (({ sent: _s, ...y }) => y)(x) : x))).catch(() => {});
+        }
+        throw e;
+      }
       rejected += (r.rejected || []).length;
       // done: the op that was sent, or an older change to a record whose newer value was sent;
       // a change made while the request was in flight stays queued
@@ -1856,11 +2007,31 @@ export class GccEngine {
   private applyRows(rows: SyncRow[]) {
     if (!rows.length) return;
     const fx = noEffects();
+    // a teammate deleted a document: its Drive file goes (whoever deleted it may not have known the
+    // file yet) and so does this browser's copy of it
+    const delDocs = rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('ddoc/')).map((r) => this.sales.docs[r.k.slice(5)]).filter(Boolean);
     rows.forEach((r) => applyRow(this, r, fx));
-    // a teammate deleted a document: this browser's copy of its file goes too
-    rows.forEach((r) => {
-      if ((r.del || r.v == null) && r.k.startsWith('ddoc/')) this.store.del(this.docBlobKey(r.k.slice(r.k.lastIndexOf('/') + 1))).catch(() => {});
-    });
+    delDocs.forEach((doc) => !this.sales.docs[`${doc.deal}/${doc.id}`] && this.dropDocFile(doc));
+    // a teammate deleted a deal: the notes and documents this browser has for it go too — also those
+    // the teammate had not seen yet (added here meanwhile), which would otherwise be left orphaned
+    const goneDeals = rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('deal/') && !this.sales.deals[r.k.slice(5)]).map((r) => r.k.slice(5));
+    if (goneDeals.length)
+      this.batchOps(() =>
+        goneDeals.forEach((id) => {
+          Object.keys(this.sales.steps).forEach((k) => {
+            if (!k.startsWith(id + '/')) return;
+            delete this.sales.steps[k];
+            this.op('dstep/' + k);
+          });
+          Object.entries(this.sales.docs).forEach(([k, doc]) => {
+            if (doc.deal !== id) return;
+            delete this.sales.docs[k];
+            this.op('ddoc/' + k);
+            this.dropDocFile(doc);
+          });
+          fx.sales = true;
+        }),
+      );
     // Save by applying the same rows to what is stored rather than writing this tab's whole copy:
     // another tab may have stored records this tab has never seen (e.g. local-only TGO companies).
     const merged = (s: SharedState) => {
@@ -2009,15 +2180,17 @@ export class GccEngine {
 
   // ---- CSV
   exportCsv(view: 'co' | 'cert', out: (Company | Cert)[]) {
+    downloadBlob(new Blob([this.registryCsv(view, out)], { type: 'text/csv;charset=utf-8' }), `GCC_${view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}_${out.length}.csv`);
+  }
+  registryCsv(view: 'co' | 'cert', out: (Company | Cert)[]) {
     const D = this.B.D, CD = this.B.CD;
-    const esc = (v: unknown) => {
-      const s = v == null ? '' : String(v);
-      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    };
-    let H: string[], L: unknown[][];
+    // same cells as the tracker export: text can't run as a formula (names typed by teammates), and
+    // juristic ids / phone numbers keep their leading 0
+    let H: string[], L: unknown[][], keep0: number[];
     if (view === 'cert') {
       H = ['เลขที่ใบรับรอง', 'องค์กร', 'กิจกรรม', 'จังหวัด', 'วันที่อนุมัติ', 'วันหมดอายุ', 'สถานะ', 'รอบที่ต้องยื่น', 'รหัสบริษัท', 'โทรศัพท์บริษัท'];
       L = (out as Cert[]).map((ct) => [ct.cert, ct.org, ct.act, ct.provTxt || CD.prov[ct.prov], ct.ap, ct.ex, CST[ct.st][0], ct.isLatest ? ct.co!.rnd : '', ct.co!.code, ct.co!.phone]);
+      keep0 = [9];
     } else {
       H = ['รหัส', 'ชื่อบริษัท', 'เลขนิติบุคคล', 'ประเภท', 'จังหวัด', 'ที่อยู่', 'กลุ่มอุตสาหกรรม', 'กิจการ', 'แหล่งข้อมูล', 'กลุ่มเป้าหมาย', 'สถานะ CFO', 'CFO หมดอายุล่าสุด', 'รอบที่ต้องยื่น', 'GI ระดับที่ยังใช้ได้', 'GI ใช้ได้ถึง', 'โรงงานใหม่ เริ่ม', 'เงินลงทุนโรงงานใหม่', 'SET', 'โทรศัพท์', 'อีเมล', 'เว็บไซต์', 'สถานะการขาย', 'รวมจากรหัส'];
       L = (out as Company[]).map((c) => [
@@ -2025,8 +2198,8 @@ export class GccEngine {
         c.tgt + 1 + '. ' + TGT[c.tgt], CST[c.cfoSt][0], c.cfoEx, c.rnd, c.giLive, c.giUntil, c.newYm, c.invest, c.set, c.phone, c.email, c.web,
         (STG.find((x) => x[0] === this.stage(c.id)) || STG[0])[1], c.ids.length > 1 ? c.ids.map(gccCode).join(' ') : '',
       ]);
+      keep0 = [2, 18];
     }
-    const body = '﻿' + [H.join(',')].concat(L.map((r) => r.map(esc).join(','))).join('\n');
-    downloadBlob(new Blob([body], { type: 'text/csv;charset=utf-8' }), `GCC_${view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}_${out.length}.csv`);
+    return '\ufeff' + [H.map(csvCell).join(',')].concat(L.map((r) => r.map((v, i) => (keep0.includes(i) ? csvPhone(v) : csvCell(v))).join(','))).join('\r\n');
   }
 }

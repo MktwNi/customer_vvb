@@ -9,7 +9,7 @@ import {
 import { Modal } from '../tabs/Sales';
 import { DocAttach } from './DocAttach';
 import { heroGrad, inputStyle, labelCol, selectStyle } from './ui';
-import { commitFocus, useDialog } from './useDialog';
+import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
 const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#2A4BE0' };
@@ -29,8 +29,10 @@ export function StepEditor({ dealId, stage, onClose }: { dealId: string; stage: 
     e.setStep(dealId, stage, { d: dt, n });
     onClose();
   };
+  // Escape, × and the backdrop keep what was typed, as the deal panel does; "ยกเลิก" discards it
+  const dismiss = () => (note !== st.n || date !== st.d ? save() : onClose());
   return (
-    <Modal title={`${stage}${STAGE_TH[stage] ? ' · ' + STAGE_TH[stage] : ''}`} onClose={onClose}>
+    <Modal title={`${stage}${STAGE_TH[stage] ? ' · ' + STAGE_TH[stage] : ''}`} onClose={dismiss}>
       <span style={{ fontSize: 13.5, color: '#475069' }}>{d.client}</span>
       <label style={labelCol}>
         วันที่
@@ -85,8 +87,11 @@ function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: st
           if (readOnly || ev.target.value === shown) return;
           const v = parseAmount(ev.target.value);
           if (v === undefined) {
-            setErr(`อ่าน "${ev.target.value}" เป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 120,000 หรือ 1.5 ล้าน`);
+            const msg = `อ่าน "${ev.target.value}" เป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 120,000 หรือ 1.5 ล้าน`;
+            setErr(msg);
             ev.target.value = shown;
+            // also when the panel is being closed (Escape / ×): the message would vanish with it
+            if (isClosingBlur()) window.alert(msg + ' (ยอดเดิมยังอยู่)');
             return;
           }
           setErr('');
@@ -186,7 +191,7 @@ function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
         <button onClick={open} style={small}>{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>
         {link && (
           <>
-            <a href={link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>
+            {SHOWABLE.test(doc.mime) && <a href={link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>}
             <a href={link} download={doc.name} style={{ fontSize: 13 }}>ดาวน์โหลด</a>
           </>
         )}

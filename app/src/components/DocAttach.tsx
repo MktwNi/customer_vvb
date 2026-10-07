@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useApp } from '../state';
 import { isoTh } from '../lib/format';
 import { norm } from '../lib/core';
-import { KIND_TH, fmtMoney, money, type Deal, type DealDoc, type DocKind, type DocTarget } from '../lib/sales';
+import { KIND_TH, fmtMoney, parseAmount, type Deal, type DealDoc, type DocKind, type DocTarget } from '../lib/sales';
 import type { DocFacts } from '../lib/docExtract';
 import { Modal } from '../tabs/Sales';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
@@ -119,9 +119,13 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     setBasis(b);
     setAmount(v == null ? '' : String(v));
   };
-  const amt = money(amount);
+  // the same reading as every other amount box ("208,650.-", "1.5 ล้าน", Thai digits); text that
+  // isn't one clear amount blocks saving instead of attaching the document with no amount
+  const parsed = parseAmount(amount);
+  const amt = parsed ?? null;
+  const badAmt = parsed === undefined;
   const save = async () => {
-    if (!file) return;
+    if (!file || badAmt) return;
     setSaving('กำลังบันทึก…');
     try {
       if (amt != null && basis !== 'manual') prefs.set(BASIS_PREF, basis);
@@ -163,7 +167,8 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
       {file && !prog && (
         <>
           {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid #E3E7F1', background: '#F4F6FC' }} />}
-          {!isImg && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
+          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
+          {!isImg && docMime(file) !== 'application/pdf' && <span style={{ fontSize: 13, color: '#5E6680' }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) — เทียบยอดกับรูปในเครื่องของคุณ</span>}
           {facts && (opts.length > 0 || others.length > 0) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F7F8FC', borderRadius: 14, padding: '12px 14px' }}>
               <span style={{ fontSize: 13.5, fontWeight: 500 }}>
@@ -198,7 +203,8 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
             <label style={labelCol}>
               ยอดเงินที่ยืนยัน (บาท)
-              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" style={{ ...inputStyle, fontSize: 16, fontWeight: 500 }} />
+              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} style={{ ...inputStyle, fontSize: 16, fontWeight: 500 }} />
+              {badAmt && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>อ่านเป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
             </label>
             <label style={labelCol}>
               นับยอดนี้เป็น
@@ -226,7 +232,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
           {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? '#8A2B12' : '#475069' }}>{saving}</span>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button onClick={onClose} style={small}>ยกเลิก</button>
-            <button onClick={save} disabled={saving === 'กำลังบันทึก…'} style={{ ...small, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff' }}>
+            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} style={{ ...small, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff', opacity: badAmt ? 0.5 : 1 }}>
               {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
             </button>
           </div>

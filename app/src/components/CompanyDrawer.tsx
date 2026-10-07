@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, LOG_TYPES, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
-import { dtTh, fmtN, gccCode, isoTh, money, telHref, ymTh } from '../lib/format';
+import { dtTh, fmtN, gccCode, isoTh, money, telHref, todayISO, ymTh } from '../lib/format';
 import type { Cert, Company, Detail, StageKey } from '../lib/types';
-import { dealMoney, dealStatus, fmtMoney, lastStage, type Deal, type SalesState } from '../lib/sales';
+import { dealMoney, dealStatus, fmtMoney, lastContact, lastStage, type Deal, type SalesState } from '../lib/sales';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { Opts, SrcTags, heroGrad, inputStyle } from './ui';
@@ -59,7 +59,9 @@ export function CompanyDrawer() {
   const deals = newestFirst(e.dealsOf(c.id));
   const deal = deals[0];
   const owner = C.owners[c.id] || deal?.resp || '';
-  const lastAt = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => x.contactDate || '')].reduce((a, b) => (b > a ? b : a), '');
+  // the latest real contact: the contact log, or a deal's typed contact date / stage dates (not the day it was sent to the tracker)
+  const today = todayISO();
+  const lastAt = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => lastContact(e.sales, x, today))].reduce((a, b) => (b > a ? b : a), '');
   const tasks = e.tasksOf(c.id).sort((a, b) => a.date.localeCompare(b.date));
   const nOpenT = tasks.filter((t) => !t.done).length;
   const pendingG = e.B.groups.filter(dedupFilter('pending'));
@@ -443,7 +445,7 @@ function SalesBox({ c }: { c: Company }) {
       {!deals.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่อยู่ในตารางติดตามการขาย — กดส่งเข้า แล้วข้อมูลติดต่อจะถูกกรอกให้อัตโนมัติ</span>}
       {deals.map((d) => {
         const m = dealMoney(e.sales, d);
-        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, d.contactDate && 'ติดต่อล่าสุด ' + isoTh(d.contactDate), m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (m.fcConfirmed ? ' ✓' : '')].filter(Boolean);
+        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, lastContact(e.sales, d, todayISO()) && 'ติดต่อล่าสุด ' + isoTh(lastContact(e.sales, d, todayISO())), m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (m.fcConfirmed ? ' ✓' : '')].filter(Boolean);
         return (
           <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="h-bg" style={{ cursor: 'pointer', border: '1px solid #E3E7F1', borderRadius: 12, background: '#fff', textAlign: 'left', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, flexWrap: 'wrap' }}>
             <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>

@@ -169,6 +169,7 @@ function fakeDrive(authorized) {
         return fileObj(add({ id: newId(), kind: 'file', name: b.getName() || 'Untitled', mime: b.getContentType() || 'application/octet-stream', data: Buffer.from(data), parent: it.id, trashed: false }));
       },
       getFiles: () => iterator([...items.values()].filter((x) => x.kind === 'file' && x.parent === it.id).map(fileObj)),
+      getFilesByName: (name) => iterator([...items.values()].filter((x) => x.kind === 'file' && x.parent === it.id && x.name === String(name)).map(fileObj)),
     };
     return f;
   };

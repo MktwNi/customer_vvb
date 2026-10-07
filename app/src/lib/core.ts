@@ -53,10 +53,12 @@ export async function getDetail(ids: number[]): Promise<Detail> {
   return out;
 }
 
-/** The row a merged group keeps the id of: a registry row before a customer added by hand (ids
- *  from 1e12, see teamSync CUSTOM_ID_MIN) — its star, stage, owner and notes are keyed by that id —
- *  and among those the one with a juristic id. */
-const primaryRow = (g: RawCompany[]) => g.find((r) => r.jur && r.id < 1e12) || g.find((r) => r.id < 1e12) || g.find((r) => r.jur) || g[0];
+/** The row a merged group keeps the id of — its star, stage, owner and notes are keyed by that id:
+ *  a registry row, then a customer added by hand (ids from 1e12, see teamSync CUSTOM_ID_MIN, shared
+ *  with the team), then a company from the TGO website sync (900000…, this device only); within each,
+ *  one with a juristic id, then the smallest id (the same choice on every browser). */
+const tier = (id: number) => (id < 900000 ? 0 : id >= 1e12 ? 1 : 2);
+const primaryRow = (g: RawCompany[]) => g.slice().sort((a, b) => tier(a.id) - tier(b.id) || +!a.jur - +!b.jur || a.id - b.id)[0];
 
 function mergeRows(g: RawCompany[], D: Dicts): RawCompany {
   const p = primaryRow(g);
@@ -68,7 +70,7 @@ function mergeRows(g: RawCompany[], D: Dicts): RawCompany {
     [...new Set(g.flatMap((r) => String(r[k] || '').split('|').map((s) => s.trim())).filter(Boolean))].slice(0, m).join(' | ');
   o.ids = g.map((r) => r.id);
   o.src = g.reduce((m, r) => m | r.src, 0);
-  for (const k of ['addr', 'biz', 'set', 'mkt', 'web'] as const) if (!o[k]) o[k] = (others.find((r) => r[k]) || ({} as RawCompany))[k] || '';
+  for (const k of ['addr', 'biz', 'set', 'mkt', 'web', 'jur'] as const) if (!o[k]) o[k] = (others.find((r) => r[k]) || ({} as RawCompany))[k] || '';
   if (!D.prov[o.prov]) o.prov = others.find((r) => D.prov[r.prov])?.prov ?? o.prov;
   if (o.ind === NOIND) o.ind = others.find((r) => r.ind !== NOIND)?.ind ?? o.ind;
   o.cfo = g.slice().sort((a, b) => rank(b.cfo) - rank(a.cfo))[0].cfo;
@@ -133,7 +135,11 @@ export function build(base: Dataset, dec: Record<string, string>, extra: BuildEx
   Object.entries(byN).forEach(([k, ids]) => {
     if (ids.length < 2) return;
     const jurs = new Set(ids.map((i) => byId.get(i)!.jur).filter(Boolean));
-    const why = jurs.size === 1 ? 'auto' : jurs.size > 1 ? 'diffjur' : 'nojur';
+    // A customer added by hand may join a name group only where the registry rows alone would be one
+    // company: its juristic id must not merge two separate same-name registry companies.
+    const reg = ids.filter((i) => i < 1e12);
+    const regJurs = new Set(reg.map((i) => byId.get(i)!.jur).filter(Boolean));
+    const why = jurs.size > 1 ? 'diffjur' : jurs.size === 1 && (reg.length <= 1 || regJurs.size === 1) ? 'auto' : 'nojur';
     groups.push({ key: 'n:' + k, ids, why, state: 'pending' });
   });
   groups.filter((g) => g.why === 'auto' && dec[g.key] !== 'split').forEach((g) => g.ids.forEach((i) => uni(g.ids[0], i)));

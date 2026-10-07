@@ -10,7 +10,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { gccCode } from './format';
 import { memoryStore } from './storage';
-import { dealMoney, lastContact, parseAmount, type Deal } from './sales';
+import { dealMoney, lastContact, overdueDays, parseAmount, type Deal } from './sales';
 import { CUSTOM_ID_MIN, type SyncOp } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -204,14 +204,16 @@ describe('Sales Tracker: concurrent edits between browsers', () => {
     const q2 = await A.attachDoc(d.id, pdf('q2.pdf'), { kind: 'quotation', amount: 120000, target: 'forecast', basis: 'total', detected: 120000, docNo: 'Q2', docDate: '' });
     expect(dealMoney(A.sales, A.sales.deals[d.id]).fcDoc?.id).toBe(q2.id);
     vi.setSystemTime(Date.now() + 1000);
-    A.updateDoc(d.id, q1.id, { amount: 110000 }); // a correction is a new confirmation
-    expect(dealMoney(A.sales, A.sales.deals[d.id])).toMatchObject({ forecast: 110000 });
+    A.updateDoc(d.id, q1.id, { amount: 110000 }); // correcting the old quotation's record doesn't make it current
+    expect(dealMoney(A.sales, A.sales.deals[d.id])).toMatchObject({ forecast: 120000 });
+    A.updateDoc(d.id, q2.id, { amount: 125000 }); // correcting the current one does
+    expect(dealMoney(A.sales, A.sales.deals[d.id])).toMatchObject({ forecast: 125000 });
     A.deleteDoc(d.id, q1.id);
-    expect(dealMoney(A.sales, A.sales.deals[d.id])).toMatchObject({ forecast: 120000, fcConfirmed: true });
+    expect(dealMoney(A.sales, A.sales.deals[d.id])).toMatchObject({ forecast: 125000, fcConfirmed: true });
     // a teammate's stale write of the deal (B never saw the documents) doesn't unlink the quotation
     B.updateDeal(d.id, { referral: 'งานสัมมนา' });
     await settle();
-    expect(dealMoney(B.sales, B.sales.deals[d.id])).toMatchObject({ forecast: 120000, fcConfirmed: true });
+    expect(dealMoney(B.sales, B.sales.deals[d.id])).toMatchObject({ forecast: 125000, fcConfirmed: true });
   });
 
   it('the stage note a document filled in follows the document, unless someone wrote in it', async () => {
@@ -327,10 +329,13 @@ describe('Sales Tracker: concurrent edits between browsers', () => {
     expect(gccCode(id)).toMatch(/^NEW-/); // the hand-added row, wherever a row code is shown (Dedup, drawer, CSV)
   });
 
-  it('new deals start counting from today and go to "อื่นๆ" when nothing says otherwise', () => {
+  it('a new deal isn\'t "contacted" yet, but is flagged if nobody follows up; it goes to "อื่นๆ" when nothing says otherwise', () => {
     const d = A.addDeal({ client: 'แถวว่าง', year: '2569' });
-    expect(d).toMatchObject({ contactDate: '2026-10-06', section: 'อื่นๆ', source: [] });
-    expect(lastContact(A.sales, d, '2026-10-06')).toBe('2026-10-06');
+    expect(d).toMatchObject({ contactDate: '', section: 'อื่นๆ', source: [] });
+    expect(lastContact(A.sales, d, '2026-10-06')).toBe('');
+    const at = d.at.slice(0, 10);
+    expect(overdueDays(A.sales, d, at)).toBeNull();
+    expect(overdueDays(A.sales, d, new Date(Date.parse(at) + 15 * 864e5).toISOString().slice(0, 10))).toBe(15);
   });
 
   it('CSV: text can\'t run as a formula, phones keep their 0, ticks no longer in the lists are kept', () => {

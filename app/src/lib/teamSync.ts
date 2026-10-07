@@ -8,14 +8,21 @@
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, StageKey, Task } from './types';
-import type { Deal, DealDoc, DealLog, DealStep, SalesCfg, SalesState } from './sales';
+import { toDeal, toDoc, toLog, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
  *  ignores all three. */
 /** `f` = the fields this op changes in an object record (deal, document, customer); without it the
  *  whole value is this browser's. Kept in the queue only — the sheet gets k, v, del, by. */
-export interface SyncOp { id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string; f?: string[]; lst?: ListEdit }
+export interface SyncOp {
+  id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string; f?: string[]; lst?: ListEdit;
+  /** A write made on the strength of what this browser saw in the record (an auto-filled stage note):
+   *  dropped if a teammate's row differs from it. null = the record was empty. */
+  base?: { d: string; n: string } | null;
+  /** Create only (an import): dropped if the team already has any row for the record. */
+  nx?: boolean;
+}
 /** What a queued list change (scfg/…) does: items added and removed (a rename is both). */
 export interface ListEdit { add: string[]; rm: string[] }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
@@ -140,6 +147,8 @@ export const keyOf = {
   dlog: (id: string) => `dlog/${id}`,
   scfg: (name: keyof SalesCfg) => `scfg/${name}`,
   cust: (id: number) => `cust/${id}`,
+  /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
+  dundo: (id: string) => `dundo/${id}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -197,6 +206,7 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.entries(S.steps || {}).forEach(([k, v]) => (v.d || v.n) && m.set('dstep/' + k, { ...v }));
     Object.entries(S.docs || {}).forEach(([k, v]) => m.set('ddoc/' + k, { ...v }));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
+    Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
   }
@@ -301,10 +311,22 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       if (type !== 'deal' && type !== 'dlog' && rest.indexOf('/') < 0) return;
       if (del && type === 'deal') (S.gone || (S.gone = {}))[rest] = row.at || new Date().toISOString();
       if (del) delete bag[rest];
-      else if (row.v && typeof row.v === 'object') {
-        const v = row.v as Record<string, unknown>;
-        bag[rest] = type === 'deal' ? { ...(v as unknown as Deal), id: rest } : type === 'dlog' ? { ...(v as unknown as DealLog), id: rest } : type === 'ddoc' ? (v as unknown as DealDoc) : (v as unknown as DealStep);
-      } else return;
+      else {
+        // checked: a malformed record is skipped rather than breaking every teammate's screen
+        const j = rest.indexOf('/');
+        const v = type === 'deal' ? toDeal(row.v, rest) : type === 'dlog' ? toLog(row.v, rest) : type === 'ddoc' ? toDoc(row.v, rest.slice(0, j), rest.slice(j + 1)) : toStep(row.v);
+        if (!v) return;
+        bag[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
+    case 'dundo': {
+      const U = s.sales.undone || (s.sales.undone = {});
+      if (del) {
+        if (!(rest in U)) return;
+        delete U[rest];
+      } else U[rest] = String(row.v);
       fx.sales = true;
       break;
     }
@@ -335,6 +357,15 @@ const MERGED = /^(deal|ddoc|cust)\//;
  * - a whole-value write (a new record, a deletion here) or another kind of record: ours stands (null).
  */
 export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown } | null {
+  // an import only fills gaps: whatever the team has for the record (a value or a deletion) wins
+  if (o.nx) return { drop: true };
+  // a stage note written for a document: only over what this browser saw there (`base`); a
+  // teammate who wrote in that stage since keeps their note
+  if (o.base !== undefined) {
+    const cur = row.del || !row.v || typeof row.v !== 'object' ? null : (row.v as { d?: string; n?: string });
+    const same = (a: { d?: string; n?: string } | null, b: { d?: string; n?: string } | null) => (a?.d || '') === (b?.d || '') && (a?.n || '') === (b?.n || '');
+    return same(cur, o.base) ? null : { drop: true };
+  }
   // a list: the teammate's list with this browser's additions and removals applied (a rename keeps
   // the item's place)
   if (o.k.startsWith('scfg/') && o.lst && Array.isArray(row.v)) return { v: applyListEdit(row.v.map(String), o.lst) };

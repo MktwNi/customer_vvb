@@ -5,6 +5,7 @@ import { Banners, TopBar } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Overview } from './tabs/Overview';
 import { Search } from './tabs/Search';
 import { Track } from './tabs/Track';
@@ -93,18 +94,24 @@ export default function App() {
         <Banners />
         <main className="main">
           {!ready && <Loading msg={e.loadMsg} />}
-          {ready && ui.tab === 'overview' && <Overview />}
-          {ready && ui.tab === 'sales' && <Sales />}
-          {ready && ui.tab === 'search' && <Search />}
-          {ready && ui.tab === 'track' && <Track />}
-          {ready && ui.tab === 'plan' && <Plan />}
-          {ready && ui.tab === 'map' && <MapTab />}
-          {ready && ui.tab === 'dedup' && <Dedup />}
-          {ready && ui.tab === 'update' && <Update />}
-          {ready && ui.tab === 'notes' && <Notes />}
+          <ErrorBoundary resetKey={ui.tab}>
+            {ready && ui.tab === 'overview' && <Overview />}
+            {ready && ui.tab === 'sales' && <Sales />}
+            {ready && ui.tab === 'search' && <Search />}
+            {ready && ui.tab === 'track' && <Track />}
+            {ready && ui.tab === 'plan' && <Plan />}
+            {ready && ui.tab === 'map' && <MapTab />}
+            {ready && ui.tab === 'dedup' && <Dedup />}
+            {ready && ui.tab === 'update' && <Update />}
+            {ready && ui.tab === 'notes' && <Notes />}
+          </ErrorBoundary>
         </main>
       </div>
-      {ready && ui.deal && <DealPanel />}
+      {ready && ui.deal && (
+        <ErrorBoundary resetKey={ui.deal}>
+          <DealPanel />
+        </ErrorBoundary>
+      )}
       {ready && ui.sel != null && <CompanyDrawer />}
       {ready && ui.addCust && <AddCustomer />}
       {ready && ui.sendIds && <SendToTracker />}

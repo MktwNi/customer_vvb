@@ -149,6 +149,7 @@ function AddMenu() {
 
 function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
   const { engine: e, set } = useApp();
+  const yearTotal = Object.values(e.sales.deals).filter((d) => d.year === year).length;
   const { open, setOpen, close, btn, wrap } = useMenu();
   const [lists, setLists] = useState(false);
   const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[]; batch?: string; n?: number } | null>(null);
@@ -199,7 +200,10 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
       <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnOutline, height: 36 }}>เพิ่มเติม ▾</button>
       {open && (
         <div style={{ ...menuBox, width: 'min(300px,86vw)' }}>
-          <button className="h-bg" style={item} onClick={() => { close(); e.exportSalesCsv(year, deals); }}>⬇ ส่งออกตาราง (CSV เปิดใน Excel)</button>
+          <button className="h-bg" style={item} onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
+            {/* the table's filters apply (also when another tab is open): say so */}
+            ⬇ {deals.length < yearTotal ? `ส่งออก ${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรองตาราง` : 'ส่งออกตาราง'} (CSV เปิดใน Excel)
+          </button>
           <button className="h-bg" style={item} onClick={() => { close(); fileRef.current?.click(); }}>⬆ นำเข้าจาก Sales Tracker เดิม</button>
           <button className="h-bg" style={item} onClick={() => { close(); setLists(true); }}>⚙ จัดการหมวด / SOURCE / Services</button>
         </div>
@@ -703,7 +707,7 @@ function GroupTable({ title, rows }: { title: string; rows: [string, SalesStats[
 function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: string }) {
   const { set } = useApp();
   const [f, setF] = useState({ resp: '', referral: '', month: '' });
-  const list = deals.filter((d) => (!f.resp || (d.resp || '(ไม่ระบุ)') === f.resp) && (!f.referral || (d.referral || '(ไม่ระบุ)') === f.referral) && (!f.month || d.contactDate.slice(5, 7) === f.month));
+  const list = deals.filter((d) => (!f.resp || (d.resp || '(ไม่ระบุ)') === f.resp) && (!f.referral || (d.referral || '(ไม่ระบุ)') === f.referral) && (!f.month || lastContact(S, d, today).slice(5, 7) === f.month));
   const st = salesStats(S, list, today);
   const uniq = (k: 'resp' | 'referral') => [...new Set(deals.map((d) => d[k] || '(ไม่ระบุ)'))].sort();
   const sel = { ...selectStyle, height: 36, fontSize: 13 };
@@ -729,7 +733,7 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <select value={f.resp} onChange={(ev) => setF({ ...f, resp: ev.target.value })} style={sel} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: x }))} /></select>
         <select value={f.referral} onChange={(ev) => setF({ ...f, referral: ev.target.value })} style={sel} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: x }))} /></select>
-        <select value={f.month} onChange={(ev) => setF({ ...f, month: ev.target.value })} style={sel} aria-label="เดือนที่ติดต่อ"><Opts all="เดือน: ทั้งหมด" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: m }))} /></select>
+        <select value={f.month} onChange={(ev) => setF({ ...f, month: ev.target.value })} style={sel} aria-label="เดือนที่ติดต่อล่าสุด"><Opts all="ติดต่อล่าสุด: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อล่าสุด ' + m }))} /></select>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
         {kpi.map(([ic, v, l, c]) => (

@@ -16,8 +16,17 @@ export const isTopDialog = (el: HTMLElement | null) => !!el && stack[stack.lengt
 /** Fields that save when they lose focus: blur the focused one so it saves before its dialog closes. */
 export function commitFocus() {
   const a = document.activeElement;
-  if (a instanceof HTMLElement && a !== document.body) a.blur();
+  if (!(a instanceof HTMLElement) || a === document.body) return;
+  closingBlur = true; // a field that refuses its value must say so now: its dialog is about to go
+  try {
+    a.blur();
+  } finally {
+    closingBlur = false;
+  }
 }
+let closingBlur = false;
+/** True while commitFocus blurs a field because its dialog is closing. */
+export const isClosingBlur = () => closingBlur;
 
 /**
  * `focus`: 'field' focuses the first field (input / select / textarea, unless one has autoFocus),

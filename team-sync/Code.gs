@@ -271,7 +271,15 @@ function upload_(req) {
   if (!bytes.length) return { ok: false, error: 'empty_file' };
   if (bytes.length > MAX_FILE) return { ok: false, error: 'file_too_large' };
   // no lock while the file is written: a multi-second upload must not hold up the team's sync
-  const file = docFolder_().createFile(Utilities.newBlob(bytes, mime, docId + '__' + cleanName_(req.name)));
+  const folder = docFolder_(), fileName = docId + '__' + cleanName_(req.name);
+  // the same document sent again (a reply that was lost, a retry, a second tab): answer with the file
+  // already saved instead of making a copy nobody can see or delete
+  const same = folder.getFilesByName(fileName);
+  while (same.hasNext()) {
+    const f = same.next();
+    if (!f.isTrashed() && f.getSize() === bytes.length) return { ok: true, fileId: f.getId(), size: f.getSize() };
+  }
+  const file = folder.createFile(Utilities.newBlob(bytes, mime, fileName));
   return { ok: true, fileId: file.getId(), size: file.getSize() };
 }
 
