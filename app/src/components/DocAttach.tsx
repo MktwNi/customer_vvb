@@ -40,6 +40,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const [docDate, setDocDate] = useState('');
   const [saving, setSaving] = useState('');
   const abort = useRef<AbortController | null>(null);
+  const input = useRef<HTMLInputElement>(null);
   useEffect(() => () => {
     abort.current?.abort();
   }, []);
@@ -48,17 +49,29 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   }, [url]);
 
   const pick = async (f: File, forceOcr = false) => {
+    // a new pick starts from an empty form: a rejected file must not leave the previous file (and its
+    // amount) ready to attach, and a read still running for the previous file must not keep the progress bar
     abort.current?.abort();
+    setProg(null);
+    setFile(null);
+    setUrl('');
     setFacts(null);
     setMethod('');
     setReadErr('');
     setSaving('');
-    if (f.size > DOC_MAX_BYTES) {
-      setReadErr('ไฟล์ใหญ่เกิน 10 MB');
-      return;
+    if (!forceOcr) {
+      // (re-reading the same file keeps the type chosen for it)
+      setKind(kind0);
+      setTarget(defaultTarget(kind0));
     }
-    if (!docMime(f)) {
-      setReadErr('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
+    setBasis('manual');
+    setAmount('');
+    setDocNo('');
+    setDocDate('');
+    const bad = f.size > DOC_MAX_BYTES ? 'ไฟล์ใหญ่เกิน 10 MB' : !docMime(f) ? 'รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)' : '';
+    if (bad) {
+      setReadErr(`${bad} — เลือกไฟล์อื่น (${f.name})`);
+      if (input.current) input.current.value = '';
       return;
     }
     setFile(f);
@@ -135,7 +148,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     <Modal title={`แนบ${KIND_TH[kind]} · ${deal.client}`} onClose={onClose} width={620}>
       <label style={{ ...labelCol, gap: 8 }}>
         เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)
-        <input type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 13.5 }} />
+        <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 13.5 }} />
       </label>
       {prog && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

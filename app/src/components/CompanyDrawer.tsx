@@ -1,12 +1,13 @@
-import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, LOG_TYPES, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, money, telHref, ymTh } from '../lib/format';
 import type { Cert, Company, Detail, StageKey } from '../lib/types';
-import { dealMoney, dealStatus, fmtMoney } from '../lib/sales';
+import { dealMoney, dealStatus, fmtMoney, lastStage, type Deal, type SalesState } from '../lib/sales';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { Opts, SrcTags, heroGrad, inputStyle } from './ui';
+import { useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
 const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#2A4BE0' };
@@ -22,6 +23,9 @@ export function CompanyDrawer() {
   const [det, setDet] = useState<{ id: number; d: Detail } | null>(null);
   const [more, setMore] = useState<Record<string, boolean>>({});
   const [editC, setEditC] = useState(false);
+  const ref = useRef<HTMLElement>(null);
+  // takes the keyboard (also when opened over the deal panel), gives focus back on close
+  useDialog(ref, { focus: 'dialog', on: !!c });
   const cid = c?.id;
   const idsKey = c?.ids.join(',');
 
@@ -50,6 +54,12 @@ export function CompanyDrawer() {
   const certs = (e.certsBy.get(c.id) || []).slice().sort((a, b) => (b.ex || '').localeCompare(a.ex || ''));
   const logs = (C.log[c.id] || []).slice().sort((a, b) => b.at.localeCompare(a.at));
   const lastC = logs.find((l) => ['call', 'email', 'meet', 'follow'].includes(l.type));
+  // the Sales Tracker's view of this customer, so the header doesn't say "ยังไม่ติดต่อ" for one the
+  // tracker shows as called or won (the contact-plan stage below is kept separately)
+  const deals = newestFirst(e.dealsOf(c.id));
+  const deal = deals[0];
+  const owner = C.owners[c.id] || deal?.resp || '';
+  const lastAt = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => x.contactDate || '')].reduce((a, b) => (b > a ? b : a), '');
   const tasks = e.tasksOf(c.id).sort((a, b) => a.date.localeCompare(b.date));
   const nOpenT = tasks.filter((t) => !t.done).length;
   const pendingG = e.B.groups.filter(dedupFilter('pending'));
@@ -111,6 +121,11 @@ export function CompanyDrawer() {
   const facts = ([['เลขนิติบุคคล', c.jur], ['จังหวัด', D.prov[c.prov]], ['ที่อยู่', c.addr], ['กลุ่มอุตสาหกรรม', D.ind[c.ind]], ['กิจการ', c.biz], ['จำนวนโรงงาน', c.fac ? fmtN(c.fac) + ' แห่ง' : ''], ['SET', c.set ? `${c.set} · ตลาด ${c.mkt}` : '']] as [string, string][]).filter((x) => x[1]);
   const ph = (c.phone || '').split('|').map((x) => x.trim()).filter(Boolean);
   const em = (c.email || '').split('|').map((x) => x.trim()).filter(Boolean);
+  // the contact typed in the Sales Tracker (what is not already listed above)
+  const split = (s: string) => s.split('|').map((x) => x.trim()).filter(Boolean);
+  const dc = deals
+    .map((x) => ({ name: x.contactName.trim(), phones: split(x.phone).filter((t) => !ph.includes(t)), emails: split(x.email).filter((t) => !em.includes(t)) }))
+    .find((x) => x.name || x.phones.length || x.emails.length);
   const ce = c.cEdited;
   const ctSrc = ce ? `แก้ไขด้วยตนเอง ${isoTh(ce.at.slice(0, 10))}${ce.note ? ' · ' + ce.note : ''}` : D.ct[c.ct] ? 'แหล่งข้อมูลติดต่อ: ' + D.ct[c.ct] : '';
   const r = c.rndR;
@@ -136,7 +151,7 @@ export function CompanyDrawer() {
   return (
     <>
       <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.38)', zIndex: 40 }} />
-      <aside role="dialog" aria-modal="true" aria-label={c.name} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(680px,100vw)', background: '#F4F6FC', zIndex: 41, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)' }}>
+      <aside ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={c.name} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(680px,100vw)', background: '#F4F6FC', zIndex: 41, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
         <div style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#C9D4FF' }}>{c.code} · {D.type[c.type]}</span>
@@ -151,9 +166,14 @@ export function CompanyDrawer() {
             <SrcTags mask={c.src} size="lg" />
           </div>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#DCE6FF' }}>
-            <span>สถานะการขาย <b style={{ fontWeight: 500, color: '#fff' }}>{st[1]}</b></span>
-            <span>ผู้รับผิดชอบ <b style={{ fontWeight: 500, color: '#fff' }}>{C.owners[c.id] || 'ยังไม่มี'}</b></span>
-            <span>{lastC ? 'ติดต่อล่าสุด ' + isoTh(lastC.at.slice(0, 10)) : 'ยังไม่เคยติดต่อ'}</span>
+            {deal ? (
+              <span>สถานะการขาย <b style={{ fontWeight: 500, color: '#fff' }}>{trackerStatus(e.sales, deal)}</b> (Sales Tracker ปี {deal.year})</span>
+            ) : (
+              <span>สถานะการขาย <b style={{ fontWeight: 500, color: '#fff' }}>{st[1]}</b></span>
+            )}
+            {deal && st[0] !== 'none' && <span>แผนติดต่อ <b style={{ fontWeight: 500, color: '#fff' }}>{st[1]}</b></span>}
+            <span>ผู้รับผิดชอบ <b style={{ fontWeight: 500, color: '#fff' }}>{owner || 'ยังไม่มี'}</b></span>
+            <span>{lastAt ? 'ติดต่อล่าสุด ' + isoTh(lastAt) : 'ยังไม่เคยติดต่อ'}</span>
           </div>
         </div>
 
@@ -207,10 +227,18 @@ export function CompanyDrawer() {
                   <span style={kicker}>ข้อมูลติดต่อ</span>
                   <button onClick={() => setEditC(!editC)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>
                 </div>
-                {!ph.length && !em.length && !c.web && <span style={{ fontSize: 14, color: '#475069' }}>ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span>}
+                {!ph.length && !em.length && !c.web && !dc && <span style={{ fontSize: 14, color: '#475069' }}>ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span>}
                 {ph.map((t) => <a key={t} href={telHref(t)} style={{ fontSize: 16, fontWeight: 500, textDecoration: 'none' }}>{t}</a>)}
                 {em.map((t) => <a key={t} href={'mailto:' + t} style={{ fontSize: 14 }}>{t}</a>)}
                 {c.web && <a href={/^https?:\/\//.test(c.web) ? c.web : 'https://' + c.web} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, wordBreak: 'break-all' }}>{c.web}</a>}
+                {dc && (
+                  <span style={{ display: 'flex', gap: '4px 12px', flexWrap: 'wrap', alignItems: 'baseline', fontSize: 14, wordBreak: 'break-word' }}>
+                    <span style={{ fontSize: 12.5, color: '#475069' }}>ผู้ติดต่อใน Sales Tracker</span>
+                    {dc.name && <span>{dc.name}</span>}
+                    {dc.phones.map((t) => <a key={t} href={telHref(t)}>{t}</a>)}
+                    {dc.emails.map((t) => <a key={t} href={'mailto:' + t}>{t}</a>)}
+                  </span>
+                )}
                 {ctSrc && <span style={{ fontSize: 12, color: '#475069' }}>{ctSrc}</span>}
                 {editC && (
                   <form onSubmit={saveContact} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#F4F6FC', borderRadius: 12, padding: 14 }}>
@@ -385,10 +413,22 @@ function BlockRow({ it }: { it: BlockItem }) {
   );
 }
 
+/** Newest year first; in a year, open jobs first. */
+const newestFirst = (deals: Deal[]) => deals.sort((a, b) => b.year.localeCompare(a.year) || (a.jobStatus === 'open' ? 0 : 1) - (b.jobStatus === 'open' ? 0 : 1) || b.at.localeCompare(a.at));
+
+/** One line for a deal: its status, and the result when the job is closed ("ปิดงาน" alone doesn't say whether it was won), else the stage reached. */
+function trackerStatus(S: SalesState, d: Deal) {
+  const st = dealStatus(S, d);
+  const res = st.result === 'YES' || st.result === 'NO' ? st.result : '';
+  const last = lastStage(S, d);
+  const overall = st.overall.length > 40 ? st.overall.slice(0, 40) + '…' : st.overall; // a waiting note can be long
+  return [overall, d.jobStatus === 'closed' && res ? 'ผล ' + res : '', !res && last ? 'ขั้นล่าสุด ' + last : ''].filter(Boolean).join(' · ');
+}
+
 /** Where the company stands in the Sales Tracker, and a one-click way to put it there. */
 function SalesBox({ c }: { c: Company }) {
   const { engine: e, set } = useApp();
-  const deals = e.dealsOf(c.id).sort((a, b) => b.year.localeCompare(a.year));
+  const deals = newestFirst(e.dealsOf(c.id));
   const custom = e.custom[c.id];
   const btn: CSSProperties = { cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 };
   return (
@@ -402,12 +442,12 @@ function SalesBox({ c }: { c: Company }) {
       </div>
       {!deals.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่อยู่ในตารางติดตามการขาย — กดส่งเข้า แล้วข้อมูลติดต่อจะถูกกรอกให้อัตโนมัติ</span>}
       {deals.map((d) => {
-        const st = dealStatus(e.sales, d);
         const m = dealMoney(e.sales, d);
+        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, d.contactDate && 'ติดต่อล่าสุด ' + isoTh(d.contactDate), m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (m.fcConfirmed ? ' ✓' : '')].filter(Boolean);
         return (
           <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="h-bg" style={{ cursor: 'pointer', border: '1px solid #E3E7F1', borderRadius: 12, background: '#fff', textAlign: 'left', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, flexWrap: 'wrap' }}>
-            <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{st.overall}</b></span>
-            <span style={{ color: '#475069', fontSize: 12.5 }}>{m.forecast != null ? 'Forecast ' + fmtMoney(m.forecast) + (m.fcConfirmed ? ' ✓' : '') : ''} · เปิด →</span>
+            <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>
+            <span style={{ color: '#475069', fontSize: 12.5 }}>{[...more, 'เปิด →'].join(' · ')}</span>
           </button>
         );
       })}

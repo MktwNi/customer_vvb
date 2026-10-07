@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion } from './state';
 import { isTeamUrl } from './lib/teamSync';
 import { Banners, TopBar } from './components/Header';
@@ -16,6 +16,7 @@ import { Notes } from './tabs/Notes';
 import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
+import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
   const sk = { height: 64, borderRadius: 16, background: '#E6EAF4' };
@@ -66,10 +67,18 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, [e, set]);
 
+  // Escape closes the top layer only. The field being typed in is blurred first: the deal panel's
+  // fields save when they lose focus, and closing without a blur would drop what was typed.
+  const uiRef = useRef(ui);
+  uiRef.current = ui;
   useEffect(() => {
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
-      set((s) => (s.sched ? { sched: null } : s.addCust ? { addCust: null } : s.sendIds ? { sendIds: null } : s.sel != null ? { sel: null } : s.deal ? { deal: null } : {}));
+      const s = uiRef.current;
+      const p = s.sched ? { sched: null } : s.addCust ? { addCust: null } : s.sendIds ? { sendIds: null } : s.sel != null ? { sel: null } : s.deal ? { deal: null } : null;
+      if (!p) return;
+      commitFocus();
+      set(p);
     };
     document.addEventListener('keydown', kd);
     return () => document.removeEventListener('keydown', kd);
