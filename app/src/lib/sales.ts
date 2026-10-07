@@ -330,9 +330,14 @@ export interface TrackerData { year: string; cfg: Partial<SalesCfg>; clients: Tr
 
 const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : String(v || '').split(',')).map((x) => x.trim()).filter(Boolean);
 const pad2 = (n: number) => String(n).padStart(2, '0');
+const DMY = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s|$)/;
 /** yyyy-mm-dd from what a date becomes in a sheet download: ISO text, d/m/yyyy (Thai sheets, also
  *  with a Buddhist-era year), m/d/yyyy when the day can't be a month, or an Excel serial number. */
 export function isoDate(v: unknown): string {
+  return dateOf(v, false);
+}
+/** isoDate, reading n/n/yyyy as m/d/yyyy when `monthFirst` (the file's dates were saved that way). */
+function dateOf(v: unknown, monthFirst: boolean): string {
   const s = String(v ?? '').trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const ok = (y: number, m: number, d: number) => {
@@ -340,10 +345,10 @@ export function isoDate(v: unknown): string {
     const dt = new Date(Date.UTC(y, m - 1, d));
     return y > 1900 && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? `${y}-${pad2(m)}-${pad2(d)}` : '';
   };
-  let m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s|$)/.exec(s);
+  let m = DMY.exec(s);
   if (m) {
     const a = +m[1], b = +m[2], y = +m[3];
-    return b > 12 ? ok(y, a, b) : ok(y, b, a);
+    return b > 12 || (monthFirst && a <= 12) ? ok(y, a, b) : ok(y, b, a);
   }
   m = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})(?:\s|$)/.exec(s);
   if (m) return ok(+m[1], +m[2], +m[3]);
@@ -352,6 +357,21 @@ export function isoDate(v: unknown): string {
     return new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 864e5).toISOString().slice(0, 10);
   }
   return '';
+}
+/** Whether a file's n/n/yyyy dates are m/d/yyyy. Excel writes all the dates of a CSV in one order (the
+ *  computer's), so one that can only be read one way decides for all: "10/13/2026" → m/d, so
+ *  "10/7/2026" is 7 October too. Thai d/m when no date decides it; date by date when they disagree.
+ *  Stage dates are left out: they sit inside the progress JSON text, which Excel doesn't rewrite. */
+function monthFirstOf(rows: Record<string, unknown>[]): boolean {
+  let dm = false, md = false;
+  rows.forEach((r) =>
+    [r?.contactDate, r?.closedDate].forEach((v) => {
+      const m = DMY.exec(String(v ?? '').trim());
+      if (m && +m[1] > 12) dm = true;
+      if (m && +m[2] > 12) md = true;
+    }),
+  );
+  return md && !dm;
 }
 
 /** A phone number a spreadsheet stored as a number lost its leading 0 ("812345678"). */
@@ -388,18 +408,29 @@ function progressOf(p: unknown): Record<string, DealStep> {
   });
   return out;
 }
-function clientOf(r: Record<string, unknown>, section: string): TrackerClient {
+function clientOf(r: Record<string, unknown>, section: string, monthFirst: boolean): TrackerClient {
   const has = (k: string) => r[k] != null && String(r[k]).trim() !== '';
   // rows from before the old tracker split "contact" into name / phone / e-mail
   const pc = !has('contactName') && !has('phone') && !has('email') && has('contact') ? parseContact(r.contact) : null;
   const fc = looseMoney(r.forecast), ac = looseMoney(r.actual);
   return {
     section, client: String(r.client || '').trim(), contactName: pc ? pc.name : String(r.contactName || '').trim(), phone: fixPhone(pc ? pc.phone : r.phone),
-    email: (pc ? pc.email : String(r.email || '')).trim(), resp: String(r.resp || '').trim(), referral: String(r.referral || '').trim(), contactDate: isoDate(r.contactDate),
-    jobStatus: r.jobStatus === 'closed' ? 'closed' : 'open', closedDate: isoDate(r.closedDate),
+    email: (pc ? pc.email : String(r.email || '')).trim(), resp: String(r.resp || '').trim(), referral: String(r.referral || '').trim(), contactDate: dateOf(r.contactDate, monthFirst),
+    jobStatus: r.jobStatus === 'closed' ? 'closed' : 'open', closedDate: dateOf(r.closedDate, monthFirst),
     forecast: fc.value, actual: ac.value, forecastText: fc.exact ? '' : String(r.forecast).trim(), actualText: ac.exact ? '' : String(r.actual).trim(),
     source: list(r.source), service: list(r.service), progress: progressOf(r.progress),
   };
+}
+const NO_NAME = '(ไม่มีชื่อ)';
+/** The row to import, or null for a row with nothing typed in it. A client row of the old tracker
+ *  (`clientRow`) without a client or contact name but with anything else (a phone, an amount, a stage
+ *  note, a closed job…) is kept under "(ไม่มีชื่อ)" — the old tracker shows and sums it. Contact date
+ *  and SOURCE don't count: the old tracker fills them in on every new row. */
+function kept(c: TrackerClient, clientRow: boolean): TrackerClient | null {
+  if (c.client || c.contactName) return c;
+  const typed = c.phone || c.email || c.resp || c.referral || c.forecast != null || c.actual != null || c.forecastText || c.actualText ||
+    c.jobStatus === 'closed' || c.closedDate || c.service.length || Object.keys(c.progress).length;
+  return clientRow && typed ? { ...c, client: NO_NAME } : null;
 }
 
 /** The tracker's "สำรองข้อมูล (JSON)" file: {sources, services, progress, rows:[{type:'section'|'client', …}]}. */
@@ -408,12 +439,16 @@ export function parseTrackerJson(obj: unknown, year: string): TrackerData {
   if (!o || typeof o !== 'object' || !Array.isArray(o.rows)) throw new Error('ไม่ใช่ไฟล์สำรองของ Sales Tracker (ไม่พบรายการ rows)');
   const clients: TrackerClient[] = [];
   const sections: string[] = [];
+  const monthFirst = monthFirstOf(o.rows as Record<string, unknown>[]);
   let cur = '';
   (o.rows as Record<string, unknown>[]).forEach((r) => {
     if (r && r.type === 'section') {
       cur = String(r.name || '');
       if (cur && !sections.includes(cur)) sections.push(cur);
-    } else if (r && (r.client || r.contactName)) clients.push(clientOf(r, cur));
+    } else if (r && typeof r === 'object') {
+      const c = kept(clientOf(r, cur, monthFirst), r.type === 'client');
+      if (c) clients.push(c);
+    }
   });
   return { year, cfg: { sections, sources: list(o.sources), services: list(o.services), stages: list(o.progress) }, clients };
 }
@@ -421,6 +456,7 @@ export function parseTrackerJson(obj: unknown, year: string): TrackerData {
 /** Rows of the tracker's Google Sheet (columns year, section, client, …, progress, syncId, config) — read
  *  from a CSV / Excel download of that sheet. Keeps only the newest snapshot (syncId) of each year. */
 export function parseTrackerSheet(rows: Record<string, unknown>[]): TrackerData[] {
+  const monthFirst = monthFirstOf(rows);
   const byYear = new Map<string, Record<string, unknown>[]>();
   rows.forEach((r) => {
     const y = String(r.year || '').trim() || beYear();
@@ -439,7 +475,11 @@ export function parseTrackerSheet(rows: Record<string, unknown>[]): TrackerData[
         } catch {
           /* ignore */
         }
-      } else if (r.client || r.contactName) clients.push(clientOf(r, String(r.section || '')));
+      } else {
+        // a file with a client column is the tracker's sheet, not some other list with a phone column
+        const c = kept(clientOf(r, String(r.section || ''), monthFirst), 'client' in r);
+        if (c) clients.push(c);
+      }
     });
     return { year, cfg, clients };
   });
@@ -460,9 +500,30 @@ export function importId(year: string, c: TrackerClient, nth: number) {
   return 'imp' + year + (h >>> 0).toString(36);
 }
 
-/** Minimal CSV parser (RFC 4180: quotes, doubled quotes, newlines in quotes; BOM). First row = header. */
+/** Text of a CSV file in whatever encoding Excel saved it: UTF-8 (with or without BOM), UTF-16 with a
+ *  BOM, else Thai Windows "ANSI" (windows-874 / TIS-620) — which reading it as UTF-8 would turn into "����". */
+export function decodeTrackerText(bytes: ArrayBuffer | Uint8Array): { text: string; encoding: string } {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const enc =
+    b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? 'utf-8'
+    : b[0] === 0xff && b[1] === 0xfe ? 'utf-16le'
+    : b[0] === 0xfe && b[1] === 0xff ? 'utf-16be'
+    : '';
+  if (enc) return { text: new TextDecoder(enc).decode(b), encoding: enc };
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(b), encoding: 'utf-8' };
+  } catch {
+    return { text: new TextDecoder('windows-874').decode(b), encoding: 'windows-874' };
+  }
+}
+
+/** Minimal CSV parser (RFC 4180: quotes, doubled quotes, newlines in quotes; BOM). First row = header.
+ *  The separator is the one the header row has most of: ',' or, as Excel saves with some regional
+ *  settings, ';' or a tab. */
 export function parseCsv(text: string): Record<string, string>[] {
   const t = text.replace(/^﻿/, '');
+  const head0 = t.split(/\r?\n|\r/, 1)[0].replace(/"[^"]*"/g, '');
+  const sep = [';', '\t'].reduce((a, s) => (head0.split(s).length > head0.split(a).length ? s : a), ',');
   const rows: string[][] = [];
   let row: string[] = [], cell = '', q = false;
   for (let i = 0; i < t.length; i++) {
@@ -475,7 +536,7 @@ export function parseCsv(text: string): Record<string, string>[] {
         } else q = false;
       } else cell += ch;
     } else if (ch === '"') q = true;
-    else if (ch === ',') {
+    else if (ch === sep) {
       row.push(cell);
       cell = '';
     } else if (ch === '\n' || ch === '\r') {

@@ -215,24 +215,37 @@ export function status(c: Company, T: number, W: number) {
 export async function readXlsxRows(file: Blob): Promise<Record<string, string>[]> {
   const { default: JSZip } = await import('jszip');
   const zx = await JSZip.loadAsync(file);
-  const dec = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  // character references too: some writers (openpyxl…) store every Thai letter as "&#3610;"
+  const ENT: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' };
+  const dec = (s: string) =>
+    s.replace(/&(?:#(\d+)|#x([\da-fA-F]+)|(lt|gt|quot|apos|amp));/g, (e, d, h, n) => {
+      const cp = n ? 0 : d ? parseInt(d, 10) : parseInt(h, 16);
+      return n ? ENT[n] : cp <= 0x10ffff ? String.fromCodePoint(cp) : e;
+    });
+  // a shared or inline string: the text of all its rich-text runs, without phonetic guides
+  const str = (x: string) => dec([...x.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t(?:\s[^>]*[^/>])?>([\s\S]*?)<\/t>/g)].map((m) => m[1]).join(''));
   const ssF = zx.file('xl/sharedStrings.xml');
-  const S = ssF ? [...(await ssF.async('string')).matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => dec([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''))) : [];
+  const S = ssF ? [...(await ssF.async('string')).matchAll(/<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g)].map((m) => str(m[1] || '')) : [];
   const first = Object.keys(zx.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort((a, b) => parseInt(a.replace(/\D/g, '')) - parseInt(b.replace(/\D/g, '')))[0];
   if (!first) throw new Error('ไม่พบชีตในไฟล์ Excel');
   const x = await zx.file(first)!.async('string');
-  const rows = [...x.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)].map((r) => {
-    const o: Record<string, string> = {};
-    for (const c of r[1].matchAll(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-      const t = /t="(\w+)"/.exec(c[2]);
-      let v = (/<v>([\s\S]*?)<\/v>/.exec(c[3] || '') || [])[1];
-      if (v == null) v = (/<t[^>]*>([\s\S]*?)<\/t>/.exec(c[3] || '') || [])[1];
-      if (v != null) o[c[1]] = t && t[1] === 's' ? S[+v] : dec(v);
+  const rows = [...x.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)].map((r) => {
+    const o: Record<number, string> = {};
+    let col = 0;
+    for (const c of (r[1] || '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      // column from r="B2"; a cell without one (it is optional) is the one after the previous cell
+      const ref = /\br="([A-Z]+)\d*"/.exec(c[1]);
+      col = ref ? [...ref[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) : col + 1;
+      const t = (/\bt="(\w+)"/.exec(c[1]) || [])[1];
+      const is = /<is>([\s\S]*?)<\/is>/.exec(c[2] || '');
+      const v = (/<v>([\s\S]*?)<\/v>/.exec(c[2] || '') || [])[1]; // a formula's (<f>) last result
+      if (is) o[col] = str(is[1]);
+      else if (v != null) o[col] = t === 's' ? (S[+v] ?? '') : dec(v);
     }
     return o;
-  });
+  }).filter((r) => Object.values(r).some((v) => v.trim()));
   const head = rows.shift() || {};
-  return rows.map((r) => Object.fromEntries(Object.entries(head).map(([col, h]) => [String(h).trim(), r[col] ?? ''])));
+  return rows.map((r) => Object.fromEntries(Object.entries(head).map(([col, h]) => [h.trim(), r[+col] ?? ''])));
 }
 
 /* ---------- Excel importer (ฐานข้อมูลลูกค้า_GCC.xlsx) ---------- */

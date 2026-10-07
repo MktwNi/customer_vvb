@@ -2,12 +2,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
-import { norm } from './core';
+import JSZip from 'jszip';
+import { norm, readXlsxRows } from './core';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import {
-  dealMoney, dealResult, dealStatus, emptySales, filterDeals, fixPhone, htmlToText, importId, isoDate, looseMoney, matchSource, money, newDeal, overdueDays,
-  parseContact, parseCsv, parseTrackerJson, parseTrackerSheet, salesStats, DEFAULT_SECTIONS, DEFAULT_SOURCES, type Deal, type SalesState,
+  dealMoney, dealResult, dealStatus, decodeTrackerText, emptySales, filterDeals, fixPhone, htmlToText, importId, importKey, isoDate, looseMoney, matchSource, money, newDeal, overdueDays,
+  parseContact, parseCsv, parseTrackerJson, parseTrackerSheet, salesStats, DEFAULT_SECTIONS, DEFAULT_SOURCES, type Deal, type SalesState, type TrackerClient,
 } from './sales';
 import { CUSTOM_ID_MIN, isLocalOnly } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
@@ -350,5 +351,106 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     await vi.waitFor(() => expect(Object.keys(C.sales.deals).length).toBe(Object.keys(A.sales.deals).length), WAIT);
     expect(Object.keys(C.custom)).toEqual(Object.keys(A.custom));
     C.dispose();
+  });
+});
+
+describe('old tracker files as Excel and other tools save them', () => {
+  const HEAD = 'year,section,client,contactName,phone,email,resp,referral,contactDate,jobStatus,closedDate,forecast,actual,source,service,progress,syncId';
+  /** Thai text the way Excel on Thai Windows saves "CSV (Comma delimited)": windows-874, no BOM. */
+  const cp874 = (s: string) => Uint8Array.from([...s], (ch) => (ch >= 'ก' && ch <= '๛' ? ch.charCodeAt(0) - 0xe01 + 0xa1 : ch.charCodeAt(0)));
+
+  it('a CSV saved as ANSI (windows-874), UTF-8 with or without BOM, or UTF-16 reads as Thai', () => {
+    const csv = HEAD + '\n2569,TGO,บริษัท ทดสอบ จำกัด,คุณเอ,,,บี,,2026-10-01,open,,"1,000",,TGO,,{},S1\n';
+    const ansi = decodeTrackerText(cp874(csv).buffer);
+    expect(ansi).toEqual({ text: csv, encoding: 'windows-874' });
+    expect(parseTrackerSheet(parseCsv(ansi.text))[0].clients[0]).toMatchObject({ client: 'บริษัท ทดสอบ จำกัด', contactName: 'คุณเอ', resp: 'บี', forecast: 1000 });
+    const utf8 = new TextEncoder().encode(csv);
+    expect(decodeTrackerText(utf8)).toEqual({ text: csv, encoding: 'utf-8' });
+    expect(decodeTrackerText(Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8]))).toEqual({ text: csv, encoding: 'utf-8' });
+    const u16 = Uint8Array.from([0xff, 0xfe, ...[...csv].flatMap((ch) => [ch.charCodeAt(0) & 255, ch.charCodeAt(0) >> 8])]);
+    expect(decodeTrackerText(u16.buffer)).toEqual({ text: csv, encoding: 'utf-16le' });
+  });
+
+  it('a CSV separated by ";" or tabs (other regional settings) is read like a comma one', () => {
+    const semi = parseCsv('year;section;client;forecast;source\n2569;TGO;"บริษัท ก; จำกัด";"1,500";"TGO, Partner"\n');
+    expect(semi).toEqual([{ year: '2569', section: 'TGO', client: 'บริษัท ก; จำกัด', forecast: '1,500', source: 'TGO, Partner' }]);
+    expect(parseTrackerSheet(semi)[0].clients[0]).toMatchObject({ client: 'บริษัท ก; จำกัด', forecast: 1500, source: ['TGO', 'Partner'] });
+    expect(parseCsv('year\tclient\tforecast\r\n2569\tบริษัท ข, จำกัด\t2,000\r\n')).toEqual([{ year: '2569', client: 'บริษัท ข, จำกัด', forecast: '2,000' }]);
+    expect(parseCsv('"a;b",c\n1,2')).toEqual([{ 'a;b': '1', c: '2' }]); // a ";" inside a quoted header is not a separator
+  });
+
+  it('dates saved by Excel with US settings (m/d/yyyy) are read in one order for the whole file', () => {
+    const rows = (dates: [string, string][]) => parseTrackerSheet(parseCsv([HEAD, ...dates.map(([c, d], i) => `2569,TGO,ราย ${i},,,,,,${c},closed,${d},,,,,{},S1`)].join('\n')))[0].clients;
+    const dates = (cs: TrackerClient[]) => cs.map((c) => [c.contactDate, c.closedDate]);
+    // one date that can only be m/d ("10/13/2026") → every date of the file is m/d
+    expect(dates(rows([['10/7/2026', '10/13/2026'], ['3/5/2026', '3/25/2026']]))).toEqual([['2026-10-07', '2026-10-13'], ['2026-03-05', '2026-03-25']]);
+    // a Thai file: d/m, also when no date decides it
+    expect(dates(rows([['7/10/2026', '13/10/2026'], ['5/3/2569', '']]))).toEqual([['2026-10-07', '2026-10-13'], ['2026-03-05', '']]);
+    expect(dates(rows([['1/10/2026', '2/10/2026']]))).toEqual([['2026-10-01', '2026-10-02']]);
+    // dates that disagree: each is read on its own, as before
+    expect(dates(rows([['13/1/2026', '1/13/2026'], ['2/3/2026', '']]))).toEqual([['2026-01-13', '2026-01-13'], ['2026-03-02', '']]);
+    // ISO dates and Excel serial numbers are never ambiguous
+    expect(dates(rows([['2026-10-07', '46296'], ['10/13/2026', '']]))).toEqual([['2026-10-07', '2026-10-01'], ['2026-10-13', '']]);
+    // one value on its own keeps the per-value reading
+    expect(['10/7/2026', '10/13/2026'].map((x) => isoDate(x))).toEqual(['2026-07-10', '2026-10-13']);
+    // the JSON backup is read the same way
+    const j = parseTrackerJson({ rows: [{ type: 'client', client: 'ก', contactDate: '10/7/2026' }, { type: 'client', client: 'ข', contactDate: '10/13/2026' }] }, '2569');
+    expect(j.clients.map((c) => c.contactDate)).toEqual(['2026-10-07', '2026-10-13']);
+  });
+
+  it('a row with no client or contact name but with data is kept as "(ไม่มีชื่อ)"; an untouched new row is not', () => {
+    const t = parseTrackerJson({
+      rows: [
+        { type: 'section', name: 'TGO' },
+        { type: 'client', client: '', contactName: '', phone: '0812345678', forecast: '200000', progress: { CALL1: { d: '2026-09-01', n: 'โทรแล้ว' } } },
+        { type: 'client', client: '', contactName: '', forecast: 'รอคุยราคา' },
+        { type: 'client', client: '', contactName: '', jobStatus: 'closed' },
+        { type: 'client', client: '  ', contactName: '', progress: { QUOTATION: { d: '2026-09-05', n: '' } } },
+        // what the old tracker's "add client" puts in a new row: today's date and the section's SOURCE
+        { type: 'client', client: '', contact: '', contactName: '', phone: '', contactDate: '2026-10-07', jobStatus: 'open', source: ['TGO'], service: [], progress: {} },
+        { type: 'client', client: 'มีชื่อ' },
+      ],
+    }, '2569');
+    expect(t.clients.map((c) => c.client)).toEqual(['(ไม่มีชื่อ)', '(ไม่มีชื่อ)', '(ไม่มีชื่อ)', '(ไม่มีชื่อ)', 'มีชื่อ']);
+    expect(t.clients[0]).toMatchObject({ section: 'TGO', phone: '0812345678', forecast: 200000, progress: { CALL1: { d: '2026-09-01', n: 'โทรแล้ว' } } });
+    expect(t.clients[1]).toMatchObject({ forecast: null, forecastText: 'รอคุยราคา' });
+    // unnamed rows get ids of their own (the nth row of that name, as importTracker counts them)
+    const nth = new Map<string, number>();
+    const ids = t.clients.map((c) => importId('2569', c, nth.set(importKey(c), (nth.get(importKey(c)) || 0) + 1).get(importKey(c))!));
+    expect(new Set(ids).size).toBe(5);
+    const sheet = parseTrackerSheet(parseCsv([HEAD, '2569,TGO,,,,,,,,open,,"50,000",,,,{},S1', '2569,TGO,,,,,,,2026-10-07,open,,,,TGO,,{},S1'].join('\n')));
+    expect(sheet[0].clients).toHaveLength(1);
+    expect(sheet[0].clients[0]).toMatchObject({ client: '(ไม่มีชื่อ)', section: 'TGO', forecast: 50000 });
+    // some other list (no client column) is still not a tracker: nothing to import
+    expect(parseTrackerSheet(parseCsv('name,phone,email\nก,0812345678,a@b.co')).flatMap((t) => t.clients)).toEqual([]);
+  });
+
+  it('readXlsxRows: character references, inline and rich-text strings, formulas, sparse and unnumbered cells', async () => {
+    const zip = new JSZip();
+    // shared strings: rich-text runs with a Japanese reading guide, an empty <t/>, an escaped "&#" that must stay as typed
+    zip.file('xl/sharedStrings.xml', '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<si><t>client</t></si><si><r><rPr><b/></rPr><t xml:space="preserve">บริษัท </t></r><r><t>ริช</t></r><rPh sb="0" eb="1"><t>ふり</t></rPh></si>' +
+      '<si><t/></si><si><t>A &amp;#3610; &amp; B</t></si><si><t>forecast</t></si></sst>');
+    const c = (r: string, attrs: string, body = '') => `<c r="${r}"${attrs}${body ? `>${body}</c>` : '/>'}`;
+    const inl = (s: string) => `<is><t>${s}</t></is>`;
+    zip.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+      '<row r="1" spans="1:6" ht="20" customHeight="1"/>' + // an empty formatted row before the header
+      `<row r="2">${c('A2', ' t="inlineStr"', inl('year'))}${c('B2', ' t="s"', '<v>0</v>')}${c('C2', ' t="inlineStr"', inl('contactName'))}${c('D2', ' t="inlineStr"', inl('phone'))}${c('E2', ' t="s"', '<v>4</v>')}${c('F2', ' t="inlineStr"', inl('note'))}</row>` +
+      // openpyxl: every Thai letter as a decimal reference; a rich-text inline string; a phone stored as a number
+      `<row r="3">${c('A3', ' t="n"', '<v>2569</v>')}${c('B3', ' t="inlineStr"', '<is><r><rPr><b val="1"/></rPr><t xml:space="preserve">&#3610;&#3619;&#3636;&#3625;&#3633;&#3607; </t></r><r><t>&#x0E01; &#3592;&#3635;&#3585;&#3633;&#3604;</t></r></is>')}` +
+      `${c('C3', ' t="inlineStr"', inl('&#3588;&#3640;&#3603;&#3648;&#3629;'))}${c('D3', ' t="n"', '<v>812345678</v>')}${c('E3', ' t="inlineStr"', inl('1.5 &#3621;&#3657;&#3634;&#3609;'))}${c('F3', ' t="s"', '<v>3</v>')}</row>` +
+      // shared rich text; a formula with its last result; a string formula; a formula never calculated; a skipped column
+      `<row r="4">${c('A4', '', '<f>2568+1</f><v>2569</v>')}${c('B4', ' s="2" t="s"', '<v>1</v>')}${c('C4', ' t="str"', '<f>"คุณ"&amp;"บี"</f><v>คุณบี</v>')}${c('E4', '', '<f>SUM(X1:X2)</f><v></v>')}</row>` +
+      '<row r="5"><c r="A5" s="3"/><c r="B5" s="3"/></row>' + // formatted but empty
+      // cells without r="…" (optional): each is the one after the previous; attributes in another order; an empty shared string
+      `<row r="6"><c t="n"><v>2569</v></c><c s="1" r="B6" t="inlineStr"><is><t>r ไม่ได้อยู่หน้า</t></is></c><c t="s"><v>2</v></c>${c('E6', ' t="n"', '<v>5000</v>')}<c t="inlineStr"><is><t>ถัดจาก E</t></is></c></row>` +
+      '</sheetData></worksheet>');
+    const rows = await readXlsxRows(new Blob([await zip.generateAsync({ type: 'arraybuffer' })]));
+    expect(rows).toEqual([
+      { year: '2569', client: 'บริษัท ก จำกัด', contactName: 'คุณเอ', phone: '812345678', forecast: '1.5 ล้าน', note: 'A &#3610; & B' },
+      { year: '2569', client: 'บริษัท ริช', contactName: 'คุณบี', phone: '', forecast: '', note: '' },
+      { year: '2569', client: 'r ไม่ได้อยู่หน้า', contactName: '', phone: '', forecast: '5000', note: 'ถัดจาก E' },
+    ]);
+    expect(parseTrackerSheet(rows)[0].clients[0]).toMatchObject({ client: 'บริษัท ก จำกัด', phone: '0812345678', forecast: 1500000, forecastText: '' });
   });
 });
