@@ -3,7 +3,6 @@ import { useApp, useEngineVersion } from './state';
 import { isTeamUrl } from './lib/teamSync';
 import { Banners, TopBar } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { prefs, PREF } from './lib/storage';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
 import { Overview } from './tabs/Overview';
@@ -32,15 +31,9 @@ function Loading({ msg }: { msg: string }) {
 export default function App() {
   const { engine: e, ui, set } = useApp();
   useEngineVersion();
-  const [navOpen, setNavOpen] = useState(false); // phone drawer
-  const [mini, setMini] = useState(() => prefs.getRaw(PREF.nav) === 'mini'); // desktop: icons only
+  const [navOpen, setNavOpen] = useState(false); // full menu shown (desktop: over the icon rail; phones: drawer)
   const closeNav = useCallback(() => setNavOpen(false), []);
-  const toggleMini = useCallback(() => {
-    setMini((m) => {
-      prefs.set(PREF.nav, m ? '' : 'mini');
-      return !m;
-    });
-  }, []);
+  const toggleNav = useCallback(() => setNavOpen((o) => !o), []);
 
   useEffect(() => {
     e.load();
@@ -82,7 +75,7 @@ export default function App() {
   const ready = e.ready;
   return (
     <div className="shell">
-      <Sidebar mini={mini} open={navOpen} onClose={closeNav} onToggleMini={toggleMini} />
+      <Sidebar open={navOpen} onToggle={toggleNav} onClose={closeNav} />
       <div className="content">
         <TopBar navOpen={navOpen} onMenu={() => setNavOpen(true)} />
         <Banners />

@@ -20,18 +20,24 @@ a{color:#1A3FE0}a:hover{color:#0A1A86}
 @container (max-width:900px){.map-grid{grid-template-columns:1fr}}
 .map-org:hover .on{color:#1A3FE0}
 
-/* ---- app shell: CRM-style left sidebar + content column with a sticky top bar */
+/* ---- app shell: CRM-style icon rail on the left (the full menu slides out over the page) + content
+   column with a sticky top bar. Phones (<= 900px): the menu is a drawer opened from the top bar. */
 :root{--side-w:248px;--side-mini:76px;--topbar-h:64px;--main-px:28px}
-.shell{display:flex;min-height:100vh}
+.shell{display:flex;min-height:100vh;padding-left:var(--side-mini)}
 .content{flex:1;min-width:0;display:flex;flex-direction:column}
 .main{flex:1;width:100%;max-width:1400px;margin:0 auto;padding:24px var(--main-px) 64px;display:flex;flex-direction:column;gap:26px}
 
-.side{position:sticky;top:0;height:100vh;flex:none;width:var(--side-w);background:linear-gradient(180deg,#040A3C 0%,#0A1A86 72%,#1530C0 100%);color:#fff;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;z-index:36;transition:width .18s ease;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
-.side.mini{width:var(--side-mini)}
-.side-brand{display:flex;align-items:center;gap:12px;padding:16px 18px;min-height:var(--topbar-h);border-bottom:1px solid rgba(255,255,255,.1)}
-.side-logo{width:40px;height:40px;flex:none;border-radius:11px;background:#fff;color:#0A1A86;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px}
+.side{position:fixed;left:0;top:0;bottom:0;width:var(--side-mini);background:linear-gradient(180deg,#040A3C 0%,#0A1A86 72%,#1530C0 100%);color:#fff;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;z-index:36;transition:width .18s ease,box-shadow .18s ease;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+.side.open{width:var(--side-w);box-shadow:24px 0 60px -24px rgba(4,10,60,.6)}
+.side-backdrop{display:none}
+.side-backdrop.open{display:block;position:fixed;inset:0;background:rgba(4,10,60,.18);z-index:35}
+.side-brand{display:flex;align-items:center;gap:12px;padding:0 18px;height:var(--topbar-h);flex:none;border-bottom:1px solid rgba(255,255,255,.1)}
+.rail-btn{cursor:pointer;width:40px;height:40px;flex:none;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;display:flex;align-items:center;justify-content:center;padding:0}
+.rail-btn:hover{background:rgba(255,255,255,.18)}
+.rail-btn svg{width:22px;height:22px}
+.side-logo{display:none;width:36px;height:36px;flex:none;border-radius:10px;background:#fff;color:#0A1A86;align-items:center;justify-content:center;font-weight:600;font-size:13px}
 .side-brand-text{display:flex;flex-direction:column;line-height:1.3;min-width:0;flex:1}
-.side-brand-text b{font-weight:500;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-brand-text b{font-weight:500;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .side-brand-text small{font-size:12px;color:#B9C8FF;font-weight:300;white-space:nowrap}
 .side-nav{flex:1;display:flex;flex-direction:column;gap:20px;padding:18px 12px}
 .side-group{display:flex;flex-direction:column;gap:2px}
@@ -39,25 +45,21 @@ a{color:#1A3FE0}a:hover{color:#0A1A86}
 .side-item{position:relative;cursor:pointer;border:0;background:transparent;color:#C9D4FF;display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;border-radius:12px;font-size:14.5px;text-align:left;width:100%;white-space:nowrap;transition:background .12s,color .12s}
 .side-item:hover{background:rgba(255,255,255,.09);color:#fff}
 .side-item[aria-current=page]{background:#fff;color:#0A1A86;font-weight:500}
-.side-item:focus-visible,.side-collapse:focus-visible,.side-close:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+.side-item:focus-visible,.rail-btn:focus-visible,.side-close:focus-visible{outline:2px solid #fff;outline-offset:-2px}
 .side-ico{position:relative;width:22px;height:22px;flex:none;display:flex}
 .side-ico svg{width:22px;height:22px}
 .side-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .side-badge{flex:none;font-size:11px;min-width:22px;height:20px;padding:0 7px;border-radius:999px;background:rgba(255,255,255,.18);color:#fff;display:flex;align-items:center;justify-content:center}
 .side-item[aria-current=page] .side-badge{background:#0A1A86;color:#fff}
 .side-dot{position:absolute;top:-8px;right:-12px;font-size:10px;line-height:1;min-width:18px;height:16px;padding:0 4px;border-radius:999px;background:#F2B84B;color:#0E1430;display:flex;align-items:center;justify-content:center;font-weight:600}
-.side.mini .lbl{display:none}
-.side.mini .side-brand{justify-content:center;padding:16px 0}
-.side.mini .side-item{justify-content:center;padding:0}
-.side.mini .side-group+.side-group{border-top:1px solid rgba(255,255,255,.12);padding-top:16px}
+/* icon rail (menu folded) */
+.side:not(.open) .lbl{display:none}
+.side:not(.open) .side-brand{justify-content:center;padding:0}
+.side:not(.open) .side-item{justify-content:center;padding:0}
+.side:not(.open) .side-group+.side-group{border-top:1px solid rgba(255,255,255,.12);padding-top:16px}
 .side-foot{padding:12px;border-top:1px solid rgba(255,255,255,.1)}
-.side-collapse{cursor:pointer;border:0;background:transparent;color:#B9C8FF;display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:12px;font-size:13px;width:100%}
-.side-collapse:hover{background:rgba(255,255,255,.09);color:#fff}
-.side-collapse svg{width:20px;height:20px;flex:none;transition:transform .18s}
-.side.mini .side-collapse{justify-content:center;padding:0}
-.side.mini .side-collapse svg{transform:rotate(180deg)}
 .side-data{display:block;font-size:12px;color:#B9C8FF;line-height:1.55;padding:0 6px}
-.side-close,.side-backdrop,.menu-btn{display:none}
+.side-close,.menu-btn{display:none}
 
 .topbar{position:sticky;top:0;z-index:30;height:var(--topbar-h);flex:none;display:flex;align-items:center;gap:14px;padding:0 var(--main-px);background:rgba(255,255,255,.94);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom:1px solid #E3E7F1}
 .tb-title{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
@@ -71,20 +73,24 @@ a{color:#1A3FE0}a:hover{color:#0A1A86}
 .menu-btn svg,.side-close svg{width:22px;height:22px}
 @media (max-width:1180px){.tb-hide-md{display:none}}
 
-/* phones / narrow tablets: the sidebar becomes a slide-out drawer */
+/* phones / narrow tablets: no rail; the menu is a drawer opened from the top bar */
 @media (max-width:900px){
   :root{--main-px:16px}
-  .side{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(280px,86vw);transform:translateX(-105%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s;z-index:45;box-shadow:20px 0 60px -20px rgba(4,10,60,.55)}
+  .shell{padding-left:0}
+  .side,.side.open{width:min(280px,86vw)}
+  .side{transform:translateX(-105%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s;z-index:45;box-shadow:20px 0 60px -20px rgba(4,10,60,.55)}
   .side.open{transform:none;visibility:visible;transition:transform .22s ease}
-  .side-backdrop.open{display:block;position:fixed;inset:0;background:rgba(4,10,60,.38);z-index:44}
-  .side-close{display:flex;cursor:pointer;width:38px;height:38px;flex:none;border-radius:10px;border:0;background:rgba(255,255,255,.1);color:#fff;align-items:center;justify-content:center;padding:0}
+  .side-backdrop.open{background:rgba(4,10,60,.38);z-index:44}
+  .rail-btn{display:none}
+  .side.open .side-logo{display:flex}
+  .side-close{display:flex;cursor:pointer;width:38px;height:38px;flex:none;margin-left:auto;border-radius:10px;border:0;background:rgba(255,255,255,.1);color:#fff;align-items:center;justify-content:center;padding:0}
   .menu-btn{display:flex}
   .topbar{gap:10px}
   .tb-sub{display:none}
   .main{padding-top:18px;padding-bottom:48px}
 }
 @media (max-width:560px){.tb-hide-sm{display:none}.tb-btn{padding:0 12px}}
-@media (prefers-reduced-motion:reduce){.side,.side.open,.side-item,.side-collapse svg{transition:none}}
+@media (prefers-reduced-motion:reduce){.side,.side.open,.side-item{transition:none}}
 
 /* contact-plan rows: one line on wide screens; on phones name/phone on top, stage + button below */
 .plan-row{display:grid;grid-template-columns:26px minmax(0,2fr) minmax(0,1fr) 150px 150px;gap:12px;align-items:center;padding:9px 0;border-top:1px solid #EEF1F8}

@@ -55,14 +55,18 @@ export function useDataLine() {
   return `ข้อมูล ณ ${isoTh(e.base.asOf)} · ${src} · ${fmtN(e.B.companies.length)} บริษัท · ${fmtN(e.B.certs.length)} ใบรับรอง CFO`;
 }
 
-export function Sidebar({ mini, open, onClose, onToggleMini }: { mini: boolean; open: boolean; onClose: () => void; onToggleMini: () => void }) {
+/**
+ * Desktop: an icon rail; the ☰ button slides the full menu out over the page, and choosing an item,
+ * clicking outside or Escape folds it back. Phones (<= 900px): a drawer opened from the top bar.
+ */
+export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }) {
   const { engine: e, ui, go } = useApp();
   useEngineVersion();
   const mobile = useMedia(MOBILE_NAV);
   const dataLine = useDataLine();
   const closeRef = useRef<HTMLButtonElement>(null);
   const ready = e.ready;
-  const compact = mini && !mobile;
+  const rail = !mobile && !open; // icons only
 
   const badges: Partial<Record<Tab, number>> = {};
   if (ready) {
@@ -73,15 +77,16 @@ export function Sidebar({ mini, open, onClose, onToggleMini }: { mini: boolean; 
     badges.dedup = e.B.groups.filter((g) => g.state === 'pending').length;
   }
 
-  // phone drawer: focus moves into it, Escape closes it and focus returns to the menu button
+  // open menu: Escape folds it and focus returns to the button that opened it;
+  // on phones focus also moves into the drawer
   useEffect(() => {
-    if (!open || !mobile) return;
-    closeRef.current?.focus();
+    if (!open) return;
+    if (mobile) closeRef.current?.focus();
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       ev.stopPropagation();
       onClose();
-      document.getElementById('menu-btn')?.focus();
+      document.getElementById(mobile ? 'menu-btn' : 'rail-btn')?.focus();
     };
     document.addEventListener('keydown', kd, true);
     return () => document.removeEventListener('keydown', kd, true);
@@ -90,9 +95,12 @@ export function Sidebar({ mini, open, onClose, onToggleMini }: { mini: boolean; 
   return (
     <>
       <div className={'side-backdrop' + (open ? ' open' : '')} onClick={onClose} />
-      <aside id="side-nav" className={'side' + (compact ? ' mini' : '') + (open ? ' open' : '')} aria-label="เมนูหลัก">
+      <aside id="side-nav" className={'side' + (open ? ' open' : '')} aria-label="เมนูหลัก">
         <div className="side-brand">
-          <span className="side-logo">GCC</span>
+          <button id="rail-btn" className="rail-btn" onClick={onToggle} aria-label={open ? 'ย่อเมนู' : 'ขยายเมนู'} title={open ? 'ย่อเมนู' : 'ขยายเมนู'} aria-expanded={open} aria-controls="side-nav">
+            <Icon name={open ? 'collapse' : 'menu'} />
+          </button>
+          <span className="side-logo lbl">GCC</span>
           <span className="side-brand-text lbl">
             <b>ฐานข้อมูลลูกค้า GCC</b>
             <small>CRM ทีมขาย</small>
@@ -113,8 +121,8 @@ export function Sidebar({ mini, open, onClose, onToggleMini }: { mini: boolean; 
                     key={it.key}
                     className="side-item"
                     aria-current={on ? 'page' : undefined}
-                    title={compact ? it.label + (b ? ` (${fmtN(b)})` : '') : undefined}
-                    aria-label={compact ? it.label + (b ? ` ${fmtN(b)} รายการ` : '') : undefined}
+                    title={rail ? it.label + (b ? ` (${fmtN(b)})` : '') : undefined}
+                    aria-label={rail ? it.label + (b ? ` ${fmtN(b)} รายการ` : '') : undefined}
                     onClick={() => {
                       if (ready) go(it.key);
                       onClose();
@@ -122,25 +130,21 @@ export function Sidebar({ mini, open, onClose, onToggleMini }: { mini: boolean; 
                   >
                     <span className="side-ico">
                       <Icon name={it.icon} />
-                      {compact && b > 0 && <span className="side-dot">{b > 99 ? '99+' : fmtN(b)}</span>}
+                      {rail && b > 0 && <span className="side-dot">{b > 99 ? '99+' : fmtN(b)}</span>}
                     </span>
                     <span className="side-label lbl">{it.label}</span>
-                    {!compact && b > 0 && <span className="side-badge">{fmtN(b)}</span>}
+                    {!rail && b > 0 && <span className="side-badge">{fmtN(b)}</span>}
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
-        <div className="side-foot">
-          {mobile && <span className="side-data">{dataLine}</span>}
-          {!mobile && (
-            <button className="side-collapse" onClick={onToggleMini} aria-label={mini ? 'ขยายเมนู' : 'ย่อเมนู'} title={mini ? 'ขยายเมนู' : undefined} aria-expanded={!mini}>
-              <Icon name="collapse" />
-              <span className="lbl">ย่อเมนู</span>
-            </button>
-          )}
-        </div>
+        {mobile && (
+          <div className="side-foot">
+            <span className="side-data">{dataLine}</span>
+          </div>
+        )}
       </aside>
     </>
   );
