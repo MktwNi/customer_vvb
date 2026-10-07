@@ -7,7 +7,8 @@
  * tombstone {k, del:true}. The server keeps an append-only log ordered by `seq` — the last op
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
-import type { ContactEdit, Crm, LogEntry, StageKey, Task } from './types';
+import type { ContactEdit, Crm, CustomCo, LogEntry, StageKey, Task } from './types';
+import type { Deal, DealDoc, DealLog, DealStep, SalesCfg, SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -100,13 +101,16 @@ export async function call<T extends Record<string, unknown>>(t: Transport, url:
 
 // ------------------------------------------------------------------ records
 
-/** Companies created from the TGO website sync (id ≥ 900000) get per-device ids, so their records
- *  must not be shared — the same id is a different company on another device. */
+/** Companies created from the TGO website sync (900000 ≤ id < CUSTOM_ID_MIN) get per-device ids, so
+ *  their records must not be shared — the same id is a different company on another device.
+ *  Customers added by hand get random ids ≥ CUSTOM_ID_MIN and are shared like registry companies. */
 export const LOCAL_ID_MIN = 900000;
+export const CUSTOM_ID_MIN = 1e12;
+export const isLocalId = (id: number) => id >= LOCAL_ID_MIN && id < CUSTOM_ID_MIN;
 export function isLocalOnly(k: string, v?: unknown) {
   const m = /^(stage|owner|watch|contact|log)\/(\d+)/.exec(k);
-  if (m) return +m[2] >= LOCAL_ID_MIN;
-  if (k.startsWith('task/') && v && typeof v === 'object') return Number((v as Task).gid) >= LOCAL_ID_MIN;
+  if (m) return isLocalId(+m[2]);
+  if (k.startsWith('task/') && v && typeof v === 'object') return isLocalId(Number((v as Task).gid));
   return false;
 }
 
@@ -119,7 +123,14 @@ export const keyOf = {
   log: (cid: number | string, lid: string) => `log/${cid}/${lid}`,
   contact: (id: number | string) => `contact/${id}`,
   dedup: (key: string) => `dedup/${key}`,
+  deal: (id: string) => `deal/${id}`,
+  dstep: (id: string, stage: string) => `dstep/${id}/${stage}`,
+  ddoc: (id: string, docId: string) => `ddoc/${id}/${docId}`,
+  dlog: (id: string) => `dlog/${id}`,
+  scfg: (name: keyof SalesCfg) => `scfg/${name}`,
+  cust: (id: number) => `cust/${id}`,
 };
+const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
 /** Stable id for log entries created before ids existed, so the same entry imported on two
  *  machines maps to the same record. */
@@ -155,7 +166,7 @@ export function uniqueTaskIds(tasks: Task[]) {
   return renamed;
 }
 
-export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string> }
+export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo> }
 
 /** Every shared record currently held locally, keyed like the server. */
 export function localRecords(s: SharedState): Map<string, unknown> {
@@ -169,12 +180,20 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   Object.entries(C.log || {}).forEach(([cid, a]) => (a || []).forEach((e) => e.id && m.set(keyOf.log(cid, e.id), { ...e })));
   Object.entries(s.contacts || {}).forEach(([id, v]) => m.set(keyOf.contact(id), { ...v }));
   Object.entries(s.dec || {}).forEach(([k, v]) => m.set(keyOf.dedup(k), v));
+  const S = s.sales;
+  if (S) {
+    Object.values(S.deals || {}).forEach((d) => m.set(keyOf.deal(d.id), { ...d }));
+    Object.entries(S.steps || {}).forEach(([k, v]) => (v.d || v.n) && m.set('dstep/' + k, { ...v }));
+    Object.entries(S.docs || {}).forEach(([k, v]) => m.set('ddoc/' + k, { ...v }));
+    Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
+  }
+  Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
-export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number> }
-export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set() });
+export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean }
+export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false });
 
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
@@ -259,6 +278,34 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
         s.dec[rest] = String(row.v);
         fx.dedup = true;
       }
+      break;
+    case 'deal':
+    case 'dstep':
+    case 'ddoc':
+    case 'dlog': {
+      const S = s.sales;
+      const bag = (type === 'deal' ? S.deals : type === 'dstep' ? S.steps : type === 'ddoc' ? S.docs : S.log) as Record<string, unknown>;
+      if (type !== 'deal' && type !== 'dlog' && rest.indexOf('/') < 0) return;
+      if (del) delete bag[rest];
+      else if (row.v && typeof row.v === 'object') {
+        const v = row.v as Record<string, unknown>;
+        bag[rest] = type === 'deal' ? { ...(v as unknown as Deal), id: rest } : type === 'dlog' ? { ...(v as unknown as DealLog), id: rest } : type === 'ddoc' ? (v as unknown as DealDoc) : (v as unknown as DealStep);
+      } else return;
+      fx.sales = true;
+      break;
+    }
+    case 'scfg':
+      if (!CFG_KEYS.includes(rest) || del || !Array.isArray(row.v)) return;
+      s.sales.cfg[rest as keyof SalesCfg] = (row.v as unknown[]).map(String);
+      fx.sales = true;
+      break;
+    case 'cust':
+      if (del) {
+        if (!(rest in s.custom)) return;
+        delete s.custom[rest];
+      } else if (row.v && typeof row.v === 'object') s.custom[rest] = { ...(row.v as CustomCo), id: +rest };
+      else return;
+      fx.custom = true;
       break;
   }
 }

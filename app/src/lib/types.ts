@@ -35,6 +35,12 @@ export interface RawCompany {
 
 export interface ContactEdit { phone: string; email: string; web: string; note: string; at: string }
 
+/** A customer added by hand (not in the registry files); shared with the team like other records. */
+export interface CustomCo {
+  id: number; name: string; jur: string; prov: string; ind: string; biz: string; addr: string;
+  phone: string; email: string; web: string; contact: string; note: string; at: string; by: string;
+}
+
 /** A company after dedup + status calculation. Computed fields are filled by engine.recalc(). */
 export interface Company extends RawCompany {
   cEdited?: ContactEdit;

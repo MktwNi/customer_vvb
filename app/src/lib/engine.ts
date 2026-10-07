@@ -4,18 +4,24 @@
  * storage.ts. React subscribes via `subscribe` / `getVersion` (useSyncExternalStore).
  */
 import type {
-  Built, Cert, Company, ContactEdit, Crm, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
+  Built, Cert, Company, ContactEdit, Crm, CustomCo, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
   SetSnap, StageKey, SyncCfg, Task, TaskType,
 } from './types';
-import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, status, type ParsedUpload } from './core';
+import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import {
-  LOCAL_ID_MIN, TeamSyncError, applyRow, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, noEffects, opId, uniqueTaskIds,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, noEffects, opId, uniqueTaskIds,
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
+import {
+  KIND_TH, NOTE_MAX, beYear, csvCell, dealMoney, dealStatus, emptyCfg, emptySales, fmtMoney, importId, newDeal, parseCsv,
+  parseTrackerJson, parseTrackerSheet, stepOf,
+  type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
+} from './sales';
+import { deleteDocFile, downloadDocFile, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -56,6 +62,10 @@ export class GccEngine {
   setSnap: SetSnap | null = null;
   R: Round[] = [];
   sources: unknown[][] = [];
+  /** Sales Tracker: deals, stage notes, attached documents, change log and lists (lib/sales.ts). */
+  sales: SalesState = emptySales();
+  /** Customers added by hand (ids ≥ CUSTOM_ID_MIN), shared with the team. */
+  custom: Record<string, CustomCo> = {};
 
   // ---- derived
   B!: Built;
@@ -153,7 +163,7 @@ export class GccEngine {
     try {
       this.teamRaw = prefs.getRaw(PREF.team);
       const team0 = prefs.get<TeamCfg | null>(PREF.team, null);
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -164,7 +174,11 @@ export class GccEngine {
         fetch(dataUrl('rounds.json')).then((r) => r.json()).catch(() => []) as Promise<RoundRaw[]>,
         fetch(dataUrl('gcc-sources.json')).then((r) => r.json()).catch(() => []) as Promise<unknown[][]>,
         team0 && team0.url ? this.store.get<SyncOp[]>(pendKey(team0.url)) : null,
+        this.store.get<Partial<SalesState>>('sales'),
+        this.store.get<Record<string, CustomCo>>('customCos'),
       ]);
+      this.sales = { ...emptySales(), ...(sales || {}), cfg: { ...emptyCfg(), ...((sales && sales.cfg) || {}) } };
+      this.custom = custom || {};
       this.base = base;
       this.dec = dec || {};
       this.contacts = contacts || {};
@@ -264,7 +278,7 @@ export class GccEngine {
 
   // ------------------------------------------------------------------ build / recalc
   rebuild() {
-    const B = build(this.base, this.dec, { added: this.added, contacts: this.contacts, certs: this.tgoCerts.map((c) => ({ ...c, tgo: true })) });
+    const B = build(this.base, this.dec, { added: [...this.added, ...this.customRaw()], contacts: this.contacts, certs: this.tgoCerts.map((c) => ({ ...c, tgo: true })) });
     this.B = B;
     // certificates pulled from the TGO website count towards their company's CFO state
     B.certs.forEach((ct) => {
@@ -351,7 +365,7 @@ export class GccEngine {
     const watch = new Set(this.crm.watch);
     B.companies.forEach((c) => {
       status(c, T, W);
-      c.code = c.id >= 900000 ? 'TGO-' + (c.id - 900000) : gccCode(c.id);
+      c.code = c.id >= CUSTOM_ID_MIN ? 'NEW-' + (c.id - CUSTOM_ID_MIN).toString(36).toUpperCase() : c.id >= 900000 ? 'TGO-' + (c.id - 900000) : gccCode(c.id);
       c.hay = [c.name, c.jur, c.set, c.phone, c.code, c.email, c.ids.map((i) => gccCode(i)).join(' ')].join(' ').toLowerCase();
       c.fl = {
         watch: watch.has(c.id),
@@ -768,13 +782,13 @@ export class GccEngine {
   }
   delTask(t: Task) {
     this.crm.tasks = this.crm.tasks.filter((x) => x !== t);
-    if (t.gid < LOCAL_ID_MIN) this.op(keyOf.task(t.id));
+    if (!isLocalId(t.gid)) this.op(keyOf.task(t.id));
     this.saveCrm();
   }
 
   // ---- team backup
   exportCrm() {
-    const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec };
+    const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom };
     downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), 'GCC_ข้อมูลทีม_' + todayISO() + '.json');
   }
   /** Merge a teammate's backup into local data — never deletes; newer contact edits win. */
@@ -840,6 +854,23 @@ export class GccEngine {
           this.op(keyOf.contact(k), { ...v });
         }
       });
+      // Sales Tracker + customers added by hand: add what this browser doesn't have
+      const IS = (d.sales || {}) as Partial<SalesState>, S = this.sales;
+      Object.values(IS.deals || {}).forEach((x) => {
+        if (!S.deals[x.id]) {
+          S.deals[x.id] = x;
+          n++;
+        }
+      });
+      (['steps', 'docs', 'log'] as const).forEach((b) => Object.entries(IS[b] || {}).forEach(([k, v]) => !(k in S[b]) && ((S[b] as Record<string, unknown>)[k] = v)));
+      Object.values((d.custom || {}) as Record<string, CustomCo>).forEach((c) => {
+        if (!this.custom[c.id]) {
+          this.custom[c.id] = c;
+          n++;
+        }
+      });
+      this.persist('sales', S);
+      this.persist('customCos', this.custom);
       Object.entries((d.dedup || {}) as Record<string, string>).forEach(([k, v]) => {
         if (!(k in this.dec)) {
           this.dec[k] = v;
@@ -866,6 +897,422 @@ export class GccEngine {
       this.importing = false;
     }
     this.emit();
+  }
+
+  // ------------------------------------------------------------------ customers added by hand
+  /** Customers added by hand as registry rows (dictionary indexes for the text fields). */
+  private customRaw(): Partial<RawCompany>[] {
+    const D = this.base.dicts;
+    const ix = (arr: string[], v: string, dflt: string) => {
+      const i = arr.indexOf(v);
+      return i >= 0 ? i : Math.max(0, arr.indexOf(dflt));
+    };
+    return Object.values(this.custom).map((c) => ({
+      id: c.id, name: c.name, jur: c.jur || '', type: ix(D.type, 'ไม่ระบุ', 'ไม่ระบุ'), prov: ix(D.prov, c.prov, ''), addr: c.addr || '',
+      ind: ix(D.ind, c.ind, 'ไม่ระบุ'), biz: c.biz || '', src: 16, tgt: 8, cfo: ix(D.cfo, '', ''), cfoN: 0, cfoEx: '', giNow: null, giMax: null,
+      giUntil: '', newYm: '', invest: null, fac: null, set: '', mkt: '', phone: c.phone || '', email: c.email || '', web: c.web || '', ct: 0, match: 0,
+    }));
+  }
+  /** Registry companies that look like the one about to be added (same juristic id or name). */
+  similarCompanies(name: string, jur: string): Company[] {
+    const k = norm(name), j = jur.replace(/\D/g, '');
+    if (k.length < 3 && j.length < 10) return [];
+    return this.B.companies
+      .filter((c) => (j.length >= 10 && c.jur.replace(/\D/g, '') === j) || (k.length >= 3 && (norm(c.name) === k || (k.length >= 6 && norm(c.name).includes(k)))))
+      .slice(0, 8);
+  }
+  /** Add a customer that is not in the registry; returns its company id. */
+  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>): number {
+    let id: number;
+    do id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
+    while (this.custom[id] || this.B.byId.has(id));
+    const c: CustomCo = { ...p, name: p.name.trim().slice(0, 200), note: cap(p.note || ''), id, at: new Date().toISOString(), by: this.me() };
+    this.custom[id] = c;
+    this.op(keyOf.cust(id), { ...c });
+    this.persist('customCos', this.custom);
+    this.rebuild();
+    this.emit();
+    return id;
+  }
+  updateCustomer(id: number, patch: Partial<Omit<CustomCo, 'id'>>) {
+    const c = this.custom[id];
+    if (!c) return;
+    const n = { ...c, ...patch, id, note: cap(patch.note ?? c.note) };
+    this.custom[id] = n;
+    this.op(keyOf.cust(id), { ...n });
+    this.persist('customCos', this.custom);
+    this.rebuild();
+    this.emit();
+  }
+  deleteCustomer(id: number) {
+    if (!this.custom[id]) return;
+    delete this.custom[id];
+    this.op(keyOf.cust(id));
+    this.persist('customCos', this.custom);
+    this.rebuild();
+    this.emit();
+  }
+
+  // ------------------------------------------------------------------ Sales Tracker
+  saveSales() {
+    this.persist('sales', this.sales);
+    this.emit();
+  }
+  private salesLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail = '') {
+    const id = uid();
+    const L: DealLog = { id, at: new Date().toISOString(), by: this.me(), action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
+    this.sales.log[id] = L;
+    this.op(keyOf.dlog(id), { ...L });
+  }
+  private putDeal(d: Deal) {
+    this.sales.deals[d.id] = d;
+    this.op(keyOf.deal(d.id), { ...d });
+  }
+  /** Deals linked to a company (any of its merged ids). */
+  dealsOf(gid: number) {
+    const g = this.canonical(gid);
+    return Object.values(this.sales.deals).filter((d) => d.gid != null && this.canonical(d.gid) === g);
+  }
+  /** Section a company most likely belongs to, from where it was found. */
+  suggestSection(c: Company | undefined) {
+    const S = this.sales.cfg.sections;
+    const pick = (...names: string[]) => names.find((n) => S.includes(n)) || '';
+    if (!c) return '';
+    return (c.src & 8 && pick('SET/mai')) || (c.src & 1 && pick('TGO')) || '';
+  }
+  /** New deal; `gid` links it to a company whose contact details fill in what is not given. */
+  addDeal(p: Partial<Deal>): Deal {
+    const c = p.gid != null ? this.company(p.gid) : undefined;
+    const gid = c && !isLocalId(c.id) ? c.id : null; // TGO-sync companies exist on this device only
+    const cc = c ? this.custom[c.id] : undefined;
+    const section = p.section ?? (this.suggestSection(c) || this.sales.cfg.sections[0] || '');
+    const d = newDeal(
+      {
+        client: c?.name || '', phone: c?.phone || '', email: c?.email || '', contactName: cc?.contact || '',
+        resp: (c && this.crm.owners[c.id]) || this.me(), section, source: this.sales.cfg.sources.includes(section) ? [section] : [],
+        ...p, id: opId(), gid,
+      },
+      this.me(),
+    );
+    d.client = (d.client || '').trim().slice(0, 200) || 'ลูกค้าใหม่';
+    this.putDeal(d);
+    this.salesLog(d, 'เพิ่มลูกค้า', d.section);
+    this.saveSales();
+    return d;
+  }
+  /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped. */
+  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
+    const year = opts.year || beYear();
+    const seen = new Set<number>();
+    let added = 0, skipped = 0;
+    ids.forEach((id) => {
+      const c = this.company(id);
+      if (!c || seen.has(c.id)) return;
+      seen.add(c.id);
+      if (this.dealsOf(c.id).some((d) => d.year === year)) {
+        skipped++;
+        return;
+      }
+      this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) });
+      added++;
+    });
+    return { added, skipped };
+  }
+  updateDeal(id: string, patch: Partial<Deal>) {
+    const d = this.sales.deals[id];
+    if (!d) return;
+    const n: Deal = { ...d, ...patch, id };
+    if ('forecast' in patch && patch.forecast !== d.forecast) delete n.fcDoc; // a typed amount replaces the document's
+    if (patch.jobStatus === 'closed' && d.jobStatus !== 'closed') n.closedDate = n.closedDate || todayISO();
+    if (patch.jobStatus === 'open') n.closedDate = '';
+    if ('client' in patch) n.client = String(patch.client || '').trim().slice(0, 200) || d.client;
+    if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
+    const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]));
+    if (!changed.length) return;
+    this.putDeal(n);
+    const TH: Partial<Record<keyof Deal, string>> = {
+      client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
+      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+    };
+    const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
+    if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
+    this.saveSales();
+  }
+  /** Stage date + note; a note without a date gets today's date, and a later date counts as the last contact. */
+  setStep(id: string, stage: string, st: DealStep, quiet = false) {
+    const d = this.sales.deals[id];
+    if (!d) return;
+    const k = `${id}/${stage}`;
+    const n = (st.n || '').slice(0, NOTE_MAX);
+    const date = st.d || (n.trim() ? todayISO() : '');
+    const cur = this.sales.steps[k] || { d: '', n: '' };
+    if (cur.d === date && cur.n === n) return;
+    if (!date && !n.trim()) {
+      delete this.sales.steps[k];
+      this.op(keyOf.dstep(id, stage));
+    } else {
+      this.sales.steps[k] = { d: date, n };
+      this.op(keyOf.dstep(id, stage), { d: date, n });
+    }
+    if (date && date > (d.contactDate || '') && date <= todayISO()) this.putDeal({ ...d, contactDate: date });
+    if (!quiet) this.salesLog(d, 'อัปเดต ' + stage, n.trim().slice(0, 120) || isoTh(date));
+    this.saveSales();
+  }
+  /** Move a deal to another section and/or before another deal (null = end of the section). */
+  moveDeal(id: string, section: string, beforeId: string | null) {
+    const d = this.sales.deals[id];
+    if (!d) return;
+    const rows = Object.values(this.sales.deals).filter((x) => x.year === d.year && x.section === section && x.id !== id).sort((a, b) => a.order - b.order);
+    const i = beforeId ? rows.findIndex((x) => x.id === beforeId) : -1;
+    const order = i < 0 ? (rows.length ? rows[rows.length - 1].order + 1000 : Date.now()) : i === 0 ? rows[0].order - 1000 : (rows[i - 1].order + rows[i].order) / 2;
+    this.putDeal({ ...d, section, order });
+    if (section !== d.section) this.salesLog(d, 'ย้ายหมวด', `${d.section || '-'} → ${section || '-'}`);
+    this.saveSales();
+  }
+  deleteDeal(id: string) {
+    const d = this.sales.deals[id];
+    if (!d) return;
+    delete this.sales.deals[id];
+    this.op(keyOf.deal(id));
+    Object.keys(this.sales.steps).forEach((k) => {
+      if (!k.startsWith(id + '/')) return;
+      delete this.sales.steps[k];
+      this.op('dstep/' + k);
+    });
+    Object.entries(this.sales.docs).forEach(([k, doc]) => {
+      if (doc.deal !== id) return;
+      delete this.sales.docs[k];
+      this.op('ddoc/' + k);
+      this.dropDocFile(doc);
+    });
+    this.salesLog(d, 'ลบลูกค้า', d.section);
+    this.saveSales();
+  }
+  /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
+  setSalesList(name: keyof SalesCfg, items: string[]) {
+    const v = [...new Set(items.map((x) => x.trim().replace(/\//g, '-')).filter(Boolean))];
+    if (name === 'stages' && !v.length) return;
+    this.sales.cfg[name] = v;
+    this.op(keyOf.scfg(name), v.slice());
+    this.saveSales();
+  }
+  renameSection(from: string, to: string) {
+    to = to.trim();
+    if (!to || to === from) return;
+    const S = this.sales.cfg;
+    this.setSalesList('sections', S.sections.map((x) => (x === from ? to : x)));
+    if (S.sources.includes(from)) this.setSalesList('sources', S.sources.map((x) => (x === from ? to : x)));
+    Object.values(this.sales.deals).forEach((d) => {
+      if (d.section !== from && !d.source.includes(from)) return;
+      this.putDeal({ ...d, section: d.section === from ? to : d.section, source: d.source.map((x) => (x === from ? to : x)) });
+    });
+    this.saveSales();
+  }
+
+  // ---- attached documents (quotation / invoice); files go to the team's Drive, a copy stays in this browser
+  /** Script supports attachments (null = not checked yet for this connection). */
+  teamFiles: boolean | null = null;
+  fileTransport: Transport = fileFetchTransport;
+  docMsg = '';
+  private docUploading = false;
+  private docBlobKey = (docId: string) => 'docblob:' + docId;
+
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string }) {
+    const d = this.sales.deals[dealId];
+    if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
+    if (file.size > 10 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
+    const S = this.sales;
+    const id = uid();
+    const filled = (p: string) => {
+      const x = stepOf(S, dealId, p);
+      return !!(x.d || x.n.trim());
+    };
+    const stage = info.target === 'forecast' || (info.target === 'none' && info.kind === 'quotation') ? 'QUOTATION' : info.target === 'actual' ? (filled('PAY1') ? 'PAY2' : 'PAY1') : '';
+    const doc: DealDoc = {
+      id, deal: dealId, kind: info.kind, name: (file.name || 'เอกสาร').slice(0, 120), mime: file.type || 'application/octet-stream', size: file.size, fileId: '',
+      docNo: info.docNo.slice(0, 60), docDate: info.docDate, amount: info.amount, target: info.amount == null ? 'none' : info.target,
+      detected: info.detected, basis: info.basis, stage, at: new Date().toISOString(), by: this.me(),
+    };
+    // keep the file in this browser first: it is uploaded to the team's Drive in the background
+    let kept = true;
+    try {
+      await this.store.set(this.docBlobKey(id), { name: doc.name, mime: doc.mime, data: await file.arrayBuffer() });
+    } catch {
+      kept = false;
+    }
+    if (!kept) {
+      if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
+      const r = await uploadDocFile(this.fileTransport, this.teamCfg.url, this.teamCfg.key, { docId: id, name: doc.name, mime: doc.mime, blob: file });
+      doc.fileId = r.fileId;
+    }
+    S.docs[`${dealId}/${id}`] = doc;
+    this.op(keyOf.ddoc(dealId, id), { ...doc });
+    if (doc.target === 'forecast') this.putDeal({ ...S.deals[dealId], fcDoc: id });
+    if (stage && !filled(stage))
+      this.setStep(dealId, stage, { d: info.docDate && info.docDate <= todayISO() ? info.docDate : todayISO(), n: `${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}` }, true);
+    this.salesLog(d, 'แนบ' + KIND_TH[doc.kind], `${doc.name}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}`);
+    this.saveSales();
+    this.uploadDocs();
+    return doc;
+  }
+  updateDoc(dealId: string, docId: string, patch: Partial<Pick<DealDoc, 'amount' | 'target' | 'basis' | 'kind' | 'docNo' | 'docDate'>>) {
+    const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
+    if (!doc || !d) return;
+    const n = { ...doc, ...patch };
+    if (n.amount == null) n.target = 'none';
+    this.sales.docs[k] = n;
+    this.op(keyOf.ddoc(dealId, docId), { ...n });
+    if (n.target === 'forecast' && d.fcDoc !== docId) this.putDeal({ ...d, fcDoc: docId });
+    else if (n.target !== 'forecast' && d.fcDoc === docId) {
+      const nd = { ...d };
+      delete nd.fcDoc;
+      this.putDeal(nd);
+    }
+    this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
+    this.saveSales();
+  }
+  deleteDoc(dealId: string, docId: string) {
+    const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
+    if (!doc) return;
+    delete this.sales.docs[k];
+    this.op(keyOf.ddoc(dealId, docId));
+    if (d && d.fcDoc === docId) {
+      const nd = { ...d };
+      delete nd.fcDoc;
+      this.putDeal(nd);
+    }
+    this.dropDocFile(doc);
+    if (d) this.salesLog(d, 'ลบเอกสาร', doc.name);
+    this.saveSales();
+  }
+  private dropDocFile(doc: DealDoc) {
+    this.store.del(this.docBlobKey(doc.id)).catch(() => {});
+    const cfg = this.teamCfg;
+    if (doc.fileId && cfg) deleteDocFile(this.fileTransport, cfg.url, cfg.key, doc.fileId).catch(() => {});
+  }
+  /** The file itself: this browser's copy, else downloaded from the team's Drive (and kept). */
+  async docBlob(doc: DealDoc): Promise<Blob> {
+    const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer }>(this.docBlobKey(doc.id));
+    if (b) return new Blob([b.data], { type: b.mime || doc.mime });
+    const cfg = this.teamCfg;
+    if (!doc.fileId) throw new Error('ไฟล์นี้ยังอยู่ในเครื่องของคนที่แนบ ยังไม่ได้อัปโหลดขึ้น Drive ของทีม');
+    if (!cfg) throw new Error('เชื่อมต่อทีม (แท็บอัปเดตข้อมูล) ก่อน จึงจะเปิดไฟล์ใน Drive ของทีมได้');
+    const r = await downloadDocFile(this.fileTransport, cfg.url, cfg.key, doc.fileId);
+    this.store.set(this.docBlobKey(doc.id), { name: doc.name, mime: r.mime || doc.mime, data: await r.blob.arrayBuffer() }).catch(() => {});
+    return r.blob;
+  }
+  /** Documents attached in this browser that are not in the team's Drive yet. */
+  get docsWaiting() {
+    return Object.values(this.sales.docs).filter((d) => !d.fileId).length;
+  }
+  /** Upload files attached in this browser to the team's Drive (after each successful sync). */
+  async uploadDocs() {
+    const cfg = this.teamCfg;
+    if (!cfg || this.docUploading) return;
+    const todo = Object.values(this.sales.docs).filter((d) => !d.fileId);
+    if (!todo.length) return;
+    this.docUploading = true;
+    try {
+      if (this.teamFiles == null) this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, cfg.key);
+      if (!this.teamFiles) {
+        this.docMsg = 'สคริปต์ของทีมยังเป็นเวอร์ชันเก่า เอกสารจึงเก็บไว้ในเครื่องนี้ — อัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่ (ดูคู่มือ) เพื่อเก็บใน Drive ของทีม';
+        return;
+      }
+      for (const doc of todo) {
+        if (this.teamCfg !== cfg) return;
+        const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer }>(this.docBlobKey(doc.id));
+        if (!b) continue; // attached on another device
+        const r = await uploadDocFile(this.fileTransport, cfg.url, cfg.key, { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
+        const k = `${doc.deal}/${doc.id}`, cur = this.sales.docs[k];
+        if (!cur) {
+          deleteDocFile(this.fileTransport, cfg.url, cfg.key, r.fileId).catch(() => {}); // deleted meanwhile
+          continue;
+        }
+        this.sales.docs[k] = { ...cur, fileId: r.fileId };
+        this.op(keyOf.ddoc(doc.deal, doc.id), { ...this.sales.docs[k] });
+        this.saveSales();
+      }
+      this.docMsg = '';
+    } catch (e) {
+      this.docMsg = 'อัปโหลดเอกสารขึ้น Drive ไม่สำเร็จ: ' + errText(e) + ' (เก็บไว้ในเครื่องนี้ จะลองใหม่อัตโนมัติ)';
+    } finally {
+      this.docUploading = false;
+      this.emit();
+    }
+  }
+
+  // ---- import / export
+  /**
+   * Import the old Sales Tracker: its JSON backup (needs the year), or its Google Sheet downloaded as CSV /
+   * Excel. Rows get stable ids, so importing the same file again updates instead of duplicating; clients whose
+   * name matches a registry company are linked to it.
+   */
+  async importTracker(f: File, year: string): Promise<{ deals: number; linked: number; years: string[] }> {
+    const name = (f.name || '').toLowerCase();
+    let data: TrackerData[];
+    if (name.endsWith('.json')) data = [parseTrackerJson(JSON.parse(await f.text()), year)];
+    else if (name.endsWith('.csv')) data = parseTrackerSheet(parseCsv(await f.text()));
+    else if (name.endsWith('.xlsx')) data = parseTrackerSheet(await readXlsxRows(f));
+    else throw new Error('รองรับไฟล์ .json (สำรองข้อมูลจาก Sales Tracker) หรือ .csv / .xlsx (ดาวน์โหลดจาก Google Sheet ของ Sales Tracker)');
+    if (!data.length || !data.some((x) => x.clients.length)) throw new Error('ไม่พบรายการลูกค้าในไฟล์');
+    const S = this.sales, me = this.me();
+    let deals = 0, linked = 0;
+    data.forEach((t) => {
+      // lists: keep ours, add what the file has that we don't
+      (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
+        const extra = (t.cfg[k] || []).filter((x) => !S.cfg[k].includes(x));
+        if (k === 'sections') t.clients.forEach((c) => c.section && !S.cfg.sections.includes(c.section) && !extra.includes(c.section) && extra.push(c.section));
+        if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !extra.includes(p) && extra.push(p)));
+        if (extra.length) this.setSalesList(k, [...S.cfg[k], ...extra]);
+      });
+      const nth = new Map<string, number>();
+      t.clients.forEach((c, i) => {
+        const base = `${c.section}|${norm(c.client)}|${c.contactName}`;
+        const n = (nth.get(base) || 0) + 1;
+        nth.set(base, n);
+        const id = importId(t.year, c, n);
+        const g = this.byNorm.get(norm(c.client));
+        const gid = g != null && !isLocalId(g) ? this.canonical(g) : null;
+        if (gid != null) linked++;
+        const old = S.deals[id];
+        const d: Deal = {
+          ...(old || newDeal({ id, client: c.client }, me)),
+          id, year: t.year, section: c.section, gid: old?.gid ?? gid, client: c.client || old?.client || 'ลูกค้า', contactName: c.contactName, phone: c.phone, email: c.email,
+          resp: c.resp, referral: c.referral, contactDate: c.contactDate, jobStatus: c.jobStatus, closedDate: c.closedDate, forecast: c.forecast, actual: c.actual,
+          source: c.source, service: c.service, order: old?.order ?? i,
+        };
+        this.putDeal(d);
+        Object.entries(c.progress).forEach(([p, st]) => {
+          S.steps[`${id}/${p}`] = st;
+          this.op(keyOf.dstep(id, p), { ...st });
+        });
+        deals++;
+      });
+      this.salesLog({ id: '', client: '' }, 'นำเข้าจาก Sales Tracker เดิม', `ปี ${t.year} · ${t.clients.length} ราย`);
+    });
+    this.saveSales();
+    return { deals, linked, years: data.map((x) => x.year) };
+  }
+  /** CSV (opens in Excel) of a year's tracker table, like the old tracker's export. */
+  exportSalesCsv(year: string, deals: Deal[]) {
+    const S = this.sales, C = S.cfg;
+    const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'สถานะงาน', 'สถานะ']
+      .concat(C.sources.map((x) => 'SOURCE: ' + x), C.services.map((x) => 'Service: ' + x), C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']))
+      .concat(['FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ']);
+    const lines = deals.map((d, i) => {
+      const m = dealMoney(S, d), st = dealStatus(S, d);
+      const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
+      return [i + 1, d.section, d.client, d.gid != null ? this.company(d.gid)?.code || '' : '', d.contactName, d.phone, d.email, d.resp, d.referral, d.contactDate,
+        d.jobStatus === 'closed' ? 'ปิดงาน ' + (d.closedDate || '') : 'เปิด', st.overall]
+        .concat(C.sources.map((x) => (d.source.includes(x) ? '✓' : '')), C.services.map((x) => (d.service.includes(x) ? '✓' : '')))
+        .concat(C.stages.flatMap((p) => {
+          const x = stepOf(S, d.id, p);
+          return [x.d, x.n];
+        }))
+        .concat([m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | ')])
+        .map(csvCell).join(',');
+    });
+    downloadBlob(new Blob(['﻿' + [head.map(csvCell).join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' }), `Sales_Tracker_${year}_${todayISO()}.csv`);
   }
 
   // ------------------------------------------------------------------ team sync
@@ -919,10 +1366,12 @@ export class GccEngine {
   }
   /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
   private async storedShared(): Promise<SharedState> {
-    const [crm, contacts, dec] = await Promise.all([
+    const [crm, contacts, dec, sales, custom] = await Promise.all([
       this.store.get<Partial<Crm>>('crm'),
       this.store.get<Record<string, ContactEdit>>('contacts'),
       this.store.get<Record<string, string>>('dedup'),
+      this.store.get<SalesState>('sales'),
+      this.store.get<Record<string, CustomCo>>('customCos'),
     ]);
     // where this tab's own last save failed, the stored copy is older than this tab's: use this tab's
     const ok = (k: string, v: unknown) => !!v && !this.unstored.has(k);
@@ -930,6 +1379,8 @@ export class GccEngine {
       crm: ok('crm', crm) ? { ...emptyCrm(), ...crm } : this.crm,
       contacts: ok('contacts', contacts) ? contacts! : this.contacts,
       dec: ok('dedup', dec) ? dec! : this.dec,
+      sales: ok('sales', sales) ? sales! : this.sales,
+      custom: ok('customCos', custom) ? custom! : this.custom,
     };
   }
   /** Read-modify-write of a sheet's stored queue (one transaction, so tabs don't overwrite each other). */
@@ -1007,6 +1458,7 @@ export class GccEngine {
       if (gen === this.teamGen) {
         this.teamNeedKey = false;
         this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
+        this.uploadDocs();
       }
     } catch (e) {
       if (gen === this.teamGen) {
@@ -1151,12 +1603,15 @@ export class GccEngine {
       rows.forEach((r) => applyRow(s, r, noEffects()));
       return s;
     };
-    const none = { crm: emptyCrm(), contacts: {}, dec: {} };
+    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {} };
     if (fx.crm) this.store.update<Partial<Crm>>('crm', (cur) => (cur ? merged({ ...none, crm: { ...emptyCrm(), ...cur } }).crm : this.crm)).catch(() => {});
     if (fx.contacts.size || fx.contactDel)
       this.store.update<Record<string, ContactEdit>>('contacts', (cur) => (cur ? merged({ ...none, contacts: cur }).contacts : this.contacts)).catch(() => {});
     if (fx.dedup) this.store.update<Record<string, string>>('dedup', (cur) => (cur ? merged({ ...none, dec: cur }).dec : this.dec)).catch(() => {});
-    if (fx.dedup || fx.contactDel) {
+    if (fx.sales)
+      this.store.update<SalesState>('sales', (cur) => (cur ? merged({ ...none, sales: { ...emptySales(), ...cur, cfg: { ...emptyCfg(), ...cur.cfg } } }).sales : this.sales)).catch(() => {});
+    if (fx.custom) this.store.update<Record<string, CustomCo>>('customCos', (cur) => (cur ? merged({ ...none, custom: cur }).custom : this.custom)).catch(() => {});
+    if (fx.dedup || fx.contactDel || fx.custom) {
       this.rebuild(); // regroups companies / restores original contact data
     } else {
       // records are keyed by the company id they were made on; on this device that id may be an
@@ -1253,6 +1708,7 @@ export class GccEngine {
     this.unsaved = new Map();
     this.delivered = new Map();
     this.teamNeedKey = false;
+    this.teamFiles = null;
   }
   /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */
   private startTeam(now = true) {

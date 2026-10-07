@@ -40,6 +40,7 @@ export async function getDetail(ids: number[]): Promise<Detail> {
   const out: Detail = { t: [], g: [], f: [], s: [] };
   const up = await kv.get<Record<string, Record<string, unknown[][]>>>('details');
   for (const id of ids) {
+    if (id >= 900000 && !up) continue; // companies added in the app (TGO sync, by hand) have no detail files
     let d: Record<string, unknown[][]> | undefined;
     if (up) d = up[id];
     else {
@@ -208,6 +209,30 @@ export function status(c: Company, T: number, W: number) {
     : 8;
   c.hasPh = !!c.phone;
   return c;
+}
+
+/** First worksheet of an .xlsx as objects keyed by the header row (text values; Excel dates stay serial numbers). */
+export async function readXlsxRows(file: Blob): Promise<Record<string, string>[]> {
+  const { default: JSZip } = await import('jszip');
+  const zx = await JSZip.loadAsync(file);
+  const dec = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  const ssF = zx.file('xl/sharedStrings.xml');
+  const S = ssF ? [...(await ssF.async('string')).matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => dec([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''))) : [];
+  const first = Object.keys(zx.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort((a, b) => parseInt(a.replace(/\D/g, '')) - parseInt(b.replace(/\D/g, '')))[0];
+  if (!first) throw new Error('ไม่พบชีตในไฟล์ Excel');
+  const x = await zx.file(first)!.async('string');
+  const rows = [...x.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)].map((r) => {
+    const o: Record<string, string> = {};
+    for (const c of r[1].matchAll(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const t = /t="(\w+)"/.exec(c[2]);
+      let v = (/<v>([\s\S]*?)<\/v>/.exec(c[3] || '') || [])[1];
+      if (v == null) v = (/<t[^>]*>([\s\S]*?)<\/t>/.exec(c[3] || '') || [])[1];
+      if (v != null) o[c[1]] = t && t[1] === 's' ? S[+v] : dec(v);
+    }
+    return o;
+  });
+  const head = rows.shift() || {};
+  return rows.map((r) => Object.fromEntries(Object.entries(head).map(([col, h]) => [String(h).trim(), r[col] ?? ''])));
 }
 
 /* ---------- Excel importer (ฐานข้อมูลลูกค้า_GCC.xlsx) ---------- */
