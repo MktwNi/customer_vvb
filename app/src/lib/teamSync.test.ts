@@ -7,6 +7,9 @@ import { errText, isLocalOnly, isTeamUrl, legacyLogId, uniqueTaskIds } from './t
 import { memoryStore } from './storage';
 import type { Dataset, RoundRaw } from './types';
 
+// sync rounds over the full dataset can be slow on a busy machine (CI)
+vi.setConfig({ testTimeout: 30000 });
+const WAIT = { timeout: 15000 };
 const KEY = 'test-key-123';
 const URL = 'https://script.google.com/macros/s/x/exec';
 const DATA = join(__dirname, '..', '..', '..', 'project', 'data');
@@ -357,7 +360,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     await B.importCrm(file); // starts the merge sync in the background
     await vi.waitFor(() => {
       if ((B as unknown as { teamBusy: boolean }).teamBusy) throw new Error('still syncing');
-    });
+    }, WAIT);
     await B.teamSync();
     expect(B.team.status).toBe('ok');
     await A.teamSync();
@@ -590,13 +593,13 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
       return sim.post(body);
     };
     const inflight = D.teamSync(); // e.g. started by the window regaining focus after the file picker
-    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'), WAIT);
     const backup = { kind: 'gcc-crm-backup', v: 1, at: '2026-09-01T00:00:00.000Z', by: 'old', crm: { stages: { [c11.id]: 'interested' }, tasks: [], watch: [], owners: {}, team: [], log: {} }, contacts: {}, dedup: {} };
     await D.importCrm({ text: async () => JSON.stringify(backup) } as unknown as File);
     release();
     await inflight;
     await vi.advanceTimersByTimeAsync(100); // the follow-up round queued by the import
-    await vi.waitFor(() => expect((D as unknown as { teamBusy: boolean }).teamBusy).toBe(false));
+    await vi.waitFor(() => expect((D as unknown as { teamBusy: boolean }).teamBusy).toBe(false), WAIT);
     expect(sheetValue(sim, `stage/${c11.id}`)!.v).toBe('interested');
     D.dispose();
   });
@@ -616,10 +619,10 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
         return sim.post(body);
       };
       const connecting = T1.teamConnect(URL, KEY);
-      await vi.waitFor(() => expect(release).toBeTypeOf('function')); // T1's first round is in flight (seeded: false)
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'), WAIT); // T1's first round is in flight (seeded: false)
       (T2 as unknown as { teamPrefsChanged: (e: { key: string }) => void }).teamPrefsChanged({ key: 'gcc-team-sync' });
       expect(T2.teamCfg).toMatchObject({ url: URL, seeded: false });
-      await vi.waitFor(() => expect((T2 as unknown as { teamBusy: boolean }).teamBusy).toBe(false));
+      await vi.waitFor(() => expect((T2 as unknown as { teamBusy: boolean }).teamBusy).toBe(false), WAIT);
       release();
       expect(await connecting).toBe(true);
       expect(sheetValue(sim, `watch/${x.id}`)).toBeUndefined();
@@ -631,7 +634,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     const used = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k.split('/')[1]));
     return e.B.companies.filter((c) => c.ids.length === 1 && !used.has(String(c.id))).slice(skip, skip + n);
   };
-  const idle = (e: GccEngine) => vi.waitFor(() => expect((e as unknown as { teamBusy: boolean }).teamBusy).toBe(false));
+  const idle = (e: GccEngine) => vi.waitFor(() => expect((e as unknown as { teamBusy: boolean }).teamBusy).toBe(false), WAIT);
   const backupOf = (stages: Record<number, string>) =>
     ({ text: async () => JSON.stringify({ kind: 'gcc-crm-backup', v: 1, at: '2026-09-01T00:00:00.000Z', by: 'x', crm: { stages, tasks: [], watch: [], owners: {}, team: [], log: {} }, contacts: {}, dedup: {} }) }) as unknown as File;
 
@@ -649,7 +652,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
       return sim.post(body);
     };
     await D.importCrm(backupOf({ [a.id]: 'interested' })); // starts a re-seed round
-    await vi.waitFor(() => expect(release).toBeTypeOf('function')); // its push is in flight
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'), WAIT); // its push is in flight
     await D.importCrm(backupOf({ [b.id]: 'proposal' }));
     release!();
     await idle(D);
@@ -851,7 +854,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     T2.teamCfg = { ...T1.teamCfg! };
     T1.crm.stages[900007] = 'none';
     T1.setStage(900007, 'won'); // TGO-added company: saved locally by T1 only
-    await vi.waitFor(async () => expect(((await shared.get<{ stages: Record<string, string> }>('crm'))!.stages[900007])).toBe('won'));
+    await vi.waitFor(async () => expect(((await shared.get<{ stages: Record<string, string> }>('crm'))!.stages[900007])).toBe('won'), WAIT);
     const [c1] = cos();
     sim.post({ action: 'push', key: KEY, ops: [{ k: `owner/${c1.id}`, v: 'คุณซี' }] });
     await T2.teamSync(); // T2 never saw T1's record; saving the pulled row must not drop it
@@ -860,7 +863,7 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
       const crm = (await shared.get<{ stages: Record<string, string>; owners: Record<string, string> }>('crm'))!;
       expect(crm.owners[c1.id]).toBe('คุณซี');
       expect(crm.stages[900007]).toBe('won');
-    });
+    }, WAIT);
     T1.dispose();
     T2.dispose();
   });

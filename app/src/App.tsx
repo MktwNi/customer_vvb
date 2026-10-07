@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useApp, useEngineVersion } from './state';
 import { isTeamUrl } from './lib/teamSync';
-import { Banners, Header } from './components/Header';
+import { Banners, TopBar } from './components/Header';
+import { Sidebar } from './components/Sidebar';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
 import { Overview } from './tabs/Overview';
@@ -30,6 +31,9 @@ function Loading({ msg }: { msg: string }) {
 export default function App() {
   const { engine: e, ui, set } = useApp();
   useEngineVersion();
+  const [navOpen, setNavOpen] = useState(false); // full menu shown (desktop: over the icon rail; phones: drawer)
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  const toggleNav = useCallback(() => setNavOpen((o) => !o), []);
 
   useEffect(() => {
     e.load();
@@ -70,20 +74,23 @@ export default function App() {
 
   const ready = e.ready;
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Header />
-      <Banners />
-      <main style={{ flex: 1, maxWidth: 1400, width: '100%', margin: '0 auto', padding: '24px 28px 64px', display: 'flex', flexDirection: 'column', gap: 26 }}>
-        {!ready && <Loading msg={e.loadMsg} />}
-        {ready && ui.tab === 'overview' && <Overview />}
-        {ready && ui.tab === 'search' && <Search />}
-        {ready && ui.tab === 'track' && <Track />}
-        {ready && ui.tab === 'plan' && <Plan />}
-        {ready && ui.tab === 'map' && <MapTab />}
-        {ready && ui.tab === 'dedup' && <Dedup />}
-        {ready && ui.tab === 'update' && <Update />}
-        {ready && ui.tab === 'notes' && <Notes />}
-      </main>
+    <div className="shell">
+      <Sidebar open={navOpen} onToggle={toggleNav} onClose={closeNav} />
+      <div className="content">
+        <TopBar navOpen={navOpen} onMenu={() => setNavOpen(true)} />
+        <Banners />
+        <main className="main">
+          {!ready && <Loading msg={e.loadMsg} />}
+          {ready && ui.tab === 'overview' && <Overview />}
+          {ready && ui.tab === 'search' && <Search />}
+          {ready && ui.tab === 'track' && <Track />}
+          {ready && ui.tab === 'plan' && <Plan />}
+          {ready && ui.tab === 'map' && <MapTab />}
+          {ready && ui.tab === 'dedup' && <Dedup />}
+          {ready && ui.tab === 'update' && <Update />}
+          {ready && ui.tab === 'notes' && <Notes />}
+        </main>
+      </div>
       {ready && ui.sel != null && <CompanyDrawer />}
       {ready && ui.sched && <ScheduleModal />}
     </div>

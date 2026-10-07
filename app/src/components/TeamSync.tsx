@@ -171,18 +171,19 @@ export function TeamSyncCard() {
   );
 }
 
-/** Small status chip for the header; renders nothing until a team sheet is connected. */
+/** Small status chip for the top bar; renders nothing until a team sheet is connected. */
 export function TeamChip({ onClick }: { onClick: () => void }) {
   const { engine: e } = useApp();
   useEngineVersion();
   if (!e.teamCfg) return null;
   const t = e.team;
-  const [label, , dot] = TEAM_ST[t.status];
+  const [label, dot] = TEAM_ST[t.status];
+  const text = label + (t.status === 'ok' && t.last ? ' ' + hhmm(t.last) : '');
   return (
-    <button onClick={onClick} title={t.msg || 'ข้อมูลทีม'} style={{ cursor: 'pointer', height: 38, padding: '0 14px', borderRadius: 999, border: '1px solid rgba(185,200,255,.45)', background: 'rgba(4,10,60,.3)', color: '#fff', fontSize: 13.5, display: 'flex', gap: 8, alignItems: 'center' }}>
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot }} />
-      <span style={{ color: '#C9D4FF' }}>ทีม</span>
-      <span>{label}{t.status === 'ok' && t.last ? ' ' + hhmm(t.last) : ''}</span>
+    <button className="tb-btn" onClick={onClick} title={t.msg || 'ข้อมูลทีม: ' + text} aria-label={'ข้อมูลทีม: ' + text}>
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flex: 'none' }} />
+      <span className="tb-muted">ทีม</span>
+      <span className="tb-hide-sm">{text}</span>
     </button>
   );
 }

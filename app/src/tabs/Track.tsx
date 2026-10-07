@@ -123,7 +123,7 @@ export function Track() {
   return (
     <>
       <PageHead gap={12} title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
-      <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'rgba(244,246,252,.92)', backdropFilter: 'blur(8px)', margin: '-8px -8px 0', padding: '10px 8px', borderRadius: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ position: 'sticky', top: 'var(--topbar-h)', zIndex: 5, background: 'rgba(244,246,252,.92)', backdropFilter: 'blur(8px)', margin: '-8px -8px 0', padding: '10px 8px', borderRadius: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 13, color: '#475069' }}>ตัวกรอง:</span>
         {chips.map((c) => (
           <button key={c.label} onClick={() => set(c.p)} style={{ cursor: 'pointer', height: 32, padding: '0 8px 0 14px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' }}>
