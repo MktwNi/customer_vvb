@@ -37,6 +37,13 @@ const ERR_TH: Record<string, string> = {
   no_team_key: 'สคริปต์ยังไม่มีรหัสทีม (TEAM_KEY อย่างน้อย 8 ตัวอักษร) — ตั้งรหัสแล้วกด Deploy → Manage deployments → Edit → New version',
   busy: 'ชีตกำลังบันทึกข้อมูลของคนอื่นอยู่ จะลองใหม่อัตโนมัติ',
   too_many_ops: 'ส่งข้อมูลครั้งละมากเกินไป',
+  // attached documents (teamFiles.ts)
+  file_too_large: 'ไฟล์ใหญ่เกิน 10 MB',
+  bad_file_type: 'รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)',
+  empty_file: 'ไฟล์ว่างเปล่า (0 ไบต์) — เลือกไฟล์อีกครั้ง',
+  not_found: 'ไม่พบไฟล์ในโฟลเดอร์เอกสารของทีม',
+  unknown_action: 'สคริปต์ของทีมยังเป็นเวอร์ชันเก่า — อัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่ เพื่อเปิดใช้การแนบเอกสาร',
+  drive_permission: 'หัวหน้าทีมยังไม่ได้อนุญาตให้สคริปต์ใช้ Google Drive — เปิด Apps Script กด Run ฟังก์ชัน setup แล้วกด Allow',
 };
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and

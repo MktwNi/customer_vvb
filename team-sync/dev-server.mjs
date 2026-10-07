@@ -1,6 +1,7 @@
 // Local stand-in for the Apps Script web app: serves the real Code.gs (via sim.mjs) over HTTP
-// with the same CORS behaviour, for development and end-to-end tests.
-//   node team-sync/dev-server.mjs [port] [teamKey]
+// with the same CORS behaviour, for development and end-to-end tests. Attached documents are
+// kept in the simulator's in-memory Drive (gone when the server stops).
+//   node team-sync/dev-server.mjs [port] [teamKey]      (port 0 = any free port)
 import { createServer } from 'node:http';
 import { createGasSim } from './sim.mjs';
 
@@ -8,7 +9,7 @@ const port = +(process.argv[2] || 8787);
 const key = process.argv[3] || 'test-key-123';
 const sim = createGasSim({ teamKey: key });
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   const headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
   if (req.method === 'OPTIONS') {
     res.writeHead(204, { ...headers, 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type' });
@@ -18,16 +19,18 @@ createServer((req, res) => {
     res.writeHead(200, headers);
     return res.end(JSON.stringify(sim.get()));
   }
-  let body = '';
-  req.on('data', (c) => (body += c));
+  // decode once at the end: a multi-byte (Thai) character may be split across chunks of a large upload
+  const chunks = [];
+  req.on('data', (c) => chunks.push(c));
   req.on('end', () => {
     let out;
     try {
-      out = sim.post(body);
+      out = sim.post(Buffer.concat(chunks).toString('utf8'));
     } catch (e) {
       out = { ok: false, error: String(e.message || e) };
     }
     res.writeHead(200, headers);
     res.end(JSON.stringify(out));
   });
-}).listen(port, () => console.log(`team-sync dev server on http://localhost:${port} (key: ${key})`));
+});
+server.listen(port, () => console.log(`team-sync dev server on http://localhost:${server.address().port} (key: ${key})`));
