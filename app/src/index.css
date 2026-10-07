@@ -386,17 +386,17 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .sd-hello{display:flex;flex-direction:column;gap:4px;min-width:0}
 .sd-hello h3{margin:0;font-size:26px;font-weight:500;line-height:1.25;color:var(--ink)}
 .sd-hello span{font-size:13.5px;color:#475069}
-/* headline numbers: three tiles, the main result filled */
-.sd-heroes{display:flex;gap:12px;flex-wrap:wrap}
-.sd-stat{min-width:168px;display:flex;flex-direction:column;gap:4px;padding:14px 18px 14px;border-radius:22px;background:#fff;border:1px solid #E6EBF5;box-shadow:0 12px 28px -20px rgba(16,40,120,.35)}
+/* headline numbers: no boxes, thin dividers; the main result in blue, overdue in orange */
+.sd-heroes{display:flex;flex-wrap:wrap;align-items:stretch}
+.sd-stat{min-width:150px;display:flex;flex-direction:column;gap:3px;padding:2px 26px}
+.sd-stat+.sd-stat{border-left:1px solid #DCE2EE}
+.sd-stat:last-child{padding-right:0}
 .sd-stat-l{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;color:#384155}
 .sd-stat-l svg{width:16px;height:16px;flex:none;color:var(--brand)}
 .sd-stat-v{font-size:13px;color:#475069}
-.sd-stat-v b{font-size:36px;font-weight:600;line-height:1.05;color:var(--ink);letter-spacing:-.01em}
+.sd-stat-v b{font-size:40px;font-weight:600;line-height:1.05;color:var(--ink);letter-spacing:-.01em}
 .sd-stat small{font-size:12px;color:#5E6680}
-.sd-stat.pri{background:linear-gradient(135deg,#1745B8,#1F5BD8);border-color:transparent;box-shadow:0 16px 30px -18px rgba(31,91,216,.9)}
-.sd-stat.pri .sd-stat-l,.sd-stat.pri .sd-stat-l svg,.sd-stat.pri .sd-stat-v,.sd-stat.pri .sd-stat-v b,.sd-stat.pri small{color:#fff}
-.sd-stat.warn{border-color:#F3C9B4;background:#FFF7F2}
+.sd-stat.pri .sd-stat-v b{color:var(--brand)}
 .sd-stat.warn .sd-stat-l svg,.sd-stat.warn .sd-stat-v b{color:#B2440F}
 .sd-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sd-filters .sx-sel{width:auto;max-width:100%;height:38px;border-radius:999px;font-size:13px;background-color:#fff}
@@ -523,9 +523,10 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 @container (max-width:640px){
   .sd-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "act" "ring" "win" "follow" "week" "acc"}
   .sd-hello h3{font-size:22px}
-  .sd-heroes{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-  .sd-stat{min-width:0;padding:12px 12px;border-radius:18px}
-  .sd-stat-v b{font-size:28px}
+  .sd-heroes{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .sd-stat{min-width:0;padding:2px 12px}
+  .sd-stat:first-child{padding-left:0}
+  .sd-stat-v b{font-size:30px}
   .sd-stat small{display:none}
   .sd-stage{min-width:calc(50% - 4px)}
   .sd-top{min-height:0}
