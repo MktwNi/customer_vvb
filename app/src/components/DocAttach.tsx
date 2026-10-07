@@ -5,10 +5,10 @@ import { norm } from '../lib/core';
 import { KIND_TH, fmtMoney, money, type Deal, type DealDoc, type DocKind, type DocTarget } from '../lib/sales';
 import type { DocFacts } from '../lib/docExtract';
 import { Modal } from '../tabs/Sales';
+import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { Notice, inputStyle, labelCol, selectStyle } from './ui';
 
 const small: CSSProperties = { cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 13 };
-const ACCEPT = '.pdf,application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif';
 const defaultTarget = (k: DocKind): DocTarget => (k === 'quotation' ? 'forecast' : k === 'invoice' ? 'actual' : 'none');
 
 /** Two names refer to the same company? (ignores company-type words and punctuation) */
@@ -49,8 +49,12 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     setFacts(null);
     setReadErr('');
     setSaving('');
-    if (f.size > 10 * 1024 * 1024) {
+    if (f.size > DOC_MAX_BYTES) {
       setReadErr('ไฟล์ใหญ่เกิน 10 MB');
+      return;
+    }
+    if (!docMime(f)) {
+      setReadErr('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
       return;
     }
     setFile(f);
@@ -114,7 +118,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     <Modal title={`แนบ${KIND_TH[kind]} · ${deal.client}`} onClose={onClose} width={620}>
       <label style={{ ...labelCol, gap: 8 }}>
         เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)
-        <input type="file" accept={ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 13.5 }} />
+        <input type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 13.5 }} />
       </label>
       {prog && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -21,7 +21,7 @@ import {
   parseTrackerJson, parseTrackerSheet, stepOf,
   type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
-import { deleteDocFile, downloadDocFile, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1120,7 +1120,9 @@ export class GccEngine {
   async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string }) {
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
-    if (file.size > 10 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
+    if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
+    const mime = docMime({ name: file.name || '', type: file.type || '' });
+    if (!mime) throw new Error('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
     const S = this.sales;
     const id = uid();
     const filled = (p: string) => {
@@ -1129,7 +1131,7 @@ export class GccEngine {
     };
     const stage = info.target === 'forecast' || (info.target === 'none' && info.kind === 'quotation') ? 'QUOTATION' : info.target === 'actual' ? (filled('PAY1') ? 'PAY2' : 'PAY1') : '';
     const doc: DealDoc = {
-      id, deal: dealId, kind: info.kind, name: (file.name || 'เอกสาร').slice(0, 120), mime: file.type || 'application/octet-stream', size: file.size, fileId: '',
+      id, deal: dealId, kind: info.kind, name: (file.name || 'เอกสาร').slice(0, 120), mime, size: file.size, fileId: '',
       docNo: info.docNo.slice(0, 60), docDate: info.docDate, amount: info.amount, target: info.amount == null ? 'none' : info.target,
       detected: info.detected, basis: info.basis, stage, at: new Date().toISOString(), by: this.me(),
     };

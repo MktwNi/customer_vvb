@@ -233,6 +233,26 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     expect(Object.values(B.sales.docs).find((x) => x.id === doc.id)).toMatchObject({ amount: 107000, docNo: 'QT-2569-001' });
   });
 
+  it('attached files go to the team\'s Drive after a sync and open in another browser', async () => {
+    A.fileTransport = B.fileTransport = async (_u, body) => sim.post(body);
+    const d = A.addDeal({ client: 'ลูกค้าแนบไฟล์', section: 'Partner', year: '2569' });
+    const bytes = new Uint8Array(3000).map((_, i) => (i * 7) % 256);
+    const file = Object.assign(new Blob([bytes], { type: '' }), { name: 'INV-0099.pdf' }); // no type from the browser
+    const doc = await A.attachDoc(d.id, file, { kind: 'invoice', amount: 53500, target: 'actual', basis: 'total', detected: 53500, docNo: 'INV-0099', docDate: '' });
+    expect(doc.mime).toBe('application/pdf');
+    expect(A.sales.steps[`${d.id}/PAY1`].n).toContain('53,500');
+    await A.teamSync();
+    await vi.waitFor(() => expect(A.sales.docs[`${d.id}/${doc.id}`].fileId).not.toBe(''), WAIT);
+    await A.teamSync(); // sends the record that now carries the Drive file id
+    await B.teamSync();
+    const meta = B.sales.docs[`${d.id}/${doc.id}`];
+    expect(meta.fileId).toBe(A.sales.docs[`${d.id}/${doc.id}`].fileId);
+    expect(new Uint8Array(await (await B.docBlob(meta)).arrayBuffer())).toEqual(bytes);
+    expect(dealMoney(B.sales, B.sales.deals[d.id])).toMatchObject({ actual: 53500, acConfirmed: true });
+    B.deleteDoc(d.id, doc.id); // removes the Drive file too
+    await vi.waitFor(() => expect(sim.post({ action: 'file', key: KEY, fileId: meta.fileId }).error).toBe('not_found'), WAIT);
+  });
+
   it('imports the old tracker backup, links known companies, and re-importing does not duplicate', async () => {
     const [c] = cos().slice(5);
     const backup = { sources: ['TGO'], services: ['CFO'], progress: ['CALL1', 'CLOSED DEAL'], rows: [{ type: 'section', name: 'งานเก่า' }, { type: 'client', client: c.name, resp: 'เอ', progress: { CALL1: { d: '2026-09-01', n: '<b>นัดแล้ว</b>' } } }, { type: 'client', client: 'ไม่มีในทะเบียนแน่นอน' }] };
