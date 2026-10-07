@@ -115,3 +115,5 @@ a{color:#1A3FE0}a:hover{color:#0A1A86}
 .sl-input{font-family:inherit}
 .sl-input:hover,.sl-input:focus{border-color:#D5DBEA!important;background:#fff!important}
 @media (max-width:560px){.sl-steprow{grid-template-columns:1fr!important}}
+.sl-ftoggle{display:none}
+@media (max-width:760px){.sl-ftoggle{display:inline-block}.sl-filters:not(.open)>select{display:none}}

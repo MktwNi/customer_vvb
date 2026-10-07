@@ -259,9 +259,13 @@ function Filters({ S, deals }: { S: SalesState; deals: Deal[] }) {
   const uniq = (k: 'resp' | 'referral') => [...new Set(deals.map((d) => d[k] || '(ไม่ระบุ)'))].sort();
   const sel = { ...selectStyle, height: 36, fontSize: 13 };
   const any = Object.values(F).some(Boolean);
+  const nSet = Object.entries(F).filter(([k, v]) => k !== 'q' && v).length;
+  // phones: the selects fold behind one button (they would take half the screen)
+  const [more, setMore] = useState(false);
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div className={'sl-filters' + (more ? ' open' : '')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
       <input value={F.q || ''} onChange={(ev) => up({ q: ev.target.value })} placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต" aria-label="ค้นหา" style={{ ...inputStyle, height: 36, flex: '1 1 220px', minWidth: 0 }} />
+      <button className="sl-ftoggle" onClick={() => setMore(!more)} aria-expanded={more} style={{ ...small, height: 36 }}>ตัวกรอง{nSet ? ` (${nSet})` : ''} {more ? '▴' : '▾'}</button>
       <select value={F.source || ''} onChange={(ev) => up({ source: ev.target.value })} style={sel} aria-label="SOURCE"><Opts all="SOURCE: ทั้งหมด" options={S.cfg.sources.map((x) => ({ v: x, label: x }))} /></select>
       <select value={F.service || ''} onChange={(ev) => up({ service: ev.target.value })} style={sel} aria-label="Services"><Opts all="Services: ทั้งหมด" options={S.cfg.services.map((x) => ({ v: x, label: x }))} /></select>
       <select value={F.resp || ''} onChange={(ev) => up({ resp: ev.target.value })} style={sel} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: x }))} /></select>
