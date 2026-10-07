@@ -158,7 +158,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 13.5, color: '#475069' }}>{prog.msg}</span>
           <span style={{ height: 6, background: '#EEF1F8', borderRadius: 999, overflow: 'hidden' }}>
-            <span style={{ display: 'block', height: '100%', width: `${prog.pct ?? 30}%`, background: '#1A3FE0', transition: 'width .2s' }} />
+            <span style={{ display: 'block', height: '100%', width: `${prog.pct ?? 30}%`, background: '#1F5BD8', transition: 'width .2s' }} />
           </span>
           <span style={{ fontSize: 12, color: '#5E6680' }}>อ่านในเครื่องนี้ ไม่ได้ส่งไฟล์ไปที่อื่น · รูปถ่าย / สแกนใช้เวลาอ่านนานกว่า PDF (ครั้งแรกต้องโหลดตัวอ่านภาษาไทย)</span>
         </div>
@@ -166,7 +166,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
       {readErr && <Notice kind="error" role="alert">{readErr}</Notice>}
       {file && !prog && (
         <>
-          {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid #E3E7F1', background: '#F4F6FC' }} />}
+          {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid #E3E7F1', background: '#F6F8FE' }} />}
           {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
           {!isImg && docMime(file) !== 'application/pdf' && <span style={{ fontSize: 13, color: '#5E6680' }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) — เทียบยอดกับรูปในเครื่องของคุณ</span>}
           {facts && (opts.length > 0 || others.length > 0) && (
@@ -232,7 +232,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
           {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? '#8A2B12' : '#475069' }}>{saving}</span>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button onClick={onClose} style={small}>ยกเลิก</button>
-            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} style={{ ...small, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff', opacity: badAmt ? 0.5 : 1 }}>
+            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff', opacity: badAmt ? 0.5 : 1 }}>
               {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
             </button>
           </div>

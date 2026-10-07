@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion } from './state';
 import { isTeamUrl } from './lib/teamSync';
 import { Banners, TopBar } from './components/Header';
-import { Sidebar } from './components/Sidebar';
+import { MOBILE_NAV, Sidebar, WIDE_NAV, useMedia } from './components/Sidebar';
+import { PREF, prefs } from './lib/storage';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -23,7 +24,7 @@ function Loading({ msg }: { msg: string }) {
   const sk = { height: 64, borderRadius: 16, background: '#E6EAF4' };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }} aria-busy="true">
-      <div style={{ height: 210, borderRadius: 28, background: 'linear-gradient(135deg,#0D2390,#1C3FE6)', opacity: 0.25 }} />
+      <div style={{ height: 210, borderRadius: 28, background: 'linear-gradient(135deg,#1745B8,#1F5BD8)', opacity: 0.2 }} />
       <span style={{ fontSize: 14, color: '#475069' }}>{msg}</span>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>
         <div style={sk} /><div style={sk} /><div style={sk} /><div style={sk} />
@@ -36,9 +37,24 @@ function Loading({ msg }: { msg: string }) {
 export default function App() {
   const { engine: e, ui, set } = useApp();
   useEngineVersion();
-  const [navOpen, setNavOpen] = useState(false); // full menu shown (desktop: over the icon rail; phones: drawer)
+  const mobile = useMedia(MOBILE_NAV);
+  const wide = useMedia(WIDE_NAV);
+  // wide screens keep the full menu docked unless folded to the icon rail (remembered per browser)
+  const [pinned, setPinned] = useState(() => prefs.getRaw(PREF.nav) !== 'rail');
+  const docked = !mobile && wide && pinned;
+  const [navOpen, setNavOpen] = useState(false); // full menu slid out (over the icon rail; phones: drawer)
+  const open = navOpen && !docked;
+  // a slid-out menu doesn't survive a change of layout (it would reappear when coming back)
+  useEffect(() => setNavOpen(false), [mobile, wide]);
   const closeNav = useCallback(() => setNavOpen(false), []);
-  const toggleNav = useCallback(() => setNavOpen((o) => !o), []);
+  const toggleNav = useCallback(() => {
+    if (!wide || mobile) return setNavOpen((o) => !o);
+    setNavOpen(false);
+    setPinned((p) => {
+      prefs.set(PREF.nav, p ? 'rail' : 'dock');
+      return !p;
+    });
+  }, [wide, mobile]);
 
   useEffect(() => {
     e.load();
@@ -86,26 +102,35 @@ export default function App() {
   }, [set]);
 
   const ready = e.ready;
+  // once loaded, Page Down / Space scroll the page straight away (on desktop the content scrolls inside
+  // the window, so it must hold the focus rather than the document)
+  useEffect(() => {
+    if (ready && !mobile && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
+  }, [ready, mobile]);
   return (
-    <div className="shell">
-      <Sidebar open={navOpen} onToggle={toggleNav} onClose={closeNav} />
-      <div className="content">
-        <TopBar navOpen={navOpen} onMenu={() => setNavOpen(true)} />
-        <Banners />
-        <main className="main">
-          {!ready && <Loading msg={e.loadMsg} />}
-          <ErrorBoundary resetKey={ui.tab}>
-            {ready && ui.tab === 'overview' && <Overview />}
-            {ready && ui.tab === 'sales' && <Sales />}
-            {ready && ui.tab === 'search' && <Search />}
-            {ready && ui.tab === 'track' && <Track />}
-            {ready && ui.tab === 'plan' && <Plan />}
-            {ready && ui.tab === 'map' && <MapTab />}
-            {ready && ui.tab === 'dedup' && <Dedup />}
-            {ready && ui.tab === 'update' && <Update />}
-            {ready && ui.tab === 'notes' && <Notes />}
-          </ErrorBoundary>
-        </main>
+    <div className={'shell' + (docked ? ' docked' : '')}>
+      <div className="frame">
+        <TopBar navOpen={open} docked={docked} onMenu={() => setNavOpen(true)} onToggle={toggleNav} />
+        <div className="frame-body">
+          <Sidebar open={open} docked={docked} mobile={mobile} onClose={closeNav} />
+          <div className="content" id="scroller" tabIndex={-1} role="region" aria-labelledby="page-title">
+            <Banners />
+            <main className="main">
+              {!ready && <Loading msg={e.loadMsg} />}
+              <ErrorBoundary resetKey={ui.tab}>
+                {ready && ui.tab === 'overview' && <Overview />}
+                {ready && ui.tab === 'sales' && <Sales />}
+                {ready && ui.tab === 'search' && <Search />}
+                {ready && ui.tab === 'track' && <Track />}
+                {ready && ui.tab === 'plan' && <Plan />}
+                {ready && ui.tab === 'map' && <MapTab />}
+                {ready && ui.tab === 'dedup' && <Dedup />}
+                {ready && ui.tab === 'update' && <Update />}
+                {ready && ui.tab === 'notes' && <Notes />}
+              </ErrorBoundary>
+            </main>
+          </div>
+        </div>
       </div>
       {ready && ui.deal && (
         <ErrorBoundary resetKey={ui.deal}>

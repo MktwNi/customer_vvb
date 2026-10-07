@@ -12,7 +12,7 @@ import { heroGrad, inputStyle, labelCol, selectStyle } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
-const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#2A4BE0' };
+const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#1F5BD8' };
 const chip = (on: boolean, c: [string, string]): CSSProperties => ({ cursor: 'pointer', fontSize: 12.5, padding: '4px 11px', borderRadius: 999, border: `1.5px solid ${on ? c[1] : '#D5DBEA'}`, background: on ? c[0] : '#fff', color: on ? c[1] : '#475069' });
 const small: CSSProperties = { cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 12.5 };
 const TARGET_TH = { forecast: 'นับเป็น Forecast', actual: 'นับเป็น Actual', none: 'ไม่นับยอด' };
@@ -57,7 +57,7 @@ export function StepEditor({ dealId, stage, onClose }: { dealId: string; stage: 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         {(st.d || st.n) && <button onClick={() => save('', '')} style={{ ...small, color: '#8A2B12' }}>ล้างขั้นนี้</button>}
         <button onClick={onClose} style={small}>ยกเลิก</button>
-        <button onClick={() => save()} style={{ ...small, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff' }}>บันทึก</button>
+        <button onClick={() => save()} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>บันทึก</button>
       </div>
     </Modal>
   );
@@ -106,7 +106,7 @@ function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: st
           onSave(v);
         }}
         onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()}
-        style={{ ...inputStyle, ...(readOnly ? { background: '#F4F6FC', color: '#475069' } : {}) }}
+        style={{ ...inputStyle, ...(readOnly ? { background: '#F6F8FE', color: '#475069' } : {}) }}
       />
       {err && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>{err}</span>}
     </label>
@@ -223,7 +223,7 @@ function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           <label style={labelCol}>นับเป็น<select name="target" defaultValue={doc.target} style={selectStyle}><option value="forecast">Forecast</option><option value="actual">Actual</option><option value="none">ไม่นับยอด</option></select></label>
           <label style={labelCol}>ประเภท<select name="kind" defaultValue={doc.kind} style={selectStyle}>{(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}</select></label>
           <label style={labelCol}>เลขที่เอกสาร<input name="docNo" defaultValue={doc.docNo} style={inputStyle} /></label>
-          <button type="submit" style={{ ...small, height: 40, background: '#0A1A86', borderColor: '#0A1A86', color: '#fff' }}>บันทึก</button>
+          <button type="submit" style={{ ...small, height: 40, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>บันทึก</button>
         </form>
       )}
     </div>
@@ -264,17 +264,17 @@ export function DealPanel() {
   return (
     <>
       <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.38)', zIndex: 38 }} />
-      <aside ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={d.client} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(720px,100vw)', background: '#F4F6FC', zIndex: 39, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
-        <div style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <aside ref={ref} className="panel" tabIndex={-1} role="dialog" aria-modal="true" aria-label={d.client} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(720px,100vw)', background: '#F6F8FE', zIndex: 39, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
+        <div className="hero" style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-            <span style={{ fontSize: 13, color: '#C9D4FF' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
+            <span style={{ fontSize: 13, color: '#fff' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>
-              <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 18 }}>×</button>
+              <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>
+              <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
           <input key={d.client} defaultValue={d.client} aria-label="ชื่อลูกค้า" onBlur={(ev) => ev.target.value.trim() && ev.target.value !== d.client && up({ client: ev.target.value })} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={{ fontSize: 22, fontWeight: 500, background: 'transparent', border: 0, borderBottom: '1px dashed rgba(255,255,255,.35)', color: '#fff', padding: '2px 0', fontFamily: 'inherit' }} />
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#DCE6FF' }}>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#fff' }}>
             <span>สถานะ <b style={{ fontWeight: 500, color: '#fff' }}>{st.overall}</b></span>
             <span>Forecast <b style={{ fontWeight: 500, color: '#fff' }}>{m.forecast != null ? fmtMoney(m.forecast) : '—'}</b>{m.fcConfirmed ? ' ✓' : ''}</span>
             <span>Actual <b style={{ fontWeight: 500, color: '#fff' }}>{m.actual != null ? fmtMoney(m.actual) : '—'}</b>{m.acConfirmed ? ' ✓' : ''}</span>
@@ -324,7 +324,7 @@ export function DealPanel() {
           <div style={box}>
             <span style={kicker}>SOURCE (ช่องทาง)</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {C.sources.map((x) => <button key={x} aria-pressed={d.source.includes(x)} onClick={() => toggle('source', x)} style={chip(d.source.includes(x), ['#E6ECFD', '#1A2FB0'])}>{d.source.includes(x) ? '✓ ' : ''}{x}</button>)}
+              {C.sources.map((x) => <button key={x} aria-pressed={d.source.includes(x)} onClick={() => toggle('source', x)} style={chip(d.source.includes(x), ['#E6ECFD', '#1745B8'])}>{d.source.includes(x) ? '✓ ' : ''}{x}</button>)}
             </div>
             <span style={kicker}>Services (บริการ)</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -341,7 +341,7 @@ export function DealPanel() {
                 <span style={{ fontSize: 12, color: fcDoc ? '#14633F' : '#6B4100', lineHeight: 1.5 }}>
                   {fcDoc ? `✓ จาก${KIND_TH[fcDoc.kind]}${fcDoc.docNo ? ' ' + fcDoc.docNo : ''} · พิมพ์ยอดใหม่เพื่อใช้แทน` : m.fcOverride ? 'ใช้ยอดที่พิมพ์ (ยังไม่ได้ยืนยันด้วยเอกสาร) ' : m.forecast != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}
                   {m.fcOverride && fcLatest && (
-                    <button onClick={() => up({ forecast: null })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', textDecoration: 'underline', fontSize: 12, padding: 0 }}>
+                    <button onClick={() => up({ forecast: null })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', textDecoration: 'underline', fontSize: 12, padding: 0 }}>
                       ใช้ยอดจาก{KIND_TH[fcLatest.kind]} {fmtMoney(fcLatest.amount)} บาทแทน
                     </button>
                   )}

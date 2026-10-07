@@ -1,10 +1,12 @@
-import { useDeferredValue, useMemo, type CSSProperties } from 'react';
-import { useApp, useEngineVersion, useNarrow } from '../state';
-import { CONFIG, CST, FEEDS, GCOL, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
+import { CONFIG, CST, FEEDS, GCOL, GDESC, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
 import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
 import type { Cert, Company } from '../lib/types';
-import { Opts, Pager, SrcTags, card, tabular } from '../components/ui';
+import { Opts, Pager, SrcTags, card, heroGrad, tabular } from '../components/ui';
+import { Icon } from '../components/icons';
+import { PREF, prefs } from '../lib/storage';
 
 const empty = (text: string, boxed?: boolean) => (
   <div style={boxed ? { padding: 32, textAlign: 'center', color: '#475069', background: '#fff', borderRadius: 18 } : { padding: 40, textAlign: 'center', color: '#475069' }}>{text}</div>
@@ -14,6 +16,14 @@ export function Search() {
   const { engine: e, ui, set, setF, open } = useApp();
   const v = useEngineVersion();
   const narrow = useNarrow();
+  // the filter grid starts folded (the chosen filters show as tags) until opened; remembered per browser
+  const [filtersOpen, setFiltersOpen] = useState(() => prefs.getRaw(PREF.searchFilters) === 'open');
+  const toggleFilters = () => {
+    prefs.set(PREF.searchFilters, filtersOpen ? 'closed' : 'open');
+    setFiltersOpen(!filtersOpen);
+  };
+  const ftoggleRef = useRef<HTMLButtonElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
   const s = ui.f;
   // Typing only defers the query; memo on the other filter fields (not the `s` object, which
   // changes identity on every keystroke) so the urgent render reuses the previous result.
@@ -69,6 +79,21 @@ export function Search() {
   if (s.cFy) activeChips.push({ label: 'ปีที่ยื่น ' + s.cFy, p: { cFy: '' } });
   if (s.cProv) activeChips.push({ label: 'จังหวัด (TGO): ' + s.cProv, p: { cProv: '' } });
   const hasFilter = Object.keys(CLEAR_FILTERS).some((k) => s[k as keyof Filters] !== '');
+  const nSel = selects.filter(([, k]) => s[k] !== '').length;
+  // screen readers hear the count once typing / filtering settles, not on every keystroke
+  const [said, setSaid] = useState('');
+  const sayNow = `${fmtN(F.out.length)} ${s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}`;
+  useEffect(() => {
+    const t = setTimeout(() => setSaid(sayNow), 800);
+    return () => clearTimeout(t);
+  }, [sayNow]);
+  // phones scroll the chips sideways: keep the chosen group in view (e.g. when another page set it)
+  useEffect(() => {
+    const r = chipsRef.current, a = r?.querySelector<HTMLElement>('[aria-pressed=true]');
+    if (!r || !a) return;
+    const ar = a.getBoundingClientRect(), rr = r.getBoundingClientRect();
+    if (ar.left < rr.left || ar.right > rr.right) r.scrollLeft += ar.left - rr.left - 6;
+  }, [s.tgt]);
   const sortOpts = s.view === 'cert'
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
@@ -78,7 +103,7 @@ export function Search() {
     return { star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => e.toggleWatch(id) };
   };
   const rndPill = (c: Company) =>
-    c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1A2FB0' } : null;
+    c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1745B8' } : null;
   const cfoView = (c: Company) => {
     const [t, fg] = CST[c.cfoSt];
     return { t, fg, sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' };
@@ -86,65 +111,131 @@ export function Search() {
   const contactOf = (c: Company) => (c.phone ? c.phone.split('|')[0].trim() : c.web ? c.web.replace(/^https?:\/\//, '') : '—');
   const go = (p: number) => {
     set({ page: p });
-    window.scrollTo(0, 0);
+    scrollTop();
   };
-  const sel: CSSProperties = { height: 42, borderRadius: 12, padding: '0 10px', fontSize: 14, color: '#0E1430' };
 
-  const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 140px 160px 80px minmax(0,1.2fr)';
-  const ctCols = '32px 160px minmax(0,2.2fr) minmax(0,1fr) 110px 150px 120px';
+  const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 120px 140px 72px minmax(0,1.2fr)';
+  const ctCols = '32px 160px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 120px';
 
   return (
     <>
-      <section style={{ ...card, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', background: '#E6ECFD', borderRadius: 999, padding: 4, gap: 2 }}>
-            {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
-              <button key={k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })} style={{ cursor: 'pointer', border: 0, height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14, background: s.view === k ? '#0A1A86' : 'transparent', color: s.view === k ? '#fff' : '#1A2FB0' }}>{label}</button>
-            ))}
-          </div>
-          <input value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" style={{ flex: 1, minWidth: 260, height: 48, border: '1.5px solid #D5DBEA', borderRadius: 14, padding: '0 16px', fontSize: 15, color: '#0E1430', background: '#fff', outline: 'none' }} />
-          <button onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)} style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 14 }}>ส่งออก CSV</button>
-          <button onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน" style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: 0, background: '#0A1A86', color: '#fff', fontSize: 14 }}>+ เพิ่มลูกค้าใหม่</button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {tgtChips.map((c) => (
-            <button key={c.label} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })} style={{ cursor: 'pointer', height: 34, padding: '0 12px', borderRadius: 999, border: `1.5px solid ${c.act ? '#0A1A86' : '#D5DBEA'}`, background: c.act ? '#0A1A86' : '#fff', color: c.act ? '#fff' : '#0E1430', fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span>{c.label}</span>
-              <span style={{ opacity: 0.75, ...tabular }}>{fmtN(c.n)}</span>
+      <section className="sx" style={card}>
+        <div className="sx-band hero" style={{ background: heroGrad }}>
+          <h2 className="sr-only">ค้นหาลูกค้า</h2>
+          <div className="sx-row">
+            <div className="sx-toggle" role="group" aria-label="ค้นหาจาก">
+              {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  aria-pressed={s.view === k}
+                  // certificates have no "ยังไม่มี CFO" status: don't carry that filter over (it would hide everything)
+                  onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default', ...(k === 'cert' && s.cfo === 'none' ? { cfo: '' } : {}) })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="sx-input">
+              <Icon name="search" />
+              <input id="search-q" value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" />
+              {s.q && (
+                <button className="sx-clear" onClick={() => { setF({ q: '' }); document.getElementById('search-q')?.focus(); }} aria-label="ล้างคำค้น">
+                  <Icon name="close" />
+                </button>
+              )}
+            </div>
+            <button className="sx-btn sx-ghost" onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)}>
+              <Icon name="download" />
+              ส่งออก CSV
             </button>
-          ))}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '10px 12px' }}>
-          {selects.map(([label, k, options]) => {
-            const val = s[k] as string;
-            const on = val !== '';
-            return (
-              <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
-                {label}
-                <select value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)} style={{ ...sel, border: `1.5px solid ${on ? '#1A3FE0' : '#D5DBEA'}`, background: on ? '#EEF2FF' : '#fff' }}>
-                  <Opts options={options} all="ทั้งหมด" />
-                </select>
-              </label>
-            );
-          })}
-        </div>
-        {activeChips.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {activeChips.map((c) => (
-              <button key={c.label} onClick={() => setF(c.p)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 12.5 }}>{c.label} ×</button>
-            ))}
+            <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
+              <Icon name="plus" />
+              เพิ่มลูกค้าใหม่
+            </button>
           </div>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 15 }}>
-            <span style={{ fontWeight: 600, fontSize: 20 }}>{fmtN(F.out.length)}</span> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}{' '}
-            <span style={{ color: '#475069', fontSize: 13.5 }}>{s.view === 'cert' ? '· ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `· มีเบอร์โทร ${fmtN(F.ph)}`}</span>
-          </span>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {hasFilter && <button onClick={() => setF(CLEAR_FILTERS)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13.5, textDecoration: 'underline' }}>ล้างตัวกรอง</button>}
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#475069' }}>
+        </div>
+        <div className="sx-body">
+          <div className="sx-groups">
+            <div className="sx-groups-h">
+              <span id="sx-chips-h">กลุ่มเป้าหมาย</span>
+              <span className="sx-groups-sub">บริษัทหนึ่งอยู่ได้กลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า<span className="sx-hover-hint"> · ชี้ที่การ์ดเพื่อดูเงื่อนไข</span></span>
+            </div>
+            <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h" aria-describedby={s.tgt !== '' ? 'sx-rule' : undefined}>
+              {tgtChips.map((c) => {
+                const total = tgtChips[0].n;
+                const share = c.i == null ? (total ? 100 : 0) : total ? (c.n / total) * 100 : 0;
+                return (
+                  <button key={c.label} className="sx-chip" aria-pressed={c.act} title={c.i == null ? 'ทุกบริษัทที่ตรงกับคำค้นและตัวกรอง' : `กลุ่ม ${c.i + 1}: ${GDESC[c.i]}`} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
+                    {c.i == null ? (
+                      <span className="sx-dot sx-dot-all" aria-hidden="true"><Icon name="overview" /></span>
+                    ) : (
+                      <span className="sx-dot" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
+                    )}
+                    <span className="sx-chip-label">{c.i == null ? c.label : c.label.replace(/^\d+\. /, '')}</span>
+                    <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
+                    <span className="sx-bar" aria-hidden="true"><i style={{ width: `${share}%`, background: c.i == null ? undefined : GCOL[c.i][2] }} /></span>
+                  </button>
+                );
+              })}
+            </div>
+            {s.tgt !== '' && GDESC[+s.tgt] && (
+              <span className="sx-rule" id="sx-rule">
+                <b>{`กลุ่ม ${+s.tgt + 1}:`}</b> {GDESC[+s.tgt]}
+              </span>
+            )}
+          </div>
+          <div className="sx-filters">
+            <div className="sx-fhead">
+              <button ref={ftoggleRef} className="sx-ftoggle" aria-expanded={filtersOpen} aria-controls={filtersOpen ? 'sx-grid' : undefined} onClick={() => toggleFilters()}>
+                <Icon name="filter" />
+                ตัวกรอง
+                {nSel > 0 && <span className="sx-fcount">{fmtN(nSel)}</span>}
+                <span className="sx-chev" aria-hidden="true">▾</span>
+              </button>
+              {!filtersOpen && nSel === 0 && <span className="sx-fhint">จังหวัด · อุตสาหกรรม · สถานะ CFO · สถานะการขาย · ผู้รับผิดชอบ และอื่นๆ</span>}
+              {!filtersOpen && nSel > 0 && (
+                <div className="sx-tags">
+                  {selects.filter(([, k]) => s[k] !== '').map(([label, k, options]) => (
+                    <button key={k} className="sx-tag" onClick={() => { setF({ [k]: '' } as Partial<Filters>); ftoggleRef.current?.focus(); }}>
+                      {label}: {(options.find((o) => o.v === s[k]) || { label: String(s[k]) }).label.replace(/ \([\d,]+\)$/, '')} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+              {hasFilter && <button className="sx-reset" onClick={() => { setF(CLEAR_FILTERS); ftoggleRef.current?.focus(); }}>ล้างตัวกรองทั้งหมด</button>}
+            </div>
+            {filtersOpen && (
+              <div className="sx-grid" id="sx-grid">
+                {selects.map(([label, k, options]) => {
+                  const val = s[k] as string;
+                  return (
+                    <label key={k} className="sx-field">
+                      {label}
+                      <select className={'sx-sel' + (val !== '' ? ' on' : '')} value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)}>
+                        <Opts options={options} all="ทั้งหมด" />
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {activeChips.length > 0 && (
+            <div className="sx-tags">
+              {activeChips.map((c) => (
+                <button key={c.label} className="sx-tag" onClick={() => setF(c.p)}>{c.label} ×</button>
+              ))}
+            </div>
+          )}
+          <span className="sr-only" role="status">{said}</span>
+          <div className="sx-foot">
+            <span className="sx-total">
+              <b>{fmtN(F.out.length)}</b> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}
+              <span className="sx-sub">{s.view === 'cert' ? 'ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `มีเบอร์โทร ${fmtN(F.ph)}`}</span>
+            </span>
+            <label className="sx-sort">
               เรียงตาม
-              <select value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })} style={{ height: 38, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 13.5, background: '#fff', color: '#0E1430' }}>
+              <select className="sx-sel" value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })}>
                 <Opts options={sortOpts.map(([v, label]) => ({ v, label }))} />
               </select>
             </label>
@@ -196,7 +287,7 @@ export function Search() {
             return (
               <button key={ct.cid} onClick={() => open(ct.gid)} style={{ cursor: 'pointer', textAlign: 'left', background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, color: '#0E1430' }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 500, color: '#0A1A86' }}>{ct.cert || '—'}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <span style={{ fontSize: 12, fontWeight: 500, padding: '3px 10px', borderRadius: 999, background: bg, color: fg }}>{CST[ct.st][0]}</span>
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
@@ -210,7 +301,7 @@ export function Search() {
 
       {s.view === 'co' && !narrow && (
         <section style={{ ...card, overflowX: 'auto' }}>
-          <div style={{ minWidth: 1060 }}>
+          <div style={{ minWidth: 940 }}>
             <div style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: '13px 20px', fontSize: 12.5, color: '#475069', background: '#F7F8FC', borderBottom: '1px solid #E3E7F1' }}>
               <span /><span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ · สถานะการขาย</span>
             </div>
@@ -226,8 +317,8 @@ export function Search() {
                       <span style={{ padding: '1px 7px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
                       <span>{c.code}</span>
                       <span>{D.type[c.type]}</span>
-                      {c.set && <span style={{ fontWeight: 500, color: '#0E1F7A' }}>{c.set}</span>}
-                      {c.ids.length > 1 && <span style={{ color: '#1A3FE0' }}>รวม {c.ids.length} แถว</span>}
+                      {c.set && <span style={{ fontWeight: 500, color: '#1745B8' }}>{c.set}</span>}
+                      {c.ids.length > 1 && <span style={{ color: '#1F5BD8' }}>รวม {c.ids.length} แถว</span>}
                     </span>
                   </button>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13.5, minWidth: 0 }}>
@@ -245,7 +336,7 @@ export function Search() {
                     <span style={{ wordBreak: 'break-word' }}>{contactOf(c)}</span>
                     <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {sg[0] !== 'none' && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: sg[2], color: sg[3] }}>{sg[1]}</span>}
-                      {owner && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F4F6FC', color: '#384155' }}>{owner}</span>}
+                      {owner && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F6F8FE', color: '#384155' }}>{owner}</span>}
                     </span>
                   </span>
                 </div>
@@ -258,7 +349,7 @@ export function Search() {
 
       {s.view === 'cert' && !narrow && (
         <section style={{ ...card, overflowX: 'auto' }}>
-          <div style={{ minWidth: 1000 }}>
+          <div style={{ minWidth: 940 }}>
             <div style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: '13px 20px', fontSize: 12.5, color: '#475069', background: '#F7F8FC', borderBottom: '1px solid #E3E7F1' }}>
               <span /><span>เลขที่ใบรับรอง</span><span>องค์กร · กิจกรรม</span><span>จังหวัด</span><span>วันที่อนุมัติ</span><span>วันหมดอายุ</span><span>สถานะ</span>
             </div>
@@ -268,7 +359,7 @@ export function Search() {
               return (
                 <div key={ct.cid} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, borderBottom: '1px solid #EEF1F8', alignItems: 'center', fontSize: 13.5 }}>
                   <button onClick={st.toggle} title="ติดตาม" style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
-                  <span style={{ fontWeight: 500, color: '#0A1A86' }}>{ct.cert || '—'}</span>
+                  <span style={{ fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
                     <span style={{ fontSize: 12, color: '#475069' }}>{ct.act}</span>

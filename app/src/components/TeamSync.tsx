@@ -28,8 +28,8 @@ export function TeamSyncCard() {
   const [busy, setBusy] = useState<'' | 'key' | 'leave'>('');
   const cfg = e.teamCfg, t = e.team;
   const [label, dot] = TEAM_ST[t.status];
-  const btn: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 };
-  const ghost: CSSProperties = { ...btn, background: '#fff', color: '#0A1A86', border: '1.5px solid #0A1A86' };
+  const btn: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 };
+  const ghost: CSSProperties = { ...btn, background: '#fff', color: '#1F5BD8', border: '1.5px solid #1F5BD8' };
 
   const connect = async (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -82,7 +82,7 @@ export function TeamSyncCard() {
             เชื่อมกับ Google Sheet ของทีม แล้ว ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ เบอร์ที่แก้ รายชื่อทีม และผลตรวจข้อมูลซ้ำ จะซิงก์ระหว่างทุกเครื่องอัตโนมัติ ทันทีที่แก้ไข และดึงของคนอื่นทุก 30 วินาที
           </span>
         </div>
-        <span style={{ display: 'flex', gap: 8, alignItems: 'center', height: 32, padding: '0 12px', borderRadius: 999, background: '#F4F6FC', fontSize: 13, color: '#384155' }}>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center', height: 32, padding: '0 12px', borderRadius: 999, background: '#F6F8FE', fontSize: 13, color: '#384155' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: dot }} />
           {cfg ? label : TEAM_ST.off[0]}
           {cfg && t.status === 'ok' && t.last ? ` ${hhmm(t.last)}` : ''}
@@ -124,7 +124,7 @@ export function TeamSyncCard() {
               ['รอส่งขึ้นชีต', fmtN(e.teamPendingN) + ' รายการ'],
               ['รหัสชีตของทีม', '…' + deploymentId(cfg.url)],
             ] as const).map(([k, v]) => (
-              <div key={k} style={{ background: '#F4F6FC', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+              <div key={k} style={{ background: '#F6F8FE', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: '#475069' }}>{k}</span>
                 <span style={{ fontSize: 14.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={k === 'รหัสชีตของทีม' ? cfg.url : undefined}>{v}</span>
               </div>

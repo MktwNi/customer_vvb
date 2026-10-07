@@ -1,0 +1,81 @@
+import { useState, type CSSProperties } from 'react';
+
+/** Background colours for monogram avatars (white text on each is at least 4.5:1). */
+const SWATCH = ['#1F5BD8', '#0B6E66', '#6D4BD8', '#B4570B', '#B03A64', '#2E7D32', '#3949AB', '#0E7490'];
+
+const hash = (s: string) => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+};
+
+/** The company's own name without the legal-form words around it ("บริษัท … จำกัด (มหาชน)"). */
+export function coreName(name: string) {
+  return name
+    .replace(/\((สำนักงานใหญ่|มหาชน|ประเทศไทย|สาขา[^)]*)\)/g, ' ')
+    // longer alternatives first (ห้างหุ้นส่วนสามัญนิติบุคคล before ห้างหุ้นส่วนสามัญ, นางสาว before นาง)
+    .replace(/^\s*(บริษัท|บจก\.?|บมจ\.?|ห้างหุ้นส่วนสามัญนิติบุคคล|ห้างหุ้นส่วนจำกัด|ห้างหุ้นส่วนสามัญ|หจก\.?|โรงงาน|สหกรณ์|มูลนิธิ|สมาคม|นางสาว|นาง|นาย|น\.ส\.)\s*/, '')
+    .replace(/\s*(จำกัด|จก\.|co\.?,?\s*ltd\.?|company limited|public company limited|plc\.?|ltd\.?|limited|inc\.?)\s*$/i, '')
+    .trim();
+}
+
+/** One or two letters for the avatar: the SET symbol when listed (never cut: a cut symbol can be
+ *  another company's), else the name's first letter(s). */
+export function monogram(name: string, set?: string) {
+  if (set && set.length <= 4) return set.toUpperCase();
+  const n = coreName(name) || name;
+  const words = n.split(/\s+/).filter((w) => /[A-Za-z]/.test(w[0] || ''));
+  if (words.length && /^[A-Za-z]/.test(n)) return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
+  return Array.from(n).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '•';
+}
+
+const hostOf = (web?: string) => {
+  if (!web) return '';
+  try {
+    return new URL(/^https?:\/\//i.test(web) ? web : 'https://' + web).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * A company's picture: its website icon when it has a website (fetched by the browser from Google's
+ * favicon service, shown only if it is a real, sharp icon), otherwise a coloured monogram — the SET
+ * symbol for listed companies, else the first letter of the name. Decorative: the name is always
+ * written next to it.
+ */
+type AvatarProps = { name: string; web?: string; set?: string; size?: number; ring?: string; style?: CSSProperties };
+export function CoAvatar(p: AvatarProps) {
+  // a new website (contact edited) starts its logo check afresh
+  return <CoAvatarInner key={hostOf(p.web)} {...p} />;
+}
+function CoAvatarInner({ name, web, set, size = 36, ring, style }: AvatarProps) {
+  const host = hostOf(web);
+  const [logo, setLogo] = useState<'wait' | 'ok' | 'none'>(host ? 'wait' : 'none');
+  const full = monogram(name, set);
+  const text = size < 28 ? Array.from(full)[0] : full; // small bubbles: one readable letter
+  const bg = SWATCH[hash(coreName(name) || name) % SWATCH.length];
+  const fs = Math.round(size * (text.length > 2 ? 0.3 : text.length > 1 ? 0.36 : 0.44));
+  return (
+    <span
+      className="co-ava"
+      aria-hidden="true"
+      style={{ width: size, height: size, fontSize: fs, background: logo === 'ok' ? '#fff' : bg, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, ...style }}
+    >
+      {logo !== 'ok' && text}
+      {host && logo !== 'none' && (
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          // the service answers unknown sites with a tiny generic globe: keep the monogram then
+          onLoad={(ev) => setLogo((ev.target as HTMLImageElement).naturalWidth >= 32 ? 'ok' : 'none')}
+          onError={() => setLogo('none')}
+          // kept in the layout (not display:none) or the lazy image would never load
+          style={{ opacity: logo === 'ok' ? 1 : 0 }}
+        />
+      )}
+    </span>
+  );
+}

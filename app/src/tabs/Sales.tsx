@@ -3,12 +3,13 @@ import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
   DEAL_STAGE, KIND_TH, STAGE_TH, dealMoney, dealResult, dealStatus, docsOf, filterDeals, fmtMoney, lastContact, overdueDays, parseAmount, salesStats, sectionsFor, stepOf,
-  type Deal, type SalesFilter, type SalesState, type SalesStats,
+  type Deal, type SalesFilter, type SalesState,
 } from '../lib/sales';
-import { beYearInput, facetOptions, winRateBySource, yearOptions } from '../lib/salesUi';
+import { beYearInput, facetOptions, yearOptions } from '../lib/salesUi';
 import { useMedia } from '../components/Sidebar';
 import { Notice, Opts, PageHead, btnOutline, btnPrimary, card, inputStyle, selectStyle, tabular } from '../components/ui';
 import { StepEditor } from '../components/DealPanel';
+import { SalesDash } from './SalesDash';
 import { commitFocus, isTopDialog, useDialog } from '../components/useDialog';
 
 type Engine = ReturnType<typeof useApp>['engine'];
@@ -18,7 +19,7 @@ const RES: Record<string, [string, string, string]> = {
   YES: ['ปิดการขายได้', '#DDF5E8', '#14633F'],
   NO: ['ไม่สำเร็จ', '#FBE3DC', '#8A2B12'],
   WAIT: ['รอผล', '#FFF4DC', '#6B4100'],
-  '': ['', '#F4F6FC', '#475069'],
+  '': ['', '#F6F8FE', '#475069'],
 };
 const small: CSSProperties = { cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 12.5 };
 
@@ -74,15 +75,15 @@ export function Sales() {
         {tabs.map(([k, label, n]) => {
           const on = v === k;
           return (
-            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#0A1A86' : '#475069', borderBottom: `2.5px solid ${on ? '#0A1A86' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
               {label}
-              {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
+              {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
             </button>
           );
         })}
       </div>
       {v === 'table' && <TableView e={e} S={S} deals={shown.filter((d) => d.jobStatus === 'open')} all={shown} facets={yearDeals} today={today} />}
-      {v === 'dash' && <Dashboard S={S} deals={yearDeals} today={today} />}
+      {v === 'dash' && <SalesDash S={S} deals={yearDeals} today={today} year={ui.slYear} />}
       {v === 'closed' && <ClosedView S={S} deals={shown.filter((d) => d.jobStatus === 'closed')} facets={yearDeals} total={closedN} />}
       {v === 'log' && <LogView S={S} year={year} />}
     </>
@@ -264,7 +265,7 @@ export function Modal({ title, children, onClose, width = 520, focus }: { title:
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: `min(${width}px,94vw)`, maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 22, padding: 22, zIndex: 55, display: 'flex', flexDirection: 'column', gap: 14, outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>{title}</span>
-          <button onClick={onClose} aria-label="ปิด" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, background: '#F4F6FC', fontSize: 18, color: '#475069' }}>×</button>
+          <button onClick={onClose} aria-label="ปิด" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, background: '#F6F8FE', fontSize: 18, color: '#475069' }}>×</button>
         </div>
         {children}
       </div>
@@ -282,7 +283,7 @@ function ListsModal({ onClose }: { onClose: () => void }) {
       <span style={{ fontSize: 12.5, color: '#5E6680' }}>{hint}</span>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {C[name].map((x) => (
-          <span key={x} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, padding: '3px 4px 3px 10px', borderRadius: 999, background: '#F4F6FC', border: '1px solid #E3E7F1' }}>
+          <span key={x} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, padding: '3px 4px 3px 10px', borderRadius: 999, background: '#F6F8FE', border: '1px solid #E3E7F1' }}>
             {x}
             {name === 'sections' && (
               <button title="เปลี่ยนชื่อ" onClick={() => { const n = window.prompt('ชื่อหมวดใหม่', x); if (n) e.renameSection(x, n); }} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#475069', fontSize: 12 }}>✎</button>
@@ -418,7 +419,7 @@ function TableView({ e, S, deals, all, facets, today }: { e: Engine; S: SalesSta
             if (!list.length) return null;
             return (
               <div key={sec} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#2A4BE0', padding: '6px 2px 0' }}>{sec || 'ไม่ระบุหมวด'} · {fmtN(list.length)}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#1F5BD8', padding: '6px 2px 0' }}>{sec || 'ไม่ระบุหมวด'} · {fmtN(list.length)}</span>
                 {list.map((d) => <DealCard key={d.id} S={S} d={d} today={today} onOpen={() => set({ deal: d.id })} />)}
               </div>
             );
@@ -481,12 +482,12 @@ function SectionRows({ sec, list, collapsed, cols, onToggle, onAdd, children }: 
       <tr className="sl-sec">
         <td className="sl-sticky" colSpan={1}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={onToggle} aria-expanded={!collapsed} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#0A1A86', padding: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button onClick={onToggle} aria-expanded={!collapsed} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#1F5BD8', padding: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
               <span aria-hidden="true">{collapsed ? '▶' : '▼'}</span>
               {sec || 'ไม่ระบุหมวด'}
-              <span style={{ fontSize: 11, fontWeight: 500, minWidth: 20, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(list.length)}</span>
+              <span style={{ fontSize: 11, fontWeight: 500, minWidth: 20, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(list.length)}</span>
             </button>
-            <button onClick={onAdd} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 12.5, padding: 0 }}>+ เพิ่มในหมวดนี้</button>
+            <button onClick={onAdd} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 12.5, padding: 0 }}>+ เพิ่มในหมวดนี้</button>
           </div>
         </td>
         <td colSpan={cols - 1} />
@@ -500,7 +501,7 @@ function Chips({ d }: { d: Deal }) {
   if (!d.source.length && !d.service.length) return null;
   return (
     <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-      {d.source.map((x) => <span key={'s' + x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 999, background: '#E6ECFD', color: '#1A2FB0' }}>{x}</span>)}
+      {d.source.map((x) => <span key={'s' + x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8' }}>{x}</span>)}
       {d.service.map((x) => <span key={'v' + x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 999, background: '#DDF5F1', color: '#0B6E66' }}>{x}</span>)}
     </span>
   );
@@ -591,7 +592,7 @@ function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState
             <button onClick={() => onStep(p)} className="sl-step" title={st.n || STAGE_TH[p] || p} style={{ background: bg, color: fg }}>
               {filled ? (
                 <>
-                  {st.d && <span style={{ fontSize: 11, fontWeight: 500, color: isRes ? fg : '#1A3FE0' }}>{short(st.d)}</span>}
+                  {st.d && <span style={{ fontSize: 11, fontWeight: 500, color: isRes ? fg : '#1F5BD8' }}>{short(st.d)}</span>}
                   {st.n.trim() && <span className="sl-clamp">{st.n}</span>}
                 </>
               ) : (
@@ -640,138 +641,6 @@ function DealCard({ S, d, today, onOpen }: { S: SalesState; d: Deal; today: stri
         {od != null && <span style={{ color: '#8A2B12' }}>⏰ ค้าง {fmtN(od)} วัน</span>}
       </span>
     </button>
-  );
-}
-
-// ------------------------------------------------------------------ dashboard
-
-/** Bar list; rows at 0 are left out unless `keepZero` (the items are then already the ones to show). */
-function Bars({ title, sub, items, fmt = fmtN, unit = '', keepZero }: { title: string; sub: string; items: [string, number][]; fmt?: (n: number) => string; unit?: string; keepZero?: boolean }) {
-  const list = keepZero ? items : items.filter((x) => x[1] > 0);
-  const max = Math.max(1, ...list.map((x) => x[1]));
-  return (
-    <div style={{ ...card, borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 15, fontWeight: 500 }}>{title}</span>
-        <span style={{ fontSize: 12, color: '#5E6680' }}>{sub}</span>
-      </div>
-      {!list.length ? (
-        <span style={{ fontSize: 13, color: '#8A93AD', padding: '8px 0' }}>ยังไม่มีข้อมูล</span>
-      ) : (
-        <div role="list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {list.map(([k, v]) => (
-            <div key={k} role="listitem" title={`${k}: ${fmt(v)}${unit}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,140px) minmax(0,1fr) auto', gap: 10, alignItems: 'center', fontSize: 13 }}>
-              <span style={{ color: '#384155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
-              <span style={{ height: 12, background: '#F0F2F8', borderRadius: 4, overflow: 'hidden' }}>
-                <span style={{ display: 'block', height: '100%', width: `${Math.max(2, (v / max) * 100)}%`, background: '#1A3FE0', borderRadius: '0 4px 4px 0' }} />
-              </span>
-              <span style={{ color: '#0E1430', fontWeight: 500, ...tabular }}>{fmt(v)}{unit}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GroupTable({ title, rows }: { title: string; rows: [string, SalesStats['byResp'][string]][] }) {
-  return (
-    <div style={{ ...card, borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10, overflowX: 'auto' }}>
-      <span style={{ fontSize: 15, fontWeight: 500 }}>{title}</span>
-      <table style={{ borderCollapse: 'collapse', fontSize: 13, ...tabular }}>
-        <thead>
-          <tr style={{ color: '#475069', textAlign: 'right' }}>
-            <th style={{ textAlign: 'left', fontWeight: 500, padding: '6px 8px' }}>ชื่อ</th>
-            <th style={{ fontWeight: 500, padding: '6px 8px' }}>ลูกค้า</th>
-            <th style={{ fontWeight: 500, padding: '6px 8px' }}>Forecast</th>
-            <th style={{ fontWeight: 500, padding: '6px 8px' }}>Actual</th>
-            <th style={{ fontWeight: 500, padding: '6px 8px' }}>%</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([k, v]) => (
-            <tr key={k} style={{ borderTop: '1px solid #EEF1F8', textAlign: 'right' }}>
-              <td style={{ textAlign: 'left', padding: '6px 8px' }}>{k}</td>
-              <td style={{ padding: '6px 8px' }}>{fmtN(v.n)}</td>
-              <td style={{ padding: '6px 8px' }}>{fmtMoney(v.forecast)}</td>
-              <td style={{ padding: '6px 8px' }}>{fmtMoney(v.actual)}</td>
-              <td style={{ padding: '6px 8px' }}>{v.forecast ? Math.round((v.actual / v.forecast) * 100) + '%' : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: string }) {
-  const { set } = useApp();
-  const [f, setF] = useState({ resp: '', referral: '', month: '' });
-  const list = deals.filter((d) => (!f.resp || (d.resp || '(ไม่ระบุ)') === f.resp) && (!f.referral || (d.referral || '(ไม่ระบุ)') === f.referral) && (!f.month || lastContact(S, d, today).slice(5, 7) === f.month));
-  const st = salesStats(S, list, today);
-  const uniq = (k: 'resp' | 'referral') => [...new Set(deals.map((d) => d[k] || '(ไม่ระบุ)'))].sort();
-  const sel = { ...selectStyle, height: 36, fontSize: 13 };
-  const kpi: [string, string, string, string?][] = [
-    ['👥', fmtN(st.total), 'ลูกค้า (ตามตัวกรอง)'],
-    ['🎯', st.winRate + '%', `Win rate · ปิดได้ ÷ รู้ผลแล้ว (${fmtN(st.decided)})`],
-    ['✓', fmtN(st.yes), 'ปิดการขายได้ (YES)', '#14633F'],
-    ['✕', fmtN(st.no), 'ไม่สำเร็จ (NO)', '#8A2B12'],
-    ['…', fmtN(st.wait + st.none), 'รอผล / ยังไม่มีผล'],
-    ['฿', fmtMoney(st.forecast) || '0', `Forecast รวม · ยืนยันด้วยเอกสาร ${fmtMoney(st.fcConfirmed) || '0'}`],
-    ['฿', fmtMoney(st.actual) || '0', `Actual รวม · ยืนยันด้วยเอกสาร ${fmtMoney(st.acConfirmed) || '0'}`],
-    ['%', st.achieved + '%', 'Actual ÷ Forecast'],
-    ['⏹', fmtN(st.closed), 'ปิดงานแล้ว'],
-    ['▶', fmtN(st.open), 'งานที่ยังเปิด'],
-    ['⏰', fmtN(st.overdue), 'ค้างติดตาม (เกิน 14 วัน)', st.overdue ? '#8A2B12' : undefined],
-  ];
-  const follow = list
-    .filter((d) => d.jobStatus === 'open' && !['YES', 'NO'].includes(dealResult(S, d)))
-    .sort((a, b) => (lastContact(S, a, today) || '0').localeCompare(lastContact(S, b, today) || '0'));
-  const srcRows = Object.entries(st.bySource);
-  return (
-    <>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <select value={f.resp} onChange={(ev) => setF({ ...f, resp: ev.target.value })} style={sel} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: x }))} /></select>
-        <select value={f.referral} onChange={(ev) => setF({ ...f, referral: ev.target.value })} style={sel} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: x }))} /></select>
-        <select value={f.month} onChange={(ev) => setF({ ...f, month: ev.target.value })} style={sel} aria-label="เดือนที่ติดต่อล่าสุด"><Opts all="ติดต่อล่าสุด: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อล่าสุด ' + m }))} /></select>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
-        {kpi.map(([ic, v, l, c]) => (
-          <div key={l} style={{ ...card, borderRadius: 16, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span aria-hidden="true" style={{ width: 36, height: 36, flex: 'none', borderRadius: 10, background: '#F0F4FF', color: c || '#1A3FE0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{ic}</span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 21, fontWeight: 500, color: c || '#0E1430', ...tabular }}>{v}</span>
-              <span style={{ fontSize: 12, color: '#475069', lineHeight: 1.4 }}>{l}</span>
-            </span>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,380px),1fr))', gap: 12 }}>
-        <Bars title="Pipeline ตามขั้นตอน" sub="จำนวนลูกค้าที่มีวันที่หรือโน้ตในแต่ละขั้น" items={st.stages.map((x) => [x.name, x.n])} />
-        <Bars title="ลูกค้าตามช่องทาง" sub="SOURCE · ลูกค้าที่ติ๊กหลายช่องทางนับในทุกช่องทาง" items={srcRows.map(([k, x]) => [k, x.n])} />
-        <Bars title="ลูกค้าตามบริการ" sub="Services" items={Object.entries(st.byService)} />
-        <Bars title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ ผลรวมจึงอาจเกิน Forecast รวม" items={srcRows.map(([k, x]) => [k, x.forecast])} fmt={(n) => fmtMoney(n)} />
-        <Bars title="Win rate ตามช่องทาง" sub="ปิดได้ ÷ รู้ผลแล้ว ในแต่ละช่องทาง" items={winRateBySource(st.bySource)} unit="%" keepZero />
-        <GroupTable title="สรุปยอดตามผู้รับผิดชอบ" rows={Object.entries(st.byResp).sort((a, b) => b[1].forecast - a[1].forecast)} />
-        <GroupTable title="สรุปยอดตามแหล่งที่มา" rows={Object.entries(st.byReferral).sort((a, b) => b[1].forecast - a[1].forecast)} />
-      </div>
-      <div style={{ ...card, borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={{ fontSize: 15, fontWeight: 500 }}>รายการที่ต้องติดตาม <span style={{ fontSize: 12.5, color: '#5E6680', fontWeight: 300 }}>ยังเปิดงานและยังไม่รู้ผล · ติดต่อนานที่สุดก่อน</span></span>
-        {!follow.length && <span style={{ fontSize: 13, color: '#8A93AD' }}>ไม่มีรายการค้าง</span>}
-        {follow.slice(0, 50).map((d) => {
-          const od = overdueDays(S, d, today);
-          return (
-            <button key={d.id} onClick={() => set({ deal: d.id })} className="h-bg" style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', background: 'transparent', textAlign: 'left', padding: '8px 4px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, fontSize: 13.5 }}>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                <span style={{ color: '#0E1430' }}>{d.client}</span>
-                <span style={{ fontSize: 12, color: '#475069' }}>{[d.section, d.resp, lastContact(S, d, today) ? 'ติดต่อล่าสุด ' + isoTh(lastContact(S, d, today)) : 'ยังไม่ระบุวันที่ติดต่อ'].filter(Boolean).join(' · ')}</span>
-              </span>
-              {od != null && <span style={{ fontSize: 12, padding: '2px 9px', borderRadius: 999, background: '#FBE3DC', color: '#8A2B12', alignSelf: 'center' }}>⏰ {fmtN(od)} วัน</span>}
-            </button>
-          );
-        })}
-      </div>
-    </>
   );
 }
 

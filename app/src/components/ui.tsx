@@ -1,22 +1,22 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { tagsOf } from '../lib/constants';
 
-export const card: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 22 };
-export const heroGrad = 'linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%)';
-export const selectStyle: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' };
-export const inputStyle: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 12px', fontSize: 14 };
+export const card: CSSProperties = { background: '#fff', border: '1px solid #E6EBF5', borderRadius: 24, boxShadow: '0 1px 2px rgba(16,40,120,.04), 0 10px 28px -18px rgba(16,40,120,.22)' };
+export const heroGrad = 'linear-gradient(125deg,#1745B8 0%,#1F5BD8 62%,#2462DD 100%)';
+export const selectStyle: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 12, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' };
+export const inputStyle: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 12, padding: '0 12px', fontSize: 14 };
 export const labelCol: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' };
-export const btnPrimary: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13.5 };
-export const btnOutline: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13.5 };
-export const linkBtn: CSSProperties = { cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', fontSize: 13.5, textDecoration: 'underline', padding: 0 };
+export const btnPrimary: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 };
+export const btnOutline: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13.5 };
+export const linkBtn: CSSProperties = { cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0 };
 export const tabular: CSSProperties = { fontVariantNumeric: 'tabular-nums' };
 
 /** Page title row: big heading + light subtitle. */
 export function PageHead({ title, sub, no, right, wrapSub, gap = 14, nowrap }: { title: string; sub?: ReactNode; no?: string; right?: ReactNode; wrapSub?: boolean; gap?: number; nowrap?: boolean }) {
   const head = (
     <div style={{ display: 'flex', alignItems: 'baseline', gap, flexWrap: nowrap ? undefined : 'wrap' }}>
-      {no && <span style={{ fontSize: 15, fontWeight: 600, color: '#2A4BE0' }}>{no}</span>}
-      <h2 style={{ margin: 0, fontSize: 28, fontWeight: 500 }}>{title}</h2>
+      {no && <span style={{ fontSize: 15, fontWeight: 600, color: '#1F5BD8' }}>{no}</span>}
+      <h2 style={{ margin: 0, fontSize: 28, fontWeight: 500, color: 'var(--brand-deep)' }}>{title}</h2>
       {sub != null && <span style={{ fontSize: 14, color: '#475069', fontWeight: 300, textWrap: wrapSub ? 'pretty' : undefined }}>{sub}</span>}
     </div>
   );
