@@ -267,14 +267,14 @@ export function DealPanel() {
       <aside ref={ref} className="panel" tabIndex={-1} role="dialog" aria-modal="true" aria-label={d.client} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(720px,100vw)', background: '#F6F8FE', zIndex: 39, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
         <div className="hero" style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-            <span style={{ fontSize: 13, color: '#E4ECFF' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
+            <span style={{ fontSize: 13, color: '#fff' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>
-              <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 18 }}>×</button>
+              <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>
+              <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
           <input key={d.client} defaultValue={d.client} aria-label="ชื่อลูกค้า" onBlur={(ev) => ev.target.value.trim() && ev.target.value !== d.client && up({ client: ev.target.value })} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={{ fontSize: 22, fontWeight: 500, background: 'transparent', border: 0, borderBottom: '1px dashed rgba(255,255,255,.35)', color: '#fff', padding: '2px 0', fontFamily: 'inherit' }} />
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#E4ECFF' }}>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#fff' }}>
             <span>สถานะ <b style={{ fontWeight: 500, color: '#fff' }}>{st.overall}</b></span>
             <span>Forecast <b style={{ fontWeight: 500, color: '#fff' }}>{m.forecast != null ? fmtMoney(m.forecast) : '—'}</b>{m.fcConfirmed ? ' ✓' : ''}</span>
             <span>Actual <b style={{ fontWeight: 500, color: '#fff' }}>{m.actual != null ? fmtMoney(m.actual) : '—'}</b>{m.acConfirmed ? ' ✓' : ''}</span>

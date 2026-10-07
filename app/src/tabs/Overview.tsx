@@ -54,15 +54,15 @@ export function Overview() {
       <PageHead gap={12} title="ภาพรวมลูกค้าทั้งหมด (GCC)" sub={`นับระดับบริษัท รวมทุกแหล่ง · สถานะ ณ ${isoTh(e.ref)}`} />
       <section className="hero" style={{ background: heroGrad, color: '#fff', borderRadius: 32, padding: 32, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,340px),1fr))', gap: 28, alignItems: 'end' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 14, color: '#E4ECFF' }}>บริษัท/ผู้ประกอบการ หลังตัดข้อมูลซ้ำ</span>
+          <span style={{ fontSize: 14, color: '#fff' }}>บริษัท/ผู้ประกอบการ หลังตัดข้อมูลซ้ำ</span>
           <span style={{ fontSize: 72, fontWeight: 600, lineHeight: 1.15 }}>{fmtN(e.B.companies.length)}</span>
-          <span style={{ fontSize: 15, color: '#E4ECFF', fontWeight: 300, textWrap: 'pretty', maxWidth: 540 }}>
+          <span style={{ fontSize: 15, color: '#fff', fontWeight: 300, textWrap: 'pretty', maxWidth: 540 }}>
             {`รวม TGO · GI · กรอ. · SET เข้าเป็นบริษัทเดียว ${fmtN(ov.merged)} รายรวมจากหลายแถว · CFO อยู่ในอายุ ${fmtN(ov.act)} ราย · มีเบอร์โทร ${fmtN(ov.ph)} ราย · รอตรวจข้อมูลซ้ำ ${fmtN(ov.pending)} กลุ่ม`}
           </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 10 }}>
           {ov.src.map((n, i) => (
-            <button key={i} onClick={() => setF({ src: String(i), tgt: '', view: 'co' })} style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid rgba(255,255,255,.22)', background: 'rgba(255,255,255,.1)', color: '#fff', borderRadius: 20, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <button key={i} onClick={() => setF({ src: String(i), tgt: '', view: 'co' })} style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid rgba(255,255,255,.22)', background: 'rgba(6,22,90,.2)', color: '#fff', borderRadius: 20, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontSize: 13, color: '#fff' }}>{SRCC[i][0]}</span>
               <span style={{ fontSize: 28, fontWeight: 500 }}>{fmtN(n)}</span>
               <span style={{ fontSize: 12, color: '#fff', fontWeight: 300 }}>{SRC_SUB[i]}</span>

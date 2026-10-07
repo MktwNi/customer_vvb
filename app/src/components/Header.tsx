@@ -98,6 +98,8 @@ function QuickSearch() {
         if (!v) return;
         setF({ ...EMPTY_FILTERS, view: 'co', sort: 'default', q: v });
         setQ('');
+        // this box is not on the search page: carry on typing in the page's own search field
+        requestAnimationFrame(() => document.getElementById('search-q')?.focus());
       }}
     >
       <Icon name="search" />
@@ -110,7 +112,9 @@ function QuickSearch() {
 function MeButton() {
   const { engine: e, go } = useApp();
   const me = e.me();
-  const initial = Array.from(me).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '';
+  // the letter of the name itself, not of a leading "คุณ" (but keep names such as "คุณากร")
+  const base = me.replace(/^\s*คุณ(?=\s|[ก-ฮเแโใไ])\s*/, '') || me;
+  const initial = Array.from(base).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '';
   return (
     <button className="tb-me" onClick={() => go('update')} title={me ? `ฉันคือ ${me} · เปลี่ยนชื่อที่แท็บอัปเดตข้อมูล` : 'ใส่ชื่อของคุณที่แท็บอัปเดตข้อมูล'} aria-label={me ? `ฉันคือ ${me} (เปลี่ยนชื่อที่แท็บอัปเดตข้อมูล)` : 'ใส่ชื่อของคุณ (แท็บอัปเดตข้อมูล)'}>
       <span className="tb-me-name">{me || 'ใส่ชื่อของคุณ'}</span>

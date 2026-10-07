@@ -81,6 +81,8 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
     go: (tab, p) => {
       set({ tab, ...(p || {}) });
       scrollTop();
+      // the new page takes the keyboard: Page Down / Space scroll it (on desktop only the content scrolls)
+      requestAnimationFrame(() => document.getElementById('scroller')?.focus({ preventScroll: true }));
     },
     setF: (p) => {
       set((s) => ({ f: { ...s.f, ...p }, page: 0, tab: 'search' }));

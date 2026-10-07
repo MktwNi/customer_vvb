@@ -90,7 +90,7 @@ export function Search() {
   };
   const sel: CSSProperties = { height: 42, borderRadius: 12, padding: '0 10px', fontSize: 14, color: '#0E1430' };
 
-  const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 140px 160px 80px minmax(0,1.2fr)';
+  const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 120px 140px 72px minmax(0,1.2fr)';
   const ctCols = '32px 160px minmax(0,2.2fr) minmax(0,1fr) 110px 150px 120px';
 
   return (
@@ -102,7 +102,7 @@ export function Search() {
               <button key={k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })} style={{ cursor: 'pointer', border: 0, height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14, background: s.view === k ? '#1F5BD8' : 'transparent', color: s.view === k ? '#fff' : '#1745B8' }}>{label}</button>
             ))}
           </div>
-          <input value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" style={{ flex: 1, minWidth: 260, height: 48, border: '1.5px solid #D5DBEA', borderRadius: 14, padding: '0 16px', fontSize: 15, color: '#0E1430', background: '#fff', outline: 'none' }} />
+          <input id="search-q" value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" style={{ flex: 1, minWidth: 260, height: 48, border: '1.5px solid #D5DBEA', borderRadius: 14, padding: '0 16px', fontSize: 15, color: '#0E1430', background: '#fff', outline: 'none' }} />
           <button onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)} style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 14 }}>ส่งออก CSV</button>
           <button onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน" style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 14 }}>+ เพิ่มลูกค้าใหม่</button>
         </div>
@@ -210,7 +210,7 @@ export function Search() {
 
       {s.view === 'co' && !narrow && (
         <section style={{ ...card, overflowX: 'auto' }}>
-          <div style={{ minWidth: 1060 }}>
+          <div style={{ minWidth: 940 }}>
             <div style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: '13px 20px', fontSize: 12.5, color: '#475069', background: '#F7F8FC', borderBottom: '1px solid #E3E7F1' }}>
               <span /><span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ · สถานะการขาย</span>
             </div>
@@ -258,7 +258,7 @@ export function Search() {
 
       {s.view === 'cert' && !narrow && (
         <section style={{ ...card, overflowX: 'auto' }}>
-          <div style={{ minWidth: 1000 }}>
+          <div style={{ minWidth: 940 }}>
             <div style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: '13px 20px', fontSize: 12.5, color: '#475069', background: '#F7F8FC', borderBottom: '1px solid #E3E7F1' }}>
               <span /><span>เลขที่ใบรับรอง</span><span>องค์กร · กิจกรรม</span><span>จังหวัด</span><span>วันที่อนุมัติ</span><span>วันหมดอายุ</span><span>สถานะ</span>
             </div>

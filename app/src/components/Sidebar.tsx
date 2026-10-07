@@ -92,6 +92,7 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
   useEffect(() => {
     if (!open) return;
     if (mobile) closeRef.current?.focus();
+    else (document.querySelector<HTMLElement>('#side-nav .side-item[aria-current=page]') || document.querySelector<HTMLElement>('#side-nav .side-item'))?.focus();
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       ev.stopPropagation();

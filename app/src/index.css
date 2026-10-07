@@ -41,8 +41,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .main{flex:1 0 auto;width:100%;max-width:1400px;margin:0 auto;padding:14px var(--main-px) 56px;display:flex;flex-direction:column;gap:26px}
 
 /* menu */
-.side{position:absolute;left:0;top:0;bottom:0;width:var(--side-cur);background:var(--brand);color:#fff;border-top-right-radius:var(--curve);display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;z-index:36;transition:width .18s ease,box-shadow .18s ease;scrollbar-width:none}
-.side::-webkit-scrollbar{display:none}
+.side{position:absolute;left:0;top:0;bottom:0;width:var(--side-cur);background:var(--brand);color:#fff;border-top-right-radius:var(--curve);display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;z-index:36;transition:width .18s ease,box-shadow .18s ease;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent}
 .side.open{width:var(--side-w);box-shadow:24px 0 60px -24px rgba(6,22,90,.6)}
 .side-backdrop{display:none}
 .side-backdrop.open{display:block;position:fixed;inset:0;background:rgba(6,22,90,.2);z-index:35}
@@ -53,24 +52,28 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-brand-text{display:flex;flex-direction:column;line-height:1.3;min-width:0;flex:1}
 .side-brand-text b{font-weight:500;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .side-brand-text small{font-size:12px;color:#fff;font-weight:300;white-space:nowrap}
-.side-cta{flex:none;padding:24px 16px 6px}
+.side-cta{flex:none;padding:16px 16px 6px}
 .side-add{cursor:pointer;width:100%;height:46px;border:0;border-radius:999px;background:#fff;color:var(--brand-deep);font-size:14.5px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;box-shadow:0 12px 26px -14px rgba(6,22,90,.75);transition:transform .12s,box-shadow .12s}
 .side-add svg{width:20px;height:20px;flex:none}
 .side-add:hover{transform:translateY(-1px);box-shadow:0 16px 30px -14px rgba(6,22,90,.8)}
 .side-add:focus-visible{outline:2px solid #fff;outline-offset:3px}
-.side-nav{flex:1;display:flex;flex-direction:column;gap:18px;padding:14px 0 18px 14px}
+.side-add:disabled{opacity:.55;cursor:default;transform:none;box-shadow:none}
+.side-nav{flex:1;display:flex;flex-direction:column;gap:12px;padding:12px 0 16px 14px}
 .side-group{display:flex;flex-direction:column;gap:4px}
 .side-group-title{font-size:12px;letter-spacing:.04em;color:#fff;opacity:.92;padding:0 14px 4px;white-space:nowrap}
-.side-item{position:relative;cursor:pointer;border:0;background:transparent;color:#fff;display:flex;align-items:center;gap:12px;height:46px;padding:0 14px;margin-right:14px;border-radius:16px;font-size:14.5px;text-align:left;white-space:nowrap;transition:background .12s,color .12s}
+.side-item{position:relative;cursor:pointer;border:0;background:transparent;color:#fff;display:flex;align-items:center;gap:12px;height:42px;padding:0 14px;margin-right:14px;border-radius:16px;font-size:14.5px;text-align:left;white-space:nowrap;transition:background .12s,color .12s}
 .side-item:hover{background:rgba(255,255,255,.14)}
 .side-item[aria-current=page]{background:#fff;color:var(--brand);font-weight:500}
 .side-item:focus-visible,.side-close:focus-visible{outline:2px solid #fff;outline-offset:-2px}
 /* rail + docked menu: the open page is a tab that runs into the content, with concave corners */
-.side.tabs .side-item[aria-current=page]{margin-right:0;border-radius:23px 0 0 23px;background:var(--frame)}
+/* (no fade here: the tab and its corners must change as one shape) */
+.side.tabs .side-item{transition:none}
+.side.tabs .side-item[aria-current=page]{margin-right:0;border-radius:21px 0 0 21px;background:var(--frame)}
+.side.dock .side-item[aria-current=page]{padding-right:28px}
 .side.tabs .side-item[aria-current=page]::before,.side.tabs .side-item[aria-current=page]::after{content:'';position:absolute;right:0;width:24px;height:24px;pointer-events:none}
 .side.tabs .side-item[aria-current=page]::before{top:-24px;background:radial-gradient(circle at 0 0,transparent 23.5px,var(--frame) 24px)}
 .side.tabs .side-item[aria-current=page]::after{bottom:-24px;background:radial-gradient(circle at 0 100%,transparent 23.5px,var(--frame) 24px)}
-.side.tabs .side-item[aria-current=page]:focus-visible{outline-color:var(--brand)}
+.side .side-item[aria-current=page]:focus-visible{outline-color:var(--brand)}
 .side-ico{position:relative;width:22px;height:22px;flex:none;display:flex}
 .side-ico svg{width:22px;height:22px}
 .side-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -79,7 +82,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-dot{position:absolute;top:-8px;right:-12px;font-size:10px;line-height:1;min-width:18px;height:16px;padding:0 4px;border-radius:999px;background:#FFC94D;color:#0E1430;display:flex;align-items:center;justify-content:center;font-weight:600;box-shadow:0 0 0 2px var(--brand)}
 /* icon rail (menu folded): icons stay put whether or not the item is the open page */
 .side.rail .lbl{display:none}
-.side.rail .side-cta{padding:22px 0 6px;display:flex;justify-content:center}
+.side.rail .side-cta{padding:16px 0 6px;display:flex;justify-content:center}
 .side.rail .side-add{width:46px;padding:0}
 .side.rail .side-item{padding:0 0 0 13px}
 .side.rail .side-group+.side-group{border-top:1px solid rgba(255,255,255,.22);padding-top:14px;margin-right:14px}
@@ -93,6 +96,9 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-foot-sub{font-size:12px;font-weight:300}
 .side.rail .side-foot{display:none}
 .side-close,.menu-btn,.tb-mark{display:none}
+/* short windows: the menu must fit without scrolling (the info card is repeated in the top bar) */
+@media (min-width:901px) and (max-height:860px){.side-foot{display:none}}
+@media (min-width:901px) and (max-height:700px){.side-item{height:38px}.side-nav{gap:8px}.side.tabs .side-item[aria-current=page]{border-radius:19px 0 0 19px}}
 
 /* top bar */
 .topbar{position:relative;z-index:37;flex:none;height:var(--topbar-h);display:flex;align-items:center;gap:14px;padding:0 20px 0 0}
@@ -125,7 +131,10 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .tb-ava svg{width:20px;height:20px}
 .menu-btn{cursor:pointer;width:42px;height:42px;border-radius:14px;border:0;background:rgba(255,255,255,.16);color:#fff;align-items:center;justify-content:center;flex:none;padding:0}
 .menu-btn svg,.side-close svg{width:22px;height:22px}
-@media (max-width:1240px){.tb-hide-md{display:none}.tb-me-name{display:none}.tb-me{padding:0 4px}}
+@media (max-width:1240px){.tb-hide-md{display:none}}
+/* the page name keeps room; the search box and the extras give way first */
+@media (min-width:901px){.tb-title{flex:1 0 150px}.tb-search{flex:1 1 220px;min-width:0}}
+@media (max-width:1439px){.tb-me-name{display:none}.tb-me{padding:0 4px}.shell.docked .tb-hide-md{display:none}}
 @media (max-width:1100px){.tb-search{display:none}}
 
 /* 901–1279px: a slimmer window */
@@ -149,6 +158,8 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
   .tb-me{padding:0;height:42px}
   .tb-ava{width:36px;height:36px;box-shadow:0 0 0 2px rgba(255,255,255,.7)}
   .tb-btn{border-color:transparent}
+  /* focus rings on the blue bar are white */
+  .menu-btn:focus-visible,.tb-btn:focus-visible,.tb-me:focus-visible{outline-color:#fff}
   .side,.side.open{width:min(290px,86vw)}
   .side{position:fixed;top:0;bottom:0;border-radius:0 28px 28px 0;transform:translateX(-105%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s;z-index:45;box-shadow:20px 0 60px -20px rgba(6,22,90,.6)}
   .side.open{transform:none;visibility:visible;transition:transform .22s ease}
@@ -158,14 +169,20 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
   .side-close{display:flex;cursor:pointer;width:38px;height:38px;flex:none;margin-left:auto;border-radius:12px;border:0;background:rgba(255,255,255,.14);color:#fff;align-items:center;justify-content:center;padding:0}
   .main{padding-top:18px;padding-bottom:48px}
 }
-@media (max-width:560px){.tb-hide-sm{display:none}.tb-btn{padding:0 12px}}
+@media (max-width:560px){.tb-hide-sm{display:none}.tb-btn{padding:0 12px}.tb-me{display:none}}
 @media (prefers-reduced-motion:reduce){.side,.side.open,.side-item,.tb-brand,.frame-body,.side-add{transition:none}}
 
 /* hero cards (overview, panel headers): soft light circles behind the content */
 .hero{position:relative;overflow:hidden;isolation:isolate}
 .hero::before,.hero::after{content:'';position:absolute;border-radius:50%;pointer-events:none;z-index:-1}
-.hero::before{width:440px;height:440px;right:-140px;top:-200px;background:radial-gradient(circle,rgba(255,255,255,.2),rgba(255,255,255,0) 68%)}
+.hero::before{width:440px;height:440px;right:-140px;top:-200px;background:radial-gradient(circle,rgba(255,255,255,.1),rgba(255,255,255,0) 68%)}
 .hero::after{width:300px;height:300px;left:-110px;bottom:-190px;border:44px solid rgba(255,255,255,.07)}
+.hero :focus-visible{outline-color:#fff}
+#scroller:focus{outline:none}
+/* high-contrast mode: no decorations, and the open page is outlined (its tab colour is dropped) */
+@media (forced-colors:active){.hero::before,.hero::after{display:none}.side-item[aria-current=page]{outline:2px solid Highlight;outline-offset:-2px}}
+/* print the whole page, not the window's first screen */
+@media print{body{background:#fff}.shell{height:auto;padding:0;display:block}.frame{display:block;overflow:visible;border-radius:0;box-shadow:none}.frame-body{padding-left:0}.content{height:auto;overflow:visible}.side,.side-backdrop,.tb-search,#rail-btn{display:none}}
 /* side panels (company / deal): rounded edge towards the page */
 .panel{border-radius:30px 0 0 30px}
 @media (max-width:720px){.panel{border-radius:0}}

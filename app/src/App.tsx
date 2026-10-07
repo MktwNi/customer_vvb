@@ -44,6 +44,8 @@ export default function App() {
   const docked = !mobile && wide && pinned;
   const [navOpen, setNavOpen] = useState(false); // full menu slid out (over the icon rail; phones: drawer)
   const open = navOpen && !docked;
+  // a slid-out menu doesn't survive a change of layout (it would reappear when coming back)
+  useEffect(() => setNavOpen(false), [mobile, wide]);
   const closeNav = useCallback(() => setNavOpen(false), []);
   const toggleNav = useCallback(() => {
     if (!wide || mobile) return setNavOpen((o) => !o);
@@ -100,13 +102,18 @@ export default function App() {
   }, [set]);
 
   const ready = e.ready;
+  // once loaded, Page Down / Space scroll the page straight away (on desktop the content scrolls inside
+  // the window, so it must hold the focus rather than the document)
+  useEffect(() => {
+    if (ready && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
+  }, [ready]);
   return (
     <div className={'shell' + (docked ? ' docked' : '')}>
       <div className="frame">
         <TopBar navOpen={open} docked={docked} onMenu={() => setNavOpen(true)} onToggle={toggleNav} />
         <div className="frame-body">
           <Sidebar open={open} docked={docked} mobile={mobile} onClose={closeNav} />
-          <div className="content" id="scroller">
+          <div className="content" id="scroller" tabIndex={-1}>
             <Banners />
             <main className="main">
               {!ready && <Loading msg={e.loadMsg} />}

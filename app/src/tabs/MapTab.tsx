@@ -272,14 +272,14 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
       <div className="hero" style={{ borderRadius: 22, padding: '18px 20px', color: '#fff', background: heroGrad, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 12.5, color: '#E4ECFF' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
+            <span style={{ fontSize: 12.5, color: '#fff' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
             <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.3 }}>{name || 'ทั้งประเทศ'}</span>
           </div>
-          {name && <button onClick={onClear} style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', background: 'rgba(255,255,255,.1)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
+          {name && <button onClick={onClear} style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', background: 'rgba(6,22,90,.2)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8 }}>
           {([['บริษัท', a.n], ['CFO ในอายุ', a.act], ['ใกล้หมดอายุ', a.soon], ['มีเบอร์โทร', a.ph]] as const).map(([k, n]) => (
-            <div key={k} style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(185,200,255,.3)', borderRadius: 12, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div key={k} style={{ background: 'rgba(6,22,90,.2)', border: '1px solid rgba(185,200,255,.3)', borderRadius: 12, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontSize: 11.5, color: '#fff' }}>{k}</span>
               <span style={{ fontSize: 20, fontWeight: 500 }}>{fmtN(n)}</span>
             </div>
