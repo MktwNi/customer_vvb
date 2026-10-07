@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { dtTh, isoTh } from '../lib/format';
+import { dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  DEAL_STAGE, KIND_TH, NOTE_MAX, STAGE_TH, beYear, dealMoney, dealStatus, docsOf, fmtMoney, parseAmount, stepOf,
+  DEAL_STAGE, KIND_TH, NOTE_MAX, STAGE_TH, beYear, dealMoney, dealStatus, docsOf, fmtMoney, lastContact, parseAmount, stepOf,
   type Deal, type DealDoc, type DocKind,
 } from '../lib/sales';
 import { Modal } from '../tabs/Sales';
@@ -121,7 +121,7 @@ function LinkCompany({ d }: { d: Deal }) {
     );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่ได้เชื่อมกับบริษัทในทะเบียน — เชื่อมแล้วจะเห็นสถานะ CFO / GI ข้อมูลติดต่อ และนัดหมายร่วมกัน</span>
+      <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่ได้เชื่อมกับบริษัทในทะเบียน — เชื่อมแล้วจะเห็นสถานะ CFO / GI และสถานะการขายนี้ในหน้าบริษัท</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="พิมพ์ชื่อบริษัทเพื่อค้นในทะเบียน" aria-label="ค้นบริษัทในทะเบียน" style={{ ...inputStyle, flex: '1 1 220px', minWidth: 0 }} />
         <button onClick={() => set({ addCust: { deal: false, name: d.client, link: d.id } })} style={small}>เพิ่มเป็นลูกค้าใหม่ในทะเบียน</button>
@@ -281,8 +281,12 @@ export function DealPanel() {
               <Field label="ผู้รับผิดชอบ" value={d.resp} onSave={(v) => up({ resp: v })} list="sl-team" />
               <Field label="แหล่งที่มา (Referral)" value={d.referral} onSave={(v) => up({ referral: v })} list="sl-ref" />
               <label style={labelCol}>
-                วันที่ติดต่อล่าสุด
+                วันที่ติดต่อ
                 <input type="date" value={d.contactDate} onChange={(ev) => up({ contactDate: ev.target.value })} style={inputStyle} />
+                {(() => {
+                  const lc = lastContact(S, d, todayISO());
+                  return lc && lc !== d.contactDate ? <span style={{ fontSize: 12, color: '#475069', fontWeight: 400 }}>ติดต่อล่าสุดตามขั้นตอน {isoTh(lc)}</span> : null;
+                })()}
               </label>
               <label style={labelCol}>
                 หมวด

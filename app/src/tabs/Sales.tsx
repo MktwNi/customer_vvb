@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as 
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
-  DEAL_STAGE, KIND_TH, STAGE_TH, dealMoney, dealResult, dealStatus, docsOf, filterDeals, fmtMoney, money, overdueDays, salesStats, sectionsFor, stepOf,
+  DEAL_STAGE, KIND_TH, STAGE_TH, dealMoney, dealResult, dealStatus, docsOf, filterDeals, fmtMoney, lastContact, overdueDays, parseAmount, salesStats, sectionsFor, stepOf,
   type Deal, type SalesFilter, type SalesState, type SalesStats,
 } from '../lib/sales';
 import { beYearInput, facetOptions, winRateBySource, yearOptions } from '../lib/salesUi';
@@ -151,7 +151,7 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
   const { engine: e, set } = useApp();
   const { open, setOpen, close, btn, wrap } = useMenu();
   const [lists, setLists] = useState(false);
-  const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[] } | null>(null);
+  const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[]; batch?: string; n?: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const item: CSSProperties = { cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: '10px 14px', fontSize: 13.5, color: '#0E1430', borderRadius: 10 };
   /** The Buddhist-era year a JSON backup belongs to (it doesn't say): 25xx, or a 20xx year converted after a confirm. */
@@ -180,6 +180,8 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
       const r = await e.importTracker(f, y);
       setImp({
         years: r.years,
+        batch: r.deals ? r.batch : undefined,
+        n: r.deals,
         msg: [
           `เพิ่ม ${fmtN(r.deals)} รายการ (ปี ${r.years.join(', ')})`,
           r.skipped ? `ข้าม ${fmtN(r.skipped)} รายการที่มีอยู่แล้ว (ไม่เขียนทับข้อมูลที่ทีมแก้ไว้)` : '',
@@ -212,6 +214,18 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
                 <button key={y} onClick={() => { set({ slYear: y, slView: 'table' }); setImp(null); }} style={{ ...btnOutline, height: 36 }}>ดูตารางปี {y}</button>
               ))}
             </div>
+          )}
+          {imp.batch && (
+            <button
+              onClick={() => {
+                if (!window.confirm(`ยกเลิกการนำเข้านี้? ${fmtN(imp.n || 0)} รายการที่เพิ่งนำเข้าจะถูกลบออกจาก Sales Tracker ของทั้งทีม (นำเข้าไฟล์ใหม่ได้ภายหลัง)`)) return;
+                const n = e.undoImport(imp.batch!);
+                setImp({ msg: `ยกเลิกการนำเข้าแล้ว ลบ ${fmtN(n)} รายการ` });
+              }}
+              style={{ ...btnOutline, height: 36, alignSelf: 'flex-start', color: '#8A2B12', borderColor: '#E7B9AC' }}
+            >
+              ยกเลิกการนำเข้านี้
+            </button>
           )}
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
             ใช้ไฟล์ได้ 2 แบบ: ไฟล์ "สำรองข้อมูล (JSON)" จากเมนูเพิ่มเติมของ Sales Tracker เดิม หรือ Google Sheet ของ Sales Tracker เดิมที่ดาวน์โหลดเป็น CSV / Excel (ไฟล์ → ดาวน์โหลด)
@@ -413,7 +427,7 @@ function TableView({ e, S, deals, all, facets, today }: { e: Engine; S: SalesSta
               <tr>
                 <th className="sl-sticky" style={{ minWidth: 300 }}>ลูกค้า</th>
                 <th style={{ minWidth: 120 }}>ผู้รับผิดชอบ</th>
-                <th style={{ minWidth: 132 }} title="อัปเดตเองเมื่อบันทึกขั้นตอนด้วยวันที่ใหม่กว่า · เกิน 14 วันขึ้นค้างติดตาม">ติดต่อล่าสุด</th>
+                <th style={{ minWidth: 132 }} title="วันที่ติดต่อที่พิมพ์ไว้ · ถ้าขั้นตอนมีวันที่ใหม่กว่า จะแสดง “ล่าสุด” ใต้ช่อง · ไม่ได้ติดต่อเกิน 14 วันขึ้นค้างติดตาม">วันที่ติดต่อ</th>
                 {S.cfg.stages.map((p) => (
                   <th key={p} style={{ minWidth: 118 }} title={STAGE_TH[p] || p}>
                     {p}
@@ -509,8 +523,15 @@ function MoneyCell({ e, d, which, value, confirmed }: { e: Engine; d: Deal; whic
       inputMode="decimal"
       aria-label={which === 'forecast' ? 'Forecast (บาท)' : 'Actual (บาท)'}
       placeholder="—"
+      title="พิมพ์ได้ เช่น 120,000 · 1.5 ล้าน · 200k"
       onBlur={(ev) => {
-        const n = money(ev.target.value);
+        const n = parseAmount(ev.target.value);
+        if (n === undefined) {
+          // not one clear amount ("50,000-80,000", words): keep the saved figure, say why
+          window.alert(`อ่าน "${ev.target.value}" เป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 120,000 หรือ 1.5 ล้าน`);
+          ev.target.value = value == null ? '' : fmtMoney(value);
+          return;
+        }
         if (n !== value) e.updateDeal(d.id, { [which]: n });
       }}
       style={{ width: '100%', height: 32, border: '1px solid transparent', borderRadius: 8, padding: '0 6px', fontSize: 13, textAlign: 'right', background: 'transparent', ...tabular }}
@@ -522,6 +543,7 @@ function MoneyCell({ e, d, which, value, confirmed }: { e: Engine; d: Deal; whic
 function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState; d: Deal; n: number; today: string; team: string[]; onStep: (stage: string) => void }) {
   const { set } = useApp();
   const od = overdueDays(S, d, today);
+  const lc = lastContact(S, d, today);
   const m = dealMoney(S, d);
   const docs = docsOf(S, d.id);
   const res = dealResult(S, d);
@@ -550,7 +572,8 @@ function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState
       </td>
       <td>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <input type="date" value={d.contactDate} onChange={(ev) => e.updateDeal(d.id, { contactDate: ev.target.value })} aria-label="ติดต่อล่าสุด" className="sl-input" style={{ height: 32, border: '1px solid transparent', borderRadius: 8, fontSize: 12.5, background: 'transparent', color: '#0E1430', width: '100%' }} />
+          <input type="date" value={d.contactDate} onChange={(ev) => e.updateDeal(d.id, { contactDate: ev.target.value })} aria-label="วันที่ติดต่อ" className="sl-input" style={{ height: 32, border: '1px solid transparent', borderRadius: 8, fontSize: 12.5, background: 'transparent', color: '#0E1430', width: '100%' }} />
+          {lc && lc !== d.contactDate && <span style={{ fontSize: 11, color: '#475069' }}>ล่าสุด {isoTh(lc)}</span>}
           {od != null && <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#FBE3DC', color: '#8A2B12', alignSelf: 'flex-start' }}>⏰ ค้าง {fmtN(od)} วัน</span>}
         </div>
       </td>
@@ -605,7 +628,7 @@ function DealCard({ S, d, today, onOpen }: { S: SalesState; d: Deal; today: stri
         <span style={{ fontSize: 14.5, fontWeight: 500, color: '#0E1430' }}>{d.client}</span>
         <StatusPill S={S} d={d} />
       </span>
-      <span style={{ fontSize: 12.5, color: '#475069' }}>{[d.resp && 'ผู้รับผิดชอบ ' + d.resp, d.contactDate && 'ติดต่อ ' + isoTh(d.contactDate), last && 'ล่าสุด ' + last].filter(Boolean).join(' · ') || 'ยังไม่เริ่ม'}</span>
+      <span style={{ fontSize: 12.5, color: '#475069' }}>{[d.resp && 'ผู้รับผิดชอบ ' + d.resp, lastContact(S, d, today) && 'ติดต่อล่าสุด ' + isoTh(lastContact(S, d, today)), last && 'ขั้นล่าสุด ' + last].filter(Boolean).join(' · ') || 'ยังไม่เริ่ม'}</span>
       <Chips d={d} />
       <span style={{ display: 'flex', gap: 12, fontSize: 12.5, color: '#384155', flexWrap: 'wrap', ...tabular }}>
         {m.forecast != null && <span>Forecast {fmtMoney(m.forecast)}{m.fcConfirmed ? ' ✓' : ''}</span>}
@@ -699,7 +722,7 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
   ];
   const follow = list
     .filter((d) => d.jobStatus === 'open' && !['YES', 'NO'].includes(dealResult(S, d)))
-    .sort((a, b) => (a.contactDate || '0').localeCompare(b.contactDate || '0'));
+    .sort((a, b) => (lastContact(S, a, today) || '0').localeCompare(lastContact(S, b, today) || '0'));
   const srcRows = Object.entries(st.bySource);
   return (
     <>
@@ -737,7 +760,7 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
             <button key={d.id} onClick={() => set({ deal: d.id })} className="h-bg" style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', background: 'transparent', textAlign: 'left', padding: '8px 4px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, fontSize: 13.5 }}>
               <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                 <span style={{ color: '#0E1430' }}>{d.client}</span>
-                <span style={{ fontSize: 12, color: '#475069' }}>{[d.section, d.resp, d.contactDate ? 'ติดต่อล่าสุด ' + isoTh(d.contactDate) : 'ยังไม่ระบุวันที่ติดต่อ'].filter(Boolean).join(' · ')}</span>
+                <span style={{ fontSize: 12, color: '#475069' }}>{[d.section, d.resp, lastContact(S, d, today) ? 'ติดต่อล่าสุด ' + isoTh(lastContact(S, d, today)) : 'ยังไม่ระบุวันที่ติดต่อ'].filter(Boolean).join(' · ')}</span>
               </span>
               {od != null && <span style={{ fontSize: 12, padding: '2px 9px', borderRadius: 999, background: '#FBE3DC', color: '#8A2B12', alignSelf: 'center' }}>⏰ {fmtN(od)} วัน</span>}
             </button>
