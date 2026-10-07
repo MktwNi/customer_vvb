@@ -69,6 +69,20 @@ export function AddCustomer() {
             ชื่อบริษัท / ลูกค้า *
             <input value={f.name} onChange={up('name')} autoFocus required maxLength={200} placeholder="เช่น บริษัท ตัวอย่าง จำกัด" style={inputStyle} />
           </label>
+          {/* right under the name, where it is seen while typing (on a phone the rest of the form is below the fold) */}
+          {similar.length > 0 && (
+            <div style={{ gridColumn: '1 / -1', background: '#FFF4DC', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 13.5, color: '#6B4100' }}>พบบริษัทที่คล้ายกันในทะเบียนแล้ว — ใช้บริษัทเดิมเพื่อไม่ให้ข้อมูลซ้ำ</span>
+              {similar.map((c) => (
+                <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', fontSize: 13.5 }}>
+                  <span>
+                    {c.name} <span style={{ color: '#6B4100', fontSize: 12 }}>· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
+                  </span>
+                  <button type="button" onClick={() => useExisting(c)} style={{ ...small, height: 30 }}>ใช้บริษัทนี้</button>
+                </div>
+              ))}
+            </div>
+          )}
           <label style={labelCol}>เลขนิติบุคคล (13 หลัก)<input value={f.jur} onChange={up('jur')} inputMode="numeric" maxLength={20} style={inputStyle} /></label>
           <label style={labelCol}>ผู้ติดต่อ<input value={f.contact} onChange={up('contact')} style={inputStyle} /></label>
           <label style={labelCol}>เบอร์โทร<input value={f.phone} onChange={up('phone')} type="tel" style={inputStyle} /></label>
@@ -100,19 +114,6 @@ export function AddCustomer() {
             </label>
           )}
         </div>
-        {similar.length > 0 && (
-          <div style={{ background: '#FFF4DC', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={{ fontSize: 13.5, color: '#6B4100' }}>พบบริษัทที่คล้ายกันในทะเบียนแล้ว — ใช้บริษัทเดิมเพื่อไม่ให้ข้อมูลซ้ำ</span>
-            {similar.map((c) => (
-              <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', fontSize: 13.5 }}>
-                <span>
-                  {c.name} <span style={{ color: '#6B4100', fontSize: 12 }}>· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
-                </span>
-                <button type="button" onClick={() => useExisting(c)} style={{ ...small, height: 30 }}>ใช้บริษัทนี้</button>
-              </div>
-            ))}
-          </div>
-        )}
         {err && <Notice kind="error" role="alert">{err}</Notice>}
         <span style={{ fontSize: 12, color: '#5E6680' }}>ลูกค้าที่เพิ่มเองจะมีป้าย "เพิ่มเอง" ค้นหา ติดดาว นัดหมาย และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน และทั้งทีมเห็นด้วย (เมื่อเชื่อมต่อทีม)</span>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, isoTh } from '../lib/format';
 import { norm } from '../lib/core';
@@ -9,6 +9,7 @@ import {
 import { Modal } from '../tabs/Sales';
 import { DocAttach } from './DocAttach';
 import { heroGrad, inputStyle, labelCol, selectStyle } from './ui';
+import { commitFocus, useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
 const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#2A4BE0' };
@@ -176,9 +177,16 @@ export function DealPanel() {
   const d = ui.deal ? e.sales.deals[ui.deal] : undefined;
   const [attach, setAttach] = useState<DocKind | null>(null);
   useEffect(() => setAttach(null), [ui.deal]);
+  const ref = useRef<HTMLElement>(null);
+  // focus the panel itself (its first field is the client name: a stray key would rename it)
+  useDialog(ref, { focus: 'dialog', on: !!d });
   if (!d) return null;
   const S = e.sales, C = S.cfg;
-  const close = () => set({ deal: null });
+  // blur first: the fields save when they lose focus
+  const close = () => {
+    commitFocus();
+    set({ deal: null });
+  };
   const st = dealStatus(S, d);
   const m = dealMoney(S, d);
   const docs = docsOf(S, d.id);
@@ -193,7 +201,7 @@ export function DealPanel() {
   return (
     <>
       <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.38)', zIndex: 38 }} />
-      <aside role="dialog" aria-modal="true" aria-label={d.client} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(720px,100vw)', background: '#F4F6FC', zIndex: 39, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)' }}>
+      <aside ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={d.client} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(720px,100vw)', background: '#F4F6FC', zIndex: 39, overflowY: 'auto', boxShadow: '-20px 0 60px -20px rgba(4,10,60,.4)', outline: 'none' }}>
         <div style={{ background: heroGrad, color: '#fff', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#C9D4FF' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>

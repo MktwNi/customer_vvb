@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
-  DEAL_STAGE, KIND_TH, STAGE_TH, beYear, dealMoney, dealResult, dealStatus, docsOf, filterDeals, fmtMoney, money, overdueDays, salesStats, sectionsFor, stepOf,
+  DEAL_STAGE, KIND_TH, STAGE_TH, dealMoney, dealResult, dealStatus, docsOf, filterDeals, fmtMoney, money, overdueDays, salesStats, sectionsFor, stepOf,
   type Deal, type SalesFilter, type SalesState, type SalesStats,
 } from '../lib/sales';
+import { beYearInput, facetOptions, winRateBySource, yearOptions } from '../lib/salesUi';
 import { useMedia } from '../components/Sidebar';
 import { Notice, Opts, PageHead, btnOutline, btnPrimary, card, inputStyle, selectStyle, tabular } from '../components/ui';
 import { StepEditor } from '../components/DealPanel';
+import { commitFocus, isTopDialog, useDialog } from '../components/useDialog';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -29,11 +31,8 @@ export function Sales() {
   const f: SalesFilter = { year, ...ui.slF };
   const yearDeals = filterDeals(S, { year });
   const shown = filterDeals(S, f);
-  const years = useMemo(() => {
-    const ys = new Set([beYear(), String(+beYear() + 1), String(+beYear() - 1), year]);
-    Object.values(S.deals).forEach((d) => ys.add(d.year));
-    return [...ys].sort();
-  }, [S.deals, year]);
+  // not memoised: the engine changes S.deals in place (an import or a team sync can add a year)
+  const years = yearOptions(Object.values(S.deals), year);
   const openN = yearDeals.filter((d) => d.jobStatus === 'open').length;
   const closedN = yearDeals.length - openN;
   const v = ui.slView;
@@ -82,9 +81,9 @@ export function Sales() {
           );
         })}
       </div>
-      {v === 'table' && <TableView e={e} S={S} deals={shown.filter((d) => d.jobStatus === 'open')} today={today} />}
+      {v === 'table' && <TableView e={e} S={S} deals={shown.filter((d) => d.jobStatus === 'open')} all={shown} facets={yearDeals} today={today} />}
       {v === 'dash' && <Dashboard S={S} deals={yearDeals} today={today} />}
-      {v === 'closed' && <ClosedView S={S} deals={shown.filter((d) => d.jobStatus === 'closed')} />}
+      {v === 'closed' && <ClosedView S={S} deals={shown.filter((d) => d.jobStatus === 'closed')} facets={yearDeals} total={closedN} />}
       {v === 'log' && <LogView S={S} year={year} />}
     </>
   );
@@ -92,39 +91,54 @@ export function Sales() {
 
 // ------------------------------------------------------------------ toolbar menus
 
-function useOutside(open: boolean, close: () => void) {
+/** Drop-down menu: closes when focus leaves it, or on Escape (only the menu — focus goes back to its
+ *  button). Choosing an item also puts focus back on the button, so a dialog it opens returns there. */
+function useMenu() {
+  const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  return {
+  const btn = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    btn.current?.focus();
+    setOpen(false);
+  };
+  const wrap = {
     ref,
     onBlur: (ev: React.FocusEvent) => {
-      if (open && !ref.current?.contains(ev.relatedTarget as Node)) close();
+      if (open && !ref.current?.contains(ev.relatedTarget as Node)) setOpen(false);
+    },
+    onKeyDown: (ev: ReactKeyboardEvent) => {
+      if (ev.key !== 'Escape' || !open) return;
+      ev.stopPropagation();
+      close();
     },
   };
+  return { open, setOpen, close, btn, wrap };
 }
+const menuBox: CSSProperties = { position: 'absolute', right: 0, top: 42, zIndex: 20, background: '#fff', border: '1px solid #E3E7F1', borderRadius: 14, boxShadow: '0 20px 50px -16px rgba(4,10,60,.35)', padding: 6, display: 'flex', flexDirection: 'column' };
 
 function AddMenu() {
   const { engine: e, ui, set, go } = useApp();
-  const [open, setOpen] = useState(false);
-  const o = useOutside(open, () => setOpen(false));
+  const { open, setOpen, close, btn, wrap } = useMenu();
   const starred = e.crm.watch.map((id) => e.company(id)).filter((c) => c && !e.dealsOf(c.id).some((d) => d.year === ui.slYear));
   const item: CSSProperties = { cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: '10px 14px', fontSize: 13.5, color: '#0E1430', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 2 };
+  const off: CSSProperties = { ...item, cursor: 'default', color: '#8A93AD' };
   const sub: CSSProperties = { fontSize: 12, color: '#5E6680' };
   return (
-    <div ref={o.ref} onBlur={o.onBlur} style={{ position: 'relative' }}>
-      <button onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnPrimary, height: 36 }}>+ เพิ่มลูกค้า ▾</button>
+    <div {...wrap} style={{ position: 'relative' }}>
+      <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnPrimary, height: 36 }}>+ เพิ่มลูกค้า ▾</button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: 42, zIndex: 20, background: '#fff', border: '1px solid #E3E7F1', borderRadius: 14, boxShadow: '0 20px 50px -16px rgba(4,10,60,.35)', padding: 6, width: 'min(320px,86vw)', display: 'flex', flexDirection: 'column' }}>
-          <button className="h-bg" style={item} onClick={() => { setOpen(false); go('search'); }}>
+        <div style={{ ...menuBox, width: 'min(320px,86vw)' }}>
+          <button className="h-bg" style={item} onClick={() => { close(); go('search'); }}>
             เลือกจากทะเบียนบริษัท<span style={sub}>ค้นหาในแท็บค้นหา แล้วกด "ส่งเข้า Sales Tracker" ในหน้าบริษัท</span>
           </button>
-          <button className="h-bg" style={item} disabled={!starred.length} onClick={() => { setOpen(false); set({ sendIds: starred.map((c) => c!.id) }); }}>
+          <button className={starred.length ? 'h-bg' : undefined} style={starred.length ? item : off} disabled={!starred.length} onClick={() => { close(); set({ sendIds: starred.map((c) => c!.id) }); }}>
             ส่งบริษัทที่ติดดาว ({fmtN(starred.length)}){' '}
             <span style={sub}>{starred.length ? 'ที่ยังไม่อยู่ในตารางปีนี้ — เลือกได้ก่อนส่ง' : 'ติดดาว ☆ บริษัทในหน้าค้นหาก่อน'}</span>
           </button>
-          <button className="h-bg" style={item} onClick={() => { setOpen(false); set({ addCust: { deal: true } }); }}>
+          <button className="h-bg" style={item} onClick={() => { close(); set({ addCust: { deal: true } }); }}>
             เพิ่มลูกค้าใหม่ (ไม่มีในทะเบียน)<span style={sub}>กรอกชื่อบริษัทและข้อมูลติดต่อเอง ทุกคนในทีมจะเห็นด้วย</span>
           </button>
-          <button className="h-bg" style={item} onClick={() => { setOpen(false); const d = e.addDeal({ client: 'ลูกค้าใหม่', year: ui.slYear }); set({ deal: d.id }); }}>
+          <button className="h-bg" style={item} onClick={() => { close(); const d = e.addDeal({ client: 'ลูกค้าใหม่', year: ui.slYear }); set({ deal: d.id }); }}>
             เพิ่มแถวว่าง<span style={sub}>พิมพ์ชื่อลูกค้าเอง ไม่ผูกกับทะเบียนบริษัท</span>
           </button>
         </div>
@@ -134,25 +148,38 @@ function AddMenu() {
 }
 
 function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
-  const { engine: e } = useApp();
-  const [open, setOpen] = useState(false);
+  const { engine: e, set } = useApp();
+  const { open, setOpen, close, btn, wrap } = useMenu();
   const [lists, setLists] = useState(false);
-  const [imp, setImp] = useState<{ msg: string; err?: boolean } | null>(null);
+  const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const o = useOutside(open, () => setOpen(false));
   const item: CSSProperties = { cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: '10px 14px', fontSize: 13.5, color: '#0E1430', borderRadius: 10 };
+  /** The Buddhist-era year a JSON backup belongs to (it doesn't say): 25xx, or a 20xx year converted after a confirm. */
+  const askYear = (f: File): string | null => {
+    const m = /(25\d\d)/.exec(f.name);
+    let def = m ? m[1] : year;
+    for (;;) {
+      const ans = window.prompt('ไฟล์สำรองของ Sales Tracker เดิมไม่ได้บอกปี — ข้อมูลนี้เป็นของปี พ.ศ. ใด? (เช่น 2569)', def);
+      if (ans == null || !ans.trim()) return null;
+      const y = beYearInput(ans);
+      if (y && !y.ce) return y.year;
+      if (y && window.confirm(`${y.ce} เป็นปี ค.ศ. — นำเข้าเป็นปี พ.ศ. ${y.year} ใช่ไหม?`)) return y.year;
+      if (!y) window.alert(`"${ans.trim()}" ไม่ใช่ปี พ.ศ. — ใส่ปี พ.ศ. 4 หลัก เช่น ${year}`);
+      def = y ? y.year : year;
+    }
+  };
   const doImport = async (f: File) => {
     let y = year;
     if (f.name.toLowerCase().endsWith('.json')) {
-      const m = /(25\d\d)/.exec(f.name);
-      const ans = window.prompt('ไฟล์สำรองของ Sales Tracker เดิมไม่ได้บอกปี — ข้อมูลนี้เป็นของปี พ.ศ. ใด?', m ? m[1] : year);
+      const ans = askYear(f);
       if (!ans) return;
-      y = ans.trim();
+      y = ans;
     }
     setImp({ msg: 'กำลังนำเข้า…' });
     try {
       const r = await e.importTracker(f, y);
       setImp({
+        years: r.years,
         msg: [
           `เพิ่ม ${fmtN(r.deals)} รายการ (ปี ${r.years.join(', ')})`,
           r.skipped ? `ข้าม ${fmtN(r.skipped)} รายการที่มีอยู่แล้ว (ไม่เขียนทับข้อมูลที่ทีมแก้ไว้)` : '',
@@ -166,19 +193,26 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
     }
   };
   return (
-    <div ref={o.ref} onBlur={o.onBlur} style={{ position: 'relative' }}>
-      <button onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnOutline, height: 36 }}>เพิ่มเติม ▾</button>
+    <div {...wrap} style={{ position: 'relative' }}>
+      <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnOutline, height: 36 }}>เพิ่มเติม ▾</button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: 42, zIndex: 20, background: '#fff', border: '1px solid #E3E7F1', borderRadius: 14, boxShadow: '0 20px 50px -16px rgba(4,10,60,.35)', padding: 6, width: 'min(300px,86vw)', display: 'flex', flexDirection: 'column' }}>
-          <button className="h-bg" style={item} onClick={() => { setOpen(false); e.exportSalesCsv(year, deals); }}>⬇ ส่งออกตาราง (CSV เปิดใน Excel)</button>
-          <button className="h-bg" style={item} onClick={() => { setOpen(false); fileRef.current?.click(); }}>⬆ นำเข้าจาก Sales Tracker เดิม</button>
-          <button className="h-bg" style={item} onClick={() => { setOpen(false); setLists(true); }}>⚙ จัดการหมวด / SOURCE / Services</button>
+        <div style={{ ...menuBox, width: 'min(300px,86vw)' }}>
+          <button className="h-bg" style={item} onClick={() => { close(); e.exportSalesCsv(year, deals); }}>⬇ ส่งออกตาราง (CSV เปิดใน Excel)</button>
+          <button className="h-bg" style={item} onClick={() => { close(); fileRef.current?.click(); }}>⬆ นำเข้าจาก Sales Tracker เดิม</button>
+          <button className="h-bg" style={item} onClick={() => { close(); setLists(true); }}>⚙ จัดการหมวด / SOURCE / Services</button>
         </div>
       )}
       <input ref={fileRef} type="file" accept=".json,.csv,.xlsx" style={{ display: 'none' }} onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) doImport(f); }} />
       {imp && (
         <Modal title="นำเข้าจาก Sales Tracker เดิม" onClose={() => setImp(null)}>
           <Notice kind={imp.err ? 'error' : 'ok'} role="status">{imp.msg}</Notice>
+          {imp.years && imp.years.some((y) => y !== year) && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {imp.years.filter((y) => y !== year).map((y) => (
+                <button key={y} onClick={() => { set({ slYear: y, slView: 'table' }); setImp(null); }} style={{ ...btnOutline, height: 36 }}>ดูตารางปี {y}</button>
+              ))}
+            </div>
+          )}
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
             ใช้ไฟล์ได้ 2 แบบ: ไฟล์ "สำรองข้อมูล (JSON)" จากเมนูเพิ่มเติมของ Sales Tracker เดิม หรือ Google Sheet ของ Sales Tracker เดิมที่ดาวน์โหลดเป็น CSV / Excel (ไฟล์ → ดาวน์โหลด)
           </span>
@@ -189,14 +223,18 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
   );
 }
 
-export function Modal({ title, children, onClose, width = 520 }: { title: string; children: ReactNode; onClose: () => void; width?: number }) {
+/** Centered dialog. Focus goes to its first field (`focus="dialog"`: to the dialog itself), stays in it, and returns on close. */
+export function Modal({ title, children, onClose, width = 520, focus }: { title: string; children: ReactNode; onClose: () => void; width?: number; focus?: 'field' | 'dialog' }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialog(ref, { focus });
   // Escape closes this dialog only (not the panel underneath)
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
     const kd = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Escape') return;
+      if (ev.key !== 'Escape' || !isTopDialog(ref.current)) return;
       ev.stopPropagation();
+      commitFocus();
       closeRef.current();
     };
     document.addEventListener('keydown', kd, true);
@@ -205,7 +243,7 @@ export function Modal({ title, children, onClose, width = 520 }: { title: string
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.45)', zIndex: 54 }} />
-      <div role="dialog" aria-modal="true" aria-label={title} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: `min(${width}px,94vw)`, maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 22, padding: 22, zIndex: 55, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: `min(${width}px,94vw)`, maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 22, padding: 22, zIndex: 55, display: 'flex', flexDirection: 'column', gap: 14, outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>{title}</span>
           <button onClick={onClose} aria-label="ปิด" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, background: '#F4F6FC', fontSize: 18, color: '#475069' }}>×</button>
@@ -242,7 +280,8 @@ function ListsModal({ onClose }: { onClose: () => void }) {
     </div>
   );
   return (
-    <Modal title="จัดการรายการ" onClose={onClose} width={640}>
+    // its fields only add to the lists: focus the dialog (a phone would pop its keyboard up for a field)
+    <Modal title="จัดการรายการ" onClose={onClose} width={640} focus="dialog">
       {box('sections', 'หมวด (กลุ่มแถวในตาราง)', 'แต่ละลูกค้าอยู่ในหมวดเดียว เช่น ช่องทางที่ได้ลูกค้ามา')}
       {box('sources', 'SOURCE (ช่องทาง)', 'ติ๊กได้หลายช่องต่อหนึ่งลูกค้า ใช้ในกราฟและ Win rate ตามช่องทาง')}
       {box('services', 'Services (บริการ)', 'บริการที่เสนอให้ลูกค้า')}
@@ -252,13 +291,14 @@ function ListsModal({ onClose }: { onClose: () => void }) {
 
 // ------------------------------------------------------------------ table
 
-function Filters({ S, deals }: { S: SalesState; deals: Deal[] }) {
+/** Table / closed-tab filters. `facets`: all of the year's deals (the ผู้รับผิดชอบ / แหล่งที่มา choices). */
+function Filters({ S, facets }: { S: SalesState; facets: Deal[] }) {
   const { ui, set } = useApp();
   const F = ui.slF;
   const up = (p: Partial<typeof F>) => set({ slF: { ...F, ...p } });
-  const uniq = (k: 'resp' | 'referral') => [...new Set(deals.map((d) => d[k] || '(ไม่ระบุ)'))].sort();
+  const uniq = (k: 'resp' | 'referral') => facetOptions(facets, k, F[k]);
   const sel = { ...selectStyle, height: 36, fontSize: 13 };
-  const any = Object.values(F).some(Boolean);
+  const any = filtersOn(F);
   const nSet = Object.entries(F).filter(([k, v]) => k !== 'q' && v).length;
   // phones: the selects fold behind one button (they would take half the screen)
   const [more, setMore] = useState(false);
@@ -279,14 +319,31 @@ function Filters({ S, deals }: { S: SalesState; deals: Deal[] }) {
     </div>
   );
 }
+const filtersOn = (F: Omit<SalesFilter, 'year'>) => Object.values(F).some(Boolean);
 
-function Summary({ S, deals, today }: { S: SalesState; deals: Deal[]; today: string }) {
-  const st = salesStats(S, deals, today);
+/** In place of the rows when the filters leave none. */
+function NoMatch({ text }: { text: string }) {
+  const { set } = useApp();
+  return (
+    <span style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: 14, color: '#475069' }}>
+      <span role="status">{text}</span>
+      <button onClick={() => set({ slF: {} })} style={{ ...small, height: 36 }}>ล้างตัวกรอง</button>
+    </span>
+  );
+}
+
+/** Table tiles: the open jobs to follow up, and the money of all the year's jobs (open and closed —
+ *  closing a paid job must not take its revenue out of the totals). Both follow the filters. */
+function Summary({ S, open, all, today }: { S: SalesState; open: Deal[]; all: Deal[]; today: string }) {
+  const { ui } = useApp();
+  const st = salesStats(S, open, today);
+  const sum = salesStats(S, all, today);
+  const note = filtersOn(ui.slF) ? ' · ตามตัวกรอง' : '';
   const tiles: [string, string, string?][] = [
-    [fmtN(st.total), 'ลูกค้าที่ยังเปิดงาน'],
+    [fmtN(st.total), 'ลูกค้าที่ยังเปิดงาน' + note],
     [fmtN(st.overdue), `ค้างติดตาม (เกิน 14 วัน)`, st.overdue ? '#8A2B12' : undefined],
-    [fmtMoney(st.forecast) || '0', 'Forecast (บาท)'],
-    [fmtMoney(st.actual) || '0', 'Actual (บาท)'],
+    [fmtMoney(sum.forecast) || '0', `Forecast รวม (บาท) · รวมงานที่ปิดแล้ว${note}`],
+    [fmtMoney(sum.actual) || '0', `Actual รวม (บาท) · รวมงานที่ปิดแล้ว${note}`],
   ];
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
@@ -300,7 +357,7 @@ function Summary({ S, deals, today }: { S: SalesState; deals: Deal[]; today: str
   );
 }
 
-function TableView({ e, S, deals, today }: { e: Engine; S: SalesState; deals: Deal[]; today: string }) {
+function TableView({ e, S, deals, all, facets, today }: { e: Engine; S: SalesState; deals: Deal[]; all: Deal[]; facets: Deal[]; today: string }) {
   const { ui, set } = useApp();
   const mobile = useMedia('(max-width: 760px)');
   const [step, setStep] = useState<{ id: string; stage: string } | null>(null);
@@ -318,7 +375,7 @@ function TableView({ e, S, deals, today }: { e: Engine; S: SalesState; deals: De
   if (!Object.values(S.deals).some((d) => d.year === ui.slYear))
     return (
       <>
-        <Filters S={S} deals={deals} />
+        <Filters S={S} facets={facets} />
         <div style={{ ...card, padding: 28, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>ยังไม่มีลูกค้าในตารางปี {ui.slYear}</span>
           <span style={{ fontSize: 13.5, color: '#475069', lineHeight: 1.7 }}>
@@ -329,10 +386,14 @@ function TableView({ e, S, deals, today }: { e: Engine; S: SalesState; deals: De
     );
   return (
     <>
-      <Summary S={S} deals={deals} today={today} />
-      <Filters S={S} deals={deals} />
+      <Summary S={S} open={deals} all={all} today={today} />
+      <Filters S={S} facets={facets} />
       {step && <StepEditor dealId={step.id} stage={step.stage} onClose={() => setStep(null)} />}
-      {mobile ? (
+      {!deals.length ? (
+        <div style={{ ...card, borderRadius: 18, padding: '20px 22px', fontSize: 14, color: '#475069' }}>
+          {filtersOn(ui.slF) ? <NoMatch text="ไม่พบงานที่ยังเปิดตามตัวกรองนี้" /> : `ไม่มีงานที่ยังเปิดในปี ${ui.slYear} — งานที่ปิดแล้วอยู่ในแท็บ "ปิดงาน"`}
+        </div>
+      ) : mobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {visible.map((sec) => {
             const list = bySec.get(sec)!;
@@ -557,8 +618,9 @@ function DealCard({ S, d, today, onOpen }: { S: SalesState; d: Deal; today: stri
 
 // ------------------------------------------------------------------ dashboard
 
-function Bars({ title, sub, items, fmt = fmtN, unit = '' }: { title: string; sub: string; items: [string, number][]; fmt?: (n: number) => string; unit?: string }) {
-  const list = items.filter((x) => x[1] > 0);
+/** Bar list; rows at 0 are left out unless `keepZero` (the items are then already the ones to show). */
+function Bars({ title, sub, items, fmt = fmtN, unit = '', keepZero }: { title: string; sub: string; items: [string, number][]; fmt?: (n: number) => string; unit?: string; keepZero?: boolean }) {
+  const list = keepZero ? items : items.filter((x) => x[1] > 0);
   const max = Math.max(1, ...list.map((x) => x[1]));
   return (
     <div style={{ ...card, borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -662,7 +724,7 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
         <Bars title="ลูกค้าตามช่องทาง" sub="SOURCE · ลูกค้าที่ติ๊กหลายช่องทางนับในทุกช่องทาง" items={srcRows.map(([k, x]) => [k, x.n])} />
         <Bars title="ลูกค้าตามบริการ" sub="Services" items={Object.entries(st.byService)} />
         <Bars title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ ผลรวมจึงอาจเกิน Forecast รวม" items={srcRows.map(([k, x]) => [k, x.forecast])} fmt={(n) => fmtMoney(n)} />
-        <Bars title="Win rate ตามช่องทาง" sub="ปิดได้ ÷ รู้ผลแล้ว ในแต่ละช่องทาง" items={srcRows.filter(([, x]) => x.decided).map(([k, x]) => [k, Math.round((x.yes / x.decided) * 100)])} unit="%" />
+        <Bars title="Win rate ตามช่องทาง" sub="ปิดได้ ÷ รู้ผลแล้ว ในแต่ละช่องทาง" items={winRateBySource(st.bySource)} unit="%" keepZero />
         <GroupTable title="สรุปยอดตามผู้รับผิดชอบ" rows={Object.entries(st.byResp).sort((a, b) => b[1].forecast - a[1].forecast)} />
         <GroupTable title="สรุปยอดตามแหล่งที่มา" rows={Object.entries(st.byReferral).sort((a, b) => b[1].forecast - a[1].forecast)} />
       </div>
@@ -688,8 +750,11 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
 
 // ------------------------------------------------------------------ closed + log
 
-function ClosedView({ S, deals }: { S: SalesState; deals: Deal[] }) {
-  const { engine: e, set } = useApp();
+/** Closed jobs of the year, with the same filters as the table (shown here too, so what is counted is what is listed). */
+function ClosedView({ S, deals, facets, total }: { S: SalesState; deals: Deal[]; facets: Deal[]; total: number }) {
+  const { engine: e, ui, set } = useApp();
+  const on = filtersOn(ui.slF);
+  const note = on ? ' · ตามตัวกรอง' : '';
   let fc = 0, ac = 0;
   deals.forEach((d) => {
     const m = dealMoney(S, d);
@@ -699,20 +764,21 @@ function ClosedView({ S, deals }: { S: SalesState; deals: Deal[] }) {
   return (
     <>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {[[fmtN(deals.length), 'งานที่ปิดแล้ว'], [fmtMoney(fc) || '0', 'Forecast รวม (บาท)'], [fmtMoney(ac) || '0', 'Actual รวม (บาท)']].map(([v, l]) => (
+        {[[fmtN(deals.length), on ? `งานที่ปิดแล้ว · ตามตัวกรอง (จากทั้งหมด ${fmtN(total)})` : 'งานที่ปิดแล้ว'], [fmtMoney(fc) || '0', 'Forecast รวม (บาท)' + note], [fmtMoney(ac) || '0', 'Actual รวม (บาท)' + note]].map(([v, l]) => (
           <div key={l} style={{ ...card, borderRadius: 16, padding: '12px 16px', minWidth: 170, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 22, fontWeight: 500, ...tabular }}>{v}</span>
             <span style={{ fontSize: 12.5, color: '#475069' }}>{l}</span>
           </div>
         ))}
       </div>
+      <Filters S={S} facets={facets} />
       <div style={{ ...card, borderRadius: 18, overflowX: 'auto' }}>
         <table className="sl-table" style={{ minWidth: 760 }}>
           <thead>
             <tr><th>ลูกค้า</th><th>หมวด</th><th>ผู้รับผิดชอบ</th><th>ผล</th><th style={{ textAlign: 'right' }}>Forecast</th><th style={{ textAlign: 'right' }}>Actual</th><th>ปิดเมื่อ</th><th /></tr>
           </thead>
           <tbody>
-            {!deals.length && <tr><td colSpan={8} style={{ color: '#8A93AD', padding: 18 }}>ยังไม่มีงานที่ปิด</td></tr>}
+            {!deals.length && <tr><td colSpan={8} style={{ color: '#8A93AD', padding: 18 }}>{on && total > 0 ? <NoMatch text="ไม่พบงานที่ปิดแล้วตามตัวกรองนี้" /> : 'ยังไม่มีงานที่ปิด'}</td></tr>}
             {deals.map((d) => {
               const m = dealMoney(S, d);
               return (
