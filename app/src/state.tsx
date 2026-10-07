@@ -3,8 +3,9 @@ import type { GccEngine } from './lib/engine';
 import type { FeedKey, StageKey } from './lib/types';
 import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
+import { beYear, type SalesFilter } from './lib/sales';
 
-export type Tab = 'overview' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes';
+export type Tab = 'overview' | 'sales' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
 export interface SchedReq { ids: number[]; taskId?: string }
 
@@ -21,9 +22,19 @@ export interface UIState {
   calM: string; calDay: string; plFeed: FeedKey; plStage: StageKey | ''; plOwner: string; perDay: number; picked: Record<number, 1>; plLim: number;
   // Dedup tab
   ddF: 'pending' | 'auto' | 'decided' | 'all'; ddPage: number;
+  // Sales Tracker
+  slView: 'table' | 'dash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
+  /** Open deal panel (deal id). */
+  deal: string | null;
+  /** "Add a customer by hand" dialog: open, and whether to also start a deal in the tracker. */
+  addCust: { deal: boolean; section?: string; name?: string; link?: string; edit?: number } | null;
+  /** "Send to Sales Tracker" dialog for these company ids. */
+  sendIds: number[] | null;
+  /** One-line result shown at the top of the Sales Tracker (e.g. after sending companies to it). */
+  slNote: string;
 }
 
-const TAB_KEYS: Tab[] = ['overview', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes'];
+const TAB_KEYS: Tab[] = ['overview', 'sales', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes'];
 
 const initial = (): UIState => {
   const s = prefs.get<{ tab?: unknown; view?: unknown } | null>(PREF.ui, {}) || {};
@@ -36,6 +47,7 @@ const initial = (): UIState => {
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
     ddF: 'pending', ddPage: 0,
+    slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, deal: null, addCust: null, sendIds: null, slNote: '',
   };
 };
 

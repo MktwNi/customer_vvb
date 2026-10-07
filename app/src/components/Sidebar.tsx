@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { Icon, type IconName } from './icons';
+import { overdueDays } from '../lib/sales';
 import mark from '../assets/gcc-mark.png';
 
 export interface NavItem { key: Tab; label: string; icon: IconName }
@@ -15,6 +16,7 @@ export const NAV: { title: string; items: NavItem[] }[] = [
     title: 'งานขาย',
     items: [
       { key: 'overview', label: 'ภาพรวม', icon: 'overview' },
+      { key: 'sales', label: 'Sales Tracker', icon: 'sales' },
       { key: 'search', label: 'ค้นหา', icon: 'search' },
       { key: 'track', label: 'ติดตาม', icon: 'track' },
       { key: 'plan', label: 'แผนติดต่อ', icon: 'plan' },
@@ -76,6 +78,7 @@ export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: 
     badges.track = (mon.events || []).filter((x) => x.at > (mon.seenAt || '')).length;
     badges.plan = e.crm.tasks.filter((t) => !t.done && t.date <= today).length;
     badges.dedup = e.B.groups.filter((g) => g.state === 'pending').length;
+    badges.sales = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear && overdueDays(e.sales, d, today) != null).length; // follow-ups overdue
   }
 
   // open menu: Escape folds it and focus returns to the button that opened it;

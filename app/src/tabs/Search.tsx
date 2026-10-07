@@ -104,6 +104,7 @@ export function Search() {
           </div>
           <input value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" style={{ flex: 1, minWidth: 260, height: 48, border: '1.5px solid #D5DBEA', borderRadius: 14, padding: '0 16px', fontSize: 15, color: '#0E1430', background: '#fff', outline: 'none' }} />
           <button onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)} style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 14 }}>ส่งออก CSV</button>
+          <button onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน" style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: 0, background: '#0A1A86', color: '#fff', fontSize: 14 }}>+ เพิ่มลูกค้าใหม่</button>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {tgtChips.map((c) => (

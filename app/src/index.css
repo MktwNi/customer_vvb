@@ -100,3 +100,20 @@ a{color:#1A3FE0}a:hover{color:#0A1A86}
   .plan-row>:nth-child(4){grid-column:2}
   .plan-row>:nth-child(5){grid-column:3}
 }
+
+/* ---- Sales Tracker table: frozen header + client column, compact stage cells */
+.sl-table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;color:#0E1430}
+.sl-table th{position:sticky;top:0;z-index:2;background:#F7F8FC;text-align:left;font-weight:500;font-size:12px;color:#384155;padding:10px 8px;border-bottom:1px solid #E3E7F1;white-space:nowrap;vertical-align:bottom}
+.sl-table td{padding:7px 8px;border-bottom:1px solid #EEF1F8;vertical-align:top;background:#fff}
+.sl-table th.sl-sticky{left:0;z-index:3}
+.sl-table td.sl-sticky{position:sticky;left:0;z-index:1;box-shadow:inset -1px 0 0 #E3E7F1}
+.sl-sec td{background:#F7F8FC;padding:8px 10px;border-bottom:1px solid #E3E7F1}
+.sl-row:hover td{background:#FAFBFF}
+.sl-step{cursor:pointer;width:100%;min-height:44px;border:1px dashed transparent;border-radius:10px;padding:5px 7px;text-align:left;display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.35;font-family:inherit}
+.sl-step:hover{border-color:#B9C8FF}
+.sl-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line;word-break:break-word}
+.sl-input{font-family:inherit}
+.sl-input:hover,.sl-input:focus{border-color:#D5DBEA!important;background:#fff!important}
+@media (max-width:560px){.sl-steprow{grid-template-columns:1fr!important}}
+.sl-ftoggle{display:none}
+@media (max-width:760px){.sl-ftoggle{display:inline-block}.sl-filters:not(.open)>select{display:none}}

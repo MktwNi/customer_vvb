@@ -180,6 +180,7 @@ export function Plan() {
           </button>
           <span style={{ fontSize: 13, color: '#475069', flex: 1 }}>{pkIds.length ? `เลือกแล้ว ${fmtN(pkIds.length)} ราย` : 'ติ๊กช่องหน้าชื่อเพื่อนัดหลายรายพร้อมกัน'}</span>
           {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1A3FE0', color: '#fff', fontSize: 13 }}>นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
+          {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {shown.map((c) => {

@@ -1,15 +1,18 @@
-import type { CSSProperties, FormEvent } from 'react';
+import { useRef, type CSSProperties, type FormEvent } from 'react';
 import { useApp } from '../state';
 import { TT } from '../lib/constants';
 import { addDays, fmtN, nextWork, todayISO } from '../lib/format';
 import type { TaskType } from '../lib/types';
 import { Opts } from './ui';
+import { useDialog } from './useDialog';
 
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: '#475069' };
 const ctl: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14 };
 
 export function ScheduleModal() {
   const { engine: e, ui, set } = useApp();
+  const ref = useRef<HTMLFormElement>(null);
+  useDialog(ref); // takes keyboard focus, keeps Tab inside, gives it back on close
   const o = ui.sched;
   if (!o) return null;
   const t = o.taskId ? e.crm.tasks.find((x) => x.id === o.taskId) : undefined;
@@ -29,7 +32,7 @@ export function ScheduleModal() {
   return (
     <>
       <div onClick={cancel} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.45)', zIndex: 50 }} />
-      <form role="dialog" aria-modal="true" onSubmit={save} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 'min(480px,94vw)', background: '#fff', borderRadius: 22, padding: 22, zIndex: 51, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <form ref={ref} role="dialog" aria-modal="true" onSubmit={save} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 'min(480px,94vw)', background: '#fff', borderRadius: 22, padding: 22, zIndex: 51, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <span style={{ fontSize: 18, fontWeight: 500 }}>{t ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'}</span>
         <span style={{ fontSize: 13, color: '#475069' }}>{c ? c.name : o.ids.length > 1 ? 'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
         <label style={field}>

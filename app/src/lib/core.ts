@@ -40,6 +40,7 @@ export async function getDetail(ids: number[]): Promise<Detail> {
   const out: Detail = { t: [], g: [], f: [], s: [] };
   const up = await kv.get<Record<string, Record<string, unknown[][]>>>('details');
   for (const id of ids) {
+    if (id >= 900000 && !up) continue; // companies added in the app (TGO sync, by hand) have no detail files
     let d: Record<string, unknown[][]> | undefined;
     if (up) d = up[id];
     else {
@@ -52,8 +53,15 @@ export async function getDetail(ids: number[]): Promise<Detail> {
   return out;
 }
 
+/** The row a merged group keeps the id of — its star, stage, owner and notes are keyed by that id:
+ *  a registry row, then a customer added by hand (ids from 1e12, see teamSync CUSTOM_ID_MIN, shared
+ *  with the team), then a company from the TGO website sync (900000…, this device only); within each,
+ *  one with a juristic id, then the smallest id (the same choice on every browser). */
+const tier = (id: number) => (id < 900000 ? 0 : id >= 1e12 ? 1 : 2);
+const primaryRow = (g: RawCompany[]) => g.slice().sort((a, b) => tier(a.id) - tier(b.id) || +!a.jur - +!b.jur || a.id - b.id)[0];
+
 function mergeRows(g: RawCompany[], D: Dicts): RawCompany {
-  const p = g.find((r) => r.jur) || g[0];
+  const p = primaryRow(g);
   const o: RawCompany = { ...p };
   const others = g.filter((r) => r !== p);
   const NOIND = D.ind.indexOf('ไม่ระบุ');
@@ -62,7 +70,7 @@ function mergeRows(g: RawCompany[], D: Dicts): RawCompany {
     [...new Set(g.flatMap((r) => String(r[k] || '').split('|').map((s) => s.trim())).filter(Boolean))].slice(0, m).join(' | ');
   o.ids = g.map((r) => r.id);
   o.src = g.reduce((m, r) => m | r.src, 0);
-  for (const k of ['addr', 'biz', 'set', 'mkt', 'web'] as const) if (!o[k]) o[k] = (others.find((r) => r[k]) || ({} as RawCompany))[k] || '';
+  for (const k of ['addr', 'biz', 'set', 'mkt', 'web', 'jur'] as const) if (!o[k]) o[k] = (others.find((r) => r[k]) || ({} as RawCompany))[k] || '';
   if (!D.prov[o.prov]) o.prov = others.find((r) => D.prov[r.prov])?.prov ?? o.prov;
   if (o.ind === NOIND) o.ind = others.find((r) => r.ind !== NOIND)?.ind ?? o.ind;
   o.cfo = g.slice().sort((a, b) => rank(b.cfo) - rank(a.cfo))[0].cfo;
@@ -127,7 +135,11 @@ export function build(base: Dataset, dec: Record<string, string>, extra: BuildEx
   Object.entries(byN).forEach(([k, ids]) => {
     if (ids.length < 2) return;
     const jurs = new Set(ids.map((i) => byId.get(i)!.jur).filter(Boolean));
-    const why = jurs.size === 1 ? 'auto' : jurs.size > 1 ? 'diffjur' : 'nojur';
+    // A customer added by hand may join a name group only where the registry rows alone would be one
+    // company: its juristic id must not merge two separate same-name registry companies.
+    const reg = ids.filter((i) => i < 1e12);
+    const regJurs = new Set(reg.map((i) => byId.get(i)!.jur).filter(Boolean));
+    const why = jurs.size > 1 ? 'diffjur' : jurs.size === 1 && (reg.length <= 1 || regJurs.size === 1) ? 'auto' : 'nojur';
     groups.push({ key: 'n:' + k, ids, why, state: 'pending' });
   });
   groups.filter((g) => g.why === 'auto' && dec[g.key] !== 'split').forEach((g) => g.ids.forEach((i) => uni(g.ids[0], i)));
@@ -152,7 +164,7 @@ export function build(base: Dataset, dec: Record<string, string>, extra: BuildEx
   const alias = new Map<number, number>();
   Object.values(comp).forEach((g) => {
     const c = (g.length > 1 ? mergeRows(g, D) : g[0]) as Company;
-    if (g.length > 1) c.id = (g.find((r) => r.jur) || g[0]).id;
+    if (g.length > 1) c.id = primaryRow(g).id;
     c.ids.forEach((i) => alias.set(i, c.id));
     companies.push(c);
   });
@@ -210,6 +222,46 @@ export function status(c: Company, T: number, W: number) {
   return c;
 }
 
+// character references too: some writers (openpyxl…) store every Thai letter as "&#3610;"
+const ENT: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' };
+/** Text of an XML value: the five named entities and numeric character references, in one pass. */
+const xmlText = (s: string) =>
+  s.replace(/&(?:#(\d+)|#x([\da-fA-F]+)|(lt|gt|quot|apos|amp));/g, (e, d, h, n) => {
+    const cp = n ? 0 : d ? parseInt(d, 10) : parseInt(h, 16);
+    return n ? ENT[n] : cp <= 0x10ffff ? String.fromCodePoint(cp) : e;
+  });
+
+/** First worksheet of an .xlsx as objects keyed by the header row (text values; Excel dates stay serial numbers). */
+export async function readXlsxRows(file: Blob): Promise<Record<string, string>[]> {
+  const { default: JSZip } = await import('jszip');
+  const zx = await JSZip.loadAsync(file);
+  const dec = xmlText;
+  // a shared or inline string: the text of all its rich-text runs, without phonetic guides
+  const str = (x: string) => dec([...x.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t(?:\s[^>]*[^/>])?>([\s\S]*?)<\/t>/g)].map((m) => m[1]).join(''));
+  const ssF = zx.file('xl/sharedStrings.xml');
+  const S = ssF ? [...(await ssF.async('string')).matchAll(/<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g)].map((m) => str(m[1] || '')) : [];
+  const first = Object.keys(zx.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort((a, b) => parseInt(a.replace(/\D/g, '')) - parseInt(b.replace(/\D/g, '')))[0];
+  if (!first) throw new Error('ไม่พบชีตในไฟล์ Excel');
+  const x = await zx.file(first)!.async('string');
+  const rows = [...x.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)].map((r) => {
+    const o: Record<number, string> = {};
+    let col = 0;
+    for (const c of (r[1] || '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      // column from r="B2"; a cell without one (it is optional) is the one after the previous cell
+      const ref = /\br="([A-Z]+)\d*"/.exec(c[1]);
+      col = ref ? [...ref[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) : col + 1;
+      const t = (/\bt="(\w+)"/.exec(c[1]) || [])[1];
+      const is = /<is>([\s\S]*?)<\/is>/.exec(c[2] || '');
+      const v = (/<v>([\s\S]*?)<\/v>/.exec(c[2] || '') || [])[1]; // a formula's (<f>) last result
+      if (is) o[col] = str(is[1]);
+      else if (v != null) o[col] = t === 's' ? (S[+v] ?? '') : dec(v);
+    }
+    return o;
+  }).filter((r) => Object.values(r).some((v) => v.trim()));
+  const head = rows.shift() || {};
+  return rows.map((r) => Object.fromEntries(Object.entries(head).map(([col, h]) => [h.trim(), r[+col] ?? ''])));
+}
+
 /* ---------- Excel importer (ฐานข้อมูลลูกค้า_GCC.xlsx) ---------- */
 
 export interface ParsedUpload { base: Dataset; details: Record<string, Record<string, unknown[][]>> }
@@ -217,7 +269,7 @@ export interface ParsedUpload { base: Dataset; details: Record<string, Record<st
 export async function parseXlsx(file: File, onProgress?: (m: string) => void): Promise<ParsedUpload> {
   const { default: JSZip } = await import('jszip');
   const zx = await JSZip.loadAsync(file);
-  const dec = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  const dec = xmlText;
   const ssF = zx.file('xl/sharedStrings.xml');
   const ss = ssF ? await ssF.async('string') : '';
   const S = [...ss.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => dec([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join('')));

@@ -15,6 +15,7 @@ export const SRCC: [string, string, string][] = [
   ['GI', '#BFF3EE', '#0B6E66'],
   ['กรอ.', '#E6ECFD', '#1A2FB0'],
   ['SET', '#0E1F7A', '#fff'],
+  ['เพิ่มเอง', '#FFF4DC', '#6B4100'], // customers added by hand (not in the registry files)
 ];
 export const SRC_SUB = ['ใบรับรอง CFO', 'อุตสาหกรรมสีเขียว', 'โรงงานใหม่ 2567–2569', 'บริษัทจดทะเบียน'];
 

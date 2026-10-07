@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion } from './state';
 import { isTeamUrl } from './lib/teamSync';
 import { Banners, TopBar } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Overview } from './tabs/Overview';
 import { Search } from './tabs/Search';
 import { Track } from './tabs/Track';
@@ -13,6 +14,10 @@ import { MapTab } from './tabs/MapTab';
 import { Dedup } from './tabs/Dedup';
 import { Update } from './tabs/Update';
 import { Notes } from './tabs/Notes';
+import { Sales } from './tabs/Sales';
+import { DealPanel } from './components/DealPanel';
+import { AddCustomer, SendToTracker } from './components/AddCustomer';
+import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
   const sk = { height: 64, borderRadius: 16, background: '#E6EAF4' };
@@ -63,10 +68,18 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, [e, set]);
 
+  // Escape closes the top layer only. The field being typed in is blurred first: the deal panel's
+  // fields save when they lose focus, and closing without a blur would drop what was typed.
+  const uiRef = useRef(ui);
+  uiRef.current = ui;
   useEffect(() => {
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
-      set((s) => (s.sched ? { sched: null } : s.sel != null ? { sel: null } : {}));
+      const s = uiRef.current;
+      const p = s.sched ? { sched: null } : s.addCust ? { addCust: null } : s.sendIds ? { sendIds: null } : s.sel != null ? { sel: null } : s.deal ? { deal: null } : null;
+      if (!p) return;
+      commitFocus();
+      set(p);
     };
     document.addEventListener('keydown', kd);
     return () => document.removeEventListener('keydown', kd);
@@ -81,18 +94,44 @@ export default function App() {
         <Banners />
         <main className="main">
           {!ready && <Loading msg={e.loadMsg} />}
-          {ready && ui.tab === 'overview' && <Overview />}
-          {ready && ui.tab === 'search' && <Search />}
-          {ready && ui.tab === 'track' && <Track />}
-          {ready && ui.tab === 'plan' && <Plan />}
-          {ready && ui.tab === 'map' && <MapTab />}
-          {ready && ui.tab === 'dedup' && <Dedup />}
-          {ready && ui.tab === 'update' && <Update />}
-          {ready && ui.tab === 'notes' && <Notes />}
+          <ErrorBoundary resetKey={ui.tab}>
+            {ready && ui.tab === 'overview' && <Overview />}
+            {ready && ui.tab === 'sales' && <Sales />}
+            {ready && ui.tab === 'search' && <Search />}
+            {ready && ui.tab === 'track' && <Track />}
+            {ready && ui.tab === 'plan' && <Plan />}
+            {ready && ui.tab === 'map' && <MapTab />}
+            {ready && ui.tab === 'dedup' && <Dedup />}
+            {ready && ui.tab === 'update' && <Update />}
+            {ready && ui.tab === 'notes' && <Notes />}
+          </ErrorBoundary>
         </main>
       </div>
-      {ready && ui.sel != null && <CompanyDrawer />}
-      {ready && ui.sched && <ScheduleModal />}
+      {ready && ui.deal && (
+        <ErrorBoundary resetKey={ui.deal}>
+          <DealPanel />
+        </ErrorBoundary>
+      )}
+      {ready && ui.sel != null && (
+        <ErrorBoundary resetKey={String(ui.sel)}>
+          <CompanyDrawer />
+        </ErrorBoundary>
+      )}
+      {ready && ui.addCust && (
+        <ErrorBoundary resetKey="addCust">
+          <AddCustomer />
+        </ErrorBoundary>
+      )}
+      {ready && ui.sendIds && (
+        <ErrorBoundary resetKey="send">
+          <SendToTracker />
+        </ErrorBoundary>
+      )}
+      {ready && ui.sched && (
+        <ErrorBoundary resetKey="sched">
+          <ScheduleModal />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }
