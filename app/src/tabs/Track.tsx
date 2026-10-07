@@ -304,6 +304,7 @@ export function Track() {
                   <>
                     <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: '#0A1A86', color: '#fff', fontSize: 13 }}>ดูทั้งหมด</button>
                     <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 }}>วางแผนติดต่อ</button>
+                    {k === 'watch' && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
                   </>
                 )}
               </div>

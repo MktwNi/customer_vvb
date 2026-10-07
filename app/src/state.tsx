@@ -30,6 +30,8 @@ export interface UIState {
   addCust: { deal: boolean; section?: string; name?: string; link?: string; edit?: number } | null;
   /** "Send to Sales Tracker" dialog for these company ids. */
   sendIds: number[] | null;
+  /** One-line result shown at the top of the Sales Tracker (e.g. after sending companies to it). */
+  slNote: string;
 }
 
 const TAB_KEYS: Tab[] = ['overview', 'sales', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes'];
@@ -45,7 +47,7 @@ const initial = (): UIState => {
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
     ddF: 'pending', ddPage: 0,
-    slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, deal: null, addCust: null, sendIds: null,
+    slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, deal: null, addCust: null, sendIds: null, slNote: '',
   };
 };
 

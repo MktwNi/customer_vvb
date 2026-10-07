@@ -136,19 +136,21 @@ export function SendToTracker() {
   const ids = ui.sendIds || [];
   const cos = ids.map((id) => e.company(id)).filter(Boolean) as Company[];
   const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));
-  const [section, setSection] = useState(() => (cos.length === 1 && e.suggestSection(cos[0])) || e.sales.cfg.sections[0] || '');
+  // several companies: by default each goes to the section of where it was found (TGO, SET/mai…)
+  const AUTO = '\u0000auto';
+  const [section, setSection] = useState(() => (cos.length > 1 ? AUTO : e.suggestSection(cos[0]) || e.sales.cfg.sections[0] || ''));
   const [year, setYear] = useState(ui.slYear || beYear());
   const close = () => set({ sendIds: null });
   const chosen = cos.filter((c) => pick[c.id]);
   const has = (c: Company) => e.dealsOf(c.id).some((d) => d.year === year);
   const send = () => {
-    const r = e.addDealsFromCompanies(chosen.map((c) => c.id), { section, year });
+    const r = e.addDealsFromCompanies(chosen.map((c) => c.id), section === AUTO ? { year } : { section, year });
+    const note = `ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`;
     if (cos.length === 1) {
       const d = e.dealsOf(cos[0].id).find((x) => x.year === year);
       set({ sendIds: null, sel: null, deal: d ? d.id : null, slYear: year });
     } else {
-      set({ sendIds: null, tab: 'sales', slView: 'table', slYear: year });
-      window.alert(`ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`);
+      set({ sendIds: null, sel: null, tab: 'sales', slView: 'table', slYear: year, slNote: note });
     }
   };
   const years = [...new Set([beYear(), String(+beYear() + 1), year])].sort();
@@ -159,6 +161,7 @@ export function SendToTracker() {
         <label style={labelCol}>
           หมวด
           <select value={section} onChange={(ev) => setSection(ev.target.value)} style={selectStyle}>
+            {cos.length > 1 && <option value={AUTO}>อัตโนมัติ — ตามแหล่งที่พบ (TGO / SET/mai)</option>}
             {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
           </select>
         </label>

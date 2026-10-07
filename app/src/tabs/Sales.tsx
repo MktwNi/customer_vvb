@@ -63,6 +63,14 @@ export function Sales() {
         </Notice>
       )}
       {e.docMsg && <Notice kind="error">{e.docMsg}</Notice>}
+      {ui.slNote && (
+        <Notice kind="ok" role="status">
+          <span style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+            {ui.slNote}
+            <button onClick={() => set({ slNote: '' })} aria-label="ปิดข้อความ" style={{ cursor: 'pointer', border: 0, background: 'transparent', color: 'inherit', fontSize: 16 }}>×</button>
+          </span>
+        </Notice>
+      )}
       <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E3E7F1', overflowX: 'auto' }}>
         {tabs.map(([k, label, n]) => {
           const on = v === k;
