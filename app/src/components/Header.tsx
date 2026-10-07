@@ -40,7 +40,7 @@ export function TopBar({ navOpen, docked, onMenu, onToggle }: { navOpen: boolean
       </button>
       <img className="tb-mark" src={mark} alt="Global Carbon Corporation" width={32} height={32} />
       <div className="tb-title">
-        <span className="tb-h">{ready ? title : 'ฐานข้อมูลลูกค้า GCC'}</span>
+        <span className="tb-h" id="page-title">{ready ? title : 'ฐานข้อมูลลูกค้า GCC'}</span>
         <span className="tb-sub" title={dataLine}>{dataLine}</span>
       </div>
       {ready && ui.tab !== 'search' && <QuickSearch />}

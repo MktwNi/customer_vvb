@@ -91,7 +91,7 @@ export function Search() {
   const sel: CSSProperties = { height: 42, borderRadius: 12, padding: '0 10px', fontSize: 14, color: '#0E1430' };
 
   const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 120px 140px 72px minmax(0,1.2fr)';
-  const ctCols = '32px 160px minmax(0,2.2fr) minmax(0,1fr) 110px 150px 120px';
+  const ctCols = '32px 160px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 120px';
 
   return (
     <>

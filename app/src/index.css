@@ -70,7 +70,9 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side.tabs .side-item{transition:none}
 .side.tabs .side-item[aria-current=page]{margin-right:0;border-radius:21px 0 0 21px;background:var(--frame)}
 .side.dock .side-item[aria-current=page]{padding-right:28px}
-.side.tabs .side-item[aria-current=page]::before,.side.tabs .side-item[aria-current=page]::after{content:'';position:absolute;right:0;width:24px;height:24px;pointer-events:none}
+.side.tabs .side-item[aria-current=page]::before,.side.tabs .side-item[aria-current=page]::after{content:'';position:absolute;right:0;width:24px;height:25px;pointer-events:none}
+/* the menu's last pixel column is the page colour, so no blue seam shows at the tab's mouth at fractional zoom */
+.side.tabs{background:linear-gradient(to left,transparent 1px,var(--brand) 1px)}
 .side.tabs .side-item[aria-current=page]::before{top:-24px;background:radial-gradient(circle at 0 0,transparent 23.5px,var(--frame) 24px)}
 .side.tabs .side-item[aria-current=page]::after{bottom:-24px;background:radial-gradient(circle at 0 100%,transparent 23.5px,var(--frame) 24px)}
 .side .side-item[aria-current=page]:focus-visible{outline-color:var(--brand)}
@@ -79,6 +81,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .side-badge{flex:none;font-size:11px;font-weight:500;min-width:22px;height:20px;padding:0 7px;border-radius:999px;background:#fff;color:var(--brand-deep);display:flex;align-items:center;justify-content:center}
 .side-item[aria-current=page] .side-badge{background:var(--brand);color:#fff}
+.side-item[aria-current=page] .side-dot{box-shadow:0 0 0 2px var(--frame)}
 .side-dot{position:absolute;top:-8px;right:-12px;font-size:10px;line-height:1;min-width:18px;height:16px;padding:0 4px;border-radius:999px;background:#FFC94D;color:#0E1430;display:flex;align-items:center;justify-content:center;font-weight:600;box-shadow:0 0 0 2px var(--brand)}
 /* icon rail (menu folded): icons stay put whether or not the item is the open page */
 .side.rail .lbl{display:none}
@@ -99,11 +102,15 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 /* short windows: the menu must fit without scrolling (the info card is repeated in the top bar) */
 @media (min-width:901px) and (max-height:860px){.side-foot{display:none}}
 @media (min-width:901px) and (max-height:700px){.side-item{height:38px}.side-nav{gap:8px}.side.tabs .side-item[aria-current=page]{border-radius:19px 0 0 19px}}
+@media (min-width:901px) and (max-height:640px){.side-cta,.side.rail .side-cta{padding-top:10px}.side-item{height:34px}.side-nav{gap:6px;padding-bottom:10px}.side.tabs .side-item[aria-current=page]{border-radius:17px 0 0 17px}}
+/* a scrollbar would push the tab off the content edge: the tab modes never show one */
+.side.tabs{scrollbar-width:none}
+.side.tabs::-webkit-scrollbar{display:none}
 
 /* top bar */
 .topbar{position:relative;z-index:37;flex:none;height:var(--topbar-h);display:flex;align-items:center;gap:14px;padding:0 20px 0 0}
 .tb-brand{flex:none;width:var(--side-cur);display:flex;align-items:center;justify-content:center;gap:10px;min-width:0;transition:width .18s ease}
-.shell.docked .tb-brand{justify-content:flex-start;padding-left:22px}
+.shell.docked .tb-brand{justify-content:flex-start;padding-left:28px}
 .tb-brand img{width:38px;height:38px;flex:none;display:block}
 .tb-brand-text{display:none;flex-direction:column;line-height:1.25;min-width:0}
 .shell.docked .tb-brand-text{display:flex}
@@ -180,7 +187,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .hero :focus-visible{outline-color:#fff}
 #scroller:focus{outline:none}
 /* high-contrast mode: no decorations, and the open page is outlined (its tab colour is dropped) */
-@media (forced-colors:active){.hero::before,.hero::after{display:none}.side-item[aria-current=page]{outline:2px solid Highlight;outline-offset:-2px}}
+@media (forced-colors:active){.hero::before,.hero::after{display:none}.side-item[aria-current=page]{outline:2px dashed Highlight;outline-offset:-2px}.side .side-item[aria-current=page]:focus-visible{outline-style:solid}}
 /* print the whole page, not the window's first screen */
 @media print{body{background:#fff}.shell{height:auto;padding:0;display:block}.frame{display:block;overflow:visible;border-radius:0;box-shadow:none}.frame-body{padding-left:0}.content{height:auto;overflow:visible}.side,.side-backdrop,.tb-search,#rail-btn{display:none}}
 /* side panels (company / deal): rounded edge towards the page */

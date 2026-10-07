@@ -105,15 +105,15 @@ export default function App() {
   // once loaded, Page Down / Space scroll the page straight away (on desktop the content scrolls inside
   // the window, so it must hold the focus rather than the document)
   useEffect(() => {
-    if (ready && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
-  }, [ready]);
+    if (ready && !mobile && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
+  }, [ready, mobile]);
   return (
     <div className={'shell' + (docked ? ' docked' : '')}>
       <div className="frame">
         <TopBar navOpen={open} docked={docked} onMenu={() => setNavOpen(true)} onToggle={toggleNav} />
         <div className="frame-body">
           <Sidebar open={open} docked={docked} mobile={mobile} onClose={closeNav} />
-          <div className="content" id="scroller" tabIndex={-1}>
+          <div className="content" id="scroller" tabIndex={-1} role="region" aria-labelledby="page-title">
             <Banners />
             <main className="main">
               {!ready && <Loading msg={e.loadMsg} />}
