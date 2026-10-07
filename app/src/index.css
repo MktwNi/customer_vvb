@@ -384,14 +384,20 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .sd{container-type:inline-size;display:flex;flex-direction:column;gap:16px}
 .sd-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
 .sd-hello{display:flex;flex-direction:column;gap:4px;min-width:0}
-.sd-hello h3{margin:0;font-size:34px;font-weight:400;line-height:1.2;color:var(--ink)}
+.sd-hello h3{margin:0;font-size:26px;font-weight:500;line-height:1.25;color:var(--ink)}
 .sd-hello span{font-size:13.5px;color:#475069}
-.sd-heroes{display:flex;gap:28px;flex-wrap:wrap}
-.sd-hero-n{display:grid;grid-template-columns:auto auto;grid-template-areas:"ic n" "l l";align-items:center;column-gap:10px}
-.sd-hero-n .sd-ic{grid-area:ic;width:32px;height:32px;border-radius:50%;background:#fff;color:var(--brand);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px -10px rgba(16,40,120,.5)}
-.sd-hero-n .sd-ic svg{width:17px;height:17px}
-.sd-hero-n b{grid-area:n;font-size:44px;font-weight:300;line-height:1;color:var(--ink)}
-.sd-hero-n small{grid-area:l;font-size:12.5px;color:#475069;padding-top:4px}
+/* headline numbers: three tiles, the main result filled */
+.sd-heroes{display:flex;gap:12px;flex-wrap:wrap}
+.sd-stat{min-width:168px;display:flex;flex-direction:column;gap:4px;padding:14px 18px 14px;border-radius:22px;background:#fff;border:1px solid #E6EBF5;box-shadow:0 12px 28px -20px rgba(16,40,120,.35)}
+.sd-stat-l{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;color:#384155}
+.sd-stat-l svg{width:16px;height:16px;flex:none;color:var(--brand)}
+.sd-stat-v{font-size:13px;color:#475069}
+.sd-stat-v b{font-size:36px;font-weight:600;line-height:1.05;color:var(--ink);letter-spacing:-.01em}
+.sd-stat small{font-size:12px;color:#5E6680}
+.sd-stat.pri{background:linear-gradient(135deg,#1745B8,#1F5BD8);border-color:transparent;box-shadow:0 16px 30px -18px rgba(31,91,216,.9)}
+.sd-stat.pri .sd-stat-l,.sd-stat.pri .sd-stat-l svg,.sd-stat.pri .sd-stat-v,.sd-stat.pri .sd-stat-v b,.sd-stat.pri small{color:#fff}
+.sd-stat.warn{border-color:#F3C9B4;background:#FFF7F2}
+.sd-stat.warn .sd-stat-l svg,.sd-stat.warn .sd-stat-v b{color:#B2440F}
 .sd-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sd-filters .sx-sel{width:auto;max-width:100%;height:38px;border-radius:999px;font-size:13px;background-color:#fff}
 .sd-pipe{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
@@ -516,9 +522,11 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 }
 @container (max-width:640px){
   .sd-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "act" "ring" "win" "follow" "week" "acc"}
-  .sd-hello h3{font-size:26px}
-  .sd-heroes{gap:18px;width:100%;justify-content:space-between}
-  .sd-hero-n b{font-size:34px}
+  .sd-hello h3{font-size:22px}
+  .sd-heroes{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .sd-stat{min-width:0;padding:12px 12px;border-radius:18px}
+  .sd-stat-v b{font-size:28px}
+  .sd-stat small{display:none}
   .sd-stage{min-width:calc(50% - 4px)}
   .sd-top{min-height:0}
   .sd-wk-r{grid-template-columns:40px repeat(7,minmax(0,1fr));gap:3px}

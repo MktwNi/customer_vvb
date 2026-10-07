@@ -170,14 +170,14 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </div>
         <div className="sd-heroes">
           {([
-            ['user', st.total, 'ลูกค้า'],
-            ['sales', st.yes, 'ปิดการขายได้'],
-            ['plan', st.overdue, 'ค้างติดตาม'],
-          ] as const).map(([ic, n, l]) => (
-            <div key={l} className="sd-hero-n">
-              <span className="sd-ic" aria-hidden="true"><Icon name={ic} /></span>
-              <b>{fmtN(n)}</b>
-              <small>{l}</small>
+            ['user', st.total, 'ลูกค้า', 'ราย', `เปิดงาน ${fmtN(st.open)} · ปิดงาน ${fmtN(st.closed)}`, ''],
+            ['sales', st.yes, 'ปิดการขายได้', 'ราย', st.decided ? `Win rate ${st.winRate}%` : 'ยังไม่มีลูกค้าที่รู้ผล', 'pri'],
+            ['plan', st.overdue, 'ค้างติดตาม', 'ราย', 'ไม่ได้ติดต่อเกิน 14 วัน', st.overdue ? 'warn' : ''],
+          ] as const).map(([ic, n, l, unit, sub2, tone]) => (
+            <div key={l} className={'sd-stat' + (tone ? ' ' + tone : '')}>
+              <span className="sd-stat-l"><Icon name={ic} />{l}</span>
+              <span className="sd-stat-v"><b>{fmtN(n)}</b> {unit}</span>
+              <small>{sub2}</small>
             </div>
           ))}
         </div>
