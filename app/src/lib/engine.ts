@@ -959,11 +959,20 @@ export class GccEngine {
     this.emit();
   }
   private salesLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail = '') {
-    const id = uid();
-    const L: DealLog = { id, at: new Date().toISOString(), by: this.me(), action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
+    const at = new Date().toISOString(), by = this.me();
+    // typing in one field after another, or rewording a note, is one history entry: the same record
+    // is rewritten (the sheet keeps only its last version) instead of a new row per keystroke-save
+    const prev = d.id && (action === 'แก้ไข' || action.startsWith('อัปเดต ')) ? this.lastLog : null;
+    const same = prev && this.sales.log[prev.id] === prev && prev.deal === d.id && prev.by === by && prev.action === action && Date.parse(at) - Date.parse(prev.at) < 10 * 60000;
+    if (same && action === 'แก้ไข') detail = [...new Set([...prev.detail.split(', '), ...detail.split(', ')])].join(', ');
+    const id = same ? prev.id : uid();
+    const L: DealLog = { id, at, by, action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
+    this.lastLog = L;
     this.sales.log[id] = L;
     this.op(keyOf.dlog(id), { ...L });
   }
+  /** The history entry this browser wrote last (see salesLog). */
+  private lastLog: DealLog | null = null;
   private putDeal(d: Deal) {
     this.sales.deals[d.id] = d;
     this.op(keyOf.deal(d.id), { ...d });

@@ -310,6 +310,24 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     expect(Object.values(B.sales.deals).filter((d) => d.year === '2568')).toHaveLength(rows.length - 1);
   });
 
+  it('editing one field after another is one history entry, not one per save', () => {
+    const d = A.addDeal({ client: 'ประวัติสั้น', year: '2566' });
+    const n = () => Object.values(A.sales.log).filter((l) => l.deal === d.id).length;
+    const base = n();
+    A.updateDeal(d.id, { phone: '021234567' });
+    A.updateDeal(d.id, { email: 'a@b.co' });
+    A.updateDeal(d.id, { phone: '029999999' });
+    A.setStep(d.id, 'CALL1', { d: '', n: 'โทร' });
+    A.setStep(d.id, 'CALL1', { d: '', n: 'โทรแล้ว นัดพรุ่งนี้' });
+    expect(n()).toBe(base + 2);
+    const logs = Object.values(A.sales.log).filter((l) => l.deal === d.id);
+    expect(logs.find((l) => l.action === 'แก้ไข')!.detail).toBe('เบอร์, อีเมล');
+    expect(logs.find((l) => l.action === 'อัปเดต CALL1')!.detail).toBe('โทรแล้ว นัดพรุ่งนี้');
+    vi.setSystemTime(Date.now() + 11 * 60000); // the clock only: no sync timers fire
+    A.updateDeal(d.id, { phone: '021111111' });
+    expect(n()).toBe(base + 3);
+  });
+
   it('a client already sent from the registry is not imported a second time that year', async () => {
     const [c] = cos().slice(6);
     A.addDealsFromCompanies([c.id], { year: '2567' });
