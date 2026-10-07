@@ -74,9 +74,9 @@ export function Plan() {
     ['7 วันข้างหน้า', open_.filter((t) => t.date > today && t.date <= wk).length, '#1F5BD8', '#fff'],
     ['หลังจากนั้น', open_.filter((t) => t.date > wk).length, '#C9D1E6', '#0E1430'],
   ];
-  const avOf = (gid: number, title: string, ring?: string, size = 22) => {
+  const avOf = (key: string, gid: number, title: string, ring?: string, size = 22) => {
     const c = e.company(gid);
-    return <CoAvatar key={gid + title} name={c ? c.name : title} web={c?.web} set={c?.set} size={size} ring={ring} />;
+    return <CoAvatar key={key} name={c ? c.name : title} web={c?.web} set={c?.set} size={size} ring={ring} />;
   };
   const upcoming = open_.filter((t) => t.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
   const teamOpts = [{ v: '-', label: 'ยังไม่มีผู้รับผิดชอบ' }].concat(C.team.map((v) => ({ v, label: v })));
@@ -123,7 +123,7 @@ export function Plan() {
                     <>
                       {/* up to three bubbles: company pictures (ring = task type), the last one "+n" when there are more */}
                       <span className="pl-avs">
-                        {ts.slice(0, ts.length > 3 ? 2 : 3).map((t) => avOf(t.gid, t.title, (TT.find((x) => x[0] === t.type) || TT[0])[2], 18))}
+                        {ts.slice(0, ts.length > 3 ? 2 : 3).map((t) => avOf(t.id, t.gid, t.title, (TT.find((x) => x[0] === t.type) || TT[0])[2], 18))}
                         {ts.length > 3 && <span className="pl-more">+{ts.length - 2}</span>}
                       </span>
                       <span className="pl-cnt">{fmtN(ts.length)}</span>
@@ -154,13 +154,13 @@ export function Plan() {
             return (
               <div key={t.id} className="pl-task">
                 <DoneBox t={t} color={ti.color} onToggle={() => e.toggleTask(t)} />
-                {avOf(t.gid, t.title, ti.color, 40)}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                {avOf(t.id, t.gid, t.title, ti.color, 40)}
+                <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                   <button onClick={() => ti.company && open(ti.company.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: '#0E1430', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
                   <span style={{ fontSize: 12.5, color: '#475069' }}>{ti.meta}</span>
                   {t.note && <span style={{ fontSize: 12.5, color: '#384155' }}>{t.note}</span>}
                 </div>
-                <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
+                <div className="pl-task-act">
                   {ti.tel && <a href={ti.tel} style={{ fontSize: 12.5, textDecoration: 'none', border: '1.5px solid #D5DBEA', borderRadius: 999, padding: '4px 10px' }}>โทร</a>}
                   <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} style={{ cursor: 'pointer', border: '1.5px solid #D5DBEA', background: '#fff', borderRadius: 999, padding: '4px 10px', fontSize: 12.5 }}>เลื่อน</button>
                   <button onClick={() => e.delTask(t)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12.5 }}>ลบ</button>
@@ -174,7 +174,7 @@ export function Plan() {
             const ti = taskInfo(e, t);
             return (
               <button key={t.id} className="pl-up" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', background: 'transparent', textAlign: 'left', padding: '8px 0', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, color: '#0E1430' }}>
-                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>{avOf(t.gid, t.title, ti.color, 30)}<span style={{ minWidth: 0 }}>{ti.title}</span></span>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>{avOf(t.id, t.gid, t.title, ti.color, 30)}<span style={{ minWidth: 0 }}>{ti.title}</span></span>
                 <span style={{ color: '#475069', whiteSpace: 'nowrap' }}>{ti.when}</span>
               </button>
             );

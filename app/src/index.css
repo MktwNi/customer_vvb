@@ -231,6 +231,9 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .sx-groups-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:0 4px}
 .sx-groups-h>span:first-child{font-size:14px;font-weight:500;color:var(--brand-deep)}
 .sx-groups-sub{font-size:12.5px;color:#5E6680}
+@media (hover:none){.sx-hover-hint{display:none}}
+.sx-rule{font-size:13px;color:#384155;background:var(--brand-soft);border-radius:14px;padding:8px 14px;line-height:1.5}
+.sx-rule b{font-weight:500;color:var(--brand-deep)}
 /* ten equal cards, 5 × 2 */
 .sx-chips{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
 .sx-chip{cursor:pointer;text-align:left;min-width:0;display:grid;grid-template-columns:auto 1fr;grid-template-areas:"dot n" "label label" "bar bar";align-items:center;gap:8px 10px;padding:12px 14px 13px;border-radius:18px;border:1.5px solid transparent;background:#F4F7FE;color:var(--ink);transition:background .12s,border-color .12s,box-shadow .12s}
@@ -326,17 +329,23 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .pl-cell{cursor:pointer;position:relative;min-height:74px;border:0;border-radius:14px;background:#F1F4FA;padding:7px 6px 7px 8px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;gap:4px;text-align:left;color:var(--ink);transition:box-shadow .12s,background .12s}
 .pl-cell:hover{background:#E8EEFA}
 .pl-cell.wk{background:repeating-linear-gradient(135deg,#E9EDF6 0 2px,#F1F4FA 2px 9px)}
-.pl-cell.out{opacity:.55}
+.pl-cell.out{background:#F8FAFE}
+.pl-cell.out.wk{background:repeating-linear-gradient(135deg,#EEF1F8 0 2px,#F8FAFE 2px 9px)}
 .pl-cell.out .pl-dn{color:#5E6680}
 .pl-dn{font-size:13px;font-variant-numeric:tabular-nums}
 .pl-cell.today{background:var(--brand);color:#fff}
-.pl-cell.today .pl-dn{font-weight:600}
+.pl-cell.today .pl-dn{font-weight:600;color:#fff}
+/* the type ring stays visible on today's blue */
+.pl-cell.today .pl-avs .co-ava{outline:2px solid #fff;outline-offset:2px}
 .pl-cell.sel{box-shadow:0 0 0 2px var(--brand),0 10px 22px -14px rgba(31,91,216,.8)}
+/* the open day is filled too, so it differs from a keyboard-focused day (ring only) */
+.pl-cell.sel:not(.today){background:var(--brand-soft)}
+.pl-cell.sel:not(.today) .pl-dn{color:var(--brand-deep);font-weight:600}
 .pl-cell.today.sel{box-shadow:0 0 0 2px var(--brand-deep),0 0 0 4px #fff inset}
 .pl-avs{display:flex;align-items:center}
 .pl-avs .co-ava{border:2px solid #fff;box-sizing:content-box}
 .pl-avs>*+*{margin-left:-7px}
-.pl-more{width:22px;height:22px;flex:none;border-radius:50%;border:2px solid #fff;box-sizing:border-box;background:#E3E8F4;color:#384155;font-size:9.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+.pl-more{position:relative;width:18px;height:18px;flex:none;border-radius:50%;border:2px solid #fff;box-sizing:content-box;box-shadow:0 0 0 2px #C9D1E6;background:#E3E8F4;color:#384155;font-size:9.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
 .pl-cnt{display:none}
 .pl-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#475069}
 .pl-legend>span{display:flex;gap:6px;align-items:center}
@@ -352,6 +361,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .pl-day-n{flex:none;font-size:12.5px;padding:5px 12px;border-radius:999px;background:#fff;color:var(--brand-deep);font-weight:500}
 .pl-empty{font-size:13px;color:#5E6680;padding:6px 0}
 .pl-task{display:flex;gap:10px;align-items:center;border:1px solid #EEF1F8;border-radius:16px;padding:10px 12px;background:#FBFCFF}
+.pl-task-act{display:flex;gap:6px;flex:none;align-items:center}
 .pl-up-h{font-size:14px;font-weight:500;padding-top:8px;color:var(--brand-deep)}
 .pl-up{align-items:center}
 @media (max-width:760px){
@@ -365,8 +375,10 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
   .pl-cnt{display:inline-flex;align-self:flex-end;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--brand);color:#fff;font-size:11px;font-weight:600;align-items:center;justify-content:center}
   .pl-cell.today .pl-cnt{background:#fff;color:var(--brand-deep)}
   .pl-task{flex-wrap:wrap}
+  .pl-task-act{flex-basis:100%;justify-content:flex-end}
+  .pl-legend{display:none}
 }
-@media (forced-colors:active){.pl-cell.sel{outline:2px solid Highlight}.pl-cell.today{outline:2px dashed Highlight}}
+@media (forced-colors:active){.pl-cell{border:2px solid Canvas}.pl-cell.sel{border-color:Highlight}.pl-cell.today{border-style:dashed;border-color:CanvasText}.pl-cell.today.sel{border-color:Highlight}}
 
 /* ---- Sales Tracker table: frozen header + client column, compact stage cells */
 .sl-table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;color:#0E1430}

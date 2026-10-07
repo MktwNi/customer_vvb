@@ -13,14 +13,16 @@ const hash = (s: string) => {
 export function coreName(name: string) {
   return name
     .replace(/\((สำนักงานใหญ่|มหาชน|ประเทศไทย|สาขา[^)]*)\)/g, ' ')
-    .replace(/^\s*(บริษัท|บจก\.?|บมจ\.?|ห้างหุ้นส่วนจำกัด|ห้างหุ้นส่วนสามัญ|หจก\.?|โรงงาน|สหกรณ์|มูลนิธิ|สมาคม)\s*/, '')
+    // longer alternatives first (ห้างหุ้นส่วนสามัญนิติบุคคล before ห้างหุ้นส่วนสามัญ, นางสาว before นาง)
+    .replace(/^\s*(บริษัท|บจก\.?|บมจ\.?|ห้างหุ้นส่วนสามัญนิติบุคคล|ห้างหุ้นส่วนจำกัด|ห้างหุ้นส่วนสามัญ|หจก\.?|โรงงาน|สหกรณ์|มูลนิธิ|สมาคม|นางสาว|นาง|นาย|น\.ส\.)\s*/, '')
     .replace(/\s*(จำกัด|จก\.|co\.?,?\s*ltd\.?|company limited|public company limited|plc\.?|ltd\.?|limited|inc\.?)\s*$/i, '')
     .trim();
 }
 
-/** One or two letters for the avatar: the SET symbol when listed, else the name's first letter(s). */
+/** One or two letters for the avatar: the SET symbol when listed (never cut: a cut symbol can be
+ *  another company's), else the name's first letter(s). */
 export function monogram(name: string, set?: string) {
-  if (set) return set.slice(0, 4).toUpperCase();
+  if (set && set.length <= 4) return set.toUpperCase();
   const n = coreName(name) || name;
   const words = n.split(/\s+/).filter((w) => /[A-Za-z]/.test(w[0] || ''));
   if (words.length && /^[A-Za-z]/.test(n)) return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
@@ -42,10 +44,16 @@ const hostOf = (web?: string) => {
  * symbol for listed companies, else the first letter of the name. Decorative: the name is always
  * written next to it.
  */
-export function CoAvatar({ name, web, set, size = 36, ring, style }: { name: string; web?: string; set?: string; size?: number; ring?: string; style?: CSSProperties }) {
+type AvatarProps = { name: string; web?: string; set?: string; size?: number; ring?: string; style?: CSSProperties };
+export function CoAvatar(p: AvatarProps) {
+  // a new website (contact edited) starts its logo check afresh
+  return <CoAvatarInner key={hostOf(p.web)} {...p} />;
+}
+function CoAvatarInner({ name, web, set, size = 36, ring, style }: AvatarProps) {
   const host = hostOf(web);
   const [logo, setLogo] = useState<'wait' | 'ok' | 'none'>(host ? 'wait' : 'none');
-  const text = monogram(name, set);
+  const full = monogram(name, set);
+  const text = size < 28 ? Array.from(full)[0] : full; // small bubbles: one readable letter
   const bg = SWATCH[hash(coreName(name) || name) % SWATCH.length];
   const fs = Math.round(size * (text.length > 2 ? 0.3 : text.length > 1 ? 0.36 : 0.44));
   return (

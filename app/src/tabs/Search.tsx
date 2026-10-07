@@ -158,9 +158,9 @@ export function Search() {
           <div className="sx-groups">
             <div className="sx-groups-h">
               <span id="sx-chips-h">กลุ่มเป้าหมาย</span>
-              <span className="sx-groups-sub">บริษัทหนึ่งอยู่ได้กลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า · ชี้ที่การ์ดเพื่อดูเงื่อนไข</span>
+              <span className="sx-groups-sub">บริษัทหนึ่งอยู่ได้กลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า<span className="sx-hover-hint"> · ชี้ที่การ์ดเพื่อดูเงื่อนไข</span></span>
             </div>
-            <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h">
+            <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h" aria-describedby={s.tgt !== '' ? 'sx-rule' : undefined}>
               {tgtChips.map((c) => {
                 const total = tgtChips[0].n;
                 const share = c.i == null ? (total ? 100 : 0) : total ? (c.n / total) * 100 : 0;
@@ -178,6 +178,11 @@ export function Search() {
                 );
               })}
             </div>
+            {s.tgt !== '' && GDESC[+s.tgt] && (
+              <span className="sx-rule" id="sx-rule">
+                <b>{`กลุ่ม ${+s.tgt + 1}:`}</b> {GDESC[+s.tgt]}
+              </span>
+            )}
           </div>
           <div className="sx-filters">
             <div className="sx-fhead">
