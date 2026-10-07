@@ -15,6 +15,12 @@ const PATHS = {
     </>
   ),
   track: <path d="M3 12h4l3-8 4 16 3-8h4" />,
+  sales: (
+    <>
+      <path d="M3 17l6-6 4 4 8-8" />
+      <path d="M15 7h6v6" />
+    </>
+  ),
   plan: (
     <>
       <rect x="3" y="5" width="18" height="16" rx="2" />

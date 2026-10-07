@@ -13,6 +13,9 @@ import { MapTab } from './tabs/MapTab';
 import { Dedup } from './tabs/Dedup';
 import { Update } from './tabs/Update';
 import { Notes } from './tabs/Notes';
+import { Sales } from './tabs/Sales';
+import { DealPanel } from './components/DealPanel';
+import { AddCustomer, SendToTracker } from './components/AddCustomer';
 
 function Loading({ msg }: { msg: string }) {
   const sk = { height: 64, borderRadius: 16, background: '#E6EAF4' };
@@ -66,7 +69,7 @@ export default function App() {
   useEffect(() => {
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
-      set((s) => (s.sched ? { sched: null } : s.sel != null ? { sel: null } : {}));
+      set((s) => (s.sched ? { sched: null } : s.addCust ? { addCust: null } : s.sendIds ? { sendIds: null } : s.sel != null ? { sel: null } : s.deal ? { deal: null } : {}));
     };
     document.addEventListener('keydown', kd);
     return () => document.removeEventListener('keydown', kd);
@@ -82,6 +85,7 @@ export default function App() {
         <main className="main">
           {!ready && <Loading msg={e.loadMsg} />}
           {ready && ui.tab === 'overview' && <Overview />}
+          {ready && ui.tab === 'sales' && <Sales />}
           {ready && ui.tab === 'search' && <Search />}
           {ready && ui.tab === 'track' && <Track />}
           {ready && ui.tab === 'plan' && <Plan />}
@@ -91,7 +95,10 @@ export default function App() {
           {ready && ui.tab === 'notes' && <Notes />}
         </main>
       </div>
+      {ready && ui.deal && <DealPanel />}
       {ready && ui.sel != null && <CompanyDrawer />}
+      {ready && ui.addCust && <AddCustomer />}
+      {ready && ui.sendIds && <SendToTracker />}
       {ready && ui.sched && <ScheduleModal />}
     </div>
   );

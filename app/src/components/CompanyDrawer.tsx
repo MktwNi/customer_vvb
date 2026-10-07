@@ -2,7 +2,8 @@ import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, LOG_TYPES, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, money, telHref, ymTh } from '../lib/format';
-import type { Cert, Detail, StageKey } from '../lib/types';
+import type { Cert, Company, Detail, StageKey } from '../lib/types';
+import { dealMoney, dealStatus, fmtMoney } from '../lib/sales';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { Opts, SrcTags, heroGrad, inputStyle } from './ui';
@@ -171,6 +172,7 @@ export function CompanyDrawer() {
         <div style={{ padding: '18px 24px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {dt === 'info' && (
             <>
+              <SalesBox c={c} />
               {multi && (
                 <div style={{ background: '#E6ECFD', borderRadius: 16, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <span style={{ fontSize: 13.5, fontWeight: 500, color: '#0A1A86' }}>รวมจาก {c.ids.length} แถวในไฟล์ต้นทาง</span>
@@ -379,6 +381,36 @@ function BlockRow({ it }: { it: BlockItem }) {
         </div>
       )}
       {it.from && <span style={{ fontSize: 11.5, color: '#5E6680' }}>{it.from}</span>}
+    </div>
+  );
+}
+
+/** Where the company stands in the Sales Tracker, and a one-click way to put it there. */
+function SalesBox({ c }: { c: Company }) {
+  const { engine: e, set } = useApp();
+  const deals = e.dealsOf(c.id).sort((a, b) => b.year.localeCompare(a.year));
+  const custom = e.custom[c.id];
+  const btn: CSSProperties = { cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #0A1A86', background: '#fff', color: '#0A1A86', fontSize: 13 };
+  return (
+    <div style={{ ...box, gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={kicker}>Sales Tracker</span>
+        <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {custom && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} style={{ ...btn, borderColor: '#D5DBEA', color: '#0E1430' }}>แก้ไขข้อมูลลูกค้า</button>}
+          <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btn, background: '#0A1A86', color: '#fff' }}>+ ส่งเข้า Sales Tracker</button>
+        </span>
+      </div>
+      {!deals.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่อยู่ในตารางติดตามการขาย — กดส่งเข้า แล้วข้อมูลติดต่อจะถูกกรอกให้อัตโนมัติ</span>}
+      {deals.map((d) => {
+        const st = dealStatus(e.sales, d);
+        const m = dealMoney(e.sales, d);
+        return (
+          <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="h-bg" style={{ cursor: 'pointer', border: '1px solid #E3E7F1', borderRadius: 12, background: '#fff', textAlign: 'left', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, flexWrap: 'wrap' }}>
+            <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{st.overall}</b></span>
+            <span style={{ color: '#475069', fontSize: 12.5 }}>{m.forecast != null ? 'Forecast ' + fmtMoney(m.forecast) + (m.fcConfirmed ? ' ✓' : '') : ''} · เปิด →</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
