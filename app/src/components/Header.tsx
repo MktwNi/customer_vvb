@@ -4,6 +4,7 @@ import { addMonths, fmtN, isoTh, todayISO } from '../lib/format';
 import { TeamChip } from './TeamSync';
 import { Icon } from './icons';
 import { TABS, useDataLine } from './Sidebar';
+import mark from '../assets/gcc-mark.png';
 
 /** Top bar of the content area: page name + data line, team status and the reference-date picker. */
 export function TopBar({ navOpen, onMenu }: { navOpen: boolean; onMenu: () => void }) {
@@ -25,6 +26,7 @@ export function TopBar({ navOpen, onMenu }: { navOpen: boolean; onMenu: () => vo
       <button id="menu-btn" className="menu-btn" onClick={onMenu} aria-label="เปิดเมนู" aria-expanded={navOpen} aria-controls="side-nav">
         <Icon name="menu" />
       </button>
+      <img className="tb-mark" src={mark} alt="Global Carbon Corporation" width={30} height={30} />
       <div className="tb-title">
         <span className="tb-h">{ready ? title : 'ฐานข้อมูลลูกค้า GCC'}</span>
         <span className="tb-sub" title={dataLine}>{dataLine}</span>
