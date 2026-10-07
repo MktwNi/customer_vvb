@@ -244,6 +244,9 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
         setProperty: (k, v) => {
           props[k] = String(v);
         },
+        deleteProperty: (k) => {
+          delete props[k];
+        },
       }),
     },
     ContentService: {

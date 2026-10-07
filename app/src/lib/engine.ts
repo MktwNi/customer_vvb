@@ -21,7 +21,7 @@ import {
   parseTrackerJson, parseTrackerSheet, stepOf,
   type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
-import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1199,7 +1199,12 @@ export class GccEngine {
     const cfg = this.teamCfg;
     if (!doc.fileId) throw new Error('ไฟล์นี้ยังอยู่ในเครื่องของคนที่แนบ ยังไม่ได้อัปโหลดขึ้น Drive ของทีม');
     if (!cfg) throw new Error('เชื่อมต่อทีม (แท็บอัปเดตข้อมูล) ก่อน จึงจะเปิดไฟล์ใน Drive ของทีมได้');
-    const r = await downloadDocFile(this.fileTransport, cfg.url, cfg.key, doc.fileId);
+    let r: Awaited<ReturnType<typeof downloadDocFile>>;
+    try {
+      r = await downloadDocFile(this.fileTransport, cfg.url, cfg.key, doc.fileId);
+    } catch (e) {
+      throw new Error('เปิดไฟล์จาก Drive ของทีมไม่ได้: ' + fileErrText(e));
+    }
     this.store.set(this.docBlobKey(doc.id), { name: doc.name, mime: r.mime || doc.mime, data: await r.blob.arrayBuffer() }).catch(() => {});
     return r.blob;
   }
@@ -1214,6 +1219,7 @@ export class GccEngine {
     const todo = Object.values(this.sales.docs).filter((d) => !d.fileId);
     if (!todo.length) return;
     this.docUploading = true;
+    const failed: string[] = [];
     try {
       if (this.teamFiles == null) this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, cfg.key);
       if (!this.teamFiles) {
@@ -1224,7 +1230,17 @@ export class GccEngine {
         if (this.teamCfg !== cfg) return;
         const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer }>(this.docBlobKey(doc.id));
         if (!b) continue; // attached on another device
-        const r = await uploadDocFile(this.fileTransport, cfg.url, cfg.key, { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
+        let r: { fileId: string };
+        try {
+          r = await uploadDocFile(this.fileTransport, cfg.url, cfg.key, { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
+        } catch (e) {
+          // a file the script refuses for good must not hold back every other upload
+          if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data'].includes(e.code ?? '')) {
+            failed.push(`${doc.name}: ${fileErrText(e)}`);
+            continue;
+          }
+          throw e;
+        }
         const k = `${doc.deal}/${doc.id}`, cur = this.sales.docs[k];
         if (!cur) {
           deleteDocFile(this.fileTransport, cfg.url, cfg.key, r.fileId).catch(() => {}); // deleted meanwhile
@@ -1234,9 +1250,9 @@ export class GccEngine {
         this.op(keyOf.ddoc(doc.deal, doc.id), { ...this.sales.docs[k] });
         this.saveSales();
       }
-      this.docMsg = '';
+      this.docMsg = failed.length ? 'อัปโหลดเอกสารขึ้น Drive ไม่ได้ — ' + failed.join(' · ') + ' (ไฟล์ยังอยู่ในเครื่องนี้ ลบแล้วแนบไฟล์ใหม่)' : '';
     } catch (e) {
-      this.docMsg = 'อัปโหลดเอกสารขึ้น Drive ไม่สำเร็จ: ' + errText(e) + ' (เก็บไว้ในเครื่องนี้ จะลองใหม่อัตโนมัติ)';
+      this.docMsg = 'อัปโหลดเอกสารขึ้น Drive ไม่สำเร็จ: ' + fileErrText(e) + ' (เก็บไว้ในเครื่องนี้ จะลองใหม่หลังซิงก์รอบถัดไป)';
     } finally {
       this.docUploading = false;
       this.emit();

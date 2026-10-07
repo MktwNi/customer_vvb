@@ -176,6 +176,51 @@ describe('attached documents through Code.gs (run in the simulator)', () => {
     await expect(downloadDocFile(t, URL, KEY, other.getId())).rejects.toThrow('ไม่พบไฟล์ในโฟลเดอร์เอกสารของทีม');
   });
 
+  it('serves only upload types, and refuses files too big to send back', async () => {
+    await up('a');
+    const folder = s.DriveApp.getFolderById(s.props.DOC_FOLDER);
+    // dropped into the folder by hand: opened as a page in the app's origin, these could read the team code
+    const html = folder.createFile(s.Utilities.newBlob([60, 104, 49, 62], 'text/html', 'x__a.html'));
+    const svg = folder.createFile(s.Utilities.newBlob([60, 115, 118, 103, 62], 'image/svg+xml', 'x__a.svg'));
+    for (const f of [html, svg]) expect(s.post({ action: 'file', key: KEY, fileId: f.getId() })).toEqual({ ok: false, error: 'not_found' });
+    const big = folder.createFile(s.Utilities.newBlob(new Array(DOC_MAX_BYTES + 1).fill(1), 'application/pdf', 'scan.pdf'));
+    expect(s.post({ action: 'file', key: KEY, fileId: big.getId() })).toEqual({ ok: false, error: 'file_too_large' });
+  });
+
+  it('a file Drive can no longer open counts as gone, so its attachment can still be removed', async () => {
+    const a = await up('a');
+    const get = s.DriveApp.getFileById;
+    s.DriveApp.getFileById = () => {
+      throw new Error('Unexpected error while getting the method or property getFileById on object DriveApp.');
+    };
+    try {
+      expect(s.post({ action: 'file', key: KEY, fileId: a.fileId })).toEqual({ ok: false, error: 'not_found' });
+      await expect(deleteDocFile(t, URL, KEY, a.fileId)).resolves.toBeUndefined();
+    } finally {
+      s.DriveApp.getFileById = get;
+    }
+  });
+
+  it('setup starts a new folder when the stored one can\'t be opened; uploads never do', async () => {
+    await up('a');
+    const old = s.props.DOC_FOLDER;
+    const get = s.DriveApp.getFolderById;
+    s.DriveApp.getFolderById = (id: string) => {
+      if (id === old) throw new Error('Unexpected error while getting the method or property getFolderById on object DriveApp.');
+      return get(id);
+    };
+    try {
+      // a brief Drive outage looks the same: an upload must not orphan every attachment by moving on
+      expect(s.post(uploadBody('b')).error).toMatch(/Unexpected error/);
+      expect(s.props.DOC_FOLDER).toBe(old);
+      s.setup();
+      expect(s.props.DOC_FOLDER).not.toBe(old);
+      expect(s.post(uploadBody('c')).ok).toBe(true);
+    } finally {
+      s.DriveApp.getFolderById = get;
+    }
+  });
+
   it('delfile moves the file to the trash; deleting it again is harmless', async () => {
     const a = await up('a');
     const b = await up('b');

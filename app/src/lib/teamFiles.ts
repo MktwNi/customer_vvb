@@ -78,7 +78,9 @@ export async function uploadDocFile(t: Transport, url: string, key: string, f: {
 
 export async function downloadDocFile(t: Transport, url: string, key: string, fileId: string): Promise<{ blob: Blob; name: string; mime: string }> {
   const r = await call(t, url, key, { action: 'file', fileId });
-  const mime = String(r.mime || 'application/octet-stream');
+  // the script only serves upload types, but never trust a type that could open as a page in the
+  // app's origin (text/html, image/svg+xml): anything else becomes a plain download
+  const mime = DOC_MIMES.includes(String(r.mime)) ? String(r.mime) : 'application/octet-stream';
   const blob = base64ToBlob(String(r.data ?? ''), mime);
   // never hand a damaged file to the PDF / image viewer
   if (blob.size !== Number(r.size)) throw new TeamSyncError('ได้รับไฟล์ไม่ครบ ลองเปิดอีกครั้ง');
@@ -100,4 +102,17 @@ export async function deleteDocFile(t: Transport, url: string, key: string, file
 export async function scriptSupportsFiles(t: Transport, url: string, key: string): Promise<boolean> {
   const r = await call(t, url, key, { action: 'ping' });
   return r.files === true;
+}
+
+/** Message for a failed upload / open / delete. errText (teamSync.ts) talks about the sheet and
+ *  calls unknown script errors "sync failed", both misleading for a file. */
+export function fileErrText(e: unknown): string {
+  const name = (e as Error)?.name;
+  if (name === 'TimeoutError' || name === 'AbortError') return 'Google Drive ไม่ตอบกลับ (ไฟล์ใหญ่หรืออินเทอร์เน็ตช้า)';
+  if (e instanceof TeamSyncError) {
+    if (e.code === 'busy') return 'สคริปต์ของทีมไม่ว่างตอนนี้';
+    return e.message.replace(/^ซิงก์ไม่สำเร็จ: /, 'Google Drive ตอบกลับผิดพลาด: ');
+  }
+  if (e instanceof TypeError) return typeof navigator !== 'undefined' && navigator.onLine === false ? 'ออฟไลน์อยู่' : 'เชื่อมต่อสคริปต์ของทีมไม่ได้';
+  return String((e as Error)?.message || e);
 }

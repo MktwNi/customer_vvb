@@ -49,7 +49,16 @@ function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('สคริปต์นี้ต้องสร้างจากไฟล์ Google Sheet: เปิดไฟล์ชีต → ส่วนขยาย (Extensions) → Apps Script แล้ววางโค้ดที่นั่น');
   sheet_();
-  docFolder_(); // also proves the Drive permission was granted
+  try {
+    docFolder_(); // also proves the Drive permission was granted
+  } catch (err) {
+    if (drivePermission_(err)) throw err;
+    // the stored folder id can't be opened at all (Drive answers with an "Unexpected error" rather
+    // than "not found"): running setup is the owner's explicit fix, so start a new folder. Only here,
+    // never on upload, where a brief Drive outage must not orphan every existing attachment.
+    PropertiesService.getScriptProperties().deleteProperty('DOC_FOLDER');
+    docFolder_();
+  }
   const msg = 'พร้อมใช้งาน: สร้างชีต "' + SHEET_NAME + '" และโฟลเดอร์ "' + DOC_FOLDER_NAME + '" ใน Google Drive แล้ว ขั้นต่อไปคือ Deploy เป็น Web app';
   Logger.log(msg);
   try {
@@ -269,6 +278,8 @@ function upload_(req) {
 function file_(fileId) {
   const f = docFile_(fileId);
   if (!f) return { ok: false, error: 'not_found' };
+  // a large scan the owner put in the folder by hand would exceed Apps Script's response limits
+  if (f.getSize() > MAX_FILE) return { ok: false, error: 'file_too_large' };
   const name = f.getName();
   const cut = name.indexOf('__'); // "<docId>__<original name>"; cleanId_ keeps "__" out of docId
   return { ok: true, name: cut >= 0 ? name.slice(cut + 2) : name, mime: f.getMimeType(), size: f.getSize(), data: Utilities.base64Encode(f.getBlob().getBytes()) };
@@ -287,9 +298,19 @@ function docFile_(fileId) {
   const id = String(fileId || '');
   if (!/^[\w-]{1,200}$/.test(id)) return null;
   const folder = docFolderReady_();
-  const f = folder && driveGet_((x) => DriveApp.getFileById(x), id);
-  // getFileById also resolves folders and Google Docs/Sheets; uploads are only ever plain files
-  if (!f || f.isTrashed() || /^application\/vnd\.google-apps\./.test(f.getMimeType())) return null;
+  if (!folder) return null;
+  let f;
+  try {
+    f = DriveApp.getFileById(id);
+  } catch (err) {
+    // a missing permission must still say so; any other failure means this file can't be served,
+    // and answering not_found lets the web app remove an attachment whose file is gone
+    if (drivePermission_(err)) throw err;
+    return null;
+  }
+  // only the types uploads are allowed to have: an .html or .svg dropped into the folder by hand
+  // must never be handed to the browser as a page (getFileById also resolves Google Docs/folders)
+  if (!f || f.isTrashed() || DOC_TYPES.indexOf(f.getMimeType()) < 0) return null;
   const parents = f.getParents();
   while (parents.hasNext()) if (parents.next().getId() === folder.getId()) return f;
   return null;
