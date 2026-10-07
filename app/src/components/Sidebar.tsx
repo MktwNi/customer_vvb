@@ -78,7 +78,7 @@ export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: 
     badges.track = (mon.events || []).filter((x) => x.at > (mon.seenAt || '')).length;
     badges.plan = e.crm.tasks.filter((t) => !t.done && t.date <= today).length;
     badges.dedup = e.B.groups.filter((g) => g.state === 'pending').length;
-    badges.sales = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear && overdueDays(d, today) != null).length; // follow-ups overdue
+    badges.sales = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear && overdueDays(e.sales, d, today) != null).length; // follow-ups overdue
   }
 
   // open menu: Escape folds it and focus returns to the button that opened it;

@@ -6,7 +6,7 @@ import { norm } from './core';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import {
-  dealMoney, dealResult, dealStatus, emptySales, filterDeals, fixPhone, htmlToText, importId, isoDate, looseMoney, matchSource, money, newDeal, overdueDays,
+  dealMoney, dealResult, dealStatus, emptySales, filterDeals, fixPhone, htmlToText, importId, isoDate, lastContact, looseMoney, matchSource, money, newDeal, overdueDays,
   parseContact, parseCsv, parseTrackerJson, parseTrackerSheet, salesStats, DEFAULT_SECTIONS, DEFAULT_SOURCES, type Deal, type SalesState,
 } from './sales';
 import { CUSTOM_ID_MIN, isLocalOnly } from './teamSync';
@@ -34,9 +34,11 @@ describe('sales tracker rules (same as the original tracker)', () => {
     expect(dealStatus(S, b).overall).toBe('ปิดงาน');
     expect(dealStatus(S, c).overall).toBe('กำลังดำเนินการ');
     expect(dealStatus(S, deal()).overall).toBe('ยังไม่เริ่ม');
-    expect(overdueDays(a, '2026-10-06')).toBe(35);
-    expect(overdueDays(a, '2026-09-10')).toBeNull(); // ≤ 14 days
-    expect(overdueDays(b, '2026-12-01')).toBeNull(); // closed jobs are never overdue
+    expect(overdueDays(S, a, '2026-10-06')).toBe(16); // since its CLOSED DEAL stage date, 2026-09-20
+    expect(overdueDays(S, a, '2026-09-25')).toBeNull(); // ≤ 14 days
+    expect(overdueDays(S, b, '2026-12-01')).toBeNull(); // closed jobs are never overdue
+    expect(overdueDays(S, c, '2026-10-30')).toBe(28); // no contact date typed: its stage date counts
+    expect(lastContact(S, a, '2026-09-15')).toBe('2026-09-01'); // a stage date after "today" (planned) doesn't count
     expect(money('1,234.50 บาท')).toBe(1234.5);
     expect(money('฿ 12 000')).toBe(12000);
     expect(money('abc')).toBeNull();
@@ -44,12 +46,19 @@ describe('sales tracker rules (same as the original tracker)', () => {
   });
 
   it('a confirmed quotation backs the forecast; confirmed invoices add up to the actual', () => {
-    const d = deal({ id: 'x', forecast: 50000, actual: 1000, fcDoc: 'q1' });
+    const d = deal({ id: 'x', forecast: 50000, actual: 1000 });
     const S = state([d]);
     S.docs['x/q1'] = { id: 'q1', deal: 'x', kind: 'quotation', name: 'q.pdf', mime: 'application/pdf', size: 1, fileId: '', docNo: 'QT-1', docDate: '', amount: 53500, target: 'forecast', detected: 53500, basis: 'total', stage: 'QUOTATION', at: '1', by: '' };
     S.docs['x/i1'] = { ...S.docs['x/q1'], id: 'i1', kind: 'invoice', amount: 20000, target: 'actual', at: '2' };
     S.docs['x/i2'] = { ...S.docs['x/q1'], id: 'i2', kind: 'invoice', amount: 33500, target: 'actual', at: '3' };
-    expect(dealMoney(S, d)).toEqual({ forecast: 53500, fcConfirmed: true, actual: 53500, acConfirmed: true });
+    expect(dealMoney(S, d)).toMatchObject({ forecast: 53500, fcConfirmed: true, actual: 53500, acConfirmed: true, acDocs: 2 });
+    // a forecast typed after the quotation was confirmed wins; the quotation is then not in use
+    expect(dealMoney(S, { ...d, forecast: 60000, fcAt: '9' })).toMatchObject({ forecast: 60000, fcConfirmed: false, fcOverride: true });
+    // a newer confirmed quotation wins over an older one, and over a forecast typed before it
+    S.docs['x/q2'] = { ...S.docs['x/q1'], id: 'q2', amount: 70000, at: '5', cAt: '5' };
+    expect(dealMoney(S, { ...d, fcAt: '4' })).toMatchObject({ forecast: 70000, fcConfirmed: true });
+    expect(dealMoney(S, d).fcDoc?.id).toBe('q2');
+    delete S.docs['x/q2'];
     delete S.docs['x/q1'];
     expect(dealMoney(S, d).forecast).toBe(50000); // its document was removed → the typed value counts again
     expect(dealMoney(S, d).fcConfirmed).toBe(false);
@@ -157,6 +166,7 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     e.rebuild();
     e.loading = false;
     e.transport = async (_u, body) => sim.post(body);
+    e.fileTransport = async (_u, body) => sim.post(body); // never the network (a hanging fetch would block uploads)
     e.store = memoryStore();
     return e;
   };
@@ -219,9 +229,9 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
       expect(e.sales.steps[`${d.id}/CALL1`].n).toBe('โทรแล้ว สนใจ');
       expect(e.sales.steps[`${d.id}/QUOTATION`]).toMatchObject({ n: 'ส่งใบเสนอราคา QT-001', d: '2026-10-06' });
     }
-    expect(A.sales.deals[d.id].contactDate).toBe('2026-10-06'); // the latest stage date counts as the last contact
+    expect(lastContact(A.sales, A.sales.deals[d.id], '2026-10-06')).toBe('2026-10-06'); // the latest stage date counts as the last contact
     A.setStep(d.id, 'FOLLOW1', { d: '2026-12-01', n: 'นัดติดตาม' }); // a planned (future) date is not a contact
-    expect(A.sales.deals[d.id].contactDate).toBe('2026-10-06');
+    expect(lastContact(A.sales, A.sales.deals[d.id], '2026-10-06')).toBe('2026-10-06');
   });
 
   it('closing, deleting and list changes reach the other browser', async () => {
@@ -288,7 +298,7 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     ];
     const f = (r: unknown[]) => Object.assign(new Blob([JSON.stringify({ sources: ['TGO'], services: ['CFO'], progress: ['CALL1', 'CLOSED DEAL'], rows: r })]), { name: 'ตารางติดตามสถานะการขาย_2568.json' }) as File;
     const r = await A.importTracker(f(rows), '2568');
-    expect(r).toEqual({ deals: rows.length - 1, skipped: 0, linked: 1, ambiguous: twin ? 1 : 0, inexact: 1, years: ['2568'] });
+    expect(r).toMatchObject({ deals: rows.length - 1, skipped: 0, linked: 1, ambiguous: twin ? 1 : 0, inexact: 1, years: ['2568'] });
     expect(A.sales.cfg.sections).toContain('งานเก่า');
     const mine = Object.values(A.sales.deals).find((d) => d.year === '2568' && d.gid === c.id)!;
     expect(mine.forecast).toBe(50000);

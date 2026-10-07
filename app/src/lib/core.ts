@@ -53,8 +53,13 @@ export async function getDetail(ids: number[]): Promise<Detail> {
   return out;
 }
 
+/** The row a merged group keeps the id of: a registry row before a customer added by hand (ids
+ *  from 1e12, see teamSync CUSTOM_ID_MIN) — its star, stage, owner and notes are keyed by that id —
+ *  and among those the one with a juristic id. */
+const primaryRow = (g: RawCompany[]) => g.find((r) => r.jur && r.id < 1e12) || g.find((r) => r.id < 1e12) || g.find((r) => r.jur) || g[0];
+
 function mergeRows(g: RawCompany[], D: Dicts): RawCompany {
-  const p = g.find((r) => r.jur) || g[0];
+  const p = primaryRow(g);
   const o: RawCompany = { ...p };
   const others = g.filter((r) => r !== p);
   const NOIND = D.ind.indexOf('ไม่ระบุ');
@@ -153,7 +158,7 @@ export function build(base: Dataset, dec: Record<string, string>, extra: BuildEx
   const alias = new Map<number, number>();
   Object.values(comp).forEach((g) => {
     const c = (g.length > 1 ? mergeRows(g, D) : g[0]) as Company;
-    if (g.length > 1) c.id = (g.find((r) => r.jur) || g[0]).id;
+    if (g.length > 1) c.id = primaryRow(g).id;
     c.ids.forEach((i) => alias.set(i, c.id));
     companies.push(c);
   });

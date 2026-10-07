@@ -13,7 +13,9 @@ import type { Deal, DealDoc, DealLog, DealStep, SalesCfg, SalesState } from './s
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
  *  ignores all three. */
-export interface SyncOp { id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string }
+/** `f` = the fields this op changes in an object record (deal, document, customer); without it the
+ *  whole value is this browser's. Kept in the queue only — the sheet gets k, v, del, by. */
+export interface SyncOp { id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string; f?: string[] }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
 /** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
@@ -193,6 +195,8 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.entries(S.steps || {}).forEach(([k, v]) => (v.d || v.n) && m.set('dstep/' + k, { ...v }));
     Object.entries(S.docs || {}).forEach(([k, v]) => m.set('ddoc/' + k, { ...v }));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
+    // the lists too: customised before connecting, they are uploaded like every other record
+    if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
@@ -293,6 +297,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       const S = s.sales;
       const bag = (type === 'deal' ? S.deals : type === 'dstep' ? S.steps : type === 'ddoc' ? S.docs : S.log) as Record<string, unknown>;
       if (type !== 'deal' && type !== 'dlog' && rest.indexOf('/') < 0) return;
+      if (del && type === 'deal') (S.gone || (S.gone = {}))[rest] = row.at || new Date().toISOString();
       if (del) delete bag[rest];
       else if (row.v && typeof row.v === 'object') {
         const v = row.v as Record<string, unknown>;
@@ -315,4 +320,33 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.custom = true;
       break;
   }
+}
+
+/** Records whose value is an object of fields that people edit separately. */
+const MERGED = /^(deal|ddoc|cust)\//;
+/**
+ * A pulled row for a record this browser still has a queued change for. Without this, the queued
+ * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.
+ * - the queued change names its fields (`f`): the teammate's record with just those fields of ours
+ *   on top — last writer wins per field, not per record;
+ * - the teammate deleted the record: the deletion wins over an edit (`drop` the queued change);
+ * - a whole-value write (a new record, a deletion here) or another kind of record: ours stands (null).
+ */
+export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: Record<string, unknown> } | null {
+  if (!MERGED.test(o.k) || o.del || !o.f || !o.v || typeof o.v !== 'object') return null;
+  if (row.del || row.v == null) return { drop: true };
+  if (typeof row.v !== 'object') return null;
+  const mine = o.v as Record<string, unknown>;
+  const v: Record<string, unknown> = { ...(row.v as Record<string, unknown>) };
+  o.f.forEach((f) => (f in mine ? (v[f] = mine[f]) : delete v[f]));
+  return { v };
+}
+
+/** Fields of a queued change that replaces `prev` (same record, not sent yet): both sets, or the
+ *  whole value when either one is a whole-value write. */
+export function mergeFields(prev: SyncOp | undefined, f: string[] | undefined): string[] | undefined {
+  if (!f) return undefined;
+  if (!prev) return f;
+  if (prev.del || !prev.f) return undefined;
+  return [...new Set([...prev.f, ...f])];
 }

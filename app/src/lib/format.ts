@@ -48,7 +48,9 @@ export const dtTh = (iso: string) => {
   const d = new Date(iso);
   return `${d.getDate()} ${TH_M[d.getMonth()]} ${d.getFullYear() + 543} ${pad(d.getHours())}:${pad(d.getMinutes())} น.`;
 };
-export const gccCode = (id: number) => 'GCC-' + String(id).padStart(6, '0');
+/** Code shown for a company row: GCC-000123 (registry), TGO-45 (from the TGO website sync, this
+ *  device only), NEW-… (added by hand; ids from 1e12, see teamSync CUSTOM_ID_MIN). */
+export const gccCode = (id: number) => (id >= 1e12 ? 'NEW-' + (id - 1e12).toString(36).toUpperCase() : id >= 900000 ? 'TGO-' + (id - 900000) : 'GCC-' + String(id).padStart(6, '0'));
 let uidN = 0;
 /** Short unique id; the counter keeps ids made in the same millisecond (bulk task plans) apart. */
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + (++uidN).toString(36);

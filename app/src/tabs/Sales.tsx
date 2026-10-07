@@ -460,7 +460,7 @@ function MoneyCell({ e, d, which, value, confirmed }: { e: Engine; d: Deal; whic
 
 function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState; d: Deal; n: number; today: string; team: string[]; onStep: (stage: string) => void }) {
   const { set } = useApp();
-  const od = overdueDays(d, today);
+  const od = overdueDays(S, d, today);
   const m = dealMoney(S, d);
   const docs = docsOf(S, d.id);
   const res = dealResult(S, d);
@@ -531,7 +531,7 @@ function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState
 }
 
 function DealCard({ S, d, today, onOpen }: { S: SalesState; d: Deal; today: string; onOpen: () => void }) {
-  const od = overdueDays(d, today);
+  const od = overdueDays(S, d, today);
   const m = dealMoney(S, d);
   let last = '';
   S.cfg.stages.forEach((p) => {
@@ -670,7 +670,7 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
         <span style={{ fontSize: 15, fontWeight: 500 }}>รายการที่ต้องติดตาม <span style={{ fontSize: 12.5, color: '#5E6680', fontWeight: 300 }}>ยังเปิดงานและยังไม่รู้ผล · ติดต่อนานที่สุดก่อน</span></span>
         {!follow.length && <span style={{ fontSize: 13, color: '#8A93AD' }}>ไม่มีรายการค้าง</span>}
         {follow.slice(0, 50).map((d) => {
-          const od = overdueDays(d, today);
+          const od = overdueDays(S, d, today);
           return (
             <button key={d.id} onClick={() => set({ deal: d.id })} className="h-bg" style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', background: 'transparent', textAlign: 'left', padding: '8px 4px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, fontSize: 13.5 }}>
               <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>

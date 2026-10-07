@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { dtTh, isoTh } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  DEAL_STAGE, KIND_TH, NOTE_MAX, STAGE_TH, beYear, dealMoney, dealStatus, docsOf, fmtMoney, money, stepOf,
+  DEAL_STAGE, KIND_TH, NOTE_MAX, STAGE_TH, beYear, dealMoney, dealStatus, docsOf, fmtMoney, parseAmount, stepOf,
   type Deal, type DealDoc, type DocKind,
 } from '../lib/sales';
 import { Modal } from '../tabs/Sales';
@@ -65,6 +65,40 @@ function Field({ label, value, onSave, type = 'text', list, placeholder }: { lab
   );
 }
 
+/** A Forecast / Actual box: accepts "120,000.-", "1.5 ล้าน", "200k"; text that isn't one clear
+ *  amount is refused with a message instead of erasing the saved figure. */
+function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: string; value: number | null; onSave: (v: number | null) => void; placeholder?: string; readOnly?: boolean }) {
+  const [err, setErr] = useState('');
+  const shown = value == null ? '' : fmtMoney(value);
+  return (
+    <label style={labelCol}>
+      {label}
+      <input
+        key={shown}
+        defaultValue={shown}
+        readOnly={readOnly}
+        inputMode="decimal"
+        placeholder={placeholder}
+        aria-invalid={!!err}
+        onBlur={(ev) => {
+          if (readOnly || ev.target.value === shown) return;
+          const v = parseAmount(ev.target.value);
+          if (v === undefined) {
+            setErr(`อ่าน "${ev.target.value}" เป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 120,000 หรือ 1.5 ล้าน`);
+            ev.target.value = shown;
+            return;
+          }
+          setErr('');
+          onSave(v);
+        }}
+        onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()}
+        style={{ ...inputStyle, ...(readOnly ? { background: '#F4F6FC', color: '#475069' } : {}) }}
+      />
+      {err && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>{err}</span>}
+    </label>
+  );
+}
+
 function LinkCompany({ d }: { d: Deal }) {
   const { engine: e, set } = useApp();
   const [q, setQ] = useState('');
@@ -101,7 +135,9 @@ function LinkCompany({ d }: { d: Deal }) {
   );
 }
 
-function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
+/** Browsers show PDF and common images in a tab; anything else (HEIC from an iPhone) is downloaded. */
+const SHOWABLE = /^(application\/pdf|image\/(png|jpeg|webp|gif))$/;
+function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
   const { engine: e } = useApp();
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState('');
@@ -109,8 +145,14 @@ function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
   useEffect(() => () => {
     if (link) URL.revokeObjectURL(link);
   }, [link]);
+  const save = (url: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = doc.name;
+    a.click();
+  };
   const open = async () => {
-    if (link) return void window.open(link, '_blank', 'noopener');
+    if (link) return void (SHOWABLE.test(doc.mime) ? window.open(link, '_blank', 'noopener') : save(link));
     setBusy(doc.fileId ? 'กำลังเปิด… (ไฟล์ใน Drive ของทีมอาจใช้เวลาสักครู่)' : 'กำลังเปิด…');
     const t0 = Date.now();
     try {
@@ -118,7 +160,8 @@ function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
       setLink(url);
       setBusy('');
       // a pop-up opened long after the click is blocked by the browser: then the link below is used
-      if (Date.now() - t0 < 2500) window.open(url, '_blank', 'noopener');
+      if (!SHOWABLE.test(doc.mime)) save(url);
+      else if (Date.now() - t0 < 2500) window.open(url, '_blank', 'noopener');
     } catch (err) {
       setBusy((err as Error)?.message || String(err));
     }
@@ -133,11 +176,13 @@ function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
         </span>
         <span style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 16, fontWeight: 500 }}>{doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '—'}</span>
-          <span style={{ fontSize: 11.5, color: doc.target === 'none' ? '#5E6680' : '#14633F' }}>{doc.target !== 'none' ? '✓ ' : ''}{TARGET_TH[doc.target]}</span>
+          <span style={{ fontSize: 11.5, color: inUse ? '#14633F' : '#5E6680' }}>
+            {inUse ? '✓ ' + TARGET_TH[doc.target] : doc.target === 'forecast' ? 'ไม่ได้ใช้เป็น Forecast (มียอดที่ใหม่กว่า)' : TARGET_TH[doc.target]}
+          </span>
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button onClick={open} style={small}>เปิดไฟล์</button>
+        <button onClick={open} style={small}>{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>
         {link && (
           <>
             <a href={link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>
@@ -153,7 +198,8 @@ function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
           onSubmit={(ev) => {
             ev.preventDefault();
             const fd = new FormData(ev.currentTarget);
-            const amount = money(fd.get('amount'));
+            const amount = parseAmount(String(fd.get('amount') ?? ''));
+            if (amount === undefined) return void window.alert('อ่านยอดเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 107,000');
             e.updateDoc(d.id, doc.id, { amount, target: amount == null ? 'none' : (String(fd.get('target')) as DealDoc['target']), kind: String(fd.get('kind')) as DocKind, docNo: String(fd.get('docNo') || ''), basis: amount === doc.amount ? doc.basis : 'manual' });
             setEdit(false);
           }}
@@ -187,8 +233,9 @@ export function DealPanel() {
   const log = Object.values(S.log).filter((l) => l.deal === d.id).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30);
   const referrals = [...new Set(Object.values(S.deals).map((x) => x.referral).filter(Boolean))];
   const years = [...new Set([beYear(), String(+beYear() + 1), String(+beYear() - 1), d.year])].sort();
-  const fcDoc = d.fcDoc ? docs.find((x) => x.id === d.fcDoc) : undefined;
-  const acDocs = docs.filter((x) => x.target === 'actual' && x.amount != null);
+  const fcDoc = m.fcDoc;
+  // the quotation a typed forecast overrides: the newest confirmed one
+  const fcLatest = docs.filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at)).pop();
 
   return (
     <>
@@ -261,12 +308,21 @@ export function DealPanel() {
             <span style={kicker}>ยอดเงิน และเอกสารยืนยัน</span>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <Field label="Forecast (บาท) — ยอดที่คาดว่าจะได้" value={d.forecast == null ? '' : String(d.forecast)} onSave={(v) => up({ forecast: money(v) })} placeholder={fcDoc ? `ใช้ยอดจากเอกสาร ${fmtMoney(fcDoc.amount)}` : 'พิมพ์เอง หรือแนบใบเสนอราคา'} />
-                <span style={{ fontSize: 12, color: fcDoc ? '#14633F' : '#6B4100' }}>{fcDoc ? `✓ ใช้ยอดจาก${KIND_TH[fcDoc.kind]} ${fcDoc.docNo} = ${fmtMoney(fcDoc.amount)} บาท` : d.forecast != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}</span>
+                {/* the box shows the figure that counts: from the quotation, or typed (which then overrides it) */}
+                <MoneyField label="Forecast (บาท) — ยอดที่คาดว่าจะได้" value={m.forecast} onSave={(v) => up({ forecast: v })} placeholder="พิมพ์เอง หรือแนบใบเสนอราคา" />
+                <span style={{ fontSize: 12, color: fcDoc ? '#14633F' : '#6B4100', lineHeight: 1.5 }}>
+                  {fcDoc ? `✓ จาก${KIND_TH[fcDoc.kind]}${fcDoc.docNo ? ' ' + fcDoc.docNo : ''} · พิมพ์ยอดใหม่เพื่อใช้แทน` : m.fcOverride ? 'ใช้ยอดที่พิมพ์ (ยังไม่ได้ยืนยันด้วยเอกสาร) ' : m.forecast != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}
+                  {m.fcOverride && fcLatest && (
+                    <button onClick={() => up({ forecast: null })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1A3FE0', textDecoration: 'underline', fontSize: 12, padding: 0 }}>
+                      ใช้ยอดจาก{KIND_TH[fcLatest.kind]} {fmtMoney(fcLatest.amount)} บาทแทน
+                    </button>
+                  )}
+                </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <Field label="Actual (บาท) — ยอดที่ได้จริง" value={d.actual == null ? '' : String(d.actual)} onSave={(v) => up({ actual: money(v) })} placeholder={acDocs.length ? `ใช้ยอดรวมจากเอกสาร ${fmtMoney(m.actual)}` : 'พิมพ์เอง หรือแนบใบแจ้งหนี้'} />
-                <span style={{ fontSize: 12, color: acDocs.length ? '#14633F' : '#6B4100' }}>{acDocs.length ? `✓ รวมจากเอกสาร ${acDocs.length} ฉบับ = ${fmtMoney(m.actual)} บาท` : d.actual != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}</span>
+                {/* with confirmed invoices / receipts the actual is their sum: changed on the documents, not here */}
+                <MoneyField label="Actual (บาท) — ยอดที่ได้จริง" value={m.actual} readOnly={m.acDocs > 0} onSave={(v) => up({ actual: v })} placeholder="พิมพ์เอง หรือแนบใบแจ้งหนี้" />
+                <span style={{ fontSize: 12, color: m.acDocs ? '#14633F' : '#6B4100', lineHeight: 1.5 }}>{m.acDocs ? `✓ รวมจากเอกสาร ${m.acDocs} ฉบับ · แก้ยอดที่เอกสารด้านล่าง` : m.actual != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -275,8 +331,8 @@ export function DealPanel() {
               <button onClick={() => setAttach('receipt')} style={small}>📎 แนบใบเสร็จ / ใบกำกับภาษี</button>
               <button onClick={() => setAttach('other')} style={small}>📎 เอกสารอื่น</button>
             </div>
-            {docs.map((doc) => <DocRow key={doc.id} d={d} doc={doc} />)}
-            <span style={{ fontSize: 12, color: '#5E6680', lineHeight: 1.6 }}>ระบบอ่านยอดเงินจากเอกสารให้ คุณตรวจแล้วกดยืนยัน ยอดจากใบเสนอราคาเป็น Forecast และยอดจากใบแจ้งหนี้รวมกันเป็น Actual (แก้ได้)</span>
+            {docs.map((doc) => <DocRow key={doc.id} d={d} doc={doc} inUse={doc.target === 'forecast' ? fcDoc?.id === doc.id : doc.target === 'actual' && doc.amount != null} />)}
+            <span style={{ fontSize: 12, color: '#5E6680', lineHeight: 1.6 }}>ระบบอ่านยอดเงินจากเอกสารให้ คุณตรวจแล้วกดยืนยัน ใบเสนอราคาที่ยืนยันล่าสุดเป็น Forecast และยอดจากใบแจ้งหนี้ / ใบเสร็จรวมกันเป็น Actual (แก้ได้ที่เอกสาร)</span>
           </div>
 
           <div style={box}>

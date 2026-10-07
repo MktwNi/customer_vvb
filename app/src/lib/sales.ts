@@ -38,19 +38,21 @@ export interface Deal {
   client: string;
   contactName: string; phone: string; email: string;
   resp: string; referral: string;
-  /** Last contact (ISO); open deals not contacted for OVERDUE_DAYS are flagged. */
+  /** Contact date typed in the table (ISO). The last contact also counts stage dates, see lastContact(). */
   contactDate: string;
   jobStatus: 'open' | 'closed';
   closedDate: string;
-  /** Typed-in amounts (THB). Confirmed documents take precedence, see dealMoney(). */
+  /** Typed-in amounts (THB); see dealMoney() for how they combine with confirmed documents. */
   forecast: number | null;
   actual: number | null;
+  /** When the forecast was last typed: a typed forecast newer than the latest confirmed quotation wins. */
+  fcAt?: string;
   source: string[];
   service: string[];
   /** Position inside its section. */
   order: number;
-  /** Document whose confirmed amount is the forecast. */
-  fcDoc?: string;
+  /** The import (from the old tracker) that added it, so that import can be undone. */
+  imp?: string;
   at: string; by: string;
 }
 export interface DealStep { d: string; n: string }
@@ -74,6 +76,10 @@ export interface DealDoc {
   basis: 'total' | 'subtotal' | 'netPay' | 'manual';
   stage: string;
   at: string; by: string;
+  /** When the amount / what it counts toward was last confirmed (attach or edit); the newest confirmed quotation is the forecast. */
+  cAt?: string;
+  /** The stage note this document filled in automatically, so it can follow the document's edits and removal. */
+  auto?: { stage: string; n: string };
 }
 export interface DealLog { id: string; at: string; by: string; action: string; client: string; detail: string; deal: string }
 export interface SalesState {
@@ -84,10 +90,12 @@ export interface SalesState {
   /** `${dealId}/${docId}` → document */
   docs: Record<string, DealDoc>;
   log: Record<string, DealLog>;
+  /** Deals deleted (here or by a teammate): id → when. Kept so an import never brings them back. */
+  gone: Record<string, string>;
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });
-export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, log: {} });
+export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, log: {}, gone: {} });
 
 /** Current Buddhist-era year as text. */
 export const beYear = (iso = new Date().toISOString()) => String(+iso.slice(0, 4) + 543);
@@ -130,6 +138,19 @@ export function looseMoney(v: unknown): { value: number | null; exact: boolean }
   return { value: Math.round(n * 100) / 100, exact };
 }
 
+/** An amount typed into a Forecast / Actual box: "120,000", "120,000.-", "1.5 ล้าน", "200k", Thai
+ *  digits. null = empty (clears the amount); undefined = not one clear amount (a range, words), so
+ *  the box keeps its old value instead of erasing it. */
+export function parseAmount(v: string): number | null | undefined {
+  const t = v
+    .replace(/[\u0E50-\u0E59]/g, (c) => String(c.charCodeAt(0) - 0x0e50))
+    .replace(/(\.|,)-\s*$/, '')
+    .trim();
+  if (!t) return null;
+  const r = looseMoney(t);
+  return r.value != null && r.exact && r.value >= 0 ? r.value : undefined;
+}
+
 /** The SOURCE a section most likely stands for: the same name, else one containing the other
  *  ignoring case, spaces and punctuation ("IEAT (กนอ)." → "กนอ."), like the old tracker. */
 export function matchSource(sources: string[], section: string): string | null {
@@ -141,18 +162,40 @@ export function matchSource(sources: string[], section: string): string | null {
   return sources.find((x) => k(x) && (n.includes(k(x)) || k(x).includes(n))) || null;
 }
 
-/** Effective Forecast / Actual: a confirmed quotation sets the forecast; confirmed invoices add up to
- *  the actual. Without confirmed documents the typed-in values count (shown as not confirmed). */
+const confirmedAt = (x: DealDoc) => x.cAt || x.at || '';
+/** Effective Forecast / Actual, derived from the records rather than stored, so teammates' edits to
+ *  the deal and to its documents never undo each other. Forecast: the most recently confirmed
+ *  quotation (target forecast), unless a forecast was typed after it. Actual: the confirmed invoices
+ *  / receipts add up (instalments); without any, the typed-in actual. */
 export function dealMoney(s: SalesState, d: Deal) {
   const docs = docsOf(s, d.id);
-  const fcd = d.fcDoc ? docs.find((x) => x.id === d.fcDoc && x.target === 'forecast' && x.amount != null) : undefined;
+  const fcs = docs.filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => confirmedAt(a).localeCompare(confirmedAt(b)));
+  const latest = fcs[fcs.length - 1];
+  const typed = d.forecast != null && (!latest || (d.fcAt || '') >= confirmedAt(latest));
+  const fcDoc = typed ? undefined : latest;
   const acs = docs.filter((x) => x.target === 'actual' && x.amount != null);
   return {
-    forecast: fcd ? fcd.amount! : d.forecast,
-    fcConfirmed: !!fcd,
+    forecast: fcDoc ? fcDoc.amount! : d.forecast,
+    fcConfirmed: !!fcDoc,
+    /** the quotation the forecast comes from */
+    fcDoc,
+    /** a typed forecast overrides a confirmed quotation */
+    fcOverride: typed && !!latest,
     actual: acs.length ? acs.reduce((a, x) => a + (x.amount || 0), 0) : d.actual,
     acConfirmed: acs.length > 0,
+    acDocs: acs.length,
   };
+}
+
+/** Last contact: the typed contact date or the latest stage date, whichever is later (a date in
+ *  the future — a planned call — does not count). */
+export function lastContact(s: SalesState, d: Deal, today: string) {
+  let last = d.contactDate && d.contactDate <= today ? d.contactDate : '';
+  for (const p of s.cfg.stages) {
+    const x = s.steps[`${d.id}/${p}`]?.d;
+    if (x && x <= today && x > last) last = x;
+  }
+  return last || d.contactDate || '';
 }
 
 /** The CLOSED DEAL stage note decides the deal result: YES / NO / anything else = waiting. */
@@ -177,10 +220,12 @@ export function dealStatus(s: SalesState, d: Deal) {
   return { result: r, overall, started };
 }
 
-/** Days since the last contact when an open deal is overdue for follow-up, else null. */
-export function overdueDays(d: Deal, today: string) {
-  if (d.jobStatus === 'closed' || !d.contactDate) return null;
-  const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(d.contactDate + 'T00:00:00')) / 864e5);
+/** Days since the last contact when an open deal has gone more than OVERDUE_DAYS without one. */
+export function overdueDays(s: SalesState, d: Deal, today: string) {
+  if (d.jobStatus === 'closed') return null;
+  const lc = lastContact(s, d, today);
+  if (!lc) return null;
+  const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(lc + 'T00:00:00')) / 864e5);
   return isFinite(n) && n > OVERDUE_DAYS ? n : null;
 }
 
@@ -265,7 +310,7 @@ export function salesStats(s: SalesState, deals: Deal[], today: string): SalesSt
     else st.none++;
     if (d.jobStatus === 'closed') st.closed++;
     else st.open++;
-    if (overdueDays(d, today) != null) st.overdue++;
+    if (overdueDays(s, d, today) != null) st.overdue++;
     const m = dealMoney(s, d);
     const fc = m.forecast || 0, ac = m.actual || 0;
     st.forecast += fc;
@@ -500,4 +545,15 @@ export function parseCsv(text: string): Record<string, string>[] {
 export const fmtMoney = (n: number | null | undefined) => (n == null ? '' : n.toLocaleString('en-US', { maximumFractionDigits: 2 }));
 export const KIND_TH: Record<DocKind, string> = { quotation: 'ใบเสนอราคา', invoice: 'ใบแจ้งหนี้', receipt: 'ใบเสร็จ / ใบกำกับภาษี', other: 'เอกสารอื่น' };
 
-export const csvCell = (v: unknown) => '"' + (v == null ? '' : String(v)).replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
+/** One CSV cell. Text that a spreadsheet would run as a formula (= + - @ at the start, also after
+ *  spaces) gets a leading ' so Excel / Sheets show it as text; numbers stay numbers. */
+export const csvCell = (v: unknown) => {
+  let t = v == null ? '' : String(v);
+  if (typeof v === 'string' && /^\s*[=+\-@]/.test(t)) t = "'" + t;
+  return '"' + t.replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
+};
+/** A phone number cell Excel keeps as written ("0812345678", not 812345678). */
+export const csvPhone = (v: unknown) => {
+  const t = v == null ? '' : String(v).trim();
+  return /^0[\d\s-]*$/.test(t) ? '"=""' + t + '"""' : csvCell(t);
+};
