@@ -348,7 +348,7 @@ function TableView({ e, S, deals, today }: { e: Engine; S: SalesState; deals: De
               <tr>
                 <th className="sl-sticky" style={{ minWidth: 300 }}>ลูกค้า</th>
                 <th style={{ minWidth: 120 }}>ผู้รับผิดชอบ</th>
-                <th style={{ minWidth: 132 }}>วันที่ติดต่อ</th>
+                <th style={{ minWidth: 132 }} title="อัปเดตเองเมื่อบันทึกขั้นตอนด้วยวันที่ใหม่กว่า · เกิน 14 วันขึ้นค้างติดตาม">ติดต่อล่าสุด</th>
                 {S.cfg.stages.map((p) => (
                   <th key={p} style={{ minWidth: 118 }} title={STAGE_TH[p] || p}>
                     {p}
@@ -485,7 +485,7 @@ function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState
       </td>
       <td>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <input type="date" value={d.contactDate} onChange={(ev) => e.updateDeal(d.id, { contactDate: ev.target.value })} aria-label="วันที่ติดต่อ" className="sl-input" style={{ height: 32, border: '1px solid transparent', borderRadius: 8, fontSize: 12.5, background: 'transparent', color: '#0E1430', width: '100%' }} />
+          <input type="date" value={d.contactDate} onChange={(ev) => e.updateDeal(d.id, { contactDate: ev.target.value })} aria-label="ติดต่อล่าสุด" className="sl-input" style={{ height: 32, border: '1px solid transparent', borderRadius: 8, fontSize: 12.5, background: 'transparent', color: '#0E1430', width: '100%' }} />
           {od != null && <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#FBE3DC', color: '#8A2B12', alignSelf: 'flex-start' }}>⏰ ค้าง {fmtN(od)} วัน</span>}
         </div>
       </td>

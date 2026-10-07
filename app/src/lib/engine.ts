@@ -1040,7 +1040,7 @@ export class GccEngine {
     if (!changed.length) return;
     this.putDeal(n);
     const TH: Partial<Record<keyof Deal, string>> = {
-      client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
+      client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'ติดต่อล่าสุด',
       jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
     };
     const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
@@ -1351,7 +1351,7 @@ export class GccEngine {
   /** CSV (opens in Excel) of a year's tracker table, like the old tracker's export. */
   exportSalesCsv(year: string, deals: Deal[]) {
     const S = this.sales, C = S.cfg;
-    const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'สถานะงาน', 'สถานะ']
+    const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), C.services.map((x) => 'Service: ' + x), C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']))
       .concat(['FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ']);
     const lines = deals.map((d, i) => {
