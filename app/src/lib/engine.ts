@@ -13,7 +13,7 @@ import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, 
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, noEffects, opId, rebaseOp, uniqueTaskIds,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeListEdits, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import {
@@ -1134,8 +1134,11 @@ export class GccEngine {
     // lists are plain values ("SET/mai")
     const v = [...new Set(items.map((x) => (name === 'stages' ? x.trim().replace(/\//g, '-') : x.trim())).filter(Boolean))];
     if (name === 'stages' && !v.length) return;
+    const cur = this.sales.cfg[name];
+    // queued as what changed, so two people adding at once both keep their item (rebaseOp)
+    const lst = { add: v.filter((x) => !cur.includes(x)), rm: cur.filter((x) => !v.includes(x)) };
     this.sales.cfg[name] = v;
-    this.op(keyOf.scfg(name), v.slice());
+    this.op(keyOf.scfg(name), v.slice(), undefined, lst);
     this.saveSales();
   }
   renameSection(from: string, to: string) {
@@ -1487,13 +1490,15 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, f?: string[]) {
+  private op(k: string, v?: unknown, f?: string[], lst?: ListEdit) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     const o = this.mkOp(k, v);
     if (v !== undefined) {
       const fl = mergeFields(this.pending.get(k), f);
       if (fl) o.f = fl;
+      const le = lst && mergeListEdits(this.pending.get(k), lst);
+      if (le) o.lst = le;
     }
     this.pending.set(k, o);
     this.unsaved.delete(k);
@@ -1535,6 +1540,11 @@ export class GccEngine {
           const fl = mergeFields(p, o.f);
           if (fl) o.f = fl;
           else delete o.f;
+        }
+        if (o.lst) {
+          const le = mergeListEdits(p, o.lst);
+          if (le) o.lst = le;
+          else delete o.lst;
         }
       });
       return ops.filter((x) => !byK.has(x.k)).concat([...byK.values()]);
@@ -1913,6 +1923,7 @@ export class GccEngine {
       [...new Map([...moved, ...carried, ...cur].map((o) => [o.k, o])).values()].map((p) => {
         const o = this.mkOp(p.k, local.get(p.k), t);
         if (o.v !== undefined && p.f && !p.del) o.f = p.f; // still only those fields of ours
+        if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
         return o;
       });
     let ops: SyncOp[];

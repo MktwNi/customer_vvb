@@ -152,6 +152,28 @@ describe('Sales Tracker: concurrent edits between browsers', () => {
     D.dispose();
   });
 
+  it('two people changing the same list at once both keep their change (adds, removals, a rename)', async () => {
+    await A.teamSync();
+    await B.teamSync();
+    A.setSalesList('services', [...A.sales.cfg.services, 'บริการของเอ']);
+    await A.teamSync();
+    B.setSalesList('services', [...B.sales.cfg.services.filter((x) => x !== 'GCT'), 'บริการของบี']); // stale: hasn't seen A's
+    await settle();
+    for (const e of [A, B]) {
+      expect(e.sales.cfg.services).toEqual(expect.arrayContaining(['บริการของเอ', 'บริการของบี']));
+      expect(e.sales.cfg.services).not.toContain('GCT');
+    }
+    const i = A.sales.cfg.sections.indexOf('Partner');
+    A.renameSection('Partner', 'Partner (พันธมิตร)');
+    await A.teamSync();
+    B.setSalesList('sections', [...B.sales.cfg.sections, 'หมวดของบี']);
+    await settle();
+    for (const e of [A, B]) {
+      expect(e.sales.cfg.sections[i]).toBe('Partner (พันธมิตร)');
+      expect(e.sales.cfg.sections).toContain('หมวดของบี');
+    }
+  });
+
   it('a company from the TGO website sync (this device only) can be sent once per year; its deal is found by name', () => {
     const local = A.B.companies.find((c) => c.id >= 900000 && c.id < CUSTOM_ID_MIN);
     if (!local) {

@@ -15,7 +15,9 @@ import type { Deal, DealDoc, DealLog, DealStep, SalesCfg, SalesState } from './s
  *  ignores all three. */
 /** `f` = the fields this op changes in an object record (deal, document, customer); without it the
  *  whole value is this browser's. Kept in the queue only — the sheet gets k, v, del, by. */
-export interface SyncOp { id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string; f?: string[] }
+export interface SyncOp { id?: string; t?: number; sent?: number; k: string; v?: unknown; del?: boolean; by?: string; f?: string[]; lst?: ListEdit }
+/** What a queued list change (scfg/…) does: items added and removed (a rename is both). */
+export interface ListEdit { add: string[]; rm: string[] }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
 /** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
@@ -332,7 +334,10 @@ const MERGED = /^(deal|ddoc|cust)\//;
  * - the teammate deleted the record: the deletion wins over an edit (`drop` the queued change);
  * - a whole-value write (a new record, a deletion here) or another kind of record: ours stands (null).
  */
-export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: Record<string, unknown> } | null {
+export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown } | null {
+  // a list: the teammate's list with this browser's additions and removals applied (a rename keeps
+  // the item's place)
+  if (o.k.startsWith('scfg/') && o.lst && Array.isArray(row.v)) return { v: applyListEdit(row.v.map(String), o.lst) };
   if (!MERGED.test(o.k) || o.del || !o.f || !o.v || typeof o.v !== 'object') return null;
   if (row.del || row.v == null) return { drop: true };
   if (typeof row.v !== 'object') return null;
@@ -349,4 +354,25 @@ export function mergeFields(prev: SyncOp | undefined, f: string[] | undefined): 
   if (!prev) return f;
   if (prev.del || !prev.f) return undefined;
   return [...new Set([...prev.f, ...f])];
+}
+
+export function applyListEdit(list: string[], e: ListEdit): string[] {
+  const out = list.slice();
+  const add = e.add.filter((x) => !out.includes(x));
+  e.rm.forEach((x) => {
+    const i = out.indexOf(x);
+    if (i < 0) return;
+    if (add.length && e.rm.length === e.add.length) out[i] = add.shift()!; // renamed: same place
+    else out.splice(i, 1);
+  });
+  return [...out, ...add.filter((x) => !out.includes(x))];
+}
+
+/** Two queued list changes in a row (the second replaces the first in the queue) as one. */
+export function mergeListEdits(prev: SyncOp | undefined, e: ListEdit): ListEdit | undefined {
+  if (!prev) return e;
+  if (!prev.lst) return undefined; // the earlier one replaced the whole list: so does this one
+  const add = prev.lst.add.filter((x) => !e.rm.includes(x)).concat(e.add.filter((x) => !prev.lst!.rm.includes(x)));
+  const rm = prev.lst.rm.filter((x) => !e.add.includes(x)).concat(e.rm.filter((x) => !prev.lst!.add.includes(x)));
+  return { add: [...new Set(add)], rm: [...new Set(rm)] };
 }
