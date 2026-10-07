@@ -144,7 +144,15 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
     setImp({ msg: 'กำลังนำเข้า…' });
     try {
       const r = await e.importTracker(f, y);
-      setImp({ msg: `นำเข้าแล้ว ${fmtN(r.deals)} รายการ (ปี ${r.years.join(', ')}) · เชื่อมกับบริษัทในทะเบียนได้ ${fmtN(r.linked)} ราย — นำเข้าไฟล์เดิมซ้ำจะอัปเดตรายการเดิม ไม่สร้างซ้ำ` });
+      setImp({
+        msg: [
+          `เพิ่ม ${fmtN(r.deals)} รายการ (ปี ${r.years.join(', ')})`,
+          r.skipped ? `ข้าม ${fmtN(r.skipped)} รายการที่มีอยู่แล้ว (ไม่เขียนทับข้อมูลที่ทีมแก้ไว้)` : '',
+          `เชื่อมกับบริษัทในทะเบียน ${fmtN(r.linked)} ราย`,
+          r.ambiguous ? `${fmtN(r.ambiguous)} รายมีบริษัทชื่อเดียวกันหลายแห่ง ยังไม่ได้เชื่อม — เปิดรายการแล้วเลือกบริษัทเอง` : '',
+          r.inexact ? `${fmtN(r.inexact)} รายการมีจำนวนเงินที่ไม่ใช่ตัวเลขล้วน (เช่น ช่วงราคา) ใช้ค่าต่ำสุด และเก็บข้อความเดิมไว้ในประวัติ — ตรวจอีกครั้ง` : '',
+        ].filter(Boolean).join(' · '),
+      });
     } catch (err) {
       setImp({ msg: 'นำเข้าไม่สำเร็จ: ' + ((err as Error)?.message || err), err: true });
     }
@@ -639,9 +647,9 @@ function Dashboard({ S, deals, today }: { S: SalesState; deals: Deal[]; today: s
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,380px),1fr))', gap: 12 }}>
         <Bars title="Pipeline ตามขั้นตอน" sub="จำนวนลูกค้าที่มีวันที่หรือโน้ตในแต่ละขั้น" items={st.stages.map((x) => [x.name, x.n])} />
-        <Bars title="ลูกค้าตามช่องทาง" sub="SOURCE" items={srcRows.map(([k, x]) => [k, x.n])} />
+        <Bars title="ลูกค้าตามช่องทาง" sub="SOURCE · ลูกค้าที่ติ๊กหลายช่องทางนับในทุกช่องทาง" items={srcRows.map(([k, x]) => [k, x.n])} />
         <Bars title="ลูกค้าตามบริการ" sub="Services" items={Object.entries(st.byService)} />
-        <Bars title="Forecast ตามช่องทาง" sub="บาท" items={srcRows.map(([k, x]) => [k, x.forecast])} fmt={(n) => fmtMoney(n)} />
+        <Bars title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ ผลรวมจึงอาจเกิน Forecast รวม" items={srcRows.map(([k, x]) => [k, x.forecast])} fmt={(n) => fmtMoney(n)} />
         <Bars title="Win rate ตามช่องทาง" sub="ปิดได้ ÷ รู้ผลแล้ว ในแต่ละช่องทาง" items={srcRows.filter(([, x]) => x.decided).map(([k, x]) => [k, Math.round((x.yes / x.decided) * 100)])} unit="%" />
         <GroupTable title="สรุปยอดตามผู้รับผิดชอบ" rows={Object.entries(st.byResp).sort((a, b) => b[1].forecast - a[1].forecast)} />
         <GroupTable title="สรุปยอดตามแหล่งที่มา" rows={Object.entries(st.byReferral).sort((a, b) => b[1].forecast - a[1].forecast)} />

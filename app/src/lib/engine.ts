@@ -17,7 +17,7 @@ import {
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import {
-  KIND_TH, NOTE_MAX, beYear, csvCell, dealMoney, dealStatus, emptyCfg, emptySales, fmtMoney, importId, newDeal, parseCsv,
+  KIND_TH, NOTE_MAX, beYear, csvCell, dealMoney, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
   parseTrackerJson, parseTrackerSheet, stepOf,
   type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
@@ -989,7 +989,7 @@ export class GccEngine {
     const d = newDeal(
       {
         client: c?.name || '', phone: c?.phone || '', email: c?.email || '', contactName: cc?.contact || '',
-        resp: (c && this.crm.owners[c.id]) || this.me(), section, source: this.sales.cfg.sources.includes(section) ? [section] : [],
+        resp: (c && this.crm.owners[c.id]) || this.me(), section, source: [matchSource(this.sales.cfg.sources, section)].filter((x): x is string => !!x),
         ...p, id: opId(), gid,
       },
       this.me(),
@@ -1265,7 +1265,10 @@ export class GccEngine {
    * Excel. Rows get stable ids, so importing the same file again updates instead of duplicating; clients whose
    * name matches a registry company are linked to it.
    */
-  async importTracker(f: File, year: string): Promise<{ deals: number; linked: number; years: string[] }> {
+  /** Import the old tracker's data. Never overwrites: a row already imported (or a client already
+   *  tracked that year) is skipped, so the team's newer edits always win over an old file. A client
+   *  name is linked to a registry company only when exactly one company has that name. */
+  async importTracker(f: File, year: string): Promise<{ deals: number; skipped: number; linked: number; ambiguous: number; inexact: number; years: string[] }> {
     const name = (f.name || '').toLowerCase();
     let data: TrackerData[];
     if (name.endsWith('.json')) data = [parseTrackerJson(JSON.parse(await f.text()), year)];
@@ -1274,7 +1277,13 @@ export class GccEngine {
     else throw new Error('รองรับไฟล์ .json (สำรองข้อมูลจาก Sales Tracker) หรือ .csv / .xlsx (ดาวน์โหลดจาก Google Sheet ของ Sales Tracker)');
     if (!data.length || !data.some((x) => x.clients.length)) throw new Error('ไม่พบรายการลูกค้าในไฟล์');
     const S = this.sales, me = this.me();
-    let deals = 0, linked = 0;
+    // companies per normalised name (merged duplicates count once)
+    const named = new Map<string, Set<number>>();
+    this.B.companies.forEach((c) => {
+      const k = norm(c.name);
+      if (k && !isLocalId(c.id)) (named.get(k) || named.set(k, new Set()).get(k)!).add(this.canonical(c.id));
+    });
+    let deals = 0, skipped = 0, linked = 0, ambiguous = 0, inexact = 0;
     data.forEach((t) => {
       // lists: keep ours, add what the file has that we don't
       (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
@@ -1283,33 +1292,52 @@ export class GccEngine {
         if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !extra.includes(p) && extra.push(p)));
         if (extra.length) this.setSalesList(k, [...S.cfg[k], ...extra]);
       });
+      // clients this year already tracked here, e.g. sent from the registry before importing
+      const have = new Map<string, number>();
+      Object.values(S.deals).forEach((d) => {
+        if (d.year !== t.year || d.id.startsWith('imp')) return;
+        const k = norm(d.client);
+        if (k) have.set(k, (have.get(k) || 0) + 1);
+      });
       const nth = new Map<string, number>();
+      let added = 0;
       t.clients.forEach((c, i) => {
-        const base = `${c.section}|${norm(c.client)}|${c.contactName}`;
-        const n = (nth.get(base) || 0) + 1;
-        nth.set(base, n);
+        const key = importKey(c);
+        const n = (nth.get(key) || 0) + 1;
+        nth.set(key, n);
         const id = importId(t.year, c, n);
-        const g = this.byNorm.get(norm(c.client));
-        const gid = g != null && !isLocalId(g) ? this.canonical(g) : null;
+        if (S.deals[id] || n <= (have.get(norm(c.client)) || 0)) {
+          skipped++;
+          return;
+        }
+        const ids = named.get(norm(c.client));
+        const gid = ids && ids.size === 1 ? [...ids][0] : null;
         if (gid != null) linked++;
-        const old = S.deals[id];
+        else if (ids && ids.size > 1) ambiguous++;
         const d: Deal = {
-          ...(old || newDeal({ id, client: c.client }, me)),
-          id, year: t.year, section: c.section, gid: old?.gid ?? gid, client: c.client || old?.client || 'ลูกค้า', contactName: c.contactName, phone: c.phone, email: c.email,
+          ...newDeal({ id, client: c.client || c.contactName || 'ลูกค้า' }, me),
+          year: t.year, section: c.section, gid, contactName: c.contactName, phone: c.phone, email: c.email,
           resp: c.resp, referral: c.referral, contactDate: c.contactDate, jobStatus: c.jobStatus, closedDate: c.closedDate, forecast: c.forecast, actual: c.actual,
-          source: c.source, service: c.service, order: old?.order ?? i,
+          source: c.source, service: c.service, order: Object.keys(S.deals).length + i,
         };
         this.putDeal(d);
         Object.entries(c.progress).forEach(([p, st]) => {
           S.steps[`${id}/${p}`] = st;
           this.op(keyOf.dstep(id, p), { ...st });
         });
-        deals++;
+        // an amount like "50,000-80,000" counts as its lower end; keep what was typed in the history
+        const raw = [c.forecastText && `Forecast เดิม "${c.forecastText}"`, c.actualText && `Actual เดิม "${c.actualText}"`].filter(Boolean).join(' · ');
+        if (raw) {
+          inexact++;
+          this.salesLog(d, 'จำนวนเงินจากไฟล์เดิม', raw + ' — ตรวจตัวเลขอีกครั้ง');
+        }
+        added++;
       });
-      this.salesLog({ id: '', client: '' }, 'นำเข้าจาก Sales Tracker เดิม', `ปี ${t.year} · ${t.clients.length} ราย`);
+      deals += added;
+      this.salesLog({ id: '', client: '' }, 'นำเข้าจาก Sales Tracker เดิม', `ปี ${t.year} · เพิ่ม ${added} ราย` + (t.clients.length > added ? ` · ข้าม ${t.clients.length - added} รายที่มีอยู่แล้ว` : ''));
     });
     this.saveSales();
-    return { deals, linked, years: data.map((x) => x.year) };
+    return { deals, skipped, linked, ambiguous, inexact, years: data.map((x) => x.year) };
   }
   /** CSV (opens in Excel) of a year's tracker table, like the old tracker's export. */
   exportSalesCsv(year: string, deals: Deal[]) {

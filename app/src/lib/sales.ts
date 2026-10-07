@@ -11,8 +11,9 @@
  */
 import { norm } from './core';
 
-export const DEFAULT_SECTIONS = ['Retention', 'EnWaste Expo', 'SET/mai', 'กนอ.', 'Event Organizer', 'Partner', 'Event Exhibition', 'Course Training', 'สสว.', 'Depa', 'TGO', 'VB SAVE+', 'Social'];
-export const DEFAULT_SOURCES = DEFAULT_SECTIONS.slice();
+/** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
+export const DEFAULT_SECTIONS = ['Retention', 'EnWaste Expo', 'SET/mai', 'IEAT (กนอ).', 'Event Organizer', 'Partner', 'Event Exhibition', 'Course Training', 'สสว.', 'Depa', 'TGO', 'VB SAVE+', 'Social', 'อื่นๆ'];
+export const DEFAULT_SOURCES = ['Retention', 'EnWaste Expo', 'SET/mai', 'กนอ.', 'Event Organizer', 'Partner', 'Event Exhibition', 'Course Training', 'สสว.', 'Depa', 'TGO', 'VB SAVE+', 'Social'];
 export const DEFAULT_SERVICES = ['CF', 'CFO', 'CFP', 'LESS', 'T-VER', 'CC', 'Course Training', 'CF-EVENT', 'VVB', 'Program Development', 'GCT'];
 export const DEFAULT_STAGES = ['CALL1', 'CALL2', 'QUOTATION', 'FOLLOW1', 'FOLLOW2', 'CLOSED DEAL', 'PAY1', 'PAY2'];
 /** Thai hint shown under each stage name. */
@@ -111,6 +112,33 @@ export function money(v: unknown): number | null {
   if (!s) return null;
   const n = Number(s);
   return isFinite(n) ? n : null;
+}
+
+const UNIT: Record<string, number> = { ล้าน: 1e6, แสน: 1e5, หมื่น: 1e4, พัน: 1e3, k: 1e3, m: 1e6, mb: 1e6 };
+/** An amount typed freely in the old tracker ("1.5 ล้าน", "3 แสน", "50,000-80,000", "~200k") as a
+ *  number, and whether that number says all the text did (`exact`). A range counts as its lower end,
+ *  as the old tracker's sums did. `value` is null when the text holds no number at all. */
+export function looseMoney(v: unknown): { value: number | null; exact: boolean } {
+  const plain = money(v);
+  if (plain != null || v == null || String(v).trim() === '') return { value: plain, exact: true };
+  const t = String(v).toLowerCase().replace(/,/g, '');
+  const m = /(\d+(?:\.\d+)?)\s*(ล้าน|แสน|หมื่น|พัน|mb|k|m(?![a-z]))?/.exec(t);
+  if (!m) return { value: null, exact: false };
+  const n = parseFloat(m[1]) * (m[2] ? UNIT[m[2]] : 1);
+  // "1.5 ล้าน" alone is exact; anything else around the number (a range, a note) is not
+  const exact = !!m[2] && t.replace(/[\s฿~≈]|บาท|thb|ประมาณ/g, '') === (m[1] + m[2]).replace(/\s/g, '');
+  return { value: Math.round(n * 100) / 100, exact };
+}
+
+/** The SOURCE a section most likely stands for: the same name, else one containing the other
+ *  ignoring case, spaces and punctuation ("IEAT (กนอ)." → "กนอ."), like the old tracker. */
+export function matchSource(sources: string[], section: string): string | null {
+  if (!section) return null;
+  if (sources.includes(section)) return section;
+  const k = (x: string) => x.toLowerCase().replace(/[\s().,/+\-]+/g, '');
+  const n = k(section);
+  if (!n) return null;
+  return sources.find((x) => k(x) && (n.includes(k(x)) || k(x).includes(n))) || null;
 }
 
 /** Effective Forecast / Actual: a confirmed quotation sets the forecast; confirmed invoices add up to
@@ -294,15 +322,54 @@ export function htmlToText(s: unknown): string {
 export interface TrackerClient {
   section: string; client: string; contactName: string; phone: string; email: string; resp: string; referral: string;
   contactDate: string; jobStatus: 'open' | 'closed'; closedDate: string; forecast: number | null; actual: number | null;
+  /** the amount text as typed, when the number above doesn't say all of it ("50,000-80,000") */
+  forecastText: string; actualText: string;
   source: string[]; service: string[]; progress: Record<string, DealStep>;
 }
 export interface TrackerData { year: string; cfg: Partial<SalesCfg>; clients: TrackerClient[] }
 
 const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : String(v || '').split(',')).map((x) => x.trim()).filter(Boolean);
-const isoDate = (v: unknown) => {
-  const s = String(v || '').trim();
-  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : '';
-};
+const pad2 = (n: number) => String(n).padStart(2, '0');
+/** yyyy-mm-dd from what a date becomes in a sheet download: ISO text, d/m/yyyy (Thai sheets, also
+ *  with a Buddhist-era year), m/d/yyyy when the day can't be a month, or an Excel serial number. */
+export function isoDate(v: unknown): string {
+  const s = String(v ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const ok = (y: number, m: number, d: number) => {
+    if (y > 2400) y -= 543;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return y > 1900 && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? `${y}-${pad2(m)}-${pad2(d)}` : '';
+  };
+  let m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s|$)/.exec(s);
+  if (m) {
+    const a = +m[1], b = +m[2], y = +m[3];
+    return b > 12 ? ok(y, a, b) : ok(y, b, a);
+  }
+  m = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})(?:\s|$)/.exec(s);
+  if (m) return ok(+m[1], +m[2], +m[3]);
+  if (/^\d{5}(\.\d+)?$/.test(s) && +s > 20000 && +s < 80000) {
+    // Excel day count from 1899-12-30
+    return new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 864e5).toISOString().slice(0, 10);
+  }
+  return '';
+}
+
+/** A phone number a spreadsheet stored as a number lost its leading 0 ("812345678"). */
+export function fixPhone(v: unknown): string {
+  const s = String(v ?? '').trim();
+  return /^[1-9]\d{7,8}$/.test(s) ? '0' + s : s;
+}
+
+/** Name / phone / e-mail from the old tracker's single "contact" text (rows from before it had
+ *  three fields), the way the old tracker split it. */
+export function parseContact(v: unknown): { name: string; phone: string; email: string } {
+  const s = String(v ?? '');
+  const email = (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(s) || [''])[0];
+  let rest = s.replace(email, ' ');
+  const phone = (/0\d[\d\s-]{6,}\d/.exec(rest) || [''])[0].trim();
+  rest = rest.replace(phone, ' ');
+  return { name: rest.replace(/[,\n]+/g, ' ').replace(/\s+/g, ' ').trim(), phone, email };
+}
 function progressOf(p: unknown): Record<string, DealStep> {
   let o: unknown = p;
   if (typeof o === 'string') {
@@ -322,11 +389,16 @@ function progressOf(p: unknown): Record<string, DealStep> {
   return out;
 }
 function clientOf(r: Record<string, unknown>, section: string): TrackerClient {
+  const has = (k: string) => r[k] != null && String(r[k]).trim() !== '';
+  // rows from before the old tracker split "contact" into name / phone / e-mail
+  const pc = !has('contactName') && !has('phone') && !has('email') && has('contact') ? parseContact(r.contact) : null;
+  const fc = looseMoney(r.forecast), ac = looseMoney(r.actual);
   return {
-    section, client: String(r.client || '').trim(), contactName: String(r.contactName || ''), phone: String(r.phone || ''), email: String(r.email || ''),
-    resp: String(r.resp || ''), referral: String(r.referral || ''), contactDate: isoDate(r.contactDate),
+    section, client: String(r.client || '').trim(), contactName: pc ? pc.name : String(r.contactName || '').trim(), phone: fixPhone(pc ? pc.phone : r.phone),
+    email: (pc ? pc.email : String(r.email || '')).trim(), resp: String(r.resp || '').trim(), referral: String(r.referral || '').trim(), contactDate: isoDate(r.contactDate),
     jobStatus: r.jobStatus === 'closed' ? 'closed' : 'open', closedDate: isoDate(r.closedDate),
-    forecast: money(r.forecast), actual: money(r.actual), source: list(r.source), service: list(r.service), progress: progressOf(r.progress),
+    forecast: fc.value, actual: ac.value, forecastText: fc.exact ? '' : String(r.forecast).trim(), actualText: ac.exact ? '' : String(r.actual).trim(),
+    source: list(r.source), service: list(r.service), progress: progressOf(r.progress),
   };
 }
 
@@ -373,9 +445,13 @@ export function parseTrackerSheet(rows: Record<string, unknown>[]): TrackerData[
   });
 }
 
-/** Stable id for an imported row, so importing the same file again updates instead of duplicating. */
+/** The name an imported row is matched by: the client, or the contact person for a row without one. */
+export const importKey = (c: TrackerClient) => norm(c.client) || '@' + c.contactName.trim().toLowerCase();
+/** Stable id for an imported row (the nth row of that client in that year), so importing the same
+ *  file again — or a newer download where a section or contact was edited — finds the rows already
+ *  imported instead of duplicating them. */
 export function importId(year: string, c: TrackerClient, nth: number) {
-  const s = `${year}|${c.section}|${norm(c.client)}|${c.contactName}|${nth}`;
+  const s = `${year}|${importKey(c)}|${nth}`;
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);

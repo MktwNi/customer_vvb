@@ -2,11 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
+import { norm } from './core';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import {
-  dealMoney, dealResult, dealStatus, emptySales, filterDeals, htmlToText, importId, money, newDeal, overdueDays, parseCsv,
-  parseTrackerJson, parseTrackerSheet, salesStats, type Deal, type SalesState,
+  dealMoney, dealResult, dealStatus, emptySales, filterDeals, fixPhone, htmlToText, importId, isoDate, looseMoney, matchSource, money, newDeal, overdueDays,
+  parseContact, parseCsv, parseTrackerJson, parseTrackerSheet, salesStats, DEFAULT_SECTIONS, DEFAULT_SOURCES, type Deal, type SalesState,
 } from './sales';
 import { CUSTOM_ID_MIN, isLocalOnly } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
@@ -113,7 +114,27 @@ describe('sales tracker rules (same as the original tracker)', () => {
     expect(y69.clients[0]).toMatchObject({ forecast: 5000, source: ['TGO', 'Partner'], progress: { CALL1: { d: '2026-10-01', n: 'ok' } } });
     expect(y69.cfg.sections).toEqual(['TGO']);
     expect(ys.find((x) => x.year === '2568')!.clients).toHaveLength(1);
-    expect(importId('2569', t.clients[0], 1)).toBe(importId('2569', { ...t.clients[0], forecast: 1 }, 1)); // stable across edits
+    // stable across edits in the old tracker: amount, section, contact person
+    expect(importId('2569', t.clients[0], 1)).toBe(importId('2569', { ...t.clients[0], forecast: 1, section: 'Partner', contactName: 'คุณซี' }, 1));
+    expect(importId('2569', t.clients[0], 1)).not.toBe(importId('2569', t.clients[0], 2));
+  });
+
+  it('what a sheet download does to dates, phones and amounts is undone; free-text amounts are kept', () => {
+    expect(['2026-10-01', '1/10/2026', '01/10/2569', '15/1/2026', '1/15/2026', '2026/10/01', '46296', '31/2/2026', 'พรุ่งนี้', ''].map(isoDate))
+      .toEqual(['2026-10-01', '2026-10-01', '2026-10-01', '2026-01-15', '2026-01-15', '2026-10-01', '2026-10-01', '', '', '']);
+    expect(['812345678', '21234567', '0812345678', '02-123-4567', '', '+66812345678'].map(fixPhone)).toEqual(['0812345678', '021234567', '0812345678', '02-123-4567', '', '+66812345678']);
+    expect(['120,000', '1.5 ล้าน', '3 แสน', '50,000-80,000', 'ประมาณ 200k', 'รอคุยราคา', '', 7000].map(looseMoney)).toEqual([
+      { value: 120000, exact: true }, { value: 1500000, exact: true }, { value: 300000, exact: true }, { value: 50000, exact: false },
+      { value: 200000, exact: true }, { value: null, exact: false }, { value: null, exact: true }, { value: 7000, exact: true },
+    ]);
+    const t = parseTrackerJson({ rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'ก', contact: 'คุณสมชาย 081-234-5678, som@example.co.th', forecast: '50,000-80,000', actual: '1.2 ล้าน' }] }, '2569');
+    expect(t.clients[0]).toMatchObject({ contactName: 'คุณสมชาย', phone: '081-234-5678', email: 'som@example.co.th', forecast: 50000, forecastText: '50,000-80,000', actual: 1200000, actualText: '' });
+    expect(parseContact('')).toEqual({ name: '', phone: '', email: '' });
+  });
+
+  it('starts with the old tracker\'s lists; a section ticks the SOURCE of the same channel', () => {
+    expect(DEFAULT_SECTIONS).toEqual(expect.arrayContaining(['IEAT (กนอ).', 'อื่นๆ']));
+    expect(['IEAT (กนอ).', 'TGO', 'set/MAI', 'อื่นๆ', ''].map((x) => matchSource(DEFAULT_SOURCES, x))).toEqual(['กนอ.', 'TGO', 'SET/mai', null, null]);
   });
 
   it('customers added by hand are shared; TGO-sync companies stay on their device', () => {
@@ -253,22 +274,49 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     await vi.waitFor(() => expect(sim.post({ action: 'file', key: KEY, fileId: meta.fileId }).error).toBe('not_found'), WAIT);
   });
 
-  it('imports the old tracker backup, links known companies, and re-importing does not duplicate', async () => {
+  it('imports the old tracker backup, links known companies, and re-importing never overwrites the team\'s edits', async () => {
     const [c] = cos().slice(5);
-    const backup = { sources: ['TGO'], services: ['CFO'], progress: ['CALL1', 'CLOSED DEAL'], rows: [{ type: 'section', name: 'งานเก่า' }, { type: 'client', client: c.name, resp: 'เอ', progress: { CALL1: { d: '2026-09-01', n: '<b>นัดแล้ว</b>' } } }, { type: 'client', client: 'ไม่มีในทะเบียนแน่นอน' }] };
-    const f = Object.assign(new Blob([JSON.stringify(backup)]), { name: 'ตารางติดตามสถานะการขาย_2568.json' }) as File;
-    const r = await A.importTracker(f, '2568');
-    expect(r).toEqual({ deals: 2, linked: 1, years: ['2568'] });
+    // a name two different registry companies share is not linked to either
+    const dup = [...A.byNorm.keys()].find((k) => A.B.companies.filter((x) => norm(x.name) === k && x.ids.length === 1).length > 1);
+    const twin = dup && A.B.companies.find((x) => norm(x.name) === dup)!;
+    expect(twin).toBeTruthy(); // the real registry has such names
+    const rows = [
+      { type: 'section', name: 'งานเก่า' },
+      { type: 'client', client: c.name, resp: 'เอ', forecast: '50,000-80,000', progress: { CALL1: { d: '2026-09-01', n: '<b>นัดแล้ว</b>' } } },
+      { type: 'client', client: 'ไม่มีในทะเบียนแน่นอน' },
+      ...(twin ? [{ type: 'client', client: twin.name }] : []),
+    ];
+    const f = (r: unknown[]) => Object.assign(new Blob([JSON.stringify({ sources: ['TGO'], services: ['CFO'], progress: ['CALL1', 'CLOSED DEAL'], rows: r })]), { name: 'ตารางติดตามสถานะการขาย_2568.json' }) as File;
+    const r = await A.importTracker(f(rows), '2568');
+    expect(r).toEqual({ deals: rows.length - 1, skipped: 0, linked: 1, ambiguous: twin ? 1 : 0, inexact: 1, years: ['2568'] });
     expect(A.sales.cfg.sections).toContain('งานเก่า');
-    const again = await A.importTracker(f, '2568');
-    expect(again.deals).toBe(2);
+    const mine = Object.values(A.sales.deals).find((d) => d.year === '2568' && d.gid === c.id)!;
+    expect(mine.forecast).toBe(50000);
+    expect(Object.values(A.sales.log).some((l) => l.deal === mine.id && l.detail.includes('50,000-80,000'))).toBe(true);
+    expect(A.sales.steps[`${mine.id}/CALL1`].n).toBe('นัดแล้ว');
+    // the team works on the deal, then someone imports the same (older) file again
+    A.updateDeal(mine.id, { forecast: 75000 });
+    A.setStep(mine.id, 'CALL1', { d: '2026-09-01', n: 'นัดแล้ว ส่งใบเสนอราคาแล้ว' });
+    const again = await A.importTracker(f(rows), '2568');
+    expect(again).toMatchObject({ deals: 0, skipped: rows.length - 1 });
+    expect(A.sales.deals[mine.id].forecast).toBe(75000);
+    expect(A.sales.steps[`${mine.id}/CALL1`].n).toBe('นัดแล้ว ส่งใบเสนอราคาแล้ว');
+    // a newer download where the section was renamed still finds the same rows
+    expect((await A.importTracker(f([{ type: 'section', name: 'ชื่อใหม่' }, ...rows.slice(1)]), '2568')).deals).toBe(0);
     const ds = Object.values(A.sales.deals).filter((d) => d.year === '2568');
-    expect(ds).toHaveLength(2);
-    expect(ds.find((d) => d.gid === c.id)).toBeTruthy();
-    expect(A.sales.steps[`${ds.find((d) => d.gid === c.id)!.id}/CALL1`].n).toBe('นัดแล้ว');
+    expect(ds).toHaveLength(rows.length - 1);
     await A.teamSync();
     await B.teamSync();
-    expect(Object.values(B.sales.deals).filter((d) => d.year === '2568')).toHaveLength(2);
+    expect(Object.values(B.sales.deals).filter((d) => d.year === '2568')).toHaveLength(rows.length - 1);
+  });
+
+  it('a client already sent from the registry is not imported a second time that year', async () => {
+    const [c] = cos().slice(6);
+    A.addDealsFromCompanies([c.id], { year: '2567' });
+    const f = Object.assign(new Blob([JSON.stringify({ rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: c.name }, { type: 'client', client: c.name }] })]), { name: 'x.json' }) as File;
+    // the file has the client twice: one matches the deal already here, the second is new
+    expect(await A.importTracker(f, '2567')).toMatchObject({ deals: 1, skipped: 1 });
+    expect(Object.values(A.sales.deals).filter((d) => d.year === '2567' && d.client === c.name)).toHaveLength(2);
   });
 
   it('deals of companies that exist only on this device are not linked by id', () => {
