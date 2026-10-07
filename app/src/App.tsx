@@ -112,10 +112,26 @@ export default function App() {
           <DealPanel />
         </ErrorBoundary>
       )}
-      {ready && ui.sel != null && <CompanyDrawer />}
-      {ready && ui.addCust && <AddCustomer />}
-      {ready && ui.sendIds && <SendToTracker />}
-      {ready && ui.sched && <ScheduleModal />}
+      {ready && ui.sel != null && (
+        <ErrorBoundary resetKey={String(ui.sel)}>
+          <CompanyDrawer />
+        </ErrorBoundary>
+      )}
+      {ready && ui.addCust && (
+        <ErrorBoundary resetKey="addCust">
+          <AddCustomer />
+        </ErrorBoundary>
+      )}
+      {ready && ui.sendIds && (
+        <ErrorBoundary resetKey="send">
+          <SendToTracker />
+        </ErrorBoundary>
+      )}
+      {ready && ui.sched && (
+        <ErrorBoundary resetKey="sched">
+          <ScheduleModal />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

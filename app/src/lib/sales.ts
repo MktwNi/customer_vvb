@@ -10,6 +10,8 @@
  * Pure functions only (no DOM) so everything here is unit-tested.
  */
 import { norm } from './core';
+import { todayISO } from './format';
+import type { CustomCo } from './types';
 
 /** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
 export const DEFAULT_SECTIONS = ['Retention', 'EnWaste Expo', 'SET/mai', 'IEAT (กนอ).', 'Event Organizer', 'Partner', 'Event Exhibition', 'Course Training', 'สสว.', 'Depa', 'TGO', 'VB SAVE+', 'Social', 'อื่นๆ'];
@@ -152,6 +154,18 @@ export function toDoc(v: unknown, deal: string, id: string): DealDoc | null {
   const a = o.auto as Record<string, unknown> | undefined;
   if (a && typeof a === 'object' && typeof a.stage === 'string' && typeof a.n === 'string') doc.auto = { stage: a.stage, n: a.n, ...(iso(a.d) ? { d: iso(a.d).slice(0, 10) } : {}) };
   return doc;
+}
+/** A customer added by hand, as this app can use it, or null (no name). */
+export function toCust(v: unknown, id: number): CustomCo | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const name = str(o.name, 200).trim();
+  if (!name || !isFinite(id)) return null;
+  const t = (k: string, max = 300) => str(o[k], max);
+  return {
+    id, name, jur: t('jur', 20), prov: t('prov', 100), ind: t('ind', 200), biz: t('biz'), addr: t('addr', 500), phone: t('phone', 200),
+    email: t('email', 200), web: t('web', 300), contact: t('contact', 200), note: t('note', 3000), at: iso(o.at), by: t('by', 100),
+  };
 }
 export const toStep = (v: unknown): DealStep | null => (v && typeof v === 'object' ? { d: iso((v as DealStep).d).slice(0, 10), n: str((v as DealStep).n, NOTE_MAX) } : null);
 export function toLog(v: unknown, id: string): DealLog | null {
@@ -314,7 +328,8 @@ export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;
       }
       if (f.day || f.month) {
-        const cd = d.contactDate || '';
+        // the last contact (typed date or latest stage date), or the day it was added — as shown in the row
+        const cd = lastContact(s, d, todayISO()) || (d.at || '').slice(0, 10);
         if (cd.length < 10) return false;
         if (f.month && cd.slice(5, 7) !== f.month) return false;
         if (f.day && cd.slice(8, 10) !== f.day) return false;

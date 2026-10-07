@@ -8,7 +8,7 @@
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, StageKey, Task } from './types';
-import { toDeal, toDoc, toLog, toStep, type SalesCfg, type SalesState } from './sales';
+import { toCust, toDeal, toDoc, toLog, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -339,8 +339,11 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       if (del) {
         if (!(rest in s.custom)) return;
         delete s.custom[rest];
-      } else if (row.v && typeof row.v === 'object') s.custom[rest] = { ...(row.v as CustomCo), id: +rest };
-      else return;
+      } else {
+        const c = toCust(row.v, +rest); // checked like every Sales Tracker record
+        if (!c) return;
+        s.custom[rest] = c;
+      }
       fx.custom = true;
       break;
   }
@@ -357,8 +360,13 @@ const MERGED = /^(deal|ddoc|cust)\//;
  * - a whole-value write (a new record, a deletion here) or another kind of record: ours stands (null).
  */
 export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown } | null {
-  // an import only fills gaps: whatever the team has for the record (a value or a deletion) wins
-  if (o.nx) return { drop: true };
+  // an import only fills gaps: whatever the team has for the record (a value or a deletion) wins —
+  // except fields a person edited here before it was shared (o.f), put on top of the team's record
+  if (o.nx) {
+    if (!o.f || row.del || !row.v || typeof row.v !== 'object' || !o.v || typeof o.v !== 'object') return { drop: true };
+    const mine = o.v as Record<string, unknown>;
+    return { v: { ...(row.v as Record<string, unknown>), ...Object.fromEntries(o.f.filter((x) => x in mine).map((x) => [x, mine[x]])) } };
+  }
   // a stage note written for a document: only over what this browser saw there (`base`); a
   // teammate who wrote in that stage since keeps their note
   if (o.base !== undefined) {

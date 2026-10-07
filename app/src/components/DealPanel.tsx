@@ -22,15 +22,20 @@ export function StepEditor({ dealId, stage, onClose }: { dealId: string; stage: 
   const { engine: e } = useApp();
   const d = e.sales.deals[dealId];
   const st = stepOf(e.sales, dealId, stage);
+  const [init] = useState(st); // what the editor opened with
   const [date, setDate] = useState(st.d);
   const [note, setNote] = useState(st.n);
   if (!d) return null;
   const save = (n = note, dt = date) => {
+    // a teammate changed this stage while the editor was open: don't replace their note unasked
+    const live = stepOf(e.sales, dealId, stage);
+    if ((live.d !== init.d || live.n !== init.n) && !window.confirm(`มีคนแก้ขั้นนี้ระหว่างที่เปิดอยู่:\n"${live.n || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`)) return onClose();
     e.setStep(dealId, stage, { d: dt, n });
     onClose();
   };
-  // Escape, × and the backdrop keep what was typed, as the deal panel does; "ยกเลิก" discards it
-  const dismiss = () => (note !== st.n || date !== st.d ? save() : onClose());
+  // Escape, × and the backdrop keep what was typed, as the deal panel does; an untouched editor just
+  // closes; "ยกเลิก" discards
+  const dismiss = () => (note !== init.n || date !== init.d ? save() : onClose());
   return (
     <Modal title={`${stage}${STAGE_TH[stage] ? ' · ' + STAGE_TH[stage] : ''}`} onClose={dismiss}>
       <span style={{ fontSize: 13.5, color: '#475069' }}>{d.client}</span>
@@ -68,6 +73,8 @@ function Field({ label, value, onSave, type = 'text', list, placeholder }: { lab
   );
 }
 
+/** The last amount a MoneyField refused (closing the panel right after must say so). */
+let refused: { msg: string; at: number } | null = null;
 /** A Forecast / Actual box: accepts "120,000.-", "1.5 ล้าน", "200k"; text that isn't one clear
  *  amount is refused with a message instead of erasing the saved figure. */
 function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: string; value: number | null; onSave: (v: number | null) => void; placeholder?: string; readOnly?: boolean }) {
@@ -92,6 +99,7 @@ function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: st
             ev.target.value = shown;
             // also when the panel is being closed (Escape / ×): the message would vanish with it
             if (isClosingBlur()) window.alert(msg + ' (ยอดเดิมยังอยู่)');
+            else refused = { msg, at: Date.now() }; // the panel may be closing by mouse (× / outside)
             return;
           }
           setErr('');
@@ -236,6 +244,9 @@ export function DealPanel() {
   // blur first: the fields save when they lose focus
   const close = () => {
     commitFocus();
+    // an amount refused just now (the click on × / outside blurred the box first): say so before closing
+    if (refused && Date.now() - refused.at < 3000) window.alert(refused.msg + ' (ยอดเดิมยังอยู่)');
+    refused = null;
     set({ deal: null });
   };
   const st = dealStatus(S, d);

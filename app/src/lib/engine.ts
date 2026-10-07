@@ -17,7 +17,7 @@ import {
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import {
-  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, toDeal, toDoc, toLog, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
+  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, toCust, toDeal, toDoc, toLog, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
   parseTrackerJson, parseTrackerSheet, stepOf,
   type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
@@ -883,8 +883,9 @@ export class GccEngine {
         const l = toLog(v, k);
         if (l && !(k in S.log)) S.log[k] = l;
       });
-      Object.values((d.custom || {}) as Record<string, CustomCo>).forEach((c) => {
-        if (!this.custom[c.id]) {
+      Object.entries((d.custom || {}) as Record<string, unknown>).forEach(([k, v]) => {
+        const c = toCust(v, +k);
+        if (c && !this.custom[c.id]) {
           this.custom[c.id] = c;
           n++;
         }
@@ -1155,7 +1156,7 @@ export class GccEngine {
     const cur = this.sales.cfg[name];
     // queued as what changed, so two people adding at once both keep their item (rebaseOp)
     const lst = { add: v.filter((x) => !cur.includes(x)), rm: cur.filter((x) => !v.includes(x)) };
-    if (!this.teamCfg) {
+    if (!this.teamCfg || this.importing) {
       const O = this.sales.offAdds || (this.sales.offAdds = {});
       O[name] = [...new Set([...(O[name] || []), ...lst.add])].filter((x) => !lst.rm.includes(x));
     }
@@ -1256,7 +1257,8 @@ export class GccEngine {
     // so is a new amount — except on an older quotation a newer one replaced: correcting that record
     // must not make it the forecast again.
     const fcs = docsOf(this.sales, dealId).filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at));
-    const superseded = doc.target === 'forecast' && fcs.length > 0 && fcs[fcs.length - 1].id !== docId;
+    // not the figure in use (a newer quotation or a forecast typed after it replaced it): a correction only
+    const superseded = doc.target === 'forecast' && dealMoney(this.sales, d).fcDoc?.id !== docId;
     if (n.target !== doc.target || (n.amount !== doc.amount && !superseded)) {
       n.cAt = this.stampAfter([d.fcAt, ...fcs.filter((x) => x.id !== docId).map((x) => x.cAt || x.at)]);
       f.push('cAt');
@@ -1287,7 +1289,7 @@ export class GccEngine {
       const userDate = doc.auto.d && st.d !== doc.auto.d ? st.d : ''; // a date the user corrected stays
       if (heir) {
         const hk = `${dealId}/${heir.id}`, note = this.autoNote(heir);
-        this.sales.docs[hk] = { ...heir, auto: { stage, n: note, d: st.d } };
+        this.sales.docs[hk] = { ...heir, auto: { stage, n: note, ...(doc.auto.d ? { d: doc.auto.d } : {}) } };
         this.op(keyOf.ddoc(dealId, heir.id), { ...this.sales.docs[hk] }, { f: ['auto'] });
         this.setStep(dealId, stage, { d: st.d, n: note }, true, true);
       } else this.setStep(dealId, stage, { d: userDate, n: '' }, true, true);
@@ -1489,8 +1491,9 @@ export class GccEngine {
           resp: c.resp, referral: c.referral, contactDate: c.contactDate, jobStatus: c.jobStatus, closedDate: c.closedDate, forecast: c.forecast, actual: c.actual,
           source: c.source, service: c.service, order: Object.keys(S.deals).length + i, imp: batch,
         };
-        // create-only (SyncOp.nx): if a teammate imported or deleted this row first, theirs stands
-        this.importNew = true;
+        // create-only (SyncOp.nx): if a teammate imported or deleted this row first, theirs stands — except
+        // for a row this team undid, which comes back as a plain write (its own tombstone is on the sheet)
+        this.importNew = !S.undone[id];
         try {
           this.putDeal(d);
           Object.entries(c.progress).forEach(([p, st]) => {
@@ -1591,12 +1594,20 @@ export class GccEngine {
     const o = this.mkOp(k, v);
     const prev = this.pending.get(k);
     if (v !== undefined) {
-      const fl = mergeFields(prev, opt.f);
-      if (fl) o.f = fl;
+      const nxPrev = !!prev?.nx && !prev.sent;
+      if (this.importNew) o.nx = true; // created by an import: only fills a gap
+      else if (nxPrev && opt.f) {
+        // a person's edit of an import row not shared yet: if the team has that row, their record wins
+        // except for the fields edited here (rebaseOp), so the edit isn't lost
+        o.nx = true;
+        o.f = [...new Set([...(prev!.f || []), ...opt.f])];
+      }
+      if (!o.nx) {
+        const fl = mergeFields(prev, opt.f);
+        if (fl) o.f = fl;
+      }
       const le = opt.lst && mergeListEdits(prev, opt.lst);
       if (le) o.lst = le;
-      // created by an import, and not yet shared: still only filling a gap
-      if (this.importNew || (prev?.nx && !prev.sent)) o.nx = true;
     }
     // conditional only while every queued write to this record is a document's own (setStep auto)
     if (opt.base !== undefined && (!prev || prev.base !== undefined)) o.base = prev ? prev.base : opt.base;
@@ -1650,7 +1661,19 @@ export class GccEngine {
           drop.add(k); // that tab deleted it: the deletion wins over an edit (as rebaseOp does)
           return;
         }
-        if (o.f) {
+        if (o.base !== undefined && p.base === undefined) {
+          drop.add(k); // that tab wrote the note by hand: a document's automatic note yields
+          return;
+        }
+        if (o.f && !p.f && !p.del && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object' && !p.nx) {
+          // that tab wrote the whole record (e.g. created it offline): keep it, with this tab's fields on top
+          const mine = o.v as Record<string, unknown>;
+          o.v = { ...(p.v as Record<string, unknown>), ...Object.fromEntries(o.f.filter((x) => x in mine).map((x) => [x, mine[x]])) };
+          delete o.f;
+          return;
+        }
+        if (o.f && o.nx && p.nx) o.f = [...new Set([...(p.f || []), ...o.f])]; // an edit of an import row not shared yet (see op)
+        else if (o.f) {
           const fl = mergeFields(p, o.f);
           if (fl && p.f && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object') {
             // keep that tab's values for the fields it changed and this tab didn't
@@ -1902,7 +1925,9 @@ export class GccEngine {
     rows.forEach((r) => this.pending.has(r.k) && lastRow.set(r.k, r));
     const merged: SyncRow[] = [], dropped: SyncOp[] = [], revised = new Map<string, SyncOp>();
     // a deal the team deleted: notes and documents this browser queued for it are dropped too
-    const goneNow = new Set(rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('deal/')).map((r) => r.k.slice(5)));
+    const lastDeal = new Map<string, SyncRow>();
+    rows.forEach((r) => r.k.startsWith('deal/') && lastDeal.set(r.k.slice(5), r));
+    const goneNow = new Set([...lastDeal].filter(([, r]) => r.del || r.v == null).map(([id]) => id));
     this.pending.forEach((o, k) => {
       const m = /^(dstep|ddoc)\/([^/]+)\//.exec(k);
       if (m && goneNow.has(m[2]) && !o.del && !lastRow.has(k) && !this.pendingDealAlive(m[2])) dropped.push(o);
@@ -2097,6 +2122,8 @@ export class GccEngine {
         const o = this.mkOp(p.k, local.get(p.k), t);
         if (o.v !== undefined && p.f && !p.del) o.f = p.f; // still only those fields of ours
         if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
+        if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
+        if (p.base !== undefined) o.base = p.base; // still only over what was seen there
         return o;
       });
     let ops: SyncOp[];

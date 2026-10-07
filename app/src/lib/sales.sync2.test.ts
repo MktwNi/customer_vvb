@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore, type KVStore } from './storage';
-import { dealMoney, lastContact, toDoc } from './sales';
+import { dealMoney, filterDeals, lastContact, toDoc } from './sales';
 import type { SyncOp } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -259,6 +259,57 @@ describe('Sales Tracker: second review', () => {
     expect(before.size).toBe(2);
     A.addCustomer({ name: A.company(pair[0])!.name, jur: '0105598765432', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' });
     expect(new Set(pair.map((i) => A.company(i)!.id)).size).toBe(2);
+  });
+
+  it('round 3: undo an import and import the same file again before the next pull — it stays, for everyone', async () => {
+    const f = Object.assign(new Blob([JSON.stringify({ rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'ลูกค้านำเข้าเร็ว' }] })]), { name: 'quick.json' }) as File;
+    const r = await A.importTracker(f, '2560');
+    await A.teamSync();
+    A.undoImport(r.batch);
+    await A.teamSync();
+    expect((await A.importTracker(f, '2560')).deals).toBe(1); // right away, before anyone pulls
+    await syncAll();
+    for (const e of all()) expect(Object.values(e.sales.deals).filter((x) => x.client === 'ลูกค้านำเข้าเร็ว')).toHaveLength(1);
+  });
+
+  it('round 3: a person\'s edit of an import row not shared yet survives when a teammate imported the same row first', async () => {
+    const f = Object.assign(new Blob([JSON.stringify({ rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'ลูกค้าแก้ก่อนซิงก์', forecast: 100000 }] })]), { name: 'e.json' }) as File;
+    await A.importTracker(f, '2559');
+    await A.teamSync();
+    offline = true;
+    await B.importTracker(f, '2559');
+    const d = Object.values(B.sales.deals).find((x) => x.client === 'ลูกค้าแก้ก่อนซิงก์' && x.year === '2559')!;
+    B.updateDeal(d.id, { phone: '029990000' });
+    await priv(B).pq;
+    offline = false;
+    await syncAll();
+    for (const e of all()) expect(e.sales.deals[d.id]).toMatchObject({ phone: '029990000', forecast: 100000 });
+  });
+
+  it('round 3: correcting the quotation a typed forecast overrides keeps the typed forecast', async () => {
+    const d = await fresh('ลูกค้าแก้ใบเสนอราคาเดิม');
+    const q = await A.attachDoc(d.id, pdf('q.pdf'), { kind: 'quotation', amount: 100000, target: 'forecast', basis: 'total', detected: 100000, docNo: 'QT-1', docDate: '' });
+    vi.setSystemTime(Date.now() + 1000);
+    A.updateDeal(d.id, { forecast: 150000 });
+    vi.setSystemTime(Date.now() + 1000);
+    A.updateDoc(d.id, q.id, { amount: 105000 });
+    expect(dealMoney(A.sales, A.sales.deals[d.id]).forecast).toBe(150000);
+  });
+
+  it('round 3: the table\'s contact month filter finds deals by their last contact (or the day added)', () => {
+    const d = A.addDeal({ client: 'ลูกค้ากรองเดือน', year: '2558' });
+    A.setStep(d.id, 'CALL1', { d: '2026-09-15', n: 'โทร' });
+    expect(filterDeals(A.sales, { year: '2558', month: '09' }).map((x) => x.id)).toEqual([d.id]);
+    const e2 = A.addDeal({ client: 'ลูกค้ายังไม่ติดต่อ', year: '2558' });
+    expect(filterDeals(A.sales, { year: '2558', month: e2.at.slice(5, 7) }).map((x) => x.id)).toContain(e2.id);
+  });
+
+  it('round 3: a backup restored while connected keeps its extra lists and shares them', async () => {
+    const backup = { kind: 'gcc-crm-backup', v: 1, crm: {}, contacts: {}, dedup: {}, custom: { 5: { name: '' } }, sales: { cfg: { sections: ['หมวดจากไฟล์สำรอง'], sources: [], services: [], stages: [] }, deals: {}, steps: {}, docs: {}, log: {} } };
+    await A.importCrm(Object.assign(new Blob([JSON.stringify(backup)]), { name: 'b.json' }) as File);
+    await syncAll();
+    for (const e of all()) expect(e.sales.cfg.sections).toContain('หมวดจากไฟล์สำรอง');
+    expect(A.custom[5]).toBeUndefined(); // a nameless customer record is skipped
   });
 
   it('registry CSV: names can\'t run as formulas; juristic ids and phones keep their 0', () => {
