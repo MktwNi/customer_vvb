@@ -6,9 +6,11 @@ import { KIND_TH, fmtMoney, money, type Deal, type DealDoc, type DocKind, type D
 import type { DocFacts } from '../lib/docExtract';
 import { Modal } from '../tabs/Sales';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
+import { prefs } from '../lib/storage';
 import { Notice, inputStyle, labelCol, selectStyle } from './ui';
 
 const small: CSSProperties = { cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 13 };
+const BASIS_PREF = 'gcc-doc-basis';
 const defaultTarget = (k: DocKind): DocTarget => (k === 'quotation' ? 'forecast' : k === 'invoice' ? 'actual' : 'none');
 
 /** Two names refer to the same company? (ignores company-type words and punctuation) */
@@ -58,7 +60,9 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
       return;
     }
     setFile(f);
-    setUrl(URL.createObjectURL(f));
+    // the preview gets the checked type, never what the file claims (an .html renamed to .pdf
+    // must not open as a page of this site)
+    setUrl(URL.createObjectURL(new Blob([f], { type: docMime(f) })));
     const ctl = new AbortController();
     abort.current = ctl;
     setProg({ msg: 'กำลังเปิดไฟล์…' });
@@ -74,8 +78,12 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
       }
       setDocNo(fx.docNo);
       setDocDate(fx.docDate);
-      const best = fx.total ?? fx.candidates[0]?.value ?? null;
-      setBasis(fx.total != null ? 'total' : 'manual');
+      // the figure this person confirmed last time (with or before VAT, after withholding) when the document has it
+      const pref = prefs.get<DealDoc['basis']>(BASIS_PREF, 'total');
+      const byBasis = { total: fx.total, subtotal: fx.subtotal, netPay: fx.netPay, manual: null };
+      const b: DealDoc['basis'] = byBasis[pref] != null ? pref : fx.total != null ? 'total' : 'manual';
+      const best = byBasis[b] ?? fx.candidates[0]?.value ?? null;
+      setBasis(b);
       setAmount(best != null ? String(best) : '');
       if (!t.text.trim()) setReadErr('อ่านข้อความจากไฟล์นี้ไม่ได้ — กรอกยอดเงินเองด้านล่าง');
       else if (best == null) setReadErr('ไม่พบยอดเงินที่ชัดเจนในเอกสาร — กรอกยอดเงินเองด้านล่าง');
@@ -95,6 +103,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     if (!file) return;
     setSaving('กำลังบันทึก…');
     try {
+      if (amt != null && basis !== 'manual') prefs.set(BASIS_PREF, basis);
       await e.attachDoc(deal.id, file, { kind, amount: amt, target: amt == null ? 'none' : target, basis: amt == null ? 'manual' : basis, detected: facts?.total ?? facts?.candidates[0]?.value ?? null, docNo, docDate });
       onClose();
     } catch (err) {
@@ -112,7 +121,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const others = facts ? facts.candidates.filter((c) => !opts.some((o) => o[2] === c.value)).slice(0, 5) : [];
   const wordsOk = facts && facts.words != null && facts.total != null && Math.abs(facts.words - facts.total) < 0.01;
   const partyWarn = facts && facts.party && !sameParty(facts.party, deal.client);
-  const isImg = file && file.type.startsWith('image/');
+  const isImg = file && docMime(file).startsWith('image/') && !/hei[cf]/.test(docMime(file)); // browsers can't show HEIC
 
   return (
     <Modal title={`แนบ${KIND_TH[kind]} · ${deal.client}`} onClose={onClose} width={620}>

@@ -105,14 +105,20 @@ function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
   const { engine: e } = useApp();
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState('');
+  const [link, setLink] = useState('');
+  useEffect(() => () => {
+    if (link) URL.revokeObjectURL(link);
+  }, [link]);
   const open = async () => {
-    setBusy('กำลังเปิด…');
+    if (link) return void window.open(link, '_blank', 'noopener');
+    setBusy(doc.fileId ? 'กำลังเปิด… (ไฟล์ใน Drive ของทีมอาจใช้เวลาสักครู่)' : 'กำลังเปิด…');
+    const t0 = Date.now();
     try {
-      const b = await e.docBlob(doc);
-      const url = URL.createObjectURL(b);
-      window.open(url, '_blank', 'noopener');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const url = URL.createObjectURL(await e.docBlob(doc));
+      setLink(url);
       setBusy('');
+      // a pop-up opened long after the click is blocked by the browser: then the link below is used
+      if (Date.now() - t0 < 2500) window.open(url, '_blank', 'noopener');
     } catch (err) {
       setBusy((err as Error)?.message || String(err));
     }
@@ -132,6 +138,12 @@ function DocRow({ d, doc }: { d: Deal; doc: DealDoc }) {
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button onClick={open} style={small}>เปิดไฟล์</button>
+        {link && (
+          <>
+            <a href={link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>
+            <a href={link} download={doc.name} style={{ fontSize: 13 }}>ดาวน์โหลด</a>
+          </>
+        )}
         <button onClick={() => setEdit(!edit)} style={small}>{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>
         <button onClick={() => window.confirm(`ลบเอกสาร "${doc.name}"?`) && e.deleteDoc(d.id, doc.id)} style={{ ...small, color: '#8A2B12' }}>ลบ</button>
         {busy && <span style={{ fontSize: 12, color: '#475069' }}>{busy}</span>}
