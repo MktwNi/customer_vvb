@@ -1,6 +1,6 @@
 // Dev-only harness: reads a chosen file with readDocText, analyses it with analyzeDocText and shows
 // the result. dev/run-doc-harness.cjs drives it in Chromium and reads window.__docResult.
-import { analyzeDocText } from '../src/lib/docExtract';
+import { analyzeDocText, factsScore } from '../src/lib/docExtract';
 import { readDocText } from '../src/lib/docText';
 
 declare global {
@@ -17,6 +17,7 @@ async function run(file: File) {
   try {
     const dt = await readDocText(file, {
       forceOcr: $<HTMLInputElement>('force').checked,
+      judge: (t) => factsScore(analyzeDocText(t)), // as the app does (DocAttach)
       onProgress: (msg) => {
         $('progress').textContent = msg;
         if (progress[progress.length - 1] !== msg) progress.push(msg);

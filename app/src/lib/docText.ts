@@ -65,16 +65,16 @@ async function sniff(file: DocFile): Promise<'pdf' | 'image' | 'heic' | 'other'>
  * (for a text layer that comes out garbled). Unsupported files give method 'none'.
  * Throws an Error with a Thai message for unreadable files; an AbortError when `signal` aborts.
  */
-export async function readDocText(file: DocFile, opts: { onProgress?: Progress; signal?: AbortSignal; forceOcr?: boolean } = {}): Promise<DocText> {
-  const { onProgress, signal } = opts;
+export async function readDocText(file: DocFile, opts: { onProgress?: Progress; signal?: AbortSignal; forceOcr?: boolean; judge?: Judge } = {}): Promise<DocText> {
+  const { onProgress, signal, judge } = opts;
   const kind = await sniff(file);
   checkAbort(signal);
-  if (kind === 'pdf') return readPdf(file, onProgress, signal, !!opts.forceOcr);
+  if (kind === 'pdf') return readPdf(file, onProgress, signal, !!opts.forceOcr, judge);
   if (kind === 'heic') throw new Error('เบราว์เซอร์นี้เปิดรูป HEIC (รูปจาก iPhone) ไม่ได้ — ส่งออกเป็น JPG หรือถ่ายภาพหน้าจอแล้วแนบใหม่');
   if (kind === 'image') {
     onProgress?.('กำลังเตรียมภาพ…', 0);
     const canvas = await imageToCanvas(file);
-    return { text: await ocr([canvas], onProgress, signal), method: 'ocr', pages: 1 };
+    return { text: await ocr([canvas], onProgress, signal, judge), method: 'ocr', pages: 1 };
   }
   return { text: '', method: 'none', pages: 0 };
 }
@@ -131,7 +131,7 @@ function hasTextLayer(text: string, pages: number) {
   return good >= Math.max(40, 15 * Math.min(pages, OCR_PAGES)) && bad < good * 0.3;
 }
 
-async function readPdf(file: DocFile, progress: Progress | undefined, signal: AbortSignal | undefined, forceOcr: boolean): Promise<DocText> {
+async function readPdf(file: DocFile, progress: Progress | undefined, signal: AbortSignal | undefined, forceOcr: boolean, judge?: Judge): Promise<DocText> {
   progress?.('กำลังเปิด PDF…', 0);
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -174,7 +174,7 @@ async function readPdf(file: DocFile, progress: Progress | undefined, signal: Ab
       progress?.(`กำลังแปลงหน้า ${p} เป็นภาพ…`, 0);
       canvases.push(await renderPage(await doc.getPage(p)));
     }
-    return { text: await ocr(canvases, progress, signal), method: 'ocr', pages: doc.numPages };
+    return { text: await ocr(canvases, progress, signal, judge), method: 'ocr', pages: doc.numPages };
   } finally {
     signal?.removeEventListener('abort', onAbort);
     await task.destroy();
@@ -248,7 +248,14 @@ interface OcrWorker {
 }
 type CreateWorker = (langs: string, oem: number, opts: Record<string, unknown>) => Promise<OcrWorker>;
 
-async function ocr(images: HTMLCanvasElement[], progress: Progress | undefined, signal: AbortSignal | undefined): Promise<string> {
+/** How well OCR'd text answers what the caller needs, 0–100; 100 = good enough, no second pass. */
+export type Judge = (text: string) => number;
+/** Tesseract page layouts tried in turn: one text block (best on photos and plain receipts), then
+ *  "a column of text of variable sizes", which keeps the right-aligned totals of bordered tables
+ *  that the first one drops. The second runs only when a judge finds the first wanting. */
+const OCR_PASSES = ['6', '4'];
+
+async function ocr(images: HTMLCanvasElement[], progress: Progress | undefined, signal: AbortSignal | undefined, judge?: Judge): Promise<string> {
   progress?.('กำลังโหลดตัวอ่าน OCR…', 0);
   const mod = (await import('tesseract.js')) as unknown as { createWorker?: CreateWorker; default?: { createWorker: CreateWorker } };
   const createWorker = mod.createWorker || mod.default!.createWorker;
@@ -278,17 +285,26 @@ async function ocr(images: HTMLCanvasElement[], progress: Progress | undefined, 
   const stop = () => void worker.terminate().catch(() => {});
   signal?.addEventListener('abort', stop, { once: true });
   try {
-    // keep runs of spaces: they separate a label from its value in a column layout
-    await worker.setParameters({ preserve_interword_spaces: '1' });
-    const out: string[] = [];
-    for (const img of images) {
-      checkAbort(signal);
-      page++;
-      const { data } = await abortable(worker.recognize(img, { rotateAuto: true }), signal);
-      out.push(data.text);
+    let best = '', bestScore = -1;
+    for (const [i, psm] of OCR_PASSES.entries()) {
+      // keep runs of spaces: they separate a label from its value in a column layout
+      await worker.setParameters({ preserve_interword_spaces: '1', tessedit_pageseg_mode: psm });
+      if (i > 0) progress?.('ตรวจอีกรอบด้วยการจัดหน้าแบบตาราง เพื่อหายอดให้ครบ…', 0);
+      const out: string[] = [];
+      page = 0;
+      for (const img of images) {
+        checkAbort(signal);
+        page++;
+        const { data } = await abortable(worker.recognize(img, { rotateAuto: true }), signal);
+        out.push(data.text);
+      }
+      const text = repairThaiText(out.join('\n\n'));
+      const score = judge ? judge(text) : 100;
+      if (score > bestScore) (best = text), (bestScore = score);
+      if (bestScore >= 100) break;
     }
     progress?.('อ่านด้วย OCR เสร็จแล้ว', 100);
-    return repairThaiText(out.join('\n\n'));
+    return best;
   } finally {
     signal?.removeEventListener('abort', stop);
     await worker.terminate().catch(() => {});

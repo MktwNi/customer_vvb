@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeDocText, bahtTextToNumber, repairThaiText } from './docExtract';
+import { analyzeDocText, bahtTextToNumber, factsScore, repairThaiText } from './docExtract';
 
 // Texts below are shaped like what docText.ts hands over: lines rebuilt from pdf.js item positions
 // (columns separated by 3+ spaces), raw pdf.js items (one per line), or Tesseract output.
@@ -454,5 +454,17 @@ describe('analyzeDocText — dates', () => {
   it('prefers the document date over the due date', () => {
     expect(analyzeDocText(doc('ใบแจ้งหนี้', 'วันที่ครบกำหนด 15/11/2569', 'วันที่ 16/10/2569')).docDate).toBe('2026-10-16');
     expect(analyzeDocText(doc('INVOICE', 'Due Date: 15 Nov 2026', 'Invoice Date: 16 Oct 2026')).docDate).toBe('2026-10-16');
+  });
+});
+
+describe('factsScore (picks between OCR passes)', () => {
+  it('a confirmed total is good enough; otherwise more money fields found score higher', () => {
+    // what the two Tesseract layouts gave for the same invoice photo: the first lost the totals table
+    const lost = 'ใบแจ้งหนี้\nเลขที่ INV2569-0088\n ค่าบริการที่ปรึกษา CFO งวดที่ 1          100,000.00        100,000.00\n(หนึ่งแสนเจ็ดพันบาทถ้วน)';
+    const kept = 'ใบแจ้งหนี้\nเลขที่ INV2569-0088\nรวมเป็นเงิน        100,000.00\nภาษีมูลค่าเพิ่ม 7%          7,000.00\nจำนวนเงินรวมทั้งสิ้น        107,000.00\nหักภาษี ณ ที่จ่าย 3%          3,000.00\nยอดชำระสุทธิ        104,000.00\n(หนึ่งแสนเจ็ดพันบาทถ้วน)';
+    const a = factsScore(analyzeDocText(lost)), b = factsScore(analyzeDocText(kept));
+    expect(b).toBe(100);
+    expect(a).toBeLessThan(100);
+    expect(factsScore(analyzeDocText('สวัสดี'))).toBeLessThan(a);
   });
 });

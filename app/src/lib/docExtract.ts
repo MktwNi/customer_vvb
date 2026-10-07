@@ -948,3 +948,11 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
     quality: best ? best.final + (best.checked ? 30 : 0) : 0,
   };
 }
+
+/** How completely a document was read, 0–100 (100 = a confirmed total): used to pick between OCR
+ *  passes (docText.ts). Short of a confirmed total, more of the money fields found counts more. */
+export function factsScore(f: DocFacts): number {
+  if (f.total != null && f.confidence === 'high') return 100;
+  const found = [f.subtotal, f.vat, f.wht, f.netPay, f.words].filter((x) => x != null).length + (f.docNo ? 1 : 0) + (f.docDate ? 1 : 0);
+  return Math.min(95, (f.total != null ? 40 : 0) + (f.confidence === 'medium' ? 10 : 0) + 5 * found);
+}

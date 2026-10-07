@@ -30,6 +30,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const [url, setUrl] = useState('');
   const [prog, setProg] = useState<{ msg: string; pct?: number } | null>(null);
   const [facts, setFacts] = useState<DocFacts | null>(null);
+  const [method, setMethod] = useState('');
   const [readErr, setReadErr] = useState('');
   const [kind, setKind] = useState<DocKind>(kind0);
   const [target, setTarget] = useState<DocTarget>(defaultTarget(kind0));
@@ -46,9 +47,10 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     if (url) URL.revokeObjectURL(url);
   }, [url]);
 
-  const pick = async (f: File) => {
+  const pick = async (f: File, forceOcr = false) => {
     abort.current?.abort();
     setFacts(null);
+    setMethod('');
     setReadErr('');
     setSaving('');
     if (f.size > DOC_MAX_BYTES) {
@@ -67,11 +69,12 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     abort.current = ctl;
     setProg({ msg: 'กำลังเปิดไฟล์…' });
     try {
-      const [{ readDocText }, { analyzeDocText }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]);
-      const t = await readDocText(f, { signal: ctl.signal, onProgress: (msg, pct) => setProg({ msg, pct }) });
+      const [{ readDocText }, { analyzeDocText, factsScore }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]);
+      const t = await readDocText(f, { signal: ctl.signal, forceOcr, onProgress: (msg, pct) => setProg({ msg, pct }), judge: (x) => factsScore(analyzeDocText(x)) });
       if (ctl.signal.aborted) return;
       const fx = analyzeDocText(t.text);
       setFacts(fx);
+      setMethod(t.method);
       if (fx.kind) {
         setKind(fx.kind);
         setTarget(defaultTarget(fx.kind));
@@ -169,6 +172,9 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
                 </span>
               )}
             </div>
+          )}
+          {method === 'pdf-text' && facts && (facts.total == null || facts.confidence !== 'high') && (
+            <button onClick={() => pick(file, true)} style={{ ...small, alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
           )}
           {partyWarn && <Notice kind="error">ชื่อลูกค้าในเอกสาร "{facts!.party}" ไม่ตรงกับ "{deal.client}" — ตรวจว่าแนบถูกรายการ</Notice>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
