@@ -7,6 +7,7 @@ import { dealMoney, dealStatus, fmtMoney, lastContact, lastStage, type Deal, typ
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { Opts, SrcTags, heroGrad, inputStyle } from './ui';
+import { CoAvatar } from './CoAvatar';
 import { useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
@@ -162,7 +163,10 @@ export function CompanyDrawer() {
               <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
-          <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.35, textWrap: 'pretty' }}>{c.name}</span>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <CoAvatar name={c.name} web={c.web} set={c.set} size={56} ring="rgba(255,255,255,.9)" />
+            <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.35, textWrap: 'pretty', minWidth: 0 }}>{c.name}</span>
+          </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: 12.5, padding: '3px 10px', borderRadius: 999, background: '#fff', color: '#1F5BD8', fontWeight: 500 }}>{`กลุ่ม ${c.tgt + 1} · ${TGT[c.tgt]}`}</span>
             <SrcTags mask={c.src} size="lg" />

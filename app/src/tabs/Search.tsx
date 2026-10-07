@@ -155,19 +155,29 @@ export function Search() {
           </div>
         </div>
         <div className="sx-body">
-          <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h">
-            <span className="sx-chips-h" id="sx-chips-h" title="ทุกบริษัทถูกจัดเข้ากลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า (เรียงจากข้อ 1)">กลุ่มเป้าหมาย</span>
-            {tgtChips.map((c) => (
-              <button key={c.label} className="sx-chip" aria-pressed={c.act} title={c.i == null ? 'ทุกบริษัทที่ตรงกับคำค้นและตัวกรอง' : `กลุ่ม ${c.i + 1}: ${GDESC[c.i]}`} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
-                {c.i == null ? (
-                  <span className="sx-dot sx-dot-all" aria-hidden="true"><Icon name="overview" /></span>
-                ) : (
-                  <span className="sx-dot" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
-                )}
-                <span className="sx-chip-label">{c.i == null ? c.label : c.label.replace(/^\d+\. /, '')}</span>
-                <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
-              </button>
-            ))}
+          <div className="sx-groups">
+            <div className="sx-groups-h">
+              <span id="sx-chips-h">กลุ่มเป้าหมาย</span>
+              <span className="sx-groups-sub">บริษัทหนึ่งอยู่ได้กลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า · ชี้ที่การ์ดเพื่อดูเงื่อนไข</span>
+            </div>
+            <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h">
+              {tgtChips.map((c) => {
+                const total = tgtChips[0].n;
+                const share = c.i == null ? (total ? 100 : 0) : total ? (c.n / total) * 100 : 0;
+                return (
+                  <button key={c.label} className="sx-chip" aria-pressed={c.act} title={c.i == null ? 'ทุกบริษัทที่ตรงกับคำค้นและตัวกรอง' : `กลุ่ม ${c.i + 1}: ${GDESC[c.i]}`} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
+                    {c.i == null ? (
+                      <span className="sx-dot sx-dot-all" aria-hidden="true"><Icon name="overview" /></span>
+                    ) : (
+                      <span className="sx-dot" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
+                    )}
+                    <span className="sx-chip-label">{c.i == null ? c.label : c.label.replace(/^\d+\. /, '')}</span>
+                    <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
+                    <span className="sx-bar" aria-hidden="true"><i style={{ width: `${share}%`, background: c.i == null ? undefined : GCOL[c.i][2] }} /></span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="sx-filters">
             <div className="sx-fhead">
