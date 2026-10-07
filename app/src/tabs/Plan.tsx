@@ -187,7 +187,7 @@ export function Plan() {
             const ot = plannedBy[c.id];
             const p = !!pk[c.id];
             return (
-              <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '26px minmax(0,2fr) minmax(0,1fr) 150px 150px', gap: 12, alignItems: 'center', padding: '9px 0', borderTop: '1px solid #EEF1F8' }}>
+              <div key={c.id} className="plan-row">
                 <button
                   onClick={() => {
                     const q = { ...pk };

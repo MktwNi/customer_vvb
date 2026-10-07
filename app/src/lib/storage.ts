@@ -117,6 +117,8 @@ export const PREF = {
   monitor: 'gcc-monitor',
   sync: 'gcc-tgo-sync',
   team: 'gcc-team-sync',
+  /** 'mini' when the sidebar is collapsed to icons. */
+  nav: 'gcc-nav',
   /** Web-app link of the last connected team sheet (its unsent changes move to the next link). */
   teamLast: 'gcc-team-last',
 } as const;
