@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ทดสอบอ่านเอกสาร (dev)</title>
+<style>
+  body { font: 14px/1.5 system-ui, Kanit, Loma, sans-serif; margin: 16px; color: #1d2733; }
+  pre { white-space: pre-wrap; background: #f4f6f8; border-radius: 6px; padding: 10px; font-size: 12px; }
+  #progress { min-height: 1.5em; color: #2b6cb0; }
+</style>
+</head>
+<body data-state="idle">
+<!-- Dev-only page (not part of the production build): served by `npx vite` at /dev/doc-harness.html,
+     driven by dev/run-doc-harness.cjs. -->
+<h1>ทดสอบอ่านยอดเงินจากเอกสาร</h1>
+<p>
+  <input type="file" id="file" accept=".pdf,image/*">
+  <label><input type="checkbox" id="force"> บังคับ OCR</label>
+</p>
+<div id="progress"></div>
+<pre id="result"></pre>
+<pre id="text"></pre>
+<script type="module" src="./doc-harness.ts"></script>
+</body>
+</html>
