@@ -15,21 +15,28 @@ const EMPTY = { name: '', jur: '', prov: '', ind: '', biz: '', addr: '', phone: 
  */
 export function AddCustomer() {
   const { engine: e, ui, set } = useApp();
-  useEngineVersion();
+  const ver = useEngineVersion();
   const a = ui.addCust!;
   const edit = a.edit != null ? e.custom[a.edit] : undefined;
   const [f, setF] = useState({ ...EMPTY, ...(edit || {}), name: edit?.name ?? a.name ?? '' });
+  // the values the dialog opened with: saving an edit writes only what was changed here, so a
+  // teammate's change to another field while it was open is kept
+  const [init] = useState(f);
   const [section, setSection] = useState(a.section ?? e.sales.cfg.sections[0] ?? '');
   const [err, setErr] = useState('');
   const [similar, setSimilar] = useState<Company[]>([]);
   const D = e.B.D;
   const provs = useMemo(() => D.prov.filter(Boolean).slice().sort((x, y) => x.localeCompare(y, 'th')), [D]);
   const close = () => set({ addCust: null });
+  // teammates' latest first: a customer one of them added a moment ago is then suggested below
+  useEffect(() => {
+    if (!edit) void e.teamSyncNow();
+  }, [e, edit]);
   useEffect(() => {
     if (edit) return;
     const t = setTimeout(() => setSimilar(e.similarCompanies(f.name, f.jur)), 300);
     return () => clearTimeout(t);
-  }, [f.name, f.jur, e, edit]);
+  }, [f.name, f.jur, e, edit, ver]);
   const up = (k: keyof typeof EMPTY) => (ev: { target: { value: string } }) => setF({ ...f, [k]: ev.target.value });
 
   /** Use an existing company instead of adding a new one. */
@@ -48,7 +55,7 @@ export function AddCustomer() {
       return;
     }
     if (edit) {
-      e.updateCustomer(edit.id, f);
+      e.updateCustomer(edit.id, Object.fromEntries(Object.entries(f).filter(([k, v]) => v !== init[k as keyof typeof init])));
       close();
       return;
     }
@@ -134,6 +141,8 @@ export function AddCustomer() {
 export function SendToTracker() {
   const { engine: e, ui, set } = useApp();
   useEngineVersion();
+  // teammates' latest first: a company one of them sent a moment ago shows as already in the table
+  useEffect(() => void e.teamSyncNow(), [e]);
   const ids = ui.sendIds || [];
   const cos = ids.map((id) => e.company(id)).filter(Boolean) as Company[];
   const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, LOG_TYPES, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, money, telHref, todayISO, ymTh } from '../lib/format';
-import type { Cert, Company, Detail, StageKey } from '../lib/types';
+import type { Cert, Company, ContactForm, Detail, StageKey } from '../lib/types';
 import { dealMoney, dealStatus, fmtMoney, lastContact, lastStage, type Deal, type SalesState } from '../lib/sales';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
@@ -23,7 +23,8 @@ export function CompanyDrawer() {
   const c = ui.sel != null ? e.company(ui.sel) : undefined;
   const [det, setDet] = useState<{ id: number; d: Detail } | null>(null);
   const [more, setMore] = useState<Record<string, boolean>>({});
-  const [editC, setEditC] = useState(false);
+  // the contact form's values when it was opened: saving writes only what was changed in it
+  const [editC, setEditC] = useState<ContactForm | null>(null);
   const ref = useRef<HTMLElement>(null);
   // takes the keyboard (also when opened over the deal panel), gives focus back on close
   useDialog(ref, { focus: 'dialog', on: !!c });
@@ -32,7 +33,7 @@ export function CompanyDrawer() {
 
   useEffect(() => {
     setMore({});
-    setEditC(false);
+    setEditC(null);
   }, [cid]);
   useEffect(() => {
     if (!c) return;
@@ -138,8 +139,8 @@ export function CompanyDrawer() {
     ev.preventDefault();
     const fd = new FormData(ev.currentTarget);
     const g = (k: string) => String(fd.get(k) || '').trim();
-    e.saveContact(c, { phone: g('phone'), email: g('email'), web: g('web'), note: g('note') });
-    setEditC(false);
+    e.saveContact(c, { phone: g('phone'), email: g('email'), web: g('web'), note: g('note') }, editC || undefined);
+    setEditC(null);
   };
   const addLog = (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -231,7 +232,7 @@ export function CompanyDrawer() {
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                   <span style={kicker}>ข้อมูลติดต่อ</span>
-                  <button onClick={() => setEditC(!editC)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>
+                  <button onClick={() => setEditC(editC ? null : { phone: c.phone || '', email: c.email || '', web: c.web || '', note: (ce && ce.note) || '' })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>
                 </div>
                 {!ph.length && !em.length && !c.web && !dc && <span style={{ fontSize: 14, color: '#475069' }}>ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span>}
                 {ph.map((t) => <a key={t} href={telHref(t)} style={{ fontSize: 16, fontWeight: 500, textDecoration: 'none' }}>{t}</a>)}
@@ -248,10 +249,10 @@ export function CompanyDrawer() {
                 {ctSrc && <span style={{ fontSize: 12, color: '#475069' }}>{ctSrc}</span>}
                 {editC && (
                   <form onSubmit={saveContact} style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#F6F8FE', borderRadius: 12, padding: 14 }}>
-                    <label style={field}>เบอร์โทร (คั่นหลายเบอร์ด้วย |)<input name="phone" defaultValue={c.phone || ''} style={inputStyle} /></label>
-                    <label style={field}>อีเมล<input name="email" defaultValue={c.email || ''} style={inputStyle} /></label>
-                    <label style={field}>เว็บไซต์<input name="web" defaultValue={c.web || ''} style={inputStyle} /></label>
-                    <label style={field}>ผู้ติดต่อ / หมายเหตุ<input name="note" defaultValue={(ce && ce.note) || ''} style={inputStyle} /></label>
+                    <label style={field}>เบอร์โทร (คั่นหลายเบอร์ด้วย |)<input name="phone" defaultValue={editC.phone} style={inputStyle} /></label>
+                    <label style={field}>อีเมล<input name="email" defaultValue={editC.email} style={inputStyle} /></label>
+                    <label style={field}>เว็บไซต์<input name="web" defaultValue={editC.web} style={inputStyle} /></label>
+                    <label style={field}>ผู้ติดต่อ / หมายเหตุ<input name="note" defaultValue={editC.note} style={inputStyle} /></label>
                     <button type="submit" style={{ cursor: 'pointer', alignSelf: 'flex-start', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>บันทึก</button>
                   </form>
                 )}

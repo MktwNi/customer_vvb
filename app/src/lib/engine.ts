@@ -4,8 +4,8 @@
  * storage.ts. React subscribes via `subscribe` / `getVersion` (useSyncExternalStore).
  */
 import type {
-  Built, Cert, Company, ContactEdit, Crm, CustomCo, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
-  SetSnap, StageKey, SyncCfg, Task, TaskType,
+  Built, Cert, Company, ContactEdit, ContactForm, Crm, CustomCo, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
+  SetSnap, StageKey, SyncCfg, Task, TaskForm, TaskType,
 } from './types';
 import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
@@ -13,7 +13,7 @@ import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, 
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeListEdits, applyListEdit, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import {
@@ -664,11 +664,13 @@ export class GccEngine {
   stage(id: number): StageKey {
     return this.crm.stages[id] || 'none';
   }
-  setStage(id: number, v: StageKey) {
+  /** `auto`: set by a logged call on a company with no stage — only if the team has no stage for it
+   *  either (a teammate who moved it on meanwhile keeps theirs). */
+  setStage(id: number, v: StageKey, auto = false) {
     const C = this.crm;
     if ((C.stages[id] || 'none') === v) return;
     C.stages[id] = v;
-    this.op(keyOf.stage(id), v);
+    this.op(keyOf.stage(id), v, { nx: auto });
     this.logAct(id, { type: 'stage', text: 'เปลี่ยนสถานะการขายเป็น "' + (STG.find((x) => x[0] === v) || STG[0])[1] + '"' });
     this.saveCrm();
   }
@@ -694,7 +696,7 @@ export class GccEngine {
   addLog(id: number, type: string, result: string, text: string) {
     if (!text && !result) return;
     this.logAct(id, { type, result, text });
-    if (type !== 'note' && this.stage(id) === 'none') this.setStage(id, result === 'ไม่สนใจ' ? 'lost' : 'contacted');
+    if (type !== 'note' && this.stage(id) === 'none') this.setStage(id, result === 'ไม่สนใจ' ? 'lost' : 'contacted', true);
     else this.saveCrm();
   }
   delLog(id: number, l: LogEntry) {
@@ -716,10 +718,17 @@ export class GccEngine {
     this.op(keyOf.team(name));
     this.saveCrm();
   }
-  saveContact(c: Company, v: { phone: string; email: string; web: string; note: string }) {
-    const e = { ...v, note: cap(v.note), at: new Date().toISOString() };
+  /** Save the contact form. Only the fields changed in it are written — over the values the form
+   *  opened with (`init`), so a teammate's change to another field meanwhile is kept. */
+  saveContact(c: Company, v: ContactForm, init?: ContactForm) {
+    const x = this.contacts[c.id];
+    const cur: ContactForm = x ? { phone: x.phone, email: x.email, web: x.web, note: x.note } : { phone: c.phone || '', email: c.email || '', web: c.web || '', note: '' };
+    const nv: ContactForm = { ...v, note: cap(v.note) };
+    const f = (['phone', 'email', 'web', 'note'] as const).filter((k) => nv[k] !== cur[k] && (!init || nv[k] !== init[k]));
+    if (!f.length) return;
+    const e: ContactEdit = { ...cur, ...Object.fromEntries(f.map((k) => [k, nv[k]])), at: new Date().toISOString() };
     this.contacts[c.id] = e;
-    this.op(keyOf.contact(c.id), { ...e });
+    this.op(keyOf.contact(c.id), { ...e }, { f: [...f, 'at'] });
     this.persist('contacts', this.contacts);
     this.patchContact(c, e);
     this.emit();
@@ -735,12 +744,16 @@ export class GccEngine {
   tasksOf(id: number) {
     return this.crm.tasks.filter((t) => this.canonical(t.gid) === id);
   }
-  updateTask(taskId: string, p: Pick<Task, 'type' | 'date' | 'time' | 'note'>) {
+  /** Save the appointment form: only the fields changed in it (over the values it opened with,
+   *  `init`), so a teammate's tick or reschedule meanwhile is kept. */
+  updateTask(taskId: string, p: TaskForm, init?: TaskForm) {
     const t = this.crm.tasks.find((x) => x.id === taskId);
-    if (t) {
-      Object.assign(t, p, { note: cap(p.note) });
-      this.op(keyOf.task(t.id), { ...t });
-    }
+    if (!t) return;
+    const nv: TaskForm = { ...p, note: cap(p.note) };
+    const f = (['type', 'date', 'time', 'note'] as const).filter((k) => nv[k] !== t[k] && (!init || nv[k] !== init[k]));
+    if (!f.length) return;
+    f.forEach((k) => Object.assign(t, { [k]: nv[k] }));
+    this.op(keyOf.task(t.id), { ...t }, { f: [...f] });
     this.saveCrm();
   }
   /** Create one task per company; with `perDay` > 0 spread them across working days. */
@@ -776,7 +789,7 @@ export class GccEngine {
   }
   toggleTask(t: Task) {
     t.done = !t.done;
-    this.op(keyOf.task(t.id), { ...t });
+    this.op(keyOf.task(t.id), { ...t }, { f: ['done'] });
     if (t.done) this.logAct(this.canonical(t.gid), { type: t.type, text: 'ทำนัดเสร็จ' + (t.note ? ': ' + t.note : '') });
     this.saveCrm();
   }
@@ -998,9 +1011,9 @@ export class GccEngine {
   private lastLog: DealLog | null = null;
   /** Save a deal and queue it; `f` = the fields this edit changes (merged field by field with a
    *  teammate's concurrent edit, see rebaseOp); without it the whole record is this browser's. */
-  private putDeal(d: Deal, f?: (keyof Deal)[]) {
+  private putDeal(d: Deal, f?: (keyof Deal)[], fl?: Record<string, ListEdit>) {
     this.sales.deals[d.id] = d;
-    this.op(keyOf.deal(d.id), { ...d }, { f });
+    this.op(keyOf.deal(d.id), { ...d }, { f, fl });
   }
   /** Deals linked to a company (any of its merged ids). A company from the TGO website sync exists
    *  on this device only, so its deals are not linked by id: they are found by name. */
@@ -1080,7 +1093,14 @@ export class GccEngine {
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
     const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
     if (!changed.length) return;
-    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])]);
+    // SOURCE / Services: the items ticked and unticked, so a teammate ticking another item keeps theirs
+    const fl: Record<string, ListEdit> = {};
+    (['source', 'service'] as const).forEach((k) => {
+      if (!changed.includes(k)) return;
+      const a = d[k] || [], b = n[k] || [];
+      fl[k] = { add: b.filter((x) => !a.includes(x)), rm: a.filter((x) => !b.includes(x)) };
+    });
+    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
     const TH: Partial<Record<keyof Deal, string>> = {
       client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
       jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
@@ -1107,7 +1127,9 @@ export class GccEngine {
       this.op(keyOf.dstep(id, stage), undefined, { base });
     } else {
       this.sales.steps[k] = { d: date, n };
-      this.op(keyOf.dstep(id, stage), { d: date, n }, { base });
+      // by hand: only what changed, so a teammate's note (or date) written meanwhile is kept
+      const f = auto ? undefined : (['d', 'n'] as const).filter((x) => (x === 'd' ? date : n) !== cur[x]);
+      this.op(keyOf.dstep(id, stage), { d: date, n }, { base, f });
     }
     if (!quiet) this.salesLog(d, 'อัปเดต ' + stage, n.trim().slice(0, 120) || isoTh(date));
     this.saveSales();
@@ -1588,25 +1610,37 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; base?: SyncOp['base'] } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     const o = this.mkOp(k, v);
     const prev = this.pending.get(k);
+    // Fields and list edits merge here only with a change not stored yet (this batch, or a failed
+    // write). A stored one may be another tab's, loaded by a sync round; queueOps merges with the
+    // stored queue, taking that tab's values too — merging here as well would apply a list edit twice.
+    const mp = prev && ((this.opBatch && this.opBatch.includes(prev)) || this.unsaved.get(k) === prev) ? prev : undefined;
     if (v !== undefined) {
       const nxPrev = !!prev?.nx && !prev.sent;
-      if (this.importNew) o.nx = true; // created by an import: only fills a gap
+      // created by an import, or a stage set automatically by a logged call: only fills a gap
+      if (this.importNew || opt.nx) o.nx = true;
       else if (nxPrev && opt.f) {
         // a person's edit of an import row not shared yet: if the team has that row, their record wins
         // except for the fields edited here (rebaseOp), so the edit isn't lost
         o.nx = true;
         o.f = [...new Set([...(prev!.f || []), ...opt.f])];
+        const fl = mergeFieldLists(prev, opt.f, opt.fl);
+        if (fl) o.fl = fl;
       }
       if (!o.nx) {
-        const fl = mergeFields(prev, opt.f);
-        if (fl) o.f = fl;
+        const f = mergeFields(mp, opt.f);
+        if (f) {
+          o.f = f;
+          const fl = mergeFieldLists(mp, opt.f!, opt.fl);
+          if (fl) o.fl = fl;
+          o.seen = Math.min(cfg.seq, mp?.seen ?? cfg.seq);
+        }
       }
-      const le = opt.lst && mergeListEdits(prev, opt.lst);
+      const le = opt.lst && mergeListEdits(mp, opt.lst);
       if (le) o.lst = le;
     }
     // conditional only while every queued write to this record is a document's own (setStep auto)
@@ -1667,22 +1701,36 @@ export class GccEngine {
         }
         if (o.f && !p.f && !p.del && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object' && !p.nx) {
           // that tab wrote the whole record (e.g. created it offline): keep it, with this tab's fields on top
-          const mine = o.v as Record<string, unknown>;
-          o.v = { ...(p.v as Record<string, unknown>), ...Object.fromEntries(o.f.filter((x) => x in mine).map((x) => [x, mine[x]])) };
+          o.v = withFields(p.v as Record<string, unknown>, o);
           delete o.f;
+          delete o.fl;
+          delete o.seen;
           return;
         }
-        if (o.f && o.nx && p.nx) o.f = [...new Set([...(p.f || []), ...o.f])]; // an edit of an import row not shared yet (see op)
-        else if (o.f) {
-          const fl = mergeFields(p, o.f);
-          if (fl && p.f && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object') {
-            // keep that tab's values for the fields it changed and this tab didn't
+        if (o.f && o.nx && p.nx) {
+          // an edit of an import row not shared yet (see op)
+          const fl = mergeFieldLists(p, o.f, o.fl);
+          o.f = [...new Set([...(p.f || []), ...o.f])];
+          if (fl) o.fl = fl;
+          else delete o.fl;
+        } else if (o.f) {
+          const f = mergeFields(p, o.f);
+          if (f && p.f && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object') {
+            // keep that tab's values for the fields it changed and this tab didn't; a list both edited
+            // item by item is that tab's list with this tab's items added and removed
             const pv = p.v as Record<string, unknown>, v = { ...(o.v as Record<string, unknown>) };
             p.f.filter((x) => !o.f!.includes(x)).forEach((x) => (x in pv ? (v[x] = pv[x]) : delete v[x]));
+            Object.entries(o.fl || {}).forEach(([x, e]) => p.f!.includes(x) && Array.isArray(pv[x]) && (v[x] = applyListEdit((pv[x] as unknown[]).map(String), e)));
             o.v = v;
           }
-          if (fl) o.f = fl;
+          const fl = f && mergeFieldLists(p, o.f, o.fl);
+          if (f) o.f = f;
           else delete o.f;
+          if (fl) o.fl = fl;
+          else delete o.fl;
+          // that tab's values came from its copy, which may be older than this tab's
+          if (f && p.seen != null && o.seen != null) o.seen = Math.min(o.seen, p.seen);
+          if (!f) delete o.seen;
         }
         if (o.lst) {
           if (Array.isArray(p.v)) o.v = applyListEdit((p.v as unknown[]).map(String), o.lst); // that tab's list + ours
@@ -1835,6 +1883,21 @@ export class GccEngine {
     }
   }
 
+  /** This tab's copy of a record edited field by field (see syncRound); a stage step not there is empty. */
+  private localRecord(k: string): Record<string, unknown> | undefined {
+    const i = k.indexOf('/'), type = k.slice(0, i), rest = k.slice(i + 1);
+    const S = this.sales;
+    const r: object | undefined =
+      type === 'deal' ? S.deals[rest]
+      : type === 'ddoc' ? S.docs[rest]
+      : type === 'dstep' ? S.steps[rest] || { d: '', n: '' }
+      : type === 'cust' ? this.custom[rest as unknown as number]
+      : type === 'contact' ? this.contacts[rest as unknown as number]
+      : type === 'task' ? this.crm.tasks.find((t) => t.id === rest)
+      : undefined;
+    return r && { ...(r as Record<string, unknown>) };
+  }
+
   /** Wait for a round in flight, then run a full one (e.g. to send what is queued before leaving). */
   async teamSyncNow() {
     for (let i = 0; i < 3 && this.teamBusy; i++) await this.teamRunning;
@@ -1861,14 +1924,14 @@ export class GccEngine {
     }
     if (!live()) return;
     // A push whose reply was lost (tab closed, timeout) may still have reached the sheet. An op sent
-    // when the sheet was at seq S is settled once the sheet has a later row for its record: it was
-    // either delivered, or someone changed the record after it was sent (the later change wins).
+    // when the sheet was at seq S is settled once the sheet has its own row after S: it was delivered
+    // (a teammate's row after that is newer and wins). A teammate's row alone does not settle it — the
+    // push may have failed (a deletion, or an edit made while the previous push was in flight), and it
+    // is kept and merged with theirs (rebaseOp) rather than lost.
     const lastSeq = new Map(rows.map((r) => [r.k, r.seq]));
-    // A field or list change is merged with a teammate's (rebaseOp), so a later row for the record only
-    // settles it if it is this change's own row — else it is kept and merged, not lost.
     const own = (o: SyncOp) =>
       rows.some((r) => r.k === o.k && r.seq > o.sent! && r.by === String(o.by || '').slice(0, 100) && (o.del ? r.del : !r.del && JSON.stringify(r.v) === JSON.stringify(o.v)));
-    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent && (!(o.f || o.lst) || own(o));
+    const settled = (o: SyncOp) => o.sent != null && (lastSeq.get(o.k) ?? -1) > o.sent && own(o);
     if ([...this.pending.values()].some(settled)) {
       this.pending.forEach((o, k) => settled(o) && this.pending.delete(k));
       this.unsaved.forEach((o, k) => settled(o) && this.unsaved.delete(k));
@@ -1943,9 +2006,18 @@ export class GccEngine {
       if (!res) return;
       if ('drop' in res) dropped.push(o);
       else {
-        revised.set(k, { ...o, v: res.v });
+        revised.set(k, { ...o, v: res.v, ...(o.seen != null && { seen: since }) });
         merged.push({ ...r, v: res.v, del: false });
       }
+    });
+    // A field change queued by another tab of this browser was made on that tab's copy, which may be
+    // older than this tab's: what this tab pulled since (not pulled again now) goes under its fields.
+    this.pending.forEach((o, k) => {
+      if (lastRow.has(k) || !o.f || o.nx || o.del || o.base !== undefined || o.seen == null || o.seen >= cfg.seq || dropped.includes(o)) return;
+      const cur = this.localRecord(k);
+      if (!cur) return;
+      const v = withFields(cur, o);
+      revised.set(k, { ...o, v, seen: since });
     });
     if (dropped.length || revised.size) {
       dropped.forEach((o) => (this.pending.delete(o.k), this.unsaved.delete(o.k)));

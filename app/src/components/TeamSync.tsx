@@ -162,7 +162,7 @@ export function TeamSyncCard() {
             </button>
           </div>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
-            ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก และบอก รหัสชีตของทีม ด้านบนให้เพื่อนตรวจว่าลิงก์ถูกต้อง · ถ้าสองคนแก้รายการเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง
+            ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก และบอก รหัสชีตของทีม ด้านบนให้เพื่อนตรวจว่าลิงก์ถูกต้อง · ถ้าสองคนแก้คนละช่องของรายการเดียวกัน (เช่น คนหนึ่งแก้เบอร์ อีกคนแก้อีเมล) จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง — รวมถึงค่าที่แก้ตอนออฟไลน์ ซึ่งจะส่งเมื่อกลับมาออนไลน์
           </span>
         </div>
       )}
@@ -178,12 +178,16 @@ export function TeamChip({ onClick }: { onClick: () => void }) {
   if (!e.teamCfg) return null;
   const t = e.team;
   const [label, dot] = TEAM_ST[t.status];
-  const text = label + (t.status === 'ok' && t.last ? ' ' + hhmm(t.last) : '');
+  const n = e.teamPendingN;
+  const bad = t.status === 'error' || t.status === 'offline';
+  const text = label + (t.status === 'ok' && t.last ? ' ' + hhmm(t.last) : '') + (bad && n ? ` · ${fmtN(n)} รายการยังไม่ถึงทีม` : '');
   return (
     <button className="tb-btn" onClick={onClick} title={t.msg || 'ข้อมูลทีม: ' + text} aria-label={'ข้อมูลทีม: ' + text}>
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flex: 'none' }} />
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flex: 'none', boxShadow: bad ? `0 0 0 3px ${dot}40` : undefined }} />
       <span className="tb-muted">ทีม</span>
       <span className="tb-hide-sm">{text}</span>
+      {/* on a phone the label above is hidden: say it when edits are not reaching the team */}
+      {bad && <span className="tb-show-sm" style={{ fontWeight: 600 }}>{t.status === 'error' ? 'ซิงก์ไม่ได้' : 'ออฟไลน์'}</span>}
     </button>
   );
 }

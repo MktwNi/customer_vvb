@@ -22,6 +22,12 @@ export interface SyncOp {
   base?: { d: string; n: string } | null;
   /** Create only (an import): dropped if the team already has any row for the record. */
   nx?: boolean;
+  /** Items added and removed in list fields named in `f` (a deal's SOURCE / Services): applied to the
+   *  teammate's list, so two people ticking different items both keep theirs. */
+  fl?: Record<string, ListEdit>;
+  /** How far the tab that made the change had pulled (its cursor): another tab of the browser that
+   *  sends it may have pulled further, and puts those newer rows under the change's fields. */
+  seen?: number;
 }
 /** What a queued list change (scfg/…) does: items added and removed (a rename is both). */
 export interface ListEdit { add: string[]; rm: string[] }
@@ -350,7 +356,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust)\//;
+const MERGED = /^(deal|ddoc|cust|contact|task|dstep)\//;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.
@@ -364,8 +370,7 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
   // except fields a person edited here before it was shared (o.f), put on top of the team's record
   if (o.nx) {
     if (!o.f || row.del || !row.v || typeof row.v !== 'object' || !o.v || typeof o.v !== 'object') return { drop: true };
-    const mine = o.v as Record<string, unknown>;
-    return { v: { ...(row.v as Record<string, unknown>), ...Object.fromEntries(o.f.filter((x) => x in mine).map((x) => [x, mine[x]])) } };
+    return { v: withFields(row.v as Record<string, unknown>, o) };
   }
   // a stage note written for a document: only over what this browser saw there (`base`); a
   // teammate who wrote in that stage since keeps their note
@@ -378,12 +383,43 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
   // the item's place)
   if (o.k.startsWith('scfg/') && o.lst && Array.isArray(row.v)) return { v: applyListEdit(row.v.map(String), o.lst) };
   if (!MERGED.test(o.k) || o.del || !o.f || !o.v || typeof o.v !== 'object') return null;
-  if (row.del || row.v == null) return { drop: true };
+  if (row.del || row.v == null) {
+    // a stage step a teammate cleared: what was written here since is new, kept on the empty step
+    if (o.k.startsWith('dstep/')) return { v: withFields({ d: '', n: '' }, o) };
+    return { drop: true };
+  }
   if (typeof row.v !== 'object') return null;
+  return { v: withFields(row.v as Record<string, unknown>, o) };
+}
+
+/** A teammate's record with the fields a queued change names (`f`) put on top; a list field edited
+ *  item by item (`fl`) gets those additions and removals applied to the teammate's list instead. */
+export function withFields(theirs: Record<string, unknown>, o: SyncOp): Record<string, unknown> {
   const mine = o.v as Record<string, unknown>;
-  const v: Record<string, unknown> = { ...(row.v as Record<string, unknown>) };
-  o.f.forEach((f) => (f in mine ? (v[f] = mine[f]) : delete v[f]));
-  return { v };
+  const v: Record<string, unknown> = { ...theirs };
+  (o.f || []).forEach((f) => {
+    const e = o.fl?.[f];
+    if (e && Array.isArray(theirs[f])) v[f] = applyListEdit((theirs[f] as unknown[]).map(String), e);
+    else if (f in mine) v[f] = mine[f];
+    else delete v[f];
+  });
+  // a stage note always has a date: a note written here on a step a teammate cleared keeps ours
+  if (o.k.startsWith('dstep/') && v.n && !v.d) v.d = mine.d;
+  return v;
+}
+
+/** List-field edits of a queued change with fields `f` that replaces `prev` (both name their fields):
+ *  a field both edited item by item gets the two edits as one; a field either wrote whole is whole. */
+export function mergeFieldLists(prev: SyncOp | undefined, f: string[], fl: Record<string, ListEdit> | undefined): Record<string, ListEdit> | undefined {
+  const out: Record<string, ListEdit> = {};
+  const pf = prev && !prev.del && prev.f ? prev.f : [];
+  new Set([...pf, ...f]).forEach((x) => {
+    const a = pf.includes(x) ? prev!.fl?.[x] : undefined, b = f.includes(x) ? fl?.[x] : undefined;
+    if (pf.includes(x) && f.includes(x)) {
+      if (a && b) out[x] = mergeListEdits({ k: '', lst: a }, b)!;
+    } else if (a || b) out[x] = (a || b)!;
+  });
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Fields of a queued change that replaces `prev` (same record, not sent yet): both sets, or the

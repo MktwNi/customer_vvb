@@ -1,8 +1,8 @@
-import { useRef, type CSSProperties, type FormEvent } from 'react';
+import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp } from '../state';
 import { TT } from '../lib/constants';
 import { addDays, fmtN, nextWork, todayISO } from '../lib/format';
-import type { TaskType } from '../lib/types';
+import type { TaskForm, TaskType } from '../lib/types';
 import { Opts } from './ui';
 import { useDialog } from './useDialog';
 
@@ -10,12 +10,20 @@ const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4,
 const ctl: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14 };
 
 export function ScheduleModal() {
+  const { ui } = useApp();
+  const o = ui.sched;
+  return o ? <ScheduleForm key={o.taskId || o.ids.join(',')} /> : null;
+}
+
+function ScheduleForm() {
   const { engine: e, ui, set } = useApp();
   const ref = useRef<HTMLFormElement>(null);
   useDialog(ref); // takes keyboard focus, keeps Tab inside, gives it back on close
-  const o = ui.sched;
-  if (!o) return null;
+  const o = ui.sched!;
   const t = o.taskId ? e.crm.tasks.find((x) => x.id === o.taskId) : undefined;
+  // the appointment as the form opened: saving writes only what was changed here, so a teammate's
+  // tick or note meanwhile is kept
+  const [init] = useState<TaskForm | undefined>(() => t && { type: t.type, date: t.date, time: t.time, note: t.note });
   const c = o.ids.length === 1 ? e.company(o.ids[0]) : undefined;
   const isMulti = !t && o.ids.length > 1;
   const cancel = () => set({ sched: null });
@@ -24,8 +32,9 @@ export function ScheduleModal() {
     const fd = new FormData(ev.currentTarget);
     const g = (k: string) => String(fd.get(k) || '').trim();
     const p = { type: (g('type') || 'call') as TaskType, date: g('date') || todayISO(), time: g('time'), note: g('note') };
-    if (t) e.updateTask(t.id, p);
-    else e.addTasks(o.ids, p, +(g('spread') || 0));
+    if (o.taskId) {
+      if (t) e.updateTask(t.id, p, init); // gone: a teammate deleted it meanwhile, and that stands
+    } else e.addTasks(o.ids, p, +(g('spread') || 0));
     set({ sched: null, picked: {} });
   };
 
@@ -37,11 +46,11 @@ export function ScheduleModal() {
         <span style={{ fontSize: 13, color: '#475069' }}>{c ? c.name : o.ids.length > 1 ? 'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
         <label style={field}>
           ประเภท
-          <select name="type" defaultValue={t ? t.type : 'call'} style={ctl}><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
+          <select name="type" defaultValue={init ? init.type : 'call'} style={ctl}><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
         </label>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <label style={field}>วันที่<input name="date" type="date" defaultValue={t ? t.date : nextWork(addDays(todayISO(), 1))} style={ctl} /></label>
-          <label style={field}>เวลา<input name="time" type="time" defaultValue={t ? t.time : ''} style={ctl} /></label>
+          <label style={field}>วันที่<input name="date" type="date" defaultValue={init ? init.date : nextWork(addDays(todayISO(), 1))} style={ctl} /></label>
+          <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} style={ctl} /></label>
         </div>
         {isMulti && (
           <label style={field}>
@@ -54,7 +63,7 @@ export function ScheduleModal() {
             </select>
           </label>
         )}
-        <label style={field}>หมายเหตุ<input name="note" defaultValue={t ? t.note : ''} style={ctl} /></label>
+        <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} style={ctl} /></label>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" onClick={cancel} style={{ cursor: 'pointer', height: 40, padding: '0 14px', border: 0, background: 'transparent', color: '#475069', fontSize: 14 }}>ยกเลิก</button>
           <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 18px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 14 }}>บันทึกนัด</button>

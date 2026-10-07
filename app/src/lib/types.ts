@@ -34,6 +34,8 @@ export interface RawCompany {
 }
 
 export interface ContactEdit { phone: string; email: string; web: string; note: string; at: string }
+export type ContactForm = Omit<ContactEdit, 'at'>;
+export type TaskForm = Pick<Task, 'type' | 'date' | 'time' | 'note'>;
 
 /** A customer added by hand (not in the registry files); shared with the team like other records. */
 export interface CustomCo {

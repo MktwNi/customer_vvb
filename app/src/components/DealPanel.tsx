@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
@@ -63,14 +63,58 @@ export function StepEditor({ dealId, stage, onClose }: { dealId: string; stage: 
   );
 }
 
-/** Text field that saves when it loses focus (so typing doesn't write a change per keystroke). */
+/**
+ * A box that saves when it loses focus (so typing doesn't write a change per keystroke). Not focused,
+ * it shows the saved value, a teammate's change included. While it has focus a teammate's change
+ * doesn't replace what is being typed; on leaving, if the saved value changed since the box got focus,
+ * the person is asked before theirs goes over it (as StepEditor does).
+ */
+function useEditBox<T extends HTMLInputElement | HTMLTextAreaElement>(value: string, commit: (typed: string, el: T) => void) {
+  const ref = useRef<T>(null);
+  const atFocus = useRef<string | null>(null); // the saved value when the box got focus
+  useEffect(() => {
+    const el = ref.current;
+    if (el && atFocus.current === null && el.value !== value) el.value = value;
+  }, [value]);
+  return {
+    ref,
+    defaultValue: value,
+    onFocus: () => {
+      atFocus.current = value;
+    },
+    onBlur: (ev: FocusEvent<T>) => {
+      const was = atFocus.current ?? value, el = ev.currentTarget, typed = el.value;
+      atFocus.current = null;
+      if (typed === value) return;
+      if (typed === was || (value !== was && !window.confirm(`มีคนแก้ช่องนี้ระหว่างที่พิมพ์อยู่:\n"${value || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`))) {
+        el.value = value; // untouched here, or theirs kept: show the saved value
+        return;
+      }
+      commit(typed, el);
+    },
+  };
+}
+
 function Field({ label, value, onSave, type = 'text', list, placeholder }: { label: string; value: string; onSave: (v: string) => void; type?: string; list?: string; placeholder?: string }) {
+  const box = useEditBox<HTMLInputElement>(value, (v) => onSave(v));
   return (
     <label style={labelCol}>
       {label}
-      <input key={value} type={type} defaultValue={value} list={list} placeholder={placeholder} onBlur={(ev) => ev.target.value !== value && onSave(ev.target.value)} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={inputStyle} />
+      <input {...box} type={type} list={list} placeholder={placeholder} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={inputStyle} />
     </label>
   );
+}
+
+/** A stage's note in the deal panel. */
+function StepNote({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
+  const box = useEditBox<HTMLTextAreaElement>(value, (v) => onSave(v));
+  return <textarea {...box} aria-label={label} rows={value.split('\n').length > 2 ? 4 : 2} maxLength={NOTE_MAX} placeholder="โน้ต…" style={{ ...inputStyle, height: 'auto', padding: '7px 10px', resize: 'vertical', lineHeight: 1.55, fontSize: 13 }} />;
+}
+
+/** The customer's name in the panel's header. */
+function ClientName({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const box = useEditBox<HTMLInputElement>(value, (v, el) => (v.trim() ? onSave(v) : (el.value = value)));
+  return <input {...box} aria-label="ชื่อลูกค้า" onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={{ fontSize: 22, fontWeight: 500, background: 'transparent', border: 0, borderBottom: '1px dashed rgba(255,255,255,.35)', color: '#fff', padding: '2px 0', fontFamily: 'inherit' }} />;
 }
 
 /** The last amount a MoneyField refused (closing the panel right after must say so). */
@@ -80,31 +124,30 @@ let refused: { msg: string; at: number } | null = null;
 function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: string; value: number | null; onSave: (v: number | null) => void; placeholder?: string; readOnly?: boolean }) {
   const [err, setErr] = useState('');
   const shown = value == null ? '' : fmtMoney(value);
+  const box = useEditBox<HTMLInputElement>(shown, (typed, el) => {
+    if (readOnly) return;
+    const v = parseAmount(typed);
+    if (v === undefined) {
+      const msg = `อ่าน "${typed}" เป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 120,000 หรือ 1.5 ล้าน`;
+      setErr(msg);
+      el.value = shown;
+      // also when the panel is being closed (Escape / ×): the message would vanish with it
+      if (isClosingBlur()) window.alert(msg + ' (ยอดเดิมยังอยู่)');
+      else refused = { msg, at: Date.now() }; // the panel may be closing by mouse (× / outside)
+      return;
+    }
+    setErr('');
+    onSave(v);
+  });
   return (
     <label style={labelCol}>
       {label}
       <input
-        key={shown}
-        defaultValue={shown}
+        {...box}
         readOnly={readOnly}
         inputMode="decimal"
         placeholder={placeholder}
         aria-invalid={!!err}
-        onBlur={(ev) => {
-          if (readOnly || ev.target.value === shown) return;
-          const v = parseAmount(ev.target.value);
-          if (v === undefined) {
-            const msg = `อ่าน "${ev.target.value}" เป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 120,000 หรือ 1.5 ล้าน`;
-            setErr(msg);
-            ev.target.value = shown;
-            // also when the panel is being closed (Escape / ×): the message would vanish with it
-            if (isClosingBlur()) window.alert(msg + ' (ยอดเดิมยังอยู่)');
-            else refused = { msg, at: Date.now() }; // the panel may be closing by mouse (× / outside)
-            return;
-          }
-          setErr('');
-          onSave(v);
-        }}
         onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()}
         style={{ ...inputStyle, ...(readOnly ? { background: '#F6F8FE', color: '#475069' } : {}) }}
       />
@@ -273,7 +316,7 @@ export function DealPanel() {
               <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
-          <input key={d.client} defaultValue={d.client} aria-label="ชื่อลูกค้า" onBlur={(ev) => ev.target.value.trim() && ev.target.value !== d.client && up({ client: ev.target.value })} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={{ fontSize: 22, fontWeight: 500, background: 'transparent', border: 0, borderBottom: '1px dashed rgba(255,255,255,.35)', color: '#fff', padding: '2px 0', fontFamily: 'inherit' }} />
+          <ClientName value={d.client} onSave={(v) => up({ client: v })} />
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#fff' }}>
             <span>สถานะ <b style={{ fontWeight: 500, color: '#fff' }}>{st.overall}</b></span>
             <span>Forecast <b style={{ fontWeight: 500, color: '#fff' }}>{m.forecast != null ? fmtMoney(m.forecast) : '—'}</b>{m.fcConfirmed ? ' ✓' : ''}</span>
@@ -381,7 +424,7 @@ export function DealPanel() {
                         <button onClick={() => e.setStep(d.id, p, { d: x.d, n: 'NO' })} style={{ ...small, height: 28, borderColor: '#8A2B12', color: '#8A2B12' }}>✕ NO</button>
                       </span>
                     )}
-                    <textarea key={x.n} defaultValue={x.n} aria-label={p + ' โน้ต'} rows={x.n.split('\n').length > 2 ? 4 : 2} maxLength={NOTE_MAX} placeholder="โน้ต…" onBlur={(ev) => ev.target.value !== x.n && e.setStep(d.id, p, { d: x.d, n: ev.target.value })} style={{ ...inputStyle, height: 'auto', padding: '7px 10px', resize: 'vertical', lineHeight: 1.55, fontSize: 13 }} />
+                    <StepNote label={p + ' โน้ต'} value={x.n} onSave={(n) => e.setStep(d.id, p, { d: stepOf(e.sales, d.id, p).d, n })} />
                   </div>
                 </div>
               );

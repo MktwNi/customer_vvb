@@ -38,6 +38,7 @@ const MAX_PULL = 3000;
 const MAX_OPS = 1000;
 const MAX_CELL = 45000; // Google Sheets limit is 50,000 characters per cell
 const COMPACT_MIN_ROWS = 5000;
+const SEQ_CACHE_S = 600; // seconds the last seq stays in the script cache (see curSeq_)
 const DOC_FOLDER_NAME = 'GCC Sales Tracker — เอกสาร';
 const MAX_FILE = 10 * 1024 * 1024; // bytes after decoding (base64 adds a third on the wire)
 const DOC_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
@@ -90,7 +91,7 @@ function doPost(e) {
       case 'ping':
         // only creating / repairing the sheet needs the lock; a ready sheet is just read
         if (!sheetReady_()) withLock_(() => sheet_());
-        return json_({ ok: true, seq: seq_(), files: true });
+        return json_({ ok: true, seq: curSeq_(), files: true });
       case 'pull':
         return json_(pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL)));
       case 'push':
@@ -159,6 +160,21 @@ function seq_() {
   return Number(PropertiesService.getScriptProperties().getProperty('SEQ') || 0);
 }
 
+/**
+ * The last seq, for the check every poll makes ("anything new?"). Read from the script cache so idle
+ * polls use none of the daily Properties quota; push_ writes it there, under the lock, before the rows.
+ * When the cache has lost it, it is read back from Properties under the lock (no push can be halfway).
+ */
+function curSeq_() {
+  const v = CacheService.getScriptCache().get('SEQ');
+  if (v != null && v !== '') return Number(v);
+  return withLock_(() => {
+    const s = seq_();
+    CacheService.getScriptCache().put('SEQ', String(s), SEQ_CACHE_S);
+    return s;
+  });
+}
+
 function rowOut_(r) {
   let v = null;
   try {
@@ -171,13 +187,13 @@ function rowOut_(r) {
 
 /** Rows with seq > since, oldest first (rows are stored in ascending seq order). */
 function pull_(since, limit) {
-  const cur = seq_();
+  const cur = curSeq_();
   if (since >= cur) return { ok: true, seq: cur, rows: [], more: false };
   // read under the lock so a concurrent append/compaction can't shift rows mid-read
   return withLock_(() => {
     const sh = sheet_();
     const last = sh.getLastRow();
-    const now = seq_();
+    const now = curSeq_();
     if (last < 2) return { ok: true, seq: now, rows: [], more: false };
     const seqs = sh.getRange(2, 1, last - 1, 1).getValues();
     // linear scan: tolerant of stray blank rows (Number('') would break a binary search)
@@ -218,12 +234,19 @@ function push_(ops) {
       const start = sh.getLastRow() + 1;
       const need = start + rows.length - 1 - sh.getMaxRows();
       if (need > 0) sh.insertRowsAfter(sh.getMaxRows(), need); // getRange does not grow the sheet
+      // the new last seq is saved before the rows: if writing them fails, those numbers are just
+      // skipped, never handed out again (a reader that saw the rows would miss the next ones)
+      CacheService.getScriptCache().put('SEQ', String(seq), SEQ_CACHE_S);
+      props.setProperty('SEQ', String(seq));
       const rng = sh.getRange(start, 1, rows.length, HEADER.length);
       // plain text so Sheets never reinterprets keys/JSON (e.g. as dates or numbers)
       rng.setNumberFormat('@');
       rng.setValues(rows);
-      props.setProperty('SEQ', String(seq));
-      compact_(sh, props);
+      try {
+        compact_(sh, props);
+      } catch (err) {
+        // only tidying: the rows are saved, so the push succeeded (the next push tries again)
+      }
     }
     return { ok: true, seq: seq, n: rows.length, rejected: rejected };
   });
@@ -243,10 +266,13 @@ function compact_(sh, props) {
   const keep = vals.filter((r, i) => r[1] !== '' && latest[r[1]] === i);
   props.setProperty('COMPACT_AT', String(Math.max(COMPACT_MIN_ROWS, 3 * keep.length)));
   if (keep.length > vals.length / 3) return; // not worth rewriting yet
-  sh.getRange(2, 1, last - 1, HEADER.length).clearContent();
-  const rng = sh.getRange(2, 1, keep.length, HEADER.length);
+  // one write over the old rows (kept rows, then blanks): if Sheets fails partway nothing is lost —
+  // a separate clear followed by a failed write would leave the team's sheet empty
+  const out = keep.map((r) => r.map(String));
+  while (out.length < vals.length) out.push(['', '', '', '', '', '']);
+  const rng = sh.getRange(2, 1, vals.length, HEADER.length);
   rng.setNumberFormat('@');
-  rng.setValues(keep.map((r) => r.map(String)));
+  rng.setValues(out);
 }
 
 // ------------------------------------------------------------------ attached documents (Google Drive)

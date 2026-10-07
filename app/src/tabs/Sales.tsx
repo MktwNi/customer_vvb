@@ -384,6 +384,10 @@ function TableView({ e, S, deals, all, facets, today }: { e: Engine; S: SalesSta
   const bySec = new Map<string, Deal[]>(secs.map((s) => [s, []]));
   deals.forEach((d) => bySec.get(d.section)!.push(d));
   const team = e.crm.team;
+  // one company twice in the year (two people sent it at the same moment): marked, to delete one
+  const perCo = new Map<number, number>();
+  facets.forEach((d) => d.gid != null && perCo.set(e.canonical(d.gid), (perCo.get(e.canonical(d.gid)) || 0) + 1));
+  const dup = (d: Deal) => d.gid != null && (perCo.get(e.canonical(d.gid)) || 0) > 1;
   // sections with rows are shown as groups; empty ones only as quick "add here" buttons
   const visible = secs.filter((s) => bySec.get(s)!.length);
   const empty = S.cfg.sections.filter((s) => !bySec.get(s)?.length);
@@ -453,7 +457,7 @@ function TableView({ e, S, deals, all, facets, today }: { e: Engine; S: SalesSta
                   <SectionRows key={sec || '-'} sec={sec} list={list} collapsed={col} cols={S.cfg.stages.length + 7}
                     onToggle={() => { const c = { ...ui.slCollapsed }; if (col) delete c[sec]; else c[sec] = 1; set({ slCollapsed: c }); }}
                     onAdd={() => addIn(sec)}>
-                    {list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} onStep={(stage) => setStep({ id: d.id, stage })} />)}
+                    {list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} dup={dup(d)} onStep={(stage) => setStep({ id: d.id, stage })} />)}
                   </SectionRows>
                 );
               })}
@@ -545,7 +549,7 @@ function MoneyCell({ e, d, which, value, confirmed }: { e: Engine; d: Deal; whic
   );
 }
 
-function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState; d: Deal; n: number; today: string; team: string[]; onStep: (stage: string) => void }) {
+function DealRow({ e, S, d, n, today, team, dup, onStep }: { e: Engine; S: SalesState; d: Deal; n: number; today: string; team: string[]; dup: boolean; onStep: (stage: string) => void }) {
   const { set } = useApp();
   const od = overdueDays(S, d, today);
   const lc = lastContact(S, d, today);
@@ -564,6 +568,7 @@ function DealRow({ e, S, d, n, today, team, onStep }: { e: Engine; S: SalesState
             <span style={{ fontSize: 12, color: '#475069', lineHeight: 1.4 }}>
               {[d.contactName, d.phone].filter(Boolean).join(' · ') || <span style={{ color: '#8A93AD' }}>ยังไม่มีผู้ติดต่อ</span>}
               {c && <span style={{ marginLeft: 6, fontSize: 10.5, padding: '0 6px', borderRadius: 999, background: c.src & 16 ? '#FFF4DC' : '#EEF1F8', color: c.src & 16 ? '#6B4100' : '#384155' }}>{c.code}</span>}
+              {dup && <span title={`บริษัทนี้มีในตารางปี ${d.year} มากกว่า 1 แถว — เปิดแถวที่ซ้ำแล้วลบออก`} style={{ marginLeft: 6, fontSize: 10.5, padding: '0 6px', borderRadius: 999, background: '#FDE9E2', color: '#8A2B12' }}>ซ้ำ</span>}
             </span>
             <Chips d={d} />
           </div>
