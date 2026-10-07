@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { Icon, type IconName } from './icons';
+import mark from '../assets/gcc-mark.png';
 
 export interface NavItem { key: Tab; label: string; icon: IconName }
 
@@ -97,16 +98,21 @@ export function Sidebar({ open, onToggle, onClose }: { open: boolean; onToggle: 
       <div className={'side-backdrop' + (open ? ' open' : '')} onClick={onClose} />
       <aside id="side-nav" className={'side' + (open ? ' open' : '')} aria-label="เมนูหลัก">
         <div className="side-brand">
-          <button id="rail-btn" className="rail-btn" onClick={onToggle} aria-label={open ? 'ย่อเมนู' : 'ขยายเมนู'} title={open ? 'ย่อเมนู' : 'ขยายเมนู'} aria-expanded={open} aria-controls="side-nav">
-            <Icon name={open ? 'collapse' : 'menu'} />
-          </button>
-          <span className="side-logo lbl">GCC</span>
+          <img className="side-mark" src={mark} alt="Global Carbon Corporation" width={36} height={36} />
           <span className="side-brand-text lbl">
-            <b>ฐานข้อมูลลูกค้า GCC</b>
-            <small>CRM ทีมขาย</small>
+            <b className="brand-word">Global Carbon</b>
+            <small>ฐานข้อมูลลูกค้า GCC</small>
           </span>
           <button ref={closeRef} className="side-close" onClick={onClose} aria-label="ปิดเมนู">
             <Icon name="close" />
+          </button>
+        </div>
+        <div className="side-toggle">
+          <button id="rail-btn" className="side-item" onClick={onToggle} aria-label={open ? 'ย่อเมนู' : 'ขยายเมนู'} title={open ? undefined : 'ขยายเมนู'} aria-expanded={open} aria-controls="side-nav">
+            <span className="side-ico">
+              <Icon name={open ? 'collapse' : 'menu'} />
+            </span>
+            <span className="side-label lbl">ย่อเมนู</span>
           </button>
         </div>
         <nav className="side-nav">
