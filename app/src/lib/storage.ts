@@ -121,4 +121,6 @@ export const PREF = {
   teamLast: 'gcc-team-last',
   /** 'rail' when the menu was folded to icons on a wide screen (default: docked open). */
   nav: 'gcc-nav',
+  /** 'open' / 'closed': the filter grid on the search page. */
+  searchFilters: 'gcc-search-filters',
 } as const;

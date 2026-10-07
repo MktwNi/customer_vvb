@@ -52,6 +52,8 @@ const PATHS = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  filter: <path d="M4 5h16l-6 7.5V19l-4 2v-8.5z" />,
+  download: <path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" />,
   user: (
     <>
       <circle cx="12" cy="8" r="4" />

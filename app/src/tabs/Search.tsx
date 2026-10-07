@@ -1,10 +1,12 @@
-import { useDeferredValue, useMemo, type CSSProperties } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
 import { CONFIG, CST, FEEDS, GCOL, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
 import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
 import type { Cert, Company } from '../lib/types';
-import { Opts, Pager, SrcTags, card, tabular } from '../components/ui';
+import { Opts, Pager, SrcTags, card, heroGrad, tabular } from '../components/ui';
+import { Icon } from '../components/icons';
+import { PREF, prefs } from '../lib/storage';
 
 const empty = (text: string, boxed?: boolean) => (
   <div style={boxed ? { padding: 32, textAlign: 'center', color: '#475069', background: '#fff', borderRadius: 18 } : { padding: 40, textAlign: 'center', color: '#475069' }}>{text}</div>
@@ -14,6 +16,15 @@ export function Search() {
   const { engine: e, ui, set, setF, open } = useApp();
   const v = useEngineVersion();
   const narrow = useNarrow();
+  // the filter grid can be folded away (remembered); phones start folded
+  const [filtersOpen, setFiltersOpen] = useState(() => {
+    const p = prefs.getRaw(PREF.searchFilters);
+    return p ? p === 'open' : !narrow;
+  });
+  const toggleFilters = () => {
+    prefs.set(PREF.searchFilters, filtersOpen ? 'closed' : 'open');
+    setFiltersOpen(!filtersOpen);
+  };
   const s = ui.f;
   // Typing only defers the query; memo on the other filter fields (not the `s` object, which
   // changes identity on every keystroke) so the urgent render reuses the previous result.
@@ -69,6 +80,7 @@ export function Search() {
   if (s.cFy) activeChips.push({ label: 'ปีที่ยื่น ' + s.cFy, p: { cFy: '' } });
   if (s.cProv) activeChips.push({ label: 'จังหวัด (TGO): ' + s.cProv, p: { cProv: '' } });
   const hasFilter = Object.keys(CLEAR_FILTERS).some((k) => s[k as keyof Filters] !== '');
+  const nSel = selects.filter(([, k]) => s[k] !== '').length;
   const sortOpts = s.view === 'cert'
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
@@ -88,63 +100,109 @@ export function Search() {
     set({ page: p });
     scrollTop();
   };
-  const sel: CSSProperties = { height: 42, borderRadius: 12, padding: '0 10px', fontSize: 14, color: '#0E1430' };
 
   const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 120px 140px 72px minmax(0,1.2fr)';
   const ctCols = '32px 160px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 120px';
 
   return (
     <>
-      <section style={{ ...card, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', background: '#E6ECFD', borderRadius: 999, padding: 4, gap: 2 }}>
-            {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
-              <button key={k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })} style={{ cursor: 'pointer', border: 0, height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14, background: s.view === k ? '#1F5BD8' : 'transparent', color: s.view === k ? '#fff' : '#1745B8' }}>{label}</button>
-            ))}
+      <section className="sx" style={card}>
+        <div className="sx-band hero" style={{ background: heroGrad }}>
+          <div className="sx-head">
+            <div className="sx-title">
+              <h2>ค้นหาลูกค้า</h2>
+              <span>{`ในทะเบียน ${fmtN(e.B.companies.length)} บริษัท · ${fmtN(e.B.certs.length)} ใบรับรอง CFO`}</span>
+            </div>
+            <div className="sx-toggle" role="group" aria-label="ค้นหาจาก">
+              {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
+                <button key={k} aria-pressed={s.view === k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })}>{label}</button>
+              ))}
+            </div>
           </div>
-          <input id="search-q" value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ค้นหาชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" style={{ flex: 1, minWidth: 260, height: 48, border: '1.5px solid #D5DBEA', borderRadius: 14, padding: '0 16px', fontSize: 15, color: '#0E1430', background: '#fff', outline: 'none' }} />
-          <button onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)} style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 14 }}>ส่งออก CSV</button>
-          <button onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน" style={{ cursor: 'pointer', height: 48, padding: '0 18px', borderRadius: 14, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 14 }}>+ เพิ่มลูกค้าใหม่</button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {tgtChips.map((c) => (
-            <button key={c.label} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })} style={{ cursor: 'pointer', height: 34, padding: '0 12px', borderRadius: 999, border: `1.5px solid ${c.act ? '#1F5BD8' : '#D5DBEA'}`, background: c.act ? '#1F5BD8' : '#fff', color: c.act ? '#fff' : '#0E1430', fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span>{c.label}</span>
-              <span style={{ opacity: 0.75, ...tabular }}>{fmtN(c.n)}</span>
+          <div className="sx-row">
+            <div className="sx-input">
+              <Icon name="search" />
+              <input id="search-q" value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" />
+              {s.q && (
+                <button className="sx-clear" onClick={() => { setF({ q: '' }); document.getElementById('search-q')?.focus(); }} aria-label="ล้างคำค้น">
+                  <Icon name="close" />
+                </button>
+              )}
+            </div>
+            <button className="sx-btn sx-ghost" onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)}>
+              <Icon name="download" />
+              ส่งออก CSV
             </button>
-          ))}
+            <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
+              <Icon name="plus" />
+              เพิ่มลูกค้าใหม่
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '10px 12px' }}>
-          {selects.map(([label, k, options]) => {
-            const val = s[k] as string;
-            const on = val !== '';
-            return (
-              <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
-                {label}
-                <select value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)} style={{ ...sel, border: `1.5px solid ${on ? '#1F5BD8' : '#D5DBEA'}`, background: on ? '#EEF2FF' : '#fff' }}>
-                  <Opts options={options} all="ทั้งหมด" />
-                </select>
-              </label>
-            );
-          })}
-        </div>
-        {activeChips.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {activeChips.map((c) => (
-              <button key={c.label} onClick={() => setF(c.p)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 12.5 }}>{c.label} ×</button>
+        <div className="sx-body">
+          <div className="sx-chips" role="group" aria-label="กลุ่มเป้าหมาย">
+            {tgtChips.map((c) => (
+              <button key={c.label} className="sx-chip" aria-pressed={c.act} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
+                {c.i == null ? (
+                  <span className="sx-dot sx-dot-all" aria-hidden="true"><Icon name="overview" /></span>
+                ) : (
+                  <span className="sx-dot" aria-hidden="true" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
+                )}
+                <span className="sx-chip-label">{c.i == null ? c.label : c.label.replace(/^\d+\. /, '')}</span>
+                <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
+              </button>
             ))}
           </div>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 15 }}>
-            <span style={{ fontWeight: 600, fontSize: 20 }}>{fmtN(F.out.length)}</span> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}{' '}
-            <span style={{ color: '#475069', fontSize: 13.5 }}>{s.view === 'cert' ? '· ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `· มีเบอร์โทร ${fmtN(F.ph)}`}</span>
-          </span>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {hasFilter && <button onClick={() => setF(CLEAR_FILTERS)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline' }}>ล้างตัวกรอง</button>}
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#475069' }}>
+          <div className="sx-filters">
+            <div className="sx-fhead">
+              <button className="sx-ftoggle" aria-expanded={filtersOpen} aria-controls="sx-grid" onClick={() => toggleFilters()}>
+                <Icon name="filter" />
+                ตัวกรอง
+                {nSel > 0 && <span className="sx-fcount">{fmtN(nSel)}</span>}
+                <span className="sx-chev" aria-hidden="true">▾</span>
+              </button>
+              {!filtersOpen && nSel > 0 && (
+                <div className="sx-tags">
+                  {selects.filter(([, k]) => s[k] !== '').map(([label, k, options]) => (
+                    <button key={k} className="sx-tag" onClick={() => setF({ [k]: '' } as Partial<Filters>)} aria-label={`เอาตัวกรอง ${label} ออก`}>
+                      {label}: {(options.find((o) => o.v === s[k]) || { label: String(s[k]) }).label.replace(/ \([\d,]+\)$/, '')} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+              {hasFilter && <button className="sx-reset" onClick={() => setF(CLEAR_FILTERS)}>ล้างตัวกรองทั้งหมด</button>}
+            </div>
+            {filtersOpen && (
+              <div className="sx-grid" id="sx-grid">
+                {selects.map(([label, k, options]) => {
+                  const val = s[k] as string;
+                  return (
+                    <label key={k} className="sx-field">
+                      {label}
+                      <select className={'sx-sel' + (val !== '' ? ' on' : '')} value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)}>
+                        <Opts options={options} all="ทั้งหมด" />
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {activeChips.length > 0 && (
+            <div className="sx-tags">
+              {activeChips.map((c) => (
+                <button key={c.label} className="sx-tag" onClick={() => setF(c.p)}>{c.label} ×</button>
+              ))}
+            </div>
+          )}
+          <div className="sx-foot">
+            <span className="sx-total" role="status">
+              <b>{fmtN(F.out.length)}</b> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}
+              <span className="sx-sub">{s.view === 'cert' ? 'ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `มีเบอร์โทร ${fmtN(F.ph)}`}</span>
+            </span>
+            <label className="sx-sort">
               เรียงตาม
-              <select value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })} style={{ height: 38, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 13.5, background: '#fff', color: '#0E1430' }}>
+              <select className="sx-sel" value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })}>
                 <Opts options={sortOpts.map(([v, label]) => ({ v, label }))} />
               </select>
             </label>
