@@ -5,9 +5,10 @@ import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
 
-export type Tab = 'overview' | 'sales' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes';
+export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
-export interface SchedReq { ids: number[]; taskId?: string }
+/** `pid`: made from a person's page (the appointment is with them). */
+export interface SchedReq { ids: number[]; taskId?: string; pid?: string }
 
 export interface UIState {
   tab: Tab;
@@ -32,9 +33,15 @@ export interface UIState {
   sendIds: number[] | null;
   /** One-line result shown at the top of the Sales Tracker (e.g. after sending companies to it). */
   slNote: string;
+  /** People (ผู้ติดต่อ): the person whose page is open, list search / view / page. */
+  person: string | null; pQ: string; pView: 'all' | 'mine' | 'left'; pPage: number;
+  /** "Add a person" dialog (at this company when `gid` is set). */
+  addPerson: { gid?: number } | null;
+  /** The record being worked on: open, or opened last (marked in its list so you keep your place). */
+  last: { deal?: string; person?: string };
 }
 
-const TAB_KEYS: Tab[] = ['overview', 'sales', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes'];
+const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes'];
 
 const initial = (): UIState => {
   const s = prefs.get<{ tab?: unknown; view?: unknown } | null>(PREF.ui, {}) || {};
@@ -48,6 +55,7 @@ const initial = (): UIState => {
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, deal: null, addCust: null, sendIds: null, slNote: '',
+    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {},
   };
 };
 
@@ -74,7 +82,17 @@ export function scrollTop() {
 
 export function AppProvider({ engine, children }: { engine: GccEngine; children: ReactNode }) {
   const [ui, setUi] = useState(initial);
-  const set = useCallback<Ctx['set']>((p) => setUi((s) => ({ ...s, ...(typeof p === 'function' ? p(s) : p) })), []);
+  const set = useCallback<Ctx['set']>(
+    (p) =>
+      setUi((s) => {
+        const n = { ...s, ...(typeof p === 'function' ? p(s) : p) };
+        // opening a deal or a person makes it the one marked in its list
+        if (n.deal && n.deal !== s.deal) n.last = { ...n.last, deal: n.deal };
+        if (n.person && n.person !== s.person) n.last = { ...n.last, person: n.person };
+        return n;
+      }),
+    [],
+  );
   useEffect(() => prefs.set(PREF.ui, { tab: ui.tab, view: ui.f.view }), [ui.tab, ui.f.view]);
   const value = useMemo<Ctx>(() => ({
     engine, ui, set,

@@ -18,6 +18,7 @@ import { Notes } from './tabs/Notes';
 import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
+import { AddPerson, People } from './tabs/People';
 import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
@@ -92,7 +93,7 @@ export default function App() {
     const kd = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       const s = uiRef.current;
-      const p = s.sched ? { sched: null } : s.addCust ? { addCust: null } : s.sendIds ? { sendIds: null } : s.sel != null ? { sel: null } : s.deal ? { deal: null } : null;
+      const p = s.sched ? { sched: null } : s.addCust ? { addCust: null } : s.addPerson ? { addPerson: null } : s.sendIds ? { sendIds: null } : s.sel != null ? { sel: null } : s.deal ? { deal: null } : null;
       if (!p) return;
       commitFocus();
       set(p);
@@ -120,6 +121,7 @@ export default function App() {
               <ErrorBoundary resetKey={ui.tab}>
                 {ready && ui.tab === 'overview' && <Overview />}
                 {ready && ui.tab === 'sales' && <Sales />}
+                {ready && ui.tab === 'people' && <People />}
                 {ready && ui.tab === 'search' && <Search />}
                 {ready && ui.tab === 'track' && <Track />}
                 {ready && ui.tab === 'plan' && <Plan />}
@@ -145,6 +147,11 @@ export default function App() {
       {ready && ui.addCust && (
         <ErrorBoundary resetKey="addCust">
           <AddCustomer />
+        </ErrorBoundary>
+      )}
+      {ready && ui.addPerson && (
+        <ErrorBoundary resetKey="addPerson">
+          <AddPerson />
         </ErrorBoundary>
       )}
       {ready && ui.sendIds && (

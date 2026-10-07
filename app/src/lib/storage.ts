@@ -123,4 +123,6 @@ export const PREF = {
   nav: 'gcc-nav',
   /** 'open' / 'closed': the filter grid on the search page. */
   searchFilters: 'gcc-search-filters',
+  /** Contact persons from the Sales Tracker not to suggest again on this browser (ids). */
+  peopleHide: 'gcc-people-hide',
 } as const;

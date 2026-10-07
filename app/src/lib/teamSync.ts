@@ -7,7 +7,8 @@
  * tombstone {k, del:true}. The server keeps an append-only log ordered by `seq` — the last op
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
-import type { ContactEdit, Crm, CustomCo, LogEntry, StageKey, Task } from './types';
+import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
+import { toPerson } from './people';
 import { toCust, toDeal, toDoc, toLog, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
@@ -153,6 +154,7 @@ export const keyOf = {
   dlog: (id: string) => `dlog/${id}`,
   scfg: (name: keyof SalesCfg) => `scfg/${name}`,
   cust: (id: number) => `cust/${id}`,
+  person: (id: string) => `person/${id}`,
   /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
   dundo: (id: string) => `dundo/${id}`,
 };
@@ -192,7 +194,7 @@ export function uniqueTaskIds(tasks: Task[]) {
   return renamed;
 }
 
-export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo> }
+export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person> }
 
 /** Every shared record currently held locally, keyed like the server. */
 export function localRecords(s: SharedState): Map<string, unknown> {
@@ -217,12 +219,13 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
+  Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
-export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean }
-export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false });
+export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean }
+export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false });
 
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
@@ -352,11 +355,24 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       }
       fx.custom = true;
       break;
+    case 'person': {
+      const P = s.people || (s.people = {});
+      if (del) {
+        if (!(rest in P)) return;
+        delete P[rest];
+      } else {
+        const p = toPerson(row.v, rest);
+        if (!p) return;
+        P[rest] = p;
+      }
+      fx.people = true;
+      break;
+    }
   }
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep)\//;
+const MERGED = /^(deal|ddoc|cust|contact|task|dstep|person)\//;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.
