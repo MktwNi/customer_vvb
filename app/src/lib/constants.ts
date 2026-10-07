@@ -43,9 +43,9 @@ export const GDESC = [
 ];
 /** Target-group colours: [badgeBg, badgeFg, bar] */
 export const GCOL: [string, string, string][] = [
-  ['#1A3FE0', '#fff', '#1A3FE0'], ['#2A63FF', '#fff', '#2A63FF'], ['#7C93FF', '#fff', '#7C93FF'],
-  ['#34D1C4', '#0B4E48', '#34D1C4'], ['#0E1F7A', '#fff', '#0E1F7A'], ['#1FB5C9', '#fff', '#1FB5C9'],
-  ['#4E9BFF', '#fff', '#4E9BFF'], ['#B9C8FF', '#0A1A86', '#B9C8FF'], ['#E3E7F1', '#475069', '#C9D1E6'],
+  ['#1A3FE0', '#fff', '#1A3FE0'], ['#2A63FF', '#fff', '#2A63FF'], ['#7C93FF', '#0A1A86', '#7C93FF'],
+  ['#34D1C4', '#0B4E48', '#34D1C4'], ['#0E1F7A', '#fff', '#0E1F7A'], ['#1FB5C9', '#0A1A86', '#1FB5C9'],
+  ['#4E9BFF', '#0A1A86', '#4E9BFF'], ['#B9C8FF', '#0A1A86', '#B9C8FF'], ['#E3E7F1', '#475069', '#C9D1E6'],
 ];
 export const tgtName = (i: number, W: number) =>
   i === 0 ? `CFO ใกล้หมดอายุ (≤ ${W} วัน)` : i === 3 ? `CFO อยู่ในอายุ (> ${W} วัน)` : TGT[i];

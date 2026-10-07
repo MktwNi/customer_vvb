@@ -1,6 +1,6 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
-import { CONFIG, CST, FEEDS, GCOL, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
+import { CONFIG, CST, FEEDS, GCOL, GDESC, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
 import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
 import type { Cert, Company } from '../lib/types';
@@ -16,15 +16,14 @@ export function Search() {
   const { engine: e, ui, set, setF, open } = useApp();
   const v = useEngineVersion();
   const narrow = useNarrow();
-  // the filter grid can be folded away (remembered); phones start folded
-  const [filtersOpen, setFiltersOpen] = useState(() => {
-    const p = prefs.getRaw(PREF.searchFilters);
-    return p ? p === 'open' : !narrow;
-  });
+  // the filter grid starts folded (the chosen filters show as tags) until opened; remembered per browser
+  const [filtersOpen, setFiltersOpen] = useState(() => prefs.getRaw(PREF.searchFilters) === 'open');
   const toggleFilters = () => {
     prefs.set(PREF.searchFilters, filtersOpen ? 'closed' : 'open');
     setFiltersOpen(!filtersOpen);
   };
+  const ftoggleRef = useRef<HTMLButtonElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
   const s = ui.f;
   // Typing only defers the query; memo on the other filter fields (not the `s` object, which
   // changes identity on every keystroke) so the urgent render reuses the previous result.
@@ -81,6 +80,20 @@ export function Search() {
   if (s.cProv) activeChips.push({ label: 'จังหวัด (TGO): ' + s.cProv, p: { cProv: '' } });
   const hasFilter = Object.keys(CLEAR_FILTERS).some((k) => s[k as keyof Filters] !== '');
   const nSel = selects.filter(([, k]) => s[k] !== '').length;
+  // screen readers hear the count once typing / filtering settles, not on every keystroke
+  const [said, setSaid] = useState('');
+  const sayNow = `${fmtN(F.out.length)} ${s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}`;
+  useEffect(() => {
+    const t = setTimeout(() => setSaid(sayNow), 800);
+    return () => clearTimeout(t);
+  }, [sayNow]);
+  // phones scroll the chips sideways: keep the chosen group in view (e.g. when another page set it)
+  useEffect(() => {
+    const r = chipsRef.current, a = r?.querySelector<HTMLElement>('[aria-pressed=true]');
+    if (!r || !a) return;
+    const ar = a.getBoundingClientRect(), rr = r.getBoundingClientRect();
+    if (ar.left < rr.left || ar.right > rr.right) r.scrollLeft += ar.left - rr.left - 6;
+  }, [s.tgt]);
   const sortOpts = s.view === 'cert'
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
@@ -108,18 +121,20 @@ export function Search() {
     <>
       <section className="sx" style={card}>
         <div className="sx-band hero" style={{ background: heroGrad }}>
-          <div className="sx-head">
-            <div className="sx-title">
-              <h2>ค้นหาลูกค้า</h2>
-              <span>{`ในทะเบียน ${fmtN(e.B.companies.length)} บริษัท · ${fmtN(e.B.certs.length)} ใบรับรอง CFO`}</span>
-            </div>
+          <h2 className="sr-only">ค้นหาลูกค้า</h2>
+          <div className="sx-row">
             <div className="sx-toggle" role="group" aria-label="ค้นหาจาก">
               {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
-                <button key={k} aria-pressed={s.view === k} onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default' })}>{label}</button>
+                <button
+                  key={k}
+                  aria-pressed={s.view === k}
+                  // certificates have no "ยังไม่มี CFO" status: don't carry that filter over (it would hide everything)
+                  onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default', ...(k === 'cert' && s.cfo === 'none' ? { cfo: '' } : {}) })}
+                >
+                  {label}
+                </button>
               ))}
             </div>
-          </div>
-          <div className="sx-row">
             <div className="sx-input">
               <Icon name="search" />
               <input id="search-q" value={s.q} onChange={(ev) => setF({ q: ev.target.value })} placeholder="ชื่อบริษัท เลขนิติบุคคล เลขที่ใบรับรอง ชื่อย่อ SET เบอร์โทร หรือรหัส GCC" aria-label="ค้นหา" />
@@ -140,13 +155,14 @@ export function Search() {
           </div>
         </div>
         <div className="sx-body">
-          <div className="sx-chips" role="group" aria-label="กลุ่มเป้าหมาย">
+          <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h">
+            <span className="sx-chips-h" id="sx-chips-h" title="ทุกบริษัทถูกจัดเข้ากลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า (เรียงจากข้อ 1)">กลุ่มเป้าหมาย</span>
             {tgtChips.map((c) => (
-              <button key={c.label} className="sx-chip" aria-pressed={c.act} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
+              <button key={c.label} className="sx-chip" aria-pressed={c.act} title={c.i == null ? 'ทุกบริษัทที่ตรงกับคำค้นและตัวกรอง' : `กลุ่ม ${c.i + 1}: ${GDESC[c.i]}`} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
                 {c.i == null ? (
                   <span className="sx-dot sx-dot-all" aria-hidden="true"><Icon name="overview" /></span>
                 ) : (
-                  <span className="sx-dot" aria-hidden="true" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
+                  <span className="sx-dot" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
                 )}
                 <span className="sx-chip-label">{c.i == null ? c.label : c.label.replace(/^\d+\. /, '')}</span>
                 <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
@@ -155,22 +171,23 @@ export function Search() {
           </div>
           <div className="sx-filters">
             <div className="sx-fhead">
-              <button className="sx-ftoggle" aria-expanded={filtersOpen} aria-controls="sx-grid" onClick={() => toggleFilters()}>
+              <button ref={ftoggleRef} className="sx-ftoggle" aria-expanded={filtersOpen} aria-controls={filtersOpen ? 'sx-grid' : undefined} onClick={() => toggleFilters()}>
                 <Icon name="filter" />
                 ตัวกรอง
                 {nSel > 0 && <span className="sx-fcount">{fmtN(nSel)}</span>}
                 <span className="sx-chev" aria-hidden="true">▾</span>
               </button>
+              {!filtersOpen && nSel === 0 && <span className="sx-fhint">จังหวัด · อุตสาหกรรม · สถานะ CFO · สถานะการขาย · ผู้รับผิดชอบ และอื่นๆ</span>}
               {!filtersOpen && nSel > 0 && (
                 <div className="sx-tags">
                   {selects.filter(([, k]) => s[k] !== '').map(([label, k, options]) => (
-                    <button key={k} className="sx-tag" onClick={() => setF({ [k]: '' } as Partial<Filters>)} aria-label={`เอาตัวกรอง ${label} ออก`}>
+                    <button key={k} className="sx-tag" onClick={() => { setF({ [k]: '' } as Partial<Filters>); ftoggleRef.current?.focus(); }}>
                       {label}: {(options.find((o) => o.v === s[k]) || { label: String(s[k]) }).label.replace(/ \([\d,]+\)$/, '')} ×
                     </button>
                   ))}
                 </div>
               )}
-              {hasFilter && <button className="sx-reset" onClick={() => setF(CLEAR_FILTERS)}>ล้างตัวกรองทั้งหมด</button>}
+              {hasFilter && <button className="sx-reset" onClick={() => { setF(CLEAR_FILTERS); ftoggleRef.current?.focus(); }}>ล้างตัวกรองทั้งหมด</button>}
             </div>
             {filtersOpen && (
               <div className="sx-grid" id="sx-grid">
@@ -195,8 +212,9 @@ export function Search() {
               ))}
             </div>
           )}
+          <span className="sr-only" role="status">{said}</span>
           <div className="sx-foot">
-            <span className="sx-total" role="status">
+            <span className="sx-total">
               <b>{fmtN(F.out.length)}</b> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}
               <span className="sx-sub">{s.view === 'cert' ? 'ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `มีเบอร์โทร ${fmtN(F.ph)}`}</span>
             </span>
