@@ -4,23 +4,28 @@ import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import { KIND_TH, docsOf, fmtMoney, dealMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
-import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personColor, personInitial, phoneKeys, type PersonForm } from '../lib/people';
+import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
 import type { Company, LogEntry, Person, Task } from '../lib/types';
 import { CoAvatar } from '../components/CoAvatar';
-import { Modal } from './Sales';
+import { Modal } from '../components/Dialog';
 import { DoneBox, taskInfo } from './Plan';
-import { Notice, PageHead, Pager, heroGrad, labelCol } from '../components/ui';
+import { Notice, PageHead, Pager, labelCol } from '../components/ui';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 const PER_PAGE = 30;
 const CONTACT = ['call', 'email', 'meet', 'follow'];
 /** Text colour of a type label: the light type colours (cyan, amber, periwinkle) darkened to be readable. */
 const TYPE_INK: Record<string, string> = { email: '#0B6E7A', meet: '#8A5300', follow: '#3949B8' };
+/** A contact-log type: [its word, its readable colour] (the colour is the only cue besides the word). */
+export const logType = (t: string): [string, string] => {
+  const ty = LOG_TYPES[t] || LOG_TYPES.note;
+  return [ty[0], TYPE_INK[t] || ty[1]];
+};
 
-/** A person's picture: the first letter of the name (without คุณ / นาย / Dr …) on their own colour. */
+/** A person's picture: the first letter of the name (without คุณ / นาย / Dr …) on the light tint. */
 export function PersonAvatar({ p, size = 40, ring }: { p: Pick<Person, 'id' | 'name'>; size?: number; ring?: string }) {
   return (
-    <span className="pe-ava" aria-hidden="true" style={{ width: size, height: size, fontSize: Math.round(size * 0.42), background: personColor(p.id), boxShadow: ring ? `0 0 0 ${size >= 64 ? 4 : 2}px ${ring}` : undefined }}>
+    <span className="pe-ava" aria-hidden="true" style={{ width: size, height: size, fontSize: Math.round(size * 0.42), boxShadow: ring ? `0 0 0 ${size >= 64 ? 4 : 2}px ${ring}` : undefined }}>
       {personInitial(p.name)}
     </span>
   );
@@ -119,26 +124,18 @@ function PeopleList() {
       <PageHead
         title="ผู้ติดต่อ"
         sub={all.length ? `${fmtN(active.length)} คน · จาก ${fmtN(cos)} บริษัท · ทั้งทีมเห็นข้อมูลเดียวกัน` : 'บันทึกคนที่คุยด้วยในแต่ละบริษัท พร้อมประวัติการติดต่อ นัด และโน้ต'}
-        right={e.can('edit') ? <button onClick={() => set({ addPerson: {} })} className="btn pri">+ เพิ่มผู้ติดต่อ</button> : undefined}
+        right={e.can('edit') ? <button onClick={() => set({ addPerson: {} })} className="btn pri">เพิ่มผู้ติดต่อ</button> : undefined}
       />
       {sugg.length > 0 && e.can('edit') && (
         <div className="pe-sugg">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 14, color: '#1745B8' }}>
-              พบชื่อผู้ติดต่อใน Sales Tracker ที่ยังไม่ได้บันทึก <b style={{ fontWeight: 600 }}>{fmtN(sugg.length)} คน</b>
-            </span>
-            <span style={{ display: 'flex', gap: 8 }}>
-              {showSugg && (
-                <button
-                  onClick={() => e.addPeople(sugg.map((s) => ({ id: s.id, name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email })))}
-                  className="btn out"
-                  style={{ height: 34 }}
-                >
-                  เพิ่มทั้งหมด
-                </button>
-              )}
-              <button onClick={() => setShowSugg(!showSugg)} aria-expanded={showSugg} className="btn pri" style={{ height: 34 }}>{showSugg ? 'ซ่อนรายการ' : 'ดูและเพิ่ม'}</button>
-            </span>
+          <div className="note">
+            <span>พบชื่อผู้ติดต่อใน Sales Tracker ที่ยังไม่ได้บันทึก {fmtN(sugg.length)} คน</span>
+            <button onClick={() => setShowSugg(!showSugg)} aria-expanded={showSugg} className="lnk" style={{ fontSize: 13 }}>{showSugg ? 'ซ่อนรายการ' : 'ดูและเพิ่ม'}</button>
+            {showSugg && (
+              <button onClick={() => e.addPeople(sugg.map((s) => ({ id: s.id, name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email })))} className="lnk" style={{ fontSize: 13 }}>
+                เพิ่มทั้งหมด
+              </button>
+            )}
           </div>
           {showSugg && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
@@ -146,11 +143,11 @@ function PeopleList() {
                 <div key={s.id} className="pe-sugg-row">
                   <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <b style={{ fontWeight: 500 }}>{s.name}</b>
-                    <span style={{ fontSize: 12.5, color: '#475069' }}>{[s.company, s.phone, s.email].filter(Boolean).join(' · ')} · จาก {s.from}</span>
+                    <span className="t-sec">{[s.company, s.phone, s.email].filter(Boolean).join(' · ')} · จาก {s.from}</span>
                   </span>
-                  <span style={{ display: 'flex', gap: 6, flex: 'none' }}>
-                    <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} className="btn pri" style={{ height: 30, fontSize: 12.5, padding: '0 12px' }} aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
-                    <button onClick={() => e.hideSuggestion(s.id)} className="btn" style={{ height: 30, fontSize: 12.5, padding: '0 12px', color: '#475069' }} aria-label={'ไม่ต้องเพิ่ม ' + s.name}>ไม่ต้อง</button>
+                  <span style={{ display: 'flex', gap: 6, flex: 'none', alignItems: 'center' }}>
+                    <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} className="btn xs" aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
+                    <button onClick={() => e.hideSuggestion(s.id)} className="quiet" aria-label={'ไม่ต้องเพิ่ม ' + s.name}>ไม่ต้อง</button>
                   </span>
                 </div>
               ))}
@@ -160,28 +157,24 @@ function PeopleList() {
       )}
       <section className="pe-list-card">
         <div className="pe-toolbar">
-          <div role="group" aria-label="แสดง" className="pe-views">
+          <div role="group" aria-label="แสดง" className="utabs pe-views">
             {views.map(([k, label, n]) => (
               <button key={k} aria-pressed={ui.pView === k} onClick={() => set({ pView: k, pPage: 0 })}>
-                {label} <span>{fmtN(n)}</span>
+                {label} <span className="n">{fmtN(n)}</span>
               </button>
             ))}
           </div>
-          <input value={ui.pQ} onChange={(ev) => set({ pQ: ev.target.value, pPage: 0 })} placeholder="ค้นหาชื่อ ตำแหน่ง บริษัท เบอร์ อีเมล LINE" aria-label="ค้นหาผู้ติดต่อ" className="pe-q" />
+          <input value={ui.pQ} onChange={(ev) => set({ pQ: ev.target.value, pPage: 0 })} placeholder="ค้นหาชื่อ ตำแหน่ง บริษัท เบอร์ อีเมล LINE" aria-label="ค้นหาผู้ติดต่อ" className="fld pe-q" />
         </div>
         {!all.length ? (
           <div className="pe-empty">
-            <span style={{ fontSize: 16, fontWeight: 500, color: '#0E1430' }}>ยังไม่มีรายชื่อผู้ติดต่อ</span>
-            <span>บันทึกคนที่คุยด้วยในแต่ละบริษัท เพื่อดูประวัติการโทร นัด และโน้ตของแต่ละคน ทั้งทีมเห็นเหมือนกัน</span>
-            <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              {e.can('edit') && <button onClick={() => set({ addPerson: {} })} className="btn pri">+ เพิ่มผู้ติดต่อ</button>}
-              {sugg.length > 0 && e.can('edit') && <button onClick={() => setShowSugg(true)} className="btn out">นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
-            </span>
+            <span>ยังไม่มีรายชื่อผู้ติดต่อ · บันทึกคนที่คุยด้วยในแต่ละบริษัท ทั้งทีมเห็นเหมือนกัน</span>
+            {sugg.length > 0 && e.can('edit') && <button onClick={() => setShowSugg(true)} className="lnk">นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
           </div>
         ) : !list.length ? (
           <div className="pe-empty">
             <span>{q ? `ไม่พบผู้ติดต่อที่ตรงกับ “${ui.pQ}”` : ui.pView === 'mine' ? (me ? `ยังไม่มีผู้ติดต่อที่ ${me} ดูแล` : 'ใส่ชื่อของคุณที่ "ฉันคือ" (แท็บอัปเดตข้อมูล) ก่อน') : 'ไม่มีรายการ'}</span>
-            {q && <button onClick={() => set({ pQ: '' })} className="btn out" style={{ height: 34 }}>ล้างคำค้นหา</button>}
+            {q && <button onClick={() => set({ pQ: '' })} className="lnk">ล้างคำค้นหา</button>}
           </div>
         ) : (
           <>
@@ -192,7 +185,6 @@ function PeopleList() {
               <span>ผู้ดูแล</span>
               <span>นัดถัดไป</span>
               <span>ติดต่อล่าสุด</span>
-              <span />
             </div>
             <ul className="pe-rows">
               {shown.map((p) => {
@@ -204,7 +196,7 @@ function PeopleList() {
                 return (
                   <li key={p.id} className="pe-row" aria-current={cur === p.id ? 'true' : undefined}>
                     <span className="pe-who">
-                      <PersonAvatar p={p} size={40} ring={cur === p.id ? '#fff' : undefined} />
+                      <PersonAvatar p={p} size={34} />
                       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                         <button className="pe-open" onClick={() => openPerson(p.id)}>{p.name}</button>
                         <span className="pe-sub">
@@ -214,23 +206,18 @@ function PeopleList() {
                       </span>
                     </span>
                     <span className="pe-co">
-                      {c ? <CoAvatar name={c.name} web={c.web} set={c.set} size={24} /> : null}
                       <span className="pe-clamp">{c?.name || p.company || '—'}</span>
                     </span>
                     <span className="pe-cell">{ph ? <a href={telHref(p.phone)} className="pe-link">{ph}</a> : <span className="pe-sub">—</span>}</span>
-                    <span className="pe-cell">{p.owner ? <span className="pe-chip">{p.owner}</span> : <span className="pe-sub">—</span>}</span>
+                    <span className="pe-cell">{p.owner || <span className="pe-sub">—</span>}</span>
                     <span className="pe-cell">
                       {nt && ty ? (
-                        <span className="pe-nextappt" title={`${ty[1]} ${isoTh(nt.date)}${nt.time ? ' ' + nt.time : ''}`}>
-                          <span className="pe-dot" style={{ background: ty[2] }} />
-                          <span className="pe-clamp1">{ty[1]} {isoTh(nt.date)}{nt.time ? ' ' + nt.time : ''}</span>
-                        </span>
+                        <span className="pe-clamp1" title={`${ty[1]} ${isoTh(nt.date)}${nt.time ? ' ' + nt.time : ''}`}>{ty[1]} {isoTh(nt.date)}{nt.time ? ' ' + nt.time : ''}</span>
                       ) : (
                         <span className="pe-sub">—</span>
                       )}
                     </span>
-                    <span className="pe-cell pe-sub2">{x?.last ? ago(x.last, today) : 'ยังไม่เคย'}</span>
-                    <span className="pe-chev" aria-hidden="true">›</span>
+                    <span className="pe-cell">{x?.last ? ago(x.last, today) : <span className="pe-sub">ยังไม่เคย</span>}</span>
                   </li>
                 );
               })}
@@ -262,8 +249,8 @@ function PersonPage({ id }: { id: string }) {
   if (!p)
     return (
       <div className="pe-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
-        <span style={{ fontSize: 16 }}>ไม่พบผู้ติดต่อนี้ — อาจมีคนในทีมลบไปแล้ว</span>
-        <button onClick={back} className="btn out">← กลับไปที่รายชื่อ</button>
+        <span className="empty">ไม่พบผู้ติดต่อนี้ อาจมีคนในทีมลบไปแล้ว</span>
+        <button onClick={back} className="lnk">กลับไปที่รายชื่อ</button>
       </div>
     );
   const c = e.personCompany(p);
@@ -277,7 +264,6 @@ function PersonPage({ id }: { id: string }) {
   const doneTasks = tasks.filter((t) => t.done).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
   const deals = c ? e.dealsOf(c.id).sort((a, b) => b.year.localeCompare(a.year)) : [];
   const others = c ? e.peopleOf(c.id).filter((x) => x.id !== p.id) : [];
-  const ph = telHref(p.phone);
   const lineUrl = lineHref(p.line);
   const openDeals = deals.filter((d) => d.jobStatus === 'open').length;
   const startLog = () => {
@@ -291,28 +277,26 @@ function PersonPage({ id }: { id: string }) {
     ['บทบาทในการซื้อ', p.role ? ROLE_TH[p.role] : ''],
     ['โทรศัพท์', phones(p.phone).map((x) => (telHref(x) ? <a key={x} href={telHref(x)} className="pe-link" style={{ display: 'block' }}>{x}</a> : <span key={x} style={{ display: 'block' }}>{x}</span>))],
     ['อีเมล', p.email ? <a href={'mailto:' + p.email} className="pe-link" style={{ wordBreak: 'break-all' }}>{p.email}</a> : ''],
-    ['LINE ID', p.line],
+    ['LINE ID', p.line && lineUrl ? <a href={lineUrl} target="_blank" rel="noopener noreferrer" className="pe-link">{p.line}</a> : p.line],
     ['ผู้ดูแล', p.owner],
-    ['สถานะ', p.status === 'left' ? 'ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว' : 'ยังติดต่อได้'],
-    ['บันทึกโดย', `${p.by || '—'}${p.at ? ' · ' + isoTh(localDay(p.at)) : ''}`],
   ];
+  // said once, as a grey footer line under the facts
+  const foot = [p.status === 'left' ? 'ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว' : 'ยังติดต่อได้', `บันทึกโดย ${p.by || '—'}${p.at ? ' · ' + isoTh(localDay(p.at)) : ''}`].join(' · ');
 
   return (
     <>
       <nav className="pe-crumb" aria-label="ตำแหน่ง">
         <button onClick={back}>ผู้ติดต่อ</button>
-        <span aria-hidden="true">›</span>
+        <span aria-hidden="true">/</span>
         <span aria-current="page">{p.name}</span>
       </nav>
       <div className="pe-grid">
         <div className="pe-col pe-col-l">
         {/* profile */}
         <section className="pe-card pe-prof" aria-label="โปรไฟล์">
-          <div className="pe-band" style={{ background: heroGrad }} />
           <div className="pe-prof-body">
             <span className="pe-prof-ava">
-              <PersonAvatar p={p} size={84} ring="#fff" />
-              {c && <CoAvatar name={c.name} web={c.web} set={c.set} size={28} ring="#fff" style={{ position: 'absolute', right: -4, bottom: -2 }} />}
+              <PersonAvatar p={p} size={72} />
             </span>
             <h2 className="pe-name">{p.name}{p.nick ? <span className="pe-nick"> ({p.nick})</span> : null}</h2>
             <span className="pe-pos">
@@ -324,31 +308,18 @@ function PersonPage({ id }: { id: string }) {
                 </>
               )}
             </span>
-            <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-              {p.role && <span className="pe-chip strong">{ROLE_TH[p.role]}</span>}
-              {p.status === 'left' && <span className="pe-chip warn">ย้ายงานแล้ว</span>}
-              {p.owner && <span className="pe-chip">ดูแลโดย {p.owner}</span>}
-            </span>
+            {p.status === 'left' && <span className="chip warn">ย้ายงานแล้ว</span>}
             <div className="pe-stats">
               <span><b>{fmtN(contacts.length)}</b>ติดต่อแล้ว</span>
               <span><b>{fmtN(mineAhead)}</b>นัดกับคนนี้</span>
               <span><b>{fmtN(openDeals)}</b>ดีลที่เปิด</span>
             </div>
-            <div className="pe-reach">
-              <a href={ph || undefined} aria-disabled={!ph} className={'pe-round' + (ph ? '' : ' off')} title={phones(p.phone)[0] || 'ยังไม่มีเบอร์'} onClick={() => ph && setTimeout(startLog, 300)}>
-                <span aria-hidden="true">📞</span>โทร
-              </a>
-              <a href={p.email ? 'mailto:' + p.email : undefined} aria-disabled={!p.email} className={'pe-round' + (p.email ? '' : ' off')} title={p.email || 'ยังไม่มีอีเมล'}>
-                <span aria-hidden="true">✉️</span>อีเมล
-              </a>
-              <a href={lineUrl || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!lineUrl} className={'pe-round' + (lineUrl ? '' : ' off')} title={p.line || 'ยังไม่มี LINE ID'}>
-                <span aria-hidden="true">💬</span>LINE
-              </a>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
-              <button onClick={startLog} disabled={ro} className="btn pri" style={{ padding: 0, opacity: ro ? 0.5 : 1 }}>บันทึกการโทร</button>
-              <button onClick={() => (c && !ro ? openSched({ ids: [c.id], pid: p.id }) : undefined)} disabled={!c || ro} title={c ? '' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'} className="btn out" style={{ padding: 0, opacity: c && !ro ? 1 : 0.5 }}>นัดหมาย</button>
-            </div>
+            {!ro && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
+                <button onClick={startLog} className="btn" style={{ padding: 0 }}>บันทึกการโทร</button>
+                {c && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn" style={{ padding: 0 }}>นัดหมาย</button>}
+              </div>
+            )}
           </div>
         </section>
 
@@ -361,7 +332,7 @@ function PersonPage({ id }: { id: string }) {
           <div className="pe-card-h">
             <h3>ข้อมูลผู้ติดต่อ</h3>
             {!edit && !ro && (
-              <button className="pe-edit" onClick={() => setEdit(Object.fromEntries(PERSON_FIELDS.map((k) => [k, p[k]])) as PersonForm)}>✎ แก้ไข</button>
+              <button className="lnk" onClick={() => setEdit(Object.fromEntries(PERSON_FIELDS.map((k) => [k, p[k]])) as PersonForm)}>แก้ไข</button>
             )}
           </div>
           {edit ? (
@@ -382,6 +353,7 @@ function PersonPage({ id }: { id: string }) {
                   <span style={{ whiteSpace: 'pre-line' }}>{p.note}</span>
                 </div>
               )}
+              <span className="t-meta">{foot}</span>
             </>
           )}
         </section>
@@ -423,10 +395,10 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
   const mayDel = (l: LogEntry) => e.can('admin') || (!ro && l.by === e.me());
   return (
     <section className="pe-card pe-tabs" aria-label="ประวัติและนัดหมาย">
-      <div role="tablist" className="pe-tablist">
+      <div role="tablist" className="utabs">
         {([['log', 'ประวัติการติดต่อ', contacts.length], ['tasks', 'นัดหมาย', upcoming.length], ['deals', 'ดีลใน Sales Tracker', deals.length]] as const).map(([k, label, n]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-            {label} <span>{fmtN(n)}</span>
+            {label} <span className="n">{fmtN(n)}</span>
           </button>
         ))}
       </div>
@@ -434,26 +406,25 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {!ro && <LogForm pid={p.id} taRef={logRef} />}
           {!contacts.length ? (
-            <span className="pe-sub">ยังไม่มีประวัติ — กด “บันทึกการโทร” หลังคุยเสร็จ</span>
+            <span className="empty">ยังไม่มีประวัติ · บันทึกหลังคุยเสร็จ</span>
           ) : (
             <ol className="pe-tl">
               {contacts.map(({ l, key }) => {
-                const ty = LOG_TYPES[l.type] || LOG_TYPES.note;
+                // the node's colour is the type's only cue besides its word in the grey line
+                const [tag, ink] = logType(l.type);
                 return (
-                  <li key={l.id || l.at}>
-                    <span className="pe-tl-node" style={{ borderColor: ty[1] }} />
+                  <li key={l.id || l.at} className="dr-row">
+                    <span className="pe-tl-node" style={{ borderColor: ink }} />
                     <div className="pe-tl-date">
                       <b>{+localDay(l.at).slice(8, 10)}</b>
                       <span>{isoTh(localDay(l.at)).replace(/^\d+\s/, '')}</span>
                     </div>
                     <div className="pe-tl-card">
-                      <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span className="pe-type" style={{ color: TYPE_INK[l.type] || ty[1], background: ty[1] + '14' }}>{ty[0]}</span>
-                        {l.result && <span className="pe-chip">{l.result}</span>}
-                        <span className="pe-sub">{dtTh(l.at).split(' ').slice(-2).join(' ')} · {l.by || 'ไม่ระบุชื่อ'}</span>
-                        {mayDel(l) && <button className="pe-del" onClick={() => window.confirm('ลบรายการนี้?') && e.delLog(key, l)} aria-label="ลบรายการนี้">ลบ</button>}
-                      </span>
                       {l.text && <span style={{ whiteSpace: 'pre-line' }}>{l.text}</span>}
+                      <span style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                        <span className="pe-sub"><span style={{ color: ink }}>{tag}</span>{[l.result, dtTh(l.at).split(' ').slice(-2).join(' '), l.by || 'ไม่ระบุชื่อ'].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
+                        {mayDel(l) && <span className="dr-acts"><button className="quiet" onClick={() => window.confirm('ลบรายการนี้?') && e.delLog(key, l)} aria-label="ลบรายการนี้">ลบ</button></span>}
+                      </span>
                     </div>
                   </li>
                 );
@@ -466,9 +437,9 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="pe-sub">{c ? 'นัดของบริษัทนี้ · ที่ทำกับ ' + p.name + ' มีป้ายกำกับ' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'}</span>
-            {c && !ro && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn out" style={{ height: 34 }}>+ นัดหมาย</button>}
+            {c && !ro && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn sm">นัดหมาย</button>}
           </div>
-          {!upcoming.length && <span className="pe-sub">ยังไม่มีนัดที่จะถึง</span>}
+          {!upcoming.length && <span className="empty">ยังไม่มีนัดที่จะถึง</span>}
           <ol className="pe-tl">
             {upcoming.map((t) => (
               <TaskItem key={t.id} t={t} p={p} today={today} />
@@ -488,11 +459,11 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
       )}
       {tab === 'deals' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!c && <span className="pe-sub">ยังไม่ได้เชื่อมกับบริษัท</span>}
+          {!c && <span className="empty">ยังไม่ได้เชื่อมกับบริษัท</span>}
           {c && !deals.length && (
             <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span className="pe-sub">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
-              {!ro && <button onClick={() => set({ sendIds: [c.id] })} className="btn out" style={{ height: 34 }}>+ ส่งเข้า Sales Tracker</button>}
+              <span className="empty">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
+              {!ro && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
             </span>
           )}
           {deals.map((d) => (
@@ -518,7 +489,7 @@ function SideCard({ p, c, deals, others, last, today }: { p: Person; c: Company 
           <CoAvatar name={c.name} web={c.web} set={c.set} size={40} />
           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
             <b style={{ fontWeight: 500 }}>{c.name}</b>
-            <span className="pe-sub">{c.code} · เปิดหน้าบริษัท ›</span>
+            <span className="pe-sub">{c.code} · เปิดหน้าบริษัท</span>
           </span>
         </button>
       ) : (
@@ -542,13 +513,12 @@ function SideCard({ p, c, deals, others, last, today }: { p: Person; c: Company 
         <h3>เอกสาร</h3>
         <span className="pe-sub">{fmtN(docs.length)} ไฟล์</span>
       </div>
-      {!docs.length && <span className="pe-sub">ยังไม่มีเอกสาร — แนบได้ในดีลของบริษัท (Sales Tracker)</span>}
+      {!docs.length && <span className="pe-sub">ยังไม่มีเอกสาร · แนบได้ในดีลของบริษัท</span>}
       {docs.slice(0, 8).map(({ doc, d }) => (
         <button key={d.id + doc.id} className="pe-doc" onClick={() => set({ deal: d.id })} title="เปิดดีลเพื่อดู / ดาวน์โหลดเอกสาร">
-          <span className="pe-doc-ic" aria-hidden="true">{/pdf/i.test(doc.mime || doc.name) ? 'PDF' : 'IMG'}</span>
           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
             <span className="pe-clamp">{KIND_TH[doc.kind]}{doc.docNo ? ' ' + doc.docNo : ''}</span>
-            <span className="pe-sub">{[doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '', 'ปี ' + d.year].filter(Boolean).join(' · ')}</span>
+            <span className="pe-sub">{[/pdf/i.test(doc.mime || doc.name) ? 'PDF' : 'รูปภาพ', doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '', 'ปี ' + d.year].filter(Boolean).join(' · ')}</span>
           </span>
         </button>
       ))}
@@ -559,11 +529,11 @@ function SideCard({ p, c, deals, others, last, today }: { p: Person; c: Company 
 
 function NoteItem({ l, onDel }: { l: LogEntry; onDel?: () => void }) {
   return (
-    <div className="pe-note">
+    <div className="pe-note dr-row">
       <span style={{ whiteSpace: 'pre-line' }}>{l.text}</span>
       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <span className="pe-sub">{l.by || 'ไม่ระบุชื่อ'} · {dtTh(l.at)}</span>
-        {onDel && <button className="pe-del" onClick={onDel} aria-label="ลบโน้ตนี้">ลบ</button>}
+        {onDel && <span className="dr-acts"><button className="quiet" onClick={onDel} aria-label="ลบโน้ตนี้">ลบ</button></span>}
       </span>
     </div>
   );
@@ -583,7 +553,7 @@ function NoteForm({ pid }: { pid: string }) {
       style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
     >
       <textarea value={t} onChange={(ev) => setT(ev.target.value)} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ชอบให้ส่งข้อมูลทาง LINE ก่อนโทร" aria-label="โน้ตใหม่" className="pe-ta" />
-      <button type="submit" disabled={!t.trim()} className="btn pri" style={{ height: 34, alignSelf: 'flex-end', opacity: t.trim() ? 1 : 0.5 }}>บันทึกโน้ต</button>
+      {t.trim() && <button type="submit" className="btn sm" style={{ alignSelf: 'flex-end' }}>บันทึกโน้ต</button>}
     </form>
   );
 }
@@ -602,16 +572,18 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
   };
   return (
     <form onSubmit={save} className="pe-logform">
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={type} onChange={(ev) => setType(ev.target.value)} aria-label="ประเภท" className="fld sel" style={{ height: 34, fontSize: 13 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
+        <select value={type} onChange={(ev) => setType(ev.target.value)} aria-label="ประเภท" className="fld sel">
           {CONTACT.map((k) => <option key={k} value={k}>{LOG_TYPES[k][0]}</option>)}
         </select>
-        {LOG_RESULTS.map((r) => (
-          <button type="button" key={r} aria-pressed={result === r} onClick={() => setResult(result === r ? '' : r)} className="pe-res">{r}</button>
-        ))}
+        <select value={result} onChange={(ev) => setResult(ev.target.value)} aria-label="ผลการติดต่อ" className="fld sel">
+          <option value="">ผลการติดต่อ</option>
+          {LOG_RESULTS.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
       </div>
       <textarea ref={taRef} value={text} onChange={(ev) => setText(ev.target.value)} rows={2} placeholder="คุยเรื่องอะไร ผลเป็นอย่างไร" aria-label="รายละเอียดการติดต่อ" className="pe-ta" />
-      <button type="submit" disabled={!text.trim() && !result} className="btn pri" style={{ height: 34, alignSelf: 'flex-end', opacity: text.trim() || result ? 1 : 0.5 }}>บันทึก</button>
+      {/* the primary shows once there is something to save */}
+      {(text.trim() || result) && <button type="submit" className="btn sm pri" style={{ alignSelf: 'flex-end' }}>บันทึก</button>}
     </form>
   );
 }
@@ -625,26 +597,28 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
   const withP = t.pid === p.id;
   const other = t.pid && t.pid !== p.id ? e.people[t.pid] : undefined;
   return (
-    <li className={t.done ? 'done' : ''}>
-      <span className="pe-tl-node" style={{ borderColor: ty[2], background: t.done ? ty[2] : '#fff' }} />
+    <li className={'dr-row' + (t.done ? ' done' : '')}>
+      <span className="pe-tl-node" style={{ borderColor: logType(t.type)[1], background: t.done ? logType(t.type)[1] : '#fff' }} />
       <div className="pe-tl-date">
         <b>{+t.date.slice(8, 10)}</b>
         <span>{isoTh(t.date).replace(/^\d+\s/, '')}</span>
       </div>
       <div className={'pe-tl-card' + (withP ? ' mine' : '')}>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <DoneBox t={t} color={ty[2]} onToggle={() => !ro && e.toggleTask(t)} size={12} ro={ro} />
-          <span className="pe-type" style={{ color: TYPE_INK[ty[0]] || ty[2], background: ty[2] + '14' }}>{ty[1]}</span>
-          <span style={{ fontWeight: 500 }}>{t.time || 'ทั้งวัน'}</span>
-          {over && <span className="pe-chip warn">เกินกำหนด</span>}
-          {withP && <span className="pe-chip strong">กับ {p.name}</span>}
-          {other && <span className="pe-chip">กับ {other.name}</span>}
+          <DoneBox t={t} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
+          <span>{t.time || 'ทั้งวัน'}</span>
+          <span className="pe-sub"><span style={{ color: logType(t.type)[1] }}>{ty[1]}</span>{withP ? ' · กับ ' + p.name : other ? ' · กับ ' + other.name : ''}</span>
+          {over && <span className="chip bad">เกินกำหนด</span>}
         </span>
         {t.note && <span>{t.note}</span>}
-        <span style={{ display: 'flex', gap: 12 }}>
-          {!ro && <button className="pe-act" onClick={() => openSched({ taskId: t.id, ids: [t.gid] })}>เลื่อน / แก้ไข</button>}
-          {!ro && <button className="pe-del" onClick={() => e.delTask(t)}>ลบนัด</button>}
+        <span style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <span className="pe-sub">{ti.title}</span>
+          {!ro && (
+            <span className="dr-acts">
+              <button className="lnk" style={{ fontSize: 13 }} onClick={() => openSched({ taskId: t.id, ids: [t.gid] })}>เลื่อน / แก้ไข</button>
+              <button className="quiet" onClick={() => e.delTask(t)}>ลบนัด</button>
+            </span>
+          )}
         </span>
       </div>
     </li>
@@ -666,11 +640,8 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
       <span className="pe-mini" role="img" aria-label={`ทำแล้ว ${tr.done} จาก ${tr.total} ขั้น`}>
         {S.cfg.stages.map((s) => <i key={s} className={'s-' + tr.states[s]} title={s} />)}
       </span>
-      <span style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12.5, color: '#475069' }}>
-        {m.forecast != null && <span>Forecast {fmtMoney(m.forecast)}</span>}
-        {m.actual != null && <span>Actual {fmtMoney(m.actual)}</span>}
-        {d.resp && <span>ผู้รับผิดชอบ {d.resp}</span>}
-        {mine && <span className="pe-chip strong">ผู้ติดต่อในดีลนี้</span>}
+      <span className="pe-sub">
+        {[m.forecast != null ? 'Forecast ' + fmtMoney(m.forecast) : '', m.actual != null ? 'Actual ' + fmtMoney(m.actual) : '', d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : ''].filter(Boolean).join(' · ')}
       </span>
     </button>
   );
@@ -737,8 +708,8 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
         <textarea value={f.note} onChange={up('note')} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ช่วงเวลาที่สะดวก ความสนใจ" className="pe-ta" />
       </label>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        {e.can('delete') ? <button type="button" onClick={del} className="btn out" style={{ borderColor: '#E9B9AC', color: '#8A2B12', marginRight: 'auto', '--hv': '#FDF0EB' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
-        <button type="button" onClick={onDone} className="btn">ยกเลิก</button>
+        {e.can('delete') ? <button type="button" onClick={del} className="quiet" style={{ marginRight: 'auto' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
+        <button type="button" onClick={onDone} className="quiet">ยกเลิก</button>
         <button type="submit" className="btn pri">บันทึก</button>
       </div>
     </form>
@@ -764,7 +735,7 @@ function CompanyPicker({ gid, company, onChange }: { gid: number | null; company
   }, [q, e]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 12.5, color: '#475069' }}>บริษัท</span>
+      <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>บริษัท</span>
       {(cur || company) && (
         <span className="pe-picked">
           {cur && <CoAvatar name={cur.name} web={cur.web} set={cur.set} size={26} />}
@@ -859,13 +830,13 @@ export function AddPerson() {
         {dup && (
           <div style={{ gridColumn: '1 / -1' }}>
             <Notice kind="error" role="status">
-              มีผู้ติดต่อที่อาจเป็นคนเดียวกันแล้ว: <b style={{ fontWeight: 600 }}>{dup.name}</b>{dup.pos ? ' · ' + dup.pos : ''}{' '}
+              มีผู้ติดต่อที่อาจเป็นคนเดียวกันแล้ว: <b style={{ fontWeight: 500 }}>{dup.name}</b>{dup.pos ? ' · ' + dup.pos : ''}{' '}
               <button type="button" className="pe-act" onClick={() => (set({ addPerson: null }), openPerson(dup.id))}>เปิดดู</button>
             </Notice>
           </div>
         )}
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={close} className="btn">ยกเลิก</button>
+        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          <button type="button" onClick={close} className="quiet">ยกเลิก</button>
           <button type="submit" className="btn pri">เพิ่มผู้ติดต่อ</button>
         </div>
       </form>
@@ -878,14 +849,14 @@ export function CompanyPeople({ c }: { c: Company }) {
   const { engine: e, set } = useApp();
   const openPerson = useOpenPerson();
   const list = e.peopleOf(c.id).sort((a, b) => (a.status === 'left' ? 1 : 0) - (b.status === 'left' ? 1 : 0) || a.name.localeCompare(b.name, 'th'));
-  const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 };
+  const box: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 8 };
   return (
     <div style={box}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#1F5BD8' }}>ผู้ติดต่อ{list.length ? ` (${fmtN(list.length)})` : ''}</span>
-        {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>+ เพิ่มผู้ติดต่อ</button>}
+        <h3 className="card-t">ผู้ติดต่อ{list.length ? ` (${fmtN(list.length)})` : ''}</h3>
+        {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="lnk">เพิ่มผู้ติดต่อ</button>}
       </div>
-      {!list.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่มี — บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติของแต่ละคน</span>}
+      {!list.length && <span className="empty">ยังไม่มี · บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติ</span>}
       {list.map((p) => (
         <button key={p.id} className="pe-other" onClick={() => openPerson(p.id)}>
           <PersonAvatar p={p} size={32} />
@@ -893,7 +864,6 @@ export function CompanyPeople({ c }: { c: Company }) {
             <span style={{ display: 'block' }}>{p.name}{p.status === 'left' ? ' (ย้ายงานแล้ว)' : ''}</span>
             <span className="pe-sub">{[p.pos, phones(p.phone)[0]].filter(Boolean).join(' · ') || '—'}</span>
           </span>
-          <span aria-hidden="true" style={{ color: '#8A93AD' }}>›</span>
         </button>
       ))}
     </div>

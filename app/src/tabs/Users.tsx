@@ -5,11 +5,11 @@ import { ROLES, ROLE_DESC, ROLE_TH, USER_RE, normUser } from '../lib/auth';
 import { TeamSyncError, type Role } from '../lib/teamSync';
 import { dtTh, fmtN } from '../lib/format';
 import { Notice, PageHead } from '../components/ui';
-import { Icon, type IconName } from '../components/icons';
+import { Icon } from '../components/icons';
 import { inviteLink } from '../components/TeamSync';
 import { RoleChip, authError, hhmm, nameLetter } from '../components/Login';
 import { menuKeys, usePopover } from '../components/usePopover';
-import { Modal } from './Sales';
+import { Modal } from '../components/Dialog';
 
 /**
  * ผู้ใช้และสิทธิ์ (admins of a team that signs in): everyone's account, role and status; new accounts
@@ -34,7 +34,7 @@ const refocus = (sel: string) => requestAnimationFrame(() => document.querySelec
 
 interface Cred { user: TeamUser; temp: string; reset?: boolean }
 interface Ask { title: string; text: string; yes: string; danger?: boolean; run: () => Promise<void> }
-interface Item { label: string; icon: IconName; run: () => void; danger?: boolean; guard?: string }
+interface Item { label: string; run: () => void; danger?: boolean; guard?: string }
 
 export function Users() {
   const { engine: e } = useApp();
@@ -135,7 +135,6 @@ export function Users() {
     const out: (Item | false)[] = [
       !self && {
         label: 'ตั้งรหัสผ่านชั่วคราวใหม่',
-        icon: 'key',
         run: () =>
           setAsk({
             title: 'ตั้งรหัสผ่านชั่วคราวใหม่',
@@ -153,12 +152,11 @@ export function Users() {
               ),
           }),
       },
-      lockedNow && { label: 'ปลดล็อก', icon: 'lock', run: () => void exec(u.u, async () => { replace(await e.adminUnlock(u.u)); setNote(`ปลดล็อก ${u.name} แล้ว`); }) },
-      !self && { label: 'ออกจากระบบทุกเครื่อง', icon: 'logout', run: () => void exec(u.u, async () => { replace(await e.adminKick(u.u)); setNote(`${u.name} ถูกออกจากระบบทุกเครื่องแล้ว`); }) },
+      lockedNow && { label: 'ปลดล็อก', run: () => void exec(u.u, async () => { replace(await e.adminUnlock(u.u)); setNote(`ปลดล็อก ${u.name} แล้ว`); }) },
+      !self && { label: 'ออกจากระบบทุกเครื่อง', run: () => void exec(u.u, async () => { replace(await e.adminKick(u.u)); setNote(`${u.name} ถูกออกจากระบบทุกเครื่องแล้ว`); }) },
       on(u)
         ? {
             label: 'ปิดการใช้งาน',
-            icon: 'close',
             danger: true,
             guard: guardOf(u),
             run: () =>
@@ -170,8 +168,8 @@ export function Users() {
                 run: () => exec(u.u, async () => replace(await e.adminUpdate(u.u, { on: 0 })), true),
               }),
           }
-        : { label: 'เปิดใช้งานอีกครั้ง', icon: 'check', run: () => void exec(u.u, async () => replace(await e.adminUpdate(u.u, { on: 1 }))) },
-      !u.ll && { label: 'แก้ชื่อที่แสดง', icon: 'user', run: () => setRename(u) },
+        : { label: 'เปิดใช้งานอีกครั้ง', run: () => void exec(u.u, async () => replace(await e.adminUpdate(u.u, { on: 1 }))) },
+      !u.ll && { label: 'แก้ชื่อที่แสดง', run: () => setRename(u) },
     ];
     return out.filter((x): x is Item => !!x);
   };
@@ -200,7 +198,6 @@ export function Users() {
         sub={sub}
         right={
           <button id="us-add" className="us-btn primary" onClick={() => setAdd({ from: '#us-add' })} disabled={!users || offline}>
-            <Icon name="plus" size={18} />
             เพิ่มผู้ใช้
           </button>
         }
@@ -211,16 +208,14 @@ export function Users() {
         <h3 id="us-list-h" className="sr-only">บัญชีผู้ใช้ของทีม</h3>
         {offline && (
           <div className="us-state">
-            <span className="us-state-ic" aria-hidden="true"><Icon name="alert" size={24} /></span>
             <span>ต้องออนไลน์เพื่อจัดการผู้ใช้</span>
-            <button className="us-btn" onClick={fetchUsers}>ลองอีกครั้ง</button>
+            <button className="lnk" onClick={fetchUsers}>ลองอีกครั้ง</button>
           </div>
         )}
         {load === 'error' && (
           <div className="us-state bad" role="alert">
-            <span className="us-state-ic" aria-hidden="true"><Icon name="alert" size={24} /></span>
             <span>{loadErr}</span>
-            <button className="us-btn" onClick={fetchUsers}>ลองอีกครั้ง</button>
+            <button className="lnk" onClick={fetchUsers}>ลองอีกครั้ง</button>
           </div>
         )}
         {load === 'loading' && !users && (
@@ -308,10 +303,7 @@ export function Users() {
           </section>
         )}
         <section className="us-card us-honest" aria-labelledby="us-honest-h">
-          <h3 id="us-honest-h" className="us-h">
-            <Icon name="shield" size={20} />
-            เข้าสู่ระบบช่วยอะไร
-          </h3>
+          <h3 id="us-honest-h" className="us-h">เข้าสู่ระบบช่วยอะไร</h3>
           <ul>
             {HONEST.map((t) => (
               <li key={t}>{t}</li>
@@ -322,12 +314,9 @@ export function Users() {
 
       {/* (was on the update page, which a team that signs in no longer has) */}
       <section className="us-card us-backup" aria-labelledby="us-backup-h">
-        <h3 id="us-backup-h" className="us-h">
-          <Icon name="download" size={20} />
-          ไฟล์สำรองข้อมูลทีม
-        </h3>
+        <h3 id="us-backup-h" className="us-h">ไฟล์สำรองข้อมูลทีม</h3>
         <div className="us-row">
-          <button className="us-btn primary" onClick={() => e.exportCrm()}>ส่งออกไฟล์สำรอง (.json)</button>
+          <button className="us-btn" onClick={() => e.exportCrm()}>ส่งออกไฟล์สำรอง (.json)</button>
           <button className="us-btn" onClick={() => file.current?.click()}>นำเข้าไฟล์สำรอง</button>
           <input
             ref={file}
@@ -448,7 +437,6 @@ function RowMenu({ u, items, busy }: { u: TeamUser; items: Item[]; busy: boolean
                 it.run();
               }}
             >
-              <Icon name={it.icon} size={18} />
               <span className="us-mi-t">
                 {it.label}
                 {it.guard && <small>{it.guard}</small>}
@@ -479,12 +467,12 @@ function Confirm({ ask, onClose }: { ask: Ask; onClose: () => void }) {
     <Modal title={ask.title} onClose={busy ? () => {} : onClose} width={460} focus="dialog">
       <p className="us-ask">{ask.text}</p>
       {err && <Notice kind="error" role="alert">{err}</Notice>}
-      <div className="us-row">
+      <div className="dlg-act">
+        <button className="quiet" onClick={onClose} disabled={busy}>ยกเลิก</button>
         <button className={'us-btn primary' + (ask.danger ? ' danger' : '')} onClick={yes} disabled={busy}>
           {busy && <span className="auth-spin" aria-hidden="true" />}
           {ask.yes}
         </button>
-        <button className="us-btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
       </div>
     </Modal>
   );
@@ -516,7 +504,6 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
   return (
     <div className="us-cred">
       <div className="us-cred-h">
-        <span className="us-cred-ok" aria-hidden="true"><Icon name="check" size={20} /></span>
         <b>{cred.reset ? `ตั้งรหัสผ่านชั่วคราวใหม่ให้ ${user.name} แล้ว` : `สร้างบัญชี ${user.name} แล้ว`}</b>
         <RoleChip role={user.role} />
       </div>
@@ -527,7 +514,6 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
             <dd>
               <code>{v}</code>
               <button className="us-btn sm" onClick={() => copy(k, v)} aria-label={`คัดลอก${label}`}>
-                <Icon name={copied === k ? 'check' : 'copy'} size={16} />
                 {copied === k ? 'คัดลอกแล้ว' : 'คัดลอก'}
               </button>
             </dd>
@@ -535,16 +521,12 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
         ))}
       </dl>
       <button className="us-btn primary wide" onClick={() => copy('i', invite)}>
-        <Icon name={copied === 'i' ? 'check' : 'copy'} size={18} />
         {copied === 'i' ? 'คัดลอกข้อความเชิญแล้ว' : 'คัดลอกข้อความเชิญ'}
       </button>
-      <div className="us-amber">
-        <Icon name="alert" size={18} />
-        <span>รหัสผ่านชั่วคราวแสดงครั้งเดียว ส่งให้เจ้าตัวทางแชตส่วนตัว ไม่ใช่ในกลุ่ม</span>
-      </div>
+      <span className="us-amber">รหัสผ่านชั่วคราวแสดงครั้งเดียว ส่งให้เจ้าตัวทางแชตส่วนตัว ไม่ใช่ในกลุ่ม</span>
       <span className="sr-only" role="status">{copied ? 'คัดลอกแล้ว' : ''}</span>
       <div className="us-row end">
-        <button ref={doneRef} className="us-btn" onClick={onDone}>เสร็จ</button>
+        <button ref={doneRef} className="quiet" onClick={onDone}>ปิด</button>
       </div>
     </div>
   );
@@ -630,12 +612,12 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
             ))}
           </fieldset>
           {err && <Notice kind="error" role="alert">{err}</Notice>}
-          <div className="us-row">
+          <div className="dlg-act">
+            <button type="button" className="quiet" onClick={onClose} disabled={busy}>ยกเลิก</button>
             <button type="submit" className="us-btn primary" disabled={busy}>
               {busy && <span className="auth-spin" aria-hidden="true" />}
               สร้างบัญชี
             </button>
-            <button type="button" className="us-btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
           </div>
         </form>
       )}
@@ -675,12 +657,12 @@ function Rename({ u, onClose, onDone, lost }: { u: TeamUser; onClose: () => void
           <span className="auth-hint">@{u.u} · แก้ได้เฉพาะก่อนเข้าสู่ระบบครั้งแรก</span>
         </div>
         {err && <Notice kind="error" role="alert">{err}</Notice>}
-        <div className="us-row">
+        <div className="dlg-act">
+          <button type="button" className="quiet" onClick={onClose} disabled={busy}>ยกเลิก</button>
           <button type="submit" className="us-btn primary" disabled={busy}>
             {busy && <span className="auth-spin" aria-hidden="true" />}
             บันทึก
           </button>
-          <button type="button" className="us-btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
         </div>
       </form>
     </Modal>

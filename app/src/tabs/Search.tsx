@@ -1,17 +1,18 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
-import { CONFIG, CST, FEEDS, GCOL, GDESC, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
+import { CONFIG, CST, FEEDS, GDESC, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
 import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
-import type { Cert, Company } from '../lib/types';
-import { Opts, Pager, SrcTags, card, heroGrad, tabular } from '../components/ui';
+import type { CfoStatus, Cert, Company } from '../lib/types';
+import { Opts, Pager, Status, card, srcWords, tabular } from '../components/ui';
 import { Icon } from '../components/icons';
 import { useSlide } from '../components/useSlide';
 import { PREF, prefs } from '../lib/storage';
 
-const empty = (text: string, boxed?: boolean) => (
-  <div style={boxed ? { padding: 32, textAlign: 'center', color: '#475069', background: '#fff', borderRadius: 18 } : { padding: 40, textAlign: 'center', color: '#475069' }}>{text}</div>
-);
+const empty = (text: string) => <div className="empty" style={{ padding: '24px 20px' }}>{text}</div>;
+/** A CFO status as dot + word; "ใกล้หมดอายุ" is the one that needs action now, so it is a tinted chip. */
+const cfoStatus = (st: CfoStatus, label: string) =>
+  st === 'soon' ? <Status kind="warn" chip>{label}</Status> : <Status kind={st === 'active' ? 'ok' : st === 'expired' ? 'bad' : 'neutral'}>{label}</Status>;
 
 export function Search() {
   const { engine: e, ui, set, setF, open } = useApp();
@@ -24,6 +25,7 @@ export function Search() {
     setFiltersOpen(!filtersOpen);
   };
   const ftoggleRef = useRef<HTMLButtonElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const chipsRef = useRef<HTMLDivElement>(null);
   const s = ui.f;
   // the white pill slides between บริษัท and ใบรับรอง CFO
@@ -58,6 +60,8 @@ export function Search() {
       .filter((o) => o.l && o.n)
       .sort((a, b) => (byName ? a.l.localeCompare(b.l, 'th') : b.n - a.n));
   const rndOpts = e.R.filter((x) => x.docT >= e.T || x.annT >= e.T).map((x) => ({ v: x.no, label: 'รอบ ' + x.no })).concat([{ v: 'later', label: 'หลังรอบในตาราง' }]);
+  // the five filters most used come first; the other seven fold under "ตัวกรองเพิ่มเติม"
+  const MAIN: (keyof Filters)[] = ['prov', 'ind', 'cfo', 'stage', 'owner'];
   const selects: [string, keyof Filters, { v: string; label: string }[]][] = [
     ['พบในแหล่งข้อมูล', 'src', SRCC.map(([t], i) => ({ v: String(i), label: t }))],
     ['กลุ่มอุตสาหกรรม', 'ind', dictOpts(D.ind, counts.ind)],
@@ -84,6 +88,9 @@ export function Search() {
   if (s.cProv) activeChips.push({ label: 'จังหวัด (TGO): ' + s.cProv, p: { cProv: '' } });
   const hasFilter = Object.keys(CLEAR_FILTERS).some((k) => s[k as keyof Filters] !== '');
   const nSel = selects.filter(([, k]) => s[k] !== '').length;
+  const mainSel = MAIN.map((k) => selects.find((x) => x[1] === k)!);
+  const moreSel = selects.filter(([, k]) => !MAIN.includes(k));
+  const showMore = moreOpen || moreSel.some(([, k]) => s[k] !== '');
   // screen readers hear the count once typing / filtering settles, not on every keystroke
   const [said, setSaid] = useState('');
   const sayNow = `${fmtN(F.out.length)} ${s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}`;
@@ -102,20 +109,10 @@ export function Search() {
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
 
-  // an account that can only read adds nothing and can't star (the star is the team's watch list):
-  // it sees ★ on the companies the team follows, not a button
-  const edit = e.can('edit');
-  const star = (id: number) => {
-    const on = C.watch.includes(id);
-    return { on, star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => (edit ? e.toggleWatch(id) : undefined) };
-  };
-  const roStar = (on: boolean, style: CSSProperties) => (on ? <span role="img" aria-label="ทีมติดตามอยู่" title="ทีมติดตามอยู่" style={{ ...style, color: '#E8A23B' }}>★</span> : <span />);
-  const rndPill = (c: Company) =>
-    c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1745B8' } : null;
-  const cfoView = (c: Company) => {
-    const [t, fg] = CST[c.cfoSt];
-    return { t, fg, sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' };
-  };
+  // following a company (the team's watch list) is done on its page; a followed row says so in grey
+  const watched = (id: number) => C.watch.includes(id);
+  const cfoView = (c: Company) => ({ st: c.cfoSt, t: CST[c.cfoSt][0], sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' });
+  const rndText = (c: Company) => (c.rnd ? (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd : '');
   /** A click anywhere on a result row opens the company (not on its buttons, nor when text was selected). */
   const rowOpen = (ev: React.MouseEvent, id: number) => {
     if ((ev.target as HTMLElement).closest('button, a, input, select, label')) return;
@@ -127,14 +124,29 @@ export function Search() {
     set({ page: p });
     scrollTop();
   };
+  /** Sales status and owner as grey text, "ได้งาน" in green. */
+  const saleLine = (c: Company) => {
+    const sg = stageOf(C.stages[c.id]);
+    const owner = C.owners[c.id];
+    if (sg[0] === 'none' && !owner) return null;
+    return (
+      <span className="t-meta">
+        {sg[0] !== 'none' && <span className={sg[0] === 'won' ? 't-ok' : undefined}>{sg[1]}</span>}
+        {sg[0] !== 'none' && owner ? ' · ' : ''}
+        {owner}
+      </span>
+    );
+  };
+  // certificates only concern groups 1–4 (the others have no CFO)
+  const chipsShown = tgtChips.filter((c) => s.view !== 'cert' || c.i == null || c.i < 4);
 
-  const coCols = '32px minmax(0,2.3fr) minmax(0,1.2fr) 120px 140px 72px minmax(0,1.2fr)';
-  const ctCols = '32px 160px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 120px';
+  const coCols = 'minmax(0,2.3fr) minmax(0,1.2fr) 120px 170px 72px minmax(0,1.2fr)';
+  const ctCols = '150px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 140px';
 
   return (
     <>
-      <section className="sx" style={card}>
-        <div className="sx-band hero" style={{ background: heroGrad }}>
+      <section className="sx card">
+        <div className="sx-band">
           <h2 className="sr-only">ค้นหาลูกค้า</h2>
           <div className="sx-row">
             <div className="sx-toggle" role="group" aria-label="ค้นหาจาก" ref={toggleRef}>
@@ -144,7 +156,7 @@ export function Search() {
                   key={k}
                   aria-pressed={s.view === k}
                   // certificates have no "ยังไม่มี CFO" status: don't carry that filter over (it would hide everything)
-                  onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default', ...(k === 'cert' && s.cfo === 'none' ? { cfo: '' } : {}) })}
+                  onClick={() => setF({ view: k, sort: k === 'cert' ? 'ap' : 'default', ...(k === 'cert' && s.cfo === 'none' ? { cfo: '' } : {}), ...(k === 'cert' && +s.tgt >= 4 ? { tgt: '' } : {}) })}
                 >
                   {label}
                 </button>
@@ -159,88 +171,65 @@ export function Search() {
                 </button>
               )}
             </div>
-            <button className="sx-btn sx-ghost" onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)}>
-              <Icon name="download" />
-              ส่งออก CSV
-            </button>
-            {edit && (
-              <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
-                <Icon name="plus" />
-                เพิ่มลูกค้าใหม่
-              </button>
-            )}
+            <button className="btn" onClick={() => e.exportCsv(s.view, (s.q === q ? F : filterAll(e, s)).out)}>ส่งออก CSV</button>
           </div>
         </div>
         <div className="sx-body">
           <div className="sx-groups">
-            <div className="sx-groups-h">
-              <span id="sx-chips-h">กลุ่มเป้าหมาย</span>
-              <span className="sx-groups-sub">บริษัทหนึ่งอยู่ได้กลุ่มเดียว ตามเงื่อนไขข้อแรกที่เข้า<span className="sx-hover-hint"> · ชี้ที่การ์ดเพื่อดูเงื่อนไข</span></span>
+            <span id="sx-chips-h" className="card-t">กลุ่มเป้าหมาย</span>
+            <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h">
+              {chipsShown.map((c) => (
+                <button key={c.label} className="sx-chip" aria-pressed={c.act} title={c.i == null ? 'ทุกบริษัทที่ตรงกับคำค้นและตัวกรอง' : `กลุ่ม ${c.i + 1}: ${GDESC[c.i]} (บริษัทหนึ่งอยู่ได้กลุ่มเดียว ตามข้อแรกที่เข้า)`} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
+                  <span className="sx-chip-label">{c.label}</span>
+                  <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
+                </button>
+              ))}
             </div>
-            <div className="sx-chips" ref={chipsRef} role="group" aria-labelledby="sx-chips-h" aria-describedby={s.tgt !== '' ? 'sx-rule' : undefined}>
-              {tgtChips.map((c) => {
-                const total = tgtChips[0].n;
-                const share = c.i == null ? (total ? 100 : 0) : total ? (c.n / total) * 100 : 0;
-                return (
-                  <button key={c.label} className="sx-chip" aria-pressed={c.act} title={c.i == null ? 'ทุกบริษัทที่ตรงกับคำค้นและตัวกรอง' : `กลุ่ม ${c.i + 1}: ${GDESC[c.i]}`} onClick={() => setF({ tgt: c.i == null ? '' : String(c.i) })}>
-                    {c.i == null ? (
-                      <span className="sx-dot sx-dot-all" aria-hidden="true"><Icon name="overview" /></span>
-                    ) : (
-                      <span className="sx-dot" style={{ background: GCOL[c.i][0], color: GCOL[c.i][1] }}>{c.i + 1}</span>
-                    )}
-                    <span className="sx-chip-label">{c.i == null ? c.label : c.label.replace(/^\d+\. /, '')}</span>
-                    <span className={'sx-n' + (c.n ? '' : ' zero')}>{fmtN(c.n)}</span>
-                    <span className="sx-bar" aria-hidden="true"><i style={{ width: `${share}%`, background: c.i == null ? undefined : GCOL[c.i][2] }} /></span>
-                  </button>
-                );
-              })}
-            </div>
-            {s.tgt !== '' && GDESC[+s.tgt] && (
-              <span className="sx-rule" id="sx-rule">
-                <b>{`กลุ่ม ${+s.tgt + 1}:`}</b> {GDESC[+s.tgt]}
-              </span>
-            )}
           </div>
           <div className="sx-filters">
             <div className="sx-fhead">
-              <button ref={ftoggleRef} className="sx-ftoggle" aria-expanded={filtersOpen} aria-controls={filtersOpen ? 'sx-grid' : undefined} onClick={() => toggleFilters()}>
-                <Icon name="filter" />
+              <button ref={ftoggleRef} className="btn" aria-expanded={filtersOpen} aria-controls={filtersOpen ? 'sx-grid' : undefined} onClick={() => toggleFilters()} title={s.view === 'cert' ? 'ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : undefined}>
                 ตัวกรอง
                 {nSel > 0 && <span className="sx-fcount">{fmtN(nSel)}</span>}
-                <span className="sx-chev" aria-hidden="true">▾</span>
               </button>
-              {!filtersOpen && nSel === 0 && <span className="sx-fhint">จังหวัด · อุตสาหกรรม · สถานะ CFO · สถานะการขาย · ผู้รับผิดชอบ และอื่นๆ</span>}
               {!filtersOpen && nSel > 0 && (
                 <div className="sx-tags">
                   {selects.filter(([, k]) => s[k] !== '').map(([label, k, options]) => (
-                    <button key={k} className="sx-tag" onClick={() => { setF({ [k]: '' } as Partial<Filters>); ftoggleRef.current?.focus(); }}>
+                    <button key={k} className="ftag" onClick={() => { setF({ [k]: '' } as Partial<Filters>); ftoggleRef.current?.focus(); }}>
                       {label}: {(options.find((o) => o.v === s[k]) || { label: String(s[k]) }).label.replace(/ \([\d,]+\)$/, '')} ×
                     </button>
                   ))}
                 </div>
               )}
-              {hasFilter && <button className="sx-reset" onClick={() => { setF(CLEAR_FILTERS); ftoggleRef.current?.focus(); }}>ล้างตัวกรองทั้งหมด</button>}
+              {hasFilter && <button className="quiet sx-reset" onClick={() => { setF(CLEAR_FILTERS); ftoggleRef.current?.focus(); }}>ล้างตัวกรอง</button>}
             </div>
             {filtersOpen && (
-              <div className="sx-grid" id="sx-grid">
-                {selects.map(([label, k, options]) => {
-                  const val = s[k] as string;
-                  return (
-                    <label key={k} className="sx-field">
-                      {label}
-                      <select className={'sx-sel' + (val !== '' ? ' on' : '')} value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)}>
-                        <Opts options={options} all="ทั้งหมด" />
-                      </select>
-                    </label>
-                  );
-                })}
+              <div id="sx-grid" className="sx-fbody">
+                <div className="sx-grid">
+                  {(showMore ? [...mainSel, ...moreSel] : mainSel).map(([label, k, options]) => {
+                    const val = s[k] as string;
+                    return (
+                      <label key={k} className="sx-field">
+                        {label}
+                        <select className={'fld sel sx-sel' + (val !== '' ? ' on' : '')} value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)}>
+                          <Opts options={options} all="ทั้งหมด" />
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+                {!moreSel.some(([, k]) => s[k] !== '') && (
+                  <button className="lnk" style={{ alignSelf: 'flex-start', marginLeft: 10 }} aria-expanded={showMore} onClick={() => setMoreOpen(!moreOpen)}>
+                    {showMore ? 'ซ่อนตัวกรองเพิ่มเติม' : `ตัวกรองเพิ่มเติม (${fmtN(moreSel.length)})`}
+                  </button>
+                )}
               </div>
             )}
           </div>
           {activeChips.length > 0 && (
             <div className="sx-tags">
               {activeChips.map((c) => (
-                <button key={c.label} className="sx-tag" onClick={() => setF(c.p)}>{c.label} ×</button>
+                <button key={c.label} className="ftag" onClick={() => setF(c.p)}>{c.label} ×</button>
               ))}
             </div>
           )}
@@ -248,11 +237,11 @@ export function Search() {
           <div className="sx-foot">
             <span className="sx-total">
               <b>{fmtN(F.out.length)}</b> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}
-              <span className="sx-sub">{s.view === 'cert' ? 'ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : `มีเบอร์โทร ${fmtN(F.ph)}`}</span>
+              {s.view !== 'cert' && <span className="sx-sub">มีเบอร์โทร {fmtN(F.ph)}</span>}
             </span>
             <label className="sx-sort">
               เรียงตาม
-              <select className="sx-sel" value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })}>
+              <select className="fld sel" value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })}>
                 <Opts options={sortOpts.map(([v, label]) => ({ v, label }))} />
               </select>
             </label>
@@ -263,98 +252,81 @@ export function Search() {
       {s.view === 'co' && narrow && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {(sl as Company[]).map((c) => {
-            const st = star(c.id), cv = cfoView(c), g = GI_COL[c.giLive || 1] || GI_COL[1];
+            const cv = cfoView(c);
+            const src = srcWords(c.src).map((t) => (t === 'GI' && c.giLive ? 'GI ' + c.giLive : t)).join(' · ');
             return (
-              <div key={c.id} style={{ background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <button onClick={() => open(c.id)} className="hv-tx" style={{ cursor: 'pointer', flex: 1, border: 0, textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, color: '#0E1430' }}>
-                    <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
-                    <span style={{ fontSize: 12, color: '#475069' }}>{c.code} · {D.prov[c.prov] || '—'}</span>
-                  </button>
-                  {edit ? <button onClick={st.toggle} aria-label="ติดตาม" className="hv" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, borderRadius: '50%', fontSize: 22, color: st.fg }}>{st.star}</button> : roStar(st.on, { width: 44, height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 })}
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
-                  <SrcTags mask={c.src} />
-                  {!!c.giLive && <span style={{ fontSize: 11.5, fontWeight: 500, padding: '2px 8px', borderRadius: 8, background: g[0], color: g[1] }}>GI ระดับ {c.giLive}</span>}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, borderTop: '1px solid #EEF1F8', paddingTop: 10, fontSize: 13 }}>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 11.5, color: '#5E6680' }}>CFO</span>
-                    <span style={{ color: cv.fg, fontWeight: 500 }}>{cv.t}</span>
-                    <span style={{ fontSize: 12, color: '#475069' }}>{cv.sub}</span>
+              <div key={c.id} className="sx-mcard card">
+                <button onClick={() => open(c.id)} className="hv-tx sx-mname">
+                  <span className="t-name">{c.name}</span>
+                  <span className="t-meta">{[c.code, D.prov[c.prov] || '—', 'กลุ่ม ' + (c.tgt + 1), watched(c.id) ? 'ติดตามอยู่' : ''].filter(Boolean).join(' · ')}</span>
+                  {src && <span className="t-meta">{src}</span>}
+                </button>
+                <div className="sx-mgrid">
+                  <span className="sx-mcol">
+                    <span className="t-meta">CFO</span>
+                    {cfoStatus(cv.st, cv.t)}
+                    {cv.sub && <span className="t-meta">{cv.sub}</span>}
                   </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                    <span style={{ fontSize: 11.5, color: '#5E6680' }}>ติดต่อ</span>
+                  <span className="sx-mcol" style={{ minWidth: 0 }}>
+                    <span className="t-meta">ติดต่อ</span>
                     <span style={{ wordBreak: 'break-word' }}>{contactOf(c)}</span>
-                    {C.owners[c.id] && <span style={{ fontSize: 12, color: '#475069' }}>ผู้รับผิดชอบ {C.owners[c.id]}</span>}
+                    {saleLine(c)}
                   </span>
                 </div>
               </div>
             );
           })}
-          {!F.out.length && empty('ไม่พบรายการตามเงื่อนไข', true)}
+          {!F.out.length && <div className="card">{empty('ไม่พบรายการตามเงื่อนไข')}</div>}
         </section>
       )}
 
       {s.view === 'cert' && narrow && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {(sl as Cert[]).map((ct) => {
-            const [bg, fg] = PILL[ct.st];
-            return (
-              <button key={ct.cid} onClick={() => open(ct.gid)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', '--bg': '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, color: '#0E1430' }}>
-                <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
-                  <span style={{ fontSize: 12, fontWeight: 500, padding: '3px 10px', borderRadius: 999, background: bg, color: fg }}>{CST[ct.st][0]}</span>
-                </span>
-                <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
-                <span style={{ fontSize: 12.5, color: '#475069' }}>{ct.provTxt || CD.prov[ct.prov] || '—'} · อนุมัติ {isoTh(ct.ap)} · หมดอายุ {isoTh(ct.ex)}</span>
-              </button>
-            );
-          })}
-          {!F.out.length && empty('ไม่พบรายการตามเงื่อนไข', true)}
+          {(sl as Cert[]).map((ct) => (
+            <button key={ct.cid} onClick={() => open(ct.gid)} className="sx-mcard card hv">
+              <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                <span className="t-sec">{ct.cert || '—'}</span>
+                {cfoStatus(ct.st, CST[ct.st][0])}
+              </span>
+              <span className="t-name">{ct.org}</span>
+              <span className="t-meta">{ct.provTxt || CD.prov[ct.prov] || '—'} · อนุมัติ {isoTh(ct.ap)} · หมดอายุ {isoTh(ct.ex)}</span>
+            </button>
+          ))}
+          {!F.out.length && <div className="card">{empty('ไม่พบรายการตามเงื่อนไข')}</div>}
         </section>
       )}
 
       {s.view === 'co' && !narrow && (
         <section style={{ ...card, overflowX: 'auto' }}>
-          <div style={{ minWidth: 940 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: '13px 20px', fontSize: 12.5, color: '#475069', background: '#F7F8FC', borderBottom: '1px solid #E3E7F1' }}>
-              <span /><span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ · สถานะการขาย</span>
+          <div style={{ minWidth: 900 }}>
+            <div className="sx-head thead" style={{ gridTemplateColumns: coCols }}>
+              <span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ · สถานะการขาย</span>
             </div>
             {(sl as Company[]).map((c) => {
-              const st = star(c.id), cv = cfoView(c), g = GI_COL[c.giLive || 1] || GI_COL[1], rp = rndPill(c), sg = stageOf(C.stages[c.id]);
-              const owner = C.owners[c.id];
+              const cv = cfoView(c), rt = rndText(c);
               return (
-                <div key={c.id} className="sxr" onClick={(ev) => rowOpen(ev, c.id)} style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: rowPad, alignItems: 'center' }}>
-                  {edit ? <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button> : roStar(st.on, { fontSize: 19 })}
-                  <button onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, color: '#0E1430' }}>
-                    <span style={{ fontSize: 14.5, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
-                    <span style={{ fontSize: 12, color: '#475069', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <span style={{ padding: '1px 7px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
-                      <span>{c.code}</span>
-                      <span>{D.type[c.type]}</span>
-                      {c.set && <span style={{ fontWeight: 500, color: '#1745B8' }}>{c.set}</span>}
-                      {c.ids.length > 1 && <span style={{ color: '#1F5BD8' }}>รวม {c.ids.length} แถว</span>}
+                <div key={c.id} className="sxr" onClick={(ev) => rowOpen(ev, c.id)} style={{ gridTemplateColumns: coCols, padding: rowPad }}>
+                  <button onClick={() => open(c.id)} className="sxr-name">
+                    <span className="t-name">{c.name}</span>
+                    <span className="t-sec sxr-sub">
+                      {['กลุ่ม ' + (c.tgt + 1), c.code, D.type[c.type], c.set || '', c.ids.length > 1 ? `รวม ${c.ids.length} แถว` : ''].filter(Boolean).join(' · ')}
+                      {watched(c.id) && <span className="t-meta"> · ติดตามอยู่</span>}
                     </span>
                   </button>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13.5, minWidth: 0 }}>
+                  <span className="sxr-col">
                     <span>{D.prov[c.prov] || '—'}</span>
-                    <span style={{ fontSize: 12, color: '#475069' }}>{D.ind[c.ind]}</span>
+                    <span className="t-sec">{D.ind[c.ind]}</span>
                   </span>
-                  <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}><SrcTags mask={c.src} /></span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 13, alignItems: 'flex-start' }}>
-                    <span style={{ color: cv.fg, fontWeight: 500 }}>{cv.t}</span>
-                    <span style={{ fontSize: 12, color: '#475069' }}>{cv.sub}</span>
-                    {rp && <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, background: rp.bg, color: rp.fg }}>{rp.label}</span>}
+                  <span className="t-meta" style={{ fontSize: 13 }}>{srcWords(c.src).join(' · ')}</span>
+                  <span className="sxr-col">
+                    {cfoStatus(cv.st, cv.t)}
+                    {cv.sub && <span className="t-meta">{cv.sub}</span>}
+                    {rt && <span className="t-meta">{rt}</span>}
                   </span>
-                  <span>{!!c.giLive && <span style={{ fontSize: 12.5, fontWeight: 500, padding: '2px 8px', borderRadius: 8, background: g[0], color: g[1] }}>ระดับ {c.giLive}</span>}</span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', fontSize: 13, minWidth: 0 }}>
+                  <span>{c.giLive ? `ระดับ ${c.giLive}` : <span className="t-muted">—</span>}</span>
+                  <span className="sxr-col">
                     <span style={{ wordBreak: 'break-word' }}>{contactOf(c)}</span>
-                    <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {sg[0] !== 'none' && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: sg[2], color: sg[3] }}>{sg[1]}</span>}
-                      {owner && <span style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 999, background: '#F6F8FE', color: '#384155' }}>{owner}</span>}
-                    </span>
+                    {saleLine(c)}
                   </span>
                 </div>
               );
@@ -366,29 +338,27 @@ export function Search() {
 
       {s.view === 'cert' && !narrow && (
         <section style={{ ...card, overflowX: 'auto' }}>
-          <div style={{ minWidth: 940 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: '13px 20px', fontSize: 12.5, color: '#475069', background: '#F7F8FC', borderBottom: '1px solid #E3E7F1' }}>
-              <span /><span>เลขที่ใบรับรอง</span><span>องค์กร · กิจกรรม</span><span>จังหวัด</span><span>วันที่อนุมัติ</span><span>วันหมดอายุ</span><span>สถานะ</span>
+          <div style={{ minWidth: 900 }}>
+            <div className="sx-head thead" style={{ gridTemplateColumns: ctCols }}>
+              <span>เลขที่ใบรับรอง</span><span>องค์กร · กิจกรรม</span><span>จังหวัด</span><span>วันที่อนุมัติ</span><span>วันหมดอายุ</span><span>สถานะ</span>
             </div>
             {(sl as Cert[]).map((ct) => {
-              const st = star(ct.gid), [bg, fg] = PILL[ct.st];
-              const rp = ct.isLatest && !ct.bad && ct.co ? rndPill(ct.co) : null;
+              const rt = ct.isLatest && !ct.bad && ct.co ? rndText(ct.co) : '';
               return (
-                <div key={ct.cid} className="sxr" onClick={(ev) => rowOpen(ev, ct.gid)} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, alignItems: 'center', fontSize: 13.5 }}>
-                  {edit ? <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button> : roStar(st.on, { fontSize: 19 })}
-                  <span style={{ fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
-                  <button onClick={() => open(ct.gid)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, color: '#0E1430' }}>
-                    <span style={{ fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
-                    <span style={{ fontSize: 12, color: '#475069' }}>{ct.act}</span>
+                <div key={ct.cid} className="sxr" onClick={(ev) => rowOpen(ev, ct.gid)} style={{ gridTemplateColumns: ctCols, padding: rowPad }}>
+                  <span className="t-sec">{ct.cert || '—'}</span>
+                  <button onClick={() => open(ct.gid)} className="sxr-name">
+                    <span className="t-name">{ct.org}</span>
+                    <span className="t-sec sxr-sub">{ct.act}{watched(ct.gid) && <span className="t-meta"> · ติดตามอยู่</span>}</span>
                   </button>
                   <span>{ct.provTxt || CD.prov[ct.prov] || '—'}</span>
                   <span style={tabular}>{isoTh(ct.ap)}</span>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                  <span className="sxr-col">
                     <span style={tabular}>{isoTh(ct.ex)}</span>
-                    {rp && <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, background: rp.bg, color: rp.fg }}>{rp.label}</span>}
-                    {ct.bad && <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 999, background: '#FDECC8', color: '#9A5A00' }}>วันหมดอายุผิดปกติ</span>}
+                    {rt && <span className="t-meta">{rt}</span>}
+                    {ct.bad && <span className="t-warn" style={{ fontSize: 12 }}>วันหมดอายุผิดปกติ</span>}
                   </span>
-                  <span><span style={{ fontSize: 12, fontWeight: 500, padding: '3px 10px', borderRadius: 999, background: bg, color: fg }}>{CST[ct.st][0]}</span></span>
+                  <span>{cfoStatus(ct.st, CST[ct.st][0])}</span>
                 </div>
               );
             })}
@@ -397,7 +367,7 @@ export function Search() {
         </section>
       )}
 
-      <Pager page={page} pages={pages} onPrev={() => go(page - 1)} onNext={() => go(page + 1)} wrap color="#0E1430" />
+      <Pager page={page} pages={pages} onPrev={() => go(page - 1)} onNext={() => go(page + 1)} wrap />
     </>
   );
 }

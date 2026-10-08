@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../state';
-import { isoTh } from '../lib/format';
 import { norm } from '../lib/core';
 import { KIND_TH, fmtMoney, parseAmount, type Deal, type DealDoc, type DocKind, type DocTarget } from '../lib/sales';
 import type { DocFacts } from '../lib/docExtract';
-import { Modal } from '../tabs/Sales';
+import { Modal } from './Dialog';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { prefs } from '../lib/storage';
-import { Notice, labelCol } from './ui';
+import { DateField, Notice, labelCol } from './ui';
 
 const BASIS_PREF = 'gcc-doc-basis';
 const defaultTarget = (k: DocKind): DocTarget => (k === 'quotation' ? 'forecast' : k === 'invoice' ? 'actual' : 'none');
@@ -151,59 +150,59 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     <Modal title={`แนบ${KIND_TH[kind]} · ${deal.client}`} onClose={onClose} width={620}>
       <label style={{ ...labelCol, gap: 8 }}>
         เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)
-        <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 13.5 }} />
+        <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 14 }} />
       </label>
       {prog && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 13.5, color: '#475069' }}>{prog.msg}</span>
-          <span style={{ height: 6, background: '#EEF1F8', borderRadius: 999, overflow: 'hidden' }}>
-            <span style={{ display: 'block', height: '100%', width: `${prog.pct ?? 30}%`, background: '#1F5BD8', transition: 'width .2s' }} />
+          <span className="t-sec" style={{ fontSize: 14 }}>{prog.msg}</span>
+          <span style={{ height: 6, background: 'var(--bar-track)', borderRadius: 999, overflow: 'hidden' }}>
+            <span style={{ display: 'block', height: '100%', width: `${prog.pct ?? 30}%`, background: 'var(--bar)', transition: 'width .2s' }} />
           </span>
-          <span style={{ fontSize: 12, color: '#5E6680' }}>อ่านในเครื่องนี้ ไม่ได้ส่งไฟล์ไปที่อื่น · รูปถ่าย / สแกนใช้เวลาอ่านนานกว่า PDF (ครั้งแรกต้องโหลดตัวอ่านภาษาไทย)</span>
+          <span className="t-meta">อ่านในเครื่องนี้ ไม่ได้ส่งไฟล์ไปที่อื่น · รูปถ่าย / สแกนใช้เวลาอ่านนานกว่า PDF</span>
         </div>
       )}
       {readErr && <Notice kind="error" role="alert">{readErr}</Notice>}
       {file && !prog && (
         <>
-          {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid #E3E7F1', background: '#F6F8FE' }} />}
-          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
-          {!isImg && docMime(file) !== 'application/pdf' && <span style={{ fontSize: 13, color: '#5E6680' }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) — เทียบยอดกับรูปในเครื่องของคุณ</span>}
+          {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--frame)' }} />}
+          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 14 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด</a>}
+          {!isImg && docMime(file) !== 'application/pdf' && <span className="t-meta" style={{ fontSize: 13 }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) เทียบยอดกับรูปในเครื่องของคุณ</span>}
           {facts && (opts.length > 0 || others.length > 0) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F7F8FC', borderRadius: 14, padding: '12px 14px' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 500 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px' }}>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>
                 ยอดเงินที่ระบบอ่านได้{' '}
-                <span style={{ fontSize: 12, fontWeight: 400, color: facts.confidence === 'high' ? '#14633F' : facts.confidence === 'medium' ? '#6B4100' : '#8A2B12' }}>
-                  · ความมั่นใจ{facts.confidence === 'high' ? 'สูง' : facts.confidence === 'medium' ? 'ปานกลาง' : 'ต่ำ — โปรดตรวจกับเอกสาร'}
+                <span style={{ fontSize: 12, fontWeight: 400, color: facts.confidence === 'high' ? 'var(--ok)' : facts.confidence === 'medium' ? 'var(--warn)' : 'var(--bad)' }}>
+                  · ความมั่นใจ{facts.confidence === 'high' ? 'สูง' : facts.confidence === 'medium' ? 'ปานกลาง' : 'ต่ำ โปรดตรวจกับเอกสาร'}
                 </span>
               </span>
               {opts.map(([b, label, v]) => (
-                <label key={b} className="hv-tx" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, cursor: 'pointer' }}>
-                  <input type="radio" name="basis" checked={basis === b && amt === v} onChange={() => choose(b, v)} />
+                <label key={b} className="hv-tx" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                  <input type="radio" name="basis" checked={basis === b && amt === v} onChange={() => choose(b, v)} style={{ accentColor: 'var(--brand)' }} />
                   <span style={{ flex: 1 }}>{label}</span>
                   <b style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(v)} บาท</b>
                 </label>
               ))}
-              {facts.vat != null && <span style={{ fontSize: 12, color: '#5E6680' }}>VAT {fmtMoney(facts.vat)} บาท{facts.wht != null ? ` · หัก ณ ที่จ่าย ${fmtMoney(facts.wht)} บาท` : ''}</span>}
-              {wordsOk && <span style={{ fontSize: 12, color: '#14633F' }}>✓ ตรงกับจำนวนเงินตัวอักษรในเอกสาร</span>}
+              {facts.vat != null && <span className="t-meta">VAT {fmtMoney(facts.vat)} บาท{facts.wht != null ? ` · หัก ณ ที่จ่าย ${fmtMoney(facts.wht)} บาท` : ''}</span>}
+              {wordsOk && <span className="t-ok" style={{ fontSize: 12 }}>ตรงกับจำนวนเงินตัวอักษรในเอกสาร</span>}
               {others.length > 0 && (
-                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: '#475069' }}>
+                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 13, color: 'var(--ink-2)' }}>
                   ตัวเลขอื่นที่พบ:
                   {others.map((c) => (
-                    <button key={c.value} onClick={() => choose('manual', c.value)} title={c.line} className="btn sm" style={{ height: 28, fontSize: 12 }}>{fmtMoney(c.value)}</button>
+                    <button key={c.value} onClick={() => choose('manual', c.value)} title={c.line} className="btn xs">{fmtMoney(c.value)}</button>
                   ))}
                 </span>
               )}
             </div>
           )}
           {method === 'pdf-text' && facts && (facts.total == null || facts.confidence !== 'high') && (
-            <button onClick={() => pick(file, true)} className="btn sm" style={{ alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
+            <button onClick={() => pick(file, true)} className="lnk" style={{ alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
           )}
           {partyWarn && <Notice kind="error">ชื่อลูกค้าในเอกสาร "{facts!.party}" ไม่ตรงกับ "{deal.client}" — ตรวจว่าแนบถูกรายการ</Notice>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
             <label style={labelCol}>
               ยอดเงินที่ยืนยัน (บาท)
-              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} className="fld" style={{ fontSize: 16, fontWeight: 500 }} />
-              {badAmt && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>อ่านเป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
+              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} className="fld" style={{ fontWeight: 500, ...(badAmt ? { borderColor: 'var(--bad)' } : {}) }} />
+              {badAmt && <span role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>อ่านเป็นจำนวนเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
             </label>
             <label style={labelCol}>
               นับยอดนี้เป็น
@@ -224,16 +223,18 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
               <input value={docNo} onChange={(ev) => setDocNo(ev.target.value)} className="fld" />
             </label>
             <label style={labelCol}>
-              ลงวันที่{docDate ? ` (${isoTh(docDate)})` : ''}
-              <input type="date" value={docDate} onChange={(ev) => setDocDate(ev.target.value)} className="fld" />
+              ลงวันที่
+              <DateField value={docDate} onChange={setDocDate} placeholder="ไม่ระบุ" />
             </label>
           </div>
-          {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? '#8A2B12' : '#475069' }}>{saving}</span>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button onClick={onClose} className="btn sm">ยกเลิก</button>
-            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} className="btn sm pri" style={{ opacity: badAmt ? 0.5 : 1 }}>
-              {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
-            </button>
+          {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? 'var(--bad)' : 'var(--ink-2)' }}>{saving}</span>}
+          <div className="dlg-act">
+            <button onClick={onClose} className="quiet">ยกเลิก</button>
+            {!badAmt && (
+              <button onClick={save} disabled={saving === 'กำลังบันทึก…'} className="btn pri">
+                {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
+              </button>
+            )}
           </div>
         </>
       )}

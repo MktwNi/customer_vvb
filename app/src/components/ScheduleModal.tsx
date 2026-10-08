@@ -3,11 +3,10 @@ import { useApp } from '../state';
 import { TT } from '../lib/constants';
 import { addDays, fmtN, nextWork, todayISO } from '../lib/format';
 import type { TaskForm, TaskType } from '../lib/types';
-import { Opts } from './ui';
+import { DateField, Opts } from './ui';
 import { useDialog } from './useDialog';
 
-const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: '#475069' };
-const ctl: CSSProperties = { borderRadius: 10, padding: '0 10px' }; // with class "fld"
+const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
 
 export function ScheduleModal() {
   const { ui } = useApp();
@@ -27,6 +26,7 @@ function ScheduleForm() {
   const c = o.ids.length === 1 ? e.company(o.ids[0]) : undefined;
   const isMulti = !o.taskId && o.ids.length > 1;
   const gone = !!o.taskId && !t; // a teammate deleted it while the form was open
+  const [date, setDate] = useState(() => (init ? init.date : nextWork(addDays(todayISO(), 1))));
   const cancel = () => set({ sched: null });
   const save = (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -41,22 +41,22 @@ function ScheduleForm() {
 
   return (
     <>
-      <div onClick={cancel} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.45)', zIndex: 50 }} />
-      <form ref={ref} role="dialog" aria-modal="true" onSubmit={save} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 'min(480px,94vw)', background: '#fff', borderRadius: 22, padding: 22, zIndex: 51, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <span style={{ fontSize: 18, fontWeight: 500 }}>{o.taskId ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'}</span>
-        <span style={{ fontSize: 13, color: '#475069' }}>{c ? c.name + (o.pid && e.people[o.pid] ? ' · กับ ' + e.people[o.pid].name : '') : o.ids.length > 1 ? 'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
+      <div onClick={cancel} className="dlg-back" style={{ zIndex: 50 }} />
+      <form ref={ref} role="dialog" aria-modal="true" aria-label="นัดติดต่อ" onSubmit={save} className="dlg" style={{ width: 'min(480px,94vw)', zIndex: 51, gap: 12 }}>
+        <span className="dlg-t">{o.taskId ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'}</span>
+        <span className="t-sec">{c ? c.name + (o.pid && e.people[o.pid] ? ' · กับ ' + e.people[o.pid].name : '') : o.ids.length > 1 ? 'กระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
         <label style={field}>
           ประเภท
-          <select name="type" defaultValue={init ? init.type : 'call'} className="fld sel" style={ctl}><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
+          <select name="type" defaultValue={init ? init.type : 'call'} className="fld sel"><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
         </label>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <label style={field}>วันที่<input name="date" type="date" defaultValue={init ? init.date : nextWork(addDays(todayISO(), 1))} className="fld" style={ctl} /></label>
-          <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} className="fld" style={ctl} /></label>
+          <label style={field}>วันที่<DateField name="date" value={date} onChange={(v) => v && setDate(v)} /></label>
+          <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} className="fld" /></label>
         </div>
         {isMulti && (
           <label style={field}>
             กระจายนัด
-            <select name="spread" defaultValue="5" className="fld sel" style={ctl}>
+            <select name="spread" defaultValue="5" className="fld sel">
               <option value="0">ทั้งหมดในวันเดียว</option>
               <option value="3">วันละ 3 ราย (วันทำการ)</option>
               <option value="5">วันละ 5 ราย (วันทำการ)</option>
@@ -64,11 +64,11 @@ function ScheduleForm() {
             </select>
           </label>
         )}
-        <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} className="fld" style={ctl} /></label>
-        {gone && <span role="alert" style={{ fontSize: 13, color: '#8A2B12' }}>คนในทีมลบนัดนี้ไปแล้วระหว่างที่เปิดอยู่ จึงบันทึกไม่ได้ — กดยกเลิก แล้วเพิ่มนัดใหม่ถ้ายังต้องการ</span>}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={cancel} className="hv" style={{ cursor: 'pointer', height: 40, padding: '0 14px', border: 0, borderRadius: 999, color: '#475069', fontSize: 14 }}>ยกเลิก</button>
-          <button type="submit" disabled={gone} className="btn pri" style={{ padding: '0 18px', fontSize: 14, ...(gone ? { background: '#A8B0C8', opacity: 1 } : {}) }}>บันทึกนัด</button>
+        <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} className="fld" /></label>
+        {gone && <span role="alert" className="note err">คนในทีมลบนัดนี้ไปแล้วระหว่างที่เปิดอยู่ จึงบันทึกไม่ได้ กดยกเลิก แล้วเพิ่มนัดใหม่ถ้ายังต้องการ</span>}
+        <div className="dlg-act">
+          <button type="button" onClick={cancel} className="quiet">ยกเลิก</button>
+          {!gone && <button type="submit" className="btn pri">บันทึกนัด</button>}
         </div>
       </form>
     </>

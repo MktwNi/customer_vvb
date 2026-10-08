@@ -6,7 +6,7 @@ import { TGT } from '../lib/constants';
 import { dataUrl } from '../lib/core';
 import { fmtN, isoTh } from '../lib/format';
 import type { Company } from '../lib/types';
-import { PageHead, card, heroGrad } from '../components/ui';
+import { Kpi, PageHead, card } from '../components/ui';
 
 type Geo = FeatureCollection<Geometry, { th: string }>;
 type Metric = 'all' | 'act' | 'soon' | 'exp' | 'opp' | 'gi';
@@ -122,7 +122,6 @@ export function MapTab() {
     svg.call(zoom).on('dblclick.zoom', null);
   }, [zoom, path]);
   const zoomBy = (k: number) => svgRef.current && d3.select(svgRef.current).transition().duration(300).call(zoom.scaleBy, k);
-  const zoomReset = () => svgRef.current && d3.select(svgRef.current).transition().duration(400).call(zoom.transform, d3.zoomIdentity);
   const k0 = svgRef.current ? d3.zoomTransform(svgRef.current).k : 1;
 
   const ticks = [1, 10, 100, 1000, 10000].filter((t) => t <= mx * 1.5);
@@ -145,7 +144,11 @@ export function MapTab() {
     if (tipRef.current) tipRef.current.style.opacity = '0';
   };
   const panelList = useMemo(() => (sel ? by[sel] || [] : list), [sel, by, list]);
-  const clearSel = useCallback(() => setSel(null), []);
+  // "ดูทั้งประเทศ" also puts the zoom back (there is no separate reset button)
+  const clearSel = useCallback(() => {
+    setSel(null);
+    if (svgRef.current) d3.select(svgRef.current).transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+  }, [zoom]);
   const toTable = useCallback(() => {
     const p = D.prov.indexOf(sel || ''), i = D.ind.indexOf(fInd);
     setF({ prov: p >= 0 ? String(p) : '', ind: i >= 0 ? String(i) : '', tgt: fTgt, view: 'co' });
@@ -153,26 +156,23 @@ export function MapTab() {
 
   return (
     <>
-      <PageHead title="แผนที่ลูกค้ารายจังหวัด" sub="กดจังหวัดเพื่อดูกลุ่มเป้าหมายและรายชื่อที่ต้องติดต่อก่อน" />
+      <PageHead title="แผนที่ลูกค้ารายจังหวัด" sub="กดจังหวัดบนแผนที่หรือในอันดับ เพื่อดูกลุ่มเป้าหมายและรายชื่อที่ต้องติดต่อก่อน" />
       <div className="map-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ ...card, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', padding: '16px 18px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
-            ระบายสีแผนที่ตาม
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', background: '#E6ECFD', padding: 4, borderRadius: 999 }}>
-              {METRICS.map(([k, l]) => (
-                <button key={k} onClick={() => setMetric(k)} aria-pressed={metric === k} className="hv" style={{ border: 0, cursor: 'pointer', height: 32, padding: '0 13px', borderRadius: 999, fontSize: 13, ...(metric === k ? { '--bg': '#1F5BD8', '--hv': 'var(--brand-deep)' } : {}), color: metric === k ? '#fff' : '#1745B8' }}>{l}</button>
-              ))}
-            </div>
-          </div>
-          <span style={{ flex: 1 }} />
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
+        <div className="card" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', padding: '16px 18px' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}>
+            ระบายสีตาม
+            <select value={metric} onChange={(ev) => setMetric(ev.target.value as Metric)} className="fld sel" style={{ minWidth: 220 }}>
+              {METRICS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}>
             กลุ่มอุตสาหกรรม
             <select value={fInd} onChange={(ev) => setFInd(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
               <option value="">ทั้งหมด</option>
               {indCounts.map(([k, n]) => <option key={k} value={k}>{`${k} (${fmtN(n)})`}</option>)}
             </select>
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}>
             กลุ่มเป้าหมาย
             <select value={fTgt} onChange={(ev) => setFTgt(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
               <option value="">ทั้งหมด</option>
@@ -182,13 +182,12 @@ export function MapTab() {
         </div>
 
         <div className="map-grid">
-          <div ref={cardRef} style={{ ...card, position: 'relative', overflow: 'hidden', background: '#EEF2FF', minHeight: 300 }}>
+          <div ref={cardRef} style={{ ...card, position: 'relative', overflow: 'hidden', background: '#F2F5FC', minHeight: 300 }}>
             <div className="map-zoom" style={{ position: 'absolute', right: 14, top: 14, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 2 }}>
               <button onClick={() => zoomBy(1.6)} aria-label="ขยาย">+</button>
               <button onClick={() => zoomBy(1 / 1.6)} aria-label="ย่อ">−</button>
-              <button onClick={zoomReset} aria-label="รีเซ็ต" style={{ fontSize: 13 }}>⟲</button>
             </div>
-            {err && <span style={{ position: 'absolute', inset: 20, fontSize: 13.5, color: '#8A2B12' }}>{err}</span>}
+            {err && <span className="t-bad" style={{ position: 'absolute', inset: 20, fontSize: 14 }}>{err}</span>}
             {path && geo && (
               <svg ref={svgRef} viewBox={`0 0 ${width} ${H}`} height={H} style={{ display: 'block', width: '100%' }} role="img" aria-label="แผนที่ประเทศไทยรายจังหวัด">
                 <g ref={gRef}>
@@ -218,8 +217,8 @@ export function MapTab() {
                 </g>
               </svg>
             )}
-            <div style={{ position: 'absolute', left: 16, bottom: 14, background: 'rgba(255,255,255,.94)', border: '1px solid #E3E7F1', borderRadius: 14, padding: '10px 12px', fontSize: 11.5, color: '#475069', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontWeight: 500, color: '#0E1430' }}>{mLabel}</span>
+            <div style={{ position: 'absolute', left: 16, bottom: 14, background: 'rgba(255,255,255,.94)', border: '1px solid var(--line)', borderRadius: 14, padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ color: 'var(--ink)', fontSize: 13 }}>{mLabel}</span>
               <span style={{ display: 'block', width: 190, height: 10, borderRadius: 5, background: `linear-gradient(90deg,${d3.range(0, 1.01, 0.1).map((t) => ramp(t)).join(',')})` }} />
               <span style={{ display: 'flex', justifyContent: 'space-between', width: 190 }}>{ticks.map((t) => <span key={t}>{fmtN(t)}</span>)}</span>
             </div>
@@ -236,17 +235,14 @@ export function MapTab() {
           <Panel list={panelList} name={sel} refISO={e.ref} D={D} onClear={clearSel} onOpen={open} onTable={toTable} />
         </div>
 
-        <div style={{ ...card, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, fontSize: 15.5, fontWeight: 500 }}>อันดับจังหวัด · {mLabel}</h3>
-            <span style={{ fontSize: 12.5, color: '#475069', lineHeight: 1.5 }}>กดเพื่อดูรายละเอียดจังหวัด</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(210px,1fr))', gap: 8 }}>
+        <div className="card" style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h3 className="card-t">อันดับจังหวัด · {mLabel}</h3>
+          <div className="map-rank">
             {rank.map(([k, n], i) => (
-              <button key={k} onClick={() => setSel(k)} className="hv" style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: '26px minmax(0,1fr) auto', gap: 8, alignItems: 'center', padding: '9px 12px', borderRadius: 12, border: `1px solid ${k === sel ? '#081247' : '#E3E7F1'}`, ...(k === sel ? { '--bg': '#EEF2FF', '--hv': '#DCE5FA' } : { '--bg': '#fff' }), fontSize: 13, color: '#0E1430', textAlign: 'left' }}>
-                <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#E6ECFD', color: '#1F5BD8', fontSize: 11.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
-                <b style={{ fontWeight: 500 }}>{fmtN(n)}</b>
+              <button key={k} onClick={() => setSel(k)} aria-pressed={k === sel} className="hv" style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: '28px minmax(0,1fr) auto', gap: 8, alignItems: 'center', padding: '9px 10px', borderRadius: 10, border: 0, borderBottom: '1px solid var(--divider)', ...(k === sel ? { '--bg': 'var(--tint)', '--hv': 'var(--tint-2)' } : {}), fontSize: 14, color: 'var(--ink)', textAlign: 'left' }}>
+                <span className="ov-rank">{i + 1}.</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: k === sel ? 500 : 400 }}>{k}</span>
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtN(n)}</span>
               </button>
             ))}
           </div>
@@ -262,36 +258,31 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
   const inds = Object.entries(a.ind).sort((x, y) => y[1] - x[1]).slice(0, 6);
   const im = Math.max(1, ...inds.map((x) => x[1]));
   const orgs = list.filter((r) => r.tgt <= 1).sort((x, y) => x.tgt - y.tgt || (x.days ?? 1e9) - (y.days ?? 1e9)).slice(0, 8);
-  const h3 = { margin: 0, fontSize: 15.5, fontWeight: 500 } as const;
-  const row = { display: 'grid', gridTemplateColumns: '170px minmax(0,1fr) 54px', gap: 10, alignItems: 'center', fontSize: 13 } as const;
+  const h3 = { margin: 0, fontSize: 16, fontWeight: 500 } as const;
+  const row = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 54px', gap: 10, alignItems: 'center', fontSize: 13 } as const;
   const ell = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
-  const bar = (w: number, c = '#1F5BD8') => (
-    <span style={{ height: 10, background: '#EEF1F8', borderRadius: 6, overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${w}%`, background: c, borderRadius: 6 }} /></span>
+  const bar = (w: number) => (
+    <span className="ov-bar"><i style={{ width: `${w}%` }} /></span>
   );
   return (
-    <div style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div className="hero" style={{ borderRadius: 22, padding: '18px 20px', color: '#fff', background: heroGrad, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 12.5, color: '#fff' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
-            <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.3 }}>{name || 'ทั้งประเทศ'}</span>
-          </div>
-          {name && <button onClick={onClear} className="hv-n" style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', '--bg': 'rgba(6,22,90,.2)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
+    <div className="card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span className="t-meta" style={{ fontSize: 13 }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
+          <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.3 }}>{name || 'ทั้งประเทศ'}</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8 }}>
-          {([['บริษัท', a.n], ['CFO ในอายุ', a.act], ['ใกล้หมดอายุ', a.soon], ['มีเบอร์โทร', a.ph]] as const).map(([k, n]) => (
-            <div key={k} style={{ background: 'rgba(6,22,90,.2)', border: '1px solid rgba(185,200,255,.3)', borderRadius: 12, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 11.5, color: '#fff' }}>{k}</span>
-              <span style={{ fontSize: 20, fontWeight: 500 }}>{fmtN(n)}</span>
-            </div>
-          ))}
-        </div>
+        {name && <button onClick={onClear} className="lnk" style={{ flex: 'none' }}>ดูทั้งประเทศ</button>}
+      </div>
+      <div className="kpis k3">
+        <Kpi hero label="บริษัท" value={fmtN(a.n)} />
+        <Kpi label="CFO ในอายุ" value={fmtN(a.act)} zero={!a.act} />
+        <Kpi label="ใกล้หมดอายุ" value={fmtN(a.soon)} zero={!a.soon} />
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <h3 style={h3}>กลุ่มเป้าหมาย</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {a.tg.slice(0, 8).map((n, i) => (
-            <div key={i} style={row}><span style={ell}>{i + 1}. {TGT[i]}</span>{bar((n / tm) * 100)}<span style={{ textAlign: 'right', color: '#475069', fontVariantNumeric: 'tabular-nums' }}>{fmtN(n)}</span></div>
+            <div key={i} style={row}><span style={ell}>{i + 1}. {TGT[i]}</span>{bar((n / tm) * 100)}<span style={{ textAlign: 'right', color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{fmtN(n)}</span></div>
           ))}
         </div>
       </div>
@@ -299,7 +290,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
         <h3 style={h3}>กลุ่มอุตสาหกรรมหลัก</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {inds.map(([k, n]) => (
-            <div key={k} style={row}><span style={ell}>{k}</span>{bar((n / im) * 100, '#4D72FF')}<span style={{ textAlign: 'right', color: '#475069', fontVariantNumeric: 'tabular-nums' }}>{fmtN(n)}</span></div>
+            <div key={k} style={row}><span style={ell}>{k}</span>{bar((n / im) * 100)}<span style={{ textAlign: 'right', color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{fmtN(n)}</span></div>
           ))}
         </div>
       </div>
@@ -308,26 +299,18 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <h3 style={h3}>ต้องติดต่อก่อน (กลุ่ม 1–2)</h3>
             <div>
-              {orgs.map((r) => {
-                const s = r.tgt === 0 ? ['ใกล้หมดอายุ', '#FDECC8', '#9A5A00'] : ['หมดอายุไม่เกิน 12 เดือน', '#EEF1F8', '#475069'];
-                return (
-                  <button key={r.id} className="map-org hv" onClick={() => onOpen(r.id)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '10px 8px', margin: '0 -8px', border: 0, borderBottom: '1px solid #EEF1F8', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: 'calc(100% + 16px)' }}>
-                    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <span className="on" style={{ fontSize: 13.5, fontWeight: 500, ...ell }}>{r.name}</span>
-                      <span style={{ fontSize: 12.5, color: '#475069', lineHeight: 1.5 }}>CFO หมดอายุ {isoTh(r.cfoEx)}</span>
-                    </span>
-                    <span style={{ fontSize: 11.5, fontWeight: 500, padding: '2px 9px', borderRadius: 999, whiteSpace: 'nowrap', background: s[1], color: s[2] }}>{s[0]}</span>
-                  </button>
-                );
-              })}
-              {!orgs.length && <span style={{ fontSize: 12.5, color: '#475069' }}>ไม่มี</span>}
+              {orgs.map((r) => (
+                <button key={r.id} className="map-org hv" onClick={() => onOpen(r.id)} style={{ display: 'flex', flexDirection: 'column', padding: '10px 8px', margin: '0 -8px', border: 0, borderBottom: '1px solid var(--divider)', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: 'calc(100% + 16px)', minWidth: 0 }}>
+                  <span className="on" style={{ fontSize: 14, fontWeight: 500, ...ell }}>{r.name}</span>
+                  <span className="t-meta">{r.tgt === 0 && r.days != null ? `เหลือ ${fmtN(r.days)} วัน · หมดอายุ ${isoTh(r.cfoEx)}` : `หมดอายุ ${isoTh(r.cfoEx)}`}</span>
+                </button>
+              ))}
+              {!orgs.length && <span className="empty">ไม่มี</span>}
             </div>
           </div>
-          <div><button onClick={onTable} className="btn pri" style={{ height: 38, fontWeight: 500 }}>ดูรายชื่อทั้งหมด {fmtN(a.n)} บริษัท →</button></div>
+          <div><button onClick={onTable} className="btn pri">ดูรายชื่อทั้งหมด {fmtN(a.n)} บริษัท</button></div>
         </>
-      ) : (
-        <span style={{ fontSize: 12.5, color: '#475069', lineHeight: 1.5 }}>กดจังหวัดบนแผนที่หรือในอันดับด้านล่างเพื่อดูรายละเอียด</span>
-      )}
+      ) : null}
     </div>
   );
 });

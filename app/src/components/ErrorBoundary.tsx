@@ -16,10 +16,10 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey: st
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div role="alert" style={{ background: '#FBE3DC', color: '#8A2B12', borderRadius: 16, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
+      <div role="alert" style={{ background: 'var(--bad-bg)', color: 'var(--bad)', borderRadius: 'var(--r-inner)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
         <b style={{ fontWeight: 500 }}>หน้านี้แสดงผลไม่ได้</b>
         <span style={{ lineHeight: 1.6 }}>มีข้อมูลบางรายการที่อ่านไม่ได้ ข้อมูลอื่นยังอยู่ครบ ลองโหลดหน้าใหม่ หรือไปเมนูอื่นก่อน ถ้ายังเป็นอยู่ แจ้งผู้ดูแลพร้อมข้อความนี้: {String(this.state.error.message || this.state.error).slice(0, 200)}</span>
-        <button onClick={() => location.reload()} className="btn sm" style={{ alignSelf: 'flex-start', borderColor: '#8A2B12', color: '#8A2B12', '--hv': '#FDF0EB' }}>โหลดหน้าใหม่</button>
+        <button onClick={() => location.reload()} className="btn sm" style={{ alignSelf: 'flex-start' }}>โหลดหน้าใหม่</button>
       </div>
     );
   }
