@@ -19,9 +19,9 @@ import {
 } from './teamSync';
 import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
 import {
-  HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, attachStage, beYear, closeReady, countedAt, isPayStage, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
-  toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
-  type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
+  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, isPayStage, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
+  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
+  type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
@@ -1065,6 +1065,11 @@ export class GccEngine {
         const l = toPay(v);
         if (l && k.indexOf('/') > 0 && !(k in S.pays)) S.pays[k] = l;
       });
+      Object.entries(IS.acts || {}).forEach(([k, v]) => {
+        const j = k.indexOf('/'), a = j > 0 ? toAct(v, k.slice(0, j), k.slice(j + 1)) : null;
+        const A = S.acts || (S.acts = {});
+        if (a && !(k in A)) A[k] = a;
+      });
       Object.entries(IS.log || {}).forEach(([k, v]) => {
         const l = toLog(v, k);
         if (l && !(k in S.log)) S.log[k] = l;
@@ -1505,14 +1510,15 @@ export class GccEngine {
     this.dropDealRecords(id);
     this.salesLog(d, why, d.section);
   }
-  /** A deleted deal's stage notes, documents (and their files) and payment plan go with it. */
+  /** A deleted deal's stage notes, documents (and their files), payment plan and contact records go with it. */
   private dropDealRecords(id: string) {
     const S = this.sales;
-    (['steps', 'pays'] as const).forEach((bag) =>
-      Object.keys(S[bag]).forEach((k) => {
+    const bags = { steps: 'dstep/', pays: 'dpay/', acts: 'dact/' } as const;
+    (Object.keys(bags) as (keyof typeof bags)[]).forEach((bag) =>
+      Object.keys(S[bag] || {}).forEach((k) => {
         if (!k.startsWith(id + '/')) return;
-        delete S[bag][k];
-        this.op((bag === 'steps' ? 'dstep/' : 'dpay/') + k);
+        delete S[bag]![k];
+        this.op(bags[bag] + k);
       }),
     );
     Object.entries(S.docs).forEach(([k, doc]) => {
@@ -1724,6 +1730,42 @@ export class GccEngine {
     return payDue(this.sales, Object.values(this.sales.deals), from, to, todayISO());
   }
 
+  // ---- contacts beyond the stages: one record each, dact/<deal>/<id> (lib/sales.ts DealAct)
+  /** "บันทึกการติดต่อ": a call, e-mail or meeting on `d` (default today) at `stage` (default where the
+   *  deal is, actStage). Never rewrites the deal or a stage: the last contact is derived (lastContact). */
+  addAct(dealId: string, a: { type: ActType; note: string; d?: string; stage?: string; pid?: string }): DealAct | null {
+    if (!this.can('edit')) return this.deny(), null;
+    const S = this.sales, deal = S.deals[dealId];
+    if (!deal) return null;
+    const today = todayISO(), id = uid();
+    const act = toAct({ d: a.d || today, type: a.type, note: (a.note || '').trim(), stage: a.stage ?? actStage(S, deal, today), pid: a.pid || '', by: this.me(), at: new Date().toISOString() }, dealId, id);
+    if (!act) return null;
+    const { deal: _d, id: _i, ...v } = act;
+    (S.acts || (S.acts = {}))[`${dealId}/${id}`] = act;
+    this.batchOps(() => {
+      this.op(keyOf.dact(dealId, id), v);
+      this.salesLog(deal, 'บันทึกการติดต่อ', [ACT_TH[act.type], act.stage, act.note.slice(0, 120)].filter(Boolean).join(' · '));
+    });
+    this.saveSales();
+    return act;
+  }
+  /** Who may remove a contact record: as with the company's contact log, its author (an account that
+   *  can edit) or an admin; without accounts, anyone. */
+  canDelAct(a: Pick<DealAct, 'by'>) {
+    return this.can('admin') || (this.can('edit') && a.by === this.me());
+  }
+  delAct(dealId: string, actId: string) {
+    const S = this.sales, k = `${dealId}/${actId}`, a = (S.acts || {})[k], deal = S.deals[dealId];
+    if (!a) return;
+    if (!this.canDelAct(a)) return this.deny();
+    delete S.acts![k];
+    this.batchOps(() => {
+      this.op(keyOf.dact(dealId, actId));
+      if (deal) this.salesLog(deal, 'ลบการติดต่อ', [ACT_TH[a.type], isoTh(a.d), a.note.slice(0, 80)].filter(Boolean).join(' · '));
+    });
+    this.saveSales();
+  }
+
   // ---- attached documents (quotation / invoice); files go to the team's Drive, a copy stays in this browser
   /** Script supports attachments (null = not checked yet for this connection). */
   teamFiles: boolean | null = null;
@@ -1900,6 +1942,11 @@ export class GccEngine {
       }
       await this.store.update<string[]>('docDelQueue', (cur) => (cur || []).filter((x) => x !== fileId)).catch(() => {});
     }
+  }
+  /** This browser's copy of a document's file, or null (a thumbnail does not download from Drive). */
+  async docLocalBlob(doc: DealDoc): Promise<Blob | null> {
+    const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer }>(this.docBlobKey(doc.id)).catch(() => null);
+    return b ? new Blob([b.data], { type: b.mime || doc.mime }) : null;
   }
   /** The file itself: this browser's copy, else downloaded from the team's Drive (and kept). */
   async docBlob(doc: DealDoc): Promise<Blob> {
@@ -2650,7 +2697,7 @@ export class GccEngine {
     }
   }
   /** Queued deletions of a deal, customer or person this account may not make, with what went with
-   *  them (a deal's stage notes, documents, payment plan and history entry; a person's notes). */
+   *  them (a deal's stage notes, documents, payment plan, contact records and history entry; a person's notes). */
   private refusedCascade(ops: SyncOp[]) {
     const cut = new Set<string>(), deals = new Set<string>(), people = new Set<string>();
     const del = (o: SyncOp) => !!o.del || o.v == null;
@@ -2666,7 +2713,7 @@ export class GccEngine {
         const [type, id] = o.k.split('/');
         const v = o.v as Partial<DealLog> | undefined;
         if (
-          (del(o) && (type === 'dstep' || type === 'ddoc' || type === 'dpay') && deals.has(id)) ||
+          (del(o) && (type === 'dstep' || type === 'ddoc' || type === 'dpay' || type === 'dact') && deals.has(id)) ||
           (type === 'dundo' && deals.has(id)) ||
           (type === 'dlog' && !!v && deals.has(v.deal || '') && (v.action === 'ลบลูกค้า' || v.action === 'ยกเลิกการนำเข้า')) ||
           (del(o) && type === 'log' && id.startsWith('p-') && people.has(id.slice(2)))
@@ -2830,12 +2877,12 @@ export class GccEngine {
     const lastRow = new Map<string, SyncRow>();
     rows.forEach((r) => this.pending.has(r.k) && lastRow.set(r.k, r));
     const merged: SyncRow[] = [], dropped: SyncOp[] = [], revised = new Map<string, SyncOp>();
-    // a deal the team deleted: notes, documents and plan lines this browser queued for it are dropped too
+    // a deal the team deleted: notes, documents, plan lines and contacts this browser queued for it are dropped too
     const lastDeal = new Map<string, SyncRow>();
     rows.forEach((r) => r.k.startsWith('deal/') && lastDeal.set(r.k.slice(5), r));
     const goneNow = new Set([...lastDeal].filter(([, r]) => r.del || r.v == null).map(([id]) => id));
     this.pending.forEach((o, k) => {
-      const m = /^(dstep|ddoc|dpay)\/([^/]+)\//.exec(k);
+      const m = /^(dstep|ddoc|dpay|dact)\/([^/]+)\//.exec(k);
       if (m && goneNow.has(m[2]) && !o.del && !lastRow.has(k) && !this.pendingDealAlive(m[2])) dropped.push(o);
     });
     lastRow.forEach((r, k) => {
@@ -3511,7 +3558,7 @@ export class GccEngine {
   private stampFor(s: Session) {
     return (o: SyncOp): SyncOp => {
       const v = o.v as Record<string, unknown> | undefined;
-      const own = s.role === 'sales' && /^d?log\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
+      const own = s.role === 'sales' && /^(d?log|dact)\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
       return { ...o, by: s.name, ...(own ? { v: { ...v, by: s.name } } : {}) };
     };
   }

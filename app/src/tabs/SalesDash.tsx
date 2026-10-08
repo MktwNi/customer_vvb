@@ -116,15 +116,15 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
     .sort((a, b) => b[1].actual - a[1].actual || b[1].forecast - a[1].forecast || b[1].n - a[1].n);
   const top = sellers[0];
 
-  // steps dated this week (Monday to today: a later date is a plan, not a contact yet), compared
-  // with the same days of last week
+  // steps and contact records dated this week (Monday to today: a later date is a plan, not a contact
+  // yet), compared with the same days of last week
   const mon = mondayOf(today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
   const ids = new Set(list.map((d) => d.id));
   const perDay: Record<string, number> = {};
   let lastWeek = 0;
   const prevMon = addDays(mon, -7), prevToday = addDays(today, -7);
-  Object.entries(S.steps).forEach(([k, x]) => {
+  [...Object.entries(S.steps), ...Object.entries(S.acts || {})].forEach(([k, x]) => {
     if (!x.d || !ids.has(k.slice(0, k.indexOf('/')))) return;
     if (x.d >= mon && x.d <= today) perDay[x.d] = (perDay[x.d] || 0) + 1;
     else if (x.d >= prevMon && x.d <= prevToday) lastWeek++;

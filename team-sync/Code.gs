@@ -47,7 +47,7 @@
  *   With a token, `by` is always the account's display name (the op's by is ignored), every reply adds
  *   me: { u, name, role }, and a remembered session with fewer than 15 days left also gets a new tok + exp.
  * Roles: admin does everything. sales may not write scfg/, dedup/, team/, dundo/ nor delete deal/, cust/,
- * person/ (refused per op in `denied`, never stored); its log/ and dlog/ values get by = its name.
+ * person/ (refused per op in `denied`, never stored); its log/, dlog/ and dact/ values get by = its name.
  * viewer only reads: push, upload and delfile answer 'forbidden'.
  *   Errors: { ok: false, error: 'unauthorized' | 'no_team_key' | 'busy' | 'bad_json' | 'unknown_action'
  *            | 'file_too_large' | 'bad_file_type' | 'empty_file' | 'not_found' | 'drive_permission'
@@ -363,8 +363,9 @@ function push_(ops, actor) {
         continue;
       }
       let val = op.v;
-      // a contact-log entry written by sales always carries its own name (key order kept)
-      if (sales && !delR && /^d?log\//.test(k) && val && typeof val === 'object' && !Array.isArray(val) && Object.prototype.hasOwnProperty.call(val, 'by'))
+      // a contact-log entry (company log, deal history, a deal's contact record) written by sales
+      // always carries its own name (key order kept)
+      if (sales && !delR && /^(d?log|dact)\//.test(k) && val && typeof val === 'object' && !Array.isArray(val) && Object.prototype.hasOwnProperty.call(val, 'by'))
         val = Object.assign({}, val, { by: actor.name });
       const v = del || val === undefined ? '' : JSON.stringify(val);
       if (v.length > MAX_CELL) {

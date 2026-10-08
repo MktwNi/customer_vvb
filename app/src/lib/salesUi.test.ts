@@ -165,7 +165,7 @@ describe('installment words', () => {
       const r = lineStatusView(l, TODAY);
       return [r.kind, r.word, r.chip, r.sub];
     };
-    expect(v('PAY1')).toEqual(['ok', 'รับแล้ว', false, 'รับ 19 ก.ย. · RC-0']);
+    expect(v('PAY1')).toEqual(['ok', 'รับแล้ว', false, 'รับ 19 ก.ย. · จากเอกสาร RC-0']);
     expect(v('PAY2')).toEqual(['warn', 'รับบางส่วน', false, '78,000 จาก 80,250']);
     expect(v('PAY3')).toEqual(['bad', 'เลยกำหนด 4 วัน', true, 'ครบกำหนด 4 ต.ค.']);
     expect(v('PAY4')).toEqual(['warn', 'ถึงกำหนด 3 วัน', true, 'ครบกำหนด 11 ต.ค.']);

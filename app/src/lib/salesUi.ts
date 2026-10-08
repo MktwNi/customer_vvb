@@ -1,8 +1,8 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
 import { daysBetween, dmTh, localDay } from './format';
 import {
-  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, beYear, closeReady, dealMoney, dealResult, dealStatus, fmtMoney, lastStage, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
-  type Deal, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
+  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, beYear, closeReady, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
+  type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
 } from './sales';
 
 /**
@@ -124,7 +124,7 @@ export function lineStatusView(l: LineView, today: string): { kind: StatusKind |
   const by = (kind: StatusKind | 'muted', word: string, sub: string, chip = false) => ({ kind, word, chip, sub });
   switch (l.status) {
     case 'paid':
-      return by('ok', PAY_STATUS_TH.paid, [l.rcvDate ? 'รับ ' + dmTh(l.rcvDate) : '', l.doc ? l.doc.docNo || KIND_TH[l.doc.kind] : 'บันทึกเอง', l.got < l.amt ? fmtMoney(l.got) + ' (ถือว่าครบ)' : ''].filter(Boolean).join(' · '));
+      return by('ok', PAY_STATUS_TH.paid, [l.rcvDate ? 'รับ ' + dmTh(l.rcvDate) : '', l.doc ? 'จากเอกสาร ' + (l.doc.docNo || KIND_TH[l.doc.kind]) : 'บันทึกเอง', l.got < l.amt ? fmtMoney(l.got) + ' (ถือว่าครบ)' : ''].filter(Boolean).join(' · '));
     case 'part':
       return by('warn', PAY_STATUS_TH.part, `${fmtMoney(l.got)} จาก ${fmtMoney(l.amt)}` + (l.lateDays ? ` · เลยกำหนด ${l.lateDays} วัน` : ''));
     case 'late':
@@ -138,6 +138,51 @@ export function lineStatusView(l: LineView, today: string): { kind: StatusKind |
     default:
       return by('muted', PAY_STATUS_TH.off, '');
   }
+}
+
+/**
+ * The word under a money figure (request: documents at every figure): `ok` "จากเอกสาร <docNo>" when a
+ * document backs it; `warn` "ไม่ตรงเอกสาร" when a document disagrees and the figure kept is the user's
+ * (`title` has the numbers); `typed` "พิมพ์เอง" (offer "แนบเอกสาร"); `hand` "บันทึกเอง" (received
+ * without a document); '' when there is no figure. Derived from the records, never stored.
+ */
+export interface FigView { kind: 'ok' | 'warn' | 'typed' | 'hand' | ''; word: string; docNo: string; title: string; doc: DealDoc | null }
+const fig = (kind: FigView['kind'], word: string, title = '', doc: DealDoc | null = null): FigView => ({ kind, word, docNo: doc ? doc.docNo || KIND_TH[doc.kind] : '', title, doc });
+/** A document backing a figure: confirmed by it, or kept against it. */
+export function docFig(doc: DealDoc, what = 'ยอดที่ใช้'): FigView {
+  const mm = docMismatch(doc), name = `${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''}`;
+  return mm ? fig('warn', 'ไม่ตรงเอกสาร', `${name}: ${mismatchText(mm.doc, mm.kept, what)}`, doc) : fig('ok', 'จากเอกสาร', `${name} · ${fmtMoney(doc.amount)} บาท`, doc);
+}
+/** The Forecast: the quotation it comes from, a typed figure a newer quotation disagrees with, or typed. */
+export function fcFig(s: SalesState, d: Deal): FigView {
+  const m = dealMoney(s, d);
+  if (m.fcDoc) return docFig(m.fcDoc, 'Forecast ที่ใช้');
+  if (m.forecast == null) return fig('', '');
+  const q = m.fcOverride ? docsOf(s, d.id).filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at)).pop() : undefined;
+  // typed after the newest quotation: the same figure is still confirmed by it, another one is kept against it
+  if (q) return q.amount === m.forecast ? docFig(q) : fig('warn', 'ไม่ตรงเอกสาร', `${KIND_TH[q.kind]}${q.docNo ? ' ' + q.docNo : ''}: ${mismatchText(q.amount!, m.forecast, 'Forecast ที่พิมพ์ไว้')}`, q);
+  return fig('typed', 'พิมพ์เอง', 'Forecast พิมพ์เอง แนบใบเสนอราคาเพื่อตรวจยอด');
+}
+/** The Actual: its documents (one that disagrees comes first), what was received by hand, or typed. */
+export function acFig(s: SalesState, d: Deal): FigView {
+  const m = dealMoney(s, d);
+  const docs = docsOf(s, d.id).filter((x) => x.target === 'actual' && x.amount != null);
+  const bad = docs.filter((x) => docMismatch(x));
+  if (bad.length) return bad.length === 1 ? docFig(bad[0]) : fig('warn', 'ไม่ตรงเอกสาร', bad.map((x) => docFig(x).title).join('\n'), bad[0]);
+  if (docs.length) {
+    const last = docs[docs.length - 1], v = docFig(last);
+    return docs.length > 1 ? { ...v, docNo: `${v.docNo} และอีก ${docs.length - 1} ใบ`, title: docs.map((x) => docFig(x).title).join('\n') } : v;
+  }
+  if (m.hand) return fig('hand', 'บันทึกเอง', 'รับเงินแล้วโดยไม่มีเอกสาร แนบใบเสร็จเพื่อตรวจยอด');
+  return m.actual != null ? fig('typed', 'พิมพ์เอง', 'Actual พิมพ์เอง แนบใบเสร็จเพื่อตรวจยอด') : fig('', '');
+}
+/** An installment: its document (or the one that disagrees with what is counted), received by hand, or
+ *  only planned (typed). */
+export function lineFig(l: LineView): FigView {
+  const bad = l.docs.find((x) => docMismatch(x));
+  if (bad || l.doc) return docFig(bad || l.doc!, 'ยอดที่นับ');
+  if (l.hand) return fig('hand', 'บันทึกเอง', 'รับเงินแล้วโดยไม่มีเอกสาร แนบใบเสร็จเพื่อตรวจยอด');
+  return fig('typed', 'ตามแผน', 'ยอดตามแผน แนบใบแจ้งหนี้หรือใบเสร็จเพื่อตรวจยอด');
 }
 
 /** The closing card's title (panel, table closing row, phone card). */

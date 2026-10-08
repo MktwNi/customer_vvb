@@ -943,6 +943,7 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-table .k-fc,.sl-table .k-ac{text-align:right}
 .sl-table .k-src{padding:0;visibility:hidden;overflow:hidden}
 .sl-ac2,.sl-sub-last,.sl-table thead small.sl-th-ac2{display:none}
+.sl-table thead small.sl-th-fc{display:block}
 @container sl-box (max-width:1069px){
   .sl-table{--w-resp:68px;--w-last:104px;--w-act:40px}
   .sl-table thead .sl-th2{display:block}
@@ -954,7 +955,7 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
   .sl-table .sl-owner{padding:4px;margin-left:-4px}
   .sl-table .sl-nmw{gap:8px}
   .sl-table .k-ac{padding:0;visibility:hidden;overflow:hidden}
-  .sl-ac2{display:block}.sl-table thead small.sl-th-ac2{display:block}
+  .sl-ac2{display:block}.sl-table thead small.sl-th-ac2{display:block}.sl-table thead small.sl-th-fc{display:none}
   .sl-table .sl-m2{grid-template-columns:var(--w-fc)}
   .sl-table .sl-m2>.k2-ac{grid-column:1;grid-row:2}
   .sl-table .sl-m2>:empty{display:none}
@@ -966,8 +967,9 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
   .sl-sub-last{display:inline}
   .sl-nx em{display:none}
 }
-/* column headings: 12/400 muted on white, a hairline under them; they stick to the top of the page */
-.sl-table thead th{position:sticky;top:var(--sticky-top);z-index:6;height:52px;background:#fff;border-bottom:1px solid var(--line);font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4}
+/* column headings: 12/400 muted on white, a hairline under them; they stick to the top of the page,
+   opaque and above every row and band (a row's cell or date chip never shows through them) */
+.sl-table thead th{position:sticky;top:var(--sticky-top);z-index:8;height:52px;background:#fff;background-clip:padding-box;border-bottom:1px solid var(--line);font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4}
 .sl-table thead small{display:block;font-size:var(--fs-meta);color:var(--muted)}
 .sl-table thead .k-resp{white-space:normal;line-height:1.35}
 .sl-th2{white-space:nowrap}
@@ -1088,8 +1090,12 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-bd.now{--s:calc(var(--bs,12px) + 2px);border:2px dashed var(--brand);background:#fff}
 .sl-bd.now.late{border-color:var(--bad)}
 /* ติดต่อล่าสุด: the date + "7 วันก่อน", or the red "ค้าง 36 วัน" chip; a popover edits the typed date */
-.sl-table tbody .k-last{position:relative;overflow:visible}
-.sl-cdw{display:flex;flex-direction:column;align-items:flex-start;line-height:1.4;gap:2px;position:relative}
+/* not positioned: the date's popover is anchored by .sl-cdw, and a positioned cell could paint over
+   the sticky headings */
+.sl-table tbody .k-last{overflow:visible}
+.sl-cdw{display:flex;flex-direction:column;align-items:flex-start;line-height:1.4;gap:2px}
+/* positioned only while its popover is open (anchors it): at rest nothing in the cell is a layer of its own */
+.sl-cdw.open{position:relative}
 .sl-cdate{cursor:pointer;border:0;padding:1px 6px;margin-left:-6px;border-radius:8px;font:inherit;font-size:var(--fs-body);color:var(--ink);white-space:nowrap}
 .sl-cdate.ro{cursor:default}
 .sl-ago{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap}
@@ -1108,7 +1114,13 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-mn b{font-size:var(--fs-body);font-weight:500;color:var(--ink);white-space:nowrap}
 .sl-mn b.none{color:var(--muted);font-weight:400}
 .sl-mn small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.sl-mn small.ok{color:var(--ok)}.sl-mn small.bad{color:var(--bad)}
+.sl-mn small.ok{color:var(--ok)}.sl-mn small.bad{color:var(--bad)}.sl-mn small.warn{color:var(--warn)}
+/* "พิมพ์เอง" under a figure gives way to "แนบเอกสาร" while its row is pointed at or has the keyboard
+   (one short line fits the cell); touch screens show the link */
+.sl-fig-a{display:none;font-size:var(--fs-meta)}
+.sl-row:is(:hover,:focus-within) .sl-fig.has-a .sl-fig-w{display:none}
+.sl-row:is(:hover,:focus-within) .sl-fig-a{display:inline}
+@media (hover:none){.sl-fig.has-a .sl-fig-w{display:none}.sl-fig-a{display:inline}}
 .sl-mbtn{cursor:pointer;border:0;padding:2px 6px;margin-right:-6px;border-radius:8px;font:inherit;display:flex;flex-direction:column;align-items:flex-end;max-width:calc(100% + 6px);line-height:1.45}
 .fld.sl-mfld{width:100%;height:34px;padding:0 8px;text-align:right;font-size:var(--fs-body)}
 .sl-ac2{font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap;margin-top:1px}
@@ -1165,6 +1177,19 @@ button.sl-amt{cursor:pointer}
 .sl-amt.warn{color:var(--warn)}
 .sl-amt.draft{color:var(--ink-2);font-weight:400}
 .sl-dno{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
+.sl-dno.warn{color:var(--warn)}
+/* "+2 ครั้ง" by a stage's date: its contacts beyond the stage open under it */
+.sl-kmore{display:block;font-size:var(--fs-meta);line-height:1.35;white-space:nowrap}
+/* contacts beyond the stages in an open row: quieter than a stage (no circle, the type in 400) */
+.sl-kid.sl-kact>*{height:34px}
+.sl-kid.sl-kact-h>*{height:38px}
+.sl-kid.sl-kact .sl-kn b{font-weight:400;color:var(--ink-2)}
+.sl-kid.sl-kact.under .sl-kn{padding-left:16px}
+.sl-kid.sl-kact .sl-st-m{font-size:var(--fs-meta);overflow:hidden;text-overflow:ellipsis;display:block}
+.sl-kact-h .sl-knote .lnk{font-size:var(--fs-sec)}
+.sl-table .sl-kid.sl-kact-ed>*{height:auto;padding-top:8px;padding-bottom:8px}
+.sl-kact-ed .sl-qaw .seg{margin-bottom:2px}
+.sl-kact-ed .k-m2 .sl-af-l{padding:0 8px}
 /* the row's "แก้ไข": a text action on hover or focus (always on touch screens) */
 .sl-kedit{font-size:var(--fs-meta);opacity:0;white-space:nowrap;padding:4px 2px}
 .sl-kid:hover .sl-kedit,.sl-kedit:focus-visible,.sl-kid.editing .sl-kedit{opacity:1}
@@ -1254,7 +1279,13 @@ button.sl-amt{cursor:pointer}
 .sl-mc-m b{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
 .sl-mc-m b.none{color:var(--muted);font-weight:400}
 .sl-mc-m small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sl-mc-m small.ok{color:var(--ok)}.sl-mc-m small.bad{color:var(--bad)}
+.sl-mc-m small.ok{color:var(--ok)}.sl-mc-m small.bad{color:var(--bad)}.sl-mc-m small.warn{color:var(--warn)}
+.sl-mc-att{align-self:flex-start;font-size:var(--fs-meta);margin-top:2px}
+/* the open card's contacts beyond the stages, before ปิดงาน */
+.sl-mk-dot{width:8px;height:8px;border-radius:50%;background:var(--mark-future);margin:7px 0 0 7px}
+.sl-mk-acts .sl-mk-t{gap:6px;align-items:stretch}
+.sl-mk-acts .sl-mk-a{align-self:flex-start}
+.sl-mk-t .sl-acts{align-self:stretch}
 .sl-mc-f{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
 .sl-mc-f .sl-nx{height:32px;line-height:30px;font-size:var(--fs-sec)}
 .sl-mc-tog{cursor:pointer;height:32px;padding:0 10px 0 14px;border-radius:var(--r-pill);border:1px solid var(--field);color:var(--ink);font:inherit;font-size:var(--fs-sec);display:inline-flex;align-items:center;gap:6px;flex:none;background-color:#fff}
@@ -1340,6 +1371,15 @@ button.sl-amt{cursor:pointer}
 .sl-repl legend{padding:0 4px;font-size:var(--fs-sec);color:var(--ink-2)}
 .sl-repl label{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:var(--fs-body);cursor:pointer}
 .sl-after{border-radius:var(--r-inner);padding:10px 14px;background:var(--ok-bg);color:var(--ok);font-size:var(--fs-sec);line-height:1.6}
+/* the document's figure against the one it should match: "ตรงกับเอกสาร", or a warning with the two choices */
+.sl-xchk{margin:0;border-radius:var(--r-inner);font-size:var(--fs-sec);line-height:1.6;min-width:0}
+.sl-xchk.ok{padding:8px 14px;background:var(--ok-bg);color:var(--ink-2)}
+.sl-xchk.ok b{color:var(--ok);font-weight:500}
+.sl-xchk.warn{border:0;background:var(--warn-bg);padding:10px 14px 12px;display:flex;flex-direction:column;gap:6px}
+.sl-xchk.warn legend{float:left;width:100%;padding:0;color:var(--warn);font-size:var(--fs-body);font-weight:500;line-height:1.5}
+.sl-xchk label{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink);cursor:pointer}
+.sl-xchk-b{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:var(--fs-meta);color:var(--ink-2)}
+.sl-xchk-b .btn[aria-pressed=true]{border-color:var(--warn);color:var(--warn)}
 .sl-rf-full{display:flex;gap:8px;align-items:center;font-size:var(--fs-sec);color:var(--ink);background:var(--warn-bg);border-radius:12px;padding:8px 12px;cursor:pointer}
 
 /* ---- the deal panel (components/DealPanel.tsx, design §7.8): a white head with one summary strip on
@@ -1401,6 +1441,28 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .sl-tl-n{margin:0;font-size:var(--fs-body);color:var(--ink);line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .sl-tl-plan{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
 .sl-tl-att{align-self:flex-start}
+.sl-tl-act{align-self:flex-start;font-size:var(--fs-sec);opacity:0}
+.sl-tl-i:hover .sl-tl-act,.sl-tl-act:focus-visible{opacity:1}
+@media (hover:none){.sl-tl-act{opacity:1}}
+.dp-h-r{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+/* contacts beyond the stages (components/DealActs.tsx): small entries on a thin rule under their stage */
+.sl-acts{list-style:none;margin:0;padding:0 0 0 12px;border-left:2px solid var(--divider);display:flex;flex-direction:column;gap:6px;min-width:0}
+.sl-act{display:flex;flex-direction:column;gap:1px;min-width:0}
+.sl-act-h{display:flex;gap:8px;align-items:baseline;font-size:var(--fs-meta);color:var(--muted);min-width:0}
+.sl-act-h b{flex:none;font-size:var(--fs-sec);font-weight:500;color:var(--ink-2)}
+.sl-act-h>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sl-act-x{margin-left:auto;flex:none;font-size:var(--fs-meta);opacity:0}
+.sl-act:hover .sl-act-x,.sl-act-x:focus-visible{opacity:1}
+@media (hover:none){.sl-act-x{opacity:1}}
+.sl-act-n{font-size:var(--fs-sec);color:var(--ink);line-height:1.5;overflow-wrap:anywhere;white-space:pre-line}
+.sl-acts-more .lnk{font-size:var(--fs-meta)}
+.sl-af{display:flex;flex-direction:column;gap:8px;background:var(--tint);border:1px solid var(--tint-line);border-radius:var(--r-inner);padding:12px;min-width:0}
+.sl-af-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
+.sl-af .fld{background-color:#fff}
+.sl-af>.fld{height:40px;width:100%}
+.sl-af-l{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sec);color:var(--ink-2);min-width:0}
+.sl-af-l .fld{height:34px;min-width:0;max-width:100%;font-size:var(--fs-sec)}
+.sl-af-a{margin-left:auto;display:flex;gap:12px;align-items:center}
 .sl-tl-i.fut .sl-tl-h b{color:var(--muted);font-weight:400}
 .sl-tl-i.fut .sl-tl-c{padding:2px 0}
 .sl-tl-i.cur-step .sl-tl-c{background:var(--tint);border:1px solid var(--tint-line);border-radius:var(--r-inner);padding:12px 14px;gap:10px;margin-bottom:4px}
@@ -1423,6 +1485,16 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .sl-closing-acts{display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;align-items:center}
 /* a document: what it is and what it counts toward; a click shows its actions */
 .sl-docc{border:1px solid var(--line);border-radius:var(--r-inner);background:#fff;min-width:0}
+.sl-docc.warn{border-color:#F3D9A6}
+.sl-docc-r{display:flex;align-items:center;gap:4px;padding-left:10px}
+.sl-docc-r>.sl-docc-h{flex:1;min-width:0;width:auto}
+/* a picture of the document (first page / the image) that opens the file: the figure checked by eye */
+.sl-thumb{cursor:pointer;flex:none;width:44px;height:56px;padding:0;border:1px solid var(--line);border-radius:8px;background-color:var(--frame);overflow:hidden;display:grid;place-items:center;font:inherit;font-size:var(--fs-meta);color:var(--muted)}
+.sl-thumb img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
+@media (hover:hover){.sl-thumb:hover{border-color:var(--tint-line)}}
+.sl-docc-w{margin:0;padding:0 14px 10px;font-size:var(--fs-sec);color:var(--warn);line-height:1.5}
+.sl-docc-w .lnk{font-size:var(--fs-sec)}
+.sl-docc-a small.warn{color:var(--warn)}
 .sl-docc-h{cursor:pointer;width:100%;display:flex;align-items:center;gap:12px;padding:10px 14px;border:0;border-radius:var(--r-inner);font:inherit;text-align:left;color:var(--ink)}
 .sl-docc.open .sl-docc-h{border-radius:var(--r-inner) var(--r-inner) 0 0}
 .sl-docc-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}

@@ -27,7 +27,9 @@ export interface UIState {
   slView: 'table' | 'dash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
   /** Deals whose stages are open under their row; deals whose done stages are unfolded ("แสดง"); the
    *  one stage editor open in the table. This browser only, never synced. */
-  slOpen: Record<string, 1>; slShowAll: Record<string, 1>; slEdit: { id: string; stage: string } | null;
+  slOpen: Record<string, 1>; slShowAll: Record<string, 1>;
+  /** The editor open in the table / phone card: a stage's date and note, or (`act`) a new contact record at that stage. */
+  slEdit: { id: string; stage: string; act?: 1 } | null;
   /** The one message at the bottom of the screen (saved, "ปิดงานเลยไหม?", moved to ปิดงาน). */
   slToast: SalesToast | null;
   /** The deal the closing prompt is about (its panel's closing card asks too); the deal asked about

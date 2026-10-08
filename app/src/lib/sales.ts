@@ -6,8 +6,9 @@
  * documents can be attached; their amounts, once confirmed, back the Forecast / Actual figures.
  *
  * Shared records (see teamSync.ts keyOf): `deal/<id>`, `dstep/<id>/<stage>`, `ddoc/<id>/<docId>`,
- * `dpay/<id>/<stage>` (one installment of the payment plan), `dlog/<id>`, `scfg/<name>` — so two
- * people editing different stages of one deal never collide.
+ * `dpay/<id>/<stage>` (one installment of the payment plan), `dact/<id>/<actId>` (one more contact:
+ * a call, e-mail or meeting beyond the stage's own), `dlog/<id>`, `scfg/<name>` — so two people
+ * editing different stages of one deal never collide.
  * Pure functions only (no DOM) so everything here is unit-tested.
  */
 import { norm } from './core';
@@ -75,7 +76,8 @@ export interface DealDoc {
   /** Amount the user confirmed (THB) and what it counts toward. */
   amount: number | null;
   target: DocTarget;
-  /** What the document reader found, kept for the record. */
+  /** The document's own figure: what the reader found (or the user corrected it to) at the chosen basis.
+   *  Differs from `amount` when the user kept their own figure ("คงยอดเดิม"): see docMismatch. */
   detected: number | null;
   /** Which figure was used: total incl. VAT, before VAT, net after withholding, or typed. */
   basis: 'total' | 'subtotal' | 'netPay' | 'manual';
@@ -87,6 +89,17 @@ export interface DealDoc {
   auto?: { stage: string; n: string; d?: string };
 }
 export interface DealLog { id: string; at: string; by: string; action: string; client: string; detail: string; deal: string }
+/** How a contact was made. */
+export type ActType = 'call' | 'email' | 'meet' | 'line' | 'other';
+export const ACT_TYPES: ActType[] = ['call', 'email', 'meet', 'line', 'other'];
+export const ACT_TH: Record<ActType, string> = { call: 'โทร', email: 'อีเมล', meet: 'นัดพบ', line: 'LINE', other: 'อื่นๆ' };
+/**
+ * One more contact with the customer (record `dact/<deal>/<id>`): the stages are milestones (CALL1 =
+ * the first call) with one date and note each; every call, e-mail or meeting beyond them is one of
+ * these. Append-only, one record each, so two people adding calls at once never collide. `stage`: the
+ * stage it belongs to; `pid`: the person (people.ts) it was with.
+ */
+export interface DealAct { id: string; deal: string; d: string; type: ActType; note: string; stage: string; pid: string; by: string; at: string }
 /** How the customer pays an installment. */
 export type PayHow = '' | 'transfer' | 'cheque' | 'cash' | 'other';
 export const HOW_TH: Record<PayHow, string> = { '': '—', transfer: 'โอน', cheque: 'เช็ค', cash: 'เงินสด', other: 'อื่นๆ' };
@@ -132,6 +145,8 @@ export interface SalesState {
    *  tracker drops this from the browser's store; every page load re-reads the team log from the
    *  start (engine load()), which brings it back. */
   pays: Record<string, PayLine>;
+  /** `${dealId}/${actId}` → a contact beyond the stages. Missing in what an older build stored: read as {}. */
+  acts?: Record<string, DealAct>;
   log: Record<string, DealLog>;
   /** Deals deleted (here or by a teammate): id → when. Kept so an import never brings them back. */
   gone: Record<string, string>;
@@ -143,7 +158,7 @@ export interface SalesState {
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });
-export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, pays: {}, log: {}, gone: {}, undone: {} });
+export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, pays: {}, acts: {}, log: {}, gone: {}, undone: {} });
 
 /** Current Buddhist-era year as text. */
 export const beYear = (iso = new Date().toISOString()) => String(+iso.slice(0, 4) + 543);
@@ -235,6 +250,18 @@ export function toLog(v: unknown, id: string): DealLog | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
   return { id, at: iso(o.at), by: str(o.by, 100), action: str(o.action, 100), client: str(o.client, 200), detail: str(o.detail, 300), deal: str(o.deal, 100) };
+}
+/** A contact record as this app can use it, or null (no date: it would never sort or count). An unknown
+ *  type (a later build's) reads as อื่นๆ. */
+export function toAct(v: unknown, deal: string, id: string): DealAct | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || !deal || !id) return null;
+  const o = v as Record<string, unknown>;
+  const d = iso(o.d).slice(0, 10) || iso(o.at).slice(0, 10);
+  if (!d) return null;
+  return {
+    id, deal, d, type: (ACT_TYPES.includes(o.type as ActType) ? o.type : 'other') as ActType, note: str(o.note, NOTE_MAX), stage: str(o.stage, 60).replace(/\//g, '-'),
+    pid: str(o.pid, 100), by: str(o.by, 100), at: iso(o.at),
+  };
 }
 
 export const stepOf = (s: SalesState, id: string, stage: string): DealStep => s.steps[`${id}/${stage}`] || { d: '', n: '' };
@@ -361,10 +388,22 @@ export function dealMoney(s: SalesState, d: Deal) {
   };
 }
 
-/** Last contact: the typed contact date or the latest stage date, whichever is later ('' when there is
- *  none), and where it came from: 'typed' (deal.contactDate) or the stage. A date in the future (a
- *  planned call) does not count. */
-export function lastContactInfo(s: SalesState, d: Deal, today: string): { date: string; from: string } {
+/** A deal's contacts beyond the stages, newest first (by date, then when they were written). */
+export const actsOf = (s: SalesState, id: string): DealAct[] =>
+  Object.values(s.acts || {})
+    .filter((a) => a.deal === id)
+    .sort((a, b) => b.d.localeCompare(a.d) || (b.at || '').localeCompare(a.at || ''));
+/** Contacts by the stage they belong to; no stage, or one no longer in the list → `other`. */
+export function stageActs(s: SalesState, d: Deal): { by: Record<string, DealAct[]>; other: DealAct[] } {
+  const by: Record<string, DealAct[]> = {}, other: DealAct[] = [];
+  actsOf(s, d.id).forEach((a) => (a.stage && (s.cfg.stages.includes(a.stage) || payOf(s, d.id, a.stage)) ? (by[a.stage] || (by[a.stage] = [])).push(a) : other.push(a)));
+  return { by, other };
+}
+
+/** Last contact: the typed contact date, the latest stage date or the latest contact record, whichever
+ *  is later ('' when there is none), and where it came from: 'typed' (deal.contactDate), the stage, or
+ *  'act' (then `act` is that record). A date in the future (a planned call) does not count. */
+export function lastContactInfo(s: SalesState, d: Deal, today: string): { date: string; from: string; act?: DealAct } {
   let date = d.contactDate && d.contactDate <= today ? d.contactDate : '', from = date ? 'typed' : '';
   for (const p of s.cfg.stages) {
     const x = s.steps[`${d.id}/${p}`]?.d;
@@ -373,6 +412,8 @@ export function lastContactInfo(s: SalesState, d: Deal, today: string): { date: 
       from = p;
     }
   }
+  const a = actsOf(s, d.id).find((x) => x.d <= today);
+  if (a && a.d > date) return { date: a.d, from: 'act', act: a };
   return { date, from };
 }
 export const lastContact = (s: SalesState, d: Deal, today: string) => lastContactInfo(s, d, today).date;
@@ -491,6 +532,27 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
     result: res,
   };
 }
+
+/** The stage a new contact record belongs to unless the user picks another: the stage the deal is at,
+ *  i.e. the last one done (an extra call after CALL2 is "+1 ครั้ง" by CALL2's date), else the next one
+ *  (nothing done yet), else the first. */
+export function actStage(s: SalesState, d: Deal, today: string) {
+  const t = stageTrack(s, d, today);
+  return [...s.cfg.stages].reverse().find((p) => ['done', 'yes', 'no', 'wait'].includes(t.states[p])) || t.next || s.cfg.stages[0] || '';
+}
+
+/** A document whose counted amount is not the document's own figure: the user kept their figure when
+ *  the reader found another ("คงยอดเดิม"), or corrected the amount since. Derived, never stored: `doc` is
+ *  the document's figure, `kept` the one counted, `diff` = kept − doc. A figure chosen from the reader
+ *  (basis total / subtotal / netPay) is the document's own, so only a typed one ('manual') can differ. */
+export function docMismatch(x: Pick<DealDoc, 'amount' | 'detected' | 'basis'>): { doc: number; kept: number; diff: number } | null {
+  if (x.amount == null || x.detected == null || x.basis !== 'manual') return null;
+  const diff = Math.round((x.amount - x.detected) * 100) / 100;
+  return diff ? { doc: x.detected, kept: x.amount, diff } : null;
+}
+/** "ยอดในเอกสาร 160,500 บาท ไม่ตรงกับแผน 160,000 บาท (ต่าง 500)": `what` names the figure ("แผน",
+ *  "Forecast ที่พิมพ์ไว้", "ยอดที่รับ"). */
+export const mismatchText = (doc: number, fig: number, what: string) => `ยอดในเอกสาร ${fmtMoney(doc)} บาท ไม่ตรงกับ${what} ${fmtMoney(fig)} บาท (ต่าง ${fmtMoney(Math.abs(Math.round((doc - fig) * 100) / 100))})`;
 
 /** One line for a deal: its status, and the result when the job is closed ("ปิดงาน" alone doesn't say whether it was won), else the stage reached. */
 export function trackerStatus(S: SalesState, d: Deal, today = todayISO()) {
@@ -774,7 +836,7 @@ export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
       }
       if (f.quick && !quickMatch(s, d, f.quick, todayISO())) return false;
       if (f.day || f.month) {
-        // the last contact (typed date or latest stage date), or the day it was added — as shown in the row
+        // the last contact (typed date, latest stage date or contact record), or the day it was added — as shown in the row
         const cd = lastContact(s, d, todayISO()) || (d.at || '').slice(0, 10);
         if (cd.length < 10) return false;
         if (f.month && cd.slice(5, 7) !== f.month) return false;
@@ -782,7 +844,7 @@ export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
       }
       if (terms.length) {
         const plan = (planLines(s, d) || []).map((x) => `${x.line.note} ${x.line.howT}`);
-        const notes = [...s.cfg.stages.map((p) => stepOf(s, d.id, p).n), ...plan].join(' ');
+        const notes = [...s.cfg.stages.map((p) => stepOf(s, d.id, p).n), ...plan, ...actsOf(s, d.id).map((a) => a.note)].join(' ');
         const hay = [d.client, d.contactName, d.phone, d.email, d.resp, d.referral, d.section, notes].join(' ').toLowerCase();
         if (!terms.every((t) => hay.includes(t))) return false;
       }

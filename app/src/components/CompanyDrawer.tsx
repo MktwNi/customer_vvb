@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { ReadOnly } from './ReadOnly';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, STG, stageOf } from '../lib/constants';
-import { dtTh, fmtN, gccCode, isoTh, money, telHref, todayISO, ymTh } from '../lib/format';
-import type { Cert, Company, ContactForm, Detail, StageKey } from '../lib/types';
-import { beYear, dealMoney, fmtMoney, lastContact, trackerStatus, type Deal } from '../lib/sales';
+import { dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
+import type { Cert, Company, ContactForm, Detail, LogEntry, StageKey } from '../lib/types';
+import { ACT_TH, actsOf, beYear, dealMoney, fmtMoney, lastContact, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { fcFig } from '../lib/salesUi';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { Opts, srcWords } from './ui';
@@ -73,6 +74,12 @@ export function CompanyDrawer() {
   // the latest real contact: the contact log, or a deal's typed contact date / stage dates (not the day it was sent to the tracker)
   const today = todayISO();
   const lastAt = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => lastContact(e.sales, x, today))].reduce((a, b) => (b > a ? b : a), '');
+  // the contact history: this company's log and the contacts recorded on its deals (read from the
+  // deals' records, never copied here), merged by date; a deal's says which deal
+  const hist: { k: string; day: string; at: string; log?: LogEntry; act?: { a: DealAct; deal: Deal } }[] = [
+    ...logs.map((l, i) => ({ k: 'l' + (l.id || l.at + i), day: localDay(l.at), at: l.at, log: l })),
+    ...deals.flatMap((x) => actsOf(e.sales, x.id).map((a) => ({ k: 'a' + a.id, day: a.d, at: a.at, act: { a, deal: x } }))),
+  ].sort((x, y) => y.day.localeCompare(x.day) || y.at.localeCompare(x.at));
   const tasks = e.tasksOf(c.id).sort((a, b) => a.date.localeCompare(b.date));
   const nOpenT = tasks.filter((t) => !t.done).length;
   const pendingG = e.B.groups.filter(dedupFilter('pending'));
@@ -122,7 +129,7 @@ export function CompanyDrawer() {
     });
   const shown = blocks.filter((b) => (dt === 'cfo' ? b.k === 't' : dt === 'src' ? b.k !== 't' : false));
   const srcN = d ? d.g.length + d.f.length + d.s.length : 0;
-  const dTabs: [DetailTab, string, number][] = [['info', 'ข้อมูลบริษัท', 0], ['cfo', 'CFO · รอบ อบก.', certs.length], ['src', 'GI · โรงงาน · SET', srcN], ['crm', 'การติดต่อ', logs.length + nOpenT]];
+  const dTabs: [DetailTab, string, number][] = [['info', 'ข้อมูลบริษัท', 0], ['cfo', 'CFO · รอบ อบก.', certs.length], ['src', 'GI · โรงงาน · SET', srcN], ['crm', 'การติดต่อ', hist.length + nOpenT]];
 
   const cvT = CST[c.cfoSt];
   const cvSub = c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '';
@@ -374,13 +381,27 @@ export function CompanyDrawer() {
                     <button type="submit" className="btn pri">บันทึก</button>
                   </div>
                 </form>}
-                {!logs.length && <span className="empty">ยังไม่มีประวัติการติดต่อ</span>}
+                {!hist.length && <span className="empty">ยังไม่มีประวัติการติดต่อ</span>}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {logs.map((l, i) => {
+                  {hist.map(({ k, log: l, act }) => {
+                    if (act) {
+                      const { a, deal: x } = act, ink = logType(a.type)[1];
+                      return (
+                        <div key={k} className="dr-row" style={{ display: 'grid', gridTemplateColumns: '14px minmax(0,1fr) auto', gap: 12, padding: '10px 0', borderTop: '1px solid var(--divider)' }}>
+                          <span style={{ width: 10, height: 10, borderRadius: '50%', background: ink, marginTop: 6 }} />
+                          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                            {a.note && <span style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{a.note}</span>}
+                            <span className="t-meta"><span style={{ color: ink }}>{ACT_TH[a.type]}</span>{[`Sales Tracker ปี ${x.year}${a.stage ? ' ที่ ' + a.stage : ''}`, isoTh(a.d), a.by].filter(Boolean).map((t) => ' · ' + t).join('')}</span>
+                          </span>
+                          <span className="dr-acts"><button onClick={() => set({ sel: null, deal: x.id })} className="lnk" style={{ fontSize: 13, alignSelf: 'flex-start' }}>เปิดดีล</button></span>
+                        </div>
+                      );
+                    }
+                    if (!l) return null;
                     // the type is said once, in the node's colour (the darkened ink); the rest is one grey line
                     const [tag, ink] = logType(l.type);
                     return (
-                      <div key={l.at + i} className="dr-row" style={{ display: 'grid', gridTemplateColumns: '14px minmax(0,1fr) auto', gap: 12, padding: '10px 0', borderTop: '1px solid var(--divider)' }}>
+                      <div key={k} className="dr-row" style={{ display: 'grid', gridTemplateColumns: '14px minmax(0,1fr) auto', gap: 12, padding: '10px 0', borderTop: '1px solid var(--divider)' }}>
                         <span style={{ width: 10, height: 10, borderRadius: '50%', background: ink, marginTop: 6 }} />
                         <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                           {l.text && <span style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</span>}
@@ -455,7 +476,8 @@ function SalesBox({ c }: { c: Company }) {
       {deals.map((d) => {
         const m = dealMoney(e.sales, d);
         const lc = lastContact(e.sales, d, todayISO());
-        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc), m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (m.fcConfirmed ? ' (ยืนยันจากเอกสาร)' : '')].filter(Boolean);
+        const fv = fcFig(e.sales, d);
+        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc), m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : '')].filter(Boolean);
         return (
           <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="hv dr-deal">
             <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>

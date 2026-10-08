@@ -721,7 +721,7 @@ describe('temporary password (must change)', () => {
 // ------------------------------------------------------------------ 9. role matrix
 
 describe('what each role may write (parity with the web app\'s rule)', () => {
-  const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dpay', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'zzz'];
+  const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dpay', 'dact', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'zzz'];
   // a write, and a delete in each of the three forms the web app may send
   const FORMS = [
     { name: 'write', op: (k: string) => ({ k, v: { a: 1 } }), del: false },
@@ -788,6 +788,27 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
     expect(last.get('dpay/x/PAY1')).toMatchObject({ del: false, by: 'สมชาย', v: { rcv: '2026-10-08', amt: 53500 } });
     expect(last.get('dpay/x/PAY2')).toMatchObject({ del: true, by: 'สมชาย' });
     expect(last.has('dpay/x/PAY3')).toBe(false);
+  });
+
+  it('contacts beyond the stages (dact/<deal>/<id>): sales add and remove them in its own name, a viewer may not', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    const v = { d: '2026-10-08', type: 'call', note: 'โทรครั้งที่ 3', stage: 'CALL2', pid: '', by: 'X', at: '2026-10-08T03:00:00.000Z' };
+    for (const del of [false, true]) {
+      expect(canWriteKey('sales', 'dact/x/a', del)).toBe(true);
+      expect(canWriteKey('viewer', 'dact/x/a', del)).toBe(false);
+    }
+    expect(call(s, tok, 'push', { ops: [{ k: 'dact/x/a', v }, { k: 'dact/x/b', v: { ...v, type: 'email' } }] })).toMatchObject({ ok: true, n: 2, denied: [] });
+    expect(call(s, tok, 'push', { ops: [{ k: 'dact/x/b', del: true }] })).toMatchObject({ ok: true, n: 1, denied: [] });
+    const vee = member(s, admin, 'vee', 'วี', 'viewer');
+    expect(call(s, vee, 'push', { ops: [{ k: 'dact/x/a', del: true }] })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(call(s, vee, 'push', { ops: [{ k: 'dact/x/c', v }] })).toMatchObject({ ok: false, error: 'forbidden' });
+    const last = new Map(rows(s, admin).map((r) => [r.k, r]));
+    // the seller's own name in the record, whatever the web app sent (key order kept), as on log entries
+    expect(last.get('dact/x/a')).toMatchObject({ del: false, by: 'สมชาย', v: { ...v, by: 'สมชาย' } });
+    expect(Object.keys(last.get('dact/x/a')!.v as object)).toEqual(Object.keys(v));
+    expect(last.get('dact/x/b')).toMatchObject({ del: true, by: 'สมชาย' });
+    expect(last.has('dact/x/c')).toBe(false);
   });
 
   it('sales may attach and remove documents', () => {

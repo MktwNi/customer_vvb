@@ -578,6 +578,7 @@ describe('what a team-code browser queued, sent by an account', () => {
     const d = A.e.addDeal({ client: 'บริษัท ทดสอบ จำกัด' });
     A.e.setStep(d.id, 'PROPOSAL', { d: '2026-10-01', n: 'นัดคุยแล้ว' });
     A.e.setPlan(d.id, [line('PAY1', 1000, { note: 'มัดจำ' })]);
+    const act = A.e.addAct(d.id, { type: 'call', note: 'โทรตามเอกสาร' })!;
     const doc = await A.e.attachDoc(d.id, pdf('qt.pdf'), quote);
     await settle(A);
     await A.e.uploadDocs();
@@ -605,9 +606,10 @@ describe('what a team-code browser queued, sent by an account', () => {
     await settle(A);
     await A.e.uploadDocs();
     await settle(A, L);
-    for (const x of ['deal/' + d.id, `dstep/${d.id}/PROPOSAL`, 'ddoc/' + k, `dpay/${d.id}/PAY1`]) expect(rows(x).map((r) => r.del)).not.toContain(true);
+    for (const x of ['deal/' + d.id, `dstep/${d.id}/PROPOSAL`, 'ddoc/' + k, `dpay/${d.id}/PAY1`, `dact/${d.id}/${act.id}`]) expect(rows(x).map((r) => r.del)).not.toContain(true);
     for (const t of [A, L]) {
       expect(t.e.sales.deals[d.id]).toBeTruthy();
+      expect(t.e.sales.acts![`${d.id}/${act.id}`]?.note).toBe('โทรตามเอกสาร');
       expect(t.e.sales.steps[d.id + '/PROPOSAL']?.n).toBe('นัดคุยแล้ว');
       expect(t.e.sales.pays[d.id + '/PAY1']?.note).toBe('มัดจำ');
       expect(t.e.sales.docs[k]?.fileId).toBe(fileId);
@@ -1060,6 +1062,55 @@ describe('payment plans and roles', () => {
     expect(A.e.sales.pays[`${d.id}/PAY3`]).toBeUndefined();
     expect(A.e.sales.steps[`${d.id}/PAY1`]).toBeUndefined(); // the note the payment filled in goes too
     expect(A.net.sent.filter((x) => x === 'push')).toHaveLength(0);
+  });
+});
+
+describe('contacts beyond the stages with accounts (dact records)', () => {
+  it('a sales account adds and removes its own (sent in its name), not another\'s; the lead removes any', async () => {
+    const L = await lead();
+    const d = L.e.addDeal({ client: 'บริษัท ติดต่อหลายครั้ง จำกัด' });
+    const la = L.e.addAct(d.id, { type: 'call', note: 'หัวหน้าโทร' })!;
+    await settle(L);
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    const aa = A.e.addAct(d.id, { type: 'meet', note: 'เอไปพบลูกค้า', d: '2026-10-05' })!;
+    expect(aa).toMatchObject({ by: 'เอ', type: 'meet' });
+    await settle(A, L);
+    expect(rows(`dact/${d.id}/${aa.id}`)).toEqual([expect.objectContaining({ by: 'เอ', v: expect.objectContaining({ by: 'เอ', note: 'เอไปพบลูกค้า' }) })]);
+    expect(L.e.sales.acts![`${d.id}/${aa.id}`]).toMatchObject({ by: 'เอ' });
+    // the lead's is not the seller's to remove: nothing happens, and it is said why
+    expect(A.e.canDelAct(A.e.sales.acts![`${d.id}/${la.id}`])).toBe(false);
+    A.e.delAct(d.id, la.id);
+    expect(A.e.sales.acts![`${d.id}/${la.id}`]).toBeDefined();
+    expect(A.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
+    A.e.delAct(d.id, aa.id);
+    await settle(A, L);
+    expect(rows(`dact/${d.id}/${aa.id}`).at(-1)).toMatchObject({ del: true, by: 'เอ' });
+    expect(L.e.sales.acts![`${d.id}/${aa.id}`]).toBeUndefined();
+    // the lead (admin) removes anyone's
+    const ab = A.e.addAct(d.id, { type: 'email', note: 'อีกครั้ง' })!;
+    await settle(A, L);
+    expect(L.e.canDelAct(L.e.sales.acts![`${d.id}/${ab.id}`])).toBe(true);
+    L.e.delAct(d.id, ab.id);
+    await settle(L, A);
+    expect(A.e.sales.acts![`${d.id}/${ab.id}`]).toBeUndefined();
+  });
+
+  it('a viewer adds and removes nothing: nothing changes here and nothing is sent', async () => {
+    const L = await lead();
+    const d = L.e.addDeal({ client: 'บริษัท ดูอย่างเดียว จำกัด' });
+    const la = L.e.addAct(d.id, { type: 'call', note: 'โทรแล้ว' })!;
+    await settle(L);
+    const V = await member(L, 'vee', 'วี', 'viewer');
+    const before = JSON.stringify(V.e.sales);
+    expect(V.e.addAct(d.id, { type: 'call', note: 'x' })).toBeNull();
+    expect(V.e.canDelAct(V.e.sales.acts![`${d.id}/${la.id}`])).toBe(false);
+    V.e.delAct(d.id, la.id);
+    expect(JSON.stringify(V.e.sales)).toBe(before);
+    expect(V.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
+    expect(V.e.teamPendingN).toBe(0);
+    await settle(V);
+    expect(V.net.sent).not.toContain('push');
+    expect(rows(`dact/${d.id}/${la.id}`)).toHaveLength(1);
   });
 });
 

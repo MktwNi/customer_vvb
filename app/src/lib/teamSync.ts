@@ -9,7 +9,7 @@
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
+import { toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -206,6 +206,8 @@ export const keyOf = {
   ddoc: (id: string, docId: string) => `ddoc/${id}/${docId}`,
   /** one installment of a deal's payment plan */
   dpay: (id: string, stage: string) => `dpay/${id}/${stage}`,
+  /** one more contact with a deal's customer (a call, e-mail, meeting beyond the stages) */
+  dact: (id: string, actId: string) => `dact/${id}/${actId}`,
   dlog: (id: string) => `dlog/${id}`,
   scfg: (name: keyof SalesCfg) => `scfg/${name}`,
   cust: (id: number) => `cust/${id}`,
@@ -269,6 +271,8 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.entries(S.steps || {}).forEach(([k, v]) => (v.d || v.n) && m.set('dstep/' + k, { ...v }));
     Object.entries(S.docs || {}).forEach(([k, v]) => m.set('ddoc/' + k, { ...v }));
     Object.entries(S.pays || {}).forEach(([k, v]) => m.set('dpay/' + k, { ...v }));
+    // stored without its own key fields (deal, id), as the record is written
+    Object.values(S.acts || {}).forEach(({ deal, id, ...v }) => m.set(keyOf.dact(deal, id), v));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
     // the lists too: customised before connecting, they are uploaded like every other record
@@ -395,6 +399,20 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
         const v = toPay(row.v);
         if (!v) return;
         P[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
+    case 'dact': {
+      // like dpay: older builds skip the prefix, so they never send or delete one
+      const A = s.sales.acts || (s.sales.acts = {});
+      const j = rest.indexOf('/');
+      if (j <= 0) return;
+      if (del) delete A[rest];
+      else {
+        const v = toAct(row.v, rest.slice(0, j), rest.slice(j + 1));
+        if (!v) return;
+        A[rest] = v;
       }
       fx.sales = true;
       break;
