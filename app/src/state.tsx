@@ -87,11 +87,19 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
       setUi((s) => {
         const n = { ...s, ...(typeof p === 'function' ? p(s) : p) };
         // opening a deal or a person makes it the one marked in its list
-        if (n.deal && n.deal !== s.deal) n.last = { ...n.last, deal: n.deal };
+        if (n.deal && n.deal !== s.deal) {
+          n.last = { ...n.last, deal: n.deal };
+          // from anywhere (dashboard, a person's or company's page): its folded table section unfolds
+          const sec = engine.sales.deals[n.deal]?.section;
+          if (sec != null && n.slCollapsed[sec]) {
+            n.slCollapsed = { ...n.slCollapsed };
+            delete n.slCollapsed[sec];
+          }
+        }
         if (n.person && n.person !== s.person) n.last = { ...n.last, person: n.person };
         return n;
       }),
-    [],
+    [engine],
   );
   useEffect(() => prefs.set(PREF.ui, { tab: ui.tab, view: ui.f.view }), [ui.tab, ui.f.view]);
   const value = useMemo<Ctx>(() => ({

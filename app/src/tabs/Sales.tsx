@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
@@ -326,7 +326,7 @@ function Filters({ S, facets, ignoreQuick }: { S: SalesState; facets: Deal[]; ig
   const [more, setMore] = useState(false);
   return (
     <div className={'sl-filters' + (more ? ' open' : '')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <input value={F.q || ''} onChange={(ev) => up({ q: ev.target.value })} placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต" aria-label="ค้นหา" style={{ ...inputStyle, height: 36, flex: '1 1 220px', minWidth: 0 }} />
+      <input value={F.q || ''} onChange={(ev) => { const q = ev.target.value; set({ slF: { ...F, q }, ...(q.trim() && !(F.q || '').trim() ? { slCollapsed: {} } : {}) }); }} placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต" aria-label="ค้นหา" style={{ ...inputStyle, height: 36, flex: '1 1 220px', minWidth: 0 }} />
       <button className="sl-ftoggle" onClick={() => setMore(!more)} aria-expanded={more} style={{ ...small, height: 36 }}>ตัวกรอง{nSet ? ` (${nSet})` : ''} {more ? '▴' : '▾'}</button>
       <select value={F.source || ''} onChange={(ev) => up({ source: ev.target.value })} style={sel} aria-label="SOURCE"><Opts all="SOURCE: ทั้งหมด" options={S.cfg.sources.map((x) => ({ v: x, label: x }))} /></select>
       <select value={F.service || ''} onChange={(ev) => up({ service: ev.target.value })} style={sel} aria-label="Services"><Opts all="Services: ทั้งหมด" options={S.cfg.services.map((x) => ({ v: x, label: x }))} /></select>
@@ -364,7 +364,7 @@ function Summary({ S, open, all, today }: { S: SalesState; open: Deal[]; all: De
   const note = filtersOn({ ...ui.slF, quick: '' }) ? ' · ตามตัวกรอง' : '';
   const tiles: [string, string, string?, (() => void)?][] = [
     [fmtN(st.total), 'ลูกค้าที่ยังเปิดงาน' + note],
-    [fmtN(st.overdue), `ค้างติดตาม (เกิน 14 วัน)`, st.overdue ? '#8A2B12' : undefined, st.overdue ? () => set({ slF: { ...ui.slF, quick: 'overdue' } }) : undefined],
+    [fmtN(st.overdue), `ค้างติดตาม (เกิน 14 วัน)`, st.overdue ? '#8A2B12' : undefined, st.overdue ? () => set({ slF: { ...ui.slF, quick: 'overdue' }, slCollapsed: {} }) : undefined],
     [fmtMoney(sum.forecast) || '0', `Forecast รวม (บาท) · รวมงานที่ปิดแล้ว${note}`],
     [fmtMoney(sum.actual) || '0', `Actual รวม (บาท) · รวมงานที่ปิดแล้ว${note}`],
   ];
@@ -395,7 +395,7 @@ function QuickTabs({ S, base, today }: { S: SalesState; base: Deal[]; today: str
         const n = k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length;
         if (k === 'payment' && !n && cur !== k) return null; // only when the table has stages after CLOSED DEAL in use
         return (
-          <button key={k || 'all'} aria-pressed={cur === k} onClick={() => set({ slF: { ...ui.slF, quick: k } })} className={k === 'overdue' && n ? 'warn' : ''}>
+          <button key={k || 'all'} aria-pressed={cur === k} onClick={() => set({ slF: { ...ui.slF, quick: k }, slCollapsed: {} })} className={k === 'overdue' && n ? 'warn' : ''}>
             {label} <span>{fmtN(n)}</span>
           </button>
         );
@@ -434,6 +434,90 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   useEffect(() => {
     if (cur) wrapRef.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [cur, ui.deal]);
+  // the section bars stick right under the column headings: their height (fonts, zoom) sets the offset
+  const headObs = useRef<ResizeObserver | null>(null);
+  const theadRef = useCallback((el: HTMLTableSectionElement | null) => {
+    headObs.current?.disconnect();
+    headObs.current = null;
+    const box = el?.closest<HTMLElement>('.sl-wrap');
+    if (!el || !box) return;
+    const put = () => box.style.setProperty('--sl-head-h', Math.floor(el.getBoundingClientRect().height) + 'px');
+    put();
+    if (typeof ResizeObserver !== 'undefined') {
+      headObs.current = new ResizeObserver(put);
+      headObs.current.observe(el);
+    }
+  }, []);
+  const secSum = (list: Deal[]): SecSum => {
+    let od = 0, fc = 0;
+    for (const d of list) {
+      if (overdueDays(S, d, today) != null) od++;
+      fc += dealMoney(S, d).forecast || 0;
+    }
+    return { n: list.length, od: ui.slF.quick === 'overdue' ? 0 : od, fc };
+  };
+  const allCol = visible.length > 0 && visible.every((x) => ui.slCollapsed[x]);
+  const toggleAll = () => set({ slCollapsed: allCol ? {} : { ...ui.slCollapsed, ...Object.fromEntries(visible.map((x) => [x, 1 as const])) } });
+  /** Fold or unfold a section. Folding from a stuck bar first brings the section's start up to where the
+   *  bar is stuck, so the bar stays put and the next section follows right under it. */
+  const toggle = (sec: string, el: HTMLElement) => {
+    const col = !!ui.slCollapsed[sec];
+    const grp = el.closest<HTMLElement>('tbody.sl-group, section.sl-mgroup');
+    if (!col && grp) {
+      if (mobile) {
+        const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sticky-top')) || 0;
+        const dy = grp.getBoundingClientRect().top - top;
+        if (dy < -1) window.scrollBy(0, dy);
+      } else if (wrapRef.current) {
+        const box = wrapRef.current;
+        const line = box.getBoundingClientRect().top + (parseFloat(getComputedStyle(box).getPropertyValue('--sl-head-h')) || 50) - 1;
+        const dy = grp.getBoundingClientRect().top - line; // a tbody keeps its own place while its heading is stuck
+        if (dy < -1) box.scrollTop += dy;
+      }
+    }
+    // the page around the table stays where it is: its scroll anchoring would follow the rows inside
+    // the box and jump the whole page, so it is off until the fold has been laid out
+    const c = { ...ui.slCollapsed };
+    if (col) delete c[sec];
+    else c[sec] = 1;
+    set({ slCollapsed: c });
+  };
+  // the open deal moved (its หมวด changed in the panel) into a folded section: that section unfolds
+  // (opening a deal unfolds its section in state.tsx, wherever it is opened from)
+  const openSec = ui.deal ? S.deals[ui.deal]?.section : undefined;
+  useEffect(() => {
+    if (openSec == null || !ui.slCollapsed[openSec]) return;
+    const c = { ...ui.slCollapsed };
+    delete c[openSec];
+    set({ slCollapsed: c });
+  }, [openSec]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a control reached with Tab must not sit under the stuck headings (the browser leaves it there when
+  // it is inside the box). Only right after a Tab: a click, or the window getting focus back, is left
+  // alone, so rows do not move under the pointer.
+  const tabAt = useRef(0);
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => ev.key === 'Tab' && (tabAt.current = Date.now());
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, []);
+  const keepFocusInView = (ev: React.FocusEvent<HTMLDivElement>) => {
+    if (Date.now() - tabAt.current > 300) return;
+    const box = ev.currentTarget, t = ev.target as HTMLElement;
+    if (t.closest('thead')) return;
+    const line = box.getBoundingClientRect().top + (parseFloat(getComputedStyle(box).getPropertyValue('--sl-head-h')) || 50) - 1;
+    const bar = t.closest<HTMLElement>('.sl-secbar');
+    if (bar) {
+      // an earlier section's bar stays stuck under the current one: scroll back to that section
+      const r = bar.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + 24, r.top + r.height / 2);
+      const grp = bar.closest<HTMLElement>('tbody.sl-group');
+      if (grp && hit && !bar.contains(hit)) box.scrollTop += grp.getBoundingClientRect().top - line;
+      return;
+    }
+    const cover = line + 1 + 62;
+    const top = t.getBoundingClientRect().top;
+    if (top < cover) box.scrollTop -= cover - top + 8;
+  };
   if (!Object.values(S.deals).some((d) => d.year === ui.slYear))
     return (
       <>
@@ -457,24 +541,37 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
           {filtersOn(ui.slF) ? <NoMatch text="ไม่พบงานที่ยังเปิดตามตัวกรองนี้" /> : `ไม่มีงานที่ยังเปิดในปี ${ui.slYear} — งานที่ปิดแล้วอยู่ในแท็บ "ปิดงาน"`}
         </div>
       ) : mobile ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} ref={wrapRef}>
+        <div className="sl-mlist" ref={wrapRef}>
+          {visible.length > 1 && (
+            <div className="sl-mtools">
+              <span>{fmtN(visible.length)} หมวด</span>
+              <button type="button" className="sl-allbtn" onClick={toggleAll}>{allCol ? 'ขยายทุกหมวด' : 'ย่อทุกหมวด'}</button>
+            </div>
+          )}
           {visible.map((sec) => {
             const list = bySec.get(sec)!;
-            if (!list.length) return null;
+            const col = !!ui.slCollapsed[sec];
             return (
-              <div key={sec} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1F5BD8', padding: '6px 2px 0' }}>{sec || 'ไม่ระบุหมวด'} · {fmtN(list.length)}</span>
-                {list.map((d) => <DealCard key={d.id} e={e} S={S} d={d} today={today} cur={cur === d.id} onOpen={() => set({ deal: d.id })} onStep={(stage) => openStep(d.id, stage)} />)}
-              </div>
+              <section key={sec || '-'} className="sl-mgroup" aria-label={'หมวด ' + (sec || 'ไม่ระบุหมวด')}>
+                <div className="sl-msec">
+                  <SecBar compact sec={sec} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={() => addIn(sec)} />
+                </div>
+                {!col && list.map((d) => <DealCard key={d.id} e={e} S={S} d={d} today={today} cur={cur === d.id} onOpen={() => set({ deal: d.id })} onStep={(stage) => openStep(d.id, stage)} />)}
+              </section>
             );
           })}
         </div>
       ) : (
-        <div className="sl-wrap" ref={wrapRef} onScroll={(ev) => ev.currentTarget.classList.toggle('scrolled', ev.currentTarget.scrollLeft > 4)}>
+        <div className="sl-wrap" ref={wrapRef} onFocus={keepFocusInView} onScroll={(ev) => ev.currentTarget.classList.toggle('scrolled', ev.currentTarget.scrollLeft > 4)}>
           <table className="sl-table">
-            <thead>
+            <thead ref={theadRef}>
               <tr>
-                <th className="sl-sticky" style={{ minWidth: 330 }}>ลูกค้า</th>
+                <th className="sl-sticky" style={{ minWidth: 330 }} aria-label="ลูกค้า">
+                  <span className="sl-th-first">
+                    ลูกค้า
+                    {visible.length > 1 && <button type="button" className="sl-allbtn" onClick={toggleAll}>{allCol ? 'ขยายทุกหมวด' : 'ย่อทุกหมวด'}</button>}
+                  </span>
+                </th>
                 <th style={{ minWidth: 150 }}>ผู้รับผิดชอบ</th>
                 <th style={{ minWidth: 150 }} title="วันที่ติดต่อที่พิมพ์ไว้ · ถ้าขั้นตอนมีวันที่ใหม่กว่า จะแสดง “ล่าสุด” ใต้ช่อง · ไม่ได้ติดต่อเกิน 14 วันขึ้นค้างติดตาม">วันที่ติดต่อ</th>
                 {S.cfg.stages.map((p) => (
@@ -489,19 +586,20 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
                 <th style={{ minWidth: 150 }}>สถานะ</th>
               </tr>
             </thead>
-            <tbody>
-              {visible.map((sec) => {
-                const list = bySec.get(sec)!;
-                const col = !!ui.slCollapsed[sec];
-                return (
-                  <SectionRows key={sec || '-'} sec={sec} list={list} collapsed={col} cols={S.cfg.stages.length + 7}
-                    onToggle={() => { const c = { ...ui.slCollapsed }; if (col) delete c[sec]; else c[sec] = 1; set({ slCollapsed: c }); }}
-                    onAdd={() => addIn(sec)}>
-                    {list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} dup={dup(d)} cur={cur === d.id} onStep={(stage) => openStep(d.id, stage)} />)}
-                  </SectionRows>
-                );
-              })}
-            </tbody>
+            {visible.map((sec) => {
+              const list = bySec.get(sec)!;
+              const col = !!ui.slCollapsed[sec];
+              return (
+                <tbody key={sec || '-'} className="sl-group">
+                  <tr className="sl-sec">
+                    <th scope="rowgroup" colSpan={S.cfg.stages.length + 7}>
+                      <SecBar sec={sec} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={() => addIn(sec)} />
+                    </th>
+                  </tr>
+                  {!col && list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} dup={dup(d)} cur={cur === d.id} onStep={(stage) => openStep(d.id, stage)} />)}
+                </tbody>
+              );
+            })}
           </table>
         </div>
       )}
@@ -520,24 +618,35 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   );
 }
 
-function SectionRows({ sec, list, collapsed, cols, onToggle, onAdd, children }: { sec: string; list: Deal[]; collapsed: boolean; cols: number; onToggle: () => void; onAdd: () => void; children: ReactNode }) {
+type SecSum = { n: number; od: number; fc: number };
+/** A section's heading bar: the fold toggle (caret, name, count, overdue), the Forecast of the rows
+ *  shown, and add-in-this-section. Pale with dark text: solid blue is the open client's row. */
+function SecBar({ sec, sum, collapsed, compact, onToggle, onAdd }: { sec: string; sum: SecSum; collapsed: boolean; compact?: boolean; onToggle: (el: HTMLElement) => void; onAdd: () => void }) {
+  const name = sec || 'ไม่ระบุหมวด';
   return (
-    <>
-      <tr className="sl-sec">
-        <td className="sl-sticky" colSpan={1}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={onToggle} aria-expanded={!collapsed} className="sl-sec-btn">
-              <span aria-hidden="true" className={'sl-caret' + (collapsed ? '' : ' open')}>›</span>
-              {sec || 'ไม่ระบุหมวด'}
-              <span className="sl-count">{fmtN(list.length)}</span>
-            </button>
-            <button onClick={onAdd} className="sl-sec-add">+ เพิ่มในหมวดนี้</button>
-          </div>
-        </td>
-        <td colSpan={cols - 1} />
-      </tr>
-      {!collapsed && children}
-    </>
+    <div className={'sl-secbar' + (collapsed ? ' closed' : '')}>
+      <button type="button" className="sl-sec-btn" aria-expanded={!collapsed} onClick={(ev) => onToggle(ev.currentTarget)} title={collapsed ? 'แสดงลูกค้าในหมวดนี้' : 'ย่อหมวดนี้'}>
+        <span className="sl-caret" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </span>
+        <span className="sl-sec-name">{name}</span>
+        <span className="sl-count">{fmtN(sum.n)}<span className="sl-unit">ราย</span></span>
+        {sum.od > 0 && (
+          <span className="sl-sec-od" title="ไม่ได้ติดต่อเกิน 14 วัน">
+            <span aria-hidden="true">⏰ {compact ? '' : 'ค้าง '}{fmtN(sum.od)}</span>
+            <span className="sr-only">ค้างติดตาม {fmtN(sum.od)} ราย</span>
+          </span>
+        )}
+      </button>
+      {sum.fc > 0 && !compact && (
+        <span className="sl-sec-fc" title="รวม Forecast ของลูกค้าที่แสดงในหมวดนี้ (งานที่ยังเปิด)">
+          Forecast<b>{fmtMoney(sum.fc)}</b>
+        </span>
+      )}
+      <button type="button" className="sl-sec-add" onClick={onAdd} aria-label={`เพิ่มในหมวดนี้ (${name})`}>
+        {compact ? <span aria-hidden="true">+</span> : '+ เพิ่มในหมวดนี้'}
+      </button>
+    </div>
   );
 }
 
