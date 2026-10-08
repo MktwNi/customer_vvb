@@ -514,7 +514,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
       if (grp && hit && !bar.contains(hit)) box.scrollTop += grp.getBoundingClientRect().top - line;
       return;
     }
-    const cover = line + 1 + 62;
+    const cover = line + 1 + (parseFloat(getComputedStyle(box).getPropertyValue('--sl-sec-h')) || 0);
     const top = t.getBoundingClientRect().top;
     if (top < cover) box.scrollTop -= cover - top + 8;
   };
@@ -586,14 +586,15 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
                 <th style={{ minWidth: 150 }}>สถานะ</th>
               </tr>
             </thead>
-            {visible.map((sec) => {
+            {visible.map((sec, gi) => {
               const list = bySec.get(sec)!;
               const col = !!ui.slCollapsed[sec];
               return (
                 <tbody key={sec || '-'} className="sl-group">
                   <tr className="sl-sec">
-                    <th scope="rowgroup" colSpan={S.cfg.stages.length + 7}>
-                      <SecBar sec={sec} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={() => addIn(sec)} />
+                    {/* named by the section name alone (not the whole bar) for the rows under it */}
+                    <th scope="rowgroup" colSpan={S.cfg.stages.length + 7} aria-labelledby={'sl-sec-' + gi}>
+                      <SecBar sec={sec} nameId={'sl-sec-' + gi} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={() => addIn(sec)} />
                     </th>
                   </tr>
                   {!col && list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} dup={dup(d)} cur={cur === d.id} onStep={(stage) => openStep(d.id, stage)} />)}
@@ -621,7 +622,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
 type SecSum = { n: number; od: number; fc: number };
 /** A section's heading bar: the fold toggle (caret, name, count, overdue), the Forecast of the rows
  *  shown, and add-in-this-section. Pale with dark text: solid blue is the open client's row. */
-function SecBar({ sec, sum, collapsed, compact, onToggle, onAdd }: { sec: string; sum: SecSum; collapsed: boolean; compact?: boolean; onToggle: (el: HTMLElement) => void; onAdd: () => void }) {
+function SecBar({ sec, nameId, sum, collapsed, compact, onToggle, onAdd }: { sec: string; nameId?: string; sum: SecSum; collapsed: boolean; compact?: boolean; onToggle: (el: HTMLElement) => void; onAdd: () => void }) {
   const name = sec || 'ไม่ระบุหมวด';
   return (
     <div className={'sl-secbar' + (collapsed ? ' closed' : '')}>
@@ -629,7 +630,7 @@ function SecBar({ sec, sum, collapsed, compact, onToggle, onAdd }: { sec: string
         <span className="sl-caret" aria-hidden="true">
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </span>
-        <span className="sl-sec-name">{name}</span>
+        <span className="sl-sec-name" id={nameId}>{name}</span>
         <span className="sl-count">{fmtN(sum.n)}<span className="sl-unit">ราย</span></span>
         {sum.od > 0 && (
           <span className="sl-sec-od" title="ไม่ได้ติดต่อเกิน 14 วัน">
