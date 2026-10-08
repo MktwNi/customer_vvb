@@ -247,14 +247,31 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
   const stats = { propRead: 0, propWrite: 0, cacheGet: 0 }; // calls, as counted against Apps Script quotas
   const logs = []; // Logger.log output (the editor's Execution log)
   const { DriveApp, drive } = fakeDrive(driveAuthorized);
-  let locked = false;
-  let onLock = null;
-  const acquire = () => {
-    if (locked) return false;
-    const fn = onLock;
-    onLock = null;
+  // LockService: the script lock and the user lock are separate locks (holding one never blocks the
+  // other). A web app that executes as its owner runs every request as that one user, so all of them
+  // share the user lock. tryLock gives up at once where the real one would wait out its timeout.
+  const locks = { script: { held: false, before: null }, user: { held: false, before: null } };
+  const acquire = (kind) => {
+    const l = locks[kind];
+    if (l.held) return false;
+    const fn = l.before;
+    l.before = null;
     if (fn) fn(); // e.g. another request that got the lock first runs to completion
-    return (locked = true);
+    return (l.held = true);
+  };
+  const lockOf = (kind) => {
+    let mine = false;
+    const lock = {
+      tryLock: () => mine || (mine = acquire(kind)),
+      waitLock: () => {
+        if (!lock.tryLock()) throw gasError('Lock timeout: another process was holding the lock for too long.');
+      },
+      hasLock: () => mine,
+      releaseLock: () => {
+        if (mine) locks[kind].held = mine = false;
+      },
+    };
+    return lock;
   };
   const sandbox = {
     SpreadsheetApp: {
@@ -266,15 +283,8 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
       }),
     },
     LockService: {
-      getScriptLock: () => ({
-        waitLock: () => {
-          if (!acquire()) throw new Error('lock timeout');
-        },
-        tryLock: () => acquire(),
-        releaseLock: () => {
-          locked = false;
-        },
-      }),
+      getScriptLock: () => lockOf('script'),
+      getUserLock: () => lockOf('user'),
     },
     PropertiesService: {
       getScriptProperties: () => ({
@@ -366,14 +376,14 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     Utilities,
     /** Every Drive item (trashed ones included); remove(id) deletes for good, like emptying the trash. */
     drive,
-    /** Take the script lock as another execution would; returns the release function. */
-    holdLock: () => {
-      if (!acquire()) throw new Error('lock already held');
-      return () => (locked = false);
+    /** Take the script lock (or the user lock) as another execution would; returns the release function. */
+    holdLock: (kind = 'script') => {
+      if (!acquire(kind)) throw new Error(kind + ' lock already held');
+      return () => (locks[kind].held = false);
     },
-    /** Run fn just before the next lock is granted (a concurrent request that got there first). */
-    beforeLock: (fn) => {
-      onLock = fn;
+    /** Run fn just before that lock is next granted (a concurrent request that got there first); null cancels. */
+    beforeLock: (fn, kind = 'script') => {
+      locks[kind].before = fn;
     },
   };
 }

@@ -64,8 +64,10 @@ export interface GasSim {
     getUuid(): string;
   };
   drive: { list(): GasDriveItem[]; remove(id: string): void };
-  holdLock(): () => void;
-  beforeLock(fn: () => void): void;
+  /** Take the script lock (or the user lock) as another execution would; returns the release function. */
+  holdLock(kind?: GasLockKind): () => void;
+  /** Run fn just before that lock is next granted (a concurrent request that got there first); null cancels. */
+  beforeLock(fn: (() => void) | null, kind?: GasLockKind): void;
   /** Properties and cache calls so far (assign 0 to reset). */
   stats: GasStats;
   /** Everything Logger.log printed (the editor's Execution log). */
@@ -78,6 +80,8 @@ export interface GasSim {
   bootstrapAdmin(o: { u: string; name: string; pw: string; rm?: boolean }): string;
 }
 export interface GasStats { propRead: number; propWrite: number; cacheGet: number }
+/** LockService's script lock, or its user lock (shared by every request of a web app that executes as its owner). */
+export type GasLockKind = 'script' | 'user';
 export function createGasSim(opts?: { teamKey?: string; code?: string; driveAuthorized?: boolean; kdfIter?: number }): GasSim;
 /** pk as the web app derives it: base64url (no padding) of PBKDF2-HMAC-SHA256(NFC(pw), 'gcc-team|v1|' + tid + '|' + u, it, 32 bytes). */
 export function derivePk(tid: string, it: number | string, u: string, pw: string): string;
