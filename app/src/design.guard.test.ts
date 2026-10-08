@@ -17,16 +17,9 @@ const walk = (d: string): string[] =>
   });
 const FILES = walk(SRC).map((p) => ({ rel: relative(SRC, p).replace(/\\/g, '/'), src: readFileSync(p, 'utf8') }));
 
-/** Not yet on the system: the Sales Tracker table and the deal panel are being redone on their own
- *  branch (with the payment plan), and lib/feeds.ts is engine code (the UI words its "→" line itself).
- *  Delete an entry when its work lands; the list must end empty. */
-const PENDING: Record<string, string> = {
-  'tabs/Sales.tsx': 'Sales Tracker table (tracker redesign)',
-  'components/DealPanel.tsx': 'deal side panel (tracker redesign)',
-  'lib/feeds.ts': 'engine text; Track and Plan show their own words for it',
-};
-/** index.css: the tracker table's rules (.sl-*) and the deal panel's (.dp-*) belong to the tracker redesign too. */
-const CSS_PENDING = /\.(sl|dp)-/;
+/** Files not on the system yet (none left: the Sales Tracker, the deal panel and the feeds' text are on
+ *  it). An entry needs a reason and the list must end empty. */
+const PENDING: Record<string, string> = {};
 /** The Sales dashboard (.sd-*) is the owner's own layout, kept as designed: its sizes stay off the scale on
  *  purpose; its weights and glyphs are still checked. */
 const SIZES_KEPT = /\.sd-/;
@@ -48,7 +41,7 @@ describe('design system guard', () => {
   for (const { rel, src } of FILES) {
     if (PENDING[rel]) continue;
     const code = noComments(src);
-    const lines = code.split('\n').map((l) => (rel.endsWith('.css') && CSS_PENDING.test(l) ? '' : l));
+    const lines = code.split('\n');
     it(`${rel}: weights 400/500 only (600 = band, 700 = wordmark)`, () => {
       const bad = lines.flatMap((l, i) =>
         [...l.matchAll(/font(?:Weight|-weight)\s*:([^,;}]*)/g)] // also catches `on ? 600 : 400`
@@ -73,5 +66,6 @@ describe('design system guard', () => {
   }
   it('lists what is still pending (shrink to nothing)', () => {
     expect(Object.keys(PENDING).every((k) => FILES.some((f) => f.rel === k))).toBe(true);
+    expect(Object.keys(PENDING)).toEqual([]);
   });
 });

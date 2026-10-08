@@ -7,8 +7,8 @@ import { feedMeta } from '../lib/feeds';
 import type { Company, Dicts, FeedKey } from '../lib/types';
 import { PageHead, SectionHead, card, tabular } from '../components/ui';
 
-/** A feed row's grey context: the engine's line, in words where it uses an arrow (GI went down). */
-export const feedLine = (D: Dicts, k: FeedKey, c: Company) => (k === 'giDown' ? `เคยได้ระดับ ${c.giMax} ตอนนี้ ${c.giLive || 'หมดอายุ'}` : feedMeta(D, k, c));
+/** A feed row's grey context (lib/feeds.ts words it). */
+export const feedLine = (D: Dicts, k: FeedKey, c: Company) => feedMeta(D, k, c);
 
 const AMB = 'var(--bar-warn)', NORM = 'var(--bar)';
 const panel: CSSProperties = { ...card, padding: 22, height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 14 };

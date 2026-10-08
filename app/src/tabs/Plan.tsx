@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { FEEDS, STG, TT, stageOf } from '../lib/constants';
-import { TH_M, addDays, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
+import { TH_M, addDays, daysBetween, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
+import { fmtMoney, type Deal, type LineView } from '../lib/sales';
+import { shortName } from '../lib/salesUi';
 import type { Company, FeedKey, StageKey, Task } from '../lib/types';
 import { feedLine } from './Track';
 import { Opts, PageHead, labelCol } from '../components/ui';
@@ -53,6 +55,11 @@ export function Plan() {
   C.tasks.forEach((t) => (byDay[t.date] || (byDay[t.date] = [])).push(t));
   const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i)).filter((_, i) => i < 35 || addDays(start, 35).slice(0, 7) === calM);
   const dayT = (byDay[selISO] || []).slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  // installments of won deals still to be received (the payment plan): read-only entries, never stored
+  const pays = e.payDue('', '9999-12-31');
+  const payBy: Record<string, { deal: Deal; line: LineView }[]> = {};
+  pays.forEach((x) => (payBy[x.line.due] || (payBy[x.line.due] = [])).push(x));
+  const dayP = payBy[selISO] || [];
 
   const plannedBy: Record<number, Task> = {};
   open_.forEach((t) => {
@@ -76,12 +83,22 @@ export function Plan() {
     ['วันนี้', open_.filter((t) => t.date === today).length, 't-warn'],
     ['7 วันข้างหน้า', open_.filter((t) => t.date > today && t.date <= wk).length, ''],
     ['หลังจากนั้น', open_.filter((t) => t.date > wk).length, ''],
+    // installments late or due within 7 days
+    ['รับเงิน', pays.filter((x) => x.line.due <= wk).length, 't-warn'],
   ];
   const avOf = (key: string, gid: number, title: string, size = 28) => {
     const c = e.company(gid);
     return <CoAvatar key={key} name={c ? c.name : title} web={c?.web} set={c?.set} size={size} />;
   };
   const upcoming = open_.filter((t) => t.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
+  const upPays = pays.filter((x) => x.line.due >= today).slice(0, 4);
+  /** "รับชำระ PAY2 · กรีนวัลเลย์ ฟู้ดส์ · 53,500 บาท": opens the deal (the receipt is recorded there). */
+  const payItem = (x: { deal: Deal; line: LineView }, when?: boolean) => (
+    <button key={x.deal.id + x.line.stage} className={'pl-pay hv' + (when ? ' up' : '') + (x.line.lateDays ? ' late' : '')} onClick={() => set({ deal: x.deal.id })}>
+      <span>รับชำระ {x.line.stage} · {shortName(x.deal.client)} · {fmtMoney(x.line.left || x.line.amt)} บาท</span>
+      <small>{x.line.lateDays ? `เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : when ? isoTh(x.line.due) : x.line.due === today ? 'ครบกำหนดวันนี้' : `อีก ${fmtN(daysBetween(today, x.line.due))} วัน`}</small>
+    </button>
+  );
   const teamOpts = [{ v: '-', label: 'ยังไม่มีผู้รับผิดชอบ' }].concat(C.team.map((v) => ({ v, label: v })));
 
   return (
@@ -117,12 +134,14 @@ export function Plan() {
             {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((w, i) => <span key={w} className={'pl-wd' + (i === 0 || i === 6 ? ' wk' : '')}>{w}</span>)}
             {cells.map((d) => {
               const ts = byDay[d] || [];
+              const ps = payBy[d] || [];
               const inM = d.slice(0, 7) === calM, isSel = d === selISO, wkd = dow(d) === 0 || dow(d) === 6;
               const cls = 'pl-cell' + (inM ? '' : ' out') + (wkd ? ' wk' : '') + (d === today ? ' today' : '') + (isSel ? ' sel' : '');
               return (
-                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={`${isoTh(d)}${d === today ? ' (วันนี้)' : ''} · ${ts.length} งาน`}>
+                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={`${isoTh(d)}${d === today ? ' (วันนี้)' : ''} · ${ts.length} งาน${ps.length ? ` · รับเงิน ${ps.length} งวด` : ''}`}>
                   <span className="pl-dn">{+d.slice(8)}</span>
                   {ts.length > 0 && <span className="pl-cnt">{fmtN(ts.length)}<span className="pl-cnt-u"> งาน</span></span>}
+                  {ps.length > 0 && <span className={'pl-cnt pay' + (ps.some((x) => x.line.lateDays) ? ' late' : '')}><span className="pl-cnt-u">รับเงิน </span>{fmtN(ps.length)}</span>}
                 </button>
               );
             })}
@@ -134,10 +153,11 @@ export function Plan() {
             <span className="pl-day-dn">{+selISO.slice(8)}</span>
             <span className="pl-day-t">
               <b>{(selISO === today ? 'วันนี้ · ' : '') + ['วันอาทิตย์', 'วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์', 'วันเสาร์'][dow(selISO)] + ' ' + isoTh(selISO)}</b>
-              <span>{fmtN(dayT.length)} งาน</span>
+              <span>{fmtN(dayT.length)} งาน{dayP.length ? ` · รับเงิน ${fmtN(dayP.length)} งวด` : ''}</span>
             </span>
           </div>
-          {!dayT.length && <span className="pl-empty">ไม่มีงานในวันนี้ · เลือกวันอื่น หรือกด นัด ที่รายชื่อด้านล่าง</span>}
+          {!dayT.length && !dayP.length && <span className="pl-empty">ไม่มีงานในวันนี้ · เลือกวันอื่น หรือกด นัด ที่รายชื่อด้านล่าง</span>}
+          {dayP.map((x) => payItem(x))}
           {dayT.map((t) => {
             const ti = taskInfo(e, t);
             return (
@@ -158,8 +178,11 @@ export function Plan() {
             );
           })}
           <span className="pl-up-h">งานที่กำลังจะถึง</span>
-          {!upcoming.length && <span className="pl-empty">ยังไม่มีงานที่กำลังจะถึง</span>}
-          {upcoming.map((t) => {
+          {!upcoming.length && !upPays.length && <span className="pl-empty">ยังไม่มีงานที่กำลังจะถึง</span>}
+          {/* contacts and installments in one list by date */}
+          {[...upcoming.map((t) => ({ at: t.date, t, x: undefined })), ...upPays.map((x) => ({ at: x.line.due, t: undefined, x }))].sort((a, b) => a.at.localeCompare(b.at)).slice(0, 10).map(({ t, x }) => {
+            if (x) return payItem(x, true);
+            if (!t) return null;
             const ti = taskInfo(e, t);
             return (
               <button key={t.id} className="pl-up hv" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '8px', margin: '0 4px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 14, color: 'var(--ink)' }}>

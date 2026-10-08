@@ -200,7 +200,7 @@ async function readPdf(file: DocFile, progress: Progress | undefined, signal: Ab
       doc = await abortable(task.promise, signal);
     } catch (e) {
       checkAbort(signal);
-      if ((e as Error)?.name === 'PasswordException') throw new Error('PDF นี้ตั้งรหัสผ่านไว้ — เปิดด้วยรหัสแล้วบันทึกเป็นไฟล์ใหม่ (Print → Save as PDF) ก่อนแนบ');
+      if ((e as Error)?.name === 'PasswordException') throw new Error('PDF นี้ตั้งรหัสผ่านไว้ — เปิดด้วยรหัสแล้วบันทึกเป็นไฟล์ใหม่ (สั่ง Print แล้วเลือก Save as PDF) ก่อนแนบ');
       // pdf.js's own worker script did not load (offline, or an old page after a new version went up)
       if (/fake worker|dynamically imported|importScripts|failed to fetch|networkerror/i.test(String((e as Error)?.message ?? e))) throw new Error(PDF_LOAD_FAILED, { cause: e });
       throw new Error('เปิดไฟล์ PDF ไม่ได้ ไฟล์อาจเสียหรือไม่ใช่ PDF', { cause: e });

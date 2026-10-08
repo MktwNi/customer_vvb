@@ -1,15 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../state';
 import { norm } from '../lib/core';
-import { KIND_TH, fmtMoney, parseAmount, type Deal, type DealDoc, type DocKind, type DocTarget } from '../lib/sales';
+import { dmTh, isoTh, todayISO } from '../lib/format';
+import {
+  KIND_TH, attachPreview, closeReady, countedAt, dealMoney, fmtMoney, kindForStage, parseAmount, planOf, stageTh, stageTrack, targetForStage,
+  type Deal, type DealDoc, type DocKind, type DocTarget,
+} from '../lib/sales';
 import type { DocFacts } from '../lib/docExtract';
+import type { GccEngine } from '../lib/engine';
 import { Modal } from './Dialog';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { prefs } from '../lib/storage';
 import { DateField, Notice, labelCol } from './ui';
+import { Bead } from './StageTrack';
+import { useSalesActs } from './SalesToast';
 
 const BASIS_PREF = 'gcc-doc-basis';
-const defaultTarget = (k: DocKind): DocTarget => (k === 'quotation' ? 'forecast' : k === 'invoice' ? 'actual' : 'none');
+
+/** Browsers show PDF and common images in a tab; anything else (HEIC from an iPhone) is downloaded. */
+export const SHOWABLE = /^(application\/pdf|image\/(png|jpeg|webp|gif))$/;
+/** Open an attached document's file (from this browser, or the team's Drive). The tab is opened within
+ *  the click, then filled: a pop-up opened after a slow download would be blocked. */
+export async function openDocFile(e: GccEngine, doc: DealDoc) {
+  const w = SHOWABLE.test(doc.mime) ? window.open('', '_blank') : null;
+  try {
+    const url = URL.createObjectURL(await e.docBlob(doc));
+    if (w) w.location.href = url;
+    else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.name;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    w?.close();
+    window.alert('เปิดไฟล์ไม่สำเร็จ: ' + ((err as Error)?.message || err));
+  }
+}
 
 /** Two names refer to the same company? (ignores company-type words and punctuation) */
 function sameParty(a: string, b: string) {
@@ -21,9 +49,17 @@ function sameParty(a: string, b: string) {
 /**
  * Attach a quotation / invoice: the document is read in the browser (PDF text, or OCR for scans and
  * photos), the amounts found are shown, and nothing is saved until the user confirms the figure.
+ * `stage`: the stage it was attached at (QUOTATION is the Forecast, a PAY the Actual of that
+ * installment); without it the stage is chosen ("ระบบเลือกขั้นให้"), '' = a document of no stage
+ * ("เอกสารอื่น"). `file`: a file dropped on the panel, read at once.
  */
-export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: DocKind; onClose: () => void }) {
+export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void }) {
   const { engine: e } = useApp();
+  const acts = useSalesActs();
+  const cfg = e.sales.cfg, today = todayISO();
+  const kind0: DocKind = kindIn ?? (stage ? kindForStage(cfg, stage) : dealMoney(e.sales, deal).fcDoc ? 'invoice' : 'quotation');
+  // what a kind counts toward at this stage (a receipt at a PAY stage is Actual)
+  const defaultTarget = (k: DocKind): DocTarget => targetForStage(cfg, stage ?? '', k);
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [prog, setProg] = useState<{ msg: string; pct?: number } | null>(null);
@@ -37,11 +73,19 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const [docNo, setDocNo] = useState('');
   const [docDate, setDocDate] = useState('');
   const [saving, setSaving] = useState('');
+  // a document already counted at this stage: the new one replaces it (kept as evidence) or adds to it
+  const [mode, setMode] = useState<'replace' | 'add'>('replace');
+  // "ถือว่ารับครบงวดนี้" on a short payment: null = as suggested (ticked when it matches withholding tax)
+  const [full, setFull] = useState<boolean | null>(null);
   const abort = useRef<AbortController | null>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => () => {
     abort.current?.abort();
   }, []);
+  // a file dropped on the deal panel is read right away
+  useEffect(() => {
+    if (dropped) pick(dropped);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => {
     if (url) URL.revokeObjectURL(url);
   }, [url]);
@@ -122,17 +166,44 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const parsed = parseAmount(amount);
   const amt = parsed ?? null;
   const badAmt = parsed === undefined;
+  const counted = stage && target === 'actual' ? countedAt(e.sales, deal, stage) : [];
+  const old = counted[counted.length - 1];
+  const replace = old && mode === 'replace' ? old.id : undefined;
+  const tgt: DocTarget = amt == null ? 'none' : target;
+  // what attaching changes: the installment of the plan, the Actual, and whether the job becomes ready to close
+  const pv = file && amt != null && tgt !== 'none' ? attachPreview(e.sales, deal, { kind, amount: amt, target: tgt, docDate, stage, replace }, today) : null;
+  const short = !!pv?.line && pv.short > 0 && pv.line.got > 0;
+  const fullOn = short && (full ?? pv?.wht != null);
+  const ad = docDate && docDate <= today ? docDate : today;
+  const after = !pv
+    ? ''
+    : [
+        pv.line
+          ? `หลังแนบ: ${pv.stage} รับแล้ว ${fmtMoney(pv.line.got)} บาท · ${pv.short > 0 ? `ขาด ${fmtMoney(pv.short)} จากแผน ${fmtMoney(pv.line.amt)}` : 'ครบตามแผน'}`
+          : tgt === 'forecast'
+            ? `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Forecast จะเป็น ${fmtMoney(amt)}`
+            : `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Actual จะเป็น ${fmtMoney(pv.actual)}${pv.fcFull ? ' (ครบตาม Forecast)' : ''}`,
+        pv.ready || (fullOn && pv.readyIfFull) ? (pv.line ? 'รับครบทุกงวดแล้ว งานนี้จะพร้อมปิดงาน' : 'งานนี้จะพร้อมปิดงาน') : '',
+      ].filter(Boolean).join(' · ');
   const save = async () => {
     if (!file || badAmt) return;
     setSaving('กำลังบันทึก…');
     try {
       if (amt != null && basis !== 'manual') prefs.set(BASIS_PREF, basis);
-      await e.attachDoc(deal.id, file, { kind, amount: amt, target: amt == null ? 'none' : target, basis: amt == null ? 'manual' : basis, detected: facts?.total ?? facts?.candidates[0]?.value ?? null, docNo, docDate });
+      const was = closeReady(e.sales, deal, today);
+      const doc = await e.attachDoc(deal.id, file, { kind, amount: amt, target: tgt, basis: amt == null ? 'manual' : basis, detected: facts?.total ?? facts?.candidates[0]?.value ?? null, docNo, docDate, stage, replace });
+      // a short payment counted complete (withholding tax): the installment is received
+      if (fullOn && doc.stage) e.setPayFull(deal.id, doc.stage, true);
       onClose();
+      const d = e.sales.deals[deal.id];
+      if (d) acts.after(d, was, 'payment', `แนบ${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''}${doc.stage ? ' ที่ ' + doc.stage : ''} แล้ว`);
     } catch (err) {
       setSaving('บันทึกไม่สำเร็จ: ' + ((err as Error)?.message || err));
     }
   };
+  // the installment planned at this stage, and the stage's circle
+  const line = stage ? planOf(e.sales, deal, today)?.lines.find((l) => l.stage === stage) : undefined;
+  const st = stage ? stageTrack(e.sales, deal, today).states[stage] : undefined;
 
   const opts: [DealDoc['basis'], string, number | null][] = facts
     ? ([
@@ -147,7 +218,17 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const isImg = file && docMime(file).startsWith('image/') && !/hei[cf]/.test(docMime(file)); // browsers can't show HEIC
 
   return (
-    <Modal title={`แนบ${KIND_TH[kind]} · ${deal.client}`} onClose={onClose} width={620}>
+    <Modal title={stage ? `แนบเอกสารที่ ${stage}${stageTh(stage) ? ' · ' + stageTh(stage) : ''}` : `แนบ${KIND_TH[kind]}`} onClose={onClose} width={620}>
+      <span className="sl-dlg-sub">{deal.client}</span>
+      {stage && (
+        <div className="sl-stagebar">
+          <Bead state={st || 'future'} now stage={stage} />
+          <span>
+            เอกสารนี้จะผูกกับขั้น <b>{stage}</b> · ยอดที่ยืนยัน{target === 'forecast' ? 'เป็น Forecast' : target === 'actual' ? 'รวมเข้า Actual' : 'ไม่นับยอด'}
+            {line && line.amt > 0 && <> · <b>แผนงวดนี้ {fmtMoney(line.amt)} บาท{line.due ? ' ครบกำหนด ' + dmTh(line.due) : ''}</b></>}
+          </span>
+        </div>
+      )}
       <label style={{ ...labelCol, gap: 8 }}>
         เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)
         <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 14 }} />
@@ -227,12 +308,25 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
               <DateField value={docDate} onChange={setDocDate} placeholder="ไม่ระบุ" />
             </label>
           </div>
+          {old && amt != null && (
+            <fieldset className="sl-repl">
+              <legend>{stage} นับยอดจาก{KIND_TH[old.kind]}{old.docNo ? ' ' + old.docNo : ''} {fmtMoney(old.amount)} บาท อยู่แล้ว</legend>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'replace'} onChange={() => setMode('replace')} /> ใช้ยอดนี้แทน <span className="t-meta">ใบเดิมเก็บไว้เป็นหลักฐาน ไม่นับยอด</span></label>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'add'} onChange={() => setMode('add')} /> นับเพิ่ม <span className="t-meta">งวดนี้จ่ายหลายครั้ง</span></label>
+            </fieldset>
+          )}
+          {after && <div className="sl-after">{after}</div>}
+          {short && (
+            <label className="sl-rf-full hv-tx">
+              <input type="checkbox" checked={fullOn} onChange={(ev) => setFull(ev.target.checked)} /> ถือว่ารับครบงวดนี้ (เช่น หัก ณ ที่จ่าย)
+            </label>
+          )}
           {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? 'var(--bad)' : 'var(--ink-2)' }}>{saving}</span>}
           <div className="dlg-act">
             <button onClick={onClose} className="quiet">ยกเลิก</button>
             {!badAmt && (
               <button onClick={save} disabled={saving === 'กำลังบันทึก…'} className="btn pri">
-                {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
+                {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และ${stage ? 'แนบที่ ' + stage : 'แนบเอกสาร'}` : 'แนบเอกสาร (ไม่ระบุยอด)'}
               </button>
             )}
           </div>

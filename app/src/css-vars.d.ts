@@ -6,5 +6,9 @@ declare module 'react' {
     '--bg'?: string;
     '--hv'?: string;
     '--bd'?: string;
+    // the tracker's stage circles: how many stages share the track (their size follows)
+    '--n'?: number;
+    // the guide line under an open deal's chevron: brand once a stage is reached
+    '--line-c'?: string;
   }
 }

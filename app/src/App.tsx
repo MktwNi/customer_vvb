@@ -17,6 +17,7 @@ import { Update } from './tabs/Update';
 import { Notes } from './tabs/Notes';
 import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
+import { SalesMessages } from './components/SalesToast';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
 import { AddPerson, People } from './tabs/People';
 import { Users } from './tabs/Users';
@@ -170,6 +171,8 @@ export default function App() {
           <DealPanel />
         </ErrorBoundary>
       )}
+      {/* the Sales Tracker's messages and its closing question, over the table and the deal panel alike */}
+      {ready && <SalesMessages />}
       {ready && ui.sel != null && (
         <ErrorBoundary resetKey={String(ui.sel)}>
           <CompanyDrawer />

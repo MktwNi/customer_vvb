@@ -1487,7 +1487,7 @@ export class GccEngine {
     const i = beforeId ? rows.findIndex((x) => x.id === beforeId) : -1;
     const order = i < 0 ? (rows.length ? rows[rows.length - 1].order + 1000 : Date.now()) : i === 0 ? rows[0].order - 1000 : (rows[i - 1].order + rows[i].order) / 2;
     this.putDeal({ ...d, section, order }, ['section', 'order']);
-    if (section !== d.section) this.salesLog(d, 'ย้ายหมวด', `${d.section || '-'} → ${section || '-'}`);
+    if (section !== d.section) this.salesLog(d, 'ย้ายหมวด', `จาก ${d.section || 'ไม่ระบุหมวด'} ไป ${section || 'ไม่ระบุหมวด'}`);
     this.saveSales();
   }
   deleteDeal(id: string) {
