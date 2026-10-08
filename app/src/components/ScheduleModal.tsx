@@ -35,7 +35,7 @@ function ScheduleForm() {
     const p = { type: (g('type') || 'call') as TaskType, date: g('date') || todayISO(), time: g('time'), note: g('note') };
     if (o.taskId) {
       if (t) e.updateTask(t.id, p, init); // gone: a teammate deleted it meanwhile, and that stands (see `gone`)
-    } else e.addTasks(o.ids, p, +(g('spread') || 0));
+    } else e.addTasks(o.ids, p, +(g('spread') || 0), o.pid);
     set({ sched: null, picked: {} });
   };
 
@@ -44,7 +44,7 @@ function ScheduleForm() {
       <div onClick={cancel} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.45)', zIndex: 50 }} />
       <form ref={ref} role="dialog" aria-modal="true" onSubmit={save} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 'min(480px,94vw)', background: '#fff', borderRadius: 22, padding: 22, zIndex: 51, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <span style={{ fontSize: 18, fontWeight: 500 }}>{o.taskId ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'}</span>
-        <span style={{ fontSize: 13, color: '#475069' }}>{c ? c.name : o.ids.length > 1 ? 'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
+        <span style={{ fontSize: 13, color: '#475069' }}>{c ? c.name + (o.pid && e.people[o.pid] ? ' · กับ ' + e.people[o.pid].name : '') : o.ids.length > 1 ? 'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
         <label style={field}>
           ประเภท
           <select name="type" defaultValue={init ? init.type : 'call'} style={ctl}><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>

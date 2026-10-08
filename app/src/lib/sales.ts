@@ -307,7 +307,84 @@ export function lastStage(s: SalesState, d: Deal) {
   return last;
 }
 
-export interface SalesFilter { year: string; q?: string; section?: string; source?: string; service?: string; resp?: string; referral?: string; result?: '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY'; day?: string; month?: string; job?: '' | 'open' | 'closed' }
+/**
+ * How far a deal has come, stage by stage, for the progress track in the table:
+ * - done: has a date (today or earlier) or a note; planned: its date is still ahead;
+ * - yes / no / wait: the CLOSED DEAL result;
+ * - skipped: left empty before a later stage that has something;
+ * - next: the one to do now (the first not done after the last one done) — `next` names it, also when
+ *   it is already planned or waiting for the result;
+ * - future: still to come; off: not needed (stages after a lost deal).
+ */
+export type StageState = 'done' | 'planned' | 'yes' | 'no' | 'wait' | 'skipped' | 'next' | 'future' | 'off';
+export function stageTrack(s: SalesState, d: Deal, today: string) {
+  const stages = s.cfg.stages;
+  const res = dealResult(s, d);
+  const dIx = stages.indexOf(DEAL_STAGE);
+  const filled = stages.map((p) => {
+    const x = stepOf(s, d.id, p);
+    return !!(x.d || x.n.trim());
+  });
+  const lastFilled = filled.lastIndexOf(true);
+  const states: StageState[] = stages.map((p, i) => {
+    const x = stepOf(s, d.id, p);
+    if (filled[i]) {
+      if (p === DEAL_STAGE) {
+        if (res) return res === 'YES' ? 'yes' : res === 'NO' ? 'no' : 'wait';
+        return x.d > today ? 'planned' : 'next'; // a date but no result yet: still to decide
+      }
+      return x.d && x.d > today ? 'planned' : 'done';
+    }
+    if (res === 'NO' && dIx >= 0 && i > dIx) return 'off';
+    return i < lastFilled ? 'skipped' : 'future';
+  });
+  let next = -1;
+  if (res === 'WAIT') next = dIx;
+  else if (res !== 'NO') {
+    let lastDone = -1;
+    states.forEach((x, i) => ['done', 'yes', 'wait'].includes(x) && (lastDone = i));
+    next = states.findIndex((x, i) => i > lastDone && (x === 'planned' || x === 'future' || x === 'next'));
+    // not decided yet: the result is asked for before anything after it (payments, stages added later)
+    if (dIx >= 0 && res !== 'YES' && (next < 0 || next > dIx)) next = dIx;
+  }
+  if (next >= 0 && (states[next] === 'future' || states[next] === 'skipped')) states[next] = 'next';
+  // only one stage is "next"
+  states.forEach((x, i) => x === 'next' && i !== next && (states[i] = filled[i] ? 'planned' : i < lastFilled ? 'skipped' : 'future'));
+  const done = states.filter((x) => x === 'done' || x === 'yes' || x === 'no' || x === 'wait').length;
+  return {
+    states: Object.fromEntries(stages.map((p, i) => [p, states[i]])) as Record<string, StageState>,
+    next: next >= 0 ? stages[next] : '',
+    nextStep: next >= 0 ? stepOf(s, d.id, stages[next]) : null,
+    done,
+    total: stages.length,
+    result: res,
+  };
+}
+
+/** One line for a deal: its status, and the result when the job is closed ("ปิดงาน" alone doesn't say whether it was won), else the stage reached. */
+export function trackerStatus(S: SalesState, d: Deal) {
+  const st = dealStatus(S, d);
+  const res = st.result === 'YES' || st.result === 'NO' ? st.result : '';
+  const last = lastStage(S, d);
+  const overall = st.overall.length > 40 ? st.overall.slice(0, 40) + '…' : st.overall; // a waiting note can be long
+  return [overall, d.jobStatus === 'closed' && res ? 'ผล ' + res : '', !res && last ? 'ขั้นล่าสุด ' + last : ''].filter(Boolean).join(' · ');
+}
+
+/** Quick views of the table: what needs doing (combined with the other filters). */
+export type QuickView = '' | 'overdue' | 'notstarted' | 'active' | 'payment';
+export function quickMatch(s: SalesState, d: Deal, q: QuickView, today: string) {
+  if (!q) return true;
+  if (q === 'overdue') return overdueDays(s, d, today) != null;
+  const st = dealStatus(s, d);
+  if (q === 'notstarted') return !st.started;
+  if (q === 'active') return st.started && (st.result === '' || st.result === 'WAIT');
+  // won, and a payment stage (PAY…, after CLOSED DEAL) is still empty
+  const dIx = s.cfg.stages.indexOf(DEAL_STAGE);
+  const pays = dIx >= 0 ? s.cfg.stages.slice(dIx + 1).filter((p) => /^PAY/i.test(p) || DEFAULT_STAGES.includes(p)) : [];
+  return st.result === 'YES' && pays.some((p) => !stepOf(s, d.id, p).d && !stepOf(s, d.id, p).n.trim());
+}
+
+export interface SalesFilter { year: string; q?: string; section?: string; source?: string; service?: string; resp?: string; referral?: string; result?: '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY'; day?: string; month?: string; job?: '' | 'open' | 'closed'; quick?: QuickView }
 
 /** Deals of a year that pass the filters, in section order then row order. */
 export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
@@ -327,6 +404,7 @@ export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
         const r = dealResult(s, d);
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;
       }
+      if (f.quick && !quickMatch(s, d, f.quick, todayISO())) return false;
       if (f.day || f.month) {
         // the last contact (typed date or latest stage date), or the day it was added — as shown in the row
         const cd = lastContact(s, d, todayISO()) || (d.at || '').slice(0, 10);

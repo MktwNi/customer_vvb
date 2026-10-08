@@ -84,8 +84,19 @@ export interface Built {
 export interface RoundRaw { no: string; m1: string; ann: string; doc: string; docOff?: string; fee: string; dl: string; cer?: string; annNote?: string; feeNote?: string }
 export interface Round extends RoundRaw { annT: number; docT: number }
 
-export interface Task { id: string; gid: number; title: string; type: TaskType; date: string; time: string; note: string; done: boolean }
-export interface LogEntry { id?: string; at: string; by: string; type: string; text?: string; result?: string }
+/** `pid`: the person (ผู้ติดต่อ) it is with, when made from that person's page. */
+export interface Task { id: string; gid: number; title: string; type: TaskType; date: string; time: string; note: string; done: boolean; pid?: string }
+/** `pid`: the person (ผู้ติดต่อ) it is about; such entries without a company are kept under `p-<pid>`. */
+export interface LogEntry { id?: string; at: string; by: string; type: string; text?: string; result?: string; pid?: string }
+export type PersonRole = '' | 'decision' | 'influencer' | 'coordinator' | 'user';
+/** A contact person at a customer company, shared with the team (see people.ts). */
+export interface Person {
+  id: string; name: string; nick: string; pos: string; dept: string; role: PersonRole;
+  /** Company everyone has (registry or added by hand); null = only named in `company`. */
+  gid: number | null; company: string;
+  phone: string; email: string; line: string; owner: string; status: 'active' | 'left'; note: string;
+  at: string; by: string; upAt: string; upBy: string;
+}
 export interface Crm {
   stages: Record<string, StageKey>;
   notes: Record<string, { at: string; text: string }[]>;

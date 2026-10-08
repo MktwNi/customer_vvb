@@ -3,11 +3,12 @@ import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, LOG_TYPES, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, money, telHref, todayISO, ymTh } from '../lib/format';
 import type { Cert, Company, ContactForm, Detail, StageKey } from '../lib/types';
-import { dealMoney, dealStatus, fmtMoney, lastContact, lastStage, type Deal, type SalesState } from '../lib/sales';
+import { dealMoney, fmtMoney, lastContact, trackerStatus, type Deal } from '../lib/sales';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { Opts, SrcTags, heroGrad, inputStyle } from './ui';
 import { CoAvatar } from './CoAvatar';
+import { CompanyPeople } from '../tabs/People';
 import { useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
@@ -257,6 +258,7 @@ export function CompanyDrawer() {
                   </form>
                 )}
               </div>
+              <CompanyPeople c={c} />
               <div style={{ ...box, gap: 9 }}>
                 {facts.map(([k, v]) => (
                   <div key={k} style={{ display: 'grid', gridTemplateColumns: '130px minmax(0,1fr)', gap: 12, fontSize: 14 }}>
@@ -422,15 +424,6 @@ function BlockRow({ it }: { it: BlockItem }) {
 
 /** Newest year first; in a year, open jobs first. */
 const newestFirst = (deals: Deal[]) => deals.sort((a, b) => b.year.localeCompare(a.year) || (a.jobStatus === 'open' ? 0 : 1) - (b.jobStatus === 'open' ? 0 : 1) || b.at.localeCompare(a.at));
-
-/** One line for a deal: its status, and the result when the job is closed ("ปิดงาน" alone doesn't say whether it was won), else the stage reached. */
-function trackerStatus(S: SalesState, d: Deal) {
-  const st = dealStatus(S, d);
-  const res = st.result === 'YES' || st.result === 'NO' ? st.result : '';
-  const last = lastStage(S, d);
-  const overall = st.overall.length > 40 ? st.overall.slice(0, 40) + '…' : st.overall; // a waiting note can be long
-  return [overall, d.jobStatus === 'closed' && res ? 'ผล ' + res : '', !res && last ? 'ขั้นล่าสุด ' + last : ''].filter(Boolean).join(' · ');
-}
 
 /** Where the company stands in the Sales Tracker, and a one-click way to put it there. */
 function SalesBox({ c }: { c: Company }) {

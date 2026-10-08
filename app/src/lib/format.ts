@@ -38,10 +38,20 @@ export const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
-/** tel: link for the first number in a "a | b" or "a, b" list. */
+/** tel: link for the first number in a "a | b", "a, b" or "a / b" list; an extension ("ต่อ 214", "ext 214",
+ *  "#214") is dialled after a pause, not as part of the number. */
 export const telHref = (p?: string | null) => {
-  const m = String(p || '').split(/[|,]/)[0].replace(/[^\d+]/g, '');
-  return m ? 'tel:' + m : '';
+  const first = String(p || '').split(/[|,/;]/)[0];
+  const [num, ext] = first.split(/ต่อ|ext\.?|#|x(?=\s*\d)/i);
+  const m = num.replace(/[^\d+]/g, '');
+  const x = (ext || '').replace(/\D/g, '');
+  return m ? 'tel:' + m + (x ? ',' + x : '') : '';
+};
+/** ISO timestamp → its date (YYYY-MM-DD) in local time (a UTC slice is the day before until 07:00 in Thailand). */
+export const localDay = (iso: string) => {
+  if (/^\d{4}-\d\d-\d\d$/.test(iso || '')) return iso; // already a day
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? String(iso || '').slice(0, 10) : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 /** ISO timestamp → "6 ต.ค. 2569 14:05 น." in local time */
 export const dtTh = (iso: string) => {

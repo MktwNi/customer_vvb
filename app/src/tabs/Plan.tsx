@@ -16,7 +16,7 @@ export function taskInfo(e: ReturnType<typeof useApp>['engine'], t: Task) {
   const over = !t.done && t.date < today;
   return {
     title: c ? c.name : t.title,
-    meta: [ty[1], t.time, isoTh(t.date), over ? 'เกินกำหนด' : ''].filter(Boolean).join(' · '),
+    meta: [ty[1], t.time, isoTh(t.date), t.pid && e.people[t.pid] ? 'กับ ' + e.people[t.pid].name : '', over ? 'เกินกำหนด' : ''].filter(Boolean).join(' · '),
     color: ty[2],
     tel: c && c.phone ? telHref(c.phone) : '',
     company: c,
