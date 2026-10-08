@@ -329,7 +329,10 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
   const states: StageState[] = stages.map((p, i) => {
     const x = stepOf(s, d.id, p);
     if (filled[i]) {
-      if (p === DEAL_STAGE && res) return res === 'YES' ? 'yes' : res === 'NO' ? 'no' : 'wait';
+      if (p === DEAL_STAGE) {
+        if (res) return res === 'YES' ? 'yes' : res === 'NO' ? 'no' : 'wait';
+        return x.d > today ? 'planned' : 'next'; // a date but no result yet: still to decide
+      }
       return x.d && x.d > today ? 'planned' : 'done';
     }
     if (res === 'NO' && dIx >= 0 && i > dIx) return 'off';
@@ -340,9 +343,13 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
   else if (res !== 'NO') {
     let lastDone = -1;
     states.forEach((x, i) => ['done', 'yes', 'wait'].includes(x) && (lastDone = i));
-    next = states.findIndex((x, i) => i > lastDone && (x === 'planned' || x === 'future'));
+    next = states.findIndex((x, i) => i > lastDone && (x === 'planned' || x === 'future' || x === 'next'));
+    // not decided yet: the result is asked for before anything after it (payments, stages added later)
+    if (dIx >= 0 && res !== 'YES' && (next < 0 || next > dIx)) next = dIx;
   }
-  if (next >= 0 && states[next] === 'future') states[next] = 'next';
+  if (next >= 0 && (states[next] === 'future' || states[next] === 'skipped')) states[next] = 'next';
+  // only one stage is "next"
+  states.forEach((x, i) => x === 'next' && i !== next && (states[i] = filled[i] ? 'planned' : i < lastFilled ? 'skipped' : 'future'));
   const done = states.filter((x) => x === 'done' || x === 'yes' || x === 'no' || x === 'wait').length;
   return {
     states: Object.fromEntries(stages.map((p, i) => [p, states[i]])) as Record<string, StageState>,
@@ -371,9 +378,10 @@ export function quickMatch(s: SalesState, d: Deal, q: QuickView, today: string) 
   const st = dealStatus(s, d);
   if (q === 'notstarted') return !st.started;
   if (q === 'active') return st.started && (st.result === '' || st.result === 'WAIT');
-  // won, and a stage after CLOSED DEAL (the payments) is still empty
+  // won, and a payment stage (PAY…, after CLOSED DEAL) is still empty
   const dIx = s.cfg.stages.indexOf(DEAL_STAGE);
-  return st.result === 'YES' && dIx >= 0 && s.cfg.stages.slice(dIx + 1).some((p) => !stepOf(s, d.id, p).d && !stepOf(s, d.id, p).n.trim());
+  const pays = dIx >= 0 ? s.cfg.stages.slice(dIx + 1).filter((p) => /^PAY/i.test(p) || DEFAULT_STAGES.includes(p)) : [];
+  return st.result === 'YES' && pays.some((p) => !stepOf(s, d.id, p).d && !stepOf(s, d.id, p).n.trim());
 }
 
 export interface SalesFilter { year: string; q?: string; section?: string; source?: string; service?: string; resp?: string; referral?: string; result?: '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY'; day?: string; month?: string; job?: '' | 'open' | 'closed'; quick?: QuickView }

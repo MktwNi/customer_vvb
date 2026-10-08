@@ -1012,24 +1012,46 @@ export class GccEngine {
     const c = this.company(gid);
     return c && !isLocalId(c.id) ? c.id : null;
   }
+  private newPerson(p: Partial<PersonForm> & { name: string }, id: string) {
+    const c = p.gid != null ? this.company(p.gid) : undefined;
+    const gid = this.personGid(p.gid);
+    const at = new Date().toISOString(), by = this.me();
+    return toPerson(
+      { ...p, gid, company: (c?.name || p.company || '').trim(), line: (p.line || '').trim(), owner: p.owner !== undefined ? p.owner : (gid != null && this.crm.owners[gid]) || by, status: p.status || 'active', at, by, upAt: at, upBy: by },
+      id,
+    );
+  }
   /** Add a contact person; returns its id. `id` + `nx`: one found in the Sales Tracker — the same id on
    *  every browser, so if a teammate added the same person first, theirs stands. */
   addPerson(p: Partial<PersonForm> & { name: string }, opt: { id?: string; nx?: boolean } = {}): string {
     if (opt.id && this.people[opt.id]) return opt.id;
-    const c = p.gid != null ? this.company(p.gid) : undefined;
-    const gid = this.personGid(p.gid);
-    const at = new Date().toISOString(), by = this.me();
-    const id = opt.id || opId();
-    const v = toPerson(
-      { ...p, gid, company: (c?.name || p.company || '').trim(), owner: p.owner !== undefined ? p.owner : (gid != null && this.crm.owners[gid]) || by, status: p.status || 'active', at, by, upAt: at, upBy: by },
-      id,
-    );
+    const v = this.newPerson(p, opt.id || opId());
     if (!v) return '';
+    const id = v.id;
     this.people[id] = v;
     this.op(keyOf.person(id), { ...v }, { nx: !!opt.nx });
     this.persist('people', this.people);
     this.emit();
     return id;
+  }
+  /** Add several contacts found in the Sales Tracker at once (one queue write, one save). */
+  addPeople(list: (Partial<PersonForm> & { name: string; id: string })[]) {
+    let n = 0;
+    this.batchOps(() =>
+      list.forEach((p) => {
+        if (this.people[p.id]) return;
+        const v = this.newPerson(p, p.id);
+        if (!v) return;
+        this.people[v.id] = v;
+        this.op(keyOf.person(v.id), { ...v }, { nx: true });
+        n++;
+      }),
+    );
+    if (n) {
+      this.persist('people', this.people);
+      this.emit();
+    }
+    return n;
   }
   /** Save a person's form: only the fields changed in it (over the values it opened with, `init`), so
    *  a teammate's change to another field meanwhile is kept. */
@@ -1037,11 +1059,19 @@ export class GccEngine {
     const cur = this.people[id];
     if (!cur) return;
     const n: Person = { ...cur, ...patch };
-    if ('gid' in patch) {
-      const c = patch.gid != null ? this.company(patch.gid) : undefined;
-      n.gid = this.personGid(patch.gid);
+    // the company only when the form changed it: a save of other fields keeps the team's link as it is
+    // (this device may not know the company, or know it under a merged id)
+    const coEdited = ('gid' in patch || 'company' in patch) && (!init || patch.gid !== init.gid || patch.company !== init.company);
+    if (coEdited) {
+      const g = patch.gid !== undefined ? patch.gid : cur.gid;
+      const c = g != null ? this.company(g) : undefined;
+      n.gid = g == null ? null : c ? (isLocalId(c.id) ? null : c.id) : isLocalId(g) ? null : this.canonical(g);
       if (c) n.company = c.name;
+    } else {
+      n.gid = cur.gid;
+      n.company = cur.company;
     }
+    n.line = (n.line || '').trim();
     n.name = (n.name || '').trim().slice(0, 200) || cur.name;
     n.note = (n.note || '').slice(0, NOTE_CAP);
     const f = PERSON_FIELDS.filter((k) => n[k] !== cur[k] && (!init || !(k in init) || n[k] !== init[k]));
@@ -1053,12 +1083,18 @@ export class GccEngine {
     this.persist('people', this.people);
     this.emit();
   }
-  /** Delete a person (their calls and notes stay in the company's contact log). */
+  /** Delete a person. Their calls and notes at a company stay in its contact log; those kept under the
+   *  person (no company the team shares) are shown nowhere else, so they go too. */
   deletePerson(id: string) {
     if (!this.people[id]) return;
     delete this.people[id];
-    this.op(keyOf.person(id));
-    this.hideSuggestion(id); // one found in the Sales Tracker is not suggested again
+    this.batchOps(() => {
+      this.op(keyOf.person(id));
+      (this.crm.log['p-' + id] || []).slice().forEach((l) => this.delLog('p-' + id, l));
+    });
+    delete this.crm.log['p-' + id];
+    this.saveCrm();
+    this.forgetPeople([id]); // one found in the Sales Tracker is not suggested again
     this.persist('people', this.people);
     this.emit();
   }
@@ -1075,15 +1111,24 @@ export class GccEngine {
   /** The company page a person links to (registry, added by hand, or found by name on this device). */
   personCompany(p: Person) {
     if (p.gid != null) return this.company(p.gid);
-    const k = norm(p.company);
-    return k ? this.B.companies.find((c) => isLocalId(c.id) && norm(c.name) === k) : undefined;
+    return p.company ? this.localCo(p.company) : undefined;
   }
   /** Calls, e-mails, meetings and notes with a person, newest first. */
   personLogs(p: Person) {
-    const c = this.personCompany(p);
-    const own = (this.crm.log['p-' + p.id] || []).map((l) => ({ l, key: 'p-' + p.id }));
-    const co = c ? (this.crm.log[c.id] || []).filter((l) => l.pid === p.id).map((l) => ({ l, key: String(c.id) })) : [];
-    return [...own, ...co].sort((a, b) => b.l.at.localeCompare(a.l.at));
+    // filed under the company id of the time (a company merged or changed since) or under the person
+    const out: { l: LogEntry; key: string }[] = [];
+    Object.entries(this.crm.log).forEach(([key, a]) => (a || []).forEach((l) => l.pid === p.id && out.push({ l, key })));
+    return out.sort((a, b) => b.l.at.localeCompare(a.l.at));
+  }
+  /** Companies on this device only, by name (for people who name one): built once per registry. */
+  private localByName: { B: unknown; m: Map<string, Company> } | null = null;
+  private localCo(name: string) {
+    if (!this.localByName || this.localByName.B !== this.B) {
+      const m = new Map<string, Company>();
+      this.B.companies.forEach((c) => isLocalId(c.id) && !m.has(norm(c.name)) && m.set(norm(c.name), c));
+      this.localByName = { B: this.B, m };
+    }
+    return this.localByName.m.get(norm(name));
   }
   /** A call, e-mail, meeting or note with a person: in the company's contact log (the company page
    *  shows it too), or kept under the person when they have no company everyone has. */
@@ -1098,14 +1143,23 @@ export class GccEngine {
   }
   /** Contact persons named in the Sales Tracker or in customers added by hand, not recorded yet. */
   personSuggestions() {
-    const hidden = new Set(prefs.get<string[]>(PREF.peopleHide, []) || []);
-    return personSuggestions(Object.values(this.people), Object.values(this.sales.deals), Object.values(this.custom), (g) => this.personGid(g), hidden);
+    const hidden = new Set([...(prefs.get<string[]>(PREF.peopleHide, []) || []), ...(prefs.get<string[]>(PREF.peopleGone, []) || [])]);
+    return personSuggestions(Object.values(this.people), Object.values(this.sales.deals), Object.values(this.custom), (g) => this.personGid(g), hidden, (g) => this.company(g)?.ids || [g]);
   }
-  /** Don't suggest this one again on this browser. */
+  /** "ไม่ต้อง": don't suggest this one again on this browser (kept apart from deletions, never cut). */
   hideSuggestion(id: string) {
     const h = prefs.get<string[]>(PREF.peopleHide, []) || [];
-    if (!h.includes(id)) prefs.set(PREF.peopleHide, [...h, id].slice(-3000));
+    if (!h.includes(id)) prefs.set(PREF.peopleHide, [...h, id]);
     this.emit();
+  }
+  /** People deleted (here or by a teammate) that came from the Sales Tracker: not suggested again. */
+  private forgetPeople(ids: string[]) {
+    const sids = ids.filter((x) => x.startsWith('s'));
+    if (!sids.length) return;
+    const g = prefs.get<string[]>(PREF.peopleGone, []) || [];
+    const have = new Set(g);
+    const add = sids.filter((x) => !have.has(x));
+    if (add.length) prefs.set(PREF.peopleGone, [...g, ...add].slice(-5000));
   }
 
   // ------------------------------------------------------------------ Sales Tracker
@@ -2260,7 +2314,7 @@ export class GccEngine {
     // file yet) and so does this browser's copy of it
     const delDocs = rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('ddoc/')).map((r) => this.sales.docs[r.k.slice(5)]).filter(Boolean);
     rows.forEach((r) => (r.del || r.v == null ? this.goneKeys.add(r.k) : this.goneKeys.delete(r.k)));
-    rows.forEach((r) => (r.del || r.v == null) && r.k.startsWith('person/') && this.hideSuggestion(r.k.slice(7)));
+    this.forgetPeople(rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('person/')).map((r) => r.k.slice(7)));
     rows.forEach((r) => applyRow(this, r, fx));
     delDocs.forEach((doc) => !this.sales.docs[`${doc.deal}/${doc.id}`] && this.dropDocFile(doc));
     // a teammate deleted a deal: the notes and documents this browser has for it go too — also those

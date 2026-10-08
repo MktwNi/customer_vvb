@@ -95,8 +95,10 @@ export interface Suggestion { id: string; name: string; gid: number | null; comp
 
 /**
  * Contact persons named in the Sales Tracker (a deal's ผู้ติดต่อ) and in customers added by hand that
- * nobody has recorded as a person yet. `canon` maps a company id to the one it is merged into; `hidden`
- * are ids hidden or deleted on this browser.
+ * nobody has recorded as a person yet. `canon` maps a company id to the one it is merged into (null when
+ * this device can't place it), `aliases` gives every id of that company (merged duplicates); `hidden`
+ * are ids hidden or deleted on this browser. A company is recognised by any of its ids or its name, so
+ * a merge, a split or a deleted customer doesn't bring back a choice already made.
  */
 export function personSuggestions(
   people: Person[],
@@ -104,24 +106,37 @@ export function personSuggestions(
   custom: CustomCo[],
   canon: (gid: number) => number | null,
   hidden: Set<string>,
+  aliases: (gid: number) => number[] = (g) => [g],
 ): Suggestion[] {
-  const coKey = (gid: number | null, company: string) => (gid != null ? 'g' + gid : 'n' + nameKey(company));
-  const known = people.map((p) => {
-    const g = p.gid != null ? canon(p.gid) ?? p.gid : null;
-    return { co: coKey(g, p.company), name: nameKey(p.name), phones: phoneKeys(p.phone), email: p.email.trim().toLowerCase(), id: p.id };
-  });
+  const coKeys = (gid: number | null, company: string) => {
+    const keys = new Set<string>();
+    if (gid != null) {
+      keys.add('g' + gid);
+      const c = canon(gid);
+      if (c != null) keys.add('g' + c);
+      aliases(gid).forEach((x) => keys.add('g' + x));
+    }
+    const nk = nameKey(company);
+    if (nk) keys.add('n' + nk);
+    return keys;
+  };
+  const known = people.map((p) => ({ co: coKeys(p.gid, p.company), name: nameKey(p.name), phones: phoneKeys(p.phone), email: p.email.trim().toLowerCase() }));
+  const ids = new Set(people.map((p) => p.id));
   const out = new Map<string, Suggestion>();
   const add = (name: string, gid: number | null, company: string, phone: string, email: string, from: string) => {
     name = name.trim();
     const nk = nameKey(name);
     if (!nk || nk.length < 2) return;
-    const g = gid != null ? canon(gid) : null;
-    const co = coKey(g, company);
-    const id = stableId('s', co, nk);
-    if (hidden.has(id) || out.has(id)) return;
+    const shared = gid != null ? canon(gid) : null; // null: a company on this device only, or gone
+    // the id every browser makes for this contact (the team's company id, else its name)
+    const id = stableId('s', shared != null ? 'g' + shared : 'n' + nameKey(company), nk);
+    if (out.has(id)) return;
+    const keys = coKeys(gid, company);
+    // hidden / added under any id this company has had
+    if ([...keys].some((k) => { const x = stableId('s', k, nk); return hidden.has(x) || ids.has(x); })) return;
     const ph = phoneKeys(phone), em = email.trim().toLowerCase();
-    if (known.some((k) => k.id === id || (k.co === co && (k.name === nk || (ph.length > 0 && ph.some((x) => k.phones.includes(x))) || (!!em && k.email === em))))) return;
-    out.set(id, { id, name, gid: g, company, phone, email, from });
+    if (known.some((k) => [...keys].some((x) => k.co.has(x)) && (k.name === nk || (ph.length > 0 && ph.some((x) => k.phones.includes(x))) || (!!em && k.email === em)))) return;
+    out.set(id, { id, name, gid: shared ?? gid, company, phone, email, from });
   };
   deals.forEach((d) => d.contactName && add(d.contactName, d.gid, d.client, d.phone, d.email, 'Sales Tracker ปี ' + d.year));
   custom.forEach((c) => c.contact && add(c.contact, c.id, c.name, '', '', 'ลูกค้าที่เพิ่มเอง'));

@@ -56,7 +56,7 @@ export function Sales() {
               </select>
             </label>
             <AddMenu />
-            <MoreMenu year={year} deals={shown} />
+            <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...noQuick.filter((d) => d.jobStatus === 'closed')]} quick={f.quick ? QUICK.find(([k]) => k === f.quick)?.[1] : ''} />
           </div>
         }
       />
@@ -85,7 +85,7 @@ export function Sales() {
           );
         })}
       </div>
-      {v === 'table' && <TableView e={e} S={S} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={shown} facets={yearDeals} today={today} />}
+      {v === 'table' && <TableView e={e} S={S} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={yearDeals} today={today} />}
       {v === 'dash' && <SalesDash S={S} deals={yearDeals} today={today} year={ui.slYear} />}
       {v === 'closed' && <ClosedView S={S} deals={noQuick.filter((d) => d.jobStatus === 'closed')} facets={yearDeals} total={closedN} />}
       {v === 'log' && <LogView S={S} year={year} />}
@@ -151,7 +151,7 @@ function AddMenu() {
   );
 }
 
-function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
+function MoreMenu({ year, deals, quick }: { year: string; deals: Deal[]; quick?: string }) {
   const { engine: e, set } = useApp();
   const yearTotal = Object.values(e.sales.deals).filter((d) => d.year === year).length;
   const { open, setOpen, close, btn, wrap } = useMenu();
@@ -206,7 +206,7 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
         <div style={{ ...menuBox, width: 'min(300px,86vw)' }}>
           <button className="h-bg" style={item} onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
             {/* the table's filters apply (also when another tab is open): say so */}
-            ⬇ {deals.length < yearTotal ? `ส่งออก ${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรองตาราง` : 'ส่งออกตาราง'} (CSV เปิดใน Excel)
+            ⬇ {deals.length < yearTotal ? `ส่งออก ${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรองตาราง${quick ? ` (งานที่เปิด: ${quick.replace(/^⏰ /, '')})` : ''}` : 'ส่งออกตาราง'} (CSV เปิดใน Excel)
           </button>
           <button className="h-bg" style={item} onClick={() => { close(); fileRef.current?.click(); }}>⬆ นำเข้าจาก Sales Tracker เดิม</button>
           <button className="h-bg" style={item} onClick={() => { close(); setLists(true); }}>⚙ จัดการหมวด / SOURCE / Services</button>
@@ -314,13 +314,13 @@ function ListsModal({ onClose }: { onClose: () => void }) {
 // ------------------------------------------------------------------ table
 
 /** Table / closed-tab filters. `facets`: all of the year's deals (the ผู้รับผิดชอบ / แหล่งที่มา choices). */
-function Filters({ S, facets }: { S: SalesState; facets: Deal[] }) {
+function Filters({ S, facets, ignoreQuick }: { S: SalesState; facets: Deal[]; ignoreQuick?: boolean }) {
   const { ui, set } = useApp();
   const F = ui.slF;
   const up = (p: Partial<typeof F>) => set({ slF: { ...F, ...p } });
   const uniq = (k: 'resp' | 'referral') => facetOptions(facets, k, F[k]);
   const sel = { ...selectStyle, height: 36, fontSize: 13 };
-  const any = filtersOn(F);
+  const any = filtersOn(ignoreQuick ? { ...F, quick: '' } : F);
   const nSet = Object.entries(F).filter(([k, v]) => k !== 'q' && k !== 'quick' && v).length;
   // phones: the selects fold behind one button (they would take half the screen)
   const [more, setMore] = useState(false);
@@ -355,12 +355,13 @@ function NoMatch({ text }: { text: string }) {
 }
 
 /** Table tiles: the open jobs to follow up, and the money of all the year's jobs (open and closed —
- *  closing a paid job must not take its revenue out of the totals). Both follow the filters. */
+ *  closing a paid job must not take its revenue out of the totals). Both follow the filters, not the
+ *  quick view (the overdue tile is the count the ⏰ quick view lists). */
 function Summary({ S, open, all, today }: { S: SalesState; open: Deal[]; all: Deal[]; today: string }) {
   const { ui, set } = useApp();
   const st = salesStats(S, open, today);
   const sum = salesStats(S, all, today);
-  const note = filtersOn(ui.slF) ? ' · ตามตัวกรอง' : '';
+  const note = filtersOn({ ...ui.slF, quick: '' }) ? ' · ตามตัวกรอง' : '';
   const tiles: [string, string, string?, (() => void)?][] = [
     [fmtN(st.total), 'ลูกค้าที่ยังเปิดงาน' + note],
     [fmtN(st.overdue), `ค้างติดตาม (เกิน 14 วัน)`, st.overdue ? '#8A2B12' : undefined, st.overdue ? () => set({ slF: { ...ui.slF, quick: 'overdue' } }) : undefined],
@@ -447,7 +448,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
     );
   return (
     <>
-      <Summary S={S} open={deals} all={all} today={today} />
+      <Summary S={S} open={base} all={all} today={today} />
       <Filters S={S} facets={facets} />
       <QuickTabs S={S} base={base} today={today} />
       {step && <StepEditor dealId={step.id} stage={step.stage} onClose={() => setStep(null)} />}
@@ -607,7 +608,10 @@ const agoTh = (iso: string, today: string) => {
 /** The step to do now, under the client's name: opens that stage (orange when the client is overdue). */
 function NextStep({ d, tr, od, onStep }: { d: Deal; tr: ReturnType<typeof stageTrack>; od: number | null; onStep: (stage: string) => void }) {
   if (d.jobStatus === 'closed') return null;
-  if (!tr.next) return tr.result === 'NO' ? null : <span className="sl-next done">✓ ครบทุกขั้น</span>;
+  if (!tr.next) {
+    if (od != null) return <span className="sl-next warn" title="ไม่ได้ติดต่อเกิน 14 วัน">⏰ ค้าง {fmtN(od)} วัน</span>;
+    return tr.result === 'NO' ? null : <span className="sl-next done">✓ ครบทุกขั้น</span>;
+  }
   const planned = tr.states[tr.next] === 'planned' && tr.nextStep ? tr.nextStep.d : '';
   return (
     <button onClick={() => onStep(tr.next)} className={'sl-next' + (od != null ? ' warn' : '')} title={STAGE_TH[tr.next] || tr.next}>
@@ -674,7 +678,10 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
             <button onClick={() => onStep(p)} className="sl-step" aria-label={label} title={st.n || STAGE_TH[p] || p} aria-current={tr.next === p ? 'step' : undefined}>
               <span className="sl-node" aria-hidden="true">{state === 'done' || state === 'yes' ? '✓' : state === 'no' ? '✕' : state === 'wait' ? '…' : ''}</span>
               {state === 'yes' || state === 'no' || state === 'wait' ? (
-                <span className={'sl-res ' + state}>{state === 'wait' ? st.n.trim().slice(0, 24) : state === 'yes' ? 'ปิดการขายได้' : 'ไม่สำเร็จ'}</span>
+                <>
+                  {st.d && <span className="sl-sdate">{short(st.d)}</span>}
+                  <span className={'sl-res ' + state}>{state === 'wait' ? (st.n.trim().length > 24 ? st.n.trim().slice(0, 24) + '…' : st.n.trim()) : state === 'yes' ? 'ปิดการขายได้' : 'ไม่สำเร็จ'}</span>
+                </>
               ) : st.d || st.n.trim() ? (
                 <>
                   {st.d && <span className="sl-sdate">{state === 'planned' ? 'นัด ' : ''}{short(st.d)}</span>}
@@ -764,7 +771,7 @@ function ClosedView({ S, deals, facets, total }: { S: SalesState; deals: Deal[];
           </div>
         ))}
       </div>
-      <Filters S={S} facets={facets} />
+      <Filters S={S} facets={facets} ignoreQuick />
       <div style={{ ...card, borderRadius: 18, overflowX: 'auto' }}>
         <table className="sl-table" style={{ minWidth: 760 }}>
           <thead>

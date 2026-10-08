@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { nameKey, personInitial, personSuggestions, phoneKeys, toPerson } from './people';
+import { PERSON_FIELDS, nameKey, personInitial, personSuggestions, phoneKeys, toPerson, type PersonForm } from './people';
 import { applyRow, keyOf, localRecords, noEffects } from './teamSync';
 import { newDeal } from './sales';
 import type { Dataset, RoundRaw } from './types';
@@ -50,6 +50,17 @@ describe('people helpers', () => {
     const again = personSuggestions(people, deals.slice().reverse(), [], (g) => g, new Set());
     expect(again.map((x) => x.id).sort()).toEqual(s.map((x) => x.id).sort());
     expect(personSuggestions(people, deals, [], (g) => g, new Set([s[0].id])).length).toBe(1);
+  });
+
+  it('after two companies are merged, a contact recorded or hidden under either id is not suggested again', () => {
+    const d9 = { ...newDeal({ id: 'd9', client: 'บริษัท บี', gid: 9, contactName: 'คุณซ้ำ' }, 'A') };
+    const before = personSuggestions([], [d9], [], (g) => g, new Set());
+    expect(before.length).toBe(1);
+    // 9 is merged into 5: the deal now resolves to 5, the company has ids 5 and 9
+    const canon = (g: number) => (g === 9 ? 5 : g), aliases = () => [5, 9];
+    expect(personSuggestions([], [d9], [], canon, new Set([before[0].id]), aliases)).toEqual([]);
+    const known = toPerson({ name: 'ซ้ำ', gid: 5, company: 'บริษัท เอ' }, 'p1')!;
+    expect(personSuggestions([known], [d9], [], canon, new Set(), aliases)).toEqual([]);
   });
 
   it('person records are shared records, and a malformed row is skipped', () => {
@@ -197,6 +208,86 @@ describe('people shared between browsers', () => {
     B.updateTask(t.id, { type: 'meet', date: '2026-10-12', time: '10:00', note: 'นัดที่ออฟฟิศ' });
     await settle(B, A);
     expect(A.crm.tasks.find((x) => x.id === t.id)).toMatchObject({ pid, done: true, type: 'meet' });
+    A.dispose();
+    B.dispose();
+  });
+  const form = (e: GccEngine, id: string) => Object.fromEntries(PERSON_FIELDS.map((k) => [k, e.people[id][k]])) as PersonForm;
+  const blankCo = { jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' };
+
+  it("saving other fields keeps the team's company link, also on a browser that can't place the company", async () => {
+    const [A, B] = await team();
+    const cid = A.addCustomer({ ...blankCo, name: 'บริษัท มือ จำกัด' });
+    const id = A.addPerson({ name: 'คุณลิงก์', gid: cid });
+    await settle(A, B);
+    expect(B.people[id]).toMatchObject({ gid: cid, company: 'บริษัท มือ จำกัด' });
+    A.deleteCustomer(cid);
+    await settle(A, B);
+    expect(B.company(cid)).toBeUndefined();
+    const init = form(B, id); // the edit form sends every field
+    B.updatePerson(id, { ...init, phone: '02-000-0000' }, init);
+    await settle(B, A);
+    for (const e of [A, B]) expect(e.people[id]).toMatchObject({ gid: cid, company: 'บริษัท มือ จำกัด', phone: '02-000-0000' });
+    A.dispose();
+    B.dispose();
+  });
+
+  it('a person moved to another company keeps the calls logged before', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = [A.B.companies[11], A.B.companies[12]];
+    const id = A.addPerson({ name: 'คุณย้าย', gid: c1.id });
+    A.addPersonLog(id, 'call', 'ติดต่อได้', 'ก่อนย้าย');
+    const init = form(A, id);
+    A.updatePerson(id, { ...init, gid: c2.id, company: c2.name }, init);
+    A.addPersonLog(id, 'call', '', 'หลังย้าย');
+    await settle(A, B);
+    expect(B.people[id]).toMatchObject({ gid: c2.id, company: c2.name });
+    expect(B.personLogs(B.people[id]).map((x) => x.l.text).sort()).toEqual(['ก่อนย้าย', 'หลังย้าย']);
+    A.dispose();
+    B.dispose();
+  });
+
+  it('"add all" adds every suggestion in one go; one a teammate deletes is not suggested again', async () => {
+    const [A, B] = await team();
+    A.addDeal({ client: 'ลูกค้าหนึ่ง', section: 'Partner', year: '2569', contactName: 'คุณหนึ่ง' });
+    A.addDeal({ client: 'ลูกค้าสอง', section: 'Partner', year: '2569', contactName: 'คุณสอง' });
+    await settle(A, B);
+    const sugg = A.personSuggestions().filter((x) => ['คุณหนึ่ง', 'คุณสอง'].includes(x.name));
+    expect(sugg.length).toBe(2);
+    expect(A.addPeople(sugg.map((x) => ({ id: x.id, name: x.name, gid: x.gid, company: x.company })))).toBe(2);
+    await settle(A, B);
+    expect(sugg.every((x) => B.people[x.id])).toBe(true);
+    // each browser remembers deleted suggestions in its own storage
+    const ls = () => {
+      const m = new Map<string, string>();
+      return { getItem: (k: string) => (k.startsWith('gcc-people-') ? (m.get(k) ?? null) : null), setItem: (k: string, v: string) => void (k.startsWith('gcc-people-') && m.set(k, v)), removeItem: (k: string) => void m.delete(k) };
+    };
+    const lsA = ls(), lsB = ls();
+    try {
+      vi.stubGlobal('localStorage', lsB);
+      B.deletePerson(sugg[0].id);
+      await B.teamSync();
+      expect(B.personSuggestions().some((x) => x.id === sugg[0].id)).toBe(false);
+      vi.stubGlobal('localStorage', lsA);
+      await A.teamSyncNow();
+      expect(A.people[sugg[0].id]).toBeUndefined();
+      expect(A.personSuggestions().some((x) => x.id === sugg[0].id)).toBe(false);
+      expect(A.personSuggestions().some((x) => x.name === 'คุณหนึ่ง')).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    A.dispose();
+    B.dispose();
+  });
+
+  it("deleting a person without a company deletes the history kept under them, on every browser", async () => {
+    const [A, B] = await team();
+    const id = A.addPerson({ name: 'คุณร้านเล็ก', company: 'ร้านเล็ก ๆ' });
+    A.addPersonLog(id, 'note', '', 'โน้ต');
+    await settle(A, B);
+    expect(B.personLogs(B.people[id]).length).toBe(1);
+    A.deletePerson(id);
+    await settle(A, B);
+    for (const e of [A, B]) expect((e.crm.log['p-' + id] || []).length).toBe(0);
     A.dispose();
     B.dispose();
   });
