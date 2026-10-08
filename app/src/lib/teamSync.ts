@@ -95,6 +95,7 @@ const ERR_TH: Record<string, string> = {
   not_self: 'เปลี่ยนบทบาทหรือปิดบัญชีของตัวเองไม่ได้',
   last_admin: 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน',
   name_locked: 'แก้ชื่อที่แสดงได้เฉพาะก่อนเข้าสู่ระบบครั้งแรก',
+  bad_role: 'เลือกบทบาทของบัญชี (ผู้ดูแลระบบ / พนักงานขาย / ดูอย่างเดียว)',
 };
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
