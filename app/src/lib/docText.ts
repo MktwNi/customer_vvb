@@ -315,6 +315,8 @@ interface OcrWorker {
   setParameters(p: Record<string, string>): Promise<unknown>;
   recognize(img: HTMLCanvasElement, o?: { rotateAuto?: boolean }): Promise<{ data: { text: string } }>;
   terminate(): Promise<unknown>;
+  /** a call on the worker's in-memory file system (where the language data is loaded) */
+  FS?(method: string, args: unknown[]): Promise<unknown>;
 }
 type CreateWorker = (langs: string, oem: number, opts: Record<string, unknown>) => Promise<OcrWorker>;
 type OcrLog = (m: { status: string; progress: number }) => void;
@@ -385,8 +387,12 @@ interface Engine {
  * tesseract.js downloads the language data itself and keeps it in IndexedDB, so it is fetched once
  * per browser. (Handing it the data as { code, data } instead does not work in tesseract.js 7.0:
  * initialize() then passes the bytes as the language name, and Thai is silently left out.)
+ * It also takes whatever answers with status 200 — a proxy's block page, a misconfigured fallback —
+ * starts without an error, reads without Thai, and caches that page, so Thai stays broken in this
+ * browser. So the loaded data is checked: bad data is dropped from the cache and downloaded once
+ * more (it may only have been cached earlier); still bad, the read fails and nothing bad is kept.
  */
-async function startOcr(logger: OcrLog, signal: AbortSignal | undefined): Promise<Engine> {
+async function startOcr(logger: OcrLog, signal: AbortSignal | undefined, retried = false): Promise<Engine> {
   const mod = (await abortable(import('tesseract.js'), signal).catch((e): never => fail(e, signal, OCR_LOAD_FAILED))) as unknown as {
     createWorker?: CreateWorker;
     default?: { createWorker: CreateWorker };
@@ -400,12 +406,12 @@ async function startOcr(logger: OcrLog, signal: AbortSignal | undefined): Promis
   let raw: Worker | undefined;
   const pending = catchWorker(
     () =>
-      createWorker('tha+eng', 1 /* LSTM only */, {
+      createWorker(OCR_LANGS.join('+'), 1 /* LSTM only */, {
         workerPath: base + 'worker.min.js',
         corePath: base, // a folder: tesseract.js picks the plain / SIMD / relaxed-SIMD build for this device
         langPath: base,
         gzip: true,
-        cachePath: 'gcc-ocr', // traineddata cached in IndexedDB, apart from other sites on the same origin
+        cachePath: OCR_CACHE, // traineddata cached in IndexedDB, apart from other sites on the same origin
         logger,
         errorHandler: (e: unknown) => broke(e),
       }),
@@ -424,12 +430,88 @@ async function startOcr(logger: OcrLog, signal: AbortSignal | undefined): Promis
     else pending.then((w) => w.terminate(), () => {}).catch(() => {});
   };
   const job = <T>(p: Promise<T>) => abortable(Promise.race([p, broken]), signal);
+  let bad: string[];
   try {
-    return { worker: await job(pending), job, stop };
+    const worker = await job(pending);
+    bad = await badLanguageData(worker, job);
+    checkAbort(signal);
+    if (!bad.length) return { worker, job, stop };
   } catch (e) {
     stop();
     return fail(e, signal, OCR_LOAD_FAILED);
   }
+  stop();
+  await forgetLanguageData(bad);
+  if (!retried) {
+    // the bad answer may still be fresh in the browser's HTTP cache, where the worker's own download
+    // would find it again: it is fetched anew first (and read to the end, so the new copy is kept)
+    await Promise.all(bad.map((l) => abortable(fetch(base + l + '.traineddata.gz', { cache: 'reload' }).then((r) => r.arrayBuffer()), signal).catch(() => {})));
+    checkAbort(signal);
+    return startOcr(logger, signal, true);
+  }
+  return fail(new Error('OCR language data is not traineddata: ' + bad.join(', ')), signal, OCR_LOAD_FAILED);
+}
+
+const OCR_LANGS = ['tha', 'eng'];
+/** tesseract.js's cachePath: its IndexedDB keys are `gcc-ocr/<lang>.traineddata` */
+const OCR_CACHE = 'gcc-ocr';
+/** Below this, loaded language data is not the real thing: tha.traineddata is about 1.07 MB and eng
+ *  5.2 MB (4.0.0_best_int, unzipped); an error or block page is a few KB. */
+const MIN_TRAINEDDATA = 256 * 1024;
+
+/** The languages whose data the worker loaded is too small to be real. A check that fails itself
+ *  counts as fine: it never stops OCR that works. (Only files that are there are looked at: tesseract.js
+ *  reports any failed job to errorHandler, which would stop the engine.) */
+async function badLanguageData(worker: OcrWorker, job: Engine['job']): Promise<string[]> {
+  if (typeof worker.FS !== 'function') return [];
+  const bad: string[] = [];
+  let names: unknown;
+  try {
+    // a job's result is { jobId, data }; tesseract.js writes the data to ./<lang>.traineddata
+    names = ((await job(worker.FS('readdir', ['.']))) as { data?: unknown } | undefined)?.data;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(names)) return [];
+  for (const l of OCR_LANGS) {
+    if (!names.includes(l + '.traineddata')) continue;
+    try {
+      const r = (await job(worker.FS('stat', [l + '.traineddata']))) as { data?: { size?: unknown } } | undefined;
+      const size = r?.data?.size;
+      if (typeof size === 'number' && size < MIN_TRAINEDDATA) bad.push(l);
+    } catch {
+      // not checked: treated as fine
+    }
+  }
+  return bad;
+}
+
+/** Drops cached language data, so the next start downloads it again. tesseract.js keeps it with
+ *  idb-keyval (database "keyval-store", store "keyval"). Never fails, and gives up after 3 s. */
+function forgetLanguageData(langs: string[]): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const done = () => resolve();
+    setTimeout(done, 3000);
+    try {
+      const req = indexedDB.open('keyval-store');
+      req.onupgradeneeded = () => req.result.createObjectStore('keyval'); // as idb-keyval creates it
+      req.onerror = req.onblocked = done;
+      req.onsuccess = () => {
+        const db = req.result;
+        try {
+          const tx = db.transaction('keyval', 'readwrite');
+          const store = tx.objectStore('keyval');
+          langs.forEach((l) => store.delete(`${OCR_CACHE}/${l}.traineddata`));
+          tx.oncomplete = tx.onerror = tx.onabort = () => (db.close(), done());
+        } catch {
+          db.close();
+          done();
+        }
+      };
+    } catch {
+      done();
+    }
+  });
 }
 
 /** Runs `make` with the Worker constructor wrapped, so the worker it creates is handed to `caught`. */
