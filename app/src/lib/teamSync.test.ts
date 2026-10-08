@@ -94,6 +94,81 @@ describe('Code.gs (Apps Script backend, run through the simulator)', () => {
     expect(Object.keys(mid).length).toBe(1000);
     expect(Object.values(mid).every((v) => v === 'v5')).toBe(true);
   });
+
+  /** Make the next setValues over `rows` rows starting at `row` throw, as Sheets does on a timeout. */
+  const failWrite = (match: (row: number, rows: number) => boolean) => {
+    const sh = s.sheet()! as unknown as { getRange: (r: number, c: number, nr?: number, nc?: number) => { setValues: (v: unknown[][]) => void } };
+    const orig = sh.getRange;
+    let armed = true;
+    sh.getRange = (r, c, nr = 1, nc = 1) => {
+      const rng = orig(r, c, nr, nc);
+      if (match(r, nr)) {
+        const set = rng.setValues;
+        rng.setValues = (v) => {
+          if (!armed) return set(v);
+          armed = false;
+          throw new Error('Service Spreadsheets timed out while accessing document');
+        };
+      }
+      return rng;
+    };
+  };
+  const latest = () => {
+    const out: Record<string, unknown> = {};
+    let since = 0;
+    for (;;) {
+      const r = pull(since, 3000);
+      r.rows!.forEach((x) => (out[x.k] = x.v));
+      if (!r.more || !r.rows!.length) return out;
+      since = r.rows![r.rows!.length - 1].seq;
+    }
+  };
+
+  it('a Sheets error while compacting loses nothing, and the push still succeeds', () => {
+    for (let r = 0; r < 4; r++) push(Array.from({ length: 1000 }, (_, i) => ({ k: `stage/${i}`, v: `v${r}` })));
+    failWrite((row, n) => row === 2 && n >= 1000); // the compaction's rewrite of the log
+    // the 5000th row starts a compaction, whose write fails
+    expect(push(Array.from({ length: 1000 }, (_, i) => ({ k: `stage/${i}`, v: 'v4' })))).toMatchObject({ ok: true, n: 1000 });
+    expect(s.sheet()!.getLastRow() - 1).toBe(5000); // not compacted, nothing cleared
+    const all = latest();
+    expect(Object.keys(all).length).toBe(1000);
+    expect(Object.values(all).every((v) => v === 'v4')).toBe(true);
+    // the next push compacts
+    push(Array.from({ length: 1000 }, (_, i) => ({ k: `stage/${i}`, v: 'v5' })));
+    expect(s.sheet()!.getLastRow() - 1).toBe(1000);
+    expect(Object.values(latest()).every((v) => v === 'v5')).toBe(true);
+  });
+
+  it('a failed row write never hands out its seq numbers again (a reader would skip later rows)', () => {
+    push([{ k: 'stage/1', v: 'a' }, { k: 'stage/2', v: 'b' }]);
+    failWrite((row, n) => row === 4 && n === 3);
+    expect(push([{ k: 'stage/3', v: 'c' }, { k: 'stage/4', v: 'd' }, { k: 'stage/5', v: 'e' }]).ok).toBe(false);
+    expect(pull(2).rows).toEqual([]); // nothing was written; the reader's cursor stays at 2
+    expect(push([{ k: 'contact/99', v: { phone: '1' } }]).seq).toBe(6);
+    expect(pull(2).rows!.map((r) => [r.seq, r.k])).toEqual([[6, 'contact/99']]);
+  });
+
+  it('answers "anything new?" from the script cache, and still right after the cache is lost', () => {
+    push([{ k: 'stage/1', v: 'a' }, { k: 'stage/2', v: 'b' }]);
+    expect(s.cache.SEQ).toBe('2');
+    s.evictCache(); // Google may drop cache entries at any time
+    expect(pull(1).rows!.map((r) => r.k)).toEqual(['stage/2']);
+    expect(s.cache.SEQ).toBe('2'); // read back from the script properties
+    expect(pull(2)).toEqual({ ok: true, seq: 2, rows: [], more: false });
+    s.evictCache();
+    expect(push([{ k: 'stage/3', v: 'c' }]).seq).toBe(3);
+    expect(pull(2).rows!.map((r) => r.k)).toEqual(['stage/3']);
+    expect(s.post({ action: 'ping', key: KEY })).toMatchObject({ ok: true, seq: 3 });
+    // lost while a pull waits for the lock: read back without taking the lock a second time
+    s.beforeLock(() => s.evictCache());
+    expect(pull(0).rows!.map((r) => r.k)).toEqual(['stage/1', 'stage/2', 'stage/3']);
+    // a poll that finds the cache empty while a push holds the lock doesn't wait for it
+    s.evictCache();
+    const release = s.holdLock();
+    expect(pull(3)).toEqual({ ok: true, seq: 3, rows: [], more: false });
+    expect(s.post({ action: 'ping', key: KEY })).toMatchObject({ ok: true, seq: 3 });
+    release();
+  });
 });
 
 describe('Code.gs on a real-size sheet', () => {
@@ -180,7 +255,8 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     const keys = new Set(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.map((r) => r.k));
     for (const k of [`stage/${c1.id}`, `owner/${c1.id}`, `watch/${c2.id}`, 'team/คุณเอ', `contact/${c2.id}`, `dedup/${g.key}`]) expect(keys.has(k)).toBe(true);
     expect([...keys].some((k) => k.startsWith('task/'))).toBe(true);
-    expect([...keys].filter((k) => k.startsWith(`log/${c3.id}/`)).length).toBeGreaterThanOrEqual(2); // call + auto stage change
+    expect([...keys].filter((k) => k.startsWith(`log/${c3.id}/`)).length).toBe(1); // the call (the stage it set has no line of its own)
+    expect(keys.has(`stage/${c3.id}`)).toBe(true); // set by the call
   });
 
   it('a second browser sees the same data after connecting', async () => {

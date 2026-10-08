@@ -41,6 +41,9 @@ export interface GasSim {
   setup(): void;
   sheet(): { rows: string[][]; getLastRow(): number; getMaxRows(): number; getMaxColumns(): number } | undefined;
   props: Record<string, string>;
+  cache: Record<string, string>;
+  /** Drop everything in the script cache, as Google may do at any time. */
+  evictCache(): void;
   addSheet(name: string): { getRange(r: number, c: number, nr?: number, nc?: number): { setValues(v: string[][]): void } };
   DriveApp: {
     getFolderById(id: string): GasFolder;

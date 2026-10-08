@@ -1,5 +1,5 @@
 // Runs team-sync/Code.gs in Node with in-memory fakes of the Google Apps Script services it
-// uses (SpreadsheetApp, LockService, PropertiesService, ContentService, DriveApp, Utilities).
+// uses (SpreadsheetApp, LockService, PropertiesService, CacheService, ContentService, DriveApp, Utilities).
 // Used by the unit tests and by dev-server.mjs, so the real script — not a reimplementation — is
 // what gets exercised.
 import { randomBytes } from 'node:crypto';
@@ -210,6 +210,7 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
   src = src.replace(/const TEAM_KEY = '.*?';/, `const TEAM_KEY = ${JSON.stringify(teamKey)};`);
   const sheets = {};
   const props = {};
+  const cache = {}; // the script cache (CacheService); entries never expire here, see evictCache
   const { DriveApp, drive } = fakeDrive(driveAuthorized);
   let locked = false;
   let onLock = null;
@@ -250,6 +251,17 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
         },
       }),
     },
+    CacheService: {
+      getScriptCache: () => ({
+        get: (k) => (k in cache ? cache[k] : null),
+        put: (k, v) => {
+          cache[k] = String(v);
+        },
+        remove: (k) => {
+          delete cache[k];
+        },
+      }),
+    },
     ContentService: {
       MimeType: { JSON: 'application/json' },
       createTextOutput: (s) => ({ content: s, setMimeType() { return this; }, getContent() { return s; } }),
@@ -272,6 +284,9 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     /** Pre-create a sheet (e.g. an existing empty "sync" sheet without a header). */
     addSheet: (n) => (sheets[n] = fakeSheet(n)),
     props,
+    cache,
+    /** Drop everything in the script cache, as Google may do at any time. */
+    evictCache: () => Object.keys(cache).forEach((k) => delete cache[k]),
     /** The fake services as Code.gs sees them (e.g. to put a file elsewhere in the owner's Drive). */
     DriveApp,
     Utilities,
