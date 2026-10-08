@@ -9,6 +9,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, derivePk, type GasSim } from '../../../team-sync/sim.mjs';
+import { canWriteKey } from './auth';
+import type { Role } from './teamSync';
 
 const KEY = 'test-key-123';
 const TEAM_SYNC = join(__dirname, '..', '..', '..', 'team-sync');
@@ -18,17 +20,7 @@ const T0 = Date.parse('2026-10-08T03:00:00.000Z');
 const MIN = 60000, H = 60 * MIN, DAY = 24 * H;
 const at = (ms: number) => vi.setSystemTime(T0 + ms);
 
-// The write rule of the spec's roles table (section 1), as the web app applies it before queueing.
-// The web app's own copy will live in app/src/lib/auth.ts (phase 2); until then the parity test
-// below checks the script against this one, and should import that copy once it exists.
-type Role = 'admin' | 'sales' | 'viewer';
-const SALES_DENY = ['scfg/', 'dedup/', 'team/', 'dundo/'];
-const ADMIN_DEL = ['deal/', 'cust/', 'person/'];
-function canWriteKey(role: Role | null, k: string, del: boolean) {
-  if (role === null || role === 'admin') return true;
-  if (role === 'viewer') return false;
-  return !(SALES_DENY.some((p) => k.startsWith(p)) || (del && ADMIN_DEL.some((p) => k.startsWith(p))));
-}
+// the parity test below checks the script against the web app's own write rule (canWriteKey)
 
 // ------------------------------------------------------------------ helpers
 

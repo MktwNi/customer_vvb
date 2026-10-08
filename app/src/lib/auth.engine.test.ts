@@ -209,21 +209,22 @@ describe('switching a team-code team to accounts', () => {
     expect((await queue(A, pendKey(URL))).length).toBe(1);
     expect(rows('watch/' + id)).toEqual([]);
 
-    const { temp } = await L.e.adminCreate({ u: 'ae', name: 'เอ', role: 'sales' });
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
     const before = A.net.sent.length;
-    await A.e.teamLogin('ae', temp, true);
+    await A.e.teamLogin('aem', temp, true);
     expect(A.e.auth).toBe('change'); // nothing is sent before the password is set
     expect(A.net.sent.slice(before).filter((x) => x === 'push' || x === 'pull')).toEqual([]);
-    expect((await queue(A, pendKey(URL) + '#ae')).map((o) => [o.k, o.by])).toEqual([['watch/' + id, 'เอ']]);
+    expect((await queue(A, pendKey(URL) + '#aem')).map((o) => [o.k, o.by])).toEqual([['watch/' + id, 'เอ']]);
     expect(await queue(A, pendKey(URL))).toEqual([]);
 
+    const pushed = A.net.sent.filter((x) => x === 'push').length;
     A.net.fail = 'lost'; // the first push arrives, its reply doesn't
-    await A.e.teamChangePassword('', 'ae-pass-123');
+    await A.e.teamChangePassword('', 'aem-pass-123');
     expect(A.e.auth).toBe('');
     await settle(A);
     expect(rows('watch/' + id)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
     expect(A.e.teamPendingN).toBe(0);
-    expect(A.net.sent.filter((x) => x === 'push').length).toBe(1);
+    expect(A.net.sent.filter((x) => x === 'push').length - pushed).toBe(1);
     expect(A.e.me()).toBe('เอ');
   });
 });
@@ -232,7 +233,7 @@ describe('sessions', () => {
   it('two people on one browser: each one\'s unsent edits wait for them and go out in their name', async () => {
     const L = await lead();
     const store = memoryStore();
-    const A = await member(L, 'ae', 'เอ', 'sales', 'X', store);
+    const A = await member(L, 'aem', 'เอ', 'sales', 'X', store);
     const id = company(A);
     A.net.offline = true;
     A.e.toggleWatch(id);
@@ -248,19 +249,19 @@ describe('sessions', () => {
     await settle(A);
     expect(A.e.me()).toBe('บี');
     expect(rows('watch/' + id)).toEqual([]);
-    expect((await queue(A, pendKey(URL) + '#ae')).length).toBe(1);
+    expect((await queue(A, pendKey(URL) + '#aem')).length).toBe(1);
 
     await A.e.teamLogout();
-    await A.e.teamLogin('ae', 'ae-pass-123', true);
+    await A.e.teamLogin('aem', 'aem-pass-123', true);
     await settle(A);
     expect(rows('watch/' + id)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
-    expect(await queue(A, pendKey(URL) + '#ae')).toEqual([]);
+    expect(await queue(A, pendKey(URL) + '#aem')).toEqual([]);
   });
 
   it('signed out by an admin: edits keep queuing, and after signing in again they are sent once', async () => {
     const L = await lead();
-    const A = await member(L, 'ae', 'เอ', 'sales');
-    await L.e.adminKick('ae');
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    await L.e.adminKick('aem');
     await A.e.teamSyncNow();
     expect(A.e.auth).toBe('expired');
     expect(pref<Session>(A, PREF.session)?.tok).toBe('');
@@ -273,7 +274,7 @@ describe('sessions', () => {
     await A.e.teamSyncNow();
     expect(rows('watch/' + id)).toEqual([]); // nothing is sent while signed out
 
-    await A.e.teamLogin('ae', 'ae-pass-123', true);
+    await A.e.teamLogin('aem', 'aem-pass-123', true);
     await settle(A);
     expect(A.e.auth).toBe('');
     expect((A.e as unknown as { teamGen: number }).teamGen).toBe(gen);
@@ -282,20 +283,20 @@ describe('sessions', () => {
 
   it('a disabled account stops syncing', async () => {
     const L = await lead();
-    const A = await member(L, 'ae', 'เอ', 'sales');
-    await L.e.adminUpdate('ae', { on: 0 });
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    await L.e.adminUpdate('aem', { on: 0 });
     await A.e.teamSyncNow();
     expect(A.e.auth).toBe('disabled');
   });
 
   it('made ดูอย่างเดียว with edits queued: nothing is sent, and they can be dropped', async () => {
     const L = await lead();
-    const A = await member(L, 'ae', 'เอ', 'sales');
+    const A = await member(L, 'aem', 'เอ', 'sales');
     const id = company(A);
     A.net.offline = true;
     A.e.toggleWatch(id);
     await stored(A);
-    await L.e.adminUpdate('ae', { role: 'viewer' });
+    await L.e.adminUpdate('aem', { role: 'viewer' });
     A.net.offline = false;
     await settle(A);
     expect(A.e.role()).toBe('viewer');
@@ -313,15 +314,15 @@ describe('sessions', () => {
 
   it('must change the password: no sync until it is set; the temporary password\'s session ends', async () => {
     const L = await lead();
-    const { temp } = await L.e.adminCreate({ u: 'ae', name: 'เอ', role: 'sales' });
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
     const A = mk('A');
     await A.e.teamOpen(URL);
-    await A.e.teamLogin('ae', temp, false);
+    await A.e.teamLogin('aem', temp, false);
     expect(A.e.auth).toBe('change');
     expect(A.e.knowsTempPassword).toBe(true);
     expect(A.net.sent.filter((x) => x === 'pull' || x === 'push')).toEqual([]);
     const old = A.e.session!.tok;
-    await A.e.teamChangePassword('', 'ae-pass-123');
+    await A.e.teamChangePassword('', 'aem-pass-123');
     expect(A.e.auth).toBe('');
     expect(A.net.sent).toContain('pull');
     expect(sim.post({ action: 'pull', since: 0, cv: 3, tok: old })).toMatchObject({ ok: false, error: 'session_expired' });
@@ -351,7 +352,7 @@ describe('what each role may change', () => {
     const L = await lead();
     const d = L.e.addDeal({ client: 'บริษัท ทดสอบ จำกัด' });
     await settle(L);
-    const A = await member(L, 'ae', 'เอ', 'sales');
+    const A = await member(L, 'aem', 'เอ', 'sales');
     expect(A.e.sales.deals[d.id]).toBeTruthy();
     const pushes = () => A.net.sent.filter((x) => x === 'push' || x === 'delfile').length;
     const n = pushes();
@@ -386,15 +387,15 @@ describe('what each role may change', () => {
 describe('two tabs of one browser', () => {
   it('a sign-in, a new token, a sign-out and a different person in the other tab', async () => {
     const L = await lead();
-    const { temp } = await L.e.adminCreate({ u: 'ae', name: 'เอ', role: 'sales' });
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
     const store = memoryStore();
     const T1 = mk('X', store), T2 = mk('X', store);
     const event = (t: Tab, key: string) => (t.e as unknown as { teamPrefsChanged: (e: { key: string }) => void }).teamPrefsChanged({ key });
     await T1.e.teamOpen(URL);
     await T2.e.teamOpen(URL);
     expect(T2.e.auth).toBe('login');
-    await T1.e.teamLogin('ae', temp, true);
-    await T1.e.teamChangePassword('', 'ae-pass-123');
+    await T1.e.teamLogin('aem', temp, true);
+    await T1.e.teamChangePassword('', 'aem-pass-123');
     event(T2, PREF.session);
     await settle(T2);
     expect(T2.e.auth).toBe('');
@@ -414,7 +415,7 @@ describe('two tabs of one browser', () => {
     expect(T2.e.authMsg).toMatch(/ออกจากระบบ/);
 
     // T2 signs in again; then someone else signs in in T1: T2 reloads
-    await T2.e.teamLogin('ae', 'ae-pass-123', true);
+    await T2.e.teamLogin('aem', 'aem-pass-123', true);
     await settle(T2);
     expect(T2.e.auth).toBe('');
     const reload = vi.fn();
@@ -432,7 +433,7 @@ describe('two tabs of one browser', () => {
 describe('going back and leaving', () => {
   it('the older script pasted back: unsent edits go back to the team-code queue', async () => {
     const L = await lead();
-    const A = await member(L, 'ae', 'เอ', 'sales');
+    const A = await member(L, 'aem', 'เอ', 'sales');
     const id = company(A);
     A.net.offline = true;
     A.e.toggleWatch(id);
@@ -445,7 +446,7 @@ describe('going back and leaving', () => {
     expect(A.e.session).toBe(null);
     expect(pref(A, PREF.session)).toBe(null);
     expect((await queue(A, pendKey(URL))).map((o) => [o.k, o.by])).toEqual([['watch/' + id, 'เอ']]);
-    expect(await queue(A, pendKey(URL) + '#ae')).toEqual([]);
+    expect(await queue(A, pendKey(URL) + '#aem')).toEqual([]);
     expect(await A.e.teamSetKey(KEY)).toBe(true);
     await settle(A);
     expect(sim.post({ action: 'pull', key: KEY, since: 0 }).rows!.filter((r) => r.k === 'watch/' + id)).toEqual([expect.objectContaining({ by: 'เอ' })]);
@@ -455,10 +456,10 @@ describe('going back and leaving', () => {
     const L = await lead();
     L.e.addDeal({ client: 'บริษัท ทดสอบ จำกัด' });
     await settle(L);
-    const A = await member(L, 'ae', 'เอ', 'sales');
+    const A = await member(L, 'aem', 'เอ', 'sales');
     expect(Object.keys(A.e.sales.deals).length).toBeGreaterThan(0);
     await A.e.teamLogout({ wipe: true });
-    for (const k of ['sales', 'people', 'customCos', 'dedup']) expect(await A.store.get(k)).toBe(undefined);
+    for (const k of ['sales', 'people', 'customCos', 'dedup']) expect(await A.store.get(k)).toBe(null);
     expect(pref<TeamCfg>(A, PREF.team)).toMatchObject({ url: URL, seq: 0, seeded: true, mode: 'accounts' });
     expect(pref(A, PREF.wipe)).toBeTruthy();
 
@@ -466,7 +467,7 @@ describe('going back and leaving', () => {
     const A2 = mk('A', A.store);
     await A2.e.teamOpen(URL);
     const n = rows().length;
-    await A2.e.teamLogin('ae', 'ae-pass-123', true);
+    await A2.e.teamLogin('aem', 'aem-pass-123', true);
     await settle(A2);
     expect(A2.net.sent).not.toContain('push');
     expect(rows().length).toBe(n);
