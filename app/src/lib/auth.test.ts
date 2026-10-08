@@ -2,7 +2,7 @@
  *  the protocol helpers (hello / call). */
 import { pbkdf2Sync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { can, canWriteKey, derivePk, initials, MIN_IT, passwordChecks, tempPassword } from './auth';
+import { can, canWriteKey, derivePk, MIN_IT, passwordChecks, tempPassword } from './auth';
 import { call, hello, TeamSyncError, type Transport } from './teamSync';
 
 const node = (tid: string, it: number, u: string, pw: string) =>
@@ -81,11 +81,6 @@ describe('passwords', () => {
       seen.add(p);
     }
     expect(seen.size).toBe(200);
-  });
-  it('initials skip คุณ / K.', () => {
-    expect(initials('คุณมด')).toBe('ม');
-    expect(initials('k. somchai')).toBe('S');
-    expect(initials('')).toBe('?');
   });
 });
 

@@ -211,13 +211,17 @@ export class GccEngine {
       const s0 = prefs.get<Session | null>(PREF.session, null);
       let acct: Session | null = null;
       if (team0 && team0.url && team0.mode === 'accounts') {
-        if (s0 && s0.url === team0.url && s0.u && s0.tok && (s0.rm || s0.exp > Date.now())) acct = s0;
-        else {
+        if (s0 && s0.url === team0.url && s0.u && (s0.rm || s0.exp > Date.now())) {
+          acct = s0;
+          if (!s0.tok) this.auth = 'expired'; // signed out by the script: sign in again over the app
+        } else {
           if (s0) this.saveSession(null);
           this.authUrl = team0.url;
           this.auth = 'login';
         }
+        this.emit(); // the sign-in screen shows while the data loads
       }
+      const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
       const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people] = await Promise.all([
         loadBase(),
@@ -272,13 +276,15 @@ export class GccEngine {
       }
       // the cursor lives in localStorage while the data lives in IndexedDB; they can drift apart
       // (failed write, another tab), so every page load re-reads the (compacted) team log once
-      this.teamCfg = team0 && team0.url && (team0.mode !== 'accounts' || acct) ? { ...team0, seq: 0, ...(acct ? { u: acct.u } : {}) } : null;
-      if (acct) {
-        this.session = acct;
-        if (acct.mc) this.auth = 'change';
+      if (signN === this.sessionN) {
+        this.teamCfg = team0 && team0.url && (team0.mode !== 'accounts' || acct) ? { ...team0, seq: 0, ...(acct ? { u: acct.u } : {}) } : null;
+        if (acct) {
+          this.session = acct;
+          if (acct.mc) this.auth = 'change';
+        }
+        if (this.teamCfg && Array.isArray(pending)) pending.forEach((op) => this.pending.set(op.k, op));
       }
       if (this.teamCfg && renamed) this.teamCfg.seeded = false; // upload the renamed tasks
-      if (this.teamCfg && Array.isArray(pending)) pending.forEach((op) => this.pending.set(op.k, op));
       this.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) })).sort((a, b) => a.annT - b.annT);
       this.loadMsg = 'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…';
       this.emit();
@@ -2682,7 +2688,10 @@ export class GccEngine {
     return this.team.status === 'ok';
   }
   // ------------------------------------------------------------------ team accounts
+  /** Changes of this tab's session (see load). */
+  private sessionN = 0;
   private saveSession(s: Session | null) {
+    this.sessionN++;
     if (s) prefs.set(PREF.session, s);
     else prefs.del(PREF.session);
     this.sessionRaw = prefs.getRaw(PREF.session);

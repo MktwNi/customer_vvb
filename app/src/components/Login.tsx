@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import type { GccEngine } from '../lib/engine';
-import { ROLE_TH, USER_RE, initials, normUser, passwordChecks } from '../lib/auth';
+import { ROLE_TH, USER_RE, normUser, passwordChecks } from '../lib/auth';
 import { TeamSyncError, deploymentId, errText, type Role } from '../lib/teamSync';
 import { PREF, prefs } from '../lib/storage';
 import { CONFIG } from '../lib/constants';
@@ -23,7 +23,7 @@ import mark from '../assets/gcc-mark.png';
 export function nameLetter(name: string) {
   const base = name.replace(/^\s*คุณ(?=\s|[ก-ฮเแโใไ])\s*/, '') || name;
   const ch = Array.from(base).find((c) => /[ก-ฮA-Za-z0-9]/.test(c));
-  return ch ? ch.toUpperCase() : initials(name);
+  return ch ? ch.toUpperCase() : Array.from(name.trim())[0] || '?';
 }
 /** 14:05 (local time) */
 export const hhmm = (t: number) => {

@@ -75,9 +75,3 @@ export function tempPassword() {
   const s = Array.from(r, (x) => A[x % A.length]).join('');
   return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`;
 }
-
-/** The letter in a person's round badge: the first letter of the name without คุณ / K. */
-export function initials(name: string) {
-  const s = String(name || '').trim().replace(/^(คุณ|k\.)\s*/i, '');
-  return s ? Array.from(s)[0].toUpperCase() : '?';
-}
