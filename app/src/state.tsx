@@ -5,7 +5,7 @@ import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
 
-export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes';
+export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
 /** `pid`: made from a person's page (the appointment is with them). */
 export interface SchedReq { ids: number[]; taskId?: string; pid?: string }
@@ -39,9 +39,14 @@ export interface UIState {
   addPerson: { gid?: number } | null;
   /** The record being worked on: open, or opened last (marked in its list so you keep your place). */
   last: { deal?: string; person?: string };
+  /** Account dialog open over the app (team accounts): change password or sign out. */
+  acctDlg: '' | 'passwd' | 'logout';
+  /** The "session expired" sign-in was put aside (the team chip brings it back). */
+  hideRelogin: boolean;
 }
 
-const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes'];
+// 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
+const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users'];
 
 const initial = (): UIState => {
   const s = prefs.get<{ tab?: unknown; view?: unknown } | null>(PREF.ui, {}) || {};
@@ -55,7 +60,7 @@ const initial = (): UIState => {
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, deal: null, addCust: null, sendIds: null, slNote: '',
-    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {},
+    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', hideRelogin: false,
   };
 };
 

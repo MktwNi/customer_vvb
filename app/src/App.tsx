@@ -19,6 +19,8 @@ import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
 import { AddPerson, People } from './tabs/People';
+import { Users } from './tabs/Users';
+import { AuthScreen, ChangePasswordDialog, LogoutDialog, ReLogin } from './components/Login';
 import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
@@ -59,11 +61,15 @@ export default function App() {
 
   useEffect(() => {
     e.load();
+    // a team that signs in: the sign-in screen shows while this browser's data loads behind it
+    if (e.auth) e.emit();
     return () => e.dispose();
   }, [e]);
 
-  // invite link: #team=<web-app url> → prefill the team-sync card on the update tab.
+  // invite link: #team=<web-app url> → a team with accounts shows its sign-in (or first-admin setup);
+  // a team-code team prefills the team-sync card on the update tab, as before.
   // Only Apps Script web-app URLs are accepted, so a forged link can't collect the team code.
+  const [invited, setInvited] = useState(false);
   useEffect(() => {
     const onHash = () => {
       const m = /^#team=(.+)$/.exec(window.location.hash);
@@ -76,9 +82,10 @@ export default function App() {
       }
       history.replaceState(null, '', window.location.pathname + window.location.search);
       if (!isTeamUrl(url)) return;
-      e.teamJoinUrl = url;
-      set({ tab: 'update', sel: null });
-      e.emit();
+      setInvited(true);
+      e.teamOpen(url).then((m) => {
+        if (m === 'legacy' || m === '') set({ tab: 'update', sel: null }); // the team-code form (or why the link failed)
+      });
     };
     onHash();
     window.addEventListener('hashchange', onHash);
@@ -103,11 +110,27 @@ export default function App() {
   }, [set]);
 
   const ready = e.ready;
+  const auth = e.auth;
+  const gate = auth === 'login' || auth === 'setup' || auth === 'change' || auth === 'disabled';
   // once loaded, Page Down / Space scroll the page straight away (on desktop the content scrolls inside
   // the window, so it must hold the focus rather than the document)
   useEffect(() => {
-    if (ready && !mobile && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
-  }, [ready, mobile]);
+    if (ready && !gate && !mobile && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
+  }, [ready, mobile, gate]);
+  // ผู้ใช้และสิทธิ์ is for admins of a team that signs in; anyone else gets the overview
+  const admin = e.role() === 'admin';
+  useEffect(() => {
+    if (ready && !auth && ui.tab === 'users' && !admin) set({ tab: 'overview' });
+  }, [ready, auth, ui.tab, admin, set]);
+  // account dialogs belong to the session they were opened in; the expired sign-in comes back for a new expiry
+  useEffect(() => {
+    if (auth && auth !== 'expired' && ui.acctDlg) set({ acctDlg: '' });
+    if (auth !== 'expired' && ui.hideRelogin) set({ hideRelogin: false });
+  }, [auth, ui.acctDlg, ui.hideRelogin, set]);
+
+  // signed out, first-admin setup, a password to set, account disabled: a screen in front of the app
+  // (the data keeps loading behind it, so the app is there right after signing in)
+  if (gate) return <AuthScreen invited={invited} />;
   return (
     <div className={'shell' + (docked ? ' docked' : '')}>
       <div className="frame">
@@ -130,6 +153,7 @@ export default function App() {
                 {ready && ui.tab === 'dedup' && <Dedup />}
                 {ready && ui.tab === 'update' && <Update />}
                 {ready && ui.tab === 'notes' && <Notes />}
+                {ready && ui.tab === 'users' && (admin ? <Users /> : <Overview />)}
               </ErrorBoundary>
             </main>
           </div>
@@ -165,6 +189,10 @@ export default function App() {
           <ScheduleModal />
         </ErrorBoundary>
       )}
+      {e.session && ui.acctDlg === 'passwd' && <ChangePasswordDialog onClose={() => set({ acctDlg: '' })} />}
+      {e.session && ui.acctDlg === 'logout' && <LogoutDialog onClose={() => set({ acctDlg: '' })} />}
+      {/* the session ended: sign in again over the app (open panels and typed text stay) */}
+      {auth === 'expired' && !ui.hideRelogin && <ReLogin onClose={() => set({ hideRelogin: true })} />}
     </div>
   );
 }
