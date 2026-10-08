@@ -28,6 +28,10 @@ import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fi
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
 const pendKey = (url: string) => 'teamPending:' + url;
+/** The accounts that have signed in on this browser, per sheet ({u, name}[]): on a shared computer,
+ *  whose unsent edits and documents are whose. */
+const acctKey = (url: string) => 'teamAccts:' + url;
+const CODE_AGAIN = 'สคริปต์ของทีมกลับไปใช้รหัสทีม — ใส่รหัสทีมเพื่อซิงก์ต่อ';
 /** Longest free text (notes) shared through the sheet; one cell holds 50,000 characters. */
 const TEXT_MAX = 5000;
 /** Whether queued change `a` is at least as recent as `b` (same record). */
@@ -141,6 +145,19 @@ export class GccEngine {
   teamNote = '';
   /** Records this account changed but may not: put back to the team's value by the next round. */
   private revert = new Set<string>();
+  /** Records another account of this browser made and has not sent yet: the next round takes them
+   *  out of this account's view (they stay queued for their owner). */
+  private hidden = new Set<string>();
+  /** The other accounts that have signed in on this browser for the connected team (read by each
+   *  session's first round, see acctsRead). */
+  private others: { u: string; name: string }[] = [];
+  private acctsRead = new WeakSet<TeamCfg>();
+  /** PREF.wipe as this page last saw it (another tab's sign-out that wiped the team data). */
+  private wipeRaw = '';
+  /** While load() runs: settles when it ends. */
+  private loadEnd: Promise<void> | null = null;
+  /** When `caps` was last asked for (a team-code team's lead may update the script meanwhile). */
+  private capsAt = 0;
   /** PREF.session as last read or written by this tab (to notice other tabs signing in and out). */
   private sessionRaw = '';
   /** The temporary password typed at sign-in, kept in memory until the new one is set (must-change). */
@@ -171,9 +188,13 @@ export class GccEngine {
     this.adoptTeamPrefs();
     if (this.teamCfg && this.team.status === 'error') this.teamSync(); // e.g. a new code entered in another tab
   };
-  /** Storage events are not delivered to a page kept in the back/forward cache. */
+  /** Storage events are not delivered to a page kept in the back/forward cache: catch up with what
+   *  other tabs did meanwhile (a sign-out, with or without wiping the team data, a new setting). */
   private teamPageShow = (e: PageTransitionEvent) => {
-    if (e.persisted) this.adoptTeamPrefs();
+    if (!e.persisted) return;
+    if (prefs.getRaw(PREF.wipe) !== this.wipeRaw && typeof location !== 'undefined') return location.reload();
+    this.adoptSession();
+    this.adoptTeamPrefs();
   };
 
   subscribe = (fn: () => void) => {
@@ -202,7 +223,10 @@ export class GccEngine {
   async load() {
     if (this.started) return;
     this.started = true;
+    let end = () => {};
+    this.loadEnd = new Promise<void>((r) => (end = r));
     try {
+      this.wipeRaw = prefs.getRaw(PREF.wipe);
       this.teamRaw = prefs.getRaw(PREF.team);
       const team0 = prefs.get<TeamCfg | null>(PREF.team, null);
       // a team with accounts: the session signed in on this browser, if it can still be used (one not
@@ -295,15 +319,24 @@ export class GccEngine {
       this.emit();
       this.timer = setInterval(() => this.tick(), 6e5);
       if (this.syncDue(this.syncCfg())) setTimeout(() => this.runSync(true), 1500);
-      if (this.teamCfg && !this.auth) this.startTeam();
       if (typeof window !== 'undefined') {
         window.addEventListener('storage', this.teamPrefsChanged);
         window.addEventListener('pageshow', this.teamPageShow);
       }
-      this.adoptTeamPrefs(); // another tab may have connected / disconnected while this one loaded
+      // another tab may have connected, disconnected, signed in or out, or wiped this browser's team
+      // data while this one loaded (before the listener): follow it before syncing as what was read above
+      if (prefs.getRaw(PREF.wipe) !== this.wipeRaw && typeof location !== 'undefined') return location.reload();
+      this.adoptSession();
+      this.adoptTeamPrefs();
+      if (this.teamCfg && !this.auth && !this.teamTimer) this.startTeam();
+      // the sign-in screen of a team with accounts: its script may have gone back to the team code
+      if (team0?.url && team0.mode === 'accounts' && (this.auth === 'login' || this.auth === 'expired')) this.checkCode(team0.url);
     } catch (e) {
       this.loadMsg = 'โหลดข้อมูลไม่สำเร็จ: ' + ((e as Error)?.message || e);
       this.emit();
+    } finally {
+      this.loadEnd = null;
+      end();
     }
   }
   dispose() {
@@ -850,6 +883,7 @@ export class GccEngine {
   }
   /** Create one task per company; with `perDay` > 0 spread them across working days. */
   addTasks(ids: number[], p: { type: TaskType; date: string; time: string; note: string }, perDay = 0, pid?: string) {
+    if (!this.can('edit')) return this.deny();
     let d = p.date, n = 0;
     ids.forEach((id) => {
       const c = this.company(id);
@@ -866,6 +900,7 @@ export class GccEngine {
     this.saveCrm();
   }
   autoPlan(list: Company[], perDay: number) {
+    if (!this.can('edit')) return this.deny();
     let d = nextWork(addDays(todayISO(), 1)), n = 0;
     list.forEach((c) => {
       if (n >= perDay) {
@@ -1322,6 +1357,10 @@ export class GccEngine {
   }
   /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped. */
   addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
+    if (!this.can('edit')) {
+      this.deny();
+      return { added: 0, skipped: 0 };
+    }
     return this.batchOps(() => this.addDealsFrom(ids, opts));
   }
   private addDealsFrom(ids: number[], opts: { section?: string; year?: string }) {
@@ -1633,20 +1672,41 @@ export class GccEngine {
   get docsWaiting() {
     return Object.values(this.sales.docs).filter((d) => !d.fileId).length;
   }
+  /** This account's documents whose only copy of the file is in this browser (not uploaded to the
+   *  team's Drive yet): the sign-out dialog counts them with the unsent edits. */
+  get docsUnsent() {
+    const cfg = this.teamCfg;
+    return Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docsAway.has(d.id) && (!cfg || this.docMine(cfg, d))).length;
+  }
+  /** Whose file this browser uploads: with accounts, this account's, and those attached here with the
+   *  team code (by a name that is not another account's of this browser), as its queue was taken over. */
+  private docMine(cfg: TeamCfg, d: DealDoc) {
+    return cfg.mode !== 'accounts' || d.by === this.me() || !this.others.some((a) => a.name === d.by);
+  }
   /** Upload files attached in this browser to the team's Drive (after each successful sync). */
   /** After a failed upload round the next one waits (1, 2, 4 … up to 30 minutes), not every sync. */
   private docRetryAt = 0;
   private docFails = 0;
   /** Documents the script refused for good (too large…): not re-sent until the page is reloaded. */
   private docRefused = new Set<string>();
+  /** Documents whose file is not in this browser (attached on another device). */
+  private docsAway = new Set<string>();
   private teamFilesAt = 0;
+  /** The upload run in flight: a caller that needs it done (signing out) waits for it. */
+  private docRun: Promise<void> | null = null;
   async uploadDocs() {
     const cfg = this.teamCfg;
-    if (!cfg || this.docUploading || !this.can('edit')) return;
+    if (!cfg || !this.can('edit')) return;
+    if (this.docRun) return this.docRun;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
-    if (locks) return void (await locks.request('gcc-doc-upload', { ifAvailable: true }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)));
-    return this.uploadDocsNow(cfg);
+    const run = (locks ? locks.request('gcc-doc-upload', { ifAvailable: true }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)) : this.uploadDocsNow(cfg)).then(
+      () => {},
+      () => {},
+    );
+    this.docRun = run;
+    await run;
+    if (this.docRun === run) this.docRun = null;
   }
   private async uploadDocsNow(cfg: TeamCfg) {
     if (this.docUploading || this.teamCfg !== cfg) return;
@@ -1656,7 +1716,7 @@ export class GccEngine {
       await this.flushDocDeletes(cfg);
       // only documents of deals that still exist, and that this browser has the file of
       // with accounts, only this account's files: another person's unsent file on a shared browser is theirs to send
-      const todo = Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && (cfg.mode !== 'accounts' || d.by === this.me()));
+      const todo = Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
       if (!todo.length || Date.now() < this.docRetryAt) return;
       // "old script" is checked again every 10 minutes: the lead may deploy the new one meanwhile
       if (this.teamFiles === false && Date.now() - this.teamFilesAt > 10 * 60000) this.teamFiles = null;
@@ -1671,7 +1731,10 @@ export class GccEngine {
       for (const doc of todo) {
         if (this.teamCfg !== cfg) return;
         const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer }>(this.docBlobKey(doc.id));
-        if (!b) continue; // attached on another device
+        if (!b) {
+          this.docsAway.add(doc.id); // attached on another device
+          continue;
+        }
         let r: { fileId: string };
         try {
           r = await uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
@@ -2190,14 +2253,25 @@ export class GccEngine {
    * Rounds are serialized across tabs with the Web Locks API when available.
    */
   async teamSync(opts: { first?: boolean } = {}) {
+    // a sign-in or out in another tab that this one did not hear of (a page restored from the
+    // back/forward cache, a frozen tab) is followed before anything is sent as the old account
+    if (this.teamCfg) this.adoptSession();
     if (this.teamCfg && !this.adoptTeamPrefs()) return;
     const cfg = this.teamCfg;
     if (!cfg || !this.B || this.auth) return; // signed out / must set a password: nothing is sent
+    if (cfg.mode !== 'accounts' && !cfg.key) {
+      // back on the team code (the older script pasted back) and no code entered yet: ask for it
+      this.teamNeedKey = true;
+      if (this.team.status !== 'error') this.setTeam({ status: 'error', msg: CODE_AGAIN });
+      return;
+    }
     if (this.teamBusy) {
       this.teamAgain = true;
       return;
     }
     const gen = this.teamGen;
+    // the token this round is sent with (a failure about an older one is not about this session)
+    const tok = cfg.mode === 'accounts' ? this.session?.tok || '' : '';
     this.teamBusy = true;
     this.setTeam({ status: this.team.status === 'connecting' ? 'connecting' : 'syncing' });
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
@@ -2210,12 +2284,18 @@ export class GccEngine {
         this.teamNeedKey = false;
         this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
         this.uploadDocs();
-        if (cfg.mode !== 'accounts' && !this.caps) this.probeCaps(cfg.url); // say if the script can do accounts
+        // say if the script can do accounts; asked again now and then, as the lead may update it
+        if (cfg.mode !== 'accounts' && (!this.caps || this.caps.url !== cfg.url || Date.now() - this.capsAt > 10 * 60000)) this.probeCaps(cfg.url);
       }
     } catch (e) {
       if (gen === this.teamGen && e instanceof TeamSyncError) {
         const c = e.code;
-        if (cfg.mode === 'accounts' && ['session_expired', 'login_required', 'account_disabled', 'must_change_password'].includes(c)) return void this.authLost(c);
+        if (cfg.mode === 'accounts' && ['session_expired', 'login_required', 'account_disabled', 'must_change_password'].includes(c)) {
+          // sent with a token replaced meanwhile (a new password, a renewal in another tab): the
+          // answer is about that one, not this session; run again with the current token
+          if (this.tokReplaced(tok)) return void (this.teamAgain = true);
+          return void this.authLost(c);
+        }
         if (cfg.mode !== 'accounts' && c === 'login_required') return void this.toAccounts(cfg);
         if (cfg.mode === 'accounts' && c === 'unauthorized') return void this.maybeLegacy(cfg);
       }
@@ -2289,47 +2369,115 @@ export class GccEngine {
       changed = true;
     }
     if (changed) {
+      // signed out in another tab (or someone else signed in) and this tab did not hear of it: the
+      // session is never written back (a renewed token would sign the browser in again)
+      const p = prefs.get<Session | null>(PREF.session, null);
+      if (!p || p.u !== s.u || p.url !== s.url) return void this.adoptSession();
       this.saveSession(s);
       this.emit();
     }
   }
 
   private async syncRound(cfg: TeamCfg, gen: number, first: boolean) {
-    // changes this account may not make, put back to the team's value in this round (kept for the
-    // next one if this round fails before applying)
-    const rv = new Set(this.revert);
+    // changes this account may not make, and records another account of this browser has not sent,
+    // put back to the team's value in this round (kept for the next one if this round fails before applying)
+    const rv = new Set(this.revert), hd = new Set(this.hidden);
     this.revert.clear();
+    this.hidden.clear();
     let applied = false;
     try {
-      return await this.syncRoundBody(cfg, gen, first, rv, () => (applied = true));
+      return await this.syncRoundBody(cfg, gen, first, rv, hd, () => (applied = true));
     } finally {
-      if (!applied) rv.forEach((k) => this.revert.add(k));
+      if (!applied) {
+        rv.forEach((k) => this.revert.add(k));
+        if (gen === this.teamGen) hd.forEach((k) => this.hidden.add(k));
+      }
     }
   }
-  private async syncRoundBody(cfg: TeamCfg, gen: number, first: boolean, rv: Set<string>, onApplied: () => void) {
+  /** Queued deletions of a deal, customer or person this account may not make, with what went with
+   *  them (a deal's stage notes, documents and history entry; a person's notes). */
+  private refusedCascade(ops: SyncOp[]) {
+    const cut = new Set<string>(), deals = new Set<string>(), people = new Set<string>();
+    const del = (o: SyncOp) => !!o.del || o.v == null;
+    ops.forEach((o) => {
+      const m = /^(deal|cust|person)\/(.+)$/.exec(o.k);
+      if (!m || !del(o) || this.canWriteKey(o.k, true)) return;
+      cut.add(o.k);
+      if (m[1] === 'deal') deals.add(m[2]);
+      if (m[1] === 'person') people.add(m[2]);
+    });
+    if (cut.size)
+      ops.forEach((o) => {
+        const [type, id] = o.k.split('/');
+        const v = o.v as Partial<DealLog> | undefined;
+        if (
+          (del(o) && (type === 'dstep' || type === 'ddoc') && deals.has(id)) ||
+          (type === 'dundo' && deals.has(id)) ||
+          (type === 'dlog' && !!v && deals.has(v.deal || '') && (v.action === 'ลบลูกค้า' || v.action === 'ยกเลิกการนำเข้า')) ||
+          (del(o) && type === 'log' && id.startsWith('p-') && people.has(id.slice(2)))
+        )
+          cut.add(o.k);
+      });
+    return cut;
+  }
+  private async syncRoundBody(cfg: TeamCfg, gen: number, first: boolean, rv: Set<string>, hd: Set<string>, onApplied: () => void) {
     const live = () => this.teamCfg === cfg && gen === this.teamGen;
     // the stored queue is shared by every tab: start from it (another tab may have pushed or added
     // ops), plus this tab's ops that could not be stored
     await this.pq;
+    const s = this.session;
+    if (cfg.mode === 'accounts' && s && this.can('edit')) {
+      // edits queued with the team code after this account signed in (a tab of the older app still
+      // open): sent in its name, as those queued before it signed in
+      const old = (await this.store.get<SyncOp[]>(pendKey(cfg.url)).catch(() => null)) || [];
+      if (old.length) {
+        const ids = new Set(old.map((o) => o.id));
+        await this.writePending(this.qk(cfg), (cur) => newestPerKey([...cur, ...old.map(this.stampFor(s))]))
+          .then(() => this.writePending(pendKey(cfg.url), (cur) => cur.filter((o) => !ids.has(o.id))))
+          .catch(() => {});
+        if (!live()) return;
+      }
+    }
     const stored = await this.store.get<SyncOp[]>(this.qk(cfg));
     if (!live()) return;
     const fresh = Array.isArray(stored) ? stored.filter((o) => !this.wasDelivered(o)) : null;
     this.pending = this.withUnsaved(fresh ? new Map(fresh.map((o) => [o.k, o])) : this.pending);
+    if (this.can('edit') && !this.can('delete')) {
+      // A deletion this account may not make (queued with the team code, or before an admin made it
+      // sales) is refused by the script, but what went with it would not be: the stage notes,
+      // documents and their Drive files, the history entry. None of it is sent; the team's values come back.
+      const cut = this.refusedCascade([...this.pending.values()]);
+      if (cut.size) {
+        cut.forEach((k) => (this.pending.delete(k), this.unsaved.delete(k), rv.add(k)));
+        await this.writePending(this.qk(cfg), (ops) => ops.filter((o) => !cut.has(o.k))).catch(() => {});
+        this.teamNote = `มี ${fmtN(cut.size)} รายการที่บัญชีของคุณแก้ไม่ได้ จึงใช้ค่าของทีมแทน`;
+        if (!live()) return;
+      }
+    }
+    if (cfg.mode === 'accounts' && !this.acctsRead.has(cfg)) {
+      // On a shared computer, records another account made here and has not sent yet (still in its
+      // queue) are not this account's to see or send: they leave this view, and stay queued for it.
+      this.acctsRead.add(cfg);
+      this.others = (await this.accts(cfg.url)).filter((a) => a.u !== cfg.u);
+      for (const a of this.others) ((await this.store.get<SyncOp[]>(pendKey(cfg.url) + '#' + a.u).catch(() => null)) || []).forEach((o) => hd.add(o.k));
+      if (!live()) return;
+    }
     const seeding = first || !cfg.seeded;
-    const pulled = await this.pullFrom(cfg, seeding ? 0 : cfg.seq);
+    const from = seeding ? 0 : cfg.seq;
+    const pulled = await this.pullFrom(cfg, from);
     const rows = pulled.rows;
     let since = pulled.since;
     if (!live()) return;
     // the team's value of each refused record (its last row since the start; no row: it goes)
-    const back: SyncRow[] = [];
-    if (rv.size) {
-      const all = seeding ? rows : (await this.pullFrom(cfg, 0)).rows;
+    const back: SyncRow[] = [], quiet = new Set<string>();
+    if (rv.size || hd.size) {
+      const all = from === 0 ? rows : (await this.pullFrom(cfg, 0)).rows;
       if (!live()) return;
-      const last = new Map<string, SyncRow>();
-      all.forEach((r) => rv.has(r.k) && last.set(r.k, r));
+      const last = new Map<string, SyncRow>(), now = new Set(rows.map((r) => r.k));
+      all.forEach((r) => (rv.has(r.k) || hd.has(r.k)) && last.set(r.k, r));
       rv.forEach((k) => {
         // queued again since, or in this round's rows anyway (newer than the full pull's)
-        if (this.pending.has(k) || rows.some((r) => r.k === k)) return;
+        if (this.pending.has(k) || now.has(k)) return;
         const r = last.get(k);
         if (r) back.push(r);
         else if (k.startsWith('scfg/')) {
@@ -2338,8 +2486,24 @@ export class GccEngine {
             this.sales.cfg[name] = emptyCfg()[name];
             this.saveSales();
           }
-        } else if (!k.startsWith('deal/')) back.push({ seq: 0, k, v: null, del: true, by: '', at: '' });
+        }
+        // a deal made here that the team never got (a viewer's) goes; a refused deletion of one leaves
+        // nothing to put back without a team row (the deal is gone here already)
+        else if (!k.startsWith('deal/') || this.sales.deals[k.slice(5)]) back.push({ seq: 0, k, v: null, del: true, by: '', at: '' });
       });
+      hd.forEach((k) => {
+        if (this.pending.has(k) || rv.has(k) || now.has(k)) return;
+        const r = last.get(k);
+        if (r) back.push(r);
+        else {
+          quiet.add(k); // not the team's: it only leaves this view (its files and the rest stay)
+          back.push({ seq: 0, k, v: null, del: true, by: '', at: '' });
+        }
+      });
+      // a document put back keeps its file in the team's Drive (a refused deletion queued it to be trashed)
+      const files = [...rv].map((k) => last.get(k)).map((r) => (r && r.k.startsWith('ddoc/') && !r.del ? (r.v as DealDoc | null)?.fileId : '')).filter(Boolean);
+      if (files.length) await this.store.update<string[]>('docDelQueue', (q) => (q || []).filter((x) => !files.includes(x))).catch(() => {});
+      if (!live()) return;
     }
     // A push whose reply was lost (tab closed, timeout) may still have reached the sheet. An op sent
     // when the sheet was at seq S is settled once the sheet has its own row after S: it was delivered
@@ -2375,7 +2539,7 @@ export class GccEngine {
       const add: SyncOp[] = [];
       const t = this.opTick();
       localRecords(mine).forEach((v, k) => {
-        if (this.pending.has(k) || !this.canWriteKey(k, false)) return;
+        if (this.pending.has(k) || !this.canWriteKey(k, false) || hd.has(k)) return; // not another account's
         const r = remote.get(k);
         if (!r) add.push(this.mkOp(k, v, t));
         else if (k.startsWith('scfg/') && Array.isArray(v) && Array.isArray(r.v) && !r.del) {
@@ -2463,7 +2627,7 @@ export class GccEngine {
         if (doc?.fileId) this.dropDocFile(doc);
       });
     }
-    this.applyRows(rows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged, back));
+    this.applyRows(rows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged, back), quiet);
     onApplied();
     cfg.seq = since;
     // only a round that seeded may mark the session seeded, not while part of the upload exists only
@@ -2544,20 +2708,24 @@ export class GccEngine {
     if (rejected) throw new Error(`มี ${fmtN(rejected)} รายการยาวเกินกว่าที่ชีตเก็บได้ จึงไม่ได้แชร์ (เก็บไว้ในเครื่องนี้)`);
   }
 
-  /** Apply pulled rows (oldest first) and refresh whatever they affect. */
-  private applyRows(rows: SyncRow[]) {
+  /** Apply pulled rows (oldest first) and refresh whatever they affect. `quiet`: records that only
+   *  leave this view (another account's not sent yet): nothing that goes with a deletion happens. */
+  private applyRows(rows: SyncRow[], quiet = new Set<string>()) {
     if (!rows.length) return;
     const fx = noEffects();
+    const gone = rows.filter((r) => (r.del || r.v == null) && !quiet.has(r.k));
     // a teammate deleted a document: its Drive file goes (whoever deleted it may not have known the
     // file yet) and so does this browser's copy of it
-    const delDocs = rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('ddoc/')).map((r) => this.sales.docs[r.k.slice(5)]).filter(Boolean);
-    rows.forEach((r) => (r.del || r.v == null ? this.goneKeys.add(r.k) : this.goneKeys.delete(r.k)));
-    this.forgetPeople(rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('person/')).map((r) => r.k.slice(7)));
+    const delDocs = gone.filter((r) => r.k.startsWith('ddoc/')).map((r) => this.sales.docs[r.k.slice(5)]).filter(Boolean);
+    rows.forEach((r) => (r.del || r.v == null ? !quiet.has(r.k) && this.goneKeys.add(r.k) : this.goneKeys.delete(r.k)));
+    this.forgetPeople(gone.filter((r) => r.k.startsWith('person/')).map((r) => r.k.slice(7)));
     rows.forEach((r) => applyRow(this, r, fx));
+    const unmark = (S: SalesState) => quiet.forEach((k) => k.startsWith('deal/') && S.gone && delete S.gone[k.slice(5)]);
+    unmark(this.sales); // not deleted by anyone
     delDocs.forEach((doc) => !this.sales.docs[`${doc.deal}/${doc.id}`] && this.dropDocFile(doc));
     // a teammate deleted a deal: the notes and documents this browser has for it go too — also those
     // the teammate had not seen yet (added here meanwhile), which would otherwise be left orphaned
-    const goneDeals = rows.filter((r) => (r.del || r.v == null) && r.k.startsWith('deal/') && !this.sales.deals[r.k.slice(5)]).map((r) => r.k.slice(5));
+    const goneDeals = gone.filter((r) => r.k.startsWith('deal/') && !this.sales.deals[r.k.slice(5)]).map((r) => r.k.slice(5));
     if (goneDeals.length)
       this.batchOps(() =>
         goneDeals.forEach((id) => {
@@ -2579,6 +2747,7 @@ export class GccEngine {
     // another tab may have stored records this tab has never seen (e.g. local-only TGO companies).
     const merged = (s: SharedState) => {
       rows.forEach((r) => applyRow(s, r, noEffects()));
+      unmark(s.sales);
       return s;
     };
     const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {} };
@@ -2640,24 +2809,37 @@ export class GccEngine {
     const moved = last && last !== url ? (await this.store.get<SyncOp[]>(pendKey(last))) || [] : [];
     const carried = [...this.carry.values()]; // unsent changes that could not be stored
     this.carry = new Map();
+    // this team signed in with accounts before going back to the team code: their unsent edits go as
+    // they were made, in their names (this browser may show another account's values for them now)
+    const acctQ: { k: string; ops: SyncOp[] }[] = [];
+    for (const a of await this.accts(url)) {
+      const k = pendKey(url) + '#' + a.u;
+      const q = (await this.store.get<SyncOp[]>(k).catch(() => null)) || [];
+      if (q.length) acctQ.push({ k, ops: q.map((o) => ({ ...o, by: a.name })) });
+    }
+    const acctOps = newestPerKey(acctQ.flatMap((x) => x.ops)), acctKeys = new Set(acctOps.map((o) => o.k));
     const local = localRecords(await this.storedShared());
     const t = this.opTick();
     const requeue = (cur: SyncOp[]) =>
-      [...new Map([...moved, ...carried, ...cur].map((o) => [o.k, o])).values()].map((p) => {
-        const o = this.mkOp(p.k, local.get(p.k), t);
-        if (o.v !== undefined && p.f && !p.del) {
-          o.f = p.f; // still only those fields of ours
-          if (p.fl) o.fl = p.fl;
-        }
-        if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
-        if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
-        if (p.base !== undefined) o.base = p.base; // still only over what was seen there
-        return o;
-      });
+      [...new Map([...moved, ...carried, ...cur].map((o) => [o.k, o])).values()]
+        .filter((p) => !acctKeys.has(p.k))
+        .map((p) => {
+          const o = this.mkOp(p.k, local.get(p.k), t);
+          if (o.v !== undefined && p.f && !p.del) {
+            o.f = p.f; // still only those fields of ours
+            if (p.fl) o.fl = p.fl;
+          }
+          if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
+          if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
+          if (p.base !== undefined) o.base = p.base; // still only over what was seen there
+          return o;
+        })
+        .concat(acctOps);
     let ops: SyncOp[];
     try {
       ops = await this.writePending(pendKey(url), requeue);
       if (moved.length) await this.writePending(pendKey(last), () => []).catch(() => {});
+      for (const x of acctQ) await this.writePending(x.k, () => []).catch(() => {});
     } catch {
       ops = requeue((await this.store.get<SyncOp[]>(pendKey(url))) || []);
       ops.forEach((o) => this.keepUnsaved(o));
@@ -2696,24 +2878,33 @@ export class GccEngine {
     else prefs.del(PREF.session);
     this.sessionRaw = prefs.getRaw(PREF.session);
   }
-  /** Ask a team-code team's script whether it can do accounts (once per page; the team card says so). */
+  /** Ask a team-code team's script whether it can do accounts (the team card says so). */
   private probeCaps(url: string) {
-    if (this.caps?.url === url) return;
+    this.capsAt = Date.now(); // one question at a time
     hello(this.transport, url).then(
       (c) => {
-        this.caps = { ...c, url };
+        this.setCaps(c, url);
         this.emit();
       },
       () => {},
     );
   }
+  private setCaps(c: Caps, url: string) {
+    this.caps = { ...c, url };
+    this.capsAt = Date.now();
+  }
   /** The script's public values for hashing a password (team id, rounds); they never change. */
   private async capsFor(url: string) {
     if (this.caps && this.caps.url === url && this.caps.v === 3 && this.caps.tid) return this.caps;
     const c = await hello(this.transport, url);
-    this.caps = { ...c, url };
+    this.setCaps(c, url);
     if (c.v !== 3 || !c.tid) throw new Error('สคริปต์ของทีมยังไม่รองรับบัญชีผู้ใช้ — ให้หัวหน้าทีมอัปเดต Code.gs');
-    return this.caps;
+    return this.caps!;
+  }
+  /** Whether `tok` is no longer this session's token (changed here, or in another tab of this browser). */
+  private tokReplaced(tok: string) {
+    const s = this.session, p = prefs.get<Session | null>(PREF.session, null);
+    return (s?.tok || '') !== tok || (!!p?.tok && p.u === s?.u && p.url === s?.url && p.tok !== tok);
   }
   /** The session can't go on (expired, disabled, must set a password): sync pauses, edits keep queuing. */
   private authLost(code: string) {
@@ -2743,32 +2934,88 @@ export class GccEngine {
     this.probeCaps(cfg.url);
   }
   /** The script refused the token as a team-code script would: if it went back to the team code
-   *  (an older Code.gs pasted back), this account's unsent edits go back to the sheet's queue. */
+   *  (an older Code.gs pasted back), unsent edits go back to the sheet's queue. */
   private async maybeLegacy(cfg: TeamCfg) {
     let c: Caps | null = null;
     try {
       c = await hello(this.transport, cfg.url);
-    } catch {
-      /* offline: decide later */
+    } catch (e) {
+      // can't tell now (offline): polling goes on, and the next round asks again
+      if (this.teamCfg === cfg) this.setTeam({ status: 'error', msg: errText(e) });
+      return;
     }
     if (this.teamCfg !== cfg) return;
-    if (!c || (c.v === 3 && c.mode === 'accounts')) return this.authLost('session_expired');
-    const name = this.session?.name || '';
-    const mine = (await this.store.get<SyncOp[]>(this.qk(cfg)).catch(() => null)) || [];
-    if (mine.length) {
-      await this.writePending(pendKey(cfg.url), (cur) => newestPerKey([...cur, ...mine.map((o) => ({ ...o, by: name }))])).catch(() => {});
-      await this.writePending(this.qk(cfg), () => []).catch(() => {});
+    this.setCaps(c, cfg.url);
+    if (c.v === 3 && c.mode === 'accounts') return this.authLost('session_expired');
+    await this.backToCode(cfg.url);
+  }
+  /** A sign-in (or new password) the script answered as a team-code script would, or whose `hello`
+   *  says it is one: if it went back to the team code, so does this browser (backToCode). */
+  private async codeAgain(url: string, e: unknown, u = '') {
+    const legacy = (c: Caps | null) => !!c && (c.v === 2 || c.mode === 'legacy');
+    if (!legacy(this.caps?.url === url ? this.caps : null) && !(e instanceof TeamSyncError && ['unauthorized', 'no_accounts'].includes(e.code))) return false;
+    try {
+      this.setCaps(await hello(this.transport, url), url); // the cached answer may be from before
+    } catch {
+      return false;
     }
+    if (!legacy(this.caps)) return false;
+    await this.backToCode(url, u);
+    return true;
+  }
+  /** On the sign-in screen of a team with accounts (page load): if its script went back to the team
+   *  code, go back with it now rather than when signing in fails. */
+  private checkCode(url: string) {
+    hello(this.transport, url).then(
+      (c) => {
+        this.setCaps(c, url);
+        const here = (this.auth === 'login' && !this.teamCfg && this.authUrl === url) || (this.auth === 'expired' && this.teamCfg?.url === url);
+        if (here && (c.v === 2 || c.mode === 'legacy')) this.backToCode(url);
+      },
+      () => {},
+    );
+  }
+  /**
+   * The older Code.gs was pasted back (rollback): the team-code form asks for the code again. Every
+   * account's unsent edits on this browser go back to the sheet's queue, in its name, so nothing
+   * queued is lost; `u`: the account trying to sign in, whose name this browser uses from now on.
+   */
+  private async backToCode(url: string, u = '') {
+    const s = this.session?.url === url ? this.session : null;
+    const t = prefs.get<TeamCfg | null>(PREF.team, null);
+    const seeded = this.teamCfg?.url === url ? !!this.teamCfg.seeded : t?.url === url && !!t.seeded;
+    const accts = await this.accts(url);
+    if (s && !accts.some((a) => a.u === s.u)) accts.push({ u: s.u, name: s.name });
+    for (const a of accts) {
+      const k = pendKey(url) + '#' + a.u;
+      const ops = (await this.store.get<SyncOp[]>(k).catch(() => null)) || [];
+      if (!ops.length) continue;
+      try {
+        await this.writePending(pendKey(url), (cur) => newestPerKey([...cur, ...ops.map((o) => ({ ...o, by: a.name }))]));
+        await this.writePending(k, () => []);
+      } catch {
+        /* stays where it was: teamConnect takes it */
+      }
+    }
+    const name = s?.name || accts.find((a) => a.u === (u || this.lastUser?.u))?.name || '';
     if (name) prefs.set(PREF.me, name);
     this.endTeam();
     this.saveSession(null);
     this.session = null;
-    const n: TeamCfg = { url: cfg.url, key: '', seq: 0, seeded: cfg.seeded };
+    const n: TeamCfg = { url, key: '', seq: 0, seeded };
     this.saveTeamCfg(n);
     this.teamCfg = n;
-    this.pending = new Map(((await this.store.get<SyncOp[]>(pendKey(cfg.url)).catch(() => null)) || []).map((o) => [o.k, o]));
+    this.pending = new Map(((await this.store.get<SyncOp[]>(pendKey(url)).catch(() => null)) || []).map((o) => [o.k, o]));
+    this.auth = '';
+    this.authUrl = '';
+    this.authMsg = '';
     this.teamNeedKey = true;
-    this.setTeam({ status: 'error', msg: 'สคริปต์ของทีมกลับไปใช้รหัสทีม — ใส่รหัสทีมเพื่อซิงก์ต่อ' });
+    this.setTeam({ status: 'error', msg: CODE_AGAIN, last: '' });
+    this.startTeam(false); // and polls again once the code is entered
+  }
+  /** The accounts that have signed in on this browser for `url`. */
+  private async accts(url: string) {
+    return ((await this.store.get<{ u: string; name: string }[]>(acctKey(url)).catch(() => null)) || []).filter((a) => a && a.u);
   }
   /**
    * Open a team by its web-app link (connect form, invite link): a team-code team asks for the code
@@ -2788,12 +3035,15 @@ export class GccEngine {
       this.setTeam({ status: 'error', msg: errText(e, 'connect') });
       return '';
     }
-    this.caps = { ...c, url };
+    this.setCaps(c, url);
     if (c.v === 2 || c.mode === 'legacy') {
       if (this.teamCfg?.url !== url) this.teamJoinUrl = url; // the team-code form
       this.emit();
       return 'legacy';
     }
+    // opened while this page is still loading, on a browser signed in to this team (the invite link
+    // again): the session being restored decides, not a sign-in screen shown before it is
+    if (this.loadEnd && this.signedInHere(url)) await this.loadEnd;
     if (this.teamCfg?.url === url && this.teamCfg.mode === 'accounts' && this.session && !this.auth) {
       this.emit();
       return 'accounts'; // already signed in to it
@@ -2817,23 +3067,45 @@ export class GccEngine {
     this.authMsg = '';
     this.emit();
   }
+  /** Whether this browser's stored settings say it is signed in to `url` (another tab, or this page
+   *  before its load has restored the session). */
+  private signedInHere(url: string) {
+    const t = prefs.get<TeamCfg | null>(PREF.team, null), s = prefs.get<Session | null>(PREF.session, null);
+    return t?.url === url && t.mode === 'accounts' && s?.url === url && !!s.u;
+  }
   /** Leave a sign-in or setup screen: back to the team still connected, or to this browser only. */
   teamCancelAuth() {
-    if (this.teamCfg && (this.auth === 'login' || this.auth === 'setup')) {
-      this.auth = '';
+    const cfg = this.teamCfg;
+    if (cfg && (this.auth === 'login' || this.auth === 'setup')) {
       this.authUrl = '';
       this.authMsg = '';
-      this.emit();
+      if (cfg.mode === 'accounts' && !this.session?.tok) {
+        this.auth = 'expired'; // the script ended this session: sign in again over the app
+        this.emit();
+        return;
+      }
+      this.auth = '';
+      if (this.teamTimer) return void this.emit();
+      // the sign-in screen came up before this page started syncing (e.g. the invite link opened
+      // while it loaded): nothing polls yet
+      this.setTeam({ status: 'syncing', msg: '' });
+      this.startTeam();
     } else this.teamForget();
   }
   /** Sign in with a username and password. Throws a TeamSyncError with a Thai message on failure. */
   async teamLogin(u: string, pw: string, rm: boolean) {
     const url = this.authUrl || this.teamCfg?.url || '';
     if (!url) throw new Error('ยังไม่ได้เลือกทีม');
-    const c = await this.capsFor(url);
     u = normUser(u);
-    const pk = await derivePk(c.tid!, c.it!, u, pw);
-    const r = await call<SignIn>(this.transport, url, null, { action: 'login', u, pk, rm });
+    let r: SignIn;
+    try {
+      const c = await this.capsFor(url);
+      const pk = await derivePk(c.tid!, c.it!, u, pw);
+      r = await call<SignIn>(this.transport, url, null, { action: 'login', u, pk, rm });
+    } catch (e) {
+      if (await this.codeAgain(url, e, u)) return; // the older script was pasted back: the team code again
+      throw e;
+    }
     await this.signedIn(url, r, rm, pw);
   }
   /** The lead's first admin account, with the one-time code printed by setup() in Apps Script. */
@@ -2881,6 +3153,8 @@ export class GccEngine {
   private async openSession(url: string, s: Session) {
     const stored = prefs.get<TeamCfg | null>(PREF.team, null);
     const cfg: TeamCfg = { url, key: '', seq: 0, seeded: stored?.url === url ? !!stored.seeded : false, mode: 'accounts', u: s.u };
+    // remembered for a shared computer: whose unsent edits and documents are whose (see syncRound)
+    await this.store.update<{ u: string; name: string }[]>(acctKey(url), (cur) => [...(cur || []).filter((a) => a && a.u !== s.u), { u: s.u, name: s.name }]).catch(() => {});
     if (canCap(s.role, 'edit')) {
       const last = prefs.getRaw(PREF.teamLast);
       const before = [
@@ -2889,14 +3163,8 @@ export class GccEngine {
         ...this.carry.values(),
       ];
       if (before.length) {
-        // the script writes the account's name on the rows, and on contact-log entries of a sales account
-        const stamp = (o: SyncOp): SyncOp => {
-          const v = o.v as Record<string, unknown> | undefined;
-          const own = s.role === 'sales' && /^d?log\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
-          return { ...o, by: s.name, ...(own ? { v: { ...v, by: s.name } } : {}) };
-        };
         try {
-          await this.writePending(this.qk(cfg), (cur) => newestPerKey([...cur, ...before.map(stamp)]));
+          await this.writePending(this.qk(cfg), (cur) => newestPerKey([...cur, ...before.map(this.stampFor(s))]));
           await this.writePending(pendKey(url), () => []);
           if (last && last !== url) await this.writePending(pendKey(last), () => []).catch(() => {});
           this.carry = new Map();
@@ -2924,15 +3192,30 @@ export class GccEngine {
     await this.teamSync({ first: !cfg.seeded });
     if (this.teamCfg === cfg) this.startTeam(false);
   }
+  /** What this browser queued with the team code, taken over by account `s`: sent in its name (the
+   *  script writes the account's name on the rows, and on contact-log entries of a sales account). */
+  private stampFor(s: Session) {
+    return (o: SyncOp): SyncOp => {
+      const v = o.v as Record<string, unknown> | undefined;
+      const own = s.role === 'sales' && /^d?log\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
+      return { ...o, by: s.name, ...(own ? { v: { ...v, by: s.name } } : {}) };
+    };
+  }
   /** Set a new password (the temporary one after an admin made the account or reset it, or any time).
    *  `old` may be left empty right after signing in with a temporary password. Signs out this
    *  account's other browsers. */
   async teamChangePassword(old: string, pw: string) {
     const s = this.session;
     if (!s) throw new Error('ยังไม่ได้เข้าสู่ระบบ');
-    const c = await this.capsFor(s.url);
-    const [pkOld, pkNew] = await Promise.all([derivePk(c.tid!, c.it!, s.u, old || this.lastPw), derivePk(c.tid!, c.it!, s.u, pw)]);
-    const r = await call<{ tok: string; exp: number }>(this.transport, s.url, { tok: s.tok }, { action: 'passwd', old: pkOld, pk: pkNew, rm: s.rm });
+    let r: { tok: string; exp: number };
+    try {
+      const c = await this.capsFor(s.url);
+      const [pkOld, pkNew] = await Promise.all([derivePk(c.tid!, c.it!, s.u, old || this.lastPw), derivePk(c.tid!, c.it!, s.u, pw)]);
+      r = await call<{ tok: string; exp: number }>(this.transport, s.url, { tok: s.tok }, { action: 'passwd', old: pkOld, pk: pkNew, rm: s.rm });
+    } catch (e) {
+      if (await this.codeAgain(s.url, e, s.u)) return; // the older script was pasted back: the team code again
+      throw e;
+    }
     s.tok = r.tok;
     s.exp = Number(r.exp) || s.exp;
     s.mc = false;
@@ -2979,8 +3262,14 @@ export class GccEngine {
    */
   async teamLogout(o: { all?: boolean; wipe?: boolean; dropUnsent?: boolean } = {}) {
     const cfg = this.teamCfg, s = this.session;
-    if (cfg && !this.auth && this.pending.size && (typeof navigator === 'undefined' || navigator.onLine !== false))
-      await Promise.race([this.teamSyncNow().catch(() => {}), new Promise((r) => setTimeout(r, 10000))]);
+    if (cfg && !this.auth && (this.pending.size || this.docsUnsent) && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      this.docRetryAt = 0; // a last try for files waiting after a failed upload, too
+      const flush = async () => {
+        await this.teamSyncNow().catch(() => {});
+        await this.uploadDocs();
+      };
+      await Promise.race([flush(), new Promise((r) => setTimeout(r, 10000))]);
+    }
     if (cfg && s?.tok) await call(this.transport, cfg.url, { tok: s.tok }, { action: 'logout', all: !!o.all }).catch(() => {});
     const url = cfg?.url || s?.url || this.authUrl;
     this.endTeam();
@@ -2993,14 +3282,14 @@ export class GccEngine {
     this.teamNote = '';
     this.setTeam({ status: 'off', msg: '', last: '' });
     if (o.wipe && cfg) {
-      await this.wipeTeamData(cfg, !!o.dropUnsent);
+      await this.wipeTeamData(cfg, !!o.dropUnsent, s);
       prefs.set(PREF.wipe, String(Date.now()));
       if (typeof location !== 'undefined') location.reload();
     }
   }
   /** Delete the team's data kept in this browser, keeping what exists on this browser only (companies
    *  from the TGO website sync and what was recorded about them) and, unless asked, unsent edits. */
-  private async wipeTeamData(cfg: TeamCfg, dropUnsent: boolean) {
+  private async wipeTeamData(cfg: TeamCfg, dropUnsent: boolean, s: Session | null) {
     const loc = (id: string | number) => isLocalId(Number(id));
     const pick = <T>(o: Record<string, T> | undefined) => Object.fromEntries(Object.entries(o || {}).filter(([id]) => loc(id))) as Record<string, T>;
     const C = this.crm;
@@ -3008,7 +3297,11 @@ export class GccEngine {
     await this.store.set('crm', keep).catch(() => {});
     await this.store.set('contacts', pick(this.contacts)).catch(() => {});
     for (const k of ['dedup', 'sales', 'customCos', 'people']) await this.store.del(k).catch(() => {});
-    for (const d of Object.values(this.sales.docs)) await this.store.del(this.docBlobKey(d.id)).catch(() => {});
+    // a file not uploaded yet is an unsent edit too: its only copy, uploaded at the next sign-in (that
+    // account's, or this one's unless asked to drop what is unsent)
+    const others = (await this.accts(cfg.url)).filter((a) => a.u !== s?.u);
+    const mine = (d: DealDoc) => d.by === s?.name || !others.some((a) => a.name === d.by);
+    for (const d of Object.values(this.sales.docs)) if (d.fileId || (dropUnsent && mine(d))) await this.store.del(this.docBlobKey(d.id)).catch(() => {});
     prefs.del(PREF.peopleHide);
     prefs.del(PREF.peopleGone);
     if (dropUnsent) {
@@ -3149,6 +3442,8 @@ export class GccEngine {
     this.teamNeedKey = false;
     this.teamFiles = null;
     this.docRetryAt = this.docFails = 0;
+    this.hidden = new Set();
+    this.others = [];
   }
   /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */
   private startTeam(now = true) {
