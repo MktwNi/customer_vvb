@@ -27,6 +27,8 @@
  *     rm = "remember me": the token lasts 30 days and is renewed while in use (otherwise 12 hours).
  *     code = the one-time 8-digit code setup() prints. With no accounts it creates the first admin
  *     (name = display name); when `u` exists it resets that account to an active admin (name ignored).
+ *     With accounts, an unknown `u` and a name add another admin; without a name (recovery) the answer
+ *     is unknown_user. setup() also prints the admins' usernames.
  * Token (accounts mode):
  *   { action: 'me', tok }                        -> { ok, me, mc }
  *   { action: 'passwd', tok, old, pk, rm? }      -> { ok, tok, exp, me }   (other devices are signed out)
@@ -92,6 +94,7 @@ const LOGIN_MAX_FAILS = 5; // wrong passwords for one username within LOGIN_WIND
 const LOGIN_WINDOW_S = 900;
 const TEAM_MAX_FAILS = 30; // more wrong passwords than this team-wide in 10-20 minutes stop all logins
 const TEAM_WINDOW_S = 600;
+const PW_LOCK_MS = 5000; // a password check waits this long for the user lock (see checkPw_), then answers busy
 const CODE_TTL_MS = 86400000; // the setup / recovery code from setup() lasts 24 hours
 const CODE_MAX_TRIES = 5;
 const USER_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
@@ -131,8 +134,13 @@ function setup() {
     return newOwnerCode_();
   });
   const msg = 'พร้อมใช้งาน: สร้างชีต "' + SHEET_NAME + '" และโฟลเดอร์ "' + DOC_FOLDER_NAME + '" ใน Google Drive แล้ว ขั้นต่อไปคือ Deploy เป็น Web app';
-  const codeMsg = (hasUsers_(readUsers_()) ? 'รหัสกู้คืนผู้ดูแลระบบ (ใช้เมื่อลืมรหัสผ่าน): ' : 'รหัสตั้งค่าผู้ดูแลระบบ: ') + code + ' (ใช้ได้ครั้งเดียว ภายใน 24 ชั่วโมง)';
+  const db = readUsers_();
+  const codeMsg = (hasUsers_(db) ? 'รหัสกู้คืนผู้ดูแลระบบ (ใช้เมื่อลืมรหัสผ่าน): ' : 'รหัสตั้งค่าผู้ดูแลระบบ: ') + code + ' (ใช้ได้ครั้งเดียว ภายใน 24 ชั่วโมง)';
+  // the usernames to recover, for a lead who no longer remembers theirs (whoever sees this log can
+  // also read the accounts in Script Properties)
+  const admins = Object.keys(db.users).filter((k) => db.users[k].r === 'admin');
   Logger.log(msg);
+  if (admins.length) Logger.log('ชื่อผู้ใช้ผู้ดูแลระบบ: ' + admins.join(', '));
   Logger.log(codeMsg);
   try {
     ss.toast(codeMsg + '\n' + msg, 'GCC ข้อมูลทีม', 30); // shown in the open spreadsheet
@@ -427,7 +435,8 @@ function compact_(sh, props) {
 //   AUTH_SECRET signs session tokens;  TEAM_ID public id in the pk salt;  KDF_ITER iterations for pk
 //   OWNER_CODE  {h: sha256 hex of the 8 digits, exp, n: wrong tries} from setup()
 // Script cache: AUTHC = the directory without salts and hashes (or a "no accounts" marker), so polling
-// reads no Properties; LF:<u> / LK:<u> / LG:<bucket> = wrong-password counters and lockouts.
+// reads no Properties; LF:<u> / LK:<u> / LG:<bucket> = wrong-password counters and lockouts, checked
+// and counted only under the user lock (checkPw_), which nothing else takes.
 
 /** Public: what this script is, the team's mode, and what the browser needs to derive pk. */
 function hello_() {
@@ -446,9 +455,10 @@ function hello_() {
   return { ok: true, app: 'gcc-team-sync', v: API_V, files: true, mode: mode_(A), tid: tid, it: it };
 }
 
-/** Public: username + pk → a session token. A wrong password never takes the lock or writes Properties. */
+/** Public: username + pk → a session token. A wrong password never takes the script lock or writes Properties. */
 function login_(req) {
   const u = normUser_(req.u), pk = String(req.pk || ''), rm = !!req.rm;
+  // while blocked, answered from the cache alone (checkPw_ checks again under its lock)
   if (teamBlocked_()) return { ok: false, error: 'too_many_attempts' };
   const left = lockLeft_(u);
   if (left) return { ok: false, error: 'locked', retryIn: left };
@@ -457,21 +467,24 @@ function login_(req) {
   if (!hasUsers_(db)) return { ok: false, error: 'no_accounts' };
   const x = USER_RE.test(u) && PK_RE.test(pk) ? own_(db.users, u) : null;
   // an unknown username costs the same work as a wrong password and gets the same answer
-  const ok = x ? eq_(hash_(pk, x.s), x.h) : (hash_(pk.slice(0, 64) || 'x', DUMMY_SALT), false);
-  if (!ok) {
-    const lockedFor = failLogin_(u);
-    return lockedFor ? { ok: false, error: 'locked', retryIn: lockedFor } : { ok: false, error: 'bad_login' };
-  }
+  const bad = checkPw_(u, true, () => (x ? eq_(hash_(pk, x.s), x.h) : (hash_(pk.slice(0, 64) || 'x', DUMMY_SALT), false)));
+  if (bad && bad.error !== 'wrong') return bad;
+  if (bad) return bad.retryIn ? { ok: false, error: 'locked', retryIn: bad.retryIn } : { ok: false, error: 'bad_login' };
   if (x.on !== 1) return { ok: false, error: 'account_disabled' };
-  clearFails_(u);
   const y = withLock_(() => {
     const d = readUsers_();
     const z = own_(d.users, u);
-    if (!z) return x;
+    // the password was checked against a copy read before the lock: a password change, recovery or
+    // reset saved meanwhile has replaced it, and an account disabled meanwhile gets no token either
+    // (one signed with the sv after the disable would work again once the account is re-enabled)
+    if (!z || z.s !== x.s || z.h !== x.h) return { err: 'bad_login' };
+    if (z.on !== 1) return { err: 'account_disabled' };
     z.ll = new Date().toISOString();
     saveUsers_(d);
     return z;
   });
+  if (y.err) return { ok: false, error: y.err };
+  clearFails_(u);
   const t = tok_(p.AUTH_SECRET, u, y.sv, rm);
   return { ok: true, tok: t.tok, exp: t.exp, me: { u: u, name: y.n, role: y.r }, mc: !!y.mc };
 }
@@ -512,6 +525,9 @@ function claim_(req) {
       x.sv = (Number(x.sv) || 0) + 1; // signs out every device of this account
       x.ll = now;
     } else {
+      // the recovery form sends no display name: there an unknown username is a typo, not a new admin
+      // (only someone with the right code gets this far, so it tells nobody else which names exist)
+      if (hasUsers_(db) && req.name == null) return { err: 'unknown_user' };
       const name = cleanDisplay_(req.name);
       if (!name) return { err: 'bad_name' };
       if (nameTaken_(db, name, '')) return { err: 'name_taken' };
@@ -553,10 +569,9 @@ function passwd_(req, actor) {
   if (left) return { ok: false, error: 'locked', retryIn: left };
   const x = own_(readUsers_().users, actor.u);
   if (!x) return { ok: false, error: 'session_expired' };
-  if (!eq_(hash_(String(req.old || ''), x.s), x.h)) {
-    failLogin_(actor.u); // a stolen session can't be used to guess the password
-    return { ok: false, error: 'wrong_password' };
-  }
+  // counted like a wrong login, so a stolen session can't be used to guess the password
+  const bad = checkPw_(actor.u, false, () => eq_(hash_(String(req.old || ''), x.s), x.h));
+  if (bad) return bad.error === 'wrong' ? { ok: false, error: 'wrong_password' } : bad;
   const pk = String(req.pk || '');
   if (!PK_RE.test(pk)) return { ok: false, error: 'bad_password_data' };
   const sv = withLock_(() => {
@@ -868,15 +883,43 @@ function putCache_(k, v, ttl) {
   }
 }
 
-// Wrong passwords are counted in the script cache only: a failed login never takes the lock or
+// Wrong passwords are counted in the script cache only: a failed login never takes the script lock or
 // writes Properties, so guessing can't slow the team's syncing or use up the daily quota.
+
+/**
+ * Checks a password of `u` (right() → true when it matches) and counts it when wrong, as one step:
+ * under the user lock, which only these checks take (the web app executes as its owner, so every
+ * request shares it), requests sent at the same moment are checked and counted one after another,
+ * and none gets past a lockout another has just set. Returns null when right, else {ok:false, error}:
+ * too_many_attempts (`team` only), locked + retryIn, or wrong (+ retryIn when this one locked `u`).
+ */
+function checkPw_(u, team, right) {
+  // a lock syncing never takes; where Apps Script gives none, counting stays best effort but sign-in works
+  let lock = null;
+  try {
+    lock = LockService.getUserLock();
+  } catch (err) {
+    lock = null;
+  }
+  if (lock && !lock.tryLock(PW_LOCK_MS)) throw gccError_('busy');
+  try {
+    if (team && teamBlocked_()) return { ok: false, error: 'too_many_attempts' };
+    const left = lockLeft_(u);
+    if (left) return { ok: false, error: 'locked', retryIn: left };
+    if (right()) return null;
+    const lockedFor = failLogin_(u);
+    return lockedFor ? { ok: false, error: 'wrong', retryIn: lockedFor } : { ok: false, error: 'wrong' };
+  } finally {
+    if (lock) lock.releaseLock();
+  }
+}
 
 /** Cache key part for a username (any text a request sent; cache keys are limited to 250 characters). */
 function ck_(u) {
   return String(u).slice(0, 64);
 }
 
-/** Counts a wrong password for `u`; returns the lockout in seconds when this one locked it, else 0. */
+/** Counts a wrong password for `u` (caller holds the user lock); returns the lockout in seconds when this one locked it, else 0. */
 function failLogin_(u) {
   const cache = CacheService.getScriptCache(), now = Date.now(), k = ck_(u);
   const g = 'LG:' + Math.floor(now / (TEAM_WINDOW_S * 1000));

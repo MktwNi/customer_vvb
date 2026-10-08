@@ -79,6 +79,42 @@ function member(s: GasSim, admin: string, u: string, name: string, role: Role) {
   return String(r.tok);
 }
 const users = (s: GasSim) => JSON.parse(s.props.USERS).users as Record<string, { n: string; r: Role; on: number; sv: number; mc: number; ll: string; c: string }>;
+const loginBody = (s: GasSim, u: string, pw: string) => ({ action: 'login', cv: 3, u, pk: s.pk(u, pw), rm: true });
+/** The wrong-password counters and lockouts in the script cache (LF:, LK:, LG:). */
+const counters = (s: GasSim) => Object.fromEntries(Object.entries(s.cache).filter(([k]) => /^L[FKG]:/.test(k)));
+/**
+ * Requests sent at the same moment, run the way Apps Script runs them side by side: none sees what
+ * the others wrote before it reads the cache. One that reaches the user lock waits there while the
+ * next one starts, and the waiting ones then take the lock one at a time (the last to arrive first);
+ * one that never takes it starts from the counters as they were, and its writes land after all of
+ * them, the last one winning (CacheService has no increment). Replies in the order sent.
+ */
+function burst(s: GasSim, bodies: Record<string, unknown>[]): Reply[] {
+  const start = counters(s);
+  const late: [string, string | undefined][] = [];
+  const out: Reply[] = [];
+  const send = (i: number) => {
+    let queued = false;
+    s.beforeLock(() => {
+      queued = true;
+      if (i + 1 < bodies.length) send(i + 1);
+    }, 'user');
+    out[i] = s.post(bodies[i]);
+    if (queued) return;
+    s.beforeLock(null, 'user');
+    const now = counters(s);
+    for (const k of new Set([...Object.keys(start), ...Object.keys(now)])) if (now[k] !== start[k]) late.push([k, now[k]]);
+    for (const k of Object.keys(now)) delete s.cache[k];
+    Object.assign(s.cache, start);
+    if (i + 1 < bodies.length) send(i + 1);
+  };
+  send(0);
+  for (const [k, v] of late) {
+    if (v === undefined) delete s.cache[k];
+    else s.cache[k] = v;
+  }
+  return out;
+}
 const rows = (s: GasSim, tok: string) => call(s, tok, 'pull', { since: 0 }).rows!;
 const expired = { ok: false, error: 'session_expired' };
 const upload = { docId: 'deal-1.q1', name: 'q.pdf', mime: 'application/pdf', data: 'JVBERg==' };
@@ -89,6 +125,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 // ------------------------------------------------------------------ 1. legacy mode
@@ -195,8 +232,15 @@ describe('setup()', () => {
     }
     expect(claim(s, first, 'lead', 'หัวหน้า', 'pw-lead-01')).toEqual({ ok: false, error: 'bad_code' });
     expect(claim(s, second, 'lead', 'หัวหน้า', 'pw-lead-01').ok).toBe(true);
+    expect(s.logs.some((l) => l.startsWith('ชื่อผู้ใช้ผู้ดูแลระบบ'))).toBe(false);
     s.setup();
     expect(s.logs.at(-1)).toMatch(/^รหัสกู้คืนผู้ดูแลระบบ \(ใช้เมื่อลืมรหัสผ่าน\): \d{4}-\d{4} \(ใช้ได้ครั้งเดียว ภายใน 24 ชั่วโมง\)$/);
+    // the usernames a recovery code is for, just above it (only the admins)
+    const admin = String(login(s, 'lead', 'pw-lead-01').tok);
+    addUser(s, admin, 'somchai', 'สมชาย', 'sales');
+    addUser(s, admin, 'boss2', 'รองหัวหน้า', 'admin');
+    s.setup();
+    expect(s.logs.at(-2)).toBe('ชื่อผู้ใช้ผู้ดูแลระบบ: lead, boss2');
     // only a hash of the code is stored
     expect(s.props.OWNER_CODE).not.toContain(s.ownerCode()!.replace('-', ''));
     expect(JSON.parse(s.props.OWNER_CODE)).toEqual({ h: expect.stringMatching(/^[0-9a-f]{64}$/), exp: T0 + DAY, n: 0 });
@@ -301,9 +345,23 @@ describe('claim (first admin and recovery)', () => {
     s.setup();
     const code = s.ownerCode();
     expect(claim(s, code, 'second', 'หัวหน้า', 'pw-second-1')).toEqual({ ok: false, error: 'name_taken' });
-    expect(claim(s, code, 'second', undefined, 'pw-second-1')).toEqual({ ok: false, error: 'bad_name' });
+    for (const name of ['', '   ']) expect(claim(s, code, 'second', name, 'pw-second-1')).toEqual({ ok: false, error: 'bad_name' });
     expect(claim(s, code, 'second', 'รองหัวหน้า', 'pw-second-1')).toMatchObject({ ok: true, me: { u: 'second', name: 'รองหัวหน้า', role: 'admin' } });
     expect(Object.keys(users(s))).toEqual(['lead', 'second']);
+  });
+
+  it('with accounts: a recovery (no display name) for a username that does not exist answers unknown_user', () => {
+    const { s } = team();
+    s.setup();
+    const code = s.ownerCode()!;
+    const wrong = code === '0000-0000' ? '1111-1111' : '0000-0000';
+    // without the right code nobody learns which usernames exist
+    for (const u of ['leader', 'lead']) expect(claim(s, wrong, u, undefined, 'new-lead-pw-1')).toEqual({ ok: false, error: 'bad_code' });
+    // a mistyped username is not taken for a new admin, and leaves the code usable
+    expect(claim(s, code, 'leader', undefined, 'new-lead-pw-1')).toEqual({ ok: false, error: 'unknown_user' });
+    expect(JSON.parse(s.props.OWNER_CODE).n).toBe(2);
+    expect(claim(s, code, 'lead', undefined, 'new-lead-pw-1')).toMatchObject({ ok: true, me: { u: 'lead', role: 'admin' } });
+    expect(Object.keys(users(s))).toEqual(['lead']);
   });
 });
 
@@ -412,7 +470,79 @@ describe('login', () => {
     expect(login(s, 'somchai', 'own-somchai')).toEqual({ ok: false, error: 'account_disabled' });
   });
 
-  it('a wrong password never takes the lock or writes Properties', () => {
+  it('a sign-in that waited while a password change, a recovery or a disable was saved gets no token', () => {
+    // beforeLock runs the other request while this sign-in, its password already checked against the
+    // copy it read, waits for the script lock to record the time
+    const { s, admin } = team();
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    let r: Reply | undefined;
+    // the account's owner changes the password while someone who knows the old one signs in
+    s.beforeLock(() => (r = call(s, tok, 'passwd', { old: s.pk('somchai', 'own-somchai'), pk: s.pk('somchai', 'pw-2-somchai') })));
+    expect(login(s, 'somchai', 'own-somchai')).toEqual({ ok: false, error: 'bad_login' });
+    expect(r).toMatchObject({ ok: true });
+    expect(login(s, 'somchai', 'pw-2-somchai').ok).toBe(true);
+    // the Sheet's owner takes the lead's account back with a recovery code
+    s.setup();
+    const code = s.ownerCode();
+    s.beforeLock(() => (r = claim(s, code, 'lead', undefined, 'recovered-pw-1')));
+    expect(login(s, 'lead', 'lead-password-1')).toEqual({ ok: false, error: 'bad_login' });
+    expect(r).toMatchObject({ ok: true, me: { u: 'lead', role: 'admin' } });
+    expect(call(s, admin, 'ping')).toEqual(expired);
+    const lead = String(r!.tok);
+    // disabled meanwhile: no token now, so none that re-enabling the account would bring back
+    s.beforeLock(() => (r = call(s, lead, 'user_save', { u: 'somchai', on: 0 })));
+    expect(login(s, 'somchai', 'pw-2-somchai')).toEqual({ ok: false, error: 'account_disabled' });
+    expect(r).toMatchObject({ ok: true, user: { on: 0 } });
+    expect(call(s, lead, 'user_save', { u: 'somchai', on: 1 }).ok).toBe(true);
+    expect(login(s, 'somchai', 'pw-2-somchai').ok).toBe(true);
+    // only signed out everywhere meanwhile: the password is still the right one, so the sign-in stands
+    s.beforeLock(() => (r = call(s, lead, 'user_save', { u: 'somchai', kick: true })));
+    const k = login(s, 'somchai', 'pw-2-somchai');
+    expect(r).toMatchObject({ ok: true });
+    expect(call(s, String(k.tok), 'ping')).toMatchObject({ ok: true, me: { u: 'somchai' } });
+  });
+
+  it('a password is checked and counted only under the user lock, which syncing never takes', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    const release = s.holdLock('user'); // another sign-in being checked right now
+    try {
+      expect(login(s, 'somchai', 'nope')).toEqual({ ok: false, error: 'busy' });
+      expect(login(s, 'somchai', 'own-somchai')).toEqual({ ok: false, error: 'busy' });
+      expect(call(s, tok, 'passwd', { old: s.pk('somchai', 'nope'), pk: s.pk('somchai', 'x-new-pw-1') })).toEqual({ ok: false, error: 'busy' });
+      expect(counters(s)).toEqual({}); // nothing is counted outside it
+      expect(call(s, tok, 'push', { ops: [{ k: 'stage/1', v: 'won' }] }).ok).toBe(true);
+      expect(call(s, tok, 'pull', { since: 0 }).ok).toBe(true);
+    } finally {
+      release();
+    }
+    expect(login(s, 'somchai', 'own-somchai').ok).toBe(true);
+  });
+
+  it('wrong passwords sent at the same moment are checked and counted one after another', () => {
+    // 30 at one username, the right password sent first (so it waits longest): only 5 are checked
+    const a = team().s;
+    let bodies = [loginBody(a, 'lead', 'lead-password-1'), ...Array.from({ length: 29 }, (_, i) => loginBody(a, 'lead', 'guess-' + i))];
+    let hmac = vi.spyOn(a.Utilities, 'computeHmacSha256Signature'); // one call per password checked
+    let r = burst(a, bodies);
+    expect(hmac).toHaveBeenCalledTimes(5);
+    expect(r.filter((x) => x.error === 'bad_login')).toHaveLength(4);
+    expect(r.filter((x) => x.error === 'locked' && x.retryIn === 900)).toHaveLength(26);
+    expect(r[0]).toEqual({ ok: false, error: 'locked', retryIn: 900 });
+    hmac.mockRestore();
+    // team-wide: 40 at different usernames, then the lead's right password; 31 are checked
+    const b = team().s;
+    bodies = [loginBody(b, 'lead', 'lead-password-1'), ...Array.from({ length: 40 }, (_, i) => loginBody(b, 'guess' + i, 'nope'))];
+    hmac = vi.spyOn(b.Utilities, 'computeHmacSha256Signature');
+    r = burst(b, bodies);
+    expect(hmac).toHaveBeenCalledTimes(31);
+    expect(r.filter((x) => x.error === 'bad_login')).toHaveLength(31);
+    expect(r.filter((x) => x.error === 'too_many_attempts')).toHaveLength(10);
+    expect(r[0]).toEqual({ ok: false, error: 'too_many_attempts' });
+    expect(login(b, 'lead', 'lead-password-1').error).toBe('too_many_attempts');
+  });
+
+  it('a wrong password never takes the script lock or writes Properties', () => {
     const { s, admin } = team();
     addUser(s, admin, 'somchai', 'สมชาย', 'sales', 'temp-pw-1');
     const writes = s.stats.propWrite;
