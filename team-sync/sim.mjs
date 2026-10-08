@@ -1,8 +1,8 @@
 // Runs team-sync/Code.gs in Node with in-memory fakes of the Google Apps Script services it
-// uses (SpreadsheetApp, LockService, PropertiesService, CacheService, ContentService, DriveApp, Utilities).
-// Used by the unit tests and by dev-server.mjs, so the real script — not a reimplementation — is
-// what gets exercised.
-import { randomBytes } from 'node:crypto';
+// uses (SpreadsheetApp, LockService, PropertiesService, CacheService, ContentService, DriveApp, Utilities,
+// Logger). Used by the unit tests and by dev-server.mjs, so the real script — not a reimplementation —
+// is what gets exercised.
+import { createHash, createHmac, pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +99,9 @@ function fakeBlob(buf, type = null, name = null) {
   return b;
 }
 
+/** A string (as UTF-8) or a Byte[] as a Buffer, the way Utilities' overloads take either. */
+const bytesOf = (x) => (Array.isArray(x) ? fromByteArray(x) : Buffer.from(String(x), 'utf8'));
+
 const Utilities = {
   // Apps Script refuses malformed base64 with this message (it does not skip bad characters)
   base64Decode: (s) => {
@@ -107,8 +110,24 @@ const Utilities = {
     return toByteArray(Buffer.from(s, 'base64'));
   },
   base64Encode: (data) => (typeof data === 'string' ? Buffer.from(data, 'utf8') : fromByteArray(data)).toString('base64'),
+  // the web-safe alphabet (- and _) with the = padding kept, as Apps Script does
+  base64EncodeWebSafe: (data) => bytesOf(data).toString('base64').replace(/\+/g, '-').replace(/\//g, '_'),
+  base64DecodeWebSafe: (s) => toByteArray(Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64')),
   newBlob: (data, contentType = null, name = null) => fakeBlob(typeof data === 'string' ? Buffer.from(data, 'utf8') : fromByteArray(data), contentType, name),
+  computeDigest: (alg, value) => {
+    if (alg !== 'SHA_256') throw gasError('Digest algorithm ' + alg + ' is not supported by the simulator.');
+    return toByteArray(createHash('sha256').update(bytesOf(value)).digest());
+  },
+  computeHmacSha256Signature: (value, key) => toByteArray(createHmac('sha256', bytesOf(key)).update(bytesOf(value)).digest()),
+  getUuid: () => randomUUID(),
+  DigestAlgorithm: { SHA_256: 'SHA_256' },
+  Charset: { UTF_8: 'UTF_8' },
 };
+
+/** pk as the web app derives it: base64url (no padding) of PBKDF2-HMAC-SHA256(NFC(pw), salt, it, 32 bytes). */
+export function derivePk(tid, it, u, pw) {
+  return pbkdf2Sync(String(pw).normalize('NFC'), 'gcc-team|v1|' + tid + '|' + u, Number(it), 32, 'sha256').toString('base64url');
+}
 
 /** One user's Drive. Like the real one, an item inside a trashed folder counts as trashed, a
  *  trashed item is still found by id, and an id deleted for good (emptied trash) throws. */
@@ -203,14 +222,30 @@ function fakeDrive(authorized) {
 
 /**
  * Create an isolated simulated deployment. `teamKey` replaces the empty TEAM_KEY constant;
- * `driveAuthorized: false` = the owner has not allowed Google Drive access yet (DriveApp throws).
+ * `driveAuthorized: false` = the owner has not allowed Google Drive access yet (DriveApp throws);
+ * `kdfIter` = the PBKDF2 iterations of the team (stored as KDF_ITER before the script runs, so tests
+ * derive passwords quickly; a real script starts at 200000).
  */
-export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized = true } = {}) {
+export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized = true, kdfIter = 1000 } = {}) {
   let src = code ?? readFileSync(join(here, 'Code.gs'), 'utf8');
   src = src.replace(/const TEAM_KEY = '.*?';/, `const TEAM_KEY = ${JSON.stringify(teamKey)};`);
   const sheets = {};
-  const props = {};
-  const cache = {}; // the script cache (CacheService); entries never expire here, see evictCache
+  const props = { KDF_ITER: String(kdfIter) };
+  // the script cache (CacheService): `cache` holds the values, `cacheExp` when each expires by the
+  // host's clock (Date.now(), so vi.setSystemTime moves it); Google may also drop entries early, see evictCache
+  const cache = {};
+  const cacheExp = {};
+  const live = (k) => {
+    if (!(k in cache)) return false;
+    if (cacheExp[k] !== undefined && Date.now() >= cacheExp[k]) {
+      delete cache[k];
+      delete cacheExp[k];
+      return false;
+    }
+    return true;
+  };
+  const stats = { propRead: 0, propWrite: 0, cacheGet: 0 }; // calls, as counted against Apps Script quotas
+  const logs = []; // Logger.log output (the editor's Execution log)
   const { DriveApp, drive } = fakeDrive(driveAuthorized);
   let locked = false;
   let onLock = null;
@@ -227,6 +262,7 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
       getActiveSpreadsheet: () => ({
         getSheetByName: (n) => sheets[n] || null,
         insertSheet: (n) => (sheets[n] = fakeSheet(n)),
+        toast: () => {},
       }),
     },
     LockService: {
@@ -242,23 +278,37 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     },
     PropertiesService: {
       getScriptProperties: () => ({
-        getProperty: (k) => (k in props ? props[k] : null),
+        getProperty: (k) => (stats.propRead++, k in props ? props[k] : null),
+        getProperties: () => (stats.propRead++, { ...props }),
         setProperty: (k, v) => {
+          stats.propWrite++;
           props[k] = String(v);
         },
         deleteProperty: (k) => {
+          stats.propWrite++;
           delete props[k];
         },
       }),
     },
     CacheService: {
       getScriptCache: () => ({
-        get: (k) => (k in cache ? cache[k] : null),
-        put: (k, v) => {
+        get: (k) => (stats.cacheGet++, live(k) ? cache[k] : null),
+        getAll: (keys) => {
+          stats.cacheGet++;
+          const out = {};
+          for (const k of keys) if (live(k)) out[k] = cache[k];
+          return out;
+        },
+        // Apps Script's limits: keys up to 250 characters, expiry 1 s to 6 hours (600 s by default)
+        put: (k, v, ttl = 600) => {
+          if (String(k).length > 250) throw gasError('Argument too large: key');
+          if (!(ttl >= 1 && ttl <= 21600)) throw gasError('Invalid argument: expirationInSeconds');
           cache[k] = String(v);
+          cacheExp[k] = Date.now() + ttl * 1000;
         },
         remove: (k) => {
           delete cache[k];
+          delete cacheExp[k];
         },
       }),
     },
@@ -268,15 +318,23 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     },
     DriveApp,
     Utilities,
-    Logger: { log: () => {} },
-    JSON, Date, Math, String, Number, Array, Object, Error,
+    Logger: { log: (m) => void logs.push(String(m)) },
+    JSON, Math, String, Number, Array, Object, Error,
   };
+  // the host's Date at the time of each call, so vi.useFakeTimers / vi.setSystemTime also move the
+  // script's clock (token expiry, the "at" column), even for a simulator created before them
+  Object.defineProperty(sandbox, 'Date', { get: () => globalThis.Date, enumerable: true });
   vm.createContext(sandbox);
   vm.runInContext(src + '\n;globalThis.__api = { doGet, doPost, compact_, setup };', sandbox, { filename: 'Code.gs' });
   const api = sandbox.__api;
+  const post = (body) => JSON.parse(api.doPost({ postData: { contents: typeof body === 'string' ? body : JSON.stringify(body) } }).getContent());
+  /** The last one-time code setup() printed ("1234-5678"), if any. */
+  const ownerCode = () => (logs.join('\n').match(/(\d{4}-\d{4})(?!.*\d{4}-\d{4})/s) || [])[1];
+  /** pk for a username and password, with this team's id and iteration count (run setup or hello first). */
+  const pk = (u, pw) => derivePk(props.TEAM_ID, props.KDF_ITER, u, pw);
   return {
     /** POST a request object; returns the parsed JSON response. */
-    post: (body) => JSON.parse(api.doPost({ postData: { contents: typeof body === 'string' ? body : JSON.stringify(body) } }).getContent()),
+    post,
     get: () => JSON.parse(api.doGet().getContent()),
     /** Run setup() as the owner does from the editor. */
     setup: () => api.setup(),
@@ -286,7 +344,23 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     props,
     cache,
     /** Drop everything in the script cache, as Google may do at any time. */
-    evictCache: () => Object.keys(cache).forEach((k) => delete cache[k]),
+    evictCache: () => Object.keys(cache).forEach((k) => (delete cache[k], delete cacheExp[k])),
+    /** Properties / cache calls made so far (the counters can be reset by assigning 0). */
+    stats,
+    /** Everything Logger.log printed. */
+    logs,
+    ownerCode,
+    pk,
+    /**
+     * Turn the team into accounts mode as the lead does: run setup, then claim the printed code as
+     * the first admin. Returns the admin's session token.
+     */
+    bootstrapAdmin: ({ u, name, pw, rm = true }) => {
+      api.setup();
+      const r = post({ action: 'claim', cv: 3, code: ownerCode(), u, name, pk: pk(u, pw), rm });
+      if (!r.ok) throw new Error('claim failed: ' + r.error);
+      return r.tok;
+    },
     /** The fake services as Code.gs sees them (e.g. to put a file elsewhere in the owner's Drive). */
     DriveApp,
     Utilities,
