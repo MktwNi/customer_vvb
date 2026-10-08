@@ -918,7 +918,7 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
   const { engine: e } = useApp();
   useEngineVersion();
   const s = e.session;
-  const n = e.teamPendingN;
+  const n = e.teamPendingN + e.docsUnsent; // a document whose file is only here counts as unsent too
   const [sending, setSending] = useState(false);
   const [wipe, setWipe] = useState(() => !s?.rm);
   const [drop, setDrop] = useState(false);
@@ -929,7 +929,7 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    if (!e.teamPendingN || e.auth || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+    if (!(e.teamPendingN + e.docsUnsent) || e.auth || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     setSending(true);
     e.teamSyncNow()
       .catch(() => {})
