@@ -53,9 +53,31 @@ export interface GasSim {
     createFile(blob: GasBlob): GasFile;
     createFile(name: string, content: string, mimeType?: string): GasFile;
   };
-  Utilities: { newBlob(data: number[] | string, contentType?: string, name?: string): GasBlob; base64Encode(data: number[] | string): string; base64Decode(s: string): number[] };
+  Utilities: {
+    newBlob(data: number[] | string, contentType?: string, name?: string): GasBlob;
+    base64Encode(data: number[] | string): string;
+    base64Decode(s: string): number[];
+    base64EncodeWebSafe(data: number[] | string): string;
+    base64DecodeWebSafe(s: string): number[];
+    computeDigest(alg: 'SHA_256', value: number[] | string): number[];
+    computeHmacSha256Signature(value: number[] | string, key: number[] | string): number[];
+    getUuid(): string;
+  };
   drive: { list(): GasDriveItem[]; remove(id: string): void };
   holdLock(): () => void;
   beforeLock(fn: () => void): void;
+  /** Properties and cache calls so far (assign 0 to reset). */
+  stats: GasStats;
+  /** Everything Logger.log printed (the editor's Execution log). */
+  logs: string[];
+  /** The last one-time code setup() printed ("1234-5678"). */
+  ownerCode(): string | undefined;
+  /** pk for a username and password with this team's id and iteration count (after setup or hello). */
+  pk(u: string, pw: string): string;
+  /** Run setup and claim the printed code as the first admin; returns the admin's session token. */
+  bootstrapAdmin(o: { u: string; name: string; pw: string; rm?: boolean }): string;
 }
-export function createGasSim(opts?: { teamKey?: string; code?: string; driveAuthorized?: boolean }): GasSim;
+export interface GasStats { propRead: number; propWrite: number; cacheGet: number }
+export function createGasSim(opts?: { teamKey?: string; code?: string; driveAuthorized?: boolean; kdfIter?: number }): GasSim;
+/** pk as the web app derives it: base64url (no padding) of PBKDF2-HMAC-SHA256(NFC(pw), 'gcc-team|v1|' + tid + '|' + u, it, 32 bytes). */
+export function derivePk(tid: string, it: number | string, u: string, pw: string): string;

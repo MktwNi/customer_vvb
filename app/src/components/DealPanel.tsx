@@ -8,6 +8,7 @@ import {
 } from '../lib/sales';
 import { Modal } from '../tabs/Sales';
 import { DocAttach } from './DocAttach';
+import { ReadOnly } from './ReadOnly';
 import { heroGrad, inputStyle, labelCol, selectStyle } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 
@@ -199,6 +200,7 @@ function LinkCompany({ d }: { d: Deal }) {
 const SHOWABLE = /^(application\/pdf|image\/(png|jpeg|webp|gif))$/;
 function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
   const { engine: e } = useApp();
+  const ro = !e.can('edit');
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState('');
   const [link, setLink] = useState('');
@@ -249,8 +251,8 @@ function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
             <a href={link} download={doc.name} style={{ fontSize: 13 }}>ดาวน์โหลด</a>
           </>
         )}
-        <button onClick={() => setEdit(!edit)} style={small}>{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>
-        <button onClick={() => window.confirm(`ลบเอกสาร "${doc.name}"?`) && e.deleteDoc(d.id, doc.id)} style={{ ...small, color: '#8A2B12' }}>ลบ</button>
+        {!ro && <button onClick={() => setEdit(!edit)} style={small}>{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>}
+        {!ro && <button onClick={() => window.confirm(`ลบเอกสาร "${doc.name}"?`) && e.deleteDoc(d.id, doc.id)} style={{ ...small, color: '#8A2B12' }}>ลบ</button>}
         {busy && <span style={{ fontSize: 12, color: '#475069' }}>{busy}</span>}
       </div>
       {edit && (
@@ -298,6 +300,8 @@ export function DealPanel() {
   const st = dealStatus(S, d);
   const m = dealMoney(S, d);
   const docs = docsOf(S, d.id);
+  // an account that can only read sees everything (and opens the files) but changes nothing
+  const ro = !e.can('edit');
   const up = (p: Partial<Deal>) => e.updateDeal(d.id, p);
   const toggle = (k: 'source' | 'service', x: string) => up({ [k]: d[k].includes(x) ? d[k].filter((y) => y !== x) : [...d[k], x] });
   const log = Object.values(S.log).filter((l) => l.deal === d.id).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30);
@@ -315,11 +319,13 @@ export function DealPanel() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#fff' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>
+              {!ro && <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>}
               <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
-          <ClientName value={d.client} onSave={(v) => up({ client: v })} />
+          <ReadOnly ro={ro}>
+            <ClientName value={d.client} onSave={(v) => up({ client: v })} />
+          </ReadOnly>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, color: '#fff' }}>
             <span>สถานะ <b style={{ fontWeight: 500, color: '#fff' }}>{st.overall}</b></span>
             <span>Forecast <b style={{ fontWeight: 500, color: '#fff' }}>{m.forecast != null ? fmtMoney(m.forecast) : '—'}</b>{m.fcConfirmed ? ' ✓' : ''}</span>
@@ -329,11 +335,14 @@ export function DealPanel() {
         </div>
 
         <div style={{ padding: '18px 24px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <ReadOnly ro={ro}>
           <div style={box}>
             <span style={kicker}>บริษัท</span>
             <LinkCompany d={d} />
           </div>
+          </ReadOnly>
 
+          <ReadOnly ro={ro}>
           <div style={box}>
             <span style={kicker}>ข้อมูลติดต่อ</span>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
@@ -366,7 +375,9 @@ export function DealPanel() {
             <datalist id="sl-team">{e.crm.team.map((x) => <option key={x} value={x} />)}</datalist>
             <datalist id="sl-ref">{referrals.map((x) => <option key={x} value={x} />)}</datalist>
           </div>
+          </ReadOnly>
 
+          <ReadOnly ro={ro}>
           <div style={box}>
             <span style={kicker}>SOURCE (ช่องทาง)</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -378,8 +389,11 @@ export function DealPanel() {
             </div>
           </div>
 
+          </ReadOnly>
+
           <div style={box}>
             <span style={kicker}>ยอดเงิน และเอกสารยืนยัน</span>
+            <ReadOnly ro={ro}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {/* the box shows the figure that counts: from the quotation, or typed (which then overrides it) */}
@@ -399,16 +413,20 @@ export function DealPanel() {
                 <span style={{ fontSize: 12, color: m.acDocs ? '#14633F' : '#6B4100', lineHeight: 1.5 }}>{m.acDocs ? `✓ รวมจากเอกสาร ${m.acDocs} ฉบับ · แก้ยอดที่เอกสารด้านล่าง` : m.actual != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}</span>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button onClick={() => setAttach('quotation')} style={small}>📎 แนบใบเสนอราคา</button>
-              <button onClick={() => setAttach('invoice')} style={small}>📎 แนบใบแจ้งหนี้</button>
-              <button onClick={() => setAttach('receipt')} style={small}>📎 แนบใบเสร็จ / ใบกำกับภาษี</button>
-              <button onClick={() => setAttach('other')} style={small}>📎 เอกสารอื่น</button>
-            </div>
+            </ReadOnly>
+            {!ro && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => setAttach('quotation')} style={small}>📎 แนบใบเสนอราคา</button>
+                <button onClick={() => setAttach('invoice')} style={small}>📎 แนบใบแจ้งหนี้</button>
+                <button onClick={() => setAttach('receipt')} style={small}>📎 แนบใบเสร็จ / ใบกำกับภาษี</button>
+                <button onClick={() => setAttach('other')} style={small}>📎 เอกสารอื่น</button>
+              </div>
+            )}
             {docs.map((doc) => <DocRow key={doc.id} d={d} doc={doc} inUse={doc.target === 'forecast' ? fcDoc?.id === doc.id : doc.target === 'actual' && doc.amount != null} />)}
             <span style={{ fontSize: 12, color: '#5E6680', lineHeight: 1.6 }}>ระบบอ่านยอดเงินจากเอกสารให้ คุณตรวจแล้วกดยืนยัน ใบเสนอราคาที่ยืนยันล่าสุดเป็น Forecast และยอดจากใบแจ้งหนี้ / ใบเสร็จรวมกันเป็น Actual (แก้ได้ที่เอกสาร)</span>
           </div>
 
+          <ReadOnly ro={ro}>
           <div style={box}>
             <span style={kicker}>ขั้นตอนการติดตาม</span>
             {C.stages.map((p) => {
@@ -434,6 +452,8 @@ export function DealPanel() {
             })}
           </div>
 
+          </ReadOnly>
+
           <div style={box}>
             <span style={kicker}>ประวัติ</span>
             {!log.length && <span style={{ fontSize: 13, color: '#8A93AD' }}>ยังไม่มี</span>}
@@ -447,9 +467,11 @@ export function DealPanel() {
             ))}
           </div>
 
-          <button onClick={() => window.confirm(`ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต และเอกสารที่แนบ ทุกเครื่องในทีม)`) && (e.deleteDeal(d.id), close())} style={{ ...small, alignSelf: 'flex-start', color: '#8A2B12' }}>
-            ลบรายการนี้
-          </button>
+          {e.can('delete') && (
+            <button onClick={() => window.confirm(`ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต และเอกสารที่แนบ ทุกเครื่องในทีม)`) && (e.deleteDeal(d.id), close())} style={{ ...small, alignSelf: 'flex-start', color: '#8A2B12' }}>
+              ลบรายการนี้
+            </button>
+          )}
         </div>
       </aside>
       {attach && <DocAttach deal={d} kind={attach} onClose={() => setAttach(null)} />}

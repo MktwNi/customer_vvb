@@ -104,7 +104,8 @@ export function Search() {
 
   const star = (id: number) => {
     const on = C.watch.includes(id);
-    return { star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => e.toggleWatch(id) };
+    // an account that can only read can't star (the star is the team's watch list)
+    return { star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => (e.can('edit') ? e.toggleWatch(id) : undefined) };
   };
   const rndPill = (c: Company) =>
     c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1745B8' } : null;

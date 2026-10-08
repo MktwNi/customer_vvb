@@ -2789,12 +2789,24 @@ export class GccEngine {
       this.emit();
       return 'accounts'; // already signed in to it
     }
-    if (!this.teamCfg && c.mode === 'accounts') this.saveTeamCfg({ url, key: '', seq: 0, seeded: false, mode: 'accounts' });
+    // remembered so a reload stays on the sign-in screen (kept as is when this browser had it already)
+    const had = prefs.get<TeamCfg | null>(PREF.team, null);
+    if (!this.teamCfg && c.mode === 'accounts' && !(had?.url === url && had.mode === 'accounts')) this.saveTeamCfg({ url, key: '', seq: 0, seeded: false, mode: 'accounts' });
     this.authUrl = url;
     this.auth = c.mode === 'setup' ? 'setup' : 'login';
     this.authMsg = '';
     this.emit();
     return c.mode === 'setup' ? 'setup' : 'accounts';
+  }
+  /** The lead turns on accounts for a team-code team whose script can do them: the first-admin
+   *  setup screen (syncing with the code pauses meanwhile). */
+  teamBeginSetup() {
+    const url = this.teamCfg?.url || this.teamJoinUrl;
+    if (!url) return;
+    this.authUrl = url;
+    this.auth = 'setup';
+    this.authMsg = '';
+    this.emit();
   }
   /** Leave a sign-in or setup screen: back to the team still connected, or to this browser only. */
   teamCancelAuth() {
@@ -2927,6 +2939,20 @@ export class GccEngine {
       }
     }
     this.emit();
+  }
+  /** Edits this account can no longer send (made before an admin made it ดูอย่างเดียว): drop them,
+   *  and the next round shows the team's values again. */
+  async teamDropUnsent() {
+    const cfg = this.teamCfg;
+    if (!cfg) return;
+    const keys = [...this.pending.keys(), ...this.unsaved.keys()];
+    this.pending = new Map();
+    this.unsaved = new Map();
+    await this.writePending(this.qk(cfg), () => []).catch(() => {});
+    keys.forEach((k) => this.revert.add(k));
+    this.teamNote = '';
+    this.emit();
+    await this.teamSyncNow();
   }
   /** Whether the temporary password typed at sign-in is still known here (the must-change screen
    *  then asks only for the new one). */
@@ -3105,9 +3131,10 @@ export class GccEngine {
     this.stopTeam();
     this.teamGen++;
     this.teamBusy = this.teamAgain = false;
+    // kept for the next session of this sheet; an account's are not (never sent under someone else's)
+    if (this.teamCfg?.mode !== 'accounts') this.unsaved.forEach((o, k) => this.carry.set(k, o));
     this.teamCfg = null;
     this.pending = new Map();
-    this.unsaved.forEach((o, k) => this.carry.set(k, o));
     this.unsaved = new Map();
     this.delivered = new Map();
     this.teamNeedKey = false;
