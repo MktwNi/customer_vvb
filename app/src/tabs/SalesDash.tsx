@@ -81,7 +81,7 @@ function Acc({ title, sub, open, onToggle, children }: { title: string; sub?: st
           {title}
           {sub && <small>{sub}</small>}
         </span>
-        <span className="sd-chev" aria-hidden="true">▾</span>
+        <span className="sd-chev" aria-hidden="true" />
       </button>
       {open && <div className="sd-acc-b">{children}</div>}
     </div>
@@ -89,7 +89,8 @@ function Acc({ title, sub, open, onToggle, children }: { title: string; sub?: st
 }
 
 /**
- * Sales dashboard: greeting + headline numbers, the pipeline by stage, the top seller, this week's
+ * Sales dashboard (the owner's own layout, kept as designed; only weights, text colours and glyphs follow
+ * the design system): greeting + headline numbers, the pipeline by stage, the top seller, this week's
  * contacts, sales against forecast, win rate, follow-ups, this week's appointments and the breakdowns.
  * One filter row on top scopes everything.
  */
@@ -161,9 +162,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const R = 54, C = 2 * Math.PI * R;
   const undecided = st.wait + st.none;
   const segs: [string, number, string, string][] = [
-    ['✓ ปิดได้', st.yes, WIN, '#fff'],
-    ['✕ ไม่สำเร็จ', st.no, LOSS, '#fff'],
-    ['… รอผล', undecided, '', ''],
+    ['ปิดได้', st.yes, WIN, '#fff'],
+    ['ไม่สำเร็จ', st.no, LOSS, '#fff'],
+    ['รอผล', undecided, '', ''],
   ];
   const srcRows = Object.entries(st.bySource);
   // the latest wins: deals marked YES, newest result date first
@@ -199,10 +200,10 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
       </div>
 
       <div className="sd-filters" role="group" aria-label="ตัวกรอง Dashboard">
-        <select className={'sx-sel' + (f.resp ? ' on' : '')} value={f.resp} onChange={(ev) => setF({ ...f, resp: ev.target.value })} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: 'ผู้รับผิดชอบ: ' + x }))} /></select>
-        <select className={'sx-sel' + (f.referral ? ' on' : '')} value={f.referral} onChange={(ev) => setF({ ...f, referral: ev.target.value })} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: 'แหล่งที่มา: ' + x }))} /></select>
-        <select className={'sx-sel' + (f.month ? ' on' : '')} value={f.month} onChange={(ev) => setF({ ...f, month: ev.target.value })} aria-label="เดือนที่ติดต่อล่าสุด"><Opts all="ติดต่อล่าสุด: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อล่าสุด ' + m }))} /></select>
-        {filtered && <button className="sx-reset" style={{ marginLeft: 0 }} onClick={() => setF({ resp: '', referral: '', month: '' })}>ล้างตัวกรอง</button>}
+        <select className={'fld sel' + (f.resp ? ' on' : '')} value={f.resp} onChange={(ev) => setF({ ...f, resp: ev.target.value })} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: 'ผู้รับผิดชอบ: ' + x }))} /></select>
+        <select className={'fld sel' + (f.referral ? ' on' : '')} value={f.referral} onChange={(ev) => setF({ ...f, referral: ev.target.value })} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: 'แหล่งที่มา: ' + x }))} /></select>
+        <select className={'fld sel' + (f.month ? ' on' : '')} value={f.month} onChange={(ev) => setF({ ...f, month: ev.target.value })} aria-label="เดือนที่ติดต่อล่าสุด"><Opts all="ติดต่อล่าสุด: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อล่าสุด ' + m }))} /></select>
+        {filtered && <button className="btn sm" onClick={() => setF({ resp: '', referral: '', month: '' })}>ล้างตัวกรอง</button>}
       </div>
 
       <div className="sd-pipe" role="list" aria-label="จำนวนลูกค้าที่ผ่านแต่ละขั้น">
@@ -222,12 +223,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           <span className="sd-card-t">ผู้ทำยอดสูงสุด</span>
           {top ? (
             <>
-              <CoAvatar name={top[0]} size={92} ring="rgba(255,255,255,.9)" style={{ alignSelf: 'center', marginTop: 6 }} />
+              <CoAvatar colored name={top[0]} size={92} ring="rgba(255,255,255,.9)" style={{ alignSelf: 'center', marginTop: 6 }} />
               <div className="sd-top-name">
                 <b>{top[0]}</b>
                 <span>{`ลูกค้า ${fmtN(top[1].n)} ราย · ปิดได้ ${fmtN(yesBy[top[0]] || 0)}`}</span>
               </div>
-              <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ฿${baht(top[1].actual)}` : `Forecast ฿${baht(top[1].forecast)}`}</span>
+              <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ${baht(top[1].actual)} บาท` : `Forecast ${baht(top[1].forecast)} บาท`}</span>
               {sellers.length > 1 && (
                 <div className="sd-runners">
                   {sellers.slice(1, 4).map(([k, v], i) => (
@@ -247,7 +248,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         <section className="sd-card sd-act" aria-label="การติดต่อสัปดาห์นี้">
           <div className="sd-card-h">
             <span className="sd-card-t">การติดต่อสัปดาห์นี้</span>
-            <span className="sd-delta" title="เทียบกับวันเดียวกันของสัปดาห์ก่อน (จันทร์ถึงวันนี้)">{weekN === lastWeek ? '= เท่าสัปดาห์ก่อน' : weekN > lastWeek ? `↑ ${fmtN(weekN - lastWeek)} จากสัปดาห์ก่อน` : `↓ ${fmtN(lastWeek - weekN)} จากสัปดาห์ก่อน`}</span>
+            <span className="sd-delta" title="เทียบกับวันเดียวกันของสัปดาห์ก่อน (จันทร์ถึงวันนี้)">{weekN === lastWeek ? 'เท่าสัปดาห์ก่อน' : weekN > lastWeek ? `มากกว่าสัปดาห์ก่อน ${fmtN(weekN - lastWeek)}` : `น้อยกว่าสัปดาห์ก่อน ${fmtN(lastWeek - weekN)}`}</span>
           </div>
           <div className="sd-act-n">
             <b>{fmtN(weekN)}</b>
@@ -302,12 +303,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               const c = d.gid != null ? e.company(d.gid) : undefined;
               return (
                 <button key={d.id} className="sd-win-i" title={d.client} onClick={() => set({ deal: d.id })}>
-                  <CoAvatar name={d.client} web={c?.web} set={c?.set} size={32} />
+                  <CoAvatar colored name={d.client} web={c?.web} set={c?.set} size={32} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
                   </span>
-                  {amt > 0 && <span className={'sd-win-amt' + (fc ? ' fc' : '')} title={fc ? 'ยังไม่มี Actual · แสดง Forecast' : 'Actual'}>{fc ? 'Forecast ' : ''}฿{baht(amt)}</span>}
+                  {amt > 0 && <span className={'sd-win-amt' + (fc ? ' fc' : '')} title={fc ? 'ยังไม่มี Actual · แสดง Forecast' : 'Actual'}>{fc ? 'Forecast ' : ''}{baht(amt)} บาท</span>}
                 </button>
               );
             })}
@@ -342,8 +343,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             </span>
             <span className="sd-wk-nav">
               <button aria-disabled={wk === 0} className={wk === 0 ? 'off' : ''} onClick={() => { if (wk !== 0) { setWk(0); nextRef.current?.focus(); } }}>สัปดาห์นี้</button>
-              <button aria-label="สัปดาห์ก่อน" onClick={() => setWk(wk - 1)}>‹</button>
-              <button ref={nextRef} aria-label="สัปดาห์ถัดไป" onClick={() => setWk(wk + 1)}>›</button>
+              <button aria-label="สัปดาห์ก่อน" onClick={() => setWk(wk - 1)}><span className="sd-arr" aria-hidden="true" /></button>
+              <button ref={nextRef} aria-label="สัปดาห์ถัดไป" onClick={() => setWk(wk + 1)}><span className="sd-arr r" aria-hidden="true" /></button>
             </span>
           </div>
           <div className="sd-wk" role="table" aria-label="นัดหมายรายวัน">
@@ -370,7 +371,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                         return (
                           <button key={t.id} className={'sd-ev' + (t.done ? ' done' : '')} style={{ boxShadow: `0 0 0 2px ${ty[2]}, 0 0 0 4px #F7F9FE` }} onClick={() => open(t.gid)} title={label} aria-label={label}
                             onMouseEnter={() => setEvTip(label)} onMouseLeave={() => setEvTip(null)} onFocus={() => setEvTip(label)} onBlur={() => setEvTip(null)}>
-                            <CoAvatar name={c ? c.name : t.title} web={c?.web} set={c?.set} size={24} />
+                            <CoAvatar colored name={c ? c.name : t.title} web={c?.web} set={c?.set} size={24} />
                           </button>
                         );
                       })}
@@ -402,7 +403,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                 const name = c ? c.name : t.title;
                 return (
                   <button key={t.id} className="sd-win-i" title={name} onClick={() => open(t.gid)}>
-                    <CoAvatar name={name} web={c?.web} set={c?.set} size={30} ring={ty[2]} />
+                    <CoAvatar colored name={name} web={c?.web} set={c?.set} size={30} ring={ty[2]} />
                     <span className="sd-fi-t">
                       <b>{coreName(name) || name}</b>
                       <small>{`${ty[1]} · ${t.date === today ? 'วันนี้' : `${WD_LONG[dow(t.date)]} ${short(t.date)}`}${t.time ? ' ' + t.time : ''}`}</small>
@@ -429,12 +430,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               const when = lc ? 'ติดต่อล่าสุด ' + (lc.slice(0, 4) === today.slice(0, 4) ? short(lc) : isoTh(lc)) : 'ยังไม่ระบุวันที่ติดต่อ';
               return (
                 <button key={d.id} className="sd-fi" title={d.client} onClick={() => set({ deal: d.id })}>
-                  <CoAvatar name={d.client} web={c?.web} set={c?.set} size={34} />
+                  <CoAvatar colored name={d.client} web={c?.web} set={c?.set} size={34} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
                   </span>
-                  {od != null ? <span className="sd-od">{fmtN(od)} วัน</span> : <span className="sd-ok" title="ยังไม่ค้าง" aria-label="ยังไม่ค้าง">✓</span>}
+                  {od != null ? <span className="sd-od">{fmtN(od)} วัน</span> : <span className="sd-ok" title="ยังไม่ค้าง" aria-label="ยังไม่ค้าง"><Icon name="check" size={12} /></span>}
                 </button>
               );
             })}

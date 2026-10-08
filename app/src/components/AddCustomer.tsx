@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { beYear } from '../lib/sales';
 import type { Company } from '../lib/types';
-import { Modal } from '../tabs/Sales';
+import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 
@@ -25,6 +25,8 @@ export function AddCustomer() {
   const [init] = useState(f);
   const [section, setSection] = useState(a.section ?? e.sales.cfg.sections[0] ?? '');
   const [err, setErr] = useState('');
+  // the four fields needed on day one first; the rest fold (open when editing, or one already has a value)
+  const [moreOpen, setMoreOpen] = useState(() => !!edit && (['jur', 'prov', 'ind', 'biz', 'web', 'addr', 'note'] as const).some((k) => !!f[k]));
   const [similar, setSimilar] = useState<Company[]>([]);
   const D = e.B.D;
   // an account that can only read has no way here; should it get here anyway, nothing can be saved
@@ -84,22 +86,34 @@ export function AddCustomer() {
           </label>
           {/* right under the name, where it is seen while typing (on a phone the rest of the form is below the fold) */}
           {similar.length > 0 && (
-            <div style={{ gridColumn: '1 / -1', background: '#FFF4DC', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span style={{ fontSize: 13.5, color: '#6B4100' }}>พบบริษัทที่คล้ายกันในทะเบียนแล้ว — ใช้บริษัทเดิมเพื่อไม่ให้ข้อมูลซ้ำ</span>
+            <div style={{ gridColumn: '1 / -1', border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span className="t-warn" style={{ fontSize: 13 }}>พบบริษัทที่คล้ายกันในทะเบียน ใช้บริษัทเดิมเพื่อไม่ให้ข้อมูลซ้ำ</span>
               {similar.map((c) => (
-                <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', fontSize: 13.5 }}>
+                <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', fontSize: 14 }}>
                   <span>
-                    {c.name} <span style={{ color: '#6B4100', fontSize: 12 }}>· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
+                    {c.name} <span className="t-meta">· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
                   </span>
-                  <button type="button" onClick={() => useExisting(c)} className="btn sm" style={{ height: 30 }}>ใช้บริษัทนี้</button>
+                  <button type="button" onClick={() => useExisting(c)} className="btn xs">ใช้บริษัทนี้</button>
                 </div>
               ))}
             </div>
           )}
-          <label style={labelCol}>เลขนิติบุคคล (13 หลัก)<input value={f.jur} onChange={up('jur')} inputMode="numeric" maxLength={20} className="fld" /></label>
+          {a.deal && !edit && (
+            <label style={labelCol}>
+              หมวดใน Sales Tracker
+              <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
+                {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </label>
+          )}
           <label style={labelCol}>ผู้ติดต่อ<input value={f.contact} onChange={up('contact')} className="fld" /></label>
           <label style={labelCol}>เบอร์โทร<input value={f.phone} onChange={up('phone')} type="tel" className="fld" /></label>
           <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="email" className="fld" /></label>
+        </div>
+        <details className="upd-more" open={moreOpen} onToggle={(ev) => setMoreOpen((ev.currentTarget as HTMLDetailsElement).open)}>
+          <summary className="lnk">ข้อมูลบริษัท (ไม่บังคับ)</summary>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,250px),1fr))', gap: 10, paddingTop: 10 }}>
+          <label style={labelCol}>เลขนิติบุคคล (13 หลัก)<input value={f.jur} onChange={up('jur')} inputMode="numeric" maxLength={20} className="fld" /></label>
           <label style={labelCol}>
             จังหวัด
             <select value={f.prov} onChange={up('prov')} className="fld sel">
@@ -118,26 +132,19 @@ export function AddCustomer() {
           <label style={labelCol}>เว็บไซต์<input value={f.web} onChange={up('web')} className="fld" /></label>
           <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ที่อยู่<input value={f.addr} onChange={up('addr')} className="fld" /></label>
           <label style={{ ...labelCol, gridColumn: '1 / -1' }}>หมายเหตุ<textarea value={f.note} onChange={up('note')} rows={2} className="fld" style={{ height: 'auto', padding: 10, resize: 'vertical' }} /></label>
-          {a.deal && !edit && (
-            <label style={labelCol}>
-              เพิ่มเข้า Sales Tracker ในหมวด
-              <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
-                {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
-              </select>
-            </label>
-          )}
-        </div>
+          </div>
+        </details>
         </ReadOnly>
         {err && <Notice kind="error" role="alert">{err}</Notice>}
-        <span style={{ fontSize: 12, color: '#5E6680' }}>ลูกค้าที่เพิ่มเองจะมีป้าย "เพิ่มเอง" ค้นหา ติดดาว นัดหมาย และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน และทั้งทีมเห็นด้วย (เมื่อเชื่อมต่อทีม)</span>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        <span className="t-meta">ค้นหา ติดตาม นัด และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน ทั้งทีมเห็นด้วย</span>
+        <div className="dlg-act">
           {edit && e.can('delete') && (
-            <button type="button" onClick={() => { if (window.confirm(`ลบ "${edit.name}" ออกจากรายชื่อลูกค้า?`)) { e.deleteCustomer(edit.id); set({ addCust: null, sel: null }); } }} className="btn sm" style={{ color: '#8A2B12', marginRight: 'auto', '--hv': '#FDF0EB' }}>
+            <button type="button" onClick={() => { if (window.confirm(`ลบ "${edit.name}" ออกจากรายชื่อลูกค้า?`)) { e.deleteCustomer(edit.id); set({ addCust: null, sel: null }); } }} className="quiet" style={{ marginRight: 'auto' }}>
               ลบลูกค้านี้
             </button>
           )}
-          <button type="button" onClick={close} className="btn sm">ยกเลิก</button>
-          {!ro && <button type="submit" className="btn sm pri">{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>}
+          <button type="button" onClick={close} className="quiet">ยกเลิก</button>
+          {!ro && <button type="submit" className="btn pri">{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>}
         </div>
       </form>
     </Modal>
@@ -174,7 +181,7 @@ export function SendToTracker() {
   const years = [...new Set([beYear(), String(+beYear() + 1), year])].sort();
   return (
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
-      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span style={{ fontSize: 13.5, color: '#475069', lineHeight: 1.6 }}>ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ ไม่ต้องพิมพ์ซ้ำ</span>}
+      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ</span>}
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
         <label style={labelCol}>
@@ -193,17 +200,17 @@ export function SendToTracker() {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
         {cos.map((c) => (
-          <label key={c.id} className={has(c) ? undefined : 'hv'} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, padding: '6px 4px', borderTop: '1px solid #EEF1F8', opacity: has(c) ? 0.55 : 1, cursor: has(c) ? 'default' : 'pointer' }}>
-            <input type="checkbox" checked={!!pick[c.id] && !has(c)} disabled={has(c)} onChange={(ev) => setPick({ ...pick, [c.id]: ev.target.checked })} />
+          <label key={c.id} className={has(c) ? undefined : 'hv'} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, padding: '6px 4px', borderTop: '1px solid var(--divider)', cursor: has(c) ? 'default' : 'pointer', color: has(c) ? 'var(--muted)' : undefined }}>
+            <input type="checkbox" checked={!!pick[c.id] && !has(c)} disabled={has(c)} onChange={(ev) => setPick({ ...pick, [c.id]: ev.target.checked })} style={{ accentColor: 'var(--brand)' }} />
             <span style={{ flex: 1 }}>{c.name}</span>
-            <span style={{ fontSize: 12, color: '#5E6680' }}>{has(c) ? `มีในตารางปี ${year} แล้ว` : c.phone || 'ยังไม่มีเบอร์'}</span>
+            <span className="t-meta">{has(c) ? `มีในตารางปี ${year} แล้ว` : c.phone || 'ยังไม่มีเบอร์'}</span>
           </label>
         ))}
       </div>
       </ReadOnly>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button onClick={close} className="btn sm">ยกเลิก</button>
-        {!ro && <button onClick={send} disabled={!chosen.some((c) => !has(c))} className="btn sm pri">
+      <div className="dlg-act">
+        <button onClick={close} className="quiet">ยกเลิก</button>
+        {!ro && chosen.some((c) => !has(c)) && <button onClick={send} className="btn pri">
           ส่ง {chosen.filter((c) => !has(c)).length} รายการ
         </button>}
       </div>

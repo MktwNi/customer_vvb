@@ -4,10 +4,15 @@ import { CST, EV_LBL, FEEDS } from '../lib/constants';
 import { TH_M, addMonths, dtTh, fmtN, isoTh, pad, ymTh } from '../lib/format';
 import type { Cert } from '../lib/types';
 import { feedMeta } from '../lib/feeds';
-import { PageHead, card, tabular } from '../components/ui';
+import type { Company, Dicts, FeedKey } from '../lib/types';
+import { PageHead, SectionHead, card, tabular } from '../components/ui';
 
-const AMB = '#F2B84B', NORM = '#B9C8FF';
+/** A feed row's grey context: the engine's line, in words where it uses an arrow (GI went down). */
+export const feedLine = (D: Dicts, k: FeedKey, c: Company) => (k === 'giDown' ? `เคยได้ระดับ ${c.giMax} ตอนนี้ ${c.giLive || 'หมดอายุ'}` : feedMeta(D, k, c));
+
+const AMB = 'var(--bar-warn)', NORM = 'var(--bar)';
 const panel: CSSProperties = { ...card, padding: 22, height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 14 };
+const panelT: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 500 };
 const pairGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,400px),1fr))', gap: 16, alignItems: 'stretch' };
 
 export function Track() {
@@ -41,7 +46,7 @@ export function Track() {
       const mx = Math.max(1, ...arr.map((a) => a.total));
       return arr.map((a) => {
         const on = sel === a.i, dim = !!sel && !on;
-        return { key: a.i, label: key === 'ind' ? CD.ind[+a.i] || '(ไม่ระบุ)' : a.i, total: a.total, active: a.active, w: (a.total / mx) * 100, wa: (a.active / mx) * 100, ca: dim ? '#B9C8FF' : '#1F5BD8', ct: dim ? '#EEF1F8' : on ? '#7C93FF' : '#DCE6FF', fw: on ? 600 : 400, on };
+        return { key: a.i, label: key === 'ind' ? CD.ind[+a.i] || '(ไม่ระบุ)' : a.i, total: a.total, active: a.active, w: (a.total / mx) * 100, wa: (a.active / mx) * 100, ca: dim ? '#B9C8F5' : 'var(--bar)', ct: dim ? 'var(--bar-track)' : '#C9D7F6', fw: on ? 500 : 400, on };
       });
     };
     const indBars = group((ct) => String(ct.ind), 'ind', oInd);
@@ -52,7 +57,7 @@ export function Track() {
     });
     const fyA = Object.entries(fyM).sort((a, b) => a[0].localeCompare(b[0]));
     const fmx = Math.max(1, ...fyA.map((x) => x[1]));
-    const fyCols = fyA.map(([l, c]) => ({ label: l, count: c, h: (c / fmx) * 84, color: oFy && oFy !== l ? '#C9D1E6' : oFy ? '#1F5BD8' : '#1F5BD8' }));
+    const fyCols = fyA.map(([l, c]) => ({ label: l, count: c, h: (c / fmx) * 84, color: oFy && oFy !== l ? '#C9D7F6' : 'var(--bar)' }));
 
     const [ry, rm] = e.ref.split('-').map(Number);
     const endISO = addMonths(e.ref, 12);
@@ -79,7 +84,7 @@ export function Track() {
     const mmx = Math.max(1, ...months.map((x) => x.count));
     const expMonths = months.map((x) => {
       const key = `${x.y}-${pad(x.m + 1)}`;
-      return { key, label: `${TH_M[x.m]} ${String((x.y + 543) % 100).padStart(2, '0')}`, count: x.count, h: (x.count / mmx) * 80, color: x.soon ? AMB : NORM, op: oExpM && oExpM !== key ? 0.35 : 1, ol: oExpM === key ? '2px solid #fff' : 'none' };
+      return { key, label: `${TH_M[x.m]} ${String((x.y + 543) % 100).padStart(2, '0')}`, count: x.count, h: (x.count / mmx) * 80, color: x.soon ? AMB : NORM, op: oExpM && oExpM !== key ? 0.35 : 1, ol: oExpM === key ? '2px solid var(--ink)' : 'none' };
     });
 
     const sc = f.filter((ct) => ct.hasScope);
@@ -88,7 +93,7 @@ export function Track() {
     const pct = (x: number) => (sc.length ? x.toFixed(1) + '%' : '—');
     const fs = fx('st');
     const tt = fs.length || 1;
-    const statusMix = ([['อยู่ในอายุ', 'active', '#1F5BD8'], ['ใกล้หมดอายุ', 'soon', AMB], ['หมดอายุ', 'expired', '#C9D1E6'], ['ไม่ระบุ', 'unknown', '#E3E7F1']] as const)
+    const statusMix = ([['อยู่ในอายุ', 'active', 'var(--bar)'], ['ใกล้หมดอายุ', 'soon', AMB], ['หมดอายุ', 'expired', '#A9B4CC'], ['ไม่ระบุ', 'unknown', '#DDE2EC']] as const)
       .map(([label, k, color]) => ({ label, k, color, n: fs.filter((ct) => ct.st === k).length }))
       .filter((x) => x.n)
       .map((x) => ({ ...x, w: (x.n / tt) * 100, on: oSt === x.k }));
@@ -115,86 +120,77 @@ export function Track() {
 
   // ---- company-level feeds
   const feeds = useMemo(
-    () => FEEDS.map(([k, label, dot, desc]) => ({ k, label, dot, desc, all: e.feedItems(k) })),
+    () => FEEDS.map(([k, label, , desc]) => ({ k, label, desc, all: e.feedItems(k) })),
     [e, v],
   );
   const mon = e.monCfg();
 
   return (
     <>
-      <PageHead gap={12} title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
-      <div style={{ position: 'sticky', top: 'var(--sticky-top)', zIndex: 5, background: 'rgba(246,248,254,.92)', backdropFilter: 'blur(8px)', margin: '-8px -8px 0', padding: '10px 8px', borderRadius: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ fontSize: 13, color: '#475069' }}>ตัวกรอง:</span>
+      <PageHead title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
+      <div className="tr-bar">
         {chips.map((c) => (
-          <button key={c.label} onClick={() => set(c.p)} className="btn pri" style={{ height: 32, padding: '0 8px 0 14px', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' }}>
-            {c.label}
-            <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(255,255,255,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>×</span>
-          </button>
+          <button key={c.label} onClick={() => set(c.p)} className="ftag">{c.label} ×</button>
         ))}
-        {!chips.length && <span style={{ fontSize: 13, color: '#5E6680' }}>ยังไม่ได้เลือก · คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งแดชบอร์ด (คลิกซ้ำเพื่อยกเลิก)</span>}
+        {!chips.length && <span className="t-meta" style={{ fontSize: 13 }}>คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งหน้า</span>}
+        {chips.length > 0 && <button onClick={() => set({ oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '' })} className="quiet">ล้างทั้งหมด</button>}
         <span style={{ flex: 1 }} />
-        {chips.length > 0 && <button onClick={() => set({ oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '' })} className="hv" style={{ cursor: 'pointer', height: 32, padding: '0 10px', border: 0, borderRadius: 999, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>ล้างทั้งหมด</button>}
-        <button onClick={goTable} className="btn out" style={{ height: 32, fontSize: 13, fontWeight: 500 }}>ดูรายชื่อ {fmtN(ob.count)} รายการในตาราง →</button>
+        <button onClick={goTable} className="btn sm">ดูรายชื่อ {fmtN(ob.count)} รายการในตาราง</button>
       </div>
 
-      <div style={{ background: 'linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%)', color: '#fff', borderRadius: 24, padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ ...card, padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 20, fontWeight: 500 }}>ใบรับรองที่จะหมดอายุใน 12 เดือนข้างหน้า</span>
-            <span style={{ fontSize: 13.5, color: '#C9D4FF', fontWeight: 300 }}>นับจาก {isoTh(e.ref)} ถึง {isoTh(ob.endISO)} · คลิกที่เดือนเพื่อกรองทั้งแดชบอร์ด · สีเหลือง = อยู่ในช่วงใกล้หมดอายุ ({W} วัน)</span>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>หมดอายุใน 12 เดือนข้างหน้า</h2>
+            <span className="t-meta" style={{ fontSize: 13 }} title="คลิกที่เดือนเพื่อกรองทั้งหน้า">{`${isoTh(e.ref)} ถึง ${isoTh(ob.endISO)} · สีเหลือง = ภายใน ${W} วัน`}</span>
           </div>
-          <div style={{ display: 'flex', gap: 24 }}>
+          <div style={{ display: 'flex', gap: 28 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
-              <span style={{ fontSize: 12.5, color: '#B9C8FF' }}>รวม 12 เดือน</span>
-              <span style={{ fontSize: 30, fontWeight: 600, lineHeight: 1 }}>{fmtN(ob.expTotal)}</span>
+              <span className="t-sec">รวม 12 เดือน</span>
+              <span style={{ fontSize: 28, fontWeight: 500, lineHeight: 1.2, ...tabular }}>{fmtN(ob.expTotal)}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
-              <span style={{ fontSize: 12.5, color: '#B9C8FF' }}>ภายใน {W} วัน</span>
-              <span style={{ fontSize: 30, fontWeight: 600, lineHeight: 1, color: '#F2B84B' }}>{fmtN(ob.expSoon)}</span>
+              <span className="t-sec">ภายใน {W} วัน</span>
+              <span style={{ fontSize: 28, fontWeight: 500, lineHeight: 1.2, color: 'var(--warn)', ...tabular }}>{fmtN(ob.expSoon)}</span>
             </div>
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12,minmax(0,1fr))', gap: 8, alignItems: 'end', height: 200 }}>
           {ob.expMonths.map((m) => (
-            <button key={m.key} onClick={() => set({ oExpM: oExpM === m.key ? '' : m.key })} aria-label={`${m.label}: ${m.count}`} className="hv-w" style={{ cursor: 'pointer', border: 0, borderRadius: 10, padding: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 6, height: '100%' }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: '#fff' }}>{m.count}</span>
-              <span className="h-op" style={{ width: '100%', height: `${m.h}%`, minHeight: 3, background: m.color, opacity: m.op, outline: m.ol, outlineOffset: 2, borderRadius: '8px 8px 3px 3px' }} />
+            <button key={m.key} onClick={() => set({ oExpM: oExpM === m.key ? '' : m.key })} aria-label={`${m.label}: ${m.count}`} aria-pressed={oExpM === m.key} className="hv" style={{ cursor: 'pointer', border: 0, borderRadius: 10, padding: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 6, height: '100%' }}>
+              <span style={{ fontSize: 13, color: 'var(--ink)', visibility: m.count ? undefined : 'hidden', ...tabular }}>{m.count}</span>
+              <span style={{ width: '100%', height: `${m.h}%`, minHeight: m.count ? 3 : 0, background: m.color, opacity: m.op, outline: m.ol, outlineOffset: 2, borderRadius: '8px 8px 3px 3px' }} />
             </button>
           ))}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12,minmax(0,1fr))', gap: 8, marginTop: -8, borderTop: '1px solid rgba(185,200,255,.3)', paddingTop: 8 }}>
-          {ob.expMonths.map((m) => <span key={m.key} style={{ fontSize: 12, color: '#C9D4FF', textAlign: 'center', lineHeight: 1.25 }}>{m.label}</span>)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12,minmax(0,1fr))', gap: 8, marginTop: -8, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
+          {ob.expMonths.map((m) => <span key={m.key} style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.25 }}>{m.label}</span>)}
         </div>
       </div>
 
       <section style={pairGrid}>
         <div style={panel}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>ใกล้หมดอายุที่สุด</span>
-            <button onClick={goSoon} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0, whiteSpace: 'nowrap' }}>ดูทั้งหมด {fmtN(ob.soonN)} รายการ</button>
+            <h3 style={panelT}>ใกล้หมดอายุที่สุด</h3>
+            {ob.soonN > 0 && <button onClick={goSoon} className="lnk" style={{ whiteSpace: 'nowrap' }}>ดูทั้งหมด {fmtN(ob.soonN)} รายการ</button>}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {ob.nextUp.map((ct) => (
-              <CertRow key={ct.cid} ct={ct} onOpen={() => open(ct.gid)} badge={<span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#FDECC8', color: '#8A5300', borderRadius: 12, padding: '6px 0' }}><span style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.1 }}>{ct.days}</span><span style={{ fontSize: 10.5 }}>วัน</span></span>} sub={`${ct.cert || '—'} · ${ct.provName}`} right={isoTh(ct.ex)} />
+              <CertRow key={ct.cid} ct={ct} onOpen={() => open(ct.gid)} badge={<span style={{ color: 'var(--warn)', fontSize: 14, ...tabular }}>{ct.days} วัน</span>} sub={`${ct.cert || '—'} · ${ct.provName}`} right={isoTh(ct.ex)} />
             ))}
-            {!ob.soonN && <span style={{ fontSize: 14, color: '#5E6680', padding: '18px 0' }}>ไม่มีรายการที่จะหมดอายุภายใน {W} วัน</span>}
+            {!ob.soonN && <span className="empty" style={{ padding: '6px 0' }}>ไม่มีรายการที่จะหมดอายุภายใน {W} วัน</span>}
           </div>
         </div>
         <div style={panel}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>อนุมัติใหม่ใน 30 วันล่าสุด</span>
-            <span style={{ fontSize: 13, color: '#475069' }}>{fmtN(ob.recentN)} รายการ</span>
+            <h3 style={panelT}>อนุมัติใหม่ใน 30 วันล่าสุด</h3>
+            <span className="t-sec">{fmtN(ob.recentN)} รายการ</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
             {ob.recent.map((ct) => (
-              <CertRow key={ct.cid} ct={ct} onOpen={() => open(ct.gid)} badge={<span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#DDF5F1', color: '#0B6E66', borderRadius: 12, padding: '8px 0', fontSize: 12, fontWeight: 600 }}>ใหม่</span>} sub={`${ct.cert || '—'} · ${ct.indName}`} right={isoTh(ct.ap)} />
+              <CertRow key={ct.cid} ct={ct} onOpen={() => open(ct.gid)} badge={<span className="t-ok" style={{ fontSize: 13 }}>ใหม่</span>} sub={`${ct.cert || '—'} · ${ct.indName}`} right={isoTh(ct.ap)} />
             ))}
-            {!ob.recentN && (
-              <div style={{ flex: 1, minHeight: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#F7F8FC', borderRadius: 16, textAlign: 'center', padding: 20 }}>
-                <span style={{ fontSize: 15, fontWeight: 500, color: '#475069' }}>ไม่มีใบรับรองที่อนุมัติใน 30 วันล่าสุด</span>
-                <span style={{ fontSize: 13, color: '#5E6680' }}>{ob.lastApText}</span>
-              </div>
-            )}
+            {!ob.recentN && <span className="empty" style={{ padding: '6px 0' }}>ไม่มีใบที่อนุมัติใน 30 วันล่าสุด{ob.lastApText ? ` · ${ob.lastApText}` : ''}</span>}
           </div>
         </div>
       </section>
@@ -202,30 +198,30 @@ export function Track() {
       <section style={pairGrid}>
         <div style={{ ...panel, gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>สัดส่วนคาร์บอนฟุตพริ้นท์เฉลี่ย</span>
-            <span style={{ fontSize: 13, color: '#475069', fontWeight: 300 }}>ค่าเฉลี่ยร้อยละ จาก {fmtN(ob.scope.n)} รายการที่มีข้อมูลสัดส่วน (เว็บไม่แสดงปริมาณ tCO2e)</span>
+            <h3 style={panelT}>สัดส่วนคาร์บอนฟุตพริ้นท์เฉลี่ย</h3>
+            <span className="t-meta" style={{ fontSize: 13 }} title="ค่าเฉลี่ยร้อยละ จากรายการที่มีข้อมูลสัดส่วน (เว็บไม่แสดงปริมาณ tCO2e)">{`ร้อยละเฉลี่ย จาก ${fmtN(ob.scope.n)} รายการ`}</span>
           </div>
-          <div style={{ display: 'flex', height: 38, borderRadius: 12, overflow: 'hidden', gap: 2 }}>
-            <span style={{ width: `${ob.scope.w1}%`, background: '#0A1A86' }} />
-            <span style={{ width: `${ob.scope.w2}%`, background: '#4D72FF' }} />
-            <span style={{ width: `${ob.scope.w3}%`, background: '#34D1C4' }} />
+          <div style={{ display: 'flex', height: 28, borderRadius: 10, overflow: 'hidden', gap: 2 }}>
+            <span style={{ width: `${ob.scope.w1}%`, background: 'var(--brand-deep)' }} />
+            <span style={{ width: `${ob.scope.w2}%`, background: '#5F86E0' }} />
+            <span style={{ width: `${ob.scope.w3}%`, background: '#B9C8F5' }} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-            {([['ประเภทที่ 1', '#0A1A86', ob.scope.t1], ['ประเภทที่ 2', '#4D72FF', ob.scope.t2], ['ประเภทที่ 3', '#34D1C4', ob.scope.t3]] as const).map(([l, c, t]) => (
+            {([['ประเภทที่ 1', 'var(--brand-deep)', ob.scope.t1], ['ประเภทที่ 2', '#5F86E0', ob.scope.t2], ['ประเภทที่ 3', '#B9C8F5', ob.scope.t3]] as const).map(([l, c, t]) => (
               <div key={l} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 12.5, color: '#475069', display: 'flex', gap: 6, alignItems: 'center' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: c }} />{l}</span>
-                <span style={{ fontSize: 24, fontWeight: 500 }}>{t}</span>
+                <span style={{ fontSize: 13, color: 'var(--ink-2)', display: 'flex', gap: 6, alignItems: 'center' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: c }} />{l}</span>
+                <span style={{ fontSize: 18, fontWeight: 500, ...tabular }}>{t}</span>
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14, borderTop: '1px solid #EEF1F8' }}>
-            <span style={{ fontSize: 13, color: '#475069' }}>สถานะ ณ {isoTh(e.ref)}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14, borderTop: '1px solid var(--divider)' }}>
+            <span className="t-sec">สถานะ ณ {isoTh(e.ref)}</span>
             <div style={{ display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', gap: 2 }}>
               {ob.statusMix.map((x) => <span key={x.k} style={{ width: `${x.w}%`, background: x.color, opacity: oSt && !x.on ? 0.35 : 1 }} />)}
             </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {ob.statusMix.map((x) => (
-                <button key={x.k} onClick={() => set({ oSt: x.on ? '' : x.k })} aria-pressed={x.on} className="hv" style={{ cursor: 'pointer', fontSize: 12.5, color: '#384155', display: 'flex', gap: 6, alignItems: 'center', height: 28, padding: '0 10px', borderRadius: 999, border: `1.5px solid ${x.on ? '#1F5BD8' : 'transparent'}`, ...(x.on ? { '--bg': '#EEF2FF', '--hv': '#DCE5FA' } : {}) }}>
+                <button key={x.k} onClick={() => set({ oSt: x.on ? '' : x.k })} aria-pressed={x.on} className="hv" style={{ cursor: 'pointer', fontSize: 13, color: 'var(--ink-2)', display: 'flex', gap: 6, alignItems: 'center', height: 30, padding: '0 10px', borderRadius: 999, border: `1px solid ${x.on ? 'var(--brand)' : 'transparent'}`, ...(x.on ? { '--bg': 'var(--tint)', '--hv': 'var(--tint-2)' } : {}) }}>
                   <span style={{ width: 9, height: 9, borderRadius: '50%', background: x.color }} />
                   {x.label} {fmtN(x.n)}
                 </button>
@@ -235,15 +231,15 @@ export function Track() {
         </div>
         <div style={panel}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>จำนวนองค์กรที่ยื่นขอการรับรองในแต่ละปี</span>
-            <span style={{ fontSize: 13, color: '#475069', fontWeight: 300 }}>ปี พ.ศ. ที่ยื่นขอการรับรอง (ปีงบประมาณ อบก.) จากเลขที่ใบรับรอง หรือจากวันที่อนุมัติเมื่อไม่มีเลข FY</span>
+            <h3 style={panelT}>องค์กรที่ยื่นขอการรับรองในแต่ละปี</h3>
+            <span className="t-meta" style={{ fontSize: 13 }} title="ปี พ.ศ. ที่ยื่นขอการรับรอง (ปีงบประมาณ อบก.) จากเลขที่ใบรับรอง หรือจากวันที่อนุมัติเมื่อไม่มีเลข FY">ปีงบประมาณ อบก. ที่ยื่น</span>
           </div>
           <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 220, flex: 1 }}>
             {ob.fyCols.map((c) => (
-              <button key={c.label} onClick={() => set({ oFy: oFy === c.label ? '' : c.label })} className="hv" style={{ cursor: 'pointer', border: 0, borderRadius: 8, padding: 0, flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 4, height: '100%' }}>
-                <span style={{ fontSize: 10.5, color: '#384155', whiteSpace: 'nowrap' }}>{fmtN(c.count)}</span>
+              <button key={c.label} onClick={() => set({ oFy: oFy === c.label ? '' : c.label })} aria-pressed={oFy === c.label} className="hv" style={{ cursor: 'pointer', border: 0, borderRadius: 8, padding: 0, flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 4, height: '100%' }}>
+                <span style={{ fontSize: 12, color: 'var(--ink-2)', whiteSpace: 'nowrap', ...tabular }}>{fmtN(c.count)}</span>
                 <span style={{ width: '100%', height: `${c.h}%`, minHeight: 3, background: c.color, borderRadius: '6px 6px 2px 2px' }} />
-                <span style={{ fontSize: 10.5, fontWeight: 500, color: '#475069' }}>{c.label}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{c.label}</span>
               </button>
             ))}
           </div>
@@ -253,102 +249,102 @@ export function Track() {
       <section style={pairGrid}>
         <div style={panel}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>จำนวนตามอุตสาหกรรม</span>
-            <span style={{ display: 'flex', gap: 12, fontSize: 12.5, color: '#475069' }}>
-              <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#1F5BD8' }} />อยู่ในอายุ</span>
-              <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#DCE6FF' }} />ทั้งหมด</span>
+            <h3 style={panelT}>จำนวนตามอุตสาหกรรม</h3>
+            <span style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--muted)' }}>
+              <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--bar)' }} />อยู่ในอายุ</span>
+              <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#C9D7F6' }} />ทั้งหมด</span>
             </span>
           </div>
           <Bars bars={ob.indBars} labelW={170} ellipsis onPick={(k, on) => set({ oInd: on ? '' : k })} />
         </div>
         <div style={panel}>
-          <span style={{ fontSize: 17, fontWeight: 500 }}>จังหวัดที่มีรายการมากที่สุด</span>
+          <h3 style={panelT}>จังหวัดที่มีรายการมากที่สุด</h3>
           <Bars bars={ob.provBars} labelW={130} onPick={(k, on) => set({ oProv: on ? '' : k })} />
         </div>
       </section>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', paddingTop: 8, borderTop: '1px solid #E3E7F1' }}>
-        <h2 style={{ margin: '16px 0 0', fontSize: 28, fontWeight: 500 }}>รายการติดตามระดับบริษัท</h2>
-        <span style={{ fontSize: 14, color: '#475069', fontWeight: 300 }}>ช่วงใกล้หมดอายุ CFO {W} วัน · นับระดับบริษัทหลังตัดข้อมูลซ้ำ</span>
+      <div style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+        <SectionHead title="รายการติดตามระดับบริษัท" sub={`ใกล้หมดอายุ = ${W} วัน · นับหลังตัดข้อมูลซ้ำ`} />
       </div>
       <section style={pairGrid}>
-        {feeds.map(({ k, label, dot, desc, all }) => {
+        {feeds.map(({ k, label, desc, all }) => {
           const months = k === 'newFac' ? Object.entries(all.reduce<Record<string, number>>((m, c) => ((m[c.newYm] = (m[c.newYm] || 0) + 1), m), {})).sort((a, b) => b[0].localeCompare(a[0])) : [];
           return (
             <div key={k} style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', boxSizing: 'border-box' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', minHeight: 52 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: dot }} /><span style={{ fontSize: 16, fontWeight: 500 }}>{label}</span></span>
-                  <span style={{ fontSize: 12.5, color: '#475069', fontWeight: 300, textWrap: 'pretty' }}>{k === 'cfoSoon' ? `ใบล่าสุดจะหมดอายุภายใน ${W} วัน` : desc}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <h3 style={panelT}>{label}</h3>
+                  <span className="t-meta" style={{ fontSize: 13, textWrap: 'pretty' }}>{k === 'cfoSoon' ? `ใบล่าสุดจะหมดอายุภายใน ${W} วัน` : desc}</span>
                 </div>
-                <span style={{ fontSize: 28, fontWeight: 500, ...tabular }}>{fmtN(all.length)}</span>
+                <span style={{ fontSize: 18, fontWeight: all.length ? 500 : 400, color: all.length ? 'var(--ink)' : 'var(--muted)', ...tabular }}>{fmtN(all.length)}</span>
               </div>
               {months.length > 0 && (
                 <div className="no-scrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
                   {months.map(([ym, n]) => (
-                    <button key={ym} onClick={() => setF({ ym, feed: '', tgt: '', view: 'co', sort: 'invest' })} className="btn" style={{ height: 30, padding: '0 10px', fontSize: 12.5, whiteSpace: 'nowrap', flex: 'none' }}>{ymTh(ym)} · {fmtN(n)}</button>
+                    <button key={ym} onClick={() => setF({ ym, feed: '', tgt: '', view: 'co', sort: 'invest' })} className="btn xs" style={{ flex: 'none' }}>{ymTh(ym)} · {fmtN(n)}</button>
                   ))}
                 </div>
               )}
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 205 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                 {all.slice(0, 5).map((c) => (
-                  <button key={c.id} className="h-blue hv" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', textAlign: 'left', padding: '9px 8px', margin: '0 -8px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: '#0E1430' }}>
-                    <span style={{ fontSize: 13.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                    <span style={{ fontSize: 12, color: '#475069', whiteSpace: 'nowrap' }}>{feedMeta(D, k, c)}</span>
+                  <button key={c.id} className="hv" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '9px 8px', margin: '0 -8px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: 'var(--ink)' }}>
+                    <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{feedLine(D, k, c)}</span>
                   </button>
                 ))}
-                {!all.length && <span style={{ fontSize: 13, color: '#5E6680', borderTop: '1px solid #EEF1F8', paddingTop: 9 }}>{k === 'watch' ? 'กดดาวที่รายชื่อเพื่อเพิ่ม' : k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
+                {!all.length && <span className="empty" style={{ borderTop: '1px solid var(--divider)', paddingTop: 9 }}>{k === 'watch' ? 'กด ติดตาม ในหน้าบริษัทเพื่อเพิ่ม' : k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 4, minHeight: 40 }}>
-                {all.length > 0 && (
-                  <>
-                    <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="btn pri" style={{ height: 36, padding: '0 14px', fontSize: 13 }}>ดูทั้งหมด</button>
-                    <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} className="btn out" style={{ height: 36, padding: '0 14px', fontSize: 13 }}>วางแผนติดต่อ</button>
-                    {k === 'watch' && e.can('edit') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="btn out" style={{ height: 36, padding: '0 14px', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
-                  </>
-                )}
-              </div>
+              {all.length > 0 && (
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 4 }}>
+                  <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="lnk">ดูทั้งหมด {fmtN(all.length)}</button>
+                  <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} className="lnk">วางแผนติดต่อ</button>
+                  {k === 'watch' && e.can('edit') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="lnk">ส่งเข้า Sales Tracker</button>}
+                </div>
+              )}
             </div>
           );
         })}
       </section>
 
-      <section style={{ ...card, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>เหตุการณ์จากการตรวจสถานะอัตโนมัติ</span>
-            <span style={{ fontSize: 13, color: '#475069', fontWeight: 300 }}>{mon.last ? `ตรวจล่าสุด ${dtTh(mon.last)} · ${e.monMsg || 'ตรวจเองทุก 10 นาทีที่เปิดเว็บค้างไว้ และเมื่อขึ้นวันใหม่'}` : 'ยังไม่เคยตรวจ'}</span>
+      {/* the automatic status check: folded (its settings are on อัปเดตข้อมูล) */}
+      <details className="card tr-mon">
+        <summary className="hv">
+          <span className="card-t">เหตุการณ์จากการตรวจสถานะอัตโนมัติ</span>
+          <span className="t-meta" style={{ fontSize: 13 }}>{mon.last ? `${fmtN((mon.events || []).length)} รายการ · ตรวจล่าสุด ${dtTh(mon.last)}` : 'ยังไม่เคยตรวจ'}</span>
+        </summary>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 22px 20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="t-sec">{e.monMsg || 'ตรวจเองทุก 10 นาทีที่เปิดเว็บค้างไว้ และเมื่อขึ้นวันใหม่'}</span>
+            <button onClick={() => e.checkMonitor(true)} className="btn sm">ตรวจเดี๋ยวนี้</button>
           </div>
-          <button onClick={() => e.checkMonitor(true)} className="btn out" style={{ height: 38 }}>ตรวจเดี๋ยวนี้</button>
+          {!(mon.events || []).length && <span className="empty">ยังไม่มีเหตุการณ์ · จะบันทึกเมื่อสถานะบริษัทเปลี่ยน</span>}
+          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 360, overflow: 'auto' }}>
+            {(mon.events || []).slice(0, 60).map((x, i) => {
+              const c = e.company(x.id);
+              const [tag] = EV_LBL[x.t] || ['เหตุการณ์'];
+              return (
+                <button key={i} onClick={() => c && open(c.id)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', border: 0, borderTop: '1px solid var(--divider)', padding: '9px 8px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 14, color: 'var(--ink)' }}>{c ? c.name : String(x.id)}</span>
+                  <span className="t-meta">{`${tag} · ${c && c.cfoEx ? 'CFO หมดอายุ ' + isoTh(c.cfoEx) + ' · ' : ''}บันทึก ${dtTh(x.at)}`}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        {!(mon.events || []).length && <span style={{ fontSize: 13.5, color: '#475069' }}>ระบบบันทึกสถานะตั้งต้นแล้ว จะเริ่มบันทึกเหตุการณ์เมื่อสถานะบริษัทเปลี่ยน</span>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflow: 'auto' }}>
-          {(mon.events || []).slice(0, 60).map((x, i) => {
-            const c = e.company(x.id);
-            const [tag, bg, fg] = EV_LBL[x.t] || ['เหตุการณ์', '#EEF1F8', '#475069'];
-            return (
-              <button key={i} onClick={() => c && open(c.id)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid #EEF1F8', '--bg': '#fff', borderRadius: 12, padding: '9px 12px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11.5, fontWeight: 500, padding: '2px 8px', borderRadius: 999, background: bg, color: fg }}>{tag}</span>
-                <span style={{ fontSize: 13.5, color: '#0E1430' }}>{c ? c.name : String(x.id)}</span>
-                <span style={{ fontSize: 12.5, color: '#475069' }}>{`${c && c.cfoEx ? 'CFO หมดอายุ ' + isoTh(c.cfoEx) + ' · ' : ''}บันทึก ${dtTh(x.at)}`}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      </details>
     </>
   );
 }
 
 function CertRow({ ct, onOpen, badge, sub, right }: { ct: Cert; onOpen: () => void; badge: React.ReactNode; sub: string; right: string }) {
   return (
-    <button onClick={onOpen} className="hv" style={{ cursor: 'pointer', border: 0, borderBottom: '1px solid #EEF1F8', padding: '11px 8px', margin: '0 -8px', display: 'grid', gridTemplateColumns: '64px minmax(0,1fr) auto', gap: 12, alignItems: 'center', textAlign: 'left', color: '#0E1430' }}>
+    <button onClick={onOpen} className="hv" style={{ cursor: 'pointer', border: 0, borderBottom: '1px solid var(--divider)', padding: '11px 8px', margin: '0 -8px', display: 'grid', gridTemplateColumns: '56px minmax(0,1fr) auto', gap: 12, alignItems: 'center', textAlign: 'left', color: 'var(--ink)' }}>
       {badge}
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
         <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ct.org}</span>
-        <span style={{ fontSize: 12.5, color: '#5E6680' }}>{sub}</span>
+        <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{sub}</span>
       </span>
-      <span style={{ fontSize: 12.5, color: '#384155' }}>{right}</span>
+      <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{right}</span>
     </button>
   );
 }
@@ -358,13 +354,13 @@ function Bars({ bars, labelW, ellipsis, onPick }: { bars: BarItem[]; labelW: num
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {bars.map((b) => (
-        <button key={b.key} onClick={() => onPick(b.key, b.on)} aria-pressed={b.on} className="hv-tx" style={{ cursor: 'pointer', border: 0, borderRadius: 8, padding: 0, display: 'grid', gridTemplateColumns: `${labelW}px minmax(0,1fr) 76px`, gap: 10, alignItems: 'center', fontSize: 13, textAlign: 'left', color: '#0E1430' }}>
+        <button key={b.key} onClick={() => onPick(b.key, b.on)} aria-pressed={b.on} className="hv-tx" style={{ cursor: 'pointer', border: 0, borderRadius: 8, padding: 0, display: 'grid', gridTemplateColumns: `${labelW}px minmax(0,1fr) 76px`, gap: 10, alignItems: 'center', fontSize: 13, textAlign: 'left', color: 'var(--ink)' }}>
           <span style={{ fontWeight: b.fw, ...(ellipsis ? { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>{b.label}</span>
-          <span style={{ position: 'relative', height: 14, background: '#EEF1F8', borderRadius: 7 }}>
-            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${b.w}%`, background: b.ct, borderRadius: 7 }} />
-            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${b.wa}%`, background: b.ca, borderRadius: 7 }} />
+          <span style={{ position: 'relative', height: 12, background: 'var(--bar-track)', borderRadius: 6 }}>
+            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${b.w}%`, background: b.ct, borderRadius: 6 }} />
+            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${b.wa}%`, background: b.ca, borderRadius: 6 }} />
           </span>
-          <span style={{ fontSize: 12.5, color: '#384155', textAlign: 'right', ...tabular }}>{fmtN(b.active)}/{fmtN(b.total)}</span>
+          <span style={{ fontSize: 12, color: 'var(--ink-2)', textAlign: 'right', ...tabular }}>{fmtN(b.active)}/{fmtN(b.total)}</span>
         </button>
       ))}
     </div>

@@ -1,19 +1,39 @@
-import { type CSSProperties, type FormEvent } from 'react';
+import { type FormEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
-import { Notice, Opts, PageHead, card, labelCol } from '../components/ui';
+import { Notice, Opts, PageHead, labelCol } from '../components/ui';
 import { TeamSyncCard } from '../components/TeamSync';
+import { Icon } from '../components/icons';
 
-const section: CSSProperties = { ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 14 };
-const intro: CSSProperties = { fontSize: 13.5, color: '#475069', fontWeight: 300, lineHeight: 1.65, textWrap: 'pretty' };
-const box: CSSProperties = { background: '#F6F8FE', borderRadius: 12, display: 'flex', flexDirection: 'column' };
+/** One block of the page (design §8): title, one grey status line, the one action at the right; the long
+ *  explanation folds under "รายละเอียด". */
+export function UpdSection({ title, status, action, more, children, id }: { title: string; status?: ReactNode; action?: ReactNode; more?: ReactNode; children?: ReactNode; id?: string }) {
+  return (
+    <section id={id} className="card upd-sec">
+      <div className="upd-head">
+        <div className="upd-t">
+          <h3 className="card-t">{title}</h3>
+          {status != null && status !== '' && <span className="upd-status">{status}</span>}
+        </div>
+        {action}
+      </div>
+      {children}
+      {more && (
+        <details className="upd-more">
+          <summary className="lnk">รายละเอียด</summary>
+          <div className="upd-more-b">{more}</div>
+        </details>
+      )}
+    </section>
+  );
+}
 
 export function Update() {
   const { engine: e } = useApp();
   useEngineVersion();
   const C = e.crm;
-  // a team that signs in has no use for the section below: who you are is your account, the team list
+  // a team that signs in has no use for the team block: who you are is your account, the team list
   // is the users page's (names without an account), and so are an admin's backup files
   const accounts = e.role() != null;
   const u = e.up, y = e.sy, st = e.pendingSync, sc = e.syncCfg(), mon = e.monCfg();
@@ -29,123 +49,120 @@ export function Update() {
     f.reset();
   };
   const stats: [string, number][] = [
-    ['บริษัทที่มีผู้รับผิดชอบ', Object.keys(C.owners).length],
-    ['สถานะการขาย (ไม่ใช่ยังไม่ติดต่อ)', Object.values(C.stages).filter((v) => v && v !== 'none').length],
-    ['นัดทั้งหมด', C.tasks.length],
+    ['มีผู้รับผิดชอบ', Object.keys(C.owners).length],
+    ['มีสถานะการขาย', Object.values(C.stages).filter((v) => v && v !== 'none').length],
+    ['นัด', C.tasks.length],
     ['บันทึกการติดต่อ', Object.values(C.log).reduce((n, a) => n + a.length, 0)],
-    ['ติดดาว', C.watch.length],
+    ['ติดตาม', C.watch.length],
   ];
-  const syncBoxes: [string, string][] = [
-    ['ซิงก์ล่าสุด', sc.last ? dtTh(sc.last) : 'ยังไม่เคยซิงก์'],
+  const syncLine: [string, string][] = [
+    ['ซิงก์ล่าสุด', sc.last ? dtTh(sc.last) : 'ยังไม่เคย'],
     ['ผลล่าสุด', sc.lastMsg || '—'],
-    ['บนเว็บไซต์ TGO', sc.total ? fmtN(sc.total) + ' รายการ' : '—'],
-    ['ใบรับรองที่ดึงเพิ่มไว้', fmtN(e.tgoCerts.length) + ' ใบ'],
+    ['บนเว็บ TGO', sc.total ? fmtN(sc.total) + ' รายการ' : '—'],
+    ['ดึงเพิ่มไว้', fmtN(e.tgoCerts.length) + ' ใบ'],
   ];
 
   return (
     <>
-      <PageHead title="อัปเดตข้อมูล" sub={dataLine} />
+      <PageHead title="อัปเดตข้อมูล" />
       <TeamSyncCard />
-      <section style={section}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 260 }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>อัปโหลดฐานข้อมูลลูกค้าฉบับใหม่</span>
-            <span style={intro}>ไฟล์ Excel รูปแบบเดียวกับ ฐานข้อมูลลูกค้า_GCC (ชีต ทะเบียนบริษัท, TGO_CFO, GI, กรอ., SET) ระบบจะแทนข้อมูลบริษัททั้งหมด ส่วนที่เก็บในเครื่อง (ดาว สถานะการขาย โน้ต นัด ข้อมูลติดต่อที่แก้ไข การตัดสินข้อมูลซ้ำ) ยังอยู่ครบ</span>
-          </div>
-          <label className="btn pri" style={{ height: 44, padding: '0 20px', fontSize: 14.5, display: 'flex', alignItems: 'center' }}>
+      <UpdSection
+        title="อัปโหลดฐานข้อมูลลูกค้าฉบับใหม่"
+        status={dataLine}
+        action={
+          <label className="btn" style={{ flex: 'none' }}>
             เลือกไฟล์ .xlsx
             <input type="file" accept=".xlsx" onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) e.onFile(f); }} style={{ display: 'none' }} />
           </label>
-        </div>
-        {u.status === 'busy' && <span style={{ fontSize: 13.5, color: '#1F5BD8' }}>{u.msg}</span>}
+        }
+        more="ไฟล์ Excel รูปแบบเดียวกับ ฐานข้อมูลลูกค้า_GCC (ชีต ทะเบียนบริษัท, TGO_CFO, GI, กรอ., SET) ระบบจะแทนข้อมูลบริษัททั้งหมด ส่วนที่ทีมบันทึก (ติดตาม สถานะการขาย โน้ต นัด ข้อมูลติดต่อที่แก้ การตัดสินข้อมูลซ้ำ) ยังอยู่ครบ"
+      >
+        {u.status === 'busy' && <span className="t-link" style={{ fontSize: 14 }}>{u.msg}</span>}
         {u.status === 'error' && <Notice kind="error">{u.msg}</Notice>}
         {u.status === 'done' && <Notice kind="ok">{u.msg}</Notice>}
         {u.status === 'preview' && (
-          <div style={{ background: '#F6F8FE', borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <span style={{ fontSize: 14, fontWeight: 500 }}>{u.head}</span>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
+          <div style={{ borderTop: '1px solid var(--divider)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <span className="t-name">{u.head}</span>
+            <div className="upd-line">
               {(u.preview || []).map((b) => (
-                <div key={b.k} style={{ background: '#fff', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 12, color: '#475069' }}>{b.k}</span>
-                  <span style={{ fontSize: 20, fontWeight: 500 }}>{b.v}</span>
-                </div>
+                <span key={b.k}><span className="t-muted">{b.k}</span> {b.v}</span>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => e.applyUpload()} className="btn pri" style={{ height: 38 }}>ใช้ข้อมูลชุดนี้</button>
-              <button onClick={() => e.cancelUpload()} className="hv" style={{ cursor: 'pointer', height: 38, padding: '0 12px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}>ยกเลิก</button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={() => e.applyUpload()} className="btn sm">ใช้ข้อมูลชุดนี้</button>
+              <button onClick={() => e.cancelUpload()} className="quiet">ยกเลิก</button>
             </div>
           </div>
         )}
-        {e.base.source === 'upload' && <button onClick={() => e.revertUpload()} className="hv-tx" style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0 }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
-      </section>
+        {e.base.source === 'upload' && <button onClick={() => e.revertUpload()} className="lnk" style={{ alignSelf: 'flex-start' }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
+      </UpdSection>
 
-      <section style={section}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 260 }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>ดึงใบรับรอง CFO ใหม่จากเว็บไซต์ TGO</span>
-            <span style={intro}>อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO) ทำงานเมื่อถึงรอบหรือเมื่อกดปุ่ม</span>
-          </div>
-          <button onClick={() => e.runSync(false)} disabled={y.status === 'running'} className="btn pri" style={{ height: 44, padding: '0 20px', fontSize: 14.5 }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
-          {syncBoxes.map(([k, v]) => (
-            <div key={k} style={{ ...box, padding: '12px 14px', gap: 3 }}>
-              <span style={{ fontSize: 12, color: '#475069' }}>{k}</span>
-              <span style={{ fontSize: 14.5, fontWeight: 500 }}>{v}</span>
-            </div>
-          ))}
-        </div>
+      <UpdSection
+        title="ดึงใบรับรอง CFO ใหม่จากเว็บไซต์ TGO"
+        status={
+          <span className="upd-line">
+            {syncLine.map(([k, v]) => (
+              <span key={k}><span className="t-muted">{k}</span> {v}</span>
+            ))}
+          </span>
+        }
+        action={<button onClick={() => e.runSync(false)} disabled={y.status === 'running'} className="btn pri" style={{ flex: 'none' }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>}
+        more={
+          <>
+            <span>อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO)</span>
+            <span>Proxy (ขั้นสูง): ใช้ {'{u}'} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ project/tools/tgo-proxy-worker.js</span>
+            <input defaultValue={sc.proxy} onBlur={(ev) => e.saveSync({ proxy: ev.target.value.trim() })} placeholder="https://tgo-proxy.example.workers.dev/?url={u}" aria-label="Proxy" className="fld" style={{ maxWidth: 560 }} />
+          </>
+        }
+      >
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label style={labelCol}>
             รอบอัปเดตอัตโนมัติ
-            <select value={sc.freq} onChange={(ev) => e.saveSync({ freq: ev.target.value as SyncCfg['freq'] })} className="fld sel" style={{ padding: '0 12px' }}>
+            <select value={sc.freq} onChange={(ev) => e.saveSync({ freq: ev.target.value as SyncCfg['freq'] })} className="fld sel">
               <Opts options={[{ v: 'open', label: 'ทุกครั้งที่เปิดเว็บ' }, { v: 'daily', label: 'วันละครั้ง' }, { v: 'weekly', label: 'สัปดาห์ละครั้ง' }, { v: 'off', label: 'ปิด (กดเองเท่านั้น)' }]} />
             </select>
           </label>
-          <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 40, padding: '0 8px', margin: '0 -8px', borderRadius: 10, fontSize: 13.5, cursor: 'pointer' }}>
+          <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 40, padding: '0 8px', margin: '0 -8px', borderRadius: 10, fontSize: 14, cursor: 'pointer' }}>
             <input type="checkbox" checked={!!sc.autoApply} onChange={(ev) => e.saveSync({ autoApply: ev.target.checked })} style={{ width: 18, height: 18 }} />
             เมื่อถึงรอบ ให้อัปเดตทันทีโดยไม่ต้องยืนยัน
           </label>
         </div>
-        <details style={{ fontSize: 13, color: '#475069' }}>
-          <summary className="hv-tx" style={{ cursor: 'pointer' }}>ตั้งค่าขั้นสูง: Proxy</summary>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 10 }}>
-            <span style={{ lineHeight: 1.6 }}>ใช้ {'{u}'} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ project/tools/tgo-proxy-worker.js</span>
-            <input defaultValue={sc.proxy} onBlur={(ev) => e.saveSync({ proxy: ev.target.value.trim() })} placeholder="https://tgo-proxy.example.workers.dev/?url={u}" className="fld" style={{ maxWidth: 560 }} />
-          </div>
-        </details>
-        {y.status === 'running' && <span style={{ fontSize: 13.5, color: '#1F5BD8' }}>{y.msg}</span>}
+        {y.status === 'running' && <span className="t-link" style={{ fontSize: 14 }}>{y.msg}</span>}
         {y.status === 'error' && <Notice kind="error">{y.msg}</Notice>}
         {y.status === 'done' && <Notice kind="ok">{y.msg}</Notice>}
         {y.status === 'ready' && st && (
-          <div style={{ background: '#F6F8FE', borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 500 }}>{`พบใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ จาก ${fmtN(st.items.length)} รายการล่าสุด (ผ่าน ${st.via})`}</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflow: 'auto' }}>
+          <div style={{ borderTop: '1px solid var(--divider)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span className="t-name">{`พบใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ จาก ${fmtN(st.items.length)} รายการล่าสุด (ผ่าน ${st.via})`}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 280, overflow: 'auto' }}>
               {st.nw.slice(0, 60).map((it, i) => (
-                <div key={i} style={{ background: '#fff', borderRadius: 10, padding: '9px 12px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 500, padding: '2px 8px', borderRadius: 999, background: it.gid ? '#E6ECFD' : '#DDF5F1', color: it.gid ? '#1745B8' : '#0B6E66' }}>{it.gid ? 'ผูกกับบริษัทเดิม' : 'บริษัทใหม่'}</span>
-                  <span style={{ fontSize: 13.5 }}>{it.org}</span>
-                  <span style={{ fontSize: 12.5, color: '#475069' }}>{`${it.cert} · ${it.prov} · อนุมัติ ${it.apBE}`}</span>
+                <div key={i} style={{ borderTop: '1px solid var(--divider)', padding: '8px 0', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 14 }}>{it.org}</span>
+                  <span className="t-meta">{`${it.gid ? 'ผูกกับบริษัทเดิม' : 'บริษัทใหม่'} · ${it.cert} · ${it.prov} · อนุมัติ ${it.apBE}`}</span>
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => e.applySync(false)} className="btn pri" style={{ height: 38 }}>อัปเดตเข้าระบบ</button>
-              <button onClick={() => e.cancelSync()} className="hv" style={{ cursor: 'pointer', height: 38, padding: '0 12px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}>ยกเลิก</button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={() => e.applySync(false)} className="btn sm">อัปเดตเข้าระบบ</button>
+              <button onClick={() => e.cancelSync()} className="quiet">ยกเลิก</button>
             </div>
           </div>
         )}
-      </section>
+      </UpdSection>
 
       {!accounts && (
-        <section style={section}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 17, fontWeight: 500 }}>ทีมขายและข้อมูลที่บันทึก</span>
-            <span style={intro}>{e.teamCfg
-              ? 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ แชร์กับทีมผ่าน Google Sheet แล้ว ส่วน "ฉันคือ" ตั้งแยกในแต่ละเครื่อง ไฟล์สำรองยังส่งออก/นำเข้าได้ (นำเข้าจะเพิ่มเฉพาะรายการที่ทีมยังไม่มี รายการที่ทีมมีแล้วใช้ค่าของทีม) · ข้อมูลของบริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้'
-              : 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บอยู่ในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร) หรือเชื่อม Google Sheet ด้านบนเพื่อให้ทุกเครื่องเห็นเหมือนกัน'}</span>
-          </div>
+        <UpdSection
+          title="ทีมขายและข้อมูลที่บันทึก"
+          status={
+            <span className="upd-line">
+              {stats.map(([k, v]) => (
+                <span key={k}><span className="t-muted">{k}</span> {fmtN(v)}</span>
+              ))}
+            </span>
+          }
+          more={e.teamCfg
+            ? 'ติดตาม สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ แชร์กับทีมผ่าน Google Sheet แล้ว ส่วน "ฉันคือ" ตั้งแยกในแต่ละเครื่อง ไฟล์สำรองยังส่งออก/นำเข้าได้ (นำเข้าจะเพิ่มเฉพาะรายการที่ทีมยังไม่มี) · ข้อมูลของบริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้'
+            : 'ติดตาม สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร) หรือเชื่อม Google Sheet ด้านบนเพื่อให้ทุกเครื่องเห็นเหมือนกัน'}
+        >
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label style={labelCol}>
               ฉันคือ
@@ -155,46 +172,39 @@ export function Update() {
             </label>
             <form onSubmit={addTeam} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
               <label style={labelCol}>เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" className="fld" /></label>
-              <button type="submit" className="btn pri">เพิ่ม</button>
+              <button type="submit" className="btn">เพิ่ม</button>
             </form>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {C.team.map((name) => (
-              <span key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', height: 32, padding: '0 6px 0 12px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', fontSize: 13 }}>
+              <span key={name} className="chip upd-chip">
                 {name} · {fmtN(ownN[name] || 0)} บริษัท
-                <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} className="hv" style={{ cursor: 'pointer', width: 22, height: 22, borderRadius: '50%', border: 0, '--bg': 'rgba(10,26,134,.12)', '--hv': 'rgba(10,26,134,.24)', color: '#1745B8', fontSize: 13, padding: 0 }}>×</button>
+                <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} title={`ลบ ${name}`} className="upd-x"><Icon name="close" size={12} /></button>
               </span>
             ))}
-            {!C.team.length && <span style={{ fontSize: 13, color: '#5E6680' }}>ยังไม่มีรายชื่อทีม เพิ่มชื่อเพื่อกำหนดผู้รับผิดชอบบริษัท</span>}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
-            {stats.map(([k, v]) => (
-              <div key={k} style={{ ...box, padding: '10px 12px', gap: 2 }}>
-                <span style={{ fontSize: 12, color: '#475069' }}>{k}</span>
-                <span style={{ fontSize: 20, fontWeight: 500 }}>{fmtN(v)}</span>
-              </div>
-            ))}
+            {!C.team.length && <span className="empty">ยังไม่มีรายชื่อทีม เพิ่มชื่อเพื่อกำหนดผู้รับผิดชอบบริษัท</span>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button onClick={() => e.exportCrm()} className="btn pri">ส่งออกไฟล์สำรอง (.json)</button>
-            <label className="btn out" style={{ display: 'flex', alignItems: 'center' }}>
+            <button onClick={() => e.exportCrm()} className="btn">ส่งออกไฟล์สำรอง (.json)</button>
+            <label className="btn">
               นำเข้าไฟล์สำรอง
               <input type="file" accept=".json" onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) e.importCrm(f); }} style={{ display: 'none' }} />
             </label>
-            {e.tmMsg && <span style={{ fontSize: 13.5, color: '#0B6E66' }}>{e.tmMsg}</span>}
+            {e.tmMsg && <span className="t-ok" style={{ fontSize: 14 }}>{e.tmMsg}</span>}
           </div>
-        </section>
+        </UpdSection>
       )}
 
-      <section style={{ ...section, gap: 12 }}>
-        <span style={{ fontSize: 17, fontWeight: 500 }}>ตรวจสถานะหมดอายุอัตโนมัติ</span>
-        <span style={intro}>ตรวจทุกบริษัทเทียบกับวันนี้ ทุกครั้งที่เปิดเว็บ หลังอัปเดตข้อมูล ทุก 10 นาทีที่เปิดค้าง และเมื่อขึ้นวันใหม่ บันทึกเหตุการณ์ CFO ใกล้หมดอายุ / หมดอายุ / ต่ออายุแล้ว และ GI หมดอายุหรือถูกลดระดับ ดูได้ในแท็บติดตาม</span>
-        <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 8px', margin: '-4px -8px', borderRadius: 10, fontSize: 13.5, cursor: 'pointer' }}>
+      <UpdSection
+        title="ตรวจสถานะหมดอายุอัตโนมัติ"
+        status={mon.last ? `ตรวจล่าสุด ${dtTh(mon.last)} · เหตุการณ์ทั้งหมด ${fmtN((mon.events || []).length)}` : 'ยังไม่เคยตรวจ'}
+        more="ตรวจทุกบริษัทเทียบกับวันนี้ ทุกครั้งที่เปิดเว็บ หลังอัปเดตข้อมูล ทุก 10 นาทีที่เปิดค้าง และเมื่อขึ้นวันใหม่ บันทึกเหตุการณ์ CFO ใกล้หมดอายุ / หมดอายุ / ต่ออายุแล้ว และ GI หมดอายุหรือถูกลดระดับ ดูได้ในแท็บติดตาม"
+      >
+        <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 8px', margin: '-4px -8px', borderRadius: 10, fontSize: 14, cursor: 'pointer', alignSelf: 'flex-start' }}>
           <input type="checkbox" checked={!!mon.notify} onChange={(ev) => e.setNotify(ev.target.checked)} style={{ width: 18, height: 18 }} />
           แจ้งเตือนผ่านเบราว์เซอร์เมื่อมีเหตุการณ์ใหม่
         </label>
-        <span style={{ fontSize: 13, color: '#475069' }}>{mon.last ? `ตรวจล่าสุด ${dtTh(mon.last)} · เหตุการณ์ทั้งหมด ${fmtN((mon.events || []).length)}` : 'ยังไม่เคยตรวจ'}</span>
-      </section>
+      </UpdSection>
     </>
   );
 }

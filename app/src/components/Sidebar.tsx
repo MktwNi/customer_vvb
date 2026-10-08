@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { Icon, type IconName } from './icons';
-import { dealResult, overdueDays } from '../lib/sales';
+import { overdueDays } from '../lib/sales';
 import mark from '../assets/gcc-mark.png';
 import { useSlide } from './useSlide';
 import { RoleChip, nameLetter } from './Login';
+import { menuKeys, usePopover } from './usePopover';
 
 /** `admin`: shown only to an admin of a team that signs in with accounts. */
 export interface NavItem { key: Tab; label: string; icon: IconName; admin?: boolean }
@@ -85,18 +86,12 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
   useSlide(navRef, '.side-item[aria-current=page]', ready ? ui.tab + (admin ? '|a' : '') : '');
   const s = e.session;
 
+  // one badge in the whole menu: the Sales Tracker's overdue follow-ups (say it once)
   const badges: Partial<Record<Tab, number>> = {};
-  let won = 0, deals = 0;
   if (ready) {
     const today = todayISO();
-    const mon = e.monCfg();
-    badges.track = (mon.events || []).filter((x) => x.at > (mon.seenAt || '')).length;
-    badges.plan = e.crm.tasks.filter((t) => !t.done && t.date <= today).length;
-    badges.dedup = e.B.groups.filter((g) => g.state === 'pending').length;
     const yearDeals = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear);
-    badges.sales = yearDeals.filter((d) => overdueDays(e.sales, d, today) != null).length; // follow-ups overdue
-    deals = yearDeals.length;
-    won = yearDeals.filter((d) => dealResult(e.sales, d) === 'YES').length;
+    badges.sales = yearDeals.filter((d) => overdueDays(e.sales, d, today) != null).length;
   }
 
   // open menu: Escape folds it and focus returns to the button that opened it;
@@ -137,19 +132,7 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
               <span className="lbl">ดูอย่างเดียว</span>
             </span>
           ) : (
-            <button
-              className="side-add"
-              disabled={!ready}
-              title={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
-              aria-label={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
-              onClick={() => {
-                set({ addCust: { deal: false } });
-                onClose();
-              }}
-            >
-              <Icon name="plus" />
-              <span className="lbl">เพิ่มลูกค้าใหม่</span>
-            </button>
+            <AddMenu rail={rail} ready={ready} onDone={onClose} />
           )}
         </div>
         <nav className="side-nav" ref={navRef}>
@@ -165,8 +148,8 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                     key={it.key}
                     className="side-item"
                     aria-current={on ? 'page' : undefined}
-                    title={rail ? it.label + (b ? ` (${fmtN(b)})` : '') : undefined}
-                    aria-label={rail ? it.label + (b ? ` ${fmtN(b)} รายการ` : '') : undefined}
+                    title={rail ? it.label + (b ? ` (ค้างติดตาม ${fmtN(b)})` : '') : undefined}
+                    aria-label={rail ? it.label + (b ? ` ค้างติดตาม ${fmtN(b)} ราย` : '') : undefined}
                     onClick={() => {
                       if (ready) go(it.key);
                       onClose();
@@ -177,14 +160,14 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                       {rail && b > 0 && <span className="side-dot">{b > 99 ? '99+' : fmtN(b)}</span>}
                     </span>
                     <span className="side-label lbl">{it.label}</span>
-                    {!rail && b > 0 && <span className="side-badge">{fmtN(b)}</span>}
+                    {!rail && b > 0 && <span className="side-badge" title={`ค้างติดตาม ${fmtN(b)} ราย`}>{fmtN(b)}</span>}
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
-        {/* phones: the top bar has no room for the account, so it is here (above the data card) */}
+        {/* phones: the top bar has no room for the account, so it is here */}
         {mobile && s && role && (
           <div className="side-acct">
             <div className="side-acct-who">
@@ -203,7 +186,6 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                   set({ acctDlg: 'passwd' });
                 }}
               >
-                <Icon name="key" />
                 เปลี่ยนรหัสผ่าน
               </button>
               <button
@@ -214,29 +196,63 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                   set({ acctDlg: 'logout' });
                 }}
               >
-                <Icon name="logout" />
                 ออกจากระบบ
               </button>
             </div>
           </div>
         )}
-        {ready && (
-          <div className="side-foot lbl">
-            <span className="side-foot-title">ข้อมูลในระบบ</span>
-            <span className="side-stat"><span>บริษัท</span><b>{fmtN(e.B.companies.length)}</b></span>
-            <span className="side-stat"><span>ใบรับรอง CFO</span><b>{fmtN(e.B.certs.length)}</b></span>
-            {deals > 0 && (
-              <>
-                <span className="side-stat" style={{ marginTop: 4 }}><span>ปิดการขายปี {ui.slYear}</span><b>{fmtN(won)}/{fmtN(deals)}</b></span>
-                <span className="side-bar" role="img" aria-label={`ปิดการขายได้ ${fmtN(won)} จาก ${fmtN(deals)} ราย`}>
-                  <i style={{ width: `${Math.round((won / deals) * 100)}%` }} />
-                </span>
-              </>
-            )}
-            <span className="side-foot-sub">ข้อมูล ณ {isoTh(e.base.asOf)}</span>
-          </div>
-        )}
       </aside>
+    </>
+  );
+}
+
+/**
+ * The shell's add button (outlined; the page's own primary is the filled one): two ways to add a
+ * customer, the same as the Sales Tracker's. Placed beside the button, so the icon rail doesn't clip it.
+ */
+function AddMenu({ rail, ready, onDone }: { rail: boolean; ready: boolean; onDone: () => void }) {
+  const { set, go } = useApp();
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState({ left: 0, top: 0 });
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  usePopover(open, () => setOpen(false), btn, pop);
+  const toggle = () => {
+    const r = btn.current?.getBoundingClientRect();
+    // beside the rail's round button; under the full-width one
+    if (r) setAt(rail ? { left: r.right + 10, top: r.top } : { left: r.left, top: r.bottom + 8 });
+    setOpen(!open);
+  };
+  const pick = (f: () => void) => {
+    setOpen(false);
+    onDone();
+    f();
+  };
+  return (
+    <>
+      <button
+        ref={btn}
+        className="side-add"
+        disabled={!ready}
+        title={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
+        aria-label={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <Icon name="plus" />
+        <span className="lbl">เพิ่มลูกค้าใหม่</span>
+      </button>
+      {open && (
+        <div ref={pop} role="menu" aria-label="เพิ่มลูกค้าใหม่" className="menu side-addmenu" style={at} onKeyDown={menuKeys}>
+          <button role="menuitem" className="menu-i" onClick={() => pick(() => { go('search'); setTimeout(() => document.getElementById('search-q')?.focus(), 60); })}>
+            ค้นหาบริษัทในทะเบียน<small>แล้วส่งเข้า Sales Tracker</small>
+          </button>
+          <button role="menuitem" className="menu-i" onClick={() => pick(() => set({ addCust: { deal: false } }))}>
+            ลูกค้าใหม่ (ไม่มีในทะเบียน)<small>กรอกข้อมูลเอง</small>
+          </button>
+        </div>
+      )}
     </>
   );
 }

@@ -24,15 +24,14 @@ import { AuthScreen, ChangePasswordDialog, LogoutDialog, ReLogin } from './compo
 import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
-  const sk = { height: 64, borderRadius: 16, background: '#E6EAF4' };
+  const sk = { height: 120, borderRadius: 'var(--r-card)', background: '#E9EDF6' };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }} aria-busy="true">
-      <div style={{ height: 210, borderRadius: 28, background: 'linear-gradient(135deg,#1745B8,#1F5BD8)', opacity: 0.2 }} />
-      <span style={{ fontSize: 14, color: '#475069' }}>{msg}</span>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>
-        <div style={sk} /><div style={sk} /><div style={sk} /><div style={sk} />
+      <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{msg}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16 }}>
+        <div style={{ ...sk, background: 'var(--hero)', opacity: 0.25 }} /><div style={sk} /><div style={sk} /><div style={sk} />
       </div>
-      <div style={{ height: 320, borderRadius: 22, background: '#E6EAF4' }} />
+      <div style={{ height: 320, borderRadius: 'var(--r-card)', background: '#E9EDF6' }} />
     </div>
   );
 }
