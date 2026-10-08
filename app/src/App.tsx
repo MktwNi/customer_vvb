@@ -116,7 +116,8 @@ export default function App() {
           <Sidebar open={open} docked={docked} mobile={mobile} onClose={closeNav} />
           <div className="content" id="scroller" tabIndex={-1} role="region" aria-labelledby="page-title">
             <Banners />
-            <main className="main">
+            {/* a new page fades in (keyed by the tab, so each switch plays it once) */}
+            <main className="main page-in" key={ready ? ui.tab : 'loading'}>
               {!ready && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
                 {ready && ui.tab === 'overview' && <Overview />}

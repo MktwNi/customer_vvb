@@ -4,6 +4,7 @@ import { fmtN, isoTh, todayISO } from '../lib/format';
 import { Icon, type IconName } from './icons';
 import { dealResult, overdueDays } from '../lib/sales';
 import mark from '../assets/gcc-mark.png';
+import { useSlide } from './useSlide';
 
 export interface NavItem { key: Tab; label: string; icon: IconName }
 
@@ -73,6 +74,9 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
   const ready = e.ready;
   const rail = !mobile && !docked && !open; // icons only
   const mode = mobile ? '' : docked ? ' dock tabs' : open ? ' over' : ' rail tabs';
+  // the open page's tab slides to the page chosen (folding the menu just moves it, see useSlide)
+  const navRef = useRef<HTMLElement>(null);
+  useSlide(navRef, '.side-item[aria-current=page]', ready ? ui.tab : '');
 
   const badges: Partial<Record<Tab, number>> = {};
   let won = 0, deals = 0;
@@ -133,7 +137,8 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
             <span className="lbl">เพิ่มลูกค้าใหม่</span>
           </button>
         </div>
-        <nav className="side-nav">
+        <nav className="side-nav" ref={navRef}>
+          <span className="slide-ind" aria-hidden="true" />
           {NAV.map((g) => (
             <div key={g.title} className="side-group" role="group" aria-label={g.title}>
               <span className="side-group-title lbl" aria-hidden="true">{g.title}</span>

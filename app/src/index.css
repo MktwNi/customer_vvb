@@ -48,9 +48,9 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-brand{display:none;align-items:center;gap:12px;padding:0 18px;height:var(--topbar-h);flex:none}
 .side-mark{width:36px;height:36px;flex:none;display:block}
 /* wordmark in the phone drawer */
-.brand-word{align-self:flex-start;max-width:100%;font-family:'Montserrat','Kanit',sans-serif;font-weight:600!important;letter-spacing:.01em;color:#fff}
+.brand-word{align-self:flex-start;max-width:100%;font-family:'Montserrat','Kanit',sans-serif;font-weight:700!important;letter-spacing:-.005em;color:#fff}
 .side-brand-text{display:flex;flex-direction:column;line-height:1.3;min-width:0;flex:1}
-.side-brand-text b{font-weight:500;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-brand-text b{font-weight:500;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .side-brand-text small{font-size:12px;color:#fff;font-weight:300;white-space:nowrap}
 .side-cta{flex:none;padding:16px 16px 6px}
 .side-add{cursor:pointer;width:100%;height:46px;border:0;border-radius:999px;background:#fff;color:var(--brand-deep);font-size:14.5px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;box-shadow:0 12px 26px -14px rgba(6,22,90,.75);transition:transform .12s,box-shadow .12s}
@@ -58,7 +58,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-add:hover{transform:translateY(-1px);box-shadow:0 16px 30px -14px rgba(6,22,90,.8)}
 .side-add:focus-visible{outline:2px solid #fff;outline-offset:3px}
 .side-add:disabled{opacity:.55;cursor:default;transform:none;box-shadow:none}
-.side-nav{flex:1;display:flex;flex-direction:column;gap:12px;padding:12px 0 16px 14px}
+.side-nav{position:relative;flex:1;display:flex;flex-direction:column;gap:12px;padding:12px 0 16px 14px}
 .side-group{display:flex;flex-direction:column;gap:4px}
 .side-group-title{font-size:12px;letter-spacing:.04em;color:#fff;opacity:.92;padding:0 14px 4px;white-space:nowrap}
 .side-item{position:relative;cursor:pointer;border:0;background:transparent;color:#fff;display:flex;align-items:center;gap:12px;height:42px;padding:0 14px;margin-right:14px;border-radius:16px;font-size:14.5px;text-align:left;white-space:nowrap;transition:background .12s,color .12s}
@@ -71,11 +71,31 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side.tabs .side-item[aria-current=page]{margin-right:0;border-radius:21px 0 0 21px;background:var(--frame)}
 .side.dock .side-item[aria-current=page]{padding-right:28px}
 .side.tabs .side-item[aria-current=page]::before,.side.tabs .side-item[aria-current=page]::after{content:'';position:absolute;right:0;width:24px;height:25px;pointer-events:none}
+/* switching page: the new one fades in (opacity only: a transform would move fixed dialogs inside it) */
+@keyframes page-in{from{opacity:0}to{opacity:1}}
+.page-in{animation:page-in .24s ease-out}
+@media (prefers-reduced-motion:reduce){.page-in{animation:none}}
+/* a highlight that slides to the selected item (components/useSlide.ts) */
+.slide-ind{position:absolute;left:0;top:0;width:var(--iw,0);height:var(--ih,0);transform:translate(var(--ix,0),var(--iy,0));pointer-events:none;z-index:0;transition:transform .38s cubic-bezier(.22,.9,.26,1),width .38s cubic-bezier(.22,.9,.26,1),height .38s cubic-bezier(.22,.9,.26,1)}
+:not([data-ind=on])>.slide-ind{opacity:0}
+.ind-still>.slide-ind{transition:none}
+@media (prefers-reduced-motion:reduce){.slide-ind{transition:none}}
 /* the menu's last pixel column is the page colour, so no blue seam shows at the tab's mouth at fractional zoom */
 .side.tabs{background:linear-gradient(to left,transparent 1px,var(--brand) 1px)}
 .side.tabs .side-item[aria-current=page]::before{top:-24px;background:radial-gradient(circle at 0 0,transparent 23.5px,var(--frame) 24px)}
 .side.tabs .side-item[aria-current=page]::after{bottom:-24px;background:radial-gradient(circle at 0 100%,transparent 23.5px,var(--frame) 24px)}
 .side .side-item[aria-current=page]:focus-visible{outline-color:var(--brand)}
+/* the open page's tab slides to the item chosen (useSlide) instead of jumping: the item itself is then
+   transparent and the indicator carries the background and the concave corners */
+.side-nav .side-item{z-index:1}
+.side-nav[data-ind=on] .side-item[aria-current=page]{background:transparent}
+.side.tabs .side-nav[data-ind=on] .side-item[aria-current=page]::before,.side.tabs .side-nav[data-ind=on] .side-item[aria-current=page]::after{display:none}
+.side.tabs .side-nav[data-ind=on] .side-item{transition:color .28s ease}
+.side-nav .slide-ind{background:#fff;border-radius:16px}
+.side.tabs .side-nav .slide-ind{background:var(--frame);border-radius:21px 0 0 21px}
+.side.tabs .side-nav .slide-ind::before,.side.tabs .side-nav .slide-ind::after{content:'';position:absolute;right:0;width:24px;height:25px}
+.side.tabs .side-nav .slide-ind::before{top:-24px;background:radial-gradient(circle at 0 0,transparent 23.5px,var(--frame) 24px)}
+.side.tabs .side-nav .slide-ind::after{bottom:-24px;background:radial-gradient(circle at 0 100%,transparent 23.5px,var(--frame) 24px)}
 .side-ico{position:relative;width:22px;height:22px;flex:none;display:flex}
 .side-ico svg{width:22px;height:22px}
 .side-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -101,8 +121,8 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-close,.menu-btn,.tb-mark{display:none}
 /* short windows: the menu must fit without scrolling (the info card is repeated in the top bar) */
 @media (min-width:901px) and (max-height:860px){.side-foot{display:none}}
-@media (min-width:901px) and (max-height:700px){.side-item{height:36px}.side-nav{gap:8px}.side.tabs .side-item[aria-current=page]{border-radius:18px 0 0 18px}}
-@media (min-width:901px) and (max-height:640px){.side-cta,.side.rail .side-cta{padding-top:10px}.side-item{height:32px}.side-group{gap:3px}.side-nav{gap:6px;padding-bottom:10px}.side.tabs .side-item[aria-current=page]{border-radius:16px 0 0 16px}}
+@media (min-width:901px) and (max-height:700px){.side-item{height:36px}.side-nav{gap:8px}.side.tabs .side-item[aria-current=page],.side.tabs .side-nav .slide-ind{border-radius:18px 0 0 18px}}
+@media (min-width:901px) and (max-height:640px){.side-cta,.side.rail .side-cta{padding-top:10px}.side-item{height:32px}.side-group{gap:3px}.side-nav{gap:6px;padding-bottom:10px}.side.tabs .side-item[aria-current=page],.side.tabs .side-nav .slide-ind{border-radius:16px 0 0 16px}}
 /* a scrollbar would push the tab off the content edge: the tab modes never show one */
 .side.tabs{scrollbar-width:none}
 .side.tabs::-webkit-scrollbar{display:none}
@@ -110,12 +130,12 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 /* top bar */
 .topbar{position:relative;z-index:37;flex:none;height:var(--topbar-h);display:flex;align-items:center;gap:14px;padding:0 20px 0 0}
 .tb-brand{flex:none;width:var(--side-cur);display:flex;align-items:center;justify-content:center;gap:10px;min-width:0;transition:width .18s ease}
-.shell.docked .tb-brand{justify-content:flex-start;padding-left:28px}
-.tb-brand img{width:38px;height:38px;flex:none;display:block}
-.tb-brand-text{display:none;flex-direction:column;line-height:1.25;min-width:0}
+.shell.docked .tb-brand{justify-content:flex-start;padding-left:22px}
+.tb-brand img{width:44px;height:44px;flex:none;display:block}
+.tb-brand-text{display:none;flex-direction:column;line-height:1.2;min-width:0;gap:1px}
 .shell.docked .tb-brand-text{display:flex}
-.tb-brand-text b{font-family:'Montserrat','Kanit',sans-serif;font-weight:600;font-size:17px;color:var(--brand-deep);white-space:nowrap;letter-spacing:.01em}
-.tb-brand-text small{font-size:12px;color:#5E6680;white-space:nowrap}
+.tb-brand-text b{font-family:'Montserrat','Kanit',sans-serif;font-weight:700;font-size:21px;color:var(--brand-deep);white-space:nowrap;letter-spacing:-.005em}
+.tb-brand-text small{font-size:12.5px;color:#475069;white-space:nowrap}
 .tb-title{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
 .tb-h{font-size:17px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tb-sub{font-size:12.5px;color:#5E6680;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -207,9 +227,12 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 /* ---- search page: blue search band, coloured group chips, foldable filter panel */
 .sx{padding:8px;display:flex;flex-direction:column;gap:6px}
 .sx-band{border-radius:20px;padding:18px;color:#fff;display:flex;flex-direction:column;gap:14px}
-.sx-toggle{flex:none;display:flex;gap:2px;padding:4px;border-radius:999px;background:rgba(6,22,90,.22)}
+.sx-toggle{position:relative;flex:none;display:flex;gap:2px;padding:4px;border-radius:999px;background:rgba(6,22,90,.22)}
 .sx-toggle button{cursor:pointer;border:0;height:46px;padding:0 18px;border-radius:999px;background:transparent;color:#fff;font-size:14px;white-space:nowrap}
 .sx-toggle button[aria-pressed=true]{background:#fff;color:var(--brand-deep);font-weight:500;box-shadow:0 6px 16px -10px rgba(6,22,90,.8)}
+.sx-toggle button{position:relative;z-index:1;transition:color .28s ease}
+.sx-toggle[data-ind=on] button[aria-pressed=true]{background:transparent;box-shadow:none}
+.sx-toggle .slide-ind{background:#fff;border-radius:999px;box-shadow:0 6px 16px -10px rgba(6,22,90,.8)}
 .sx-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .sx-input{flex:1 1 360px;min-width:0;display:flex;align-items:center;gap:10px;height:54px;padding:0 8px 0 20px;border-radius:999px;background:#fff;color:var(--brand);box-shadow:0 14px 30px -18px rgba(6,22,90,.9)}
 .sx-input>svg{width:21px;height:21px;flex:none}
@@ -284,6 +307,13 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .sx-sub{align-self:center;font-size:12.5px;color:var(--brand-deep);background:var(--brand-soft);padding:4px 12px;border-radius:999px}
 .sx-sort{display:flex;align-items:center;gap:8px;font-size:13px;color:#475069}
 .sx-sort .sx-sel{width:auto;height:40px;border-radius:999px;background-color:#F4F7FE;border-color:transparent}
+/* search results: the row under the pointer (or reached with Tab) gets a light tint, like the
+   overview's group list; a click anywhere on it opens the company */
+.sxr{cursor:pointer;border-bottom:1px solid #EEF1F8;transition:background-color .12s}
+@media (hover:hover){.sxr:hover{background:#F0F4FD}}
+.sxr:has(:focus-visible){background:#F0F4FD}
+@media (prefers-reduced-motion:reduce){.sxr{transition:none}}
+@media (forced-colors:active){.sxr:is(:hover,:has(:focus-visible)){outline:2px solid Highlight;outline-offset:-2px}}
 @media (pointer:coarse){.sx-chips{scrollbar-width:none}.sx-chips::-webkit-scrollbar{display:none}}
 @media (max-width:760px){
   .sx-band{padding:16px 14px;gap:12px}

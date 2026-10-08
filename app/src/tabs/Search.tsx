@@ -6,6 +6,7 @@ import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
 import type { Cert, Company } from '../lib/types';
 import { Opts, Pager, SrcTags, card, heroGrad, tabular } from '../components/ui';
 import { Icon } from '../components/icons';
+import { useSlide } from '../components/useSlide';
 import { PREF, prefs } from '../lib/storage';
 
 const empty = (text: string, boxed?: boolean) => (
@@ -25,6 +26,9 @@ export function Search() {
   const ftoggleRef = useRef<HTMLButtonElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
   const s = ui.f;
+  // the white pill slides between บริษัท and ใบรับรอง CFO
+  const toggleRef = useRef<HTMLDivElement>(null);
+  useSlide(toggleRef, 'button[aria-pressed=true]', s.view);
   // Typing only defers the query; memo on the other filter fields (not the `s` object, which
   // changes identity on every keystroke) so the urgent render reuses the previous result.
   const q = useDeferredValue(s.q);
@@ -108,6 +112,12 @@ export function Search() {
     const [t, fg] = CST[c.cfoSt];
     return { t, fg, sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' };
   };
+  /** A click anywhere on a result row opens the company (not on its buttons, nor when text was selected). */
+  const rowOpen = (ev: React.MouseEvent, id: number) => {
+    if ((ev.target as HTMLElement).closest('button, a, input, select, label')) return;
+    if (window.getSelection()?.toString()) return;
+    open(id);
+  };
   const contactOf = (c: Company) => (c.phone ? c.phone.split('|')[0].trim() : c.web ? c.web.replace(/^https?:\/\//, '') : '—');
   const go = (p: number) => {
     set({ page: p });
@@ -123,7 +133,8 @@ export function Search() {
         <div className="sx-band hero" style={{ background: heroGrad }}>
           <h2 className="sr-only">ค้นหาลูกค้า</h2>
           <div className="sx-row">
-            <div className="sx-toggle" role="group" aria-label="ค้นหาจาก">
+            <div className="sx-toggle" role="group" aria-label="ค้นหาจาก" ref={toggleRef}>
+              <span className="slide-ind" aria-hidden="true" />
               {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
                 <button
                   key={k}
@@ -309,8 +320,8 @@ export function Search() {
               const st = star(c.id), cv = cfoView(c), g = GI_COL[c.giLive || 1] || GI_COL[1], rp = rndPill(c), sg = stageOf(C.stages[c.id]);
               const owner = C.owners[c.id];
               return (
-                <div key={c.id} style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: rowPad, borderBottom: '1px solid #EEF1F8', alignItems: 'center' }}>
-                  <button onClick={st.toggle} title="ติดตาม" style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
+                <div key={c.id} className="sxr" onClick={(ev) => rowOpen(ev, c.id)} style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: rowPad, alignItems: 'center' }}>
+                  <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.star === '★'} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
                   <button onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontSize: 14.5, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -357,8 +368,8 @@ export function Search() {
               const st = star(ct.gid), [bg, fg] = PILL[ct.st];
               const rp = ct.isLatest && !ct.bad && ct.co ? rndPill(ct.co) : null;
               return (
-                <div key={ct.cid} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, borderBottom: '1px solid #EEF1F8', alignItems: 'center', fontSize: 13.5 }}>
-                  <button onClick={st.toggle} title="ติดตาม" style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
+                <div key={ct.cid} className="sxr" onClick={(ev) => rowOpen(ev, ct.gid)} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, alignItems: 'center', fontSize: 13.5 }}>
+                  <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.star === '★'} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
                   <span style={{ fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>
