@@ -18,7 +18,9 @@ export const TEAM_ST: Record<TeamStatus, [string, string, string]> = {
 };
 const hhmm = (iso: string) => (iso ? dtTh(iso).split(' ').slice(-2).join(' ') : '');
 
-export function inviteLink(url: string) {
+/** The link that brings a teammate to `url`'s team: the site itself for its home team (`home`). */
+export function inviteLink(url: string, home = '') {
+  if (url && url === home) return location.origin + location.pathname;
   return `${location.origin}${location.pathname}#team=${encodeURIComponent(url)}`;
 }
 
@@ -28,7 +30,9 @@ export function TeamSyncCard() {
   const [copied, setCopied] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [busy, setBusy] = useState<'' | 'key' | 'leave' | 'open'>('');
-  const [url, setUrl] = useState(e.teamJoinUrl);
+  // the site's own team: no link to paste, and no leaving it
+  const home = e.homeTeam;
+  const [url, setUrl] = useState(home || e.teamJoinUrl);
   const [joinSeen, setJoinSeen] = useState(e.teamJoinUrl);
   // an invite link opened while this page is showing fills the link in
   if (e.teamJoinUrl !== joinSeen) {
@@ -41,13 +45,14 @@ export function TeamSyncCard() {
   const btn: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 };
   const ghost: CSSProperties = { ...btn, background: '#fff', color: '#1F5BD8', border: '1.5px solid #1F5BD8' };
   const plain: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13.5, textDecoration: 'underline' };
-  // step 2 of connecting (the team code) once the link turned out to be a team-code team
-  const keyStep = !!e.teamJoinUrl && url.trim() === e.teamJoinUrl;
+  // step 2 of connecting (the team code) once the link turned out to be a team-code team; the home
+  // team's form starts there
+  const keyStep = !!home || (!!e.teamJoinUrl && url.trim() === e.teamJoinUrl);
 
   const next = async (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     if (keyStep) {
-      await e.teamConnect(url, String(new FormData(ev.currentTarget).get('key') || ''));
+      await e.teamConnect(home || url, String(new FormData(ev.currentTarget).get('key') || ''));
       return;
     }
     // ask the script what it is: team code (the code field appears), sign-in, or first-admin setup
@@ -61,11 +66,11 @@ export function TeamSyncCard() {
   const copy = async () => {
     if (!cfg) return;
     try {
-      await navigator.clipboard.writeText(inviteLink(cfg.url));
+      await navigator.clipboard.writeText(inviteLink(cfg.url, home));
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      window.prompt('คัดลอกลิงก์นี้ส่งให้ทีม', inviteLink(cfg.url));
+      window.prompt('คัดลอกลิงก์นี้ส่งให้ทีม', inviteLink(cfg.url, home));
     }
   };
   const setKey = async (ev: FormEvent<HTMLFormElement>) => {
@@ -127,18 +132,20 @@ export function TeamSyncCard() {
 
       {!cfg && (
         <form onSubmit={next} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {e.teamJoinUrl && (
+          {e.teamJoinUrl && !home && (
             <Notice kind="ok">
               คุณได้รับลิงก์เชิญเข้าทีม (ชีตรหัส …{deploymentId(e.teamJoinUrl)}) ตรวจกับหัวหน้าทีมว่าตรงกัน แล้วใส่รหัสทีมและกด เชื่อมต่อ
             </Notice>
           )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <label style={{ ...labelCol, flex: '1 1 320px', minWidth: 0, maxWidth: keyStep ? undefined : 640 }}>
-              ลิงก์ Web app ของ Google Apps Script
-              <input name="url" value={url} onChange={(ev) => setUrl(ev.target.value)} placeholder="https://script.google.com/macros/s/…/exec" style={inputStyle} autoComplete="off" spellCheck={false} />
-            </label>
+            {!home && (
+              <label style={{ ...labelCol, flex: '1 1 320px', minWidth: 0, maxWidth: keyStep ? undefined : 640 }}>
+                ลิงก์ Web app ของ Google Apps Script
+                <input name="url" value={url} onChange={(ev) => setUrl(ev.target.value)} placeholder="https://script.google.com/macros/s/…/exec" style={inputStyle} autoComplete="off" spellCheck={false} />
+              </label>
+            )}
             {keyStep && (
-              <label style={{ ...labelCol, flex: '1 1 240px', minWidth: 0 }}>
+              <label style={{ ...labelCol, flex: '1 1 240px', minWidth: 0, maxWidth: home ? 420 : undefined }}>
                 รหัสทีม
                 <input name="key" type="password" placeholder="รหัสที่ตั้งไว้ในสคริปต์ (TEAM_KEY)" style={inputStyle} autoComplete="off" autoFocus />
               </label>
@@ -151,9 +158,10 @@ export function TeamSyncCard() {
           </div>
           <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5, alignSelf: 'flex-start' }}>วิธีตั้งค่า Google Sheet ของทีม (ทำครั้งเดียว ประมาณ 5 นาที)</a>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
-            {keyStep
-              ? 'ตอนเชื่อมต่อครั้งแรก ข้อมูลที่บันทึกในเครื่องนี้และยังไม่มีในชีตจะถูกส่งขึ้นไปด้วย ส่วนรายการที่ชีตมีอยู่แล้วจะใช้ค่าจากชีต'
-              : 'วางลิงก์ที่หัวหน้าทีมส่งให้ แล้วกด ถัดไป ถ้าทีมใช้บัญชีผู้ใช้ จะไปหน้าเข้าสู่ระบบ ถ้าใช้รหัสทีม จะให้ใส่รหัสทีม'}
+            {(home ? 'ใส่รหัสทีมที่ได้จากหัวหน้าทีม แล้วกด เชื่อมต่อ · ' : '') +
+              (keyStep
+                ? 'ตอนเชื่อมต่อครั้งแรก ข้อมูลที่บันทึกในเครื่องนี้และยังไม่มีในชีตจะถูกส่งขึ้นไปด้วย ส่วนรายการที่ชีตมีอยู่แล้วจะใช้ค่าจากชีต'
+                : 'วางลิงก์ที่หัวหน้าทีมส่งให้ แล้วกด ถัดไป ถ้าทีมใช้บัญชีผู้ใช้ จะไปหน้าเข้าสู่ระบบ ถ้าใช้รหัสทีม จะให้ใส่รหัสทีม')}
           </span>
         </form>
       )}
@@ -178,7 +186,7 @@ export function TeamSyncCard() {
               </div>
             ))}
           </div>
-          {e.teamJoinUrl && e.teamJoinUrl !== cfg.url && (
+          {e.teamJoinUrl && e.teamJoinUrl !== cfg.url && !home && (
             <Notice kind="error" role="alert">
               ลิงก์เชิญที่เปิดมาชี้ไปชีตอื่น (…{deploymentId(e.teamJoinUrl)}) ไม่ใช่ชีตที่เชื่อมอยู่ (…{deploymentId(cfg.url)}) ถ้าหัวหน้าทีมย้ายชีตจริง ให้กด ยกเลิกการเชื่อมต่อ แล้วเชื่อมใหม่ด้วยลิงก์เชิญ (รายการที่ยังค้างส่งจะตามไปที่ลิงก์ใหม่)
             </Notice>
@@ -252,16 +260,21 @@ export function TeamSyncCard() {
                 ออกจากระบบ
               </button>
             ) : (
-              <button onClick={disconnect} disabled={!!busy} style={plain}>
-                {busy === 'leave' ? 'กำลังส่งรายการที่ค้าง…' : 'ยกเลิกการเชื่อมต่อ'}
-              </button>
+              !home && (
+                <button onClick={disconnect} disabled={!!busy} style={plain}>
+                  {busy === 'leave' ? 'กำลังส่งรายการที่ค้าง…' : 'ยกเลิกการเชื่อมต่อ'}
+                </button>
+              )
             )}
           </div>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
             {acct
-              ? (acct.role === 'admin' ? 'ลิงก์เชิญจะพาเพื่อนไปหน้าเข้าสู่ระบบของทีมนี้ ส่งชื่อผู้ใช้และรหัสผ่านชั่วคราวให้แต่ละคนแยกกันทางแชตส่วนตัว (สร้างได้ที่ ผู้ใช้และสิทธิ์) · ' : '') +
-                'ถ้าสองคนแก้คนละช่องของรายการเดียวกัน จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง'
-              : 'ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก และบอก รหัสชีตของทีม ด้านบนให้เพื่อนตรวจว่าลิงก์ถูกต้อง · ถ้าสองคนแก้คนละช่องของรายการเดียวกัน (เช่น คนหนึ่งแก้เบอร์ อีกคนแก้อีเมล) จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง — รวมถึงค่าที่แก้ตอนออฟไลน์ ซึ่งจะส่งเมื่อกลับมาออนไลน์'}
+              ? (acct.role === 'admin'
+                  ? (home ? 'ลิงก์เชิญคือที่อยู่ของเว็บนี้ เปิดแล้วจะเจอหน้าเข้าสู่ระบบของทีม' : 'ลิงก์เชิญจะพาเพื่อนไปหน้าเข้าสู่ระบบของทีมนี้') +
+                    ' ส่งชื่อผู้ใช้และรหัสผ่านชั่วคราวให้แต่ละคนแยกกันทางแชตส่วนตัว (สร้างได้ที่ ผู้ใช้และสิทธิ์) · '
+                  : '') + 'ถ้าสองคนแก้คนละช่องของรายการเดียวกัน จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง'
+              : (home ? 'ลิงก์เชิญคือที่อยู่ของเว็บนี้ ส่งรหัสทีมให้แยกต่างหาก' : 'ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก และบอก รหัสชีตของทีม ด้านบนให้เพื่อนตรวจว่าลิงก์ถูกต้อง') +
+                ' · ถ้าสองคนแก้คนละช่องของรายการเดียวกัน (เช่น คนหนึ่งแก้เบอร์ อีกคนแก้อีเมล) จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง — รวมถึงค่าที่แก้ตอนออฟไลน์ ซึ่งจะส่งเมื่อกลับมาออนไลน์'}
           </span>
         </div>
       )}

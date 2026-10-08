@@ -52,6 +52,7 @@ export function Users() {
   const [cred, setCred] = useState<Cred | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [rename, setRename] = useState<TeamUser | null>(null);
+  const file = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -175,9 +176,21 @@ export function Users() {
     return out.filter((x): x is Item => !!x);
   };
 
-  // names used in the team's data that no account has yet (each needs one to keep its history)
+  // names used in the team's data that no account has yet (each needs one to keep its history); one
+  // only on the team list (a partner, someone who left) can come off it instead
   const taken = new Set(list.map((u) => u.name.trim().toLowerCase()));
   const missing = users ? e.legacyNames().filter((x) => !taken.has(x.name.trim().toLowerCase())) : [];
+  const unlist = (name: string) =>
+    setAsk({
+      title: 'ลบออกจากรายชื่อ',
+      text: `ลบ ${name} ออกจากรายชื่อทีม? จะไม่มีชื่อนี้ให้เลือกเป็นผู้รับผิดชอบอีก ส่วนข้อมูลเดิมที่ใช้ชื่อนี้ยังอยู่ครบ`,
+      yes: 'ลบออกจากรายชื่อ',
+      danger: true,
+      run: async () => {
+        e.delTeam(name);
+        refocus('#us-add'); // its chip (or its button) is gone
+      },
+    });
 
   const sub = users ? `${fmtN(list.length)} บัญชี · ผู้ดูแลระบบ ${fmtN(count('admin'))} · พนักงานขาย ${fmtN(count('sales'))} · ดูอย่างเดียว ${fmtN(count('viewer'))}` : undefined;
   return (
@@ -284,6 +297,11 @@ export function Users() {
                   <button id={'us-mk-' + i} className="us-btn sm" onClick={() => setAdd({ name: x.name, from: '#us-mk-' + i })} disabled={offline} aria-label={`สร้างบัญชี ${x.name}`}>
                     สร้างบัญชี
                   </button>
+                  {e.crm.team.includes(x.name) && (
+                    <button className="us-btn sm quiet" onClick={() => unlist(x.name)} aria-label={`ลบ ${x.name} ออกจากรายชื่อ`}>
+                      ลบออกจากรายชื่อ
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -301,6 +319,31 @@ export function Users() {
           </ul>
         </section>
       </div>
+
+      {/* (was on the update page, which a team that signs in no longer has) */}
+      <section className="us-card us-backup" aria-labelledby="us-backup-h">
+        <h3 id="us-backup-h" className="us-h">
+          <Icon name="download" size={20} />
+          ไฟล์สำรองข้อมูลทีม
+        </h3>
+        <div className="us-row">
+          <button className="us-btn primary" onClick={() => e.exportCrm()}>ส่งออกไฟล์สำรอง (.json)</button>
+          <button className="us-btn" onClick={() => file.current?.click()}>นำเข้าไฟล์สำรอง</button>
+          <input
+            ref={file}
+            type="file"
+            accept=".json"
+            hidden
+            onChange={(ev) => {
+              const f = ev.target.files?.[0];
+              ev.target.value = '';
+              if (f) e.importCrm(f);
+            }}
+          />
+        </div>
+        <span className="us-muted us-small">ไฟล์สำรองมีข้อมูลทั้งทีม</span>
+        {e.tmMsg && <span className="us-tm" role="status">{e.tmMsg}</span>}
+      </section>
 
       {add && (
         <AddUser
@@ -456,7 +499,7 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
     doneRef.current?.closest<HTMLElement>('[role=dialog]')?.focus();
   }, []);
   const { user, temp } = cred;
-  const invite = `เชิญเข้าใช้ฐานข้อมูลลูกค้า GCC\nลิงก์: ${inviteLink(e.teamCfg?.url || '')}\nชื่อผู้ใช้: ${user.u}\nรหัสผ่านชั่วคราว: ${temp}\n(ระบบจะให้ตั้งรหัสผ่านใหม่เมื่อเข้าครั้งแรก)`;
+  const invite = `เชิญเข้าใช้ฐานข้อมูลลูกค้า GCC\nลิงก์: ${inviteLink(e.teamCfg?.url || '', e.homeTeam)}\nชื่อผู้ใช้: ${user.u}\nรหัสผ่านชั่วคราว: ${temp}\n(ระบบจะให้ตั้งรหัสผ่านใหม่เมื่อเข้าครั้งแรก)`;
   const copy = async (k: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);

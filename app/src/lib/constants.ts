@@ -1,5 +1,9 @@
 import type { CfoStatus, FeedKey, StageKey, TaskType } from './types';
 
+/** Web-app link of the company's team script. Public by nature: it ends up in the built JavaScript
+ *  anyway, and grants nothing without the team code or an account. */
+export const HOME_TEAM_URL = 'https://script.google.com/macros/s/AKfycbyIpL-1Ks0278Enl_-aNigwoqoTMhVr8Qa3YTZ1ocUg6E-nclehWAM9VF-0rk77wXQ_/exec';
+
 /** UI defaults (the design's "Tweaks" panel). */
 export const CONFIG = {
   pageSize: 50,
@@ -7,6 +11,9 @@ export const CONFIG = {
   soonWindow: 90,
   /** Setup guide for the shared team sheet (team-sync/README.md). */
   teamGuideUrl: 'https://github.com/MktwNi/customer_vvb/blob/main/team-sync/README.md',
+  /** The team this site belongs to: it opens on that team's sign-in. VITE_TEAM_URL overrides it
+   *  ('' = none, a local simulator for browser checks); tests and `vite dev` have none unless set. */
+  teamUrl: String(import.meta.env?.VITE_TEAM_URL ?? (import.meta.env?.MODE === 'production' ? HOME_TEAM_URL : '')).trim(),
 };
 
 /** Source bit order: TGO=1, GI=2, กรอ.=4, SET=8 → [label, bg, fg] */

@@ -17,6 +17,8 @@ import type { Dataset, RoundRaw } from './types';
 vi.setConfig({ testTimeout: 30000 });
 const KEY = 'test-key-123';
 const URL = 'https://script.google.com/macros/s/c/exec';
+/** The link built into the site (a later deployment of the same script: same sheet, same secret). */
+const HOME = 'https://script.google.com/macros/s/home/exec';
 const ROOT = join(__dirname, '..', '..', '..');
 const DATA = join(ROOT, 'project', 'data');
 const V2 = readFileSync(join(ROOT, 'team-sync', 'fixtures', 'Code.v2.gs'), 'utf8');
@@ -66,6 +68,7 @@ afterEach(() => {
  *  that browser's localStorage. */
 function mk(browser: string, store: Store = memoryStore()): Tab {
   const raw = new GccEngine();
+  raw.homeTeam = ''; // whatever VITE_TEAM_URL says: home-team tests set it (home())
   raw.base = structuredClone(base);
   raw.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) }));
   raw.ref = '2026-10-06';
@@ -106,6 +109,12 @@ function mk(browser: string, store: Store = memoryStore()): Tab {
   const tab = { e, net, store, browser };
   tabs.push(tab);
   return tab;
+}
+/** An engine of the site with the home team's link built in. */
+function home(browser: string, store?: Store) {
+  const t = mk(browser, store);
+  t.e.homeTeam = HOME;
+  return t;
 }
 const tick = () => new Promise<void>((r) => setImmediate(r));
 async function settle(...ts: Tab[]) {
@@ -977,5 +986,162 @@ describe('viewers and new deals', () => {
     await settle(A);
     expect(A.e.sales.deals[d.id]).toBeUndefined();
     expect(rows('deal/' + d.id)).toEqual([]);
+  });
+});
+
+describe('a site with its home team built in', () => {
+  it('a new browser: the gate shows before anything else, then the team\'s sign-in, with no way around it', async () => {
+    const L = await lead();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const A = home('A');
+    const p = pageLoad(A);
+    expect([A.e.auth, A.e.authUrl]).toEqual(['connect', HOME]); // from the first frame
+    await loaded(A, p);
+    expect([A.e.auth, A.e.authUrl]).toEqual(['login', HOME]);
+    expect(pref<TeamCfg>(A, PREF.team)).toMatchObject({ url: HOME, mode: 'accounts' });
+    A.e.teamCancelAuth();
+    A.e.teamForget();
+    expect(A.e.auth).toBe('login');
+    expect(pref<TeamCfg>(A, PREF.team)?.url).toBe(HOME);
+    await A.e.teamLogin('aem', temp, true);
+    await A.e.teamChangePassword('', 'aem-pass-123');
+    await settle(A);
+    expect([A.e.auth, A.e.me(), A.e.teamCfg?.url, A.e.team.status]).toEqual(['', 'เอ', HOME, 'ok']);
+  });
+
+  it('a new browser of a team without its first admin: the setup screen, and ลองอีกครั้ง once the lead is done', async () => {
+    sim = createGasSim({ teamKey: '', kdfIter: 1000 });
+    sim.setup();
+    const A = home('A');
+    await loaded(A, pageLoad(A));
+    expect(A.e.auth).toBe('setup');
+    const L = mk('L');
+    expect(await L.e.teamOpen(URL)).toBe('setup');
+    await L.e.teamClaim(sim.ownerCode()!, 'lead', 'หัวหน้า', 'lead-pass-123');
+    expect(await A.e.teamRetry()).toBe('accounts');
+    expect([A.e.auth, A.e.authUrl]).toEqual(['login', HOME]);
+  });
+
+  it('a new browser of a team-code team (or the older script): the app, with the team code to enter; it stays connected', async () => {
+    for (const code of ['', V2]) {
+      sim = createGasSim(code ? { teamKey: KEY, code } : { teamKey: KEY, kdfIter: 1000 });
+      const A = home(code ? 'A2' : 'A');
+      const p = pageLoad(A);
+      expect(A.e.auth).toBe('connect');
+      await loaded(A, p);
+      expect([A.e.auth, A.e.authUrl, A.e.teamJoinUrl]).toEqual(['', '', HOME]);
+      expect(pref(A, PREF.team)).toBe(null);
+      expect(await A.e.teamConnect(HOME, KEY)).toBe(true);
+      expect(A.e.teamJoinUrl).toBe('');
+      A.e.teamDisconnect(); // the site belongs to its team
+      expect(A.e.teamCfg?.url).toBe(HOME);
+      expect(pref<TeamCfg>(A, PREF.team)).toMatchObject({ url: HOME, key: KEY });
+    }
+  });
+
+  it('offline: the gate waits and says why; ลองอีกครั้ง goes on to the sign-in', async () => {
+    await lead();
+    const A = home('A');
+    A.net.offline = true;
+    await loaded(A, pageLoad(A));
+    expect(A.e.auth).toBe('connect');
+    expect(A.e.authMsg).toMatch(/ติดต่อ Google Sheet ของทีมไม่ได้/);
+    expect(A.e.team).toMatchObject({ status: 'off', msg: '' }); // said on the gate only
+    A.net.offline = false;
+    expect(await A.e.teamRetry()).toBe('accounts');
+    expect([A.e.auth, A.e.authMsg]).toEqual(['login', '']);
+  });
+
+  it('another team\'s invite link is ignored', async () => {
+    await lead();
+    const A = home('A');
+    await loaded(A, pageLoad(A));
+    expect(A.e.auth).toBe('login');
+    const n = A.net.sent.length;
+    expect([A.e.foreign(URL), A.e.foreign(HOME)]).toEqual([true, false]);
+    expect(await A.e.teamOpen(URL)).toBe('');
+    expect(await A.e.teamConnect(URL, KEY)).toBe(false);
+    expect(A.net.sent.length).toBe(n);
+    expect([A.e.auth, A.e.authUrl, A.e.teamJoinUrl]).toEqual(['login', HOME, '']);
+    expect(pref<TeamCfg>(A, PREF.team)?.url).toBe(HOME);
+  });
+
+  it('a team-code browser on the older link moves to the home link: its queued edit is sent once, also with two tabs loading at once', async () => {
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const A = mk('A', store);
+    at('A', () => prefs.set(PREF.me, 'เอ'));
+    expect(await A.e.teamConnect(URL, KEY)).toBe(true);
+    await settle(A);
+    const id = company(A);
+    A.net.offline = true;
+    A.e.toggleWatch(id);
+    await stored(A);
+    A.e.dispose();
+    const [op, ...more] = await queue(A, pendKey(URL));
+    expect([op.k, more]).toEqual(['watch/' + id, []]);
+
+    // the site with the home link built in, opened in two tabs at once (offline, so neither sends yet)
+    const T1 = home('A', store), T2 = home('A', store);
+    T1.net.offline = T2.net.offline = true;
+    const p1 = pageLoad(T1), p2 = pageLoad(T2);
+    expect([T1.e.auth, T2.e.auth]).toEqual(['', '']); // a team-code team: the app, no gate
+    await loaded(T1, p1);
+    await loaded(T2, p2);
+    expect(await queue(T1, pendKey(URL))).toEqual([]);
+    expect((await queue(T1, pendKey(HOME))).map((o) => o.id)).toEqual([op.id]);
+    expect(pref<TeamCfg>(T1, PREF.team)).toMatchObject({ url: HOME, key: KEY });
+    expect(T1.e.teamCfg?.url).toBe(HOME);
+    T2.e.dispose();
+    T1.net.offline = false;
+    await settle(T1);
+    expect(rows('watch/' + id)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
+    expect(await queue(T1, pendKey(HOME))).toEqual([]);
+    expect(T1.net.sent.filter((x) => x === 'push')).toHaveLength(1);
+  });
+
+  it('a browser signed in on the older link: each account\'s queue moves, and the session goes on', async () => {
+    const L = await lead();
+    const store = memoryStore();
+    const A = await member(L, 'aem', 'เอ', 'sales', 'X', store);
+    const [id1, id2] = [company(A, 0), company(A, 1)];
+    A.net.offline = true;
+    A.e.toggleWatch(id1);
+    await stored(A);
+    await A.e.teamLogout(); // remembered: the team data stays in this browser
+    A.net.offline = false;
+    const { temp } = await L.e.adminCreate({ u: 'bee', name: 'บี', role: 'sales' });
+    await A.e.teamLogin('bee', temp, true);
+    await A.e.teamChangePassword('', 'bee-pass-123');
+    await settle(A);
+    A.net.offline = true;
+    A.e.toggleWatch(id2);
+    await stored(A);
+    A.e.dispose();
+    const tok = pref<Session>(A, PREF.session)!.tok;
+
+    // the site with the home link built in: บี is still signed in, on the home link
+    const B = home('X', store);
+    await loaded(B, pageLoad(B));
+    expect(B.e.auth).toBe('');
+    expect(B.e.session).toMatchObject({ u: 'bee', url: HOME, tok });
+    expect(pref<Session>(B, PREF.session)).toMatchObject({ u: 'bee', url: HOME, tok });
+    expect(pref<TeamCfg>(B, PREF.team)).toMatchObject({ url: HOME, mode: 'accounts' });
+    for (const x of ['', '#aem', '#bee']) expect(await queue(B, pendKey(URL) + x)).toEqual([]);
+    expect((await queue(B, pendKey(HOME) + '#aem')).map((o) => o.k)).toEqual(['watch/' + id1]);
+    expect((await store.get<{ u: string }[]>('teamAccts:' + HOME))?.map((a) => a.u).sort()).toEqual(['aem', 'bee']);
+    expect(await store.get('teamAccts:' + URL)).toBe(null);
+    await settle(B);
+    expect(B.e.team.status).toBe('ok');
+    expect(rows('watch/' + id2)).toEqual([expect.objectContaining({ v: 1, by: 'บี' })]);
+    expect(await queue(B, pendKey(HOME) + '#bee')).toEqual([]);
+    expect(rows('watch/' + id1)).toEqual([]); // เอ's: waits for เอ, out of บี's view
+    expect(B.e.crm.watch).not.toContain(id1);
+
+    await B.e.teamLogout();
+    await B.e.teamLogin('aem', 'aem-pass-123', true);
+    await settle(B);
+    expect(rows('watch/' + id1)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
+    expect(await queue(B, pendKey(HOME) + '#aem')).toEqual([]);
   });
 });

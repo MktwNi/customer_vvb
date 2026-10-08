@@ -945,6 +945,9 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .auth-spin{display:inline-block;width:18px;height:18px;flex:none;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:auth-spin .8s linear infinite}
 .auth-spin.dark,.auth-msg .auth-spin{border-color:rgba(31,91,216,.22);border-top-color:var(--brand)}
 @keyframes auth-spin{to{transform:rotate(360deg)}}
+/* the home team is being checked (in place of the sign-in form) */
+.auth-wait{flex:1;min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;font-size:15px;color:#475069}
+.auth-wait .auth-spin{width:32px;height:32px;border-width:3px}
 .auth-msg{display:flex;gap:10px;align-items:flex-start;border-radius:14px;padding:12px 14px;font-size:13.5px;line-height:1.55}
 .auth-msg>svg,.auth-msg>.auth-spin{flex:none;margin-top:1px}
 .auth-msg.err{background:#FBE3DC;color:#8A2B12}
@@ -1033,8 +1036,6 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .acct-out:hover,.acct-out:focus-visible{background:#FDF0EB}
 .acct-out:focus-visible{box-shadow:inset 0 0 0 2px #A33A1A}
 .acct-sep{display:block;height:1px;background:#EEF1F8;margin:4px 8px}
-.acct-line{display:inline-flex;align-items:center;gap:10px;font-size:14px;color:var(--ink);line-height:1.5}
-.acct-line b{font-weight:500}
 .tb-chip-bad{border-color:#F5C9BB;background:#FFF6F3;color:#8A2B12}
 .tb-chip-bad:hover{border-color:#A33A1A}
 @media (max-width:900px){.tb-chip-bad{border-color:transparent}}
@@ -1132,7 +1133,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .us-c .us-sel{min-width:0;width:100%}
 .us-c .us-ll{white-space:normal}
 .us-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:16px;align-items:start}
-.us-names,.us-honest{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.us-names,.us-honest,.us-backup{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
 .us-h{margin:0;font-size:16px;font-weight:500;color:var(--ink);display:flex;align-items:center;gap:8px}
 .us-h svg{flex:none;color:var(--brand)}
 .us-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
@@ -1141,6 +1142,10 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .us-chip-t{min-width:0;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .us-chip .us-btn{border-color:transparent;background:var(--brand-soft);color:var(--brand-deep)}
 .us-chip .us-btn:hover:not(:disabled){background:var(--brand);border-color:var(--brand);color:#fff}
+.us-chip .us-btn.quiet{background:transparent;color:#5E6680}
+.us-chip .us-btn.quiet:hover:not(:disabled){background:#FBE3DC;border-color:#FBE3DC;color:#A33A1A}
+.us-small{font-size:12.5px}
+.us-tm{font-size:13.5px;color:#0B6E66;line-height:1.6}
 .us-honest{background:linear-gradient(180deg,#F8FAFF,#fff)}
 .us-honest ul{margin:0;padding:0 0 0 20px;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:#384155;line-height:1.65}
 .us-honest li::marker{color:var(--brand)}
@@ -1171,7 +1176,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .us-cred-row code{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:17px;letter-spacing:.04em;color:var(--ink);overflow-wrap:anywhere}
 .us-amber{display:flex;gap:10px;align-items:flex-start;background:#FFF4DC;color:#6B4100;border-radius:14px;padding:12px 14px;font-size:13.5px;line-height:1.55}
 .us-amber svg{flex:none;margin-top:1px}
-@media (max-width:760px){.us-card{padding:10px;border-radius:20px}.us-names,.us-honest{padding:16px}
+@media (max-width:760px){.us-card{padding:10px;border-radius:20px}.us-names,.us-honest,.us-backup{padding:16px}
   /* the cards are the list: no frame around them */
   .us-card:has(>.us-cards){background:transparent;border:0;box-shadow:none;padding:0}
   .us-c{background:#fff;box-shadow:0 1px 2px rgba(16,40,120,.04),0 10px 24px -20px rgba(16,40,120,.3)}}

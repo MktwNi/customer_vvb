@@ -46,7 +46,7 @@ export function authError(err: unknown): { msg: string; until?: number; code?: s
   }
   if (err instanceof TeamSyncError) return { msg: err.message, code };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { msg: 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วลองอีกครั้ง', code: 'offline' };
-  if (err instanceof TypeError) return { msg: errText(err, 'connect') };
+  if (err instanceof TypeError) return { msg: errText(err, CONFIG.teamUrl ? 'home' : 'connect') }; // (no link typed on a site with its own team)
   return { msg: (err as Error)?.message || String(err) };
 }
 
@@ -224,26 +224,60 @@ function useUnsent(url: string, u: string) {
 
 // ------------------------------------------------------------------ full-screen sign-in
 
-/** In front of the app while signed out, setting up the first admin, setting a password or disabled.
- *  `invited`: the team was opened from an invite link (a member, rarely the lead). */
+/** Instead of the app while checking the home team, signed out, setting up the first admin, setting a
+ *  password or disabled. `invited`: the team was opened from an invite link (a member, rarely the lead). */
 export function AuthScreen({ invited }: { invited?: boolean }) {
   const { engine: e } = useApp();
   useEngineVersion();
   const url = e.authUrl || e.teamCfg?.url || e.session?.url || '';
   const mode = e.auth;
+  // the site's own team, not connected here yet: most likely a member (the lead says so to set it up)
+  const member = !!invited || (!!e.homeTeam && !e.teamCfg);
   return (
     <div className="auth">
       <div className="auth-card">
         <BrandPanel url={url} />
         <main className="auth-main" key={mode}>
+          {mode === 'connect' && <Connect />}
           {mode === 'login' && <LoginForm url={url} />}
-          {mode === 'setup' && <SetupForm askLead={!!invited} />}
+          {mode === 'setup' && <SetupForm askLead={member} />}
           {mode === 'change' && <ChangeForm />}
           {mode === 'disabled' && <Disabled />}
-          {(mode === 'login' || mode === 'setup') && <AuthFooter />}
+          {(mode === 'login' || mode === 'setup' || mode === 'connect') && <AuthFooter />}
         </main>
       </div>
     </div>
+  );
+}
+
+/** The home team is being asked what it is (sign in, set up, or the team code); or it can't be reached. */
+function Connect() {
+  const { engine: e } = useApp();
+  const err = e.authMsg;
+  // back online after it failed: ask again by itself
+  useEffect(() => {
+    const online = () => void (e.authMsg && e.teamRetry());
+    window.addEventListener('online', online);
+    return () => window.removeEventListener('online', online);
+  }, [e]);
+  if (!err)
+    return (
+      <div className="auth-wait" role="status">
+        <span className="auth-spin dark" aria-hidden="true" />
+        <span>กำลังเชื่อมต่อทีม…</span>
+      </div>
+    );
+  return (
+    <>
+      <header className="auth-head">
+        <span className="auth-state-ic bad" aria-hidden="true"><Icon name="alert" size={26} /></span>
+        <h1 className="auth-h">เชื่อมต่อทีมไม่ได้</h1>
+      </header>
+      <Msg kind="err">{err}</Msg>
+      <button type="button" className="auth-btn" onClick={() => e.teamRetry()}>
+        ลองอีกครั้ง
+      </button>
+    </>
   );
 }
 
@@ -543,14 +577,21 @@ function SetupForm({ askLead }: { askLead: boolean }) {
   const user = normUser(u);
   const uErr = uTouched && u && !USER_RE.test(user) ? 'ใช้ได้เฉพาะภาษาอังกฤษตัวเล็ก ตัวเลข . _ - ยาว 3–32 ตัว' : '';
 
+  // the site's own team (no invite link to open again): ask it again once the lead is done
+  const home = !!e.homeTeam && !e.teamCfg;
   if (!lead)
     return (
       <>
         <header className="auth-head">
           <span className="auth-state-ic" aria-hidden="true"><Icon name="shield" size={26} /></span>
           <h1 className="auth-h">ทีมนี้ยังไม่ได้เปิดใช้บัญชีผู้ใช้</h1>
-          <p className="auth-sub">รอหัวหน้าทีมตั้งค่า แล้วเปิดลิงก์เชิญอีกครั้ง</p>
+          <p className="auth-sub">{home ? 'รอหัวหน้าทีมตั้งค่า แล้วกด ลองอีกครั้ง' : 'รอหัวหน้าทีมตั้งค่า แล้วเปิดลิงก์เชิญอีกครั้ง'}</p>
         </header>
+        {home && (
+          <button type="button" className="auth-btn" onClick={() => e.teamRetry()}>
+            ลองอีกครั้ง
+          </button>
+        )}
         <button type="button" className="auth-btn ghost" onClick={() => setLead(true)}>
           ฉันคือหัวหน้าทีม
         </button>
@@ -746,7 +787,8 @@ function Disabled() {
   );
 }
 
-/** Leave the sign-in screen: back to the team still connected (team code), or to this browser only. */
+/** Leave the sign-in screen: back to the team still connected (team code), or to this browser only
+ *  (not on a site with a home team: it belongs to that team). */
 function AuthFooter() {
   const { engine: e } = useApp();
   const [ask, setAsk] = useState(false);
@@ -755,6 +797,7 @@ function AuthFooter() {
     if (ask) yes.current?.focus();
   }, [ask]);
   const back = !!e.teamCfg;
+  const leave = back || !e.homeTeam;
   return (
     <div className="auth-foot">
       {ask ? (
@@ -771,9 +814,11 @@ function AuthFooter() {
         </div>
       ) : (
         <>
-          <button type="button" className="auth-link" onClick={() => (back ? e.teamCancelAuth() : setAsk(true))}>
-            {back ? 'กลับไปที่แอป' : 'ใช้งานแบบไม่เชื่อมทีม (ข้อมูลอยู่ในเครื่องนี้)'}
-          </button>
+          {leave && (
+            <button type="button" className="auth-link" onClick={() => (back ? e.teamCancelAuth() : setAsk(true))}>
+              {back ? 'กลับไปที่แอป' : 'ใช้งานแบบไม่เชื่อมทีม (ข้อมูลอยู่ในเครื่องนี้)'}
+            </button>
+          )}
           <a className="auth-link" href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer">
             วิธีใช้งาน
           </a>
@@ -983,18 +1028,6 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </Modal>
-  );
-}
-
-/** The signed-in account in one line (used on the update page): "เข้าสู่ระบบในชื่อ … · role". */
-export function SignedInAs({ name, role }: { name: string; role: Role }) {
-  return (
-    <span className="acct-line">
-      <span className="acct-ava sm" aria-hidden="true">{nameLetter(name)}</span>
-      <span>
-        เข้าสู่ระบบในชื่อ <b>{name}</b> · {ROLE_TH[role]}
-      </span>
-    </span>
   );
 }
 

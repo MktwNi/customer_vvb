@@ -60,7 +60,7 @@ export default function App() {
   }, [wide, mobile]);
 
   useEffect(() => {
-    e.load();
+    e.load(); // (already started by main.tsx, so a gate is there from the first frame)
     // a team that signs in: the sign-in screen shows while this browser's data loads behind it
     if (e.auth) e.emit();
     return () => e.dispose();
@@ -68,7 +68,8 @@ export default function App() {
 
   // invite link: #team=<web-app url> → a team with accounts shows its sign-in (or first-admin setup);
   // a team-code team prefills the team-sync card on the update tab, as before.
-  // Only Apps Script web-app URLs are accepted, so a forged link can't collect the team code.
+  // Only Apps Script web-app URLs are accepted, so a forged link can't collect the team code; a site
+  // with a home team takes only that team's link (it belongs to one team).
   const [invited, setInvited] = useState(false);
   useEffect(() => {
     const onHash = () => {
@@ -81,7 +82,7 @@ export default function App() {
         /* ignore */
       }
       history.replaceState(null, '', window.location.pathname + window.location.search);
-      if (!isTeamUrl(url)) return;
+      if (!isTeamUrl(url) || e.foreign(url)) return;
       setInvited(true);
       e.teamOpen(url).then((m) => {
         if (m === 'legacy' || m === '') set({ tab: 'update', sel: null }); // the team-code form (or why the link failed)
@@ -109,9 +110,15 @@ export default function App() {
     return () => document.removeEventListener('keydown', kd);
   }, [set]);
 
+  // the home team uses the team code and this browser has not joined it: its code form, on the update tab
+  const joinHome = !!e.homeTeam && e.teamJoinUrl === e.homeTeam && !e.teamCfg && !e.auth;
+  useEffect(() => {
+    if (joinHome) set({ tab: 'update', sel: null });
+  }, [joinHome, set]);
+
   const ready = e.ready;
   const auth = e.auth;
-  const gate = auth === 'login' || auth === 'setup' || auth === 'change' || auth === 'disabled';
+  const gate = auth === 'connect' || auth === 'login' || auth === 'setup' || auth === 'change' || auth === 'disabled';
   // once loaded, Page Down / Space scroll the page straight away (on desktop the content scrolls inside
   // the window, so it must hold the focus rather than the document)
   useEffect(() => {
@@ -128,8 +135,8 @@ export default function App() {
     if (auth !== 'expired' && ui.hideRelogin) set({ hideRelogin: false });
   }, [auth, ui.acctDlg, ui.hideRelogin, set]);
 
-  // signed out, first-admin setup, a password to set, account disabled: a screen in front of the app
-  // (the data keeps loading behind it, so the app is there right after signing in)
+  // checking the home team, signed out, first-admin setup, a password to set, account disabled: a
+  // screen instead of the app (the data keeps loading behind it, so the app is there right after signing in)
   if (gate) return <AuthScreen invited={invited} />;
   return (
     <div className={'shell' + (docked ? ' docked' : '')}>

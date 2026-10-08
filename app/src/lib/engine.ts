@@ -135,9 +135,13 @@ export class GccEngine {
   session: Session | null = null;
   /** What the team script at `caps.url` supports (from `hello`). */
   caps: (Caps & { url: string }) | null = null;
-  /** A screen in front of the app: sign in, first-admin setup, set your password, session expired,
-   *  account disabled; '' = none. `authUrl` is the team it is for. */
-  auth: '' | 'login' | 'setup' | 'change' | 'expired' | 'disabled' = '';
+  /** The team this site belongs to (CONFIG.teamUrl): a browser not connected yet opens on its gate,
+   *  and one stored with another link of it moves to this one. '' = none (any team, or none). */
+  homeTeam = CONFIG.teamUrl;
+  /** A screen in front of the app: checking the home team (`authMsg`: why it can't be reached), sign
+   *  in, first-admin setup, set your password, session expired, account disabled; '' = none.
+   *  `authUrl` is the team it is for. */
+  auth: '' | 'connect' | 'login' | 'setup' | 'change' | 'expired' | 'disabled' = '';
   authUrl = '';
   /** A notice for the sign-in screen (e.g. "you signed out"). */
   authMsg = '';
@@ -228,7 +232,10 @@ export class GccEngine {
     try {
       this.wipeRaw = prefs.getRaw(PREF.wipe);
       this.teamRaw = prefs.getRaw(PREF.team);
-      const team0 = prefs.get<TeamCfg | null>(PREF.team, null);
+      let team0 = prefs.get<TeamCfg | null>(PREF.team, null);
+      const home = this.homeTeam;
+      // the site's own team stored with another of its links (an older deployment): moved below
+      const from = home && team0 && team0.url && team0.url !== home ? team0.url : '';
       // a team with accounts: the session signed in on this browser, if it can still be used (one not
       // remembered ends 12 h after sign-in, for a shared computer); otherwise the sign-in screen
       this.sessionRaw = prefs.getRaw(PREF.session);
@@ -240,10 +247,26 @@ export class GccEngine {
           if (!s0.tok) this.auth = 'expired'; // signed out by the script: sign in again over the app
         } else {
           if (s0) this.saveSession(null);
-          this.authUrl = team0.url;
+          this.authUrl = from ? home : team0.url;
           this.auth = 'login';
         }
         this.emit(); // the sign-in screen shows while the data loads
+      } else if (home && !(team0 && team0.url)) {
+        // a browser not connected yet: nothing but the gate until the home team answers (sign in,
+        // first-admin setup, or the app with the team-code form); asked while the data loads
+        this.auth = 'connect';
+        this.authUrl = home;
+        this.emit();
+        this.teamRetry();
+      }
+      if (from) {
+        // the same script (and sheet) under the built-in link: the queues move first, then the stored
+        // settings, so a page closed halfway moves again at its next load
+        if (await this.moveTeam(from, home, acct?.u || '')) {
+          team0 = { ...team0!, url: home };
+          if (acct) this.saveSession((acct = { ...acct, url: home }));
+          this.saveTeamCfg(team0);
+        } else if (this.authUrl === home) this.authUrl = from;
       }
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
@@ -2206,7 +2229,7 @@ export class GccEngine {
       return true;
     }
     if (!cfg && !(s && s.url)) {
-      if (this.auth) {
+      if (this.auth && !this.homeTeam) {
         // another tab went back to working without a team
         this.auth = '';
         this.authUrl = '';
@@ -2214,6 +2237,9 @@ export class GccEngine {
       }
       return true;
     }
+    // another tab moved this browser to the home team's link (its page load): what this tab queued
+    // under the old link meanwhile follows
+    if (cfg && s && s.url === this.homeTeam && cfg.url !== s.url) this.moveTeam(cfg.url, s.url, cfg.u || '');
     this.endTeam();
     if (s && s.url && s.mode === 'accounts') {
       // the team signs in (another tab switched, or signed in): this tab follows that tab's session
@@ -2239,9 +2265,11 @@ export class GccEngine {
       this.setTeam({ status: 'syncing', msg: '', last: '' });
       this.startTeam();
     } else {
-      this.auth = '';
-      this.authUrl = '';
+      // (a page of an older version disconnected): with a home team, back to its gate
+      this.auth = this.homeTeam ? 'connect' : '';
+      this.authUrl = this.homeTeam;
       this.setTeam({ status: 'off', msg: '', last: '' });
+      this.teamRetry();
     }
     return false;
   }
@@ -2780,6 +2808,7 @@ export class GccEngine {
   async teamConnect(url: string, key: string) {
     url = url.trim();
     key = key.trim();
+    if (this.foreign(url)) return false; // the site's own team only
     if (!isTeamUrl(url)) {
       this.setTeam({ status: 'error', msg: 'ลิงก์ต้องเป็น Web app ของ Google Apps Script (https://script.google.com/macros/s/…/exec)' });
       return false;
@@ -2798,7 +2827,7 @@ export class GccEngine {
         await this.teamOpen(url);
         return false;
       }
-      this.setTeam({ status: 'error', msg: errText(e, 'connect') });
+      this.setTeam({ status: 'error', msg: errText(e, url === this.homeTeam ? 'home' : 'connect') });
       return false;
     }
     this.endTeam();
@@ -3018,12 +3047,46 @@ export class GccEngine {
     return ((await this.store.get<{ u: string; name: string }[]>(acctKey(url)).catch(() => null)) || []).filter((a) => a && a.u);
   }
   /**
+   * Move what this browser keeps per link from `from` to `to` (an older deployment of the same script:
+   * the same sheet and token secret): the team-code queue, each account's queue and who has signed in
+   * here. Each op is added to the new queue before it leaves the old one, so a page closed halfway loses
+   * nothing; tabs moving at once take turns. False when it could not be stored (the old link stays).
+   */
+  private async moveTeam(from: string, to: string, u: string) {
+    const run = async () => {
+      await this.pq; // this tab's writes to the old queues first
+      const who = await this.accts(from);
+      for (const x of new Set(['', ...who.map((a) => '#' + a.u), ...(u ? ['#' + u] : [])])) {
+        const old = (await this.store.get<SyncOp[]>(pendKey(from) + x)) || [];
+        if (!old.length) continue;
+        const ids = new Set(old.map((o) => o.id));
+        await this.writePending(pendKey(to) + x, (cur) => newestPerKey([...cur, ...old]));
+        await this.writePending(pendKey(from) + x, (cur) => cur.filter((o) => !ids.has(o.id)));
+      }
+      if (who.length) {
+        await this.store.update<{ u: string; name: string }[]>(acctKey(to), (cur) => {
+          const had = (cur || []).filter((a) => a && a.u);
+          return [...had, ...who.filter((a) => !had.some((b) => b.u === a.u))];
+        });
+        await this.store.del(acctKey(from));
+      }
+      return true;
+    };
+    const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+    try {
+      return await (locks ? locks.request('gcc-team-move', run) : run());
+    } catch {
+      return false;
+    }
+  }
+  /**
    * Open a team by its web-app link (connect form, invite link): a team-code team asks for the code
    * as before; a team with accounts shows the sign-in screen; a new script with no admin yet shows the
    * first-admin setup. Returns what it found ('' when the link can't be reached).
    */
   async teamOpen(url: string): Promise<'legacy' | 'accounts' | 'setup' | ''> {
     url = url.trim();
+    if (this.foreign(url)) return ''; // the site belongs to its own team: another team's link is ignored
     if (!isTeamUrl(url)) {
       this.setTeam({ status: 'error', msg: 'ลิงก์ต้องเป็น Web app ของ Google Apps Script (https://script.google.com/macros/s/…/exec)' });
       return '';
@@ -3032,7 +3095,7 @@ export class GccEngine {
     try {
       c = await hello(this.transport, url);
     } catch (e) {
-      this.setTeam({ status: 'error', msg: errText(e, 'connect') });
+      this.setTeam({ status: 'error', msg: errText(e, url === this.homeTeam ? 'home' : 'connect') });
       return '';
     }
     this.setCaps(c, url);
@@ -3056,6 +3119,34 @@ export class GccEngine {
     this.authMsg = '';
     this.emit();
     return c.mode === 'setup' ? 'setup' : 'accounts';
+  }
+  /** A link that is not the home team's, on a site that has one. */
+  foreign(url: string) {
+    return !!this.homeTeam && url.trim() !== this.homeTeam;
+  }
+  /**
+   * Ask the home team what it is, for a browser not connected to it yet (the gate's "ลองอีกครั้ง"):
+   * its sign-in, its first-admin setup, or (team code) the app with the code form. While it can't be
+   * reached the gate stays, with why in `authMsg`.
+   */
+  async teamRetry() {
+    const url = this.homeTeam;
+    if (!url || this.teamCfg || (this.auth !== 'connect' && this.auth !== 'setup')) return '';
+    this.auth = 'connect';
+    this.authUrl = url;
+    this.authMsg = '';
+    this.emit();
+    const m = await this.teamOpen(url);
+    if (this.auth !== 'connect' || this.teamCfg) return m; // answered: sign in or set up (or another tab signed in)
+    if (m === 'legacy') {
+      this.auth = '';
+      this.authUrl = '';
+    } else if (!m) {
+      this.authMsg = this.team.msg || 'เชื่อมต่อทีมไม่ได้';
+      this.team = { status: 'off', msg: '', last: '' }; // said on the gate, not on the team card later
+    }
+    this.emit();
+    return m;
   }
   /** The lead turns on accounts for a team-code team whose script can do them: the first-admin
    *  setup screen (syncing with the code pauses meanwhile). */
@@ -3090,7 +3181,7 @@ export class GccEngine {
       // while it loaded): nothing polls yet
       this.setTeam({ status: 'syncing', msg: '' });
       this.startTeam();
-    } else this.teamForget();
+    } else this.teamForget(); // (none with a home team: its gate stays)
   }
   /** Sign in with a username and password. Throws a TeamSyncError with a Thai message on failure. */
   async teamLogin(u: string, pw: string, rm: boolean) {
@@ -3310,8 +3401,10 @@ export class GccEngine {
     }
     this.saveTeamCfg({ url: cfg.url, key: '', seq: 0, seeded: true, mode: 'accounts' });
   }
-  /** Stop using this team on this browser (from the sign-in screen): back to this browser's own data. */
+  /** Stop using this team on this browser (from the sign-in screen): back to this browser's own data.
+   *  Not on a site with a home team (it belongs to that team). */
   teamForget() {
+    if (this.homeTeam) return;
     this.endTeam();
     this.saveTeamCfg(null);
     this.saveSession(null);
@@ -3422,8 +3515,10 @@ export class GccEngine {
     return [...n].map(([name, cos]) => ({ name, cos })).sort((a, b) => b.cos - a.cos || a.name.localeCompare(b.name, 'th'));
   }
 
-  /** Stop sharing. Queued changes stay stored and are sent with the next connect (this sheet or a new link). */
+  /** Stop sharing. Queued changes stay stored and are sent with the next connect (this sheet or a new link).
+   *  Not on a site with a home team. */
   teamDisconnect() {
+    if (this.homeTeam) return;
     this.endTeam();
     this.saveTeamCfg(null);
     this.setTeam({ status: 'off', msg: '', last: '' });

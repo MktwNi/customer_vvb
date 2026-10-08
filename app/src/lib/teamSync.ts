@@ -99,16 +99,19 @@ const ERR_TH: Record<string, string> = {
 };
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
- * a network error usually means a deployment setting); `sync` = background sync of a working setup.
+ * a network error usually means a deployment setting); `home` = the same with the site's built-in
+ * team (no link was typed: a network error is said plainly); `sync` = background sync of a working setup.
  */
-export const errText = (e: unknown, ctx: 'connect' | 'sync' = 'sync') => {
+export const errText = (e: unknown, ctx: 'connect' | 'home' | 'sync' = 'sync') => {
   const name = (e as Error)?.name;
+  const once = ctx !== 'sync';
   const transient = name === 'TimeoutError' || name === 'AbortError' || (e instanceof TeamSyncError && e.code === 'busy');
-  if (transient) return ctx === 'connect' ? 'ชีตไม่ตอบกลับตอนนี้ ลองกดอีกครั้งในอีกสักครู่' : 'ชีตไม่ตอบกลับ จะลองใหม่อัตโนมัติ';
+  if (transient) return once ? 'ชีตไม่ตอบกลับตอนนี้ ลองกดอีกครั้งในอีกสักครู่' : 'ชีตไม่ตอบกลับ จะลองใหม่อัตโนมัติ';
   if (e instanceof TeamSyncError) return e.message;
   if (e instanceof TypeError) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false)
-      return ctx === 'connect' ? 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วกดอีกครั้ง' : 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
+      return once ? 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วกดอีกครั้ง' : 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
+    if (ctx === 'home') return 'ติดต่อ Google Sheet ของทีมไม่ได้ — ตรวจว่าเครื่องต่ออินเทอร์เน็ตอยู่ แล้วกดอีกครั้ง ถ้ายังไม่ได้ แจ้งหัวหน้าทีม';
     // a cross-origin redirect to Google sign-in (access not "Anyone", or a /dev URL) surfaces as a network error
     return ctx === 'connect'
       ? 'เชื่อมต่อไม่ได้ — ตรวจว่าใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้ง Who has access เป็น "Anyone (ทุกคน)" แล้ว'
