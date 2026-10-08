@@ -9,7 +9,7 @@
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { toCust, toDeal, toDoc, toLog, toStep, type SalesCfg, type SalesState } from './sales';
+import { toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -204,6 +204,8 @@ export const keyOf = {
   deal: (id: string) => `deal/${id}`,
   dstep: (id: string, stage: string) => `dstep/${id}/${stage}`,
   ddoc: (id: string, docId: string) => `ddoc/${id}/${docId}`,
+  /** one installment of a deal's payment plan */
+  dpay: (id: string, stage: string) => `dpay/${id}/${stage}`,
   dlog: (id: string) => `dlog/${id}`,
   scfg: (name: keyof SalesCfg) => `scfg/${name}`,
   cust: (id: number) => `cust/${id}`,
@@ -266,6 +268,7 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.values(S.deals || {}).forEach((d) => m.set(keyOf.deal(d.id), { ...d }));
     Object.entries(S.steps || {}).forEach(([k, v]) => (v.d || v.n) && m.set('dstep/' + k, { ...v }));
     Object.entries(S.docs || {}).forEach(([k, v]) => m.set('ddoc/' + k, { ...v }));
+    Object.entries(S.pays || {}).forEach(([k, v]) => m.set('dpay/' + k, { ...v }));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
     // the lists too: customised before connecting, they are uploaded like every other record
@@ -383,6 +386,19 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.sales = true;
       break;
     }
+    case 'dpay': {
+      // a record type older builds don't know: they skip it here, and never send or delete it
+      const P = s.sales.pays || (s.sales.pays = {});
+      if (rest.indexOf('/') < 0) return;
+      if (del) delete P[rest];
+      else {
+        const v = toPay(row.v);
+        if (!v) return;
+        P[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
     case 'dundo': {
       const U = s.sales.undone || (s.sales.undone = {});
       if (del) {
@@ -425,7 +441,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep|person)\//;
+const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\//;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.

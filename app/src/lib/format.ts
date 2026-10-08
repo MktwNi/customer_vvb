@@ -10,6 +10,14 @@ export const isoTh = (s?: string | null) => {
   const [y, m, d] = s.split('-');
   return `${+d} ${TH_M[+m - 1]} ${+y + 543}`;
 };
+/** ISO date → "6 ต.ค." (no year); day and month joined by a no-break space so they never part across lines */
+export const dmTh = (s?: string | null) => {
+  if (!s) return '';
+  const [, m, d] = s.split('-');
+  return `${+d} ${TH_M[+m - 1]}`;
+};
+/** Whole days from ISO date `a` to `b` (negative when `b` is earlier). */
+export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b.slice(0, 10) + 'T00:00:00Z') - Date.parse(a.slice(0, 10) + 'T00:00:00Z')) / 864e5);
 /** "YYYY-MM" → "ต.ค. YYYY" (year kept as given) */
 export const ymTh = (s?: string | null) => {
   if (!s) return '';
