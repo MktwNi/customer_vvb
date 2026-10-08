@@ -894,8 +894,14 @@ function putCache_(k, v, ttl) {
  * too_many_attempts (`team` only), locked + retryIn, or wrong (+ retryIn when this one locked `u`).
  */
 function checkPw_(u, team, right) {
-  const lock = LockService.getUserLock();
-  if (!lock.tryLock(PW_LOCK_MS)) throw gccError_('busy');
+  // a lock syncing never takes; where Apps Script gives none, counting stays best effort but sign-in works
+  let lock = null;
+  try {
+    lock = LockService.getUserLock();
+  } catch (err) {
+    lock = null;
+  }
+  if (lock && !lock.tryLock(PW_LOCK_MS)) throw gccError_('busy');
   try {
     if (team && teamBlocked_()) return { ok: false, error: 'too_many_attempts' };
     const left = lockLeft_(u);
@@ -904,7 +910,7 @@ function checkPw_(u, team, right) {
     const lockedFor = failLogin_(u);
     return lockedFor ? { ok: false, error: 'wrong', retryIn: lockedFor } : { ok: false, error: 'wrong' };
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
