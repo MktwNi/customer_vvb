@@ -11,7 +11,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore, prefs, PREF } from './storage';
 import type { Role, Session, SyncOp, TeamCfg } from './teamSync';
-import type { DealDoc, SalesState } from './sales';
+import { closeReady, type DealDoc, type PlanInput, type SalesState } from './sales';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -139,6 +139,7 @@ const later = (s: number) => vi.setSystemTime(Date.now() + s * 1000);
 const company = (t: Tab, n = 0) => t.e.B.companies.filter((c) => c.id < 900000 && !c.fl.watch)[n].id;
 const pdf = (name: string) => Object.assign(new Blob(['%PDF-1.4 ' + name], { type: 'application/pdf' }), { name });
 const quote = { kind: 'quotation', amount: 1000, target: 'forecast', basis: 'total', detected: 1000, docNo: 'Q-1', docDate: '' } as const;
+const line = (stage: string, amt: number, o: Partial<PlanInput> = {}): PlanInput => ({ stage, amt, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', ...o });
 /** A promise, and the function that settles it. */
 function gate() {
   let open = () => {};
@@ -576,6 +577,7 @@ describe('what a team-code browser queued, sent by an account', () => {
     expect(await A.e.teamConnect(URL, KEY)).toBe(true);
     const d = A.e.addDeal({ client: 'บริษัท ทดสอบ จำกัด' });
     A.e.setStep(d.id, 'PROPOSAL', { d: '2026-10-01', n: 'นัดคุยแล้ว' });
+    A.e.setPlan(d.id, [line('PAY1', 1000, { note: 'มัดจำ' })]);
     const doc = await A.e.attachDoc(d.id, pdf('qt.pdf'), quote);
     await settle(A);
     await A.e.uploadDocs();
@@ -603,10 +605,11 @@ describe('what a team-code browser queued, sent by an account', () => {
     await settle(A);
     await A.e.uploadDocs();
     await settle(A, L);
-    for (const x of ['deal/' + d.id, `dstep/${d.id}/PROPOSAL`, 'ddoc/' + k]) expect(rows(x).map((r) => r.del)).not.toContain(true);
+    for (const x of ['deal/' + d.id, `dstep/${d.id}/PROPOSAL`, 'ddoc/' + k, `dpay/${d.id}/PAY1`]) expect(rows(x).map((r) => r.del)).not.toContain(true);
     for (const t of [A, L]) {
       expect(t.e.sales.deals[d.id]).toBeTruthy();
       expect(t.e.sales.steps[d.id + '/PROPOSAL']?.n).toBe('นัดคุยแล้ว');
+      expect(t.e.sales.pays[d.id + '/PAY1']?.note).toBe('มัดจำ');
       expect(t.e.sales.docs[k]?.fileId).toBe(fileId);
     }
     expect(Object.values(A.e.sales.log).some((x) => x.deal === d.id && x.action === 'ลบลูกค้า')).toBe(false);
@@ -986,6 +989,77 @@ describe('viewers and new deals', () => {
     await settle(A);
     expect(A.e.sales.deals[d.id]).toBeUndefined();
     expect(rows('deal/' + d.id)).toEqual([]);
+  });
+});
+
+describe('payment plans and roles', () => {
+  /** A won deal of the lead's, with a one-installment plan the team has. */
+  async function wonDeal(L: Tab) {
+    const d = L.e.addDeal({ client: 'บริษัท แผนชำระ จำกัด' });
+    L.e.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    L.e.setPlan(d.id, [line('PAY1', 1000)]);
+    await settle(L);
+    return d;
+  }
+
+  it('a sales account sets a plan, records a payment and removes an installment; the team gets them in its name', async () => {
+    const L = await lead();
+    const d = await wonDeal(L);
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    A.e.setPlan(d.id, [line('PAY1', 1000), line('PAY2', 500)]);
+    expect(A.e.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: null })).toBe(false);
+    A.e.clearPlan(d.id); // PAY2 goes, the received PAY1 stays
+    await settle(A, L);
+    expect(rows(`dpay/${d.id}/PAY1`).at(-1)).toMatchObject({ del: false, by: 'เอ', v: { rcv: '2026-10-05', amt: 1000 } });
+    expect(rows(`dpay/${d.id}/PAY2`).at(-1)).toMatchObject({ del: true, by: 'เอ' });
+    expect(L.e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ rcv: '2026-10-05' });
+    expect(L.e.sales.pays[`${d.id}/PAY2`]).toBeUndefined();
+    expect(closeReady(L.e.sales, L.e.sales.deals[d.id], '2026-10-06')).toBe(true);
+    expect(A.e.teamPendingN).toBe(0);
+  });
+
+  it('a viewer cannot change a plan or record a payment: nothing changes here and nothing is sent', async () => {
+    const L = await lead();
+    const d = await wonDeal(L);
+    const V = await member(L, 'vee', 'วี', 'viewer');
+    const before = JSON.stringify(V.e.sales);
+    expect(V.e.setPlan(d.id, [line('PAY1', 5)])).toEqual({ kept: [] });
+    expect(V.e.quickPlan(d.id, 2)).toBeNull();
+    V.e.updatePayLine(d.id, 'PAY1', { note: 'x' });
+    expect(V.e.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: null })).toBe(false);
+    expect(V.e.setPayFull(d.id, 'PAY1', true)).toBe(false);
+    V.e.unmarkPaid(d.id, 'PAY1');
+    V.e.clearPlan(d.id);
+    await expect(V.e.attachDoc(d.id, pdf('rc.pdf'), { ...quote, kind: 'receipt', target: 'actual', stage: 'PAY1' })).rejects.toThrow(/ดูอย่างเดียว/);
+    expect(JSON.stringify(V.e.sales)).toBe(before);
+    expect(V.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
+    expect(V.e.teamPendingN).toBe(0);
+    await settle(V);
+    expect(V.net.sent).not.toContain('push');
+    expect(rows(`dpay/${d.id}/PAY1`)).toHaveLength(1);
+  });
+
+  it('a sales account made a viewer with a payment queued: it is not sent, and dropping it puts the team\'s plan back', async () => {
+    const L = await lead();
+    const d = await wonDeal(L);
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    A.net.offline = true;
+    A.e.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: null });
+    A.e.setPlan(d.id, [line('PAY1', 1000), line('PAY3', 500)]);
+    expect(A.e.sales.steps[`${d.id}/PAY1`]?.n).toBe('รับชำระแล้ว 1,000 บาท · โอน');
+    await stored(A);
+    await L.e.adminUpdate('aem', { role: 'viewer' });
+    A.net.offline = false;
+    await settle(A);
+    expect(A.e.role()).toBe('viewer');
+    expect(rows(`dpay/${d.id}/PAY1`).at(-1)!.v).toMatchObject({ rcv: '' });
+    expect(rows(`dpay/${d.id}/PAY3`)).toEqual([]);
+    await A.e.teamDropUnsent();
+    await settle(A);
+    expect(A.e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ rcv: '', amt: 1000 });
+    expect(A.e.sales.pays[`${d.id}/PAY3`]).toBeUndefined();
+    expect(A.e.sales.steps[`${d.id}/PAY1`]).toBeUndefined(); // the note the payment filled in goes too
+    expect(A.net.sent.filter((x) => x === 'push')).toHaveLength(0);
   });
 });
 

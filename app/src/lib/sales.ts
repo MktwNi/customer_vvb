@@ -6,11 +6,12 @@
  * documents can be attached; their amounts, once confirmed, back the Forecast / Actual figures.
  *
  * Shared records (see teamSync.ts keyOf): `deal/<id>`, `dstep/<id>/<stage>`, `ddoc/<id>/<docId>`,
- * `dlog/<id>`, `scfg/<name>` — so two people editing different stages of one deal never collide.
+ * `dpay/<id>/<stage>` (one installment of the payment plan), `dlog/<id>`, `scfg/<name>` — so two
+ * people editing different stages of one deal never collide.
  * Pure functions only (no DOM) so everything here is unit-tested.
  */
 import { norm } from './core';
-import { todayISO } from './format';
+import { addDays, daysBetween, localDay, todayISO } from './format';
 import type { CustomCo } from './types';
 
 /** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
@@ -24,6 +25,8 @@ export const STAGE_TH: Record<string, string> = {
   'CLOSED DEAL': 'ผลการขาย (YES / NO)', PAY1: 'ชำระงวดที่ 1', PAY2: 'ชำระงวดที่ 2',
 };
 export const DEAL_STAGE = 'CLOSED DEAL';
+/** The stage whose quotation is the Forecast. */
+export const QUOTE_STAGE = 'QUOTATION';
 export const OVERDUE_DAYS = 14;
 /** Longest stage note kept (a deal's notes all travel in separate records, each within a sheet cell). */
 export const NOTE_MAX = 3000;
@@ -84,6 +87,40 @@ export interface DealDoc {
   auto?: { stage: string; n: string; d?: string };
 }
 export interface DealLog { id: string; at: string; by: string; action: string; client: string; detail: string; deal: string }
+/** How the customer pays an installment. */
+export type PayHow = '' | 'transfer' | 'cheque' | 'cash' | 'other';
+export const HOW_TH: Record<PayHow, string> = { '': '—', transfer: 'โอน', cheque: 'เช็ค', cash: 'เงินสด', other: 'อื่นๆ' };
+/** Most installments in one deal's plan (more, and the rows stop being readable). */
+export const PLAN_MAX = 12;
+/**
+ * One installment of a deal's payment plan: record `dpay/<deal>/<stage>` (stage = PAY1, PAY2, … or an
+ * extra "PAY<n>" that is not in the stage list). Its own record, not fields on `dstep`: builds before
+ * the plan write a stage step whole ({d, n}) and would erase anything else in it. Edited field by
+ * field (MERGED in teamSync). What was actually received comes from the Actual documents at its stage,
+ * or, with none, from `rcv` / `got` typed at "รับเงินแล้ว".
+ */
+export interface PayLine {
+  /** planned amount (THB) as told to the customer; null = not decided yet */
+  amt: number | null;
+  /** share of the plan base when typed as a %, e.g. 50: kept so the plan can be re-split when the Forecast changes */
+  pct: number | null;
+  /** due date typed (yyyy-mm-dd); wins over `rel` */
+  due: string;
+  /** due as days after the deal was won (the CLOSED DEAL date of a YES): 0 = that day; null = none */
+  rel: number | null;
+  how: PayHow;
+  /** free text for the method: bank, cheque number, or what "อื่นๆ" is */
+  howT: string;
+  /** the condition / note: "มัดจำเมื่อเซ็นสัญญา" */
+  note: string;
+  /** received by hand (no document): the date; '' = not marked */
+  rcv: string;
+  /** amount received by hand; null = the planned amount */
+  got: number | null;
+  /** counted complete although less came in (withholding tax, rounding, an agreed discount) */
+  full: boolean;
+  at: string; by: string;
+}
 export interface SalesState {
   cfg: SalesCfg;
   deals: Record<string, Deal>;
@@ -91,6 +128,10 @@ export interface SalesState {
   steps: Record<string, DealStep>;
   /** `${dealId}/${docId}` → document */
   docs: Record<string, DealDoc>;
+  /** `${dealId}/${stage}` → installment of the payment plan. An older build saving its copy of the
+   *  tracker drops this from the browser's store; every page load re-reads the team log from the
+   *  start (engine load()), which brings it back. */
+  pays: Record<string, PayLine>;
   log: Record<string, DealLog>;
   /** Deals deleted (here or by a teammate): id → when. Kept so an import never brings them back. */
   gone: Record<string, string>;
@@ -102,7 +143,7 @@ export interface SalesState {
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });
-export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, log: {}, gone: {}, undone: {} });
+export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps: {}, docs: {}, pays: {}, log: {}, gone: {}, undone: {} });
 
 /** Current Buddhist-era year as text. */
 export const beYear = (iso = new Date().toISOString()) => String(+iso.slice(0, 4) + 543);
@@ -168,6 +209,28 @@ export function toCust(v: unknown, id: number): CustomCo | null {
   };
 }
 export const toStep = (v: unknown): DealStep | null => (v && typeof v === 'object' ? { d: iso((v as DealStep).d).slice(0, 10), n: str((v as DealStep).n, NOTE_MAX) } : null);
+const HOWS = ['', 'transfer', 'cheque', 'cash', 'other'];
+/** An installment record as this app can use it, or null (not an object). Out-of-range numbers become
+ *  null rather than failing the whole row. */
+export function toPay(v: unknown): PayLine | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const amt = num(o.amt), got = num(o.got), pct = num(o.pct), rel = num(o.rel);
+  return {
+    amt: amt != null && amt >= 0 ? amt : null,
+    pct: pct != null && pct >= 0 && pct <= 100 ? pct : null,
+    due: iso(o.due).slice(0, 10),
+    rel: rel != null && Number.isInteger(rel) && rel >= -365 && rel <= 730 ? rel : null,
+    how: (HOWS.includes(o.how as string) ? o.how : '') as PayHow,
+    howT: str(o.howT, 300),
+    note: str(o.note, 300),
+    rcv: iso(o.rcv).slice(0, 10),
+    got: got != null && got >= 0 ? got : null,
+    full: o.full === true,
+    at: iso(o.at),
+    by: str(o.by, 100),
+  };
+}
 export function toLog(v: unknown, id: string): DealLog | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
@@ -177,6 +240,43 @@ export function toLog(v: unknown, id: string): DealLog | null {
 export const stepOf = (s: SalesState, id: string, stage: string): DealStep => s.steps[`${id}/${stage}`] || { d: '', n: '' };
 export const docsOf = (s: SalesState, id: string) =>
   Object.values(s.docs).filter((d) => d.deal === id).sort((a, b) => (a.at || '').localeCompare(b.at || ''));
+export const payOf = (s: SalesState, id: string, stage: string): PayLine | undefined => (s.pays || {})[`${id}/${stage}`];
+/** Whether a deal has a payment plan (at least one installment). */
+export const hasPlan = (s: SalesState, id: string) => Object.keys(s.pays || {}).some((k) => k.startsWith(id + '/'));
+
+/** Payment stages: after CLOSED DEAL and named PAY… (PAY1, PAY2, PAY3…), in list order; none without CLOSED DEAL. */
+export function payStages(cfg: SalesCfg): string[] {
+  const i = cfg.stages.indexOf(DEAL_STAGE);
+  return i < 0 ? [] : cfg.stages.slice(i + 1).filter((p) => /^PAY/i.test(p));
+}
+export const isPayStage = (cfg: SalesCfg, p: string) => payStages(cfg).includes(p);
+/** "PAY3" when the stage list ends at PAY2: an installment of a plan with more installments than PAY
+ *  stages ("งวดเพิ่ม"). Lines up by name once an admin adds the stage. */
+export const isExtraPay = (cfg: SalesCfg, p: string) => /^PAY\d+$/i.test(p) && !cfg.stages.includes(p);
+/** Thai hint for a stage; an extra installment reads like the PAY stages ("ชำระงวดที่ 3"). */
+export const stageTh = (p: string) => STAGE_TH[p] || (/^PAY(\d+)$/i.test(p) ? 'ชำระงวดที่ ' + +p.slice(3) : '');
+/** The document a stage stands for when attaching there. */
+export const kindForStage = (cfg: SalesCfg, p: string): DocKind => (p === QUOTE_STAGE ? 'quotation' : isPayStage(cfg, p) || isExtraPay(cfg, p) ? 'invoice' : 'other');
+/** What a document attached at a stage counts toward: a quotation is Forecast; an invoice or receipt
+ *  at a PAY stage (or an extra installment) is Actual. Elsewhere as DocAttach always chose. */
+export function targetForStage(cfg: SalesCfg, p: string, kind: DocKind): DocTarget {
+  if (kind === 'quotation') return 'forecast';
+  if ((kind === 'invoice' || kind === 'receipt') && (isPayStage(cfg, p) || isExtraPay(cfg, p))) return 'actual';
+  return kind === 'invoice' ? 'actual' : 'none';
+}
+/** Documents by their stage; no stage, or a stage no longer in the list (and not an installment of the
+ *  deal's plan) → `other` ("เอกสารอื่น"). */
+export function stageDocs(s: SalesState, d: Deal): { by: Record<string, DealDoc[]>; other: DealDoc[] } {
+  const by: Record<string, DealDoc[]> = {}, other: DealDoc[] = [];
+  docsOf(s, d.id).forEach((x) => (x.stage && (s.cfg.stages.includes(x.stage) || payOf(s, d.id, x.stage)) ? (by[x.stage] || (by[x.stage] = [])).push(x) : other.push(x)));
+  return { by, other };
+}
+/** The Actual documents counted at a stage (with an amount), oldest confirmation first: what a new
+ *  document there may replace ("ใช้ยอดนี้แทน") instead of adding to. */
+export const countedAt = (s: SalesState, d: Deal, stage: string) =>
+  docsOf(s, d.id)
+    .filter((x) => x.stage === stage && x.target === 'actual' && x.amount != null)
+    .sort((a, b) => (a.cAt || a.at || '').localeCompare(b.cAt || b.at || ''));
 
 /** Plain number from user / imported text ("1,234.50", "฿ 12 000", "") — null when empty or not a number. */
 export function money(v: unknown): number | null {
@@ -233,7 +333,9 @@ const confirmedAt = (x: DealDoc) => x.cAt || x.at || '';
 /** Effective Forecast / Actual, derived from the records rather than stored, so teammates' edits to
  *  the deal and to its documents never undo each other. Forecast: the most recently confirmed
  *  quotation (target forecast), unless a forecast was typed after it. Actual: the confirmed invoices
- *  / receipts add up (instalments); without any, the typed-in actual. */
+ *  / receipts add up (instalments), plus what was marked received by hand ("รับเงินแล้ว") on plan
+ *  installments that have no Actual document (a document always wins: nothing counts twice); without
+ *  any, the typed-in actual. */
 export function dealMoney(s: SalesState, d: Deal) {
   const docs = docsOf(s, d.id);
   const fcs = docs.filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => confirmedAt(a).localeCompare(confirmedAt(b)));
@@ -241,6 +343,8 @@ export function dealMoney(s: SalesState, d: Deal) {
   const typed = d.forecast != null && (!latest || (d.fcAt || '') >= confirmedAt(latest));
   const fcDoc = typed ? undefined : latest;
   const acs = docs.filter((x) => x.target === 'actual' && x.amount != null);
+  const hands = (planLines(s, d) || []).filter((x) => x.line.rcv && !acs.some((a) => a.stage === x.stage));
+  const hand = hands.reduce((a, x) => a + (x.line.got ?? x.line.amt ?? 0), 0);
   return {
     forecast: fcDoc ? fcDoc.amount! : d.forecast,
     fcConfirmed: !!fcDoc,
@@ -248,22 +352,30 @@ export function dealMoney(s: SalesState, d: Deal) {
     fcDoc,
     /** a typed forecast overrides a confirmed quotation */
     fcOverride: typed && !!latest,
-    actual: acs.length ? acs.reduce((a, x) => a + (x.amount || 0), 0) : d.actual,
+    actual: acs.length || hands.length ? acs.reduce((a, x) => a + (x.amount || 0), 0) + hand : d.actual,
+    /** an Actual document exists (a hand receipt alone is not "confirmed by a document") */
     acConfirmed: acs.length > 0,
     acDocs: acs.length,
+    /** received by hand on installments without a document ("บันทึกเอง"), included in `actual` */
+    hand,
   };
 }
 
-/** Last contact: the typed contact date or the latest stage date, whichever is later; '' when
- *  there is none. A date in the future (a planned call) does not count. */
-export function lastContact(s: SalesState, d: Deal, today: string) {
-  let last = d.contactDate && d.contactDate <= today ? d.contactDate : '';
+/** Last contact: the typed contact date or the latest stage date, whichever is later ('' when there is
+ *  none), and where it came from: 'typed' (deal.contactDate) or the stage. A date in the future (a
+ *  planned call) does not count. */
+export function lastContactInfo(s: SalesState, d: Deal, today: string): { date: string; from: string } {
+  let date = d.contactDate && d.contactDate <= today ? d.contactDate : '', from = date ? 'typed' : '';
   for (const p of s.cfg.stages) {
     const x = s.steps[`${d.id}/${p}`]?.d;
-    if (x && x <= today && x > last) last = x;
+    if (x && x <= today && x > date) {
+      date = x;
+      from = p;
+    }
   }
-  return last;
+  return { date, from };
 }
+export const lastContact = (s: SalesState, d: Deal, today: string) => lastContactInfo(s, d, today).date;
 
 /** The CLOSED DEAL stage note decides the deal result: YES / NO / anything else = waiting. */
 export function dealResult(s: SalesState, d: Deal): 'YES' | 'NO' | 'WAIT' | '' {
@@ -277,10 +389,11 @@ export function dealStatus(s: SalesState, d: Deal) {
     const st = stepOf(s, d.id, p);
     return !!(st.d || st.n.trim());
   });
+  // the result never uses the word "ปิด": ปิดงาน is what moves a job to the ปิดงาน tab
   const overall =
     d.jobStatus === 'closed' ? 'ปิดงาน'
-    : r === 'YES' ? 'ปิดการขายแล้ว'
-    : r === 'NO' ? 'ไม่สำเร็จ'
+    : r === 'YES' ? 'ได้งาน'
+    : r === 'NO' ? 'ไม่ได้งาน'
     : r === 'WAIT' ? stepOf(s, d.id, DEAL_STAGE).n.trim()
     : started ? 'กำลังดำเนินการ'
     : 'ยังไม่เริ่ม';
@@ -288,9 +401,12 @@ export function dealStatus(s: SalesState, d: Deal) {
 }
 
 /** Days since the last contact when an open deal has gone more than OVERDUE_DAYS without one; a
- *  deal nobody has contacted yet counts from the day it was added (so it isn't forgotten). */
+ *  deal nobody has contacted yet counts from the day it was added (so it isn't forgotten). Not for a
+ *  deal ready to close (lost, or won and paid: it needs closing, not a call), nor for a won deal with a
+ *  payment plan (followed by its due dates: "เลยกำหนด" on the installment). */
 export function overdueDays(s: SalesState, d: Deal, today: string) {
   if (d.jobStatus === 'closed') return null;
+  if (closeReady(s, d, today) || (dealResult(s, d) === 'YES' && hasPlan(s, d.id))) return null;
   const lc = lastContact(s, d, today) || (d.at || '').slice(0, 10);
   if (!lc || lc > today) return null;
   const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(lc + 'T00:00:00')) / 864e5);
@@ -315,19 +431,31 @@ export function lastStage(s: SalesState, d: Deal) {
  * - next: the one to do now (the first not done after the last one done) — `next` names it, also when
  *   it is already planned or waiting for the result;
  * - future: still to come; off: not needed (stages after a lost deal).
+ * A won deal with a payment plan follows the plan at its PAY stages: a received installment is done
+ * (on the day it came in), one due later is planned (on its due date), one due or late is still to
+ * come (never skipped), and a PAY stage the plan does not use is off.
  */
 export type StageState = 'done' | 'planned' | 'yes' | 'no' | 'wait' | 'skipped' | 'next' | 'future' | 'off';
 export function stageTrack(s: SalesState, d: Deal, today: string) {
   const stages = s.cfg.stages;
   const res = dealResult(s, d);
   const dIx = stages.indexOf(DEAL_STAGE);
-  const filled = stages.map((p) => {
-    const x = stepOf(s, d.id, p);
-    return !!(x.d || x.n.trim());
-  });
+  const plan = res === 'YES' ? planOf(s, d, today) : null;
+  const pays = plan ? payStages(s.cfg) : [];
+  /** the stage as the track reads it: its step, or what the plan says at a PAY stage */
+  const stepT = (p: string): DealStep & { off?: true; owed?: true } => {
+    if (!plan || !pays.includes(p)) return stepOf(s, d.id, p);
+    const l = plan.lines.find((x) => x.stage === p);
+    if (!l) return { d: '', n: '', off: true };
+    if (l.status === 'paid') return { d: l.rcvDate || today, n: 'paid' };
+    return { d: l.due && l.due > today ? l.due : '', n: '', owed: true };
+  };
+  const steps = stages.map(stepT);
+  const filled = steps.map((x) => !!(x.d || x.n.trim()));
   const lastFilled = filled.lastIndexOf(true);
   const states: StageState[] = stages.map((p, i) => {
-    const x = stepOf(s, d.id, p);
+    const x = steps[i];
+    if (x.off) return 'off';
     if (filled[i]) {
       if (p === DEAL_STAGE) {
         if (res) return res === 'YES' ? 'yes' : res === 'NO' ? 'no' : 'wait';
@@ -336,7 +464,7 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
       return x.d && x.d > today ? 'planned' : 'done';
     }
     if (res === 'NO' && dIx >= 0 && i > dIx) return 'off';
-    return i < lastFilled ? 'skipped' : 'future';
+    return i < lastFilled && !x.owed ? 'skipped' : 'future';
   });
   let next = -1;
   if (res === 'WAIT') next = dIx;
@@ -346,10 +474,13 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
     next = states.findIndex((x, i) => i > lastDone && (x === 'planned' || x === 'future' || x === 'next'));
     // not decided yet: the result is asked for before anything after it (payments, stages added later)
     if (dIx >= 0 && res !== 'YES' && (next < 0 || next > dIx)) next = dIx;
+    // the plan's next installment, also one still owed before a later one that came in
+    const pn = plan?.next?.inList ? stages.indexOf(plan.next.stage) : -1;
+    if (pn >= 0 && (next < 0 || next > pn)) next = pn;
   }
   if (next >= 0 && (states[next] === 'future' || states[next] === 'skipped')) states[next] = 'next';
   // only one stage is "next"
-  states.forEach((x, i) => x === 'next' && i !== next && (states[i] = filled[i] ? 'planned' : i < lastFilled ? 'skipped' : 'future'));
+  states.forEach((x, i) => x === 'next' && i !== next && (states[i] = filled[i] ? 'planned' : i < lastFilled && !steps[i].owed ? 'skipped' : 'future'));
   const done = states.filter((x) => x === 'done' || x === 'yes' || x === 'no' || x === 'wait').length;
   return {
     states: Object.fromEntries(stages.map((p, i) => [p, states[i]])) as Record<string, StageState>,
@@ -362,26 +493,263 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
 }
 
 /** One line for a deal: its status, and the result when the job is closed ("ปิดงาน" alone doesn't say whether it was won), else the stage reached. */
-export function trackerStatus(S: SalesState, d: Deal) {
+export function trackerStatus(S: SalesState, d: Deal, today = todayISO()) {
   const st = dealStatus(S, d);
   const res = st.result === 'YES' || st.result === 'NO' ? st.result : '';
   const last = lastStage(S, d);
-  const overall = st.overall.length > 40 ? st.overall.slice(0, 40) + '…' : st.overall; // a waiting note can be long
+  const plan = d.jobStatus === 'open' && res === 'YES' ? planOf(S, d, today) : null;
+  const overall = plan ? `ได้งาน · รับแล้ว ${plan.paidN}/${plan.n} งวด` : st.overall.length > 40 ? st.overall.slice(0, 40) + '…' : st.overall; // a waiting note can be long
   return [overall, d.jobStatus === 'closed' && res ? 'ผล ' + res : '', !res && last ? 'ขั้นล่าสุด ' + last : ''].filter(Boolean).join(' · ');
 }
 
-/** Quick views of the table: what needs doing (combined with the other filters). */
-export type QuickView = '' | 'overdue' | 'notstarted' | 'active' | 'payment';
+// ------------------------------------------------------------------ payment plan (dpay records)
+
+/** The day the deal was won: the CLOSED DEAL date when the result is YES, else ''. */
+export const wonDate = (s: SalesState, d: Deal) => (dealResult(s, d) === 'YES' ? stepOf(s, d.id, DEAL_STAGE).d : '');
+/** An installment's due date: the typed date, else the won date + `rel` days, else '' (before YES the UI
+ *  says "30 วันหลังได้งาน"). A relative date follows a later change of the CLOSED DEAL date; a typed one doesn't. */
+export const dueOf = (l: Pick<PayLine, 'due' | 'rel'>, won: string) => l.due || (l.rel != null && won ? addDays(won, l.rel) : '');
+/** The stage of installment n (1-based): the n-th PAY stage of the list, else "PAY<n>" (an extra one). */
+export const payStageFor = (cfg: SalesCfg, n: number) => payStages(cfg)[n - 1] || 'PAY' + n;
+/** Amounts in these proportions that add up to `total` exactly: whole baht, the rounding goes to the last. */
+export function splitAmounts(total: number, shares: number[]): number[] {
+  if (!shares.length) return [];
+  let w = shares.map((x) => (isFinite(x) && x > 0 ? x : 0));
+  if (!w.some((x) => x)) w = w.map(() => 1);
+  const sum = w.reduce((a, b) => a + b, 0);
+  const out = w.map((x) => Math.floor((total * x) / sum));
+  out[out.length - 1] += Math.round((total - out.reduce((a, b) => a + b, 0)) * 100) / 100;
+  return out;
+}
+
+/** The plan fields of an installment, as the editor types them (what was received is not among them). */
+export const PLAN_FIELDS = ['amt', 'pct', 'due', 'rel', 'how', 'howT', 'note'] as const;
+export type PlanInput = { stage: string } & Pick<PayLine, (typeof PLAN_FIELDS)[number]>;
+/** The stage note "รับเงินแล้ว" fills in (an empty one), so builds without the plan see the stage done too. */
+export const paidNote = (l: Pick<PayLine, 'amt' | 'got' | 'how'>) => `รับชำระแล้ว ${fmtMoney(l.got ?? l.amt ?? 0)} บาท${l.how ? ' · ' + HOW_TH[l.how] : ''}`;
+
+/** One installment in plan order: `n` is its number (1-based); `inList` = its stage is a PAY stage of the list. */
+export interface PlanEntry { stage: string; n: number; inList: boolean; line: PayLine }
+/** The plan's installments in order — the PAY stages of the list first (list order), then extra ones
+ *  (and lines whose stage an admin renamed or removed) by the number in their name — or null without a plan. */
+export function planLines(s: SalesState, d: Deal): PlanEntry[] | null {
+  const pre = d.id + '/', P = s.pays || {};
+  const names = Object.keys(P).filter((k) => k.startsWith(pre)).map((k) => k.slice(pre.length));
+  if (!names.length) return null;
+  const pays = payStages(s.cfg), no = (p: string) => +p.replace(/\D/g, '') || 99;
+  return [...pays.filter((p) => names.includes(p)), ...names.filter((p) => !pays.includes(p)).sort((a, b) => no(a) - no(b) || a.localeCompare(b))].map((stage, i) => ({
+    stage, n: i + 1, inList: pays.includes(stage), line: P[pre + stage],
+  }));
+}
+
+/** paid รับแล้ว · part รับบางส่วน · late เลยกำหนด · due ถึงกำหนด (within 7 days) · wait รอชำระ · draft แผน (typed
+ *  before YES) · off ยกเลิก (the result is NO; kept in case the deal is reopened). */
+export type PayStatus = 'paid' | 'part' | 'late' | 'due' | 'wait' | 'draft' | 'off';
+export const PAY_STATUS_TH: Record<PayStatus, string> = { paid: 'รับแล้ว', part: 'รับบางส่วน', late: 'เลยกำหนด', due: 'ถึงกำหนด', wait: 'รอชำระ', draft: 'แผน', off: 'ยกเลิก' };
+/** Days ahead of the due date an installment counts as "ถึงกำหนด". */
+export const DUE_SOON = 7;
+export interface LineView extends PlanEntry {
+  /** planned amount (0 when not decided) */
+  amt: number;
+  /** effective due date ('' = none yet) */
+  due: string;
+  /** received: the Actual documents at its stage, else the hand receipt */
+  got: number;
+  /** still owed on it (0 once received, counted complete, before YES or after NO) */
+  left: number;
+  status: PayStatus;
+  /** days past the due date while something is owed (also on a part-paid one), else 0 */
+  lateDays: number;
+  /** when it came in: the stage date its document set (an extra one: the document date), or the hand-receipt date */
+  rcvDate: string;
+  /** the Actual documents counted at its stage, oldest first; `doc` = the latest */
+  docs: DealDoc[];
+  doc: DealDoc | null;
+  /** received by hand ("รับเงินแล้ว", no document) */
+  hand: boolean;
+}
+/** One installment, plan against actual. A document always wins over a hand receipt, so a stage is
+ *  never counted twice; several documents at one stage add up. */
+export function lineView(s: SalesState, d: Deal, x: PlanEntry, today: string): LineView {
+  const docs = docsOf(s, d.id).filter((z) => z.stage === x.stage && z.target === 'actual' && z.amount != null);
+  const l = x.line, hand = !docs.length && !!l.rcv;
+  const got = docs.length ? docs.reduce((a, z) => a + (z.amount || 0), 0) : hand ? (l.got ?? l.amt ?? 0) : 0;
+  const amt = l.amt ?? 0, res = dealResult(s, d), due = dueOf(l, wonDate(s, d));
+  const status: PayStatus =
+    res === 'NO' ? 'off'
+    : got > 0 && (got >= amt || l.full) ? 'paid'
+    : got > 0 ? 'part'
+    : res !== 'YES' ? 'draft'
+    : due && due < today ? 'late'
+    : due && daysBetween(today, due) <= DUE_SOON ? 'due'
+    : 'wait';
+  const owed = status === 'part' || status === 'late' || status === 'due' || status === 'wait';
+  const doc = docs[docs.length - 1] || null, st = stepOf(s, d.id, x.stage);
+  const rcvDate = doc ? (x.inList && st.d && st.d <= today ? st.d : doc.docDate || localDay(doc.at)) : l.rcv;
+  return {
+    ...x, amt, due, got, status, rcvDate, docs, doc, hand,
+    left: owed ? Math.max(0, amt - got) : 0,
+    lateDays: owed && due && due < today ? daysBetween(due, today) : 0,
+  };
+}
+export interface PlanView {
+  lines: LineView[];
+  /** planned total, received, still owed */
+  total: number; got: number; left: number;
+  /** the Forecast it is compared with, and total − Forecast (shown, never enforced) */
+  base: number | null; diff: number | null;
+  n: number; paidN: number;
+  /** the first installment not received (also before YES), null when all are */
+  next: LineView | null;
+  /** installments past their due date with something owed */
+  late: LineView[];
+}
+/** The whole plan, or null without one. */
+export function planOf(s: SalesState, d: Deal, today: string): PlanView | null {
+  const L = planLines(s, d);
+  if (!L) return null;
+  const lines = L.map((x) => lineView(s, d, x, today)), sum = (k: 'amt' | 'got' | 'left') => lines.reduce((a, l) => a + l[k], 0);
+  const total = sum('amt'), base = dealMoney(s, d).forecast;
+  return {
+    lines, total, got: sum('got'), left: sum('left'), base, diff: base != null ? total - base : null, n: lines.length,
+    paidN: lines.filter((l) => l.status === 'paid').length,
+    next: lines.find((l) => l.status !== 'paid' && l.status !== 'off') || null,
+    late: lines.filter((l) => l.lateDays > 0),
+  };
+}
+/** The withholding-tax rate (1, 2, 3 or 5 %) that a short payment matches — the shortfall equals that
+ *  share of the amount before VAT (amount / 1.07), within a baht — or null. "ถือว่ารับครบ" is offered
+ *  pre-ticked then. */
+export function whtRate(planned: number, got: number): number | null {
+  const short = planned - got;
+  if (!(short > 0) || !(planned > 0)) return null;
+  return [1, 2, 3, 5].find((r) => Math.abs(Math.round(((planned / 1.07) * r) / 100) - short) <= 1) ?? null;
+}
+/** Installments still to be received of won, open deals, due from `from` to `to` (inclusive; `from` ''
+ *  = also every late one), soonest first: the calendar's "รับชำระ" entries (derived, never stored). */
+export function payDue(s: SalesState, deals: Deal[], from: string, to: string, today: string): { deal: Deal; line: LineView }[] {
+  const out: { deal: Deal; line: LineView }[] = [];
+  deals.forEach((d) => {
+    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES') return;
+    planOf(s, d, today)?.lines.forEach((l) => l.status !== 'paid' && l.status !== 'off' && l.due && l.due >= from && l.due <= to && out.push({ deal: d, line: l }));
+  });
+  return out.sort((a, b) => a.line.due.localeCompare(b.line.due) || a.deal.client.localeCompare(b.deal.client));
+}
+/** The plan in one CSV cell: "PAY1 53,500 (22/08/2026 โอน) รับแล้ว; PAY2 53,500 (20/10/2026 โอน)". */
+export function planCsv(s: SalesState, d: Deal, today: string): string {
+  const P = planOf(s, d, today);
+  if (!P) return '';
+  const dmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  return P.lines
+    .map((l) => {
+      const when = l.due ? dmy(l.due) : l.line.rel != null ? (l.line.rel ? `${l.line.rel} วันหลังได้งาน` : 'เมื่อได้งาน') : '';
+      const info = [when, l.line.how ? HOW_TH[l.line.how] : ''].filter(Boolean).join(' ');
+      const st = l.status === 'paid' || l.status === 'part' || l.status === 'late' ? ' ' + PAY_STATUS_TH[l.status] : '';
+      return `${l.stage} ${l.line.amt != null ? fmtMoney(l.line.amt) : '-'}${info ? ` (${info})` : ''}${st}`;
+    })
+    .join('; ');
+}
+
+// ------------------------------------------------------------------ payments and closing
+
+/** Paid PAY stages. Without a plan: the PAY stages of the list, paid when done (dated today or earlier,
+ *  or a note) or holding an Actual document — a planned date alone is not paid. With a plan: its
+ *  installments (extra ones too), paid when received in full or counted complete. */
+export function payState(s: SalesState, d: Deal, today: string): { pays: string[]; paid: string[]; left: string[]; plan: PlanView | null } {
+  const plan = planOf(s, d, today);
+  if (plan) {
+    const pays = plan.lines.map((l) => l.stage), paid = plan.lines.filter((l) => l.status === 'paid').map((l) => l.stage);
+    return { pays, paid, left: pays.filter((p) => !paid.includes(p)), plan };
+  }
+  const pays = payStages(s.cfg), t = stageTrack(s, d, today), by = stageDocs(s, d).by;
+  const paid = pays.filter((p) => t.states[p] === 'done' || (by[p] || []).some((x) => x.target === 'actual' && x.amount != null));
+  return { pays, paid, left: pays.filter((p) => !paid.includes(p)), plan: null };
+}
+/** When to offer "ปิดงาน": the result is NO; or it is YES and every installment of the plan is received
+ *  (in full or counted complete) — without a plan, every PAY stage is paid; a list without PAY stages
+ *  needs nothing more. PAY stages the plan does not use, and a plan total off the Forecast, don't matter. */
+export function closeReady(s: SalesState, d: Deal, today: string) {
+  const r = dealResult(s, d);
+  return r === 'NO' || (r === 'YES' && payState(s, d, today).left.length === 0);
+}
+
+/** What a document attaches as: its kind, amount, what it counts toward, date; `stage` = where the user
+ *  attached it (omitted: the generic "แนบเอกสาร…", the stage is chosen); `replace` = a counted Actual
+ *  document at that stage the new one replaces ("ใช้ยอดนี้แทน"). */
+export interface AttachInfo { kind: DocKind; amount: number | null; target: DocTarget; docDate: string; stage?: string; replace?: string }
+/**
+ * The stage a document is tied to.
+ * - Attached at a stage: that stage when it is in the list or is an installment of the deal's plan
+ *   (an extra "PAY3"), else '' (no step is written for a stage that is not configured).
+ * - Otherwise a quotation / Forecast document goes to QUOTATION (when configured), and an Actual one to
+ *   the first installment not received (of the plan, an extra one too; else the first PAY stage not
+ *   paid), else the last one; anything else to ''.
+ */
+export function attachStage(s: SalesState, d: Deal, info: Pick<AttachInfo, 'kind' | 'target' | 'stage'>, today: string): string {
+  const cfg = s.cfg, p = info.stage;
+  if (p !== undefined) return p && (cfg.stages.includes(p) || payOf(s, d.id, p)) ? p : '';
+  if (info.target === 'forecast' || (info.target === 'none' && info.kind === 'quotation')) return cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : '';
+  if (info.target !== 'actual') return '';
+  const ps = payState(s, d, today);
+  return ps.plan?.next?.stage || ps.left[0] || ps.pays[ps.pays.length - 1] || '';
+}
+/** The tracker as attachDoc would leave it with this document (DocAttach previews from it): the
+ *  document counted, its stage done on the document date, a replaced document no longer counted. */
+export function withDoc(s: SalesState, d: Deal, info: AttachInfo, today: string): SalesState {
+  const stage = attachStage(s, d, info, today), id = '~pending', at = '9999-12-31T00:00:00.000Z'; // the newest confirmation
+  const docs: Record<string, DealDoc> = {
+    ...s.docs,
+    [`${d.id}/${id}`]: {
+      id, deal: d.id, kind: info.kind, name: '', mime: '', size: 0, fileId: '', docNo: '', docDate: info.docDate, amount: info.amount,
+      target: info.amount == null ? 'none' : info.target, detected: null, basis: 'manual', stage, at, cAt: at, by: '',
+    },
+  };
+  const old = info.replace ? s.docs[`${d.id}/${info.replace}`] : undefined;
+  if (old) docs[`${d.id}/${old.id}`] = { ...old, target: 'none' };
+  const steps = { ...s.steps };
+  if (stage && s.cfg.stages.includes(stage) && (!isPayStage(s.cfg, stage) || (info.target === 'actual' && info.amount != null))) {
+    const st = stepOf(s, d.id, stage), ad = info.docDate && info.docDate <= today ? info.docDate : today;
+    if (!st.n.trim()) steps[`${d.id}/${stage}`] = { d: ad, n: '·' };
+    else if (!st.d || st.d > today) steps[`${d.id}/${stage}`] = { d: ad, n: st.n };
+  }
+  return { ...s, docs, steps };
+}
+/**
+ * DocAttach's "หลังแนบ" line: where the document goes and what it changes. `line`: the installment at
+ * that stage afterwards (with a plan); `short`: what it still lacks against the plan; `wht`: the
+ * withholding rate the shortfall matches ("ถือว่ารับครบงวดนี้" pre-ticked); `ready` / `readyIfFull`:
+ * attaching makes the deal ready to close (counting the short installment complete, for the second).
+ */
+export function attachPreview(s: SalesState, d: Deal, info: AttachInfo, today: string) {
+  const stage = attachStage(s, d, info, today), after = withDoc(s, d, info, today);
+  const line = (stage && planOf(after, d, today)?.lines.find((l) => l.stage === stage)) || null;
+  const m = dealMoney(after, d), was = closeReady(s, d, today);
+  const k = `${d.id}/${stage}`, full = line && line.got > 0 && line.got < line.amt ? { ...after, pays: { ...after.pays, [k]: { ...after.pays[k], full: true } } } : after;
+  return {
+    stage, line,
+    short: line ? Math.max(0, line.amt - line.got) : 0,
+    wht: line && line.got > 0 && line.got < line.amt ? whtRate(line.amt, line.got) : null,
+    actual: m.actual,
+    /** Actual reaches the Forecast */
+    fcFull: m.forecast != null && m.actual != null && m.actual >= m.forecast,
+    ready: !was && closeReady(after, d, today),
+    readyIfFull: !was && closeReady(full, d, today),
+  };
+}
+
+/** Quick views of the table: what needs doing (combined with the other filters). `paylate` is reached
+ *  from the KPI ค้างรับ ("เลยกำหนด"): won deals with an installment past its due date. */
+export type QuickView = '' | 'overdue' | 'notstarted' | 'active' | 'payment' | 'ready' | 'paylate';
 export function quickMatch(s: SalesState, d: Deal, q: QuickView, today: string) {
   if (!q) return true;
   if (q === 'overdue') return overdueDays(s, d, today) != null;
+  if (q === 'ready') return d.jobStatus === 'open' && closeReady(s, d, today);
   const st = dealStatus(s, d);
   if (q === 'notstarted') return !st.started;
   if (q === 'active') return st.started && (st.result === '' || st.result === 'WAIT');
-  // won, and a payment stage (PAY…, after CLOSED DEAL) is still empty
-  const dIx = s.cfg.stages.indexOf(DEAL_STAGE);
-  const pays = dIx >= 0 ? s.cfg.stages.slice(dIx + 1).filter((p) => /^PAY/i.test(p) || DEFAULT_STAGES.includes(p)) : [];
-  return st.result === 'YES' && pays.some((p) => !stepOf(s, d.id, p).d && !stepOf(s, d.id, p).n.trim());
+  if (q === 'paylate') return st.result === 'YES' && !!planOf(s, d, today)?.late.length;
+  // won, and an installment (a PAY stage, or a line of the plan) is still to be received
+  return st.result === 'YES' && payState(s, d, today).left.length > 0;
 }
 
 export interface SalesFilter { year: string; q?: string; section?: string; source?: string; service?: string; resp?: string; referral?: string; result?: '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY'; day?: string; month?: string; job?: '' | 'open' | 'closed'; quick?: QuickView }
@@ -413,7 +781,8 @@ export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
         if (f.day && cd.slice(8, 10) !== f.day) return false;
       }
       if (terms.length) {
-        const notes = s.cfg.stages.map((p) => stepOf(s, d.id, p).n).join(' ');
+        const plan = (planLines(s, d) || []).map((x) => `${x.line.note} ${x.line.howT}`);
+        const notes = [...s.cfg.stages.map((p) => stepOf(s, d.id, p).n), ...plan].join(' ');
         const hay = [d.client, d.contactName, d.phone, d.email, d.resp, d.referral, d.section, notes].join(' ').toLowerCase();
         if (!terms.every((t) => hay.includes(t))) return false;
       }
@@ -430,7 +799,39 @@ export function sectionsFor(s: SalesState, deals: Deal[]) {
   return out;
 }
 
-export interface SalesStats {
+/** KPI ค้างรับ (open jobs whose result is YES; a plan typed before YES is not money owed yet):
+ * - receivable: what is still owed: the plan's installments not received (the rest of a part-paid
+ *   one too); without a plan, Forecast − Actual while a PAY stage is left;
+ * - late / lateN: of that, installments past their due date (amount, and how many installments);
+ * - dueMonth / dueMonthN: installments due from today to the end of this month (not the late ones). */
+export interface Receivables { receivable: number; late: number; lateN: number; dueMonth: number; dueMonthN: number }
+export function receivables(s: SalesState, deals: Deal[], today: string): Receivables {
+  const r: Receivables = { receivable: 0, late: 0, lateN: 0, dueMonth: 0, dueMonthN: 0 };
+  const monthEnd = today.slice(0, 8) + '31';
+  deals.forEach((d) => {
+    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES') return;
+    const plan = planOf(s, d, today);
+    if (plan)
+      plan.lines.forEach((l) => {
+        if (!l.left) return;
+        r.receivable += l.left;
+        if (l.lateDays > 0) {
+          r.late += l.left;
+          r.lateN++;
+        } else if (l.due && l.due >= today && l.due <= monthEnd) {
+          r.dueMonth += l.left;
+          r.dueMonthN++;
+        }
+      });
+    else {
+      const m = dealMoney(s, d);
+      if (m.forecast != null && (m.actual || 0) < m.forecast && payState(s, d, today).left.length) r.receivable += m.forecast - (m.actual || 0);
+    }
+  });
+  return r;
+}
+
+export interface SalesStats extends Receivables {
   total: number; yes: number; no: number; wait: number; none: number; decided: number; winRate: number;
   forecast: number; actual: number; achieved: number; fcConfirmed: number; acConfirmed: number;
   open: number; closed: number; overdue: number;
@@ -446,6 +847,7 @@ export function salesStats(s: SalesState, deals: Deal[], today: string): SalesSt
   const st: SalesStats = {
     total: deals.length, yes: 0, no: 0, wait: 0, none: 0, decided: 0, winRate: 0, forecast: 0, actual: 0, achieved: 0, fcConfirmed: 0, acConfirmed: 0,
     open: 0, closed: 0, overdue: 0, bySource: {}, byService: {}, stages: s.cfg.stages.map((name) => ({ name, n: 0 })), byResp: {}, byReferral: {},
+    ...receivables(s, deals, today),
   };
   s.cfg.sources.forEach((x) => (st.bySource[x] = { n: 0, forecast: 0, yes: 0, decided: 0 }));
   s.cfg.services.forEach((x) => (st.byService[x] = 0));

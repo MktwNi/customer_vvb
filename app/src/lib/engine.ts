@@ -19,9 +19,9 @@ import {
 } from './teamSync';
 import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
 import {
-  KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, toCust, toDeal, toDoc, toLog, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
-  parseTrackerJson, parseTrackerSheet, stepOf,
-  type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type SalesCfg, type SalesState, type TrackerData,
+  HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, attachStage, beYear, closeReady, countedAt, isPayStage, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
+  toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
+  type Deal, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
@@ -1061,6 +1061,10 @@ export class GccEngine {
         const j = k.indexOf('/'), doc = j > 0 ? toDoc(v, k.slice(0, j), k.slice(j + 1)) : null;
         if (doc && !(k in S.docs)) S.docs[k] = doc;
       });
+      Object.entries(IS.pays || {}).forEach(([k, v]) => {
+        const l = toPay(v);
+        if (l && k.indexOf('/') > 0 && !(k in S.pays)) S.pays[k] = l;
+      });
       Object.entries(IS.log || {}).forEach(([k, v]) => {
         const l = toLog(v, k);
         if (l && !(k in S.log)) S.log[k] = l;
@@ -1335,7 +1339,7 @@ export class GccEngine {
     const at = new Date().toISOString(), by = this.me();
     // typing in one field after another, or rewording a note, is one history entry: the same record
     // is rewritten (the sheet keeps only its last version) instead of a new row per keystroke-save
-    const prev = d.id && (action === 'แก้ไข' || action.startsWith('อัปเดต ')) ? this.lastLog : null;
+    const prev = d.id && (action === 'แก้ไข' || action.startsWith('อัปเดต ') || action === 'แก้แผนชำระ') ? this.lastLog : null;
     const same = prev && this.sales.log[prev.id] && prev.deal === d.id && prev.by === by && prev.action === action && Date.parse(at) - Date.parse(prev.at) < 10 * 60000;
     if (same && action === 'แก้ไข') detail = [...new Set([...prev.detail.split(', '), ...detail.split(', ')])].join(', ');
     const id = same ? prev.id : uid();
@@ -1498,18 +1502,25 @@ export class GccEngine {
     delete this.sales.deals[id];
     this.sales.gone[id] = new Date().toISOString();
     this.op(keyOf.deal(id));
-    Object.keys(this.sales.steps).forEach((k) => {
-      if (!k.startsWith(id + '/')) return;
-      delete this.sales.steps[k];
-      this.op('dstep/' + k);
-    });
-    Object.entries(this.sales.docs).forEach(([k, doc]) => {
+    this.dropDealRecords(id);
+    this.salesLog(d, why, d.section);
+  }
+  /** A deleted deal's stage notes, documents (and their files) and payment plan go with it. */
+  private dropDealRecords(id: string) {
+    const S = this.sales;
+    (['steps', 'pays'] as const).forEach((bag) =>
+      Object.keys(S[bag]).forEach((k) => {
+        if (!k.startsWith(id + '/')) return;
+        delete S[bag][k];
+        this.op((bag === 'steps' ? 'dstep/' : 'dpay/') + k);
+      }),
+    );
+    Object.entries(S.docs).forEach(([k, doc]) => {
       if (doc.deal !== id) return;
-      delete this.sales.docs[k];
+      delete S.docs[k];
       this.op('ddoc/' + k);
       this.dropDocFile(doc);
     });
-    this.salesLog(d, why, d.section);
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
   setSalesList(name: keyof SalesCfg, items: string[]) {
@@ -1545,6 +1556,174 @@ export class GccEngine {
     this.saveSales();
   }
 
+  // ---- payment plan: one record per installment, dpay/<deal>/<stage> (lib/sales.ts planOf)
+  /** Write one installment's plan fields (`p`; received fields are not among them): a new line as a
+   *  whole record, a changed one by the fields that changed — a teammate's receipt on it (rcv / got /
+   *  full) or edit of another field stays (rebaseOp). Returns whether anything changed. */
+  private putPay(d: Deal, stage: string, p: Partial<PlanInput>, at: string, by: string) {
+    const k = `${d.id}/${stage}`, cur = this.sales.pays[k];
+    const was: PayLine = cur || { amt: null, pct: null, due: '', rel: null, how: '', howT: '', note: '', rcv: '', got: null, full: false, at, by };
+    const typed = Object.fromEntries(PLAN_FIELDS.filter((x) => p[x] !== undefined).map((x) => [x, p[x]]));
+    const n = toPay({ ...was, ...typed, at, by })!;
+    const f = PLAN_FIELDS.filter((x) => n[x] !== was[x]);
+    if (cur && !f.length) return false;
+    this.sales.pays[k] = n;
+    this.op(keyOf.dpay(d.id, stage), { ...n }, cur ? { f: [...f, 'at', 'by'] } : {});
+    return true;
+  }
+  /** Received already (by hand, or an Actual document at its stage): such a line is never deleted. */
+  private payReceived(d: Deal, stage: string) {
+    return !!this.sales.pays[`${d.id}/${stage}`]?.rcv || countedAt(this.sales, d, stage).length > 0;
+  }
+  /** One-line summary for the history: "2 งวด · 53,500 + 53,500". */
+  private planSummary(d: Deal) {
+    const L = planLines(this.sales, d) || [];
+    return L.length ? `${L.length} งวด · ${L.map((x) => (x.line.amt != null ? fmtMoney(x.line.amt) : '-')).join(' + ')}` : '';
+  }
+  /**
+   * Replace a deal's plan ("บันทึกแผน"), at most PLAN_MAX lines, one per stage. A new line is written
+   * whole; a changed line by its changed fields; a line no longer listed is deleted unless it was
+   * received — then it stays, and its stage is in `kept` (the UI says so). An empty list removes the
+   * plan (clearPlan). History: ตั้งแผนชำระ / แก้แผนชำระ / ลบแผนชำระ.
+   */
+  setPlan(dealId: string, lines: PlanInput[]): { kept: string[] } {
+    const S = this.sales, d = S.deals[dealId], kept: string[] = [];
+    if (!this.can('edit')) return this.deny(), { kept };
+    if (!d) return { kept };
+    const had = planLines(S, d), at = new Date().toISOString(), by = this.me();
+    // a stage name is part of the record key: no "/" (as in setSalesList)
+    const want = new Map<string, PlanInput>();
+    lines.forEach((x) => {
+      const stage = String(x.stage || '').trim().replace(/\//g, '-').slice(0, 60);
+      if (stage && !want.has(stage) && want.size < PLAN_MAX) want.set(stage, x);
+    });
+    let changed = false;
+    this.batchOps(() => {
+      want.forEach((x, stage) => this.putPay(d, stage, x, at, by) && (changed = true));
+      (had || []).forEach(({ stage }) => {
+        if (want.has(stage)) return;
+        if (this.payReceived(d, stage)) return void kept.push(stage);
+        delete S.pays[`${dealId}/${stage}`];
+        this.op(keyOf.dpay(dealId, stage));
+        changed = true;
+      });
+      if (!changed) return;
+      if (!want.size) this.salesLog(d, 'ลบแผนชำระ', kept.length ? 'เก็บงวดที่รับแล้ว ' + kept.join(', ') : '');
+      else this.salesLog(d, had ? 'แก้แผนชำระ' : 'ตั้งแผนชำระ', this.planSummary(d));
+    });
+    if (changed) this.saveSales();
+    return { kept };
+  }
+  /** Remove the plan: every line not received goes (received ones stay, in `kept`). */
+  clearPlan(dealId: string) {
+    return this.setPlan(dealId, []);
+  }
+  /**
+   * The table's one-click plan ("2 งวด 50/50"): n installments of what is left of the Forecast (Forecast −
+   * Actual so far), in `shares` (default equal; 50/50 for 2), the first due 30 days after the deal was
+   * won and then every 30 days, by transfer. Installments already received stay; the new ones take the
+   * next PAY stages not paid yet (then "PAY<n>"). Returns the new stages and amounts (for the toast), or
+   * null when nothing was done.
+   */
+  quickPlan(dealId: string, n: number, shares?: number[]): { stages: string[]; amounts: (number | null)[] } | null {
+    if (!this.can('edit')) return this.deny(), null;
+    const S = this.sales, d = S.deals[dealId];
+    if (!d) return null;
+    const today = todayISO(), m = dealMoney(S, d), ps = payState(S, d, today);
+    const keep: PlanInput[] = ps.plan
+      ? ps.plan.lines.filter((l) => l.got > 0).map(({ stage, line: l }) => ({ stage, amt: l.amt, pct: l.pct, due: l.due, rel: l.rel, how: l.how, howT: l.howT, note: l.note }))
+      : ps.paid.flatMap((stage) => {
+          // paid by its documents before there was a plan: the line says what came in
+          const got = countedAt(S, d, stage).reduce((a, x) => a + (x.amount || 0), 0);
+          return got > 0 ? [{ stage, amt: got, pct: null, due: '', rel: null, how: '' as PayHow, howT: '', note: '' }] : [];
+        });
+    n = Math.max(1, Math.min(PLAN_MAX - keep.length, Math.floor(n) || 1));
+    const used = new Set([...keep.map((x) => x.stage), ...(ps.plan ? [] : ps.paid)]);
+    const stages: string[] = [];
+    for (let i = 1; stages.length < n && i <= 99; i++) {
+      const p = payStageFor(S.cfg, i);
+      if (!used.has(p) && !stages.includes(p)) stages.push(p);
+    }
+    const sh = shares && shares.length === stages.length ? shares : stages.length === 2 ? [50, 50] : stages.map(() => 1);
+    const total = sh.reduce((a, b) => a + (b > 0 ? b : 0), 0) || 1;
+    const received = m.actual || 0, base = Math.max(0, (m.forecast || 0) - received);
+    const amounts = base > 0 ? splitAmounts(base, sh) : stages.map(() => null);
+    // a share of the Forecast only when nothing has come in yet (else it is a share of what is left)
+    const pct = (i: number) => (received || keep.length ? null : Math.round(((sh[i] > 0 ? sh[i] : 0) / total) * 100));
+    this.setPlan(dealId, [...keep, ...stages.map((stage, i) => ({ stage, amt: amounts[i], pct: pct(i), due: '', rel: 30 * (i + 1), how: 'transfer' as PayHow, howT: '', note: '' }))]);
+    return { stages, amounts };
+  }
+  /** Change one installment's plan fields in place (the panel's inline edit); a stage without a line gets one. */
+  updatePayLine(dealId: string, stage: string, patch: Partial<Omit<PlanInput, 'stage'>>) {
+    if (!this.can('edit')) return this.deny();
+    const d = this.sales.deals[dealId];
+    if (!d || !stage || stage.includes('/')) return;
+    const had = !!planLines(this.sales, d);
+    this.batchOps(() => {
+      if (this.putPay(d, stage, patch, new Date().toISOString(), this.me())) this.salesLog(d, had ? 'แก้แผนชำระ' : 'ตั้งแผนชำระ', this.planSummary(d));
+    });
+    this.saveSales();
+  }
+  /**
+   * "รับเงินแล้ว" without a document: the date, the amount (null = as planned), how, and whether a short
+   * amount counts as complete ("ถือว่ารับครบงวดนี้"). An empty note of the stage is filled in as a
+   * document's would be ("รับชำระแล้ว 53,500 บาท · โอน", on the date received), so builds without the
+   * plan see the stage done too. A document attached there later takes over the amount. Returns true
+   * when this made the deal ready to close (the UI then offers ปิดงาน).
+   */
+  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean {
+    if (!this.can('edit')) return this.deny(), false;
+    const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
+    if (!d || !cur) return false;
+    const today = todayISO(), was = closeReady(S, d, today);
+    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, ...(r.how !== undefined ? { how: r.how } : {}), at: new Date().toISOString(), by: this.me() })!;
+    n.rcv = n.rcv || today;
+    const f = (['rcv', 'got', 'full', 'how'] as const).filter((x) => n[x] !== cur[x]);
+    this.batchOps(() => {
+      S.pays[k] = n;
+      this.op(keyOf.dpay(dealId, stage), { ...n }, { f: [...f, 'at', 'by'] });
+      if (S.cfg.stages.includes(stage) && !stepOf(S, dealId, stage).n.trim()) this.setStep(dealId, stage, { d: n.rcv, n: paidNote(n) }, true, true);
+      this.salesLog(d, 'รับชำระ ' + stage, [`${fmtMoney(n.got ?? n.amt ?? 0)} บาท`, n.how ? HOW_TH[n.how] : '', n.full ? 'ถือว่าครบ' : ''].filter(Boolean).join(' · '));
+    });
+    this.saveSales();
+    return !was && closeReady(S, d, today);
+  }
+  /** Undo a hand receipt ("ยกเลิกการรับ"): the stage note it filled in goes too, while it is unchanged. */
+  unmarkPaid(dealId: string, stage: string) {
+    if (!this.can('edit')) return this.deny();
+    const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
+    if (!d || !cur || (!cur.rcv && cur.got == null && !cur.full)) return;
+    const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur);
+    this.batchOps(() => {
+      S.pays[k] = { ...cur, rcv: '', got: null, full: false, at: new Date().toISOString(), by: this.me() };
+      this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['rcv', 'got', 'full', 'at', 'by'] });
+      if (auto) this.setStep(dealId, stage, { d: st.d !== cur.rcv ? st.d : '', n: '' }, true, true); // a date the user corrected stays
+      this.salesLog(d, 'ยกเลิกการรับ ' + stage);
+    });
+    this.saveSales();
+  }
+  /** Count a short installment as complete (withholding tax, rounding) or open it again. Returns true
+   *  when this made the deal ready to close. */
+  setPayFull(dealId: string, stage: string, full: boolean): boolean {
+    if (!this.can('edit')) return this.deny(), false;
+    const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
+    if (!d || !cur || cur.full === full) return false;
+    const today = todayISO(), was = closeReady(S, d, today);
+    this.batchOps(() => {
+      S.pays[k] = { ...cur, full, at: new Date().toISOString(), by: this.me() };
+      this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['full', 'at', 'by'] });
+      if (full) this.salesLog(d, 'ถือว่ารับครบ ' + stage);
+      else this.salesLog(d, 'แก้แผนชำระ', stage + ' ยังค้างรับ');
+    });
+    this.saveSales();
+    return !was && closeReady(S, d, today);
+  }
+  /** Installments due from `from` to `to` (`from` '' = the late ones too) of won, open deals: the
+   *  calendar's read-only "รับชำระ" entries. */
+  payDue(from: string, to: string) {
+    return payDue(this.sales, Object.values(this.sales.deals), from, to, todayISO());
+  }
+
   // ---- attached documents (quotation / invoice); files go to the team's Drive, a copy stays in this browser
   /** Script supports attachments (null = not checked yet for this connection). */
   teamFiles: boolean | null = null;
@@ -1553,20 +1732,27 @@ export class GccEngine {
   private docUploading = false;
   private docBlobKey = (docId: string) => 'docblob:' + docId;
 
-  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string }) {
+  /**
+   * Attach a document. `info.stage` = the stage the user attached at: a quotation at QUOTATION is the
+   * Forecast; an invoice or receipt at a PAY stage (or an installment of the plan, also an extra one)
+   * is Actual for that installment. Without a stage it is chosen (attachStage). The stage becomes done
+   * on the document date (a PAY stage only with a counted payment): an empty or planned-only stage
+   * gets the document's note; a stage with the user's note keeps it and only its date moves.
+   * `info.replace` = the counted Actual document at that stage the new one replaces ("ใช้ยอดนี้แทน"): it
+   * stays as evidence, no longer counted, and its stage note passes to the new one — so an installment
+   * is never counted twice. Without it, both add up ("นับเพิ่ม").
+   */
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string }) {
     if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
     if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
     const mime = docMime({ name: file.name || '', type: file.type || '' });
     if (!mime) throw new Error('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
-    const S = this.sales;
+    const S = this.sales, today = todayISO();
     const id = uid();
-    const filled = (p: string) => {
-      const x = stepOf(S, dealId, p);
-      return !!(x.d || x.n.trim());
-    };
-    const stage = info.target === 'forecast' || (info.target === 'none' && info.kind === 'quotation') ? 'QUOTATION' : info.target === 'actual' ? (filled('PAY1') ? 'PAY2' : 'PAY1') : '';
+    const stage = attachStage(S, d, info, today);
+    const inList = !!stage && S.cfg.stages.includes(stage); // an extra installment (PAY3) has no step record
     const at = new Date().toISOString();
     const cAt = this.stampAfter([d.fcAt, ...docsOf(S, dealId).map((x) => x.cAt || x.at)]);
     const doc: DealDoc = {
@@ -1574,10 +1760,13 @@ export class GccEngine {
       docNo: info.docNo.slice(0, 60), docDate: info.docDate, amount: info.amount, target: info.amount == null ? 'none' : info.target,
       detected: info.detected, basis: info.basis, stage, at, cAt, by: this.me(),
     };
-    // fill the stage the document stands for, if empty, and remember the note so it can follow the
-    // document (edited amount, deleted document)
-    const ad = info.docDate && info.docDate <= todayISO() ? info.docDate : todayISO();
-    if (stage && !filled(stage)) doc.auto = { stage, n: this.autoNote(doc), d: ad };
+    // fill the stage the document stands for when it is empty, or has only a planned date, and remember
+    // the note so it can follow the document (edited amount, deleted document)
+    const ad = info.docDate && info.docDate <= today ? info.docDate : today;
+    // at a PAY stage only a counted payment completes it: a contract filed there is evidence, not money
+    const st = inList && (!isPayStage(S.cfg, stage) || doc.target === 'actual') ? stepOf(S, dealId, stage) : null;
+    const noted = !!st?.n.trim();
+    if (st && !noted) doc.auto = { stage, n: this.autoNote(doc), d: ad };
     // keep the file in this browser first: it is uploaded to the team's Drive in the background
     let kept = true;
     try {
@@ -1590,14 +1779,24 @@ export class GccEngine {
       const r = await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: id, name: doc.name, mime: doc.mime, blob: file });
       doc.fileId = r.fileId;
     }
-    S.docs[`${dealId}/${id}`] = doc;
-    this.op(keyOf.ddoc(dealId, id), { ...doc });
-    // the forecast follows the newest confirmed quotation (dealMoney): the deal record is not touched
-    if (doc.auto) this.setStep(dealId, doc.auto.stage, { d: ad, n: doc.auto.n }, true, true);
-    this.salesLog(d, 'แนบ' + KIND_TH[doc.kind], `${doc.name}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}`);
+    const k = `${dealId}/${id}`;
+    const old = info.replace ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    this.batchOps(() => {
+      S.docs[k] = doc;
+      this.op(keyOf.ddoc(dealId, id), { ...doc });
+      // the forecast follows the newest confirmed quotation (dealMoney): the deal record is not touched
+      if (doc.auto) this.setStep(dealId, stage, { d: ad, n: doc.auto.n }, true, true);
+      // the user's note stays; a planned date becomes the document date (only `d`, so a teammate's note edit merges)
+      else if (st && noted && (!st.d || st.d > today)) this.setStep(dealId, stage, { d: ad, n: st.n }, true);
+      this.salesLog(d, 'แนบ' + KIND_TH[doc.kind], `${doc.name}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}`);
+      if (old && old.id !== id) {
+        if (old.stage === stage && this.autoStillThere(old)) this.handOverAuto(old, S.docs[k], true);
+        this.updateDoc(dealId, old.id, { target: 'none' });
+      }
+    });
     this.saveSales();
     this.uploadDocs();
-    return doc;
+    return S.docs[k];
   }
   /** An ISO time now, but after every given one: the order of "typed forecast" and "confirmed
    *  quotation" follows what each person saw, not the clocks of different computers. */
@@ -1612,6 +1811,20 @@ export class GccEngine {
   /** The note a document filled in, if nobody has changed it since (else it is the user's now). */
   private autoStillThere(doc: DealDoc) {
     return !!doc.auto && stepOf(this.sales, doc.deal, doc.auto.stage).n === doc.auto.n;
+  }
+  /** `to` (stored) takes over the stage note `from` filled in: the note now names `to`, and follows its
+   *  edits and removal. `clear`: `from` stays (a replaced document) and stops owning the note. */
+  private handOverAuto(from: DealDoc, to: DealDoc, clear = false) {
+    const stage = from.auto!.stage, st = stepOf(this.sales, from.deal, stage), note = this.autoNote(to);
+    const tk = `${to.deal}/${to.id}`, fk = `${from.deal}/${from.id}`;
+    this.sales.docs[tk] = { ...to, auto: { stage, n: note, ...(from.auto!.d ? { d: from.auto!.d } : {}) } };
+    this.op(keyOf.ddoc(to.deal, to.id), { ...this.sales.docs[tk] }, { f: ['auto'] });
+    if (clear && this.sales.docs[fk]) {
+      const { auto: _a, ...rest } = this.sales.docs[fk];
+      this.sales.docs[fk] = rest;
+      this.op(keyOf.ddoc(from.deal, from.id), { ...rest }, { f: ['auto'] });
+    }
+    this.setStep(from.deal, stage, { d: st.d, n: note }, true, true);
   }
   updateDoc(dealId: string, docId: string, patch: Partial<Pick<DealDoc, 'amount' | 'target' | 'basis' | 'kind' | 'docNo' | 'docDate'>>) {
     const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
@@ -1654,12 +1867,8 @@ export class GccEngine {
         .sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at))
         .pop();
       const userDate = doc.auto.d && st.d !== doc.auto.d ? st.d : ''; // a date the user corrected stays
-      if (heir) {
-        const hk = `${dealId}/${heir.id}`, note = this.autoNote(heir);
-        this.sales.docs[hk] = { ...heir, auto: { stage, n: note, ...(doc.auto.d ? { d: doc.auto.d } : {}) } };
-        this.op(keyOf.ddoc(dealId, heir.id), { ...this.sales.docs[hk] }, { f: ['auto'] });
-        this.setStep(dealId, stage, { d: st.d, n: note }, true, true);
-      } else this.setStep(dealId, stage, { d: userDate, n: '' }, true, true);
+      if (heir) this.handOverAuto(doc, heir);
+      else this.setStep(dealId, stage, { d: userDate, n: '' }, true, true);
     }
     delete this.sales.docs[k];
     this.op(keyOf.ddoc(dealId, docId));
@@ -1961,7 +2170,7 @@ export class GccEngine {
     const S = this.sales, C = S.cfg, today = todayISO();
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
-      .concat(['FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ']);
+      .concat(['FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ']);
     const lines = deals.map((d, i) => {
       const m = dealMoney(S, d), st = dealStatus(S, d);
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
@@ -1977,7 +2186,7 @@ export class GccEngine {
           const x = stepOf(S, d.id, p);
           return [csvCell(x.d), csvCell(x.n)];
         }), [csvCell(otherSteps.join(' | '))])
-        .concat([m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | ')].map(csvCell))
+        .concat([m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
         .join(',');
     });
     return [head.map(csvCell).join(','), ...lines].join('\r\n');
@@ -2369,6 +2578,7 @@ export class GccEngine {
     const r: object | undefined =
       type === 'deal' ? S.deals[rest]
       : type === 'ddoc' ? S.docs[rest]
+      : type === 'dpay' ? S.pays[rest]
       : type === 'dstep' ? S.steps[rest] || { d: '', n: '' }
       : type === 'cust' ? this.custom[rest as unknown as number]
       : type === 'contact' ? this.contacts[rest as unknown as number]
@@ -2440,7 +2650,7 @@ export class GccEngine {
     }
   }
   /** Queued deletions of a deal, customer or person this account may not make, with what went with
-   *  them (a deal's stage notes, documents and history entry; a person's notes). */
+   *  them (a deal's stage notes, documents, payment plan and history entry; a person's notes). */
   private refusedCascade(ops: SyncOp[]) {
     const cut = new Set<string>(), deals = new Set<string>(), people = new Set<string>();
     const del = (o: SyncOp) => !!o.del || o.v == null;
@@ -2456,7 +2666,7 @@ export class GccEngine {
         const [type, id] = o.k.split('/');
         const v = o.v as Partial<DealLog> | undefined;
         if (
-          (del(o) && (type === 'dstep' || type === 'ddoc') && deals.has(id)) ||
+          (del(o) && (type === 'dstep' || type === 'ddoc' || type === 'dpay') && deals.has(id)) ||
           (type === 'dundo' && deals.has(id)) ||
           (type === 'dlog' && !!v && deals.has(v.deal || '') && (v.action === 'ลบลูกค้า' || v.action === 'ยกเลิกการนำเข้า')) ||
           (del(o) && type === 'log' && id.startsWith('p-') && people.has(id.slice(2)))
@@ -2620,12 +2830,12 @@ export class GccEngine {
     const lastRow = new Map<string, SyncRow>();
     rows.forEach((r) => this.pending.has(r.k) && lastRow.set(r.k, r));
     const merged: SyncRow[] = [], dropped: SyncOp[] = [], revised = new Map<string, SyncOp>();
-    // a deal the team deleted: notes and documents this browser queued for it are dropped too
+    // a deal the team deleted: notes, documents and plan lines this browser queued for it are dropped too
     const lastDeal = new Map<string, SyncRow>();
     rows.forEach((r) => r.k.startsWith('deal/') && lastDeal.set(r.k.slice(5), r));
     const goneNow = new Set([...lastDeal].filter(([, r]) => r.del || r.v == null).map(([id]) => id));
     this.pending.forEach((o, k) => {
-      const m = /^(dstep|ddoc)\/([^/]+)\//.exec(k);
+      const m = /^(dstep|ddoc|dpay)\/([^/]+)\//.exec(k);
       if (m && goneNow.has(m[2]) && !o.del && !lastRow.has(k) && !this.pendingDealAlive(m[2])) dropped.push(o);
     });
     lastRow.forEach((r, k) => {
@@ -2650,7 +2860,7 @@ export class GccEngine {
       const cur = this.localRecord(k);
       if (!cur) {
         // deleted by a teammate in a row this tab already pulled: the deletion wins over an edit
-        const deal = /^(?:deal|ddoc)\/([^/]+)/.exec(k)?.[1];
+        const deal = /^(?:deal|ddoc|dpay)\/([^/]+)/.exec(k)?.[1];
         if (this.goneKeys.has(k) || (deal && this.sales.gone?.[deal])) dropped.push(o);
         return;
       }
@@ -2774,17 +2984,7 @@ export class GccEngine {
     if (goneDeals.length)
       this.batchOps(() =>
         goneDeals.forEach((id) => {
-          Object.keys(this.sales.steps).forEach((k) => {
-            if (!k.startsWith(id + '/')) return;
-            delete this.sales.steps[k];
-            this.op('dstep/' + k);
-          });
-          Object.entries(this.sales.docs).forEach(([k, doc]) => {
-            if (doc.deal !== id) return;
-            delete this.sales.docs[k];
-            this.op('ddoc/' + k);
-            this.dropDocFile(doc);
-          });
+          this.dropDealRecords(id);
           fx.sales = true;
         }),
       );

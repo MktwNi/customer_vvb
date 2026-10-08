@@ -721,7 +721,7 @@ describe('temporary password (must change)', () => {
 // ------------------------------------------------------------------ 9. role matrix
 
 describe('what each role may write (parity with the web app\'s rule)', () => {
-  const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'zzz'];
+  const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dpay', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'zzz'];
   // a write, and a delete in each of the three forms the web app may send
   const FORMS = [
     { name: 'write', op: (k: string) => ({ k, v: { a: 1 } }), del: false },
@@ -768,6 +768,26 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
     expect(call(s, v, 'pull', { since: 0 })).toMatchObject({ ok: true, rows: [], me: { role: 'viewer' } });
     expect(Number(s.props.SEQ || 0)).toBe(0);
     expect(s.drive.list().find((x) => x.id === fileId)!.trashed).toBe(false);
+  });
+
+  it('installments of a payment plan (dpay/<deal>/<stage>): sales may write and delete them, a viewer may not — the script needs no change', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    const v = { amt: 53500, pct: 50, due: '2026-10-20', rel: null, how: 'transfer', howT: '', note: 'เมื่อส่งรายงาน', rcv: '', got: null, full: false, at: '2026-10-08T03:00:00.000Z', by: 'X' };
+    for (const [k, del] of [['dpay/x/PAY1', false], ['dpay/x/PAY1', true]] as const) {
+      expect(canWriteKey('sales', k, del)).toBe(true);
+      expect(canWriteKey('viewer', k, del)).toBe(false);
+    }
+    expect(call(s, tok, 'push', { ops: [{ k: 'dpay/x/PAY1', v }, { k: 'dpay/x/PAY2', v: { ...v, due: '' } }] })).toMatchObject({ ok: true, n: 2 });
+    expect(call(s, tok, 'push', { ops: [{ k: 'dpay/x/PAY2', del: true }] })).toMatchObject({ ok: true, n: 1 });
+    expect(call(s, tok, 'push', { ops: [{ k: 'dpay/x/PAY1', v: { ...v, rcv: '2026-10-08' } }] }).denied).toEqual([]);
+    const vee = member(s, admin, 'vee', 'วี', 'viewer');
+    expect(call(s, vee, 'push', { ops: [{ k: 'dpay/x/PAY1', del: true }] })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(call(s, vee, 'push', { ops: [{ k: 'dpay/x/PAY3', v }] })).toMatchObject({ ok: false, error: 'forbidden' });
+    const last = new Map(rows(s, admin).map((r) => [r.k, r]));
+    expect(last.get('dpay/x/PAY1')).toMatchObject({ del: false, by: 'สมชาย', v: { rcv: '2026-10-08', amt: 53500 } });
+    expect(last.get('dpay/x/PAY2')).toMatchObject({ del: true, by: 'สมชาย' });
+    expect(last.has('dpay/x/PAY3')).toBe(false);
   });
 
   it('sales may attach and remove documents', () => {
