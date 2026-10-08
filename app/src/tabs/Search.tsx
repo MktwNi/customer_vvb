@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
 import { CONFIG, CST, FEEDS, GCOL, GDESC, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
@@ -102,11 +102,14 @@ export function Search() {
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
 
+  // an account that can only read adds nothing and can't star (the star is the team's watch list):
+  // it sees ★ on the companies the team follows, not a button
+  const edit = e.can('edit');
   const star = (id: number) => {
     const on = C.watch.includes(id);
-    // an account that can only read can't star (the star is the team's watch list)
-    return { star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => (e.can('edit') ? e.toggleWatch(id) : undefined) };
+    return { on, star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => (edit ? e.toggleWatch(id) : undefined) };
   };
+  const roStar = (on: boolean, style: CSSProperties) => (on ? <span role="img" aria-label="ทีมติดตามอยู่" title="ทีมติดตามอยู่" style={{ ...style, color: '#E8A23B' }}>★</span> : <span />);
   const rndPill = (c: Company) =>
     c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1745B8' } : null;
   const cfoView = (c: Company) => {
@@ -160,10 +163,12 @@ export function Search() {
               <Icon name="download" />
               ส่งออก CSV
             </button>
-            <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
-              <Icon name="plus" />
-              เพิ่มลูกค้าใหม่
-            </button>
+            {edit && (
+              <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
+                <Icon name="plus" />
+                เพิ่มลูกค้าใหม่
+              </button>
+            )}
           </div>
         </div>
         <div className="sx-body">
@@ -266,7 +271,7 @@ export function Search() {
                     <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069' }}>{c.code} · {D.prov[c.prov] || '—'}</span>
                   </button>
-                  <button onClick={st.toggle} aria-label="ติดตาม" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, background: 'transparent', fontSize: 22, color: st.fg }}>{st.star}</button>
+                  {edit ? <button onClick={st.toggle} aria-label="ติดตาม" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, background: 'transparent', fontSize: 22, color: st.fg }}>{st.star}</button> : roStar(st.on, { width: 44, height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 })}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
@@ -322,7 +327,7 @@ export function Search() {
               const owner = C.owners[c.id];
               return (
                 <div key={c.id} className="sxr" onClick={(ev) => rowOpen(ev, c.id)} style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: rowPad, alignItems: 'center' }}>
-                  <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.star === '★'} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
+                  {edit ? <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button> : roStar(st.on, { fontSize: 19 })}
                   <button onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontSize: 14.5, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -370,7 +375,7 @@ export function Search() {
               const rp = ct.isLatest && !ct.bad && ct.co ? rndPill(ct.co) : null;
               return (
                 <div key={ct.cid} className="sxr" onClick={(ev) => rowOpen(ev, ct.gid)} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, alignItems: 'center', fontSize: 13.5 }}>
-                  <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.star === '★'} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
+                  {edit ? <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button> : roStar(st.on, { fontSize: 19 })}
                   <span style={{ fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>

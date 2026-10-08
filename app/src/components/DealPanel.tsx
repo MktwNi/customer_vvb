@@ -160,7 +160,9 @@ function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: st
   );
 }
 
-function LinkCompany({ d }: { d: Deal }) {
+/** `ro`: an account that can only read still opens the linked company, but links and unlinks nothing
+ *  (not inside a read-only fieldset, which would disable that button too). */
+function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
   const { engine: e, set } = useApp();
   const [q, setQ] = useState('');
   const found = useMemo(() => {
@@ -176,9 +178,10 @@ function LinkCompany({ d }: { d: Deal }) {
           เชื่อมกับบริษัท <b style={{ fontWeight: 500 }}>{c.name}</b> <span style={{ color: '#5E6680' }}>({c.code})</span>
         </span>
         <button onClick={() => set({ sel: c.id, dTab: 'info' })} style={small}>เปิดหน้าบริษัท</button>
-        <button onClick={() => e.updateDeal(d.id, { gid: null })} style={{ ...small, color: '#475069' }}>ยกเลิกการเชื่อม</button>
+        {!ro && <button onClick={() => e.updateDeal(d.id, { gid: null })} style={{ ...small, color: '#475069' }}>ยกเลิกการเชื่อม</button>}
       </div>
     );
+  if (ro) return <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่ได้เชื่อมกับบริษัทในทะเบียน</span>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่ได้เชื่อมกับบริษัทในทะเบียน — เชื่อมแล้วจะเห็นสถานะ CFO / GI และสถานะการขายนี้ในหน้าบริษัท</span>
@@ -335,12 +338,10 @@ export function DealPanel() {
         </div>
 
         <div style={{ padding: '18px 24px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <ReadOnly ro={ro}>
           <div style={box}>
             <span style={kicker}>บริษัท</span>
-            <LinkCompany d={d} />
+            <LinkCompany d={d} ro={ro} />
           </div>
-          </ReadOnly>
 
           <ReadOnly ro={ro}>
           <div style={box}>

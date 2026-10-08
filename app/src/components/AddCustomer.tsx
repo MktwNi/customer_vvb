@@ -4,9 +4,11 @@ import { beYear } from '../lib/sales';
 import type { Company } from '../lib/types';
 import { Modal } from '../tabs/Sales';
 import { Notice, inputStyle, labelCol, selectStyle } from './ui';
+import { ReadOnly } from './ReadOnly';
 
 const small: CSSProperties = { cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 13 };
 const EMPTY = { name: '', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' };
+const RO_NOTE = 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้';
 
 /**
  * Add a customer that is not in the registry (or edit one added by hand). Similar registry companies are
@@ -26,6 +28,8 @@ export function AddCustomer() {
   const [err, setErr] = useState('');
   const [similar, setSimilar] = useState<Company[]>([]);
   const D = e.B.D;
+  // an account that can only read has no way here; should it get here anyway, nothing can be saved
+  const ro = !e.can('edit');
   const provs = useMemo(() => D.prov.filter(Boolean).slice().sort((x, y) => x.localeCompare(y, 'th')), [D]);
   const close = () => set({ addCust: null });
   // teammates' latest first: a customer one of them added a moment ago is then suggested below
@@ -50,6 +54,7 @@ export function AddCustomer() {
   };
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
+    if (ro) return;
     if (!f.name.trim()) {
       setErr('กรุณาใส่ชื่อบริษัท / ลูกค้า');
       return;
@@ -71,6 +76,8 @@ export function AddCustomer() {
   return (
     <Modal title={edit ? 'แก้ไขข้อมูลลูกค้าที่เพิ่มเอง' : 'เพิ่มลูกค้าใหม่ (ไม่มีในทะเบียน)'} onClose={close} width={640}>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {ro && <Notice kind="info">{RO_NOTE}</Notice>}
+        <ReadOnly ro={ro}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,250px),1fr))', gap: 10 }}>
           <label style={{ ...labelCol, gridColumn: '1 / -1' }}>
             ชื่อบริษัท / ลูกค้า *
@@ -121,6 +128,7 @@ export function AddCustomer() {
             </label>
           )}
         </div>
+        </ReadOnly>
         {err && <Notice kind="error" role="alert">{err}</Notice>}
         <span style={{ fontSize: 12, color: '#5E6680' }}>ลูกค้าที่เพิ่มเองจะมีป้าย "เพิ่มเอง" ค้นหา ติดดาว นัดหมาย และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน และทั้งทีมเห็นด้วย (เมื่อเชื่อมต่อทีม)</span>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
@@ -130,7 +138,7 @@ export function AddCustomer() {
             </button>
           )}
           <button type="button" onClick={close} style={small}>ยกเลิก</button>
-          <button type="submit" style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>
+          {!ro && <button type="submit" style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>}
         </div>
       </form>
     </Modal>
@@ -143,6 +151,7 @@ export function SendToTracker() {
   useEngineVersion();
   // teammates' latest first: a company one of them sent a moment ago shows as already in the table
   useEffect(() => void e.teamSyncNow(), [e]);
+  const ro = !e.can('edit');
   const ids = ui.sendIds || [];
   const cos = ids.map((id) => e.company(id)).filter(Boolean) as Company[];
   const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));
@@ -166,7 +175,8 @@ export function SendToTracker() {
   const years = [...new Set([beYear(), String(+beYear() + 1), year])].sort();
   return (
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
-      <span style={{ fontSize: 13.5, color: '#475069', lineHeight: 1.6 }}>ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ ไม่ต้องพิมพ์ซ้ำ</span>
+      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span style={{ fontSize: 13.5, color: '#475069', lineHeight: 1.6 }}>ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ ไม่ต้องพิมพ์ซ้ำ</span>}
+      <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
         <label style={labelCol}>
           หมวด
@@ -191,11 +201,12 @@ export function SendToTracker() {
           </label>
         ))}
       </div>
+      </ReadOnly>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button onClick={close} style={small}>ยกเลิก</button>
-        <button onClick={send} disabled={!chosen.some((c) => !has(c))} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>
+        {!ro && <button onClick={send} disabled={!chosen.some((c) => !has(c))} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>
           ส่ง {chosen.filter((c) => !has(c)).length} รายการ
-        </button>
+        </button>}
       </div>
     </Modal>
   );

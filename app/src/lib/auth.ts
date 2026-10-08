@@ -59,11 +59,14 @@ export async function derivePk(tid: string, it: number, u: string, pw: string): 
 
 const WEAK = ['12345678', '123456789', '1234567890', 'password', 'password1', 'qwerty123', '11111111', '00000000', 'gcc12345', 'abcd1234'];
 /** The checklist under a new password: long enough, not guessable (a common one, the username or
- *  the name), and both fields the same. */
-export function passwordChecks(pw: string, u: string, name: string, confirm: string) {
+ *  the name), and both fields the same. Given the current or temporary password (`old`, may still
+ *  be empty), also `notOld`: not that one again (compared as the key is made, NFC). */
+export function passwordChecks(pw: string, u: string, name: string, confirm: string, old?: string) {
   const p = pw.trim().toLowerCase();
   const bad = [...WEAK, normUser(u), name.trim().toLowerCase()].filter(Boolean);
-  return { len: pw.length >= 8, notGuessable: !!p && !bad.includes(p), match: !!pw && pw === confirm };
+  const c: { len: boolean; notGuessable: boolean; match: boolean; notOld?: boolean } = { len: pw.length >= 8, notGuessable: !!p && !bad.includes(p), match: !!pw && pw === confirm };
+  if (old !== undefined) c.notOld = !!pw && pw.normalize('NFC') !== old.normalize('NFC');
+  return c;
 }
 
 /** A temporary password for a new account or a reset: 10 easy-to-read characters, as xxxx-xxxx-xx

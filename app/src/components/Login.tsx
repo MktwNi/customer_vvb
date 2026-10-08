@@ -153,12 +153,14 @@ function PwField({ label, value, onChange, autoComplete, hints, inputRef, autoFo
   );
 }
 
-/** The live checklist under a new password. */
-function Checklist({ pw, confirm, u, name }: { pw: string; confirm: string; u: string; name: string }) {
-  const c = passwordChecks(pw, u, name, confirm);
+/** The live checklist under a new password; `old` (the current or temporary password) adds the
+ *  line `oldLabel`: not that one again. */
+function Checklist({ pw, confirm, u, name, old, oldLabel = '' }: { pw: string; confirm: string; u: string; name: string; old?: string; oldLabel?: string }) {
+  const c = passwordChecks(pw, u, name, confirm, old);
   const rows: [boolean, string][] = [
     [c.len, 'อย่างน้อย 8 ตัวอักษร'],
     [c.notGuessable, 'ไม่ใช่ชื่อผู้ใช้หรือรหัสที่เดาง่าย'],
+    ...(c.notOld === undefined ? [] : [[c.notOld, oldLabel] as [boolean, string]]),
     [c.match, 'ทั้งสองช่องตรงกัน'],
   ];
   return (
@@ -173,10 +175,24 @@ function Checklist({ pw, confirm, u, name }: { pw: string; confirm: string; u: s
     </ul>
   );
 }
-const pwOk = (pw: string, confirm: string, u: string, name: string) => {
-  const c = passwordChecks(pw, u, name, confirm);
-  return c.len && c.notGuessable && c.match;
+const pwOk = (pw: string, confirm: string, u: string, name: string, old?: string) => {
+  const c = passwordChecks(pw, u, name, confirm, old);
+  return c.len && c.notGuessable && c.match && c.notOld !== false;
 };
+
+/** The password typed for the sign-in in progress, kept while it is the temporary one the engine
+ *  still holds: the must-change screen, which then doesn't ask for it, refuses it as the new one. */
+let signInPw = '';
+async function signIn(e: GccEngine, u: string, pw: string, rm: boolean) {
+  signInPw = pw; // first: the must-change screen opens before teamLogin returns
+  try {
+    await e.teamLogin(u, pw, rm);
+  } catch (x) {
+    signInPw = '';
+    throw x;
+  }
+  if (!e.knowsTempPassword) signInPw = '';
+}
 
 function SubmitBtn({ busy, disabled, children, busyText }: { busy: boolean; disabled?: boolean; children: ReactNode; busyText: string }) {
   return (
@@ -315,7 +331,7 @@ function LoginForm({ url }: { url: string }) {
     setErr(null);
     try {
       await whenReady(e);
-      await e.teamLogin(user, pw, rm);
+      await signIn(e, user, pw, rm);
     } catch (x) {
       if (!alive.current) return;
       const r = authError(x);
@@ -411,12 +427,24 @@ function RecoverForm({ onBack }: { onBack: () => void }) {
   const [pw2, setPw2] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // what is wrong with the code or the username shows under that field (and the keyboard goes there)
+  const [codeErr, setCodeErr] = useState('');
+  const [uErr, setUErr] = useState('');
+  const codeRef = useRef<HTMLInputElement>(null);
+  const uRef = useRef<HTMLInputElement>(null);
+  const fieldErr = (which: 'code' | 'u', msg: string) => {
+    setErr('');
+    (which === 'code' ? setCodeErr : setUErr)(msg);
+    (which === 'code' ? codeRef : uRef).current?.focus();
+  };
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     if (busy) return;
     const user = normUser(u);
-    if (code.replace(/\D/g, '').length !== 8) return setErr('ใส่รหัสกู้คืน 8 หลักจาก Execution log');
-    if (!USER_RE.test(user)) return setErr('ชื่อผู้ใช้ใช้ได้เฉพาะภาษาอังกฤษตัวเล็ก ตัวเลข . _ - ยาว 3–32 ตัว');
+    setCodeErr('');
+    setUErr('');
+    if (code.replace(/\D/g, '').length !== 8) return fieldErr('code', 'ใส่รหัสกู้คืน 8 หลักจาก Execution log');
+    if (!USER_RE.test(user)) return fieldErr('u', 'ชื่อผู้ใช้ใช้ได้เฉพาะภาษาอังกฤษตัวเล็ก ตัวเลข . _ - ยาว 3–32 ตัว');
     if (!pwOk(pw, pw2, user, '')) return setErr('รหัสผ่านใหม่ยังไม่ตรงตามเงื่อนไขด้านล่าง');
     setBusy(true);
     setErr('');
@@ -425,8 +453,15 @@ function RecoverForm({ onBack }: { onBack: () => void }) {
       await e.teamRecover(code.replace(/\D/g, ''), user, pw, true);
     } catch (x) {
       if (!alive.current) return;
-      setErr(authError(x).msg);
+      const r = authError(x);
       setBusy(false);
+      // no account with that username: the script answers unknown_user (an older one bad_name, as
+      // it would make a new admin, whose display name this form doesn't ask); setup() logs the
+      // admin usernames next to the recovery code
+      if (r.code === 'unknown_user' || r.code === 'bad_name') fieldErr('u', 'ไม่พบชื่อผู้ใช้นี้ — ตรวจตัวสะกด หรือดูชื่อผู้ใช้ใน Execution log ตอนกด Run setup');
+      else if (r.code === 'bad_user') fieldErr('u', r.msg);
+      else if (r.code === 'bad_code') fieldErr('code', 'รหัสกู้คืนไม่ถูกต้องหรือหมดอายุ — กด Run setup ใน Apps Script อีกครั้งเพื่อขอรหัสใหม่');
+      else setErr(r.msg);
     }
   };
   return (
@@ -444,8 +479,35 @@ function RecoverForm({ onBack }: { onBack: () => void }) {
         <li><span>คัดลอกรหัสกู้คืนจาก Execution log (ใช้ได้ 24 ชั่วโมง)</span></li>
       </ol>
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy || undefined}>
-        <TextField label="รหัสกู้คืน" value={code} onChange={(v) => setCode(fmtCode(v))} inputMode="numeric" autoComplete="one-time-code" placeholder="1234-5678" className="auth-input auth-code" autoFocus />
-        <TextField label="ชื่อผู้ใช้ผู้ดูแล" value={u} onChange={setU} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+        <TextField
+          label="รหัสกู้คืน"
+          value={code}
+          onChange={(v) => {
+            setCode(fmtCode(v));
+            setCodeErr('');
+          }}
+          inputRef={codeRef}
+          err={codeErr}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="1234-5678"
+          className="auth-input auth-code"
+          autoFocus
+        />
+        <TextField
+          label="ชื่อผู้ใช้ผู้ดูแล"
+          value={u}
+          onChange={(v) => {
+            setU(v);
+            setUErr('');
+          }}
+          inputRef={uRef}
+          err={uErr}
+          autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+        />
         <PwField label="รหัสผ่านใหม่" value={pw} onChange={setPw} autoComplete="new-password" hints />
         <PwField label="ยืนยันรหัสผ่านใหม่" value={pw2} onChange={setPw2} autoComplete="new-password" />
         <Checklist pw={pw} confirm={pw2} u={normUser(u)} name="" />
@@ -589,23 +651,27 @@ function ChangeForm() {
   const s = e.session;
   const name = s?.name || '', u = s?.u || '';
   // the temporary password typed at sign-in is still known in this tab: only the new one is asked
-  const [needOld] = useState(() => !e.knowsTempPassword);
+  const [temp] = useState(() => (e.knowsTempPassword ? signInPw : ''));
+  const needOld = !temp;
   const [old, setOld] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // the new password must not be the temporary one (the admin and the chat it was sent in know it)
+  const cur = needOld ? old : temp;
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     if (busy) return;
     if (needOld && !old) return setErr('ใส่รหัสผ่านชั่วคราวที่ได้จากผู้ดูแลระบบ');
-    if (needOld && old === pw) return setErr('รหัสผ่านใหม่ต้องไม่เหมือนรหัสเดิม');
-    if (!pwOk(pw, pw2, u, name)) return setErr('รหัสผ่านใหม่ยังไม่ตรงตามเงื่อนไขด้านล่าง');
+    if (passwordChecks(pw, u, name, pw2, cur).notOld === false) return setErr('รหัสผ่านใหม่ต้องไม่เหมือนรหัสผ่านชั่วคราว');
+    if (!pwOk(pw, pw2, u, name, cur)) return setErr('รหัสผ่านใหม่ยังไม่ตรงตามเงื่อนไขด้านล่าง');
     setBusy(true);
     setErr('');
     try {
       await whenReady(e);
       await e.teamChangePassword(needOld ? old : '', pw);
+      signInPw = '';
     } catch (x) {
       if (!alive.current) return;
       const r = authError(x);
@@ -625,12 +691,19 @@ function ChangeForm() {
         {needOld && <PwField label="รหัสผ่านชั่วคราว" value={old} onChange={setOld} autoComplete="current-password" hints autoFocus />}
         <PwField label="รหัสผ่านใหม่" value={pw} onChange={setPw} autoComplete="new-password" hints autoFocus={!needOld} />
         <PwField label="ยืนยันรหัสผ่านใหม่" value={pw2} onChange={setPw2} autoComplete="new-password" />
-        <Checklist pw={pw} confirm={pw2} u={u} name={name} />
+        <Checklist pw={pw} confirm={pw2} u={u} name={name} old={cur} oldLabel="ไม่ใช่รหัสผ่านชั่วคราว" />
         {err && <Msg kind="err">{err}</Msg>}
         <SubmitBtn busy={busy} busyText="กำลังบันทึก…">บันทึกและเริ่มใช้งาน</SubmitBtn>
       </form>
       <div className="auth-foot">
-        <button type="button" className="auth-link" onClick={() => e.teamLogout()}>
+        <button
+          type="button"
+          className="auth-link"
+          onClick={() => {
+            signInPw = '';
+            e.teamLogout();
+          }}
+        >
           ออกจากระบบ
         </button>
       </div>
@@ -743,7 +816,7 @@ export function ReLogin({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setErr(null);
     try {
-      await e.teamLogin(s.u, pw, s.rm);
+      await signIn(e, s.u, pw, s.rm);
     } catch (x) {
       if (!alive.current) return;
       const r = authError(x);
@@ -796,8 +869,8 @@ export function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
     ev.preventDefault();
     if (busy) return;
     if (!old) return setErr('ใส่รหัสผ่านปัจจุบัน');
-    if (old === pw) return setErr('รหัสผ่านใหม่ต้องไม่เหมือนรหัสเดิม');
-    if (!pwOk(pw, pw2, u, name)) return setErr('รหัสผ่านใหม่ยังไม่ตรงตามเงื่อนไขด้านล่าง');
+    if (passwordChecks(pw, u, name, pw2, old).notOld === false) return setErr('รหัสผ่านใหม่ต้องไม่เหมือนรหัสเดิม');
+    if (!pwOk(pw, pw2, u, name, old)) return setErr('รหัสผ่านใหม่ยังไม่ตรงตามเงื่อนไขด้านล่าง');
     setBusy(true);
     setErr('');
     try {
@@ -824,7 +897,7 @@ export function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
           <PwField label="รหัสผ่านปัจจุบัน" value={old} onChange={setOld} autoComplete="current-password" hints />
           <PwField label="รหัสผ่านใหม่" value={pw} onChange={setPw} autoComplete="new-password" hints />
           <PwField label="ยืนยันรหัสผ่านใหม่" value={pw2} onChange={setPw2} autoComplete="new-password" />
-          <Checklist pw={pw} confirm={pw2} u={u} name={name} />
+          <Checklist pw={pw} confirm={pw2} u={u} name={name} old={old} oldLabel="ไม่ใช่รหัสผ่านปัจจุบัน" />
           <p className="auth-note"><Icon name="alert" size={15} /> เครื่องอื่นที่เข้าสู่ระบบไว้จะถูกออกจากระบบ</p>
           {err && <Msg kind="err">{err}</Msg>}
           <div className="auth-row">
