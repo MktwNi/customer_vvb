@@ -72,6 +72,21 @@ describe('passwords', () => {
     expect(passwordChecks('green-tea-42', 'mod', 'มด', 'green-tea-4')).toEqual({ len: true, notGuessable: true, match: false });
     expect(passwordChecks('green-tea-42', 'mod', 'มด', 'green-tea-42')).toEqual({ len: true, notGuessable: true, match: true });
     expect(passwordChecks('', 'mod', 'มด', '')).toEqual({ len: false, notGuessable: false, match: false });
+    expect(passwordChecks('green-tea-42', 'mod', 'มด', 'green-tea-42')).not.toHaveProperty('notOld');
+  });
+  it('the checklist with the current or temporary password: the new one must differ from it', () => {
+    // the temporary password the admin sent passes every other check, so it needs this one
+    const temp = 'abcd-efgh-jk';
+    expect(passwordChecks(temp, 'mod', 'มด', temp, temp)).toEqual({ len: true, notGuessable: true, match: true, notOld: false });
+    expect(passwordChecks('green-tea-42', 'mod', 'มด', 'green-tea-42', temp)).toEqual({ len: true, notGuessable: true, match: true, notOld: true });
+    // the same password written another way in Unicode makes the same key
+    const nfc = 'café-ก่อน-99';
+    expect(passwordChecks(nfc.normalize('NFD'), 'mod', 'มด', nfc.normalize('NFD'), nfc).notOld).toBe(false);
+    // case counts, as in the key
+    expect(passwordChecks('ABCD-EFGH-JK', 'mod', 'มด', 'ABCD-EFGH-JK', temp).notOld).toBe(true);
+    // the old one not typed yet: nothing to compare with; an empty new one never passes
+    expect(passwordChecks('green-tea-42', 'mod', 'มด', 'green-tea-42', '').notOld).toBe(true);
+    expect(passwordChecks('', 'mod', 'มด', '', temp).notOld).toBe(false);
   });
   it('a temporary password: xxxx-xxxx-xx from letters and digits that are easy to read', () => {
     const seen = new Set<string>();

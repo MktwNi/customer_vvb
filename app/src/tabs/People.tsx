@@ -174,7 +174,7 @@ function PeopleList() {
             <span>บันทึกคนที่คุยด้วยในแต่ละบริษัท เพื่อดูประวัติการโทร นัด และโน้ตของแต่ละคน ทั้งทีมเห็นเหมือนกัน</span>
             <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
               {e.can('edit') && <button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button>}
-              {sugg.length > 0 && <button onClick={() => setShowSugg(true)} style={btnOutline}>นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
+              {sugg.length > 0 && e.can('edit') && <button onClick={() => setShowSugg(true)} style={btnOutline}>นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
             </span>
           </div>
         ) : !list.length ? (
@@ -632,7 +632,7 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
       </div>
       <div className={'pe-tl-card' + (withP ? ' mine' : '')}>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <DoneBox t={t} color={ty[2]} onToggle={() => !ro && e.toggleTask(t)} size={12} />
+          <DoneBox t={t} color={ty[2]} onToggle={() => !ro && e.toggleTask(t)} size={12} ro={ro} />
           <span className="pe-type" style={{ color: TYPE_INK[ty[0]] || ty[2], background: ty[2] + '14' }}>{ty[1]}</span>
           <span style={{ fontWeight: 500 }}>{t.time || 'ทั้งวัน'}</span>
           {over && <span className="pe-chip warn">เกินกำหนด</span>}

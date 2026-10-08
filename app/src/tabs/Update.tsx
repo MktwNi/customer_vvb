@@ -10,10 +10,11 @@ const section: CSSProperties = { ...card, padding: 22, display: 'flex', flexDire
 const intro: CSSProperties = { fontSize: 13.5, color: '#475069', fontWeight: 300, lineHeight: 1.65, textWrap: 'pretty' };
 const box: CSSProperties = { background: '#F6F8FE', borderRadius: 12, display: 'flex', flexDirection: 'column' };
 
-/** Display names that have an account (lower case), for an admin; empty offline or for anyone else. */
+/** Display names that have an account (lower case), for an admin; null while the list isn't known
+ *  (loading, offline, it couldn't be read, or anyone else). */
 function useAccountNames(on: boolean) {
   const { engine: e } = useApp();
-  const [names, setNames] = useState<Set<string>>(() => new Set());
+  const [names, setNames] = useState<Set<string> | null>(null);
   useEffect(() => {
     if (!on || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     let live = true;
@@ -193,10 +194,12 @@ export function Update() {
         )}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {C.team.map((name) => {
-            // names with an account stay (they are people signing in); partners without one can go
-            const locked = !admin || (!!role && accounts.has(name.trim().toLowerCase()));
+            // names with an account stay (they are people signing in); partners without one can go,
+            // which is known only once the users list is read
+            const hasAccount = !!role && !!accounts?.has(name.trim().toLowerCase());
+            const locked = !admin || (!!role && (!accounts || hasAccount));
             return (
-              <span key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', height: 32, padding: locked ? '0 12px' : '0 6px 0 12px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', fontSize: 13 }} title={role && accounts.has(name.trim().toLowerCase()) ? 'มีบัญชีผู้ใช้' : undefined}>
+              <span key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', height: 32, padding: locked ? '0 12px' : '0 6px 0 12px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', fontSize: 13 }} title={hasAccount ? 'มีบัญชีผู้ใช้' : undefined}>
                 {name} · {fmtN(ownN[name] || 0)} บริษัท
                 {!locked && <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} style={{ cursor: 'pointer', width: 22, height: 22, borderRadius: '50%', border: 0, background: 'rgba(10,26,134,.12)', color: '#1745B8', fontSize: 13, padding: 0 }}>×</button>}
               </span>
