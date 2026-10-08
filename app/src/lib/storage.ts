@@ -108,6 +108,13 @@ export const prefs = {
       /* ignore */
     }
   },
+  del(key: string) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  },
 };
 
 /** localStorage keys (same as the prototype). */
@@ -127,4 +134,10 @@ export const PREF = {
   peopleHide: 'gcc-people-hide',
   /** … and those deleted (here or by a teammate). */
   peopleGone: 'gcc-people-gone',
+  /** The account signed in on this browser (team accounts): {url, u, name, role, tok, exp, rm, mc}. */
+  session: 'gcc-team-session',
+  /** The last account that chose "จดจำฉัน" ({u, name}), offered on the login screen. */
+  lastUser: 'gcc-team-last-user',
+  /** Set when a sign-out wiped this browser's team data: other tabs reload. */
+  wipe: 'gcc-team-wipe',
 } as const;

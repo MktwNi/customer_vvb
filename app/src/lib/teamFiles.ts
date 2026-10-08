@@ -4,7 +4,7 @@
  * so teammates can open them without the Drive folder ever being shared with them. Only the
  * returned fileId needs to be stored (and synced) with the record the file belongs to.
  */
-import { call, TeamSyncError, type Transport } from './teamSync';
+import { call, TeamSyncError, type Cred, type Transport } from './teamSync';
 
 /** Same limit and types as Code.gs; checked here too so a file the script would refuse is not sent. */
 export const DOC_MAX_BYTES = 10 * 1024 * 1024;
@@ -62,12 +62,12 @@ export function base64ToBlob(b64: string, mime: string): Blob {
 /** Rejects with the TeamSyncError the script itself would answer with (Thai text from teamSync's
  *  error table), for a file refused before it is sent. */
 async function refused(code: string): Promise<never> {
-  await call(async () => ({ ok: false, error: code }), '', '', {});
+  await call(async () => ({ ok: false, error: code }), '', null, {});
   throw new TeamSyncError(code, code); // not reached: call() throws on ok:false
 }
 
 /** Upload a document for record `docId`; keep the returned fileId to open or delete it later. */
-export async function uploadDocFile(t: Transport, url: string, key: string, f: { docId: string; name: string; mime: string; blob: Blob }): Promise<{ fileId: string; size: number }> {
+export async function uploadDocFile(t: Transport, url: string, key: Cred, f: { docId: string; name: string; mime: string; blob: Blob }): Promise<{ fileId: string; size: number }> {
   const mime = docMime({ name: f.name, type: f.mime });
   if (!mime) return refused('bad_file_type');
   if (!f.blob.size) return refused('empty_file');
@@ -76,7 +76,7 @@ export async function uploadDocFile(t: Transport, url: string, key: string, f: {
   return { fileId: String(r.fileId), size: Number(r.size) };
 }
 
-export async function downloadDocFile(t: Transport, url: string, key: string, fileId: string): Promise<{ blob: Blob; name: string; mime: string }> {
+export async function downloadDocFile(t: Transport, url: string, key: Cred, fileId: string): Promise<{ blob: Blob; name: string; mime: string }> {
   const r = await call(t, url, key, { action: 'file', fileId });
   // the script only serves upload types, but never trust a type that could open as a page in the
   // app's origin (text/html, image/svg+xml): anything else becomes a plain download
@@ -89,7 +89,7 @@ export async function downloadDocFile(t: Transport, url: string, key: string, fi
 
 /** Moves the file to the owner's Drive trash. A file that is already gone counts as deleted
  *  (removed from another browser, or by the owner in Drive). */
-export async function deleteDocFile(t: Transport, url: string, key: string, fileId: string): Promise<void> {
+export async function deleteDocFile(t: Transport, url: string, key: Cred, fileId: string): Promise<void> {
   try {
     await call(t, url, key, { action: 'delfile', fileId });
   } catch (e) {
@@ -99,7 +99,7 @@ export async function deleteDocFile(t: Transport, url: string, key: string, file
 
 /** Whether the deployed script stores attachments; a script from before this feature has no
  *  `files` flag in its ping (and answers the file actions with unknown_action). */
-export async function scriptSupportsFiles(t: Transport, url: string, key: string): Promise<boolean> {
+export async function scriptSupportsFiles(t: Transport, url: string, key: Cred): Promise<boolean> {
   const r = await call(t, url, key, { action: 'ping' });
   return r.files === true;
 }

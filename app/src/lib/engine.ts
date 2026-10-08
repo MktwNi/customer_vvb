@@ -14,9 +14,10 @@ import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import { NOTE_CAP, PERSON_FIELDS, personSuggestions, toPerson, type PersonForm } from './people';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
-  type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
+import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
 import {
   KIND_TH, NOTE_MAX, beYear, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, toCust, toDeal, toDoc, toLog, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv,
   parseTrackerJson, parseTrackerSheet, stepOf,
@@ -31,6 +32,19 @@ const pendKey = (url: string) => 'teamPending:' + url;
 const TEXT_MAX = 5000;
 /** Whether queued change `a` is at least as recent as `b` (same record). */
 const newer = (a: SyncOp, b: SyncOp) => (a.t || 0) >= (b.t || 0);
+/** One op per record, the newest. */
+const newestPerKey = (ops: SyncOp[]) => {
+  const m = new Map<string, SyncOp>();
+  ops.forEach((o) => {
+    const p = m.get(o.k);
+    if (!p || newer(o, p)) m.set(o.k, o);
+  });
+  return [...m.values()];
+};
+/** The script's answer to login / claim. */
+interface SignIn extends Record<string, unknown> { tok: string; exp: number; me: { u: string; name: string; role: Role }; mc?: boolean }
+/** An account as the admin page lists it. */
+export interface TeamUser { u: string; name: string; role: Role; on: number | boolean; mc: boolean; ll: string; c: string; locked?: number }
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -111,6 +125,26 @@ export class GccEngine {
   private unstored = new Set<string>();
   /** The sheet rejected the team code; the "new code" form stays until a sync succeeds. */
   teamNeedKey = false;
+
+  // ---- team accounts (Code.gs v3; see lib/auth.ts)
+  /** The account signed in on this browser for the connected team (PREF.session), if it uses accounts. */
+  session: Session | null = null;
+  /** What the team script at `caps.url` supports (from `hello`). */
+  caps: (Caps & { url: string }) | null = null;
+  /** A screen in front of the app: sign in, first-admin setup, set your password, session expired,
+   *  account disabled; '' = none. `authUrl` is the team it is for. */
+  auth: '' | 'login' | 'setup' | 'change' | 'expired' | 'disabled' = '';
+  authUrl = '';
+  /** A notice for the sign-in screen (e.g. "you signed out"). */
+  authMsg = '';
+  /** A notice about team sync for this account (changes it may not make, unsent edits). */
+  teamNote = '';
+  /** Records this account changed but may not: put back to the team's value by the next round. */
+  private revert = new Set<string>();
+  /** PREF.session as last read or written by this tab (to notice other tabs signing in and out). */
+  private sessionRaw = '';
+  /** The temporary password typed at sign-in, kept in memory until the new one is set (must-change). */
+  private lastPw = '';
   /** The team config as last written/read by this tab (raw localStorage text), to notice changes
    *  made by other tabs (connect, disconnect, new code). */
   private teamRaw = '';
@@ -128,6 +162,11 @@ export class GccEngine {
     if (this.teamCfg && !(typeof document !== 'undefined' && document.hidden)) this.teamSync();
   };
   private teamPrefsChanged = (e: StorageEvent) => {
+    if (e.key === PREF.wipe) {
+      if (typeof location !== 'undefined') location.reload(); // another tab signed out and wiped the team data
+      return;
+    }
+    if (e.key === PREF.session || e.key === null) this.adoptSession();
     if (e.key !== PREF.team && e.key !== null) return;
     this.adoptTeamPrefs();
     if (this.teamCfg && this.team.status === 'error') this.teamSync(); // e.g. a new code entered in another tab
@@ -166,6 +205,20 @@ export class GccEngine {
     try {
       this.teamRaw = prefs.getRaw(PREF.team);
       const team0 = prefs.get<TeamCfg | null>(PREF.team, null);
+      // a team with accounts: the session signed in on this browser, if it can still be used (one not
+      // remembered ends 12 h after sign-in, for a shared computer); otherwise the sign-in screen
+      this.sessionRaw = prefs.getRaw(PREF.session);
+      const s0 = prefs.get<Session | null>(PREF.session, null);
+      let acct: Session | null = null;
+      if (team0 && team0.url && team0.mode === 'accounts') {
+        if (s0 && s0.url === team0.url && s0.u && s0.tok && (s0.rm || s0.exp > Date.now())) acct = s0;
+        else {
+          if (s0) this.saveSession(null);
+          this.authUrl = team0.url;
+          this.auth = 'login';
+        }
+      }
+      const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
       const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
@@ -176,7 +229,7 @@ export class GccEngine {
         this.store.get<SetSnap>('setSnap'),
         fetch(dataUrl('rounds.json')).then((r) => r.json()).catch(() => []) as Promise<RoundRaw[]>,
         fetch(dataUrl('gcc-sources.json')).then((r) => r.json()).catch(() => []) as Promise<unknown[][]>,
-        team0 && team0.url ? this.store.get<SyncOp[]>(pendKey(team0.url)) : null,
+        queue ? this.store.get<SyncOp[]>(queue) : null,
         this.store.get<Partial<SalesState>>('sales'),
         this.store.get<Record<string, CustomCo>>('customCos'),
         this.store.get<Record<string, Person>>('people'),
@@ -219,7 +272,11 @@ export class GccEngine {
       }
       // the cursor lives in localStorage while the data lives in IndexedDB; they can drift apart
       // (failed write, another tab), so every page load re-reads the (compacted) team log once
-      this.teamCfg = team0 && team0.url ? { ...team0, seq: 0 } : null;
+      this.teamCfg = team0 && team0.url && (team0.mode !== 'accounts' || acct) ? { ...team0, seq: 0, ...(acct ? { u: acct.u } : {}) } : null;
+      if (acct) {
+        this.session = acct;
+        if (acct.mc) this.auth = 'change';
+      }
       if (this.teamCfg && renamed) this.teamCfg.seeded = false; // upload the renamed tasks
       if (this.teamCfg && Array.isArray(pending)) pending.forEach((op) => this.pending.set(op.k, op));
       this.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) })).sort((a, b) => a.annT - b.annT);
@@ -232,7 +289,7 @@ export class GccEngine {
       this.emit();
       this.timer = setInterval(() => this.tick(), 6e5);
       if (this.syncDue(this.syncCfg())) setTimeout(() => this.runSync(true), 1500);
-      if (this.teamCfg) this.startTeam();
+      if (this.teamCfg && !this.auth) this.startTeam();
       if (typeof window !== 'undefined') {
         window.addEventListener('storage', this.teamPrefsChanged);
         window.addEventListener('pageshow', this.teamPageShow);
@@ -643,6 +700,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ dedup
   /** Record a merge/split decision; returns the id the given company now resolves to. */
   decide(key: string, v: 'merge' | 'split' | null) {
+    if (!this.can('admin')) return this.deny();
     if (v == null) delete this.dec[key];
     else this.dec[key] = v;
     this.op(keyOf.dedup(key), v ?? undefined);
@@ -652,11 +710,30 @@ export class GccEngine {
   }
 
   // ------------------------------------------------------------------ CRM
+  /** Who is using this browser: the signed-in account's name when the team uses accounts (the
+   *  same string as in owners, ผู้รับผิดชอบ and history), else the name chosen at "ฉันคือ". */
   me() {
-    return prefs.getRaw(PREF.me);
+    return this.teamCfg?.mode === 'accounts' || this.auth ? this.session?.name || '' : prefs.getRaw(PREF.me);
   }
   setMe(v: string) {
+    if (this.teamCfg?.mode === 'accounts') return; // the account says who it is
     prefs.set(PREF.me, v);
+    this.emit();
+  }
+  /** The signed-in account's role, or null when the team has no accounts (team code, or this
+   *  browser only): then everything is allowed, as before accounts. */
+  role(): Role | null {
+    return this.teamCfg?.mode === 'accounts' && this.session ? this.session.role : null;
+  }
+  can(cap: 'edit' | 'delete' | 'admin') {
+    return canCap(this.role(), cap);
+  }
+  canWriteKey(k: string, del: boolean) {
+    return canKey(this.role(), k, del);
+  }
+  /** A change this account may not make: nothing happens, and it is said why. */
+  private deny() {
+    this.teamNote = 'บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้';
     this.emit();
   }
   logAct(id: number | string, e: Omit<LogEntry, 'at' | 'by' | 'id'>) {
@@ -712,6 +789,7 @@ export class GccEngine {
     this.saveCrm();
   }
   addTeam(name: string) {
+    if (!this.can('admin')) return this.deny();
     const C = this.crm;
     if (name && !C.team.includes(name)) {
       C.team.push(name);
@@ -721,6 +799,7 @@ export class GccEngine {
     this.saveCrm();
   }
   delTeam(name: string) {
+    if (!this.can('admin')) return this.deny();
     this.crm.team = this.crm.team.filter((x) => x !== name);
     this.op(keyOf.team(name));
     this.saveCrm();
@@ -808,11 +887,13 @@ export class GccEngine {
 
   // ---- team backup
   exportCrm() {
+    if (!this.can('admin')) return this.deny();
     const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom, people: this.people };
     downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), 'GCC_ข้อมูลทีม_' + todayISO() + '.json');
   }
   /** Merge a teammate's backup into local data — never deletes; newer contact edits win. */
   async importCrm(f: File) {
+    if (!this.can('admin')) return this.deny();
     // While connected, a backup only fills gaps: instead of pushing every value in the file (which
     // could revert newer team values or resurrect deleted items), re-run the first-connect merge.
     this.importing = !!this.teamCfg;
@@ -996,6 +1077,7 @@ export class GccEngine {
     this.emit();
   }
   deleteCustomer(id: number) {
+    if (!this.can('delete')) return this.deny();
     if (!this.custom[id]) return;
     delete this.custom[id];
     this.op(keyOf.cust(id));
@@ -1086,6 +1168,7 @@ export class GccEngine {
   /** Delete a person. Their calls and notes at a company stay in its contact log; those kept under the
    *  person (no company the team shares) are shown nowhere else, so they go too. */
   deletePerson(id: string) {
+    if (!this.can('delete')) return this.deny();
     if (!this.people[id]) return;
     delete this.people[id];
     this.batchOps(() => {
@@ -1319,6 +1402,7 @@ export class GccEngine {
     this.saveSales();
   }
   deleteDeal(id: string) {
+    if (!this.can('delete')) return this.deny();
     const d = this.sales.deals[id];
     if (!d) return;
     this.batchOps(() => this.deleteDealNow(d));
@@ -1344,6 +1428,7 @@ export class GccEngine {
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
   setSalesList(name: keyof SalesCfg, items: string[]) {
+    if (!this.can('admin')) return this.deny();
     // a stage name is part of its notes' record keys (dstep/<deal>/<stage>), so no "/" there; other
     // lists are plain values ("SET/mai")
     const v = [...new Set(items.map((x) => (name === 'stages' ? x.trim().replace(/\//g, '-') : x.trim())).filter(Boolean))];
@@ -1360,6 +1445,7 @@ export class GccEngine {
     this.saveSales();
   }
   renameSection(from: string, to: string) {
+    if (!this.can('admin')) return this.deny();
     to = to.trim();
     if (!to || to === from) return;
     const S = this.sales.cfg;
@@ -1383,6 +1469,7 @@ export class GccEngine {
   private docBlobKey = (docId: string) => 'docblob:' + docId;
 
   async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string }) {
+    if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
     if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
@@ -1415,7 +1502,7 @@ export class GccEngine {
     }
     if (!kept) {
       if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
-      const r = await uploadDocFile(this.fileTransport, this.teamCfg.url, this.teamCfg.key, { docId: id, name: doc.name, mime: doc.mime, blob: file });
+      const r = await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: id, name: doc.name, mime: doc.mime, blob: file });
       doc.fileId = r.fileId;
     }
     S.docs[`${dealId}/${id}`] = doc;
@@ -1504,15 +1591,16 @@ export class GccEngine {
   private dropDriveFile(fileId: string) {
     const cfg = this.teamCfg;
     const later = () => this.store.update<string[]>('docDelQueue', (q) => [...new Set([...(q || []), fileId])]).catch(() => {});
-    if (!cfg) return void later();
-    deleteDocFile(this.fileTransport, cfg.url, cfg.key, fileId).catch(later);
+    if (!cfg || !this.can('edit')) return void later();
+    deleteDocFile(this.fileTransport, cfg.url, this.cred(cfg), fileId).catch(later);
   }
   private async flushDocDeletes(cfg: TeamCfg) {
+    if (!this.can('edit')) return;
     const q = (await this.store.get<string[]>('docDelQueue').catch(() => null)) || [];
     for (const fileId of q) {
       if (this.teamCfg !== cfg) return;
       try {
-        await deleteDocFile(this.fileTransport, cfg.url, cfg.key, fileId);
+        await deleteDocFile(this.fileTransport, cfg.url, this.cred(cfg), fileId);
       } catch {
         return; // still failing: try again after the next sync
       }
@@ -1528,7 +1616,7 @@ export class GccEngine {
     if (!cfg) throw new Error('เชื่อมต่อทีม (แท็บอัปเดตข้อมูล) ก่อน จึงจะเปิดไฟล์ใน Drive ของทีมได้');
     let r: Awaited<ReturnType<typeof downloadDocFile>>;
     try {
-      r = await downloadDocFile(this.fileTransport, cfg.url, cfg.key, doc.fileId);
+      r = await downloadDocFile(this.fileTransport, cfg.url, this.cred(cfg), doc.fileId);
     } catch (e) {
       throw new Error('เปิดไฟล์จาก Drive ของทีมไม่ได้: ' + fileErrText(e));
     }
@@ -1548,7 +1636,7 @@ export class GccEngine {
   private teamFilesAt = 0;
   async uploadDocs() {
     const cfg = this.teamCfg;
-    if (!cfg || this.docUploading) return;
+    if (!cfg || this.docUploading || !this.can('edit')) return;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
     if (locks) return void (await locks.request('gcc-doc-upload', { ifAvailable: true }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)));
@@ -1561,12 +1649,13 @@ export class GccEngine {
     try {
       await this.flushDocDeletes(cfg);
       // only documents of deals that still exist, and that this browser has the file of
-      const todo = Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id));
+      // with accounts, only this account's files: another person's unsent file on a shared browser is theirs to send
+      const todo = Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && (cfg.mode !== 'accounts' || d.by === this.me()));
       if (!todo.length || Date.now() < this.docRetryAt) return;
       // "old script" is checked again every 10 minutes: the lead may deploy the new one meanwhile
       if (this.teamFiles === false && Date.now() - this.teamFilesAt > 10 * 60000) this.teamFiles = null;
       if (this.teamFiles == null) {
-        this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, cfg.key);
+        this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, this.cred(cfg));
         this.teamFilesAt = Date.now();
       }
       if (!this.teamFiles) {
@@ -1579,7 +1668,7 @@ export class GccEngine {
         if (!b) continue; // attached on another device
         let r: { fileId: string };
         try {
-          r = await uploadDocFile(this.fileTransport, cfg.url, cfg.key, { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
+          r = await uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
         } catch (e) {
           // a file the script refuses for good must not hold back every other upload
           if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data'].includes(e.code ?? '')) {
@@ -1623,6 +1712,7 @@ export class GccEngine {
    *  tracked that year) is skipped, so the team's newer edits always win over an old file. A client
    *  name is linked to a registry company only when exactly one company has that name. */
   async importTracker(f: File, year: string): Promise<{ deals: number; skipped: number; linked: number; ambiguous: number; inexact: number; years: string[]; batch: string }> {
+    if (!this.can('admin')) throw new Error('นำเข้าได้เฉพาะผู้ดูแลระบบ');
     const name = (f.name || '').toLowerCase();
     let data: TrackerData[];
     if (name.endsWith('.json')) data = [parseTrackerJson(JSON.parse(await f.text()), year)];
@@ -1727,6 +1817,10 @@ export class GccEngine {
   /** Undo an import: its deals are removed for the whole team. Unlike deleting by hand, the same
    *  file can be imported again afterwards. */
   undoImport(batch: string) {
+    if (!this.can('admin')) {
+      this.deny();
+      return 0;
+    }
     const S = this.sales, ds = this.importedBy(batch), at = new Date().toISOString();
     this.batchOps(() => {
       ds.forEach((d) => {
@@ -1786,6 +1880,13 @@ export class GccEngine {
   private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
+    if (!this.canWriteKey(k, v === undefined)) {
+      // not this account's to change: the next round puts the team's value back
+      this.revert.add(k);
+      this.teamNote = 'บัญชีของคุณแก้รายการนี้ไม่ได้ จึงใช้ค่าของทีมแทน';
+      this.flushSoon();
+      return;
+    }
     const o = this.mkOp(k, v);
     const prev = this.pending.get(k);
     // Fields and list edits merge here only with a change not stored yet (this batch, or a failed
@@ -1822,6 +1923,10 @@ export class GccEngine {
     this.unsaved.delete(k);
     if (this.opBatch) this.opBatch.push(o);
     else this.queueOps(cfg, [o]);
+    this.flushSoon();
+  }
+  /** Sync shortly (changes made together go in one round). */
+  private flushSoon() {
     if (this.teamFlush) clearTimeout(this.teamFlush);
     this.teamFlush = setTimeout(() => {
       this.teamFlush = null;
@@ -1858,7 +1963,7 @@ export class GccEngine {
     // merged into copies, which replace this tab's ops only once the queue is stored: after a failed
     // write the ops stay as they were (merging them again on the next write would apply an edit twice)
     const out = new Map<string, SyncOp>();
-    this.writePending(cfg.url, (ops) => {
+    this.writePending(this.qk(cfg), (ops) => {
       drop.clear();
       out.clear();
       const stored = new Map(ops.map((x) => [x.k, x]));
@@ -1981,9 +2086,19 @@ export class GccEngine {
       people: ok('people', people) ? people! : this.people,
     };
   }
-  /** Read-modify-write of a sheet's stored queue (one transaction, so tabs don't overwrite each other). */
-  private writePending(url: string, fn: (ops: SyncOp[]) => SyncOp[]): Promise<SyncOp[]> {
-    const p = this.pq.then(() => this.store.update<SyncOp[]>(pendKey(url), (cur) => fn(Array.isArray(cur) ? cur : [])));
+  /** The stored queue of a team session: per sheet, and per account when the team signs in (one
+   *  person's unsent edits are never sent under another's account on a shared browser). */
+  private qk(cfg: TeamCfg) {
+    return pendKey(cfg.url) + (cfg.mode === 'accounts' && cfg.u ? '#' + cfg.u : '');
+  }
+  /** What this session's requests are signed with: the account's token, or the team code. */
+  private cred(cfg: TeamCfg): Cred {
+    return cfg.mode === 'accounts' ? { tok: this.session && this.session.u === cfg.u ? this.session.tok : '' } : cfg.key;
+  }
+  /** Read-modify-write of a stored queue (`key` from qk / pendKey; one transaction, so tabs don't
+   *  overwrite each other). */
+  private writePending(key: string, fn: (ops: SyncOp[]) => SyncOp[]): Promise<SyncOp[]> {
+    const p = this.pq.then(() => this.store.update<SyncOp[]>(key, (cur) => fn(Array.isArray(cur) ? cur : [])));
     this.pq = p.catch(() => {});
     return p;
   }
@@ -1995,7 +2110,8 @@ export class GccEngine {
     this.emit();
   }
   private saveTeamCfg(cfg: TeamCfg | null) {
-    prefs.set(PREF.team, cfg);
+    // who is signed in is in PREF.session, not here
+    prefs.set(PREF.team, cfg && (({ u: _u, ...rest }) => rest)(cfg));
     this.teamRaw = prefs.getRaw(PREF.team);
     if (cfg) prefs.set(PREF.teamLast, cfg.url);
   }
@@ -2010,7 +2126,7 @@ export class GccEngine {
     this.teamRaw = raw;
     const s = prefs.get<TeamCfg | null>(PREF.team, null);
     const cfg = this.teamCfg;
-    if (s && s.url && cfg && s.url === cfg.url) {
+    if (s && s.url && cfg && s.url === cfg.url && (s.mode || '') === (cfg.mode || '')) {
       // other tabs also save their own cursor and seeding state here; only the code matters
       // (a seeding round reads what this browser has stored, so a following tab may seed too)
       cfg.key = s.key;
@@ -2020,13 +2136,44 @@ export class GccEngine {
       }
       return true;
     }
-    if (!cfg && !(s && s.url)) return true;
+    if (!cfg && !(s && s.url)) {
+      if (this.auth) {
+        // another tab went back to working without a team
+        this.auth = '';
+        this.authUrl = '';
+        this.emit();
+      }
+      return true;
+    }
     this.endTeam();
-    if (s && s.url) {
+    if (s && s.url && s.mode === 'accounts') {
+      // the team signs in (another tab switched, or signed in): this tab follows that tab's session
+      const ses = prefs.get<Session | null>(PREF.session, null);
+      this.sessionRaw = prefs.getRaw(PREF.session);
+      if (ses && ses.url === s.url && ses.tok) {
+        this.session = ses;
+        this.teamCfg = { ...s, seq: 0, u: ses.u };
+        this.auth = ses.mc ? 'change' : '';
+        if (!this.auth) {
+          this.setTeam({ status: 'syncing', msg: '', last: '' });
+          this.startTeam();
+        } else this.emit();
+      } else {
+        this.session = null;
+        this.authUrl = s.url;
+        this.auth = 'login';
+        this.setTeam({ status: 'off', msg: '', last: '' });
+      }
+    } else if (s && s.url) {
+      this.auth = '';
       this.teamCfg = { ...s, seq: 0 };
       this.setTeam({ status: 'syncing', msg: '', last: '' });
       this.startTeam();
-    } else this.setTeam({ status: 'off', msg: '', last: '' });
+    } else {
+      this.auth = '';
+      this.authUrl = '';
+      this.setTeam({ status: 'off', msg: '', last: '' });
+    }
     return false;
   }
 
@@ -2039,7 +2186,7 @@ export class GccEngine {
   async teamSync(opts: { first?: boolean } = {}) {
     if (this.teamCfg && !this.adoptTeamPrefs()) return;
     const cfg = this.teamCfg;
-    if (!cfg || !this.B) return;
+    if (!cfg || !this.B || this.auth) return; // signed out / must set a password: nothing is sent
     if (this.teamBusy) {
       this.teamAgain = true;
       return;
@@ -2057,8 +2204,15 @@ export class GccEngine {
         this.teamNeedKey = false;
         this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
         this.uploadDocs();
+        if (cfg.mode !== 'accounts' && !this.caps) this.probeCaps(cfg.url); // say if the script can do accounts
       }
     } catch (e) {
+      if (gen === this.teamGen && e instanceof TeamSyncError) {
+        const c = e.code;
+        if (cfg.mode === 'accounts' && ['session_expired', 'login_required', 'account_disabled', 'must_change_password'].includes(c)) return void this.authLost(c);
+        if (cfg.mode !== 'accounts' && c === 'login_required') return void this.toAccounts(cfg);
+        if (cfg.mode === 'accounts' && c === 'unauthorized') return void this.maybeLegacy(cfg);
+      }
       if (gen === this.teamGen) {
         if (e instanceof TeamSyncError && e.code === 'unauthorized') this.teamNeedKey = true;
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -2099,25 +2253,88 @@ export class GccEngine {
     await this.teamSync();
   }
 
-  private async syncRound(cfg: TeamCfg, gen: number, first: boolean) {
-    const live = () => this.teamCfg === cfg && gen === this.teamGen;
-    // the stored queue is shared by every tab: start from it (another tab may have pushed or added
-    // ops), plus this tab's ops that could not be stored
-    await this.pq;
-    const stored = await this.store.get<SyncOp[]>(pendKey(cfg.url));
-    if (!live()) return;
-    const fresh = Array.isArray(stored) ? stored.filter((o) => !this.wasDelivered(o)) : null;
-    this.pending = this.withUnsaved(fresh ? new Map(fresh.map((o) => [o.k, o])) : this.pending);
-    const seeding = first || !cfg.seeded;
+  /** Pull every row after `since` (in pages). */
+  private async pullFrom(cfg: TeamCfg, since: number) {
     const rows: SyncRow[] = [];
-    let since = seeding ? 0 : cfg.seq;
     for (;;) {
-      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, cfg.key, { action: 'pull', since });
+      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, this.cred(cfg), { action: 'pull', since });
+      this.meta(cfg, r);
       rows.push(...r.rows);
       if (r.rows.length) since = r.rows[r.rows.length - 1].seq;
       if (!r.more || !r.rows.length) break;
     }
+    return { rows, since };
+  }
+  /** A reply for this account: a renewed token, or a new name or role set by an admin. */
+  private meta(cfg: TeamCfg, r: Record<string, unknown>) {
+    const s = this.session;
+    if (cfg.mode !== 'accounts' || !s || s.u !== cfg.u) return;
+    let changed = false;
+    if (typeof r.tok === 'string' && r.tok && r.tok !== s.tok) {
+      s.tok = r.tok;
+      s.exp = Number(r.exp) || s.exp;
+      changed = true;
+    }
+    const me = r.me as { u?: string; name?: string; role?: Role } | undefined;
+    if (me && me.u === s.u && (me.name !== s.name || me.role !== s.role)) {
+      if (me.role === 'viewer' && s.role !== 'viewer') this.teamNote = 'ผู้ดูแลระบบเปลี่ยนบัญชีของคุณเป็น ดูอย่างเดียว — แก้ไขข้อมูลไม่ได้แล้ว';
+      if (me.name) s.name = me.name;
+      if (me.role) s.role = me.role;
+      changed = true;
+    }
+    if (changed) {
+      this.saveSession(s);
+      this.emit();
+    }
+  }
+
+  private async syncRound(cfg: TeamCfg, gen: number, first: boolean) {
+    // changes this account may not make, put back to the team's value in this round (kept for the
+    // next one if this round fails before applying)
+    const rv = new Set(this.revert);
+    this.revert.clear();
+    let applied = false;
+    try {
+      return await this.syncRoundBody(cfg, gen, first, rv, () => (applied = true));
+    } finally {
+      if (!applied) rv.forEach((k) => this.revert.add(k));
+    }
+  }
+  private async syncRoundBody(cfg: TeamCfg, gen: number, first: boolean, rv: Set<string>, onApplied: () => void) {
+    const live = () => this.teamCfg === cfg && gen === this.teamGen;
+    // the stored queue is shared by every tab: start from it (another tab may have pushed or added
+    // ops), plus this tab's ops that could not be stored
+    await this.pq;
+    const stored = await this.store.get<SyncOp[]>(this.qk(cfg));
     if (!live()) return;
+    const fresh = Array.isArray(stored) ? stored.filter((o) => !this.wasDelivered(o)) : null;
+    this.pending = this.withUnsaved(fresh ? new Map(fresh.map((o) => [o.k, o])) : this.pending);
+    const seeding = first || !cfg.seeded;
+    const pulled = await this.pullFrom(cfg, seeding ? 0 : cfg.seq);
+    const rows = pulled.rows;
+    let since = pulled.since;
+    if (!live()) return;
+    // the team's value of each refused record (its last row since the start; no row: it goes)
+    const back: SyncRow[] = [];
+    if (rv.size) {
+      const all = seeding ? rows : (await this.pullFrom(cfg, 0)).rows;
+      if (!live()) return;
+      const last = new Map<string, SyncRow>();
+      all.forEach((r) => rv.has(r.k) && last.set(r.k, r));
+      rv.forEach((k) => {
+        // queued again since, or in this round's rows anyway (newer than the full pull's)
+        if (this.pending.has(k) || rows.some((r) => r.k === k)) return;
+        const r = last.get(k);
+        if (r) back.push(r);
+        else if (k.startsWith('scfg/')) {
+          const name = k.slice(5) as keyof SalesCfg;
+          if (name in this.sales.cfg) {
+            this.sales.cfg[name] = emptyCfg()[name];
+            this.saveSales();
+          }
+        } else if (!k.startsWith('deal/')) back.push({ seq: 0, k, v: null, del: true, by: '', at: '' });
+      });
+    }
     // A push whose reply was lost (tab closed, timeout) may still have reached the sheet. An op sent
     // when the sheet was at seq S is settled once the sheet has its own row after S: it was delivered
     // (a teammate's row after that is newer and wins). A teammate's row alone does not settle it — the
@@ -2136,7 +2353,7 @@ export class GccEngine {
     if ([...this.pending.values()].some(settled)) {
       this.pending.forEach((o, k) => settled(o) && this.pending.delete(k));
       this.unsaved.forEach((o, k) => settled(o) && this.unsaved.delete(k));
-      await this.writePending(cfg.url, (ops) => ops.filter((o) => !settled(o))).catch(() => {});
+      await this.writePending(this.qk(cfg), (ops) => ops.filter((o) => !settled(o))).catch(() => {});
       if (!live()) return;
     }
     let seeded = false;
@@ -2152,7 +2369,7 @@ export class GccEngine {
       const add: SyncOp[] = [];
       const t = this.opTick();
       localRecords(mine).forEach((v, k) => {
-        if (this.pending.has(k)) return;
+        if (this.pending.has(k) || !this.canWriteKey(k, false)) return;
         const r = remote.get(k);
         if (!r) add.push(this.mkOp(k, v, t));
         else if (k.startsWith('scfg/') && Array.isArray(v) && Array.isArray(r.v) && !r.del) {
@@ -2174,7 +2391,7 @@ export class GccEngine {
       const keys = new Set(add.map((o) => o.k));
       seeded =
         !add.length ||
-        (await this.writePending(cfg.url, (ops) => ops.filter((x) => !keys.has(x.k)).concat(add)).then(
+        (await this.writePending(this.qk(cfg), (ops) => ops.filter((x) => !keys.has(x.k)).concat(add)).then(
           () => true,
           () => {
             add.forEach((o) => this.keepUnsaved(o));
@@ -2232,7 +2449,7 @@ export class GccEngine {
         if (this.unsaved.has(k)) this.unsaved.set(k, n);
       });
       const gone = new Set(dropped.map((o) => o.id));
-      await this.writePending(cfg.url, (ops) => ops.filter((x) => !gone.has(x.id)).map((x) => (revised.get(x.k)?.id === x.id ? revised.get(x.k)! : x))).catch(() => {});
+      await this.writePending(this.qk(cfg), (ops) => ops.filter((x) => !gone.has(x.id)).map((x) => (revised.get(x.k)?.id === x.id ? revised.get(x.k)! : x))).catch(() => {});
       if (!live()) return;
       // a document deleted by a teammate while this browser was uploading its file: the file goes too
       dropped.forEach((o) => {
@@ -2240,7 +2457,8 @@ export class GccEngine {
         if (doc?.fileId) this.dropDocFile(doc);
       });
     }
-    this.applyRows(rows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged));
+    this.applyRows(rows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged, back));
+    onApplied();
     cfg.seq = since;
     // only a round that seeded may mark the session seeded, not while part of the upload exists only
     // in memory, and not if an import asked for a new seed after this round read the data
@@ -2253,6 +2471,11 @@ export class GccEngine {
     }
     if (!this.adoptTeamPrefs() || !live()) return;
     this.saveTeamCfg(cfg);
+    // an account that can only read sends nothing; its queue (made before) waits for someone who can
+    if (this.role() === 'viewer') {
+      if (this.pending.size) this.teamNote = `บัญชีดูอย่างเดียวส่งการแก้ไขไม่ได้ · รอส่ง ${fmtN(this.pending.size)} รายการ`;
+      return;
+    }
     let rejected = 0;
     while (this.pending.size && live()) {
       const batch = [...this.pending.values()].slice(0, 300);
@@ -2260,20 +2483,29 @@ export class GccEngine {
       const at = cfg.seq;
       const ids = new Set(batch.map((o) => o.id));
       batch.forEach((o) => (o.sent = at));
-      await this.writePending(cfg.url, (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
+      await this.writePending(this.qk(cfg), (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
       if (!live()) return;
-      let r: { rejected?: string[] };
+      let r: { rejected?: string[]; denied?: string[] };
       try {
-        r = await call<{ rejected?: string[] }>(this.transport, cfg.url, cfg.key, { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+        r = await call<{ rejected?: string[]; denied?: string[] }>(this.transport, cfg.url, this.cred(cfg), { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
       } catch (e) {
         // the sheet answered and refused (busy, wrong code): these were certainly not delivered
         if (e instanceof TeamSyncError && e.code) {
           batch.forEach((o) => delete o.sent);
-          await this.writePending(cfg.url, (ops) => ops.map((x) => (ids.has(x.id) ? (({ sent: _s, ...y }) => y)(x) : x))).catch(() => {});
+          await this.writePending(this.qk(cfg), (ops) => ops.map((x) => (ids.has(x.id) ? (({ sent: _s, ...y }) => y)(x) : x))).catch(() => {});
         }
         throw e;
       }
+      this.meta(cfg, r);
       rejected += (r.rejected || []).length;
+      // changes this account may not make (the script decides): dropped below with the batch, and the
+      // team's value put back by the next round
+      const den = r.denied || [];
+      if (den.length) {
+        den.forEach((k) => this.revert.add(k));
+        this.teamNote = `มี ${fmtN(den.length)} รายการที่บัญชีของคุณแก้ไม่ได้ จึงใช้ค่าของทีมแทน`;
+        this.teamAgain = true;
+      }
       // done: the op that was sent, or an older change to a record whose newer value was sent;
       // a change made while the request was in flight stays queued
       const sent = new Map(batch.map((o) => [o.k, o]));
@@ -2283,7 +2515,7 @@ export class GccEngine {
       };
       this.unsaved.forEach((o, k) => done(o) && this.unsaved.delete(k));
       // acknowledged in this sheet's own queue even if the session changed meanwhile (they were delivered)
-      const left = await this.writePending(cfg.url, (ops) => ops.filter((o) => !done(o) && !this.wasDelivered(o))).then(
+      const left = await this.writePending(this.qk(cfg), (ops) => ops.filter((o) => !done(o) && !this.wasDelivered(o))).then(
         (l) => {
           this.delivered.clear(); // the stored queue no longer lists them
           return l;
@@ -2385,6 +2617,12 @@ export class GccEngine {
     try {
       await call(this.transport, url, key, { action: 'ping' });
     } catch (e) {
+      if (e instanceof TeamSyncError && e.code === 'login_required') {
+        // this team signs in with personal accounts now: the team code is not needed
+        this.setTeam({ status: 'off', msg: '' });
+        await this.teamOpen(url);
+        return false;
+      }
       this.setTeam({ status: 'error', msg: errText(e, 'connect') });
       return false;
     }
@@ -2412,8 +2650,8 @@ export class GccEngine {
       });
     let ops: SyncOp[];
     try {
-      ops = await this.writePending(url, requeue);
-      if (moved.length) await this.writePending(last, () => []).catch(() => {});
+      ops = await this.writePending(pendKey(url), requeue);
+      if (moved.length) await this.writePending(pendKey(last), () => []).catch(() => {});
     } catch {
       ops = requeue((await this.store.get<SyncOp[]>(pendKey(url))) || []);
       ops.forEach((o) => this.keepUnsaved(o));
@@ -2443,6 +2681,419 @@ export class GccEngine {
     await this.teamSync();
     return this.team.status === 'ok';
   }
+  // ------------------------------------------------------------------ team accounts
+  private saveSession(s: Session | null) {
+    if (s) prefs.set(PREF.session, s);
+    else prefs.del(PREF.session);
+    this.sessionRaw = prefs.getRaw(PREF.session);
+  }
+  /** Ask a team-code team's script whether it can do accounts (once per page; the team card says so). */
+  private probeCaps(url: string) {
+    if (this.caps?.url === url) return;
+    hello(this.transport, url).then(
+      (c) => {
+        this.caps = { ...c, url };
+        this.emit();
+      },
+      () => {},
+    );
+  }
+  /** The script's public values for hashing a password (team id, rounds); they never change. */
+  private async capsFor(url: string) {
+    if (this.caps && this.caps.url === url && this.caps.v === 3 && this.caps.tid) return this.caps;
+    const c = await hello(this.transport, url);
+    this.caps = { ...c, url };
+    if (c.v !== 3 || !c.tid) throw new Error('สคริปต์ของทีมยังไม่รองรับบัญชีผู้ใช้ — ให้หัวหน้าทีมอัปเดต Code.gs');
+    return this.caps;
+  }
+  /** The session can't go on (expired, disabled, must set a password): sync pauses, edits keep queuing. */
+  private authLost(code: string) {
+    this.auth = code === 'account_disabled' ? 'disabled' : code === 'must_change_password' ? 'change' : 'expired';
+    this.stopTeam();
+    const s = this.session;
+    if (s && this.auth === 'expired') {
+      s.tok = ''; // other tabs follow
+      this.saveSession(s);
+    } else if (s && this.auth === 'change') {
+      s.mc = true;
+      this.saveSession(s);
+    }
+    const msg = { disabled: 'บัญชีนี้ถูกปิดการใช้งาน', change: 'ตั้งรหัสผ่านใหม่ก่อนเริ่มใช้งาน', expired: 'หมดเวลาการเข้าระบบ — เข้าสู่ระบบอีกครั้งเพื่อซิงก์ต่อ' }[this.auth];
+    this.setTeam({ status: 'error', msg });
+  }
+  /** The team has just switched to personal accounts (the lead set up the first admin): sign in.
+   *  What this browser queued with the team code is kept, and sent under the account signed in. */
+  private toAccounts(cfg: TeamCfg) {
+    this.saveTeamCfg({ url: cfg.url, key: '', seq: 0, seeded: cfg.seeded, mode: 'accounts' });
+    this.endTeam();
+    this.session = null;
+    this.authUrl = cfg.url;
+    this.auth = 'login';
+    this.authMsg = 'ทีมของคุณเปลี่ยนมาใช้บัญชีผู้ใช้แล้ว เข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่านจากผู้ดูแลระบบ';
+    this.setTeam({ status: 'off', msg: '', last: '' });
+    this.probeCaps(cfg.url);
+  }
+  /** The script refused the token as a team-code script would: if it went back to the team code
+   *  (an older Code.gs pasted back), this account's unsent edits go back to the sheet's queue. */
+  private async maybeLegacy(cfg: TeamCfg) {
+    let c: Caps | null = null;
+    try {
+      c = await hello(this.transport, cfg.url);
+    } catch {
+      /* offline: decide later */
+    }
+    if (this.teamCfg !== cfg) return;
+    if (!c || (c.v === 3 && c.mode === 'accounts')) return this.authLost('session_expired');
+    const name = this.session?.name || '';
+    const mine = (await this.store.get<SyncOp[]>(this.qk(cfg)).catch(() => null)) || [];
+    if (mine.length) {
+      await this.writePending(pendKey(cfg.url), (cur) => newestPerKey([...cur, ...mine.map((o) => ({ ...o, by: name }))])).catch(() => {});
+      await this.writePending(this.qk(cfg), () => []).catch(() => {});
+    }
+    if (name) prefs.set(PREF.me, name);
+    this.endTeam();
+    this.saveSession(null);
+    this.session = null;
+    const n: TeamCfg = { url: cfg.url, key: '', seq: 0, seeded: cfg.seeded };
+    this.saveTeamCfg(n);
+    this.teamCfg = n;
+    this.pending = new Map(((await this.store.get<SyncOp[]>(pendKey(cfg.url)).catch(() => null)) || []).map((o) => [o.k, o]));
+    this.teamNeedKey = true;
+    this.setTeam({ status: 'error', msg: 'สคริปต์ของทีมกลับไปใช้รหัสทีม — ใส่รหัสทีมเพื่อซิงก์ต่อ' });
+  }
+  /**
+   * Open a team by its web-app link (connect form, invite link): a team-code team asks for the code
+   * as before; a team with accounts shows the sign-in screen; a new script with no admin yet shows the
+   * first-admin setup. Returns what it found ('' when the link can't be reached).
+   */
+  async teamOpen(url: string): Promise<'legacy' | 'accounts' | 'setup' | ''> {
+    url = url.trim();
+    if (!isTeamUrl(url)) {
+      this.setTeam({ status: 'error', msg: 'ลิงก์ต้องเป็น Web app ของ Google Apps Script (https://script.google.com/macros/s/…/exec)' });
+      return '';
+    }
+    let c: Caps;
+    try {
+      c = await hello(this.transport, url);
+    } catch (e) {
+      this.setTeam({ status: 'error', msg: errText(e, 'connect') });
+      return '';
+    }
+    this.caps = { ...c, url };
+    if (c.v === 2 || c.mode === 'legacy') {
+      if (this.teamCfg?.url !== url) this.teamJoinUrl = url; // the team-code form
+      this.emit();
+      return 'legacy';
+    }
+    if (this.teamCfg?.url === url && this.teamCfg.mode === 'accounts' && this.session && !this.auth) {
+      this.emit();
+      return 'accounts'; // already signed in to it
+    }
+    if (!this.teamCfg && c.mode === 'accounts') this.saveTeamCfg({ url, key: '', seq: 0, seeded: false, mode: 'accounts' });
+    this.authUrl = url;
+    this.auth = c.mode === 'setup' ? 'setup' : 'login';
+    this.authMsg = '';
+    this.emit();
+    return c.mode === 'setup' ? 'setup' : 'accounts';
+  }
+  /** Leave a sign-in or setup screen: back to the team still connected, or to this browser only. */
+  teamCancelAuth() {
+    if (this.teamCfg && (this.auth === 'login' || this.auth === 'setup')) {
+      this.auth = '';
+      this.authUrl = '';
+      this.authMsg = '';
+      this.emit();
+    } else this.teamForget();
+  }
+  /** Sign in with a username and password. Throws a TeamSyncError with a Thai message on failure. */
+  async teamLogin(u: string, pw: string, rm: boolean) {
+    const url = this.authUrl || this.teamCfg?.url || '';
+    if (!url) throw new Error('ยังไม่ได้เลือกทีม');
+    const c = await this.capsFor(url);
+    u = normUser(u);
+    const pk = await derivePk(c.tid!, c.it!, u, pw);
+    const r = await call<SignIn>(this.transport, url, null, { action: 'login', u, pk, rm });
+    await this.signedIn(url, r, rm, pw);
+  }
+  /** The lead's first admin account, with the one-time code printed by setup() in Apps Script. */
+  async teamClaim(code: string, u: string, name: string, pw: string, rm = true) {
+    const url = this.authUrl || this.teamCfg?.url || '';
+    const c = await this.capsFor(url);
+    u = normUser(u);
+    const pk = await derivePk(c.tid!, c.it!, u, pw);
+    const r = await call<SignIn>(this.transport, url, null, { action: 'claim', code, u, name: name.trim(), pk, rm });
+    await this.signedIn(url, r, rm, '');
+  }
+  /** A forgotten admin password: a new one with a recovery code from setup(). */
+  async teamRecover(code: string, u: string, pw: string, rm = true) {
+    const url = this.authUrl || this.teamCfg?.url || '';
+    const c = await this.capsFor(url);
+    u = normUser(u);
+    const pk = await derivePk(c.tid!, c.it!, u, pw);
+    const r = await call<SignIn>(this.transport, url, null, { action: 'claim', code, u, pk, rm });
+    await this.signedIn(url, r, rm, '');
+  }
+  private async signedIn(url: string, r: SignIn, rm: boolean, pw: string) {
+    const s: Session = { url, u: r.me.u, name: r.me.name, role: r.me.role, tok: r.tok, exp: Number(r.exp) || 0, rm, mc: !!r.mc };
+    this.saveSession(s);
+    prefs.set(PREF.me, s.name); // the same name if the team ever goes back to the team code
+    if (rm) prefs.set(PREF.lastUser, { u: s.u, name: s.name });
+    else prefs.del(PREF.lastUser);
+    this.lastPw = s.mc ? pw : '';
+    const cfg = this.teamCfg;
+    if (cfg && cfg.url === url && cfg.mode === 'accounts' && cfg.u === s.u) {
+      // the same person signing in again (session expired): the session and its queue go on
+      this.session = s;
+      this.authMsg = '';
+      this.auth = s.mc ? 'change' : '';
+      if (!this.auth) {
+        this.setTeam({ status: 'syncing', msg: '' });
+        this.startTeam();
+      } else this.emit();
+      return;
+    }
+    this.endTeam();
+    await this.openSession(url, s);
+  }
+  /** Start an account's session: its own queue (plus what this browser queued before accounts, sent
+   *  under it), then the first sync. */
+  private async openSession(url: string, s: Session) {
+    const stored = prefs.get<TeamCfg | null>(PREF.team, null);
+    const cfg: TeamCfg = { url, key: '', seq: 0, seeded: stored?.url === url ? !!stored.seeded : false, mode: 'accounts', u: s.u };
+    if (canCap(s.role, 'edit')) {
+      const last = prefs.getRaw(PREF.teamLast);
+      const before = [
+        ...((await this.store.get<SyncOp[]>(pendKey(url)).catch(() => null)) || []),
+        ...(last && last !== url ? (await this.store.get<SyncOp[]>(pendKey(last)).catch(() => null)) || [] : []),
+        ...this.carry.values(),
+      ];
+      if (before.length) {
+        // the script writes the account's name on the rows, and on contact-log entries of a sales account
+        const stamp = (o: SyncOp): SyncOp => {
+          const v = o.v as Record<string, unknown> | undefined;
+          const own = s.role === 'sales' && /^d?log\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
+          return { ...o, by: s.name, ...(own ? { v: { ...v, by: s.name } } : {}) };
+        };
+        try {
+          await this.writePending(this.qk(cfg), (cur) => newestPerKey([...cur, ...before.map(stamp)]));
+          await this.writePending(pendKey(url), () => []);
+          if (last && last !== url) await this.writePending(pendKey(last), () => []).catch(() => {});
+          this.carry = new Map();
+          this.teamNote = `ส่งรายการที่แก้ไว้ก่อนเข้าสู่ระบบ ${fmtN(before.length)} รายการ ในชื่อของคุณ`;
+        } catch {
+          /* stays where it was: taken at the next sign-in */
+        }
+      }
+    }
+    this.pending = new Map(((await this.store.get<SyncOp[]>(this.qk(cfg)).catch(() => null)) || []).map((o) => [o.k, o]));
+    this.session = s;
+    this.teamCfg = cfg;
+    this.saveTeamCfg(cfg);
+    this.authUrl = '';
+    this.authMsg = '';
+    this.teamJoinUrl = '';
+    this.teamNeedKey = false;
+    if (s.mc) {
+      this.auth = 'change';
+      this.emit();
+      return;
+    }
+    this.auth = '';
+    this.setTeam({ status: 'syncing', msg: '', last: '' });
+    await this.teamSync({ first: !cfg.seeded });
+    if (this.teamCfg === cfg) this.startTeam(false);
+  }
+  /** Set a new password (the temporary one after an admin made the account or reset it, or any time).
+   *  `old` may be left empty right after signing in with a temporary password. Signs out this
+   *  account's other browsers. */
+  async teamChangePassword(old: string, pw: string) {
+    const s = this.session;
+    if (!s) throw new Error('ยังไม่ได้เข้าสู่ระบบ');
+    const c = await this.capsFor(s.url);
+    const [pkOld, pkNew] = await Promise.all([derivePk(c.tid!, c.it!, s.u, old || this.lastPw), derivePk(c.tid!, c.it!, s.u, pw)]);
+    const r = await call<{ tok: string; exp: number }>(this.transport, s.url, { tok: s.tok }, { action: 'passwd', old: pkOld, pk: pkNew, rm: s.rm });
+    s.tok = r.tok;
+    s.exp = Number(r.exp) || s.exp;
+    s.mc = false;
+    this.saveSession(s);
+    this.lastPw = '';
+    if (this.auth === 'change') {
+      this.auth = '';
+      const cfg = this.teamCfg;
+      if (cfg) {
+        this.setTeam({ status: 'syncing', msg: '', last: '' });
+        await this.teamSync({ first: !cfg.seeded });
+        if (this.teamCfg === cfg) this.startTeam(false);
+      }
+    }
+    this.emit();
+  }
+  /** Whether the temporary password typed at sign-in is still known here (the must-change screen
+   *  then asks only for the new one). */
+  get knowsTempPassword() {
+    return !!this.lastPw;
+  }
+  /** The account that chose "จดจำฉัน" on this browser, offered on the sign-in screen. */
+  get lastUser(): { u: string; name: string } | null {
+    return prefs.get<{ u: string; name: string } | null>(PREF.lastUser, null);
+  }
+  /**
+   * Sign out. What is queued is sent first when online (unsent edits stay for the next sign-in of this
+   * account). `all`: also sign out this account's other browsers. `wipe`: delete the team data kept in
+   * this browser (shared computer), keeping data of this browser only; `dropUnsent` deletes the queue too.
+   */
+  async teamLogout(o: { all?: boolean; wipe?: boolean; dropUnsent?: boolean } = {}) {
+    const cfg = this.teamCfg, s = this.session;
+    if (cfg && !this.auth && this.pending.size && (typeof navigator === 'undefined' || navigator.onLine !== false))
+      await Promise.race([this.teamSyncNow().catch(() => {}), new Promise((r) => setTimeout(r, 10000))]);
+    if (cfg && s?.tok) await call(this.transport, cfg.url, { tok: s.tok }, { action: 'logout', all: !!o.all }).catch(() => {});
+    const url = cfg?.url || s?.url || this.authUrl;
+    this.endTeam();
+    this.saveSession(null);
+    if (!s?.rm) prefs.del(PREF.lastUser);
+    this.session = null;
+    this.authUrl = url;
+    this.auth = url ? 'login' : '';
+    this.authMsg = 'คุณออกจากระบบแล้ว';
+    this.teamNote = '';
+    this.setTeam({ status: 'off', msg: '', last: '' });
+    if (o.wipe && cfg) {
+      await this.wipeTeamData(cfg, !!o.dropUnsent);
+      prefs.set(PREF.wipe, String(Date.now()));
+      if (typeof location !== 'undefined') location.reload();
+    }
+  }
+  /** Delete the team's data kept in this browser, keeping what exists on this browser only (companies
+   *  from the TGO website sync and what was recorded about them) and, unless asked, unsent edits. */
+  private async wipeTeamData(cfg: TeamCfg, dropUnsent: boolean) {
+    const loc = (id: string | number) => isLocalId(Number(id));
+    const pick = <T>(o: Record<string, T> | undefined) => Object.fromEntries(Object.entries(o || {}).filter(([id]) => loc(id))) as Record<string, T>;
+    const C = this.crm;
+    const keep: Crm = { ...emptyCrm(), stages: pick(C.stages), owners: pick(C.owners), log: pick(C.log), watch: C.watch.filter(loc), tasks: C.tasks.filter((t) => loc(t.gid)) };
+    await this.store.set('crm', keep).catch(() => {});
+    await this.store.set('contacts', pick(this.contacts)).catch(() => {});
+    for (const k of ['dedup', 'sales', 'customCos', 'people']) await this.store.del(k).catch(() => {});
+    for (const d of Object.values(this.sales.docs)) await this.store.del(this.docBlobKey(d.id)).catch(() => {});
+    prefs.del(PREF.peopleHide);
+    prefs.del(PREF.peopleGone);
+    if (dropUnsent) {
+      await this.store.del(this.qk(cfg)).catch(() => {});
+      await this.store.del(pendKey(cfg.url)).catch(() => {});
+    }
+    this.saveTeamCfg({ url: cfg.url, key: '', seq: 0, seeded: true, mode: 'accounts' });
+  }
+  /** Stop using this team on this browser (from the sign-in screen): back to this browser's own data. */
+  teamForget() {
+    this.endTeam();
+    this.saveTeamCfg(null);
+    this.saveSession(null);
+    this.session = null;
+    this.auth = '';
+    this.authUrl = '';
+    this.authMsg = '';
+    this.setTeam({ status: 'off', msg: '', last: '' });
+  }
+  /** Another tab signed in, out, or got a new token. */
+  private adoptSession() {
+    const raw = prefs.getRaw(PREF.session);
+    if (raw === this.sessionRaw) return;
+    this.sessionRaw = raw;
+    const s = prefs.get<Session | null>(PREF.session, null);
+    const cfg = this.teamCfg;
+    if (cfg?.mode === 'accounts') {
+      if (!s) {
+        this.endTeam();
+        this.session = null;
+        this.authUrl = cfg.url;
+        this.auth = 'login';
+        this.authMsg = 'คุณออกจากระบบแล้ว';
+        this.setTeam({ status: 'off', msg: '', last: '' });
+        return;
+      }
+      if (s.u !== cfg.u) {
+        if (typeof location !== 'undefined') location.reload(); // someone else signed in on this browser
+        return;
+      }
+      this.session = s;
+      if (!s.tok) {
+        if (this.auth !== 'expired' && this.auth !== 'disabled') this.authLost('session_expired');
+      } else if ((this.auth === 'expired' || this.auth === 'change') && !s.mc) {
+        this.auth = '';
+        this.setTeam({ status: 'syncing', msg: '' });
+        this.startTeam();
+      }
+      this.emit();
+      return;
+    }
+    if (!cfg && this.auth && s?.tok && s.url === this.authUrl) {
+      const t = prefs.get<TeamCfg | null>(PREF.team, null);
+      if (!t || t.url !== s.url) return;
+      this.session = s;
+      this.teamCfg = { ...t, seq: 0, u: s.u };
+      this.auth = s.mc ? 'change' : '';
+      this.authUrl = '';
+      this.authMsg = '';
+      if (!this.auth) {
+        this.setTeam({ status: 'syncing', msg: '', last: '' });
+        this.startTeam(); // the round reads this account's queue
+      } else this.emit();
+    }
+  }
+
+  // ---- account admin (online only, never queued)
+  private async adminCall<T>(body: Record<string, unknown>): Promise<T> {
+    const s = this.session, cfg = this.teamCfg;
+    if (!s || !cfg || cfg.mode !== 'accounts') throw new Error('ยังไม่ได้เข้าสู่ระบบ');
+    const r = await call<Record<string, unknown>>(this.transport, cfg.url, { tok: s.tok }, body);
+    this.meta(cfg, r);
+    return r as T;
+  }
+  async adminUsers() {
+    return (await this.adminCall<{ users: TeamUser[] }>({ action: 'users' })).users;
+  }
+  /** A new account with a temporary password made here (shown once to the admin, never stored). */
+  async adminCreate(p: { u: string; name: string; role: Role }) {
+    const cfg = this.teamCfg!;
+    const c = await this.capsFor(cfg.url);
+    const u = normUser(p.u), temp = tempPassword();
+    const pk = await derivePk(c.tid!, c.it!, u, temp);
+    const r = await this.adminCall<{ user: TeamUser }>({ action: 'user_save', create: true, u, name: p.name.trim(), role: p.role, pk });
+    if (!this.crm.team.includes(r.user.name)) this.addTeam(r.user.name); // in the ผู้รับผิดชอบ lists
+    return { user: r.user, temp };
+  }
+  async adminUpdate(u: string, patch: { name?: string; role?: Role; on?: 0 | 1 }) {
+    return (await this.adminCall<{ user: TeamUser }>({ action: 'user_save', u, ...patch })).user;
+  }
+  /** A new temporary password (signs the account out everywhere). */
+  async adminReset(u: string) {
+    const cfg = this.teamCfg!;
+    const c = await this.capsFor(cfg.url);
+    const temp = tempPassword();
+    const pk = await derivePk(c.tid!, c.it!, u, temp);
+    const r = await this.adminCall<{ user: TeamUser }>({ action: 'user_save', u, pk });
+    return { user: r.user, temp };
+  }
+  async adminUnlock(u: string) {
+    return (await this.adminCall<{ user: TeamUser }>({ action: 'user_save', u, unlock: true })).user;
+  }
+  async adminKick(u: string) {
+    return (await this.adminCall<{ user: TeamUser }>({ action: 'user_save', u, kick: true })).user;
+  }
+  /** Names used in the team's data (team list, company and deal owners, people's ผู้ดูแล) with how many
+   *  companies each looks after: who needs an account. */
+  legacyNames() {
+    const n = new Map<string, number>();
+    const add = (x: unknown, k = 0) => {
+      const s = String(x || '').trim();
+      if (s) n.set(s, (n.get(s) || 0) + k);
+    };
+    this.crm.team.forEach((x) => add(x));
+    Object.values(this.crm.owners).forEach((x) => add(x, 1));
+    Object.values(this.sales.deals).forEach((d) => add(d.resp));
+    Object.values(this.people).forEach((p) => add(p.owner));
+    return [...n].map(([name, cos]) => ({ name, cos })).sort((a, b) => b.cos - a.cos || a.name.localeCompare(b.name, 'th'));
+  }
+
   /** Stop sharing. Queued changes stay stored and are sent with the next connect (this sheet or a new link). */
   teamDisconnect() {
     this.endTeam();
