@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { addMonths, fmtN, isoTh, todayISO } from '../lib/format';
-import { TeamChip } from './TeamSync';
+import { ROLE_TH } from '../lib/auth';
+import { TEAM_ST, TeamChip } from './TeamSync';
 import { Icon } from './icons';
+import { RoleChip, hhmm, nameLetter, sessionLine } from './Login';
+import { menuKeys, usePopover } from './usePopover';
 import { TABS, useDataLine } from './Sidebar';
 import { EMPTY_FILTERS } from '../lib/search';
 import mark from '../assets/gcc-mark.png';
@@ -78,7 +81,7 @@ export function TopBar({ navOpen, docked, onMenu, onToggle }: { navOpen: boolean
             </div>
           )}
         </div>
-        {ready && <MeButton />}
+        {ready && (e.role() ? <AccountMenu /> : <MeButton />)}
       </div>
     </header>
   );
@@ -113,13 +116,92 @@ function MeButton() {
   const { engine: e, go } = useApp();
   const me = e.me();
   // the letter of the name itself, not of a leading "คุณ" (but keep names such as "คุณากร")
-  const base = me.replace(/^\s*คุณ(?=\s|[ก-ฮเแโใไ])\s*/, '') || me;
-  const initial = Array.from(base).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '';
+  const initial = me ? nameLetter(me) : '';
   return (
     <button className="tb-me" onClick={() => go('update')} title={me ? `ฉันคือ ${me} · เปลี่ยนชื่อที่แท็บอัปเดตข้อมูล` : 'ใส่ชื่อของคุณที่แท็บอัปเดตข้อมูล'} aria-label={me ? `ฉันคือ ${me} (เปลี่ยนชื่อที่แท็บอัปเดตข้อมูล)` : 'ใส่ชื่อของคุณ (แท็บอัปเดตข้อมูล)'}>
       <span className="tb-me-name">{me || 'ใส่ชื่อของคุณ'}</span>
-      <span className="tb-ava" aria-hidden="true">{initial ? initial.toUpperCase() : <Icon name="user" />}</span>
+      <span className="tb-ava" aria-hidden="true">{initial || <Icon name="user" />}</span>
     </button>
+  );
+}
+
+/**
+ * The signed-in account (team accounts): name and role in the top bar; its menu says how the team sync
+ * stands and how long this browser stays signed in, and leads to the account's settings.
+ */
+function AccountMenu() {
+  const { engine: e, go, set } = useApp();
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  usePopover(open, () => setOpen(false), btn, pop);
+  const s = e.session;
+  if (!s) return null;
+  const t = e.team;
+  const [label, dot] = TEAM_ST[t.status];
+  const sync = `${e.auth === 'expired' ? 'ต้องเข้าสู่ระบบ' : label}${t.status === 'ok' && t.last ? ' ' + hhmm(Date.parse(t.last)) : ''} · รอส่ง ${fmtN(e.teamPendingN)}`;
+  const pick = (f: () => void) => {
+    setOpen(false);
+    btn.current?.focus(); // a dialog opened from here gives the focus back to this button
+    f();
+  };
+  return (
+    <div className="acct">
+      <button
+        ref={btn}
+        className="tb-me acct-btn"
+        onClick={() => setOpen(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? 'acct-menu' : undefined}
+        aria-label={`บัญชีของฉัน: ${s.name} · ${ROLE_TH[s.role]}`}
+        title={`${s.name} (@${s.u}) · ${ROLE_TH[s.role]}`}
+      >
+        <span className="tb-me-name">{s.name}</span>
+        <RoleChip role={s.role} className="tb-me-role" />
+        <span className="tb-ava" aria-hidden="true">{nameLetter(s.name)}</span>
+      </button>
+      {open && (
+        <div ref={pop} className="acct-pop">
+          <div className="acct-head">
+            <span className="acct-ava" aria-hidden="true">{nameLetter(s.name)}</span>
+            <span className="acct-who">
+              <b>{s.name}</b>
+              <small>@{s.u}</small>
+            </span>
+            <RoleChip role={s.role} />
+          </div>
+          <div className="acct-meta">
+            <span>
+              <i style={{ background: e.auth === 'expired' ? TEAM_ST.error[1] : dot }} aria-hidden="true" />
+              {sync}
+            </span>
+            {sessionLine(s) && <span>{sessionLine(s)}</span>}
+          </div>
+          <div id="acct-menu" role="menu" aria-label="บัญชีของฉัน" className="acct-items" onKeyDown={menuKeys}>
+            <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'passwd' }))}>
+              <Icon name="key" />
+              เปลี่ยนรหัสผ่าน
+            </button>
+            {s.role === 'admin' && (
+              <button role="menuitem" className="acct-item" onClick={() => pick(() => go('users'))}>
+                <Icon name="shield" />
+                ผู้ใช้และสิทธิ์
+              </button>
+            )}
+            <button role="menuitem" className="acct-item" onClick={() => pick(() => go('update'))}>
+              <Icon name="link" />
+              การเชื่อมต่อทีม
+            </button>
+            <span className="acct-sep" role="separator" />
+            <button role="menuitem" className="acct-item acct-out" onClick={() => pick(() => set({ acctDlg: 'logout' }))}>
+              <Icon name="logout" />
+              ออกจากระบบ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
