@@ -124,7 +124,7 @@ export function AddCustomer() {
         {err && <Notice kind="error" role="alert">{err}</Notice>}
         <span style={{ fontSize: 12, color: '#5E6680' }}>ลูกค้าที่เพิ่มเองจะมีป้าย "เพิ่มเอง" ค้นหา ติดดาว นัดหมาย และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน และทั้งทีมเห็นด้วย (เมื่อเชื่อมต่อทีม)</span>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          {edit && (
+          {edit && e.can('delete') && (
             <button type="button" onClick={() => { if (window.confirm(`ลบ "${edit.name}" ออกจากรายชื่อลูกค้า?`)) { e.deleteCustomer(edit.id); set({ addCust: null, sel: null }); } }} style={{ ...small, color: '#8A2B12', marginRight: 'auto' }}>
               ลบลูกค้านี้
             </button>

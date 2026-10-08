@@ -55,7 +55,7 @@ export function Sales() {
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </label>
-            <AddMenu />
+            {e.can('edit') && <AddMenu />}
             <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...noQuick.filter((d) => d.jobStatus === 'closed')]} quick={f.quick ? QUICK.find(([k]) => k === f.quick)?.[1] : ''} />
           </div>
         }
@@ -208,8 +208,8 @@ function MoreMenu({ year, deals, quick }: { year: string; deals: Deal[]; quick?:
             {/* the table's filters apply (also when another tab is open): say so */}
             ⬇ {deals.length < yearTotal ? `ส่งออก ${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรองตาราง${quick ? ` (งานที่เปิด: ${quick.replace(/^⏰ /, '')})` : ''}` : 'ส่งออกตาราง'} (CSV เปิดใน Excel)
           </button>
-          <button className="h-bg" style={item} onClick={() => { close(); fileRef.current?.click(); }}>⬆ นำเข้าจาก Sales Tracker เดิม</button>
-          <button className="h-bg" style={item} onClick={() => { close(); setLists(true); }}>⚙ จัดการหมวด / SOURCE / Services</button>
+          {e.can('admin') && <button className="h-bg" style={item} onClick={() => { close(); fileRef.current?.click(); }}>⬆ นำเข้าจาก Sales Tracker เดิม</button>}
+          {e.can('admin') && <button className="h-bg" style={item} onClick={() => { close(); setLists(true); }}>⚙ จัดการหมวด / SOURCE / Services</button>}
         </div>
       )}
       <input ref={fileRef} type="file" accept=".json,.csv,.xlsx" style={{ display: 'none' }} onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) doImport(f); }} />
@@ -387,10 +387,18 @@ function Summary({ S, open, all, today }: { S: SalesState; open: Deal[]; all: De
 /** Quick views over the open jobs: what needs doing (combined with the filters). */
 const QUICK: [QuickView, string][] = [['', 'ทั้งหมด'], ['overdue', '⏰ ค้างติดตาม'], ['notstarted', 'ยังไม่เริ่ม'], ['active', 'กำลังติดตาม'], ['payment', 'รอชำระเงิน']];
 function QuickTabs({ S, base, today }: { S: SalesState; base: Deal[]; today: string }) {
-  const { ui, set } = useApp();
+  const { engine: e, ui, set } = useApp();
   const cur = ui.slF.quick || '';
+  const me = e.me();
+  const mine = ui.slF.resp === me && !!me;
   return (
     <div role="group" aria-label="แสดงงาน" className="sl-quick">
+      {/* the jobs of whoever is using this browser (their ผู้รับผิดชอบ), on top of any view */}
+      {me && (
+        <button aria-pressed={mine} onClick={() => set({ slF: { ...ui.slF, resp: mine ? '' : me }, slCollapsed: {} })} title={mine ? 'แสดงงานของทุกคน' : `เฉพาะงานที่ ${me} รับผิดชอบ`}>
+          ของฉัน <span>{fmtN(base.filter((d) => d.resp === me).length)}</span>
+        </button>
+      )}
       {QUICK.map(([k, label]) => {
         const n = k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length;
         if (k === 'payment' && !n && cur !== k) return null; // only when the table has stages after CLOSED DEAL in use
@@ -409,6 +417,8 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   const mobile = useMedia('(max-width: 760px)');
   const [step, setStep] = useState<{ id: string; stage: string } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // an account that can only read: no adding, no stage notes, no edits in the rows
+  const ro = !e.can('edit');
   const secs = sectionsFor(S, deals);
   const bySec = new Map<string, Deal[]>(secs.map((s) => [s, []]));
   deals.forEach((d) => bySec.get(d.section)!.push(d));
@@ -554,9 +564,9 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
             return (
               <section key={sec || '-'} className="sl-mgroup" aria-label={'หมวด ' + (sec || 'ไม่ระบุหมวด')}>
                 <div className="sl-msec">
-                  <SecBar compact sec={sec} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={() => addIn(sec)} />
+                  <SecBar compact sec={sec} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={ro ? undefined : () => addIn(sec)} />
                 </div>
-                {!col && list.map((d) => <DealCard key={d.id} e={e} S={S} d={d} today={today} cur={cur === d.id} onOpen={() => set({ deal: d.id })} onStep={(stage) => openStep(d.id, stage)} />)}
+                {!col && list.map((d) => <DealCard key={d.id} e={e} S={S} d={d} today={today} cur={cur === d.id} ro={ro} onOpen={() => set({ deal: d.id })} onStep={(stage) => openStep(d.id, stage)} />)}
               </section>
             );
           })}
@@ -594,17 +604,17 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
                   <tr className="sl-sec">
                     {/* named by the section name alone (not the whole bar) for the rows under it */}
                     <th scope="rowgroup" colSpan={S.cfg.stages.length + 7} aria-labelledby={'sl-sec-' + gi}>
-                      <SecBar sec={sec} nameId={'sl-sec-' + gi} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={() => addIn(sec)} />
+                      <SecBar sec={sec} nameId={'sl-sec-' + gi} sum={secSum(list)} collapsed={col} onToggle={(el) => toggle(sec, el)} onAdd={ro ? undefined : () => addIn(sec)} />
                     </th>
                   </tr>
-                  {!col && list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} dup={dup(d)} cur={cur === d.id} onStep={(stage) => openStep(d.id, stage)} />)}
+                  {!col && list.map((d, i) => <DealRow key={d.id} e={e} S={S} d={d} n={i + 1} today={today} team={team} dup={dup(d)} cur={cur === d.id} ro={ro} onStep={(stage) => openStep(d.id, stage)} />)}
                 </tbody>
               );
             })}
           </table>
         </div>
       )}
-      {empty.length > 0 && !Object.values(ui.slF).some(Boolean) && (
+      {!ro && empty.length > 0 && !Object.values(ui.slF).some(Boolean) && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, color: '#475069' }}>
           หมวดที่ยังไม่มีลูกค้า (กดเพื่อเพิ่ม):
           {empty.map((s) => (
@@ -622,7 +632,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
 type SecSum = { n: number; od: number; fc: number };
 /** A section's heading bar: the fold toggle (caret, name, count, overdue), the Forecast of the rows
  *  shown, and add-in-this-section. Pale with dark text: solid blue is the open client's row. */
-function SecBar({ sec, nameId, sum, collapsed, compact, onToggle, onAdd }: { sec: string; nameId?: string; sum: SecSum; collapsed: boolean; compact?: boolean; onToggle: (el: HTMLElement) => void; onAdd: () => void }) {
+function SecBar({ sec, nameId, sum, collapsed, compact, onToggle, onAdd }: { sec: string; nameId?: string; sum: SecSum; collapsed: boolean; compact?: boolean; onToggle: (el: HTMLElement) => void; onAdd?: () => void }) {
   const name = sec || 'ไม่ระบุหมวด';
   return (
     <div className={'sl-secbar' + (collapsed ? ' closed' : '')}>
@@ -644,9 +654,11 @@ function SecBar({ sec, nameId, sum, collapsed, compact, onToggle, onAdd }: { sec
           Forecast<b>{fmtMoney(sum.fc)}</b>
         </span>
       )}
-      <button type="button" className="sl-sec-add" onClick={onAdd} aria-label={`เพิ่มในหมวดนี้ (${name})`}>
-        {compact ? <span aria-hidden="true">+</span> : '+ เพิ่มในหมวดนี้'}
-      </button>
+      {onAdd && (
+        <button type="button" className="sl-sec-add" onClick={onAdd} aria-label={`เพิ่มในหมวดนี้ (${name})`}>
+          {compact ? <span aria-hidden="true">+</span> : '+ เพิ่มในหมวดนี้'}
+        </button>
+      )}
     </div>
   );
 }
@@ -676,7 +688,8 @@ function StatusDot({ S, d }: { S: SalesState; d: Deal }) {
   );
 }
 
-function MoneyCell({ e, d, which, value, confirmed }: { e: Engine; d: Deal; which: 'forecast' | 'actual'; value: number | null; confirmed: boolean }) {
+function MoneyCell({ e, d, which, value, confirmed, ro }: { e: Engine; d: Deal; which: 'forecast' | 'actual'; value: number | null; confirmed: boolean; ro?: boolean }) {
+  if (ro && !confirmed) return <span style={{ display: 'block', textAlign: 'right', padding: '0 6px', ...tabular }}>{value == null ? '—' : fmtMoney(value)}</span>;
   if (confirmed)
     return (
       <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, ...tabular }} title={which === 'forecast' ? 'ยืนยันจากใบเสนอราคาที่แนบ' : 'ยืนยันจากใบแจ้งหนี้ที่แนบ'}>
@@ -716,7 +729,7 @@ const agoTh = (iso: string, today: string) => {
 };
 
 /** The step to do now, under the client's name: opens that stage (orange when the client is overdue). */
-function NextStep({ d, tr, od, onStep }: { d: Deal; tr: ReturnType<typeof stageTrack>; od: number | null; onStep: (stage: string) => void }) {
+function NextStep({ d, tr, od, ro, onStep }: { d: Deal; tr: ReturnType<typeof stageTrack>; od: number | null; ro?: boolean; onStep: (stage: string) => void }) {
   if (d.jobStatus === 'closed') return null;
   if (!tr.next) {
     if (od != null) return <span className="sl-next warn" title="ไม่ได้ติดต่อเกิน 14 วัน">⏰ ค้าง {fmtN(od)} วัน</span>;
@@ -724,7 +737,7 @@ function NextStep({ d, tr, od, onStep }: { d: Deal; tr: ReturnType<typeof stageT
   }
   const planned = tr.states[tr.next] === 'planned' && tr.nextStep ? tr.nextStep.d : '';
   return (
-    <button onClick={() => onStep(tr.next)} className={'sl-next' + (od != null ? ' warn' : '')} title={STAGE_TH[tr.next] || tr.next}>
+    <button onClick={() => onStep(tr.next)} disabled={ro} className={'sl-next' + (od != null ? ' warn' : '')} title={STAGE_TH[tr.next] || tr.next}>
       {od != null ? `⏰ ${fmtN(od)} วัน · ` : planned ? '📅 ' : '→ '}
       {tr.next}
       <span className="sl-next-sub">{planned ? ' นัด ' + short(planned) : STAGE_TH[tr.next] ? ' ' + STAGE_TH[tr.next] : ''}</span>
@@ -732,7 +745,7 @@ function NextStep({ d, tr, od, onStep }: { d: Deal; tr: ReturnType<typeof stageT
   );
 }
 
-function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: SalesState; d: Deal; n: number; today: string; team: string[]; dup: boolean; cur: boolean; onStep: (stage: string) => void }) {
+function DealRow({ e, S, d, n, today, team, dup, cur, ro, onStep }: { e: Engine; S: SalesState; d: Deal; n: number; today: string; team: string[]; dup: boolean; cur: boolean; ro: boolean; onStep: (stage: string) => void }) {
   const { set } = useApp();
   const od = overdueDays(S, d, today);
   const lc = lastContact(S, d, today);
@@ -759,14 +772,14 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
               {dup && <span title={`บริษัทนี้มีในตารางปี ${d.year} มากกว่า 1 แถว — เปิดแถวที่ซ้ำแล้วลบออก`} className="sl-tag dup">ซ้ำ</span>}
             </span>
             <Chips d={d} />
-            <NextStep d={d} tr={tr} od={od} onStep={onStep} />
+            <NextStep d={d} tr={tr} od={od} ro={ro} onStep={onStep} />
           </div>
         </div>
       </td>
       <td>
         <span className="sl-resp">
           <span className="sl-resp-ava" aria-hidden="true">{d.resp ? Array.from(d.resp.replace(/^(คุณ|k\.)\s*/i, ''))[0] : '+'}</span>
-          <select value={d.resp} onChange={(ev) => e.updateDeal(d.id, { resp: ev.target.value })} aria-label="ผู้รับผิดชอบ" className="sl-input sl-pill">
+          <select value={d.resp} disabled={ro} onChange={(ev) => e.updateDeal(d.id, { resp: ev.target.value })} aria-label="ผู้รับผิดชอบ" className="sl-input sl-pill">
             <option value="">{d.resp ? '— ไม่ระบุ' : 'มอบหมาย'}</option>
             {resps.map((x) => <option key={x} value={x}>{x}</option>)}
           </select>
@@ -774,7 +787,7 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
       </td>
       <td>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <input type="date" value={d.contactDate} onChange={(ev) => e.updateDeal(d.id, { contactDate: ev.target.value })} aria-label="วันที่ติดต่อ" className={'sl-input sl-pill sl-date' + (od != null ? ' warn' : '')} />
+          <input type="date" value={d.contactDate} disabled={ro} onChange={(ev) => e.updateDeal(d.id, { contactDate: ev.target.value })} aria-label="วันที่ติดต่อ" className={'sl-input sl-pill sl-date' + (od != null ? ' warn' : '')} />
           {d.contactDate && d.contactDate <= today && <span className="sl-mini">{agoTh(d.contactDate, today)}</span>}
           {lc && lc !== d.contactDate && <span className="sl-mini">ล่าสุด {isoTh(lc)}</span>}
         </div>
@@ -785,7 +798,7 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
         const label = `${p} ${STAGE_TH[p] || ''} — ${STATE_TH[state]}${st.d ? ' ' + isoTh(st.d) : ''}${st.n.trim() ? ' · ' + st.n.trim().slice(0, 80) : ''}`;
         return (
           <td key={p} className={'sl-stg s-' + state + (i <= reached ? ' on' : '') + (i < reached ? ' on2' : '') + (i === 0 ? ' first' : '') + (i === stages.length - 1 ? ' last' : '')}>
-            <button onClick={() => onStep(p)} className="sl-step" aria-label={label} title={st.n || STAGE_TH[p] || p} aria-current={tr.next === p ? 'step' : undefined}>
+            <button onClick={() => onStep(p)} disabled={ro} className="sl-step" aria-label={label} title={st.n || STAGE_TH[p] || p} aria-current={tr.next === p ? 'step' : undefined}>
               <span className="sl-node" aria-hidden="true">{state === 'done' || state === 'yes' ? '✓' : state === 'no' ? '✕' : state === 'wait' ? '…' : ''}</span>
               {state === 'yes' || state === 'no' || state === 'wait' ? (
                 <>
@@ -808,8 +821,8 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
           </td>
         );
       })}
-      <td style={{ textAlign: 'right' }}><MoneyCell e={e} d={d} which="forecast" value={m.forecast} confirmed={m.fcConfirmed} /></td>
-      <td style={{ textAlign: 'right' }}><MoneyCell e={e} d={d} which="actual" value={m.actual} confirmed={m.acConfirmed} /></td>
+      <td style={{ textAlign: 'right' }}><MoneyCell e={e} d={d} which="forecast" value={m.forecast} confirmed={m.fcConfirmed} ro={ro} /></td>
+      <td style={{ textAlign: 'right' }}><MoneyCell e={e} d={d} which="actual" value={m.actual} confirmed={m.acConfirmed} ro={ro} /></td>
       <td>
         <button onClick={() => set({ deal: d.id })} className="sl-doc" title={docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}`).join('\n') || 'แนบใบเสนอราคา / ใบแจ้งหนี้'}>
           📎 {docs.length ? fmtN(docs.length) : 'แนบ'}
@@ -819,7 +832,7 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
         <div className="sl-end">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', minWidth: 0 }}>
             <StatusDot S={S} d={d} />
-            <button onClick={() => window.confirm(`ปิดงาน "${d.client}"? (ย้ายไปแท็บปิดงาน เปิดกลับได้)`) && e.updateDeal(d.id, { jobStatus: 'closed' })} className="sl-close">ปิดงาน</button>
+            {!ro && <button onClick={() => window.confirm(`ปิดงาน "${d.client}"? (ย้ายไปแท็บปิดงาน เปิดกลับได้)`) && e.updateDeal(d.id, { jobStatus: 'closed' })} className="sl-close">ปิดงาน</button>}
           </div>
           <button onClick={() => set({ deal: d.id })} className="sl-chev" aria-label={'เปิดรายละเอียด ' + d.client}>›</button>
         </div>
@@ -829,7 +842,7 @@ function DealRow({ e, S, d, n, today, team, dup, cur, onStep }: { e: Engine; S: 
 }
 
 /** Phones: one card per client, with a mini progress track and the next step. */
-function DealCard({ e, S, d, today, cur, onOpen, onStep }: { e: Engine; S: SalesState; d: Deal; today: string; cur: boolean; onOpen: () => void; onStep: (stage: string) => void }) {
+function DealCard({ e, S, d, today, cur, ro, onOpen, onStep }: { e: Engine; S: SalesState; d: Deal; today: string; cur: boolean; ro: boolean; onOpen: () => void; onStep: (stage: string) => void }) {
   const od = overdueDays(S, d, today);
   const m = dealMoney(S, d);
   const tr = stageTrack(S, d, today);
@@ -853,7 +866,7 @@ function DealCard({ e, S, d, today, cur, onOpen, onStep }: { e: Engine; S: Sales
         {m.forecast != null && <span>Forecast {fmtMoney(m.forecast)}{m.fcConfirmed ? ' ✓' : ''}</span>}
         {m.actual != null && <span>Actual {fmtMoney(m.actual)}{m.acConfirmed ? ' ✓' : ''}</span>}
       </span>
-      <NextStep d={d} tr={tr} od={od} onStep={onStep} />
+      <NextStep d={d} tr={tr} od={od} ro={ro} onStep={onStep} />
     </div>
   );
 }
@@ -900,7 +913,7 @@ function ClosedView({ S, deals, facets, total }: { S: SalesState; deals: Deal[];
                   <td style={{ textAlign: 'right', ...tabular }}>{fmtMoney(m.forecast)}{m.fcConfirmed ? ' ✓' : ''}</td>
                   <td style={{ textAlign: 'right', ...tabular }}>{fmtMoney(m.actual)}{m.acConfirmed ? ' ✓' : ''}</td>
                   <td>{isoTh(d.closedDate)}</td>
-                  <td><button onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })} style={small}>เปิดงานอีกครั้ง</button></td>
+                  <td>{e.can('edit') && <button onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })} style={small}>เปิดงานอีกครั้ง</button>}</td>
                 </tr>
               );
             })}

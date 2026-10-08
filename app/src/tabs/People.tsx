@@ -119,9 +119,9 @@ function PeopleList() {
       <PageHead
         title="ผู้ติดต่อ"
         sub={all.length ? `${fmtN(active.length)} คน · จาก ${fmtN(cos)} บริษัท · ทั้งทีมเห็นข้อมูลเดียวกัน` : 'บันทึกคนที่คุยด้วยในแต่ละบริษัท พร้อมประวัติการติดต่อ นัด และโน้ต'}
-        right={<button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button>}
+        right={e.can('edit') ? <button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button> : undefined}
       />
-      {sugg.length > 0 && (
+      {sugg.length > 0 && e.can('edit') && (
         <div className="pe-sugg">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14, color: '#1745B8' }}>
@@ -173,7 +173,7 @@ function PeopleList() {
             <span style={{ fontSize: 16, fontWeight: 500, color: '#0E1430' }}>ยังไม่มีรายชื่อผู้ติดต่อ</span>
             <span>บันทึกคนที่คุยด้วยในแต่ละบริษัท เพื่อดูประวัติการโทร นัด และโน้ตของแต่ละคน ทั้งทีมเห็นเหมือนกัน</span>
             <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button>
+              {e.can('edit') && <button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button>}
               {sugg.length > 0 && <button onClick={() => setShowSugg(true)} style={btnOutline}>นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
             </span>
           </div>
@@ -255,6 +255,9 @@ function PersonPage({ id }: { id: string }) {
   const logRef = useRef<HTMLTextAreaElement>(null);
   const today = todayISO();
   const back = () => set({ person: null });
+  // an account that can only read changes nothing; a call or note is deleted by an admin or its author
+  const ro = !e.can('edit');
+  const mayDel = (l: LogEntry) => e.can('admin') || (!ro && l.by === e.me());
   if (!p)
     return (
       <div className="pe-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
@@ -342,8 +345,8 @@ function PersonPage({ id }: { id: string }) {
               </a>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
-              <button onClick={startLog} style={{ ...btnPrimary, padding: 0 }}>บันทึกการโทร</button>
-              <button onClick={() => (c ? openSched({ ids: [c.id], pid: p.id }) : undefined)} disabled={!c} title={c ? '' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'} style={{ ...btnOutline, padding: 0, opacity: c ? 1 : 0.5 }}>นัดหมาย</button>
+              <button onClick={startLog} disabled={ro} style={{ ...btnPrimary, padding: 0, opacity: ro ? 0.5 : 1 }}>บันทึกการโทร</button>
+              <button onClick={() => (c && !ro ? openSched({ ids: [c.id], pid: p.id }) : undefined)} disabled={!c || ro} title={c ? '' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'} style={{ ...btnOutline, padding: 0, opacity: c && !ro ? 1 : 0.5 }}>นัดหมาย</button>
             </div>
           </div>
         </section>
@@ -356,7 +359,7 @@ function PersonPage({ id }: { id: string }) {
         <section className="pe-card pe-info" aria-label="ข้อมูลผู้ติดต่อ">
           <div className="pe-card-h">
             <h3>ข้อมูลผู้ติดต่อ</h3>
-            {!edit && (
+            {!edit && !ro && (
               <button className="pe-edit" onClick={() => setEdit(Object.fromEntries(PERSON_FIELDS.map((k) => [k, p[k]])) as PersonForm)}>✎ แก้ไข</button>
             )}
           </div>
@@ -392,10 +395,10 @@ function PersonPage({ id }: { id: string }) {
             <h3>โน้ต</h3>
             <span className="pe-sub">{fmtN(notes.length)} รายการ</span>
           </div>
-          <NoteForm pid={p.id} />
+          {!ro && <NoteForm pid={p.id} />}
           {!notes.length && <span className="pe-sub">ยังไม่มีโน้ต</span>}
           {(allNotes ? notes : notes.slice(0, 6)).map(({ l, key }) => (
-            <NoteItem key={l.id || l.at} l={l} onDel={() => window.confirm('ลบโน้ตนี้?') && e.delLog(key, l)} />
+            <NoteItem key={l.id || l.at} l={l} onDel={mayDel(l) ? () => window.confirm('ลบโน้ตนี้?') && e.delLog(key, l) : undefined} />
           ))}
           {notes.length > 6 && (
             <button className="pe-act" style={{ alignSelf: 'flex-start' }} onClick={() => setAllNotes(!allNotes)} aria-expanded={allNotes}>
@@ -415,6 +418,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
   contacts: { l: LogEntry; key: string }[]; upcoming: Task[]; doneTasks: Task[]; deals: Deal[]; today: string;
 }) {
   const { engine: e, set, openSched } = useApp();
+  const ro = !e.can('edit');
+  const mayDel = (l: LogEntry) => e.can('admin') || (!ro && l.by === e.me());
   return (
     <section className="pe-card pe-tabs" aria-label="ประวัติและนัดหมาย">
       <div role="tablist" className="pe-tablist">
@@ -426,7 +431,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
       </div>
       {tab === 'log' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <LogForm pid={p.id} taRef={logRef} />
+          {!ro && <LogForm pid={p.id} taRef={logRef} />}
           {!contacts.length ? (
             <span className="pe-sub">ยังไม่มีประวัติ — กด “บันทึกการโทร” หลังคุยเสร็จ</span>
           ) : (
@@ -445,7 +450,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
                         <span className="pe-type" style={{ color: TYPE_INK[l.type] || ty[1], background: ty[1] + '14' }}>{ty[0]}</span>
                         {l.result && <span className="pe-chip">{l.result}</span>}
                         <span className="pe-sub">{dtTh(l.at).split(' ').slice(-2).join(' ')} · {l.by || 'ไม่ระบุชื่อ'}</span>
-                        <button className="pe-del" onClick={() => window.confirm('ลบรายการนี้?') && e.delLog(key, l)} aria-label="ลบรายการนี้">ลบ</button>
+                        {mayDel(l) && <button className="pe-del" onClick={() => window.confirm('ลบรายการนี้?') && e.delLog(key, l)} aria-label="ลบรายการนี้">ลบ</button>}
                       </span>
                       {l.text && <span style={{ whiteSpace: 'pre-line' }}>{l.text}</span>}
                     </div>
@@ -460,7 +465,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="pe-sub">{c ? 'นัดของบริษัทนี้ · ที่ทำกับ ' + p.name + ' มีป้ายกำกับ' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'}</span>
-            {c && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} style={{ ...btnOutline, height: 34 }}>+ นัดหมาย</button>}
+            {c && !ro && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} style={{ ...btnOutline, height: 34 }}>+ นัดหมาย</button>}
           </div>
           {!upcoming.length && <span className="pe-sub">ยังไม่มีนัดที่จะถึง</span>}
           <ol className="pe-tl">
@@ -486,7 +491,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
           {c && !deals.length && (
             <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="pe-sub">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
-              <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btnOutline, height: 34 }}>+ ส่งเข้า Sales Tracker</button>
+              {!ro && <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btnOutline, height: 34 }}>+ ส่งเข้า Sales Tracker</button>}
             </span>
           )}
           {deals.map((d) => (
@@ -551,13 +556,13 @@ function SideCard({ p, c, deals, others, last, today }: { p: Person; c: Company 
   );
 }
 
-function NoteItem({ l, onDel }: { l: LogEntry; onDel: () => void }) {
+function NoteItem({ l, onDel }: { l: LogEntry; onDel?: () => void }) {
   return (
     <div className="pe-note">
       <span style={{ whiteSpace: 'pre-line' }}>{l.text}</span>
       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <span className="pe-sub">{l.by || 'ไม่ระบุชื่อ'} · {dtTh(l.at)}</span>
-        <button className="pe-del" onClick={onDel} aria-label="ลบโน้ตนี้">ลบ</button>
+        {onDel && <button className="pe-del" onClick={onDel} aria-label="ลบโน้ตนี้">ลบ</button>}
       </span>
     </div>
   );
@@ -612,6 +617,7 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
 
 function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
   const { engine: e, openSched } = useApp();
+  const ro = !e.can('edit');
   const ti = taskInfo(e, t);
   const ty = TT.find((x) => x[0] === t.type) || TT[0];
   const over = !t.done && t.date < today;
@@ -626,7 +632,7 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
       </div>
       <div className={'pe-tl-card' + (withP ? ' mine' : '')}>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <DoneBox t={t} color={ty[2]} onToggle={() => e.toggleTask(t)} size={12} />
+          <DoneBox t={t} color={ty[2]} onToggle={() => !ro && e.toggleTask(t)} size={12} />
           <span className="pe-type" style={{ color: TYPE_INK[ty[0]] || ty[2], background: ty[2] + '14' }}>{ty[1]}</span>
           <span style={{ fontWeight: 500 }}>{t.time || 'ทั้งวัน'}</span>
           {over && <span className="pe-chip warn">เกินกำหนด</span>}
@@ -635,8 +641,8 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
         </span>
         {t.note && <span>{t.note}</span>}
         <span style={{ display: 'flex', gap: 12 }}>
-          <button className="pe-act" onClick={() => openSched({ taskId: t.id, ids: [t.gid] })}>เลื่อน / แก้ไข</button>
-          <button className="pe-del" onClick={() => e.delTask(t)}>ลบนัด</button>
+          {!ro && <button className="pe-act" onClick={() => openSched({ taskId: t.id, ids: [t.gid] })}>เลื่อน / แก้ไข</button>}
+          {!ro && <button className="pe-del" onClick={() => e.delTask(t)}>ลบนัด</button>}
           <span className="pe-sub">{ti.title}</span>
         </span>
       </div>
@@ -730,7 +736,7 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
         <textarea value={f.note} onChange={up('note')} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ช่วงเวลาที่สะดวก ความสนใจ" className="pe-ta" />
       </label>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        <button type="button" onClick={del} style={{ ...btnOutline, borderColor: '#E9B9AC', color: '#8A2B12', marginRight: 'auto' }}>ลบผู้ติดต่อ</button>
+        {e.can('delete') ? <button type="button" onClick={del} style={{ ...btnOutline, borderColor: '#E9B9AC', color: '#8A2B12', marginRight: 'auto' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
         <button type="button" onClick={onDone} style={{ ...btnOutline, borderColor: '#D5DBEA', color: '#0E1430' }}>ยกเลิก</button>
         <button type="submit" style={btnPrimary}>บันทึก</button>
       </div>
@@ -876,7 +882,7 @@ export function CompanyPeople({ c }: { c: Company }) {
     <div style={box}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: '#1F5BD8' }}>ผู้ติดต่อ{list.length ? ` (${fmtN(list.length)})` : ''}</span>
-        <button onClick={() => set({ addPerson: { gid: c.id } })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>+ เพิ่มผู้ติดต่อ</button>
+        {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>+ เพิ่มผู้ติดต่อ</button>}
       </div>
       {!list.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่มี — บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติของแต่ละคน</span>}
       {list.map((p) => (

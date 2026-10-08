@@ -16,6 +16,8 @@ export const dedupFilter = (k: F) => (g: DupGroup) =>
 
 export function Dedup() {
   const { engine: e, ui, set, open } = useApp();
+  // deciding what is a duplicate changes every company list of the team: the admin's job
+  const admin = e.can('admin');
   useEngineVersion();
   const G = e.B.groups, D = e.B.D;
   const list = G.filter(dedupFilter(ui.ddF));
@@ -59,9 +61,10 @@ export function Dedup() {
                   <span style={{ fontSize: 12.5, color: '#475069' }}>{stateLabel}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {canMerge && <button onClick={() => e.decide(g.key, g.why === 'auto' ? null : 'merge')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>รวมเป็นบริษัทเดียว</button>}
-                  {canSplit && <button onClick={() => e.decide(g.key, 'split')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>{g.state === 'pending' ? 'ไม่ซ้ำ แยกกัน' : 'แยกออก'}</button>}
-                  {canUndo && <button onClick={() => e.decide(g.key, null)} style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13, textDecoration: 'underline' }}>ยกเลิกการตัดสินใจ</button>}
+                  {!admin && <span style={{ fontSize: 12.5, color: '#5E6680' }}>การตัดสินข้อมูลซ้ำทำโดยผู้ดูแลระบบ</span>}
+                  {admin && canMerge && <button onClick={() => e.decide(g.key, g.why === 'auto' ? null : 'merge')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>รวมเป็นบริษัทเดียว</button>}
+                  {admin && canSplit && <button onClick={() => e.decide(g.key, 'split')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>{g.state === 'pending' ? 'ไม่ซ้ำ แยกกัน' : 'แยกออก'}</button>}
+                  {admin && canUndo && <button onClick={() => e.decide(g.key, null)} style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13, textDecoration: 'underline' }}>ยกเลิกการตัดสินใจ</button>}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,280px),1fr))', gap: 10 }}>
