@@ -96,22 +96,14 @@ export function TeamSyncCard() {
   };
   // a team-code team whose script can now do accounts: the lead turns them on from here
   const caps = cfg && !acct && e.caps?.url === cfg.url ? e.caps : null;
-  const x = e as typeof e & { teamBeginSetup?: () => void; teamDropUnsent?: () => Promise<unknown> };
-  const enableAccounts = () => {
-    if (!cfg) return;
-    if (x.teamBeginSetup) return x.teamBeginSetup();
-    e.auth = 'setup';
-    e.authUrl = cfg.url;
-    e.authMsg = '';
-    e.emit();
-  };
+  const enableAccounts = () => e.teamBeginSetup();
   // an account made ดูอย่างเดียว with edits still queued: they can't be sent; offer to drop them
-  const stuck = acct?.role === 'viewer' && e.teamPendingN > 0 && !!x.teamDropUnsent;
+  const stuck = acct?.role === 'viewer' && e.teamPendingN > 0;
   const dropUnsent = async () => {
     if (!window.confirm(`ทิ้งรายการที่ส่งไม่ได้ ${fmtN(e.teamPendingN)} รายการ? ข้อมูลในเครื่องนี้จะกลับไปเป็นค่าของทีม`)) return;
     setBusy('leave');
     try {
-      await x.teamDropUnsent?.();
+      await e.teamDropUnsent();
     } finally {
       setBusy('');
     }
@@ -140,26 +132,24 @@ export function TeamSyncCard() {
               คุณได้รับลิงก์เชิญเข้าทีม (ชีตรหัส …{deploymentId(e.teamJoinUrl)}) ตรวจกับหัวหน้าทีมว่าตรงกัน แล้วใส่รหัสทีมและกด เชื่อมต่อ
             </Notice>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,260px),1fr))', gap: 10 }}>
-            <label style={labelCol}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <label style={{ ...labelCol, flex: '1 1 320px', minWidth: 0, maxWidth: keyStep ? undefined : 640 }}>
               ลิงก์ Web app ของ Google Apps Script
-              <input name="url" value={url} onChange={(ev) => setUrl(ev.target.value)} placeholder="https://script.google.com/macros/s/…/exec" style={inputStyle} autoComplete="off" />
+              <input name="url" value={url} onChange={(ev) => setUrl(ev.target.value)} placeholder="https://script.google.com/macros/s/…/exec" style={inputStyle} autoComplete="off" spellCheck={false} />
             </label>
             {keyStep && (
-              <label style={labelCol}>
+              <label style={{ ...labelCol, flex: '1 1 240px', minWidth: 0 }}>
                 รหัสทีม
                 <input name="key" type="password" placeholder="รหัสที่ตั้งไว้ในสคริปต์ (TEAM_KEY)" style={inputStyle} autoComplete="off" autoFocus />
               </label>
             )}
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             {keyStep ? (
               <button type="submit" disabled={t.status === 'connecting'} style={btn}>{t.status === 'connecting' ? 'กำลังเชื่อมต่อ…' : 'เชื่อมต่อ'}</button>
             ) : (
               <button type="submit" disabled={busy === 'open' || !url.trim()} style={{ ...btn, opacity: url.trim() ? 1 : 0.6 }}>{busy === 'open' ? 'กำลังตรวจสอบ…' : 'ถัดไป'}</button>
             )}
-            <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5 }}>วิธีตั้งค่า Google Sheet ของทีม (ทำครั้งเดียว ประมาณ 5 นาที)</a>
           </div>
+          <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5, alignSelf: 'flex-start' }}>วิธีตั้งค่า Google Sheet ของทีม (ทำครั้งเดียว ประมาณ 5 นาที)</a>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
             {keyStep
               ? 'ตอนเชื่อมต่อครั้งแรก ข้อมูลที่บันทึกในเครื่องนี้และยังไม่มีในชีตจะถูกส่งขึ้นไปด้วย ส่วนรายการที่ชีตมีอยู่แล้วจะใช้ค่าจากชีต'
@@ -193,7 +183,7 @@ export function TeamSyncCard() {
               ลิงก์เชิญที่เปิดมาชี้ไปชีตอื่น (…{deploymentId(e.teamJoinUrl)}) ไม่ใช่ชีตที่เชื่อมอยู่ (…{deploymentId(cfg.url)}) ถ้าหัวหน้าทีมย้ายชีตจริง ให้กด ยกเลิกการเชื่อมต่อ แล้วเชื่อมใหม่ด้วยลิงก์เชิญ (รายการที่ยังค้างส่งจะตามไปที่ลิงก์ใหม่)
             </Notice>
           )}
-          {e.teamNote && (
+          {e.teamNote && !stuck && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Notice kind="info" role="status">{e.teamNote}</Notice>
@@ -245,7 +235,7 @@ export function TeamSyncCard() {
           {caps && caps.v === 3 && caps.mode === 'legacy' && (
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: 'var(--brand-soft)', borderRadius: 14, padding: '12px 14px' }}>
               <span style={{ color: 'var(--brand-deep)', display: 'inline-flex' }}><Icon name="shield" size={22} /></span>
-              <span style={{ flex: 1, minWidth: 220, fontSize: 13.5, color: 'var(--brand-deep)', lineHeight: 1.6 }}>สคริปต์รองรับบัญชีผู้ใช้แล้ว — เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</span>
+              <span style={{ flex: 1, minWidth: 220, fontSize: 13.5, color: 'var(--brand-deep)', lineHeight: 1.6 }}>สคริปต์รองรับบัญชีผู้ใช้แล้ว</span>
               <button onClick={enableAccounts} style={btn}>เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</button>
             </div>
           )}
@@ -269,7 +259,8 @@ export function TeamSyncCard() {
           </div>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
             {acct
-              ? 'ลิงก์เชิญจะพาเพื่อนไปหน้าเข้าสู่ระบบของทีมนี้ ส่งชื่อผู้ใช้และรหัสผ่านชั่วคราวให้แต่ละคนแยกกันทางแชตส่วนตัว (สร้างได้ที่ ผู้ใช้และสิทธิ์) · ถ้าสองคนแก้คนละช่องของรายการเดียวกัน จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง'
+              ? (acct.role === 'admin' ? 'ลิงก์เชิญจะพาเพื่อนไปหน้าเข้าสู่ระบบของทีมนี้ ส่งชื่อผู้ใช้และรหัสผ่านชั่วคราวให้แต่ละคนแยกกันทางแชตส่วนตัว (สร้างได้ที่ ผู้ใช้และสิทธิ์) · ' : '') +
+                'ถ้าสองคนแก้คนละช่องของรายการเดียวกัน จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง'
               : 'ลิงก์เชิญจะพาเพื่อนมาที่หน้านี้พร้อมลิงก์ชีตใส่ไว้ให้ ส่งรหัสทีมให้แยกต่างหาก และบอก รหัสชีตของทีม ด้านบนให้เพื่อนตรวจว่าลิงก์ถูกต้อง · ถ้าสองคนแก้คนละช่องของรายการเดียวกัน (เช่น คนหนึ่งแก้เบอร์ อีกคนแก้อีเมล) จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง — รวมถึงค่าที่แก้ตอนออฟไลน์ ซึ่งจะส่งเมื่อกลับมาออนไลน์'}
           </span>
         </div>

@@ -231,38 +231,46 @@ export function AuthScreen({ invited }: { invited?: boolean }) {
   );
 }
 
-const POINTS: [IconName, string][] = [
+// (role names and the headline's halves are kept whole: Thai line breaking would split them)
+const POINTS: [IconName, ReactNode][] = [
   ['notes', 'ข้อมูลทีมเก็บใน Google Sheet ของบริษัท'],
   ['user', 'บันทึกชื่อผู้ทำทุกการเปลี่ยนแปลง'],
-  ['shield', 'สิทธิ์แยกตามบทบาท: ผู้ดูแลระบบ · พนักงานขาย · ดูอย่างเดียว'],
+  ['shield', <>สิทธิ์แยกตามบทบาท: <span className="nw">ผู้ดูแลระบบ</span> · <span className="nw">พนักงานขาย</span> · <span className="nw">ดูอย่างเดียว</span></>],
 ];
 function BrandPanel({ url }: { url: string }) {
   return (
     <section className="auth-brand" aria-label="Global Carbon · ฐานข้อมูลลูกค้า GCC">
-      <div className="auth-logo">
-        <img src={mark} alt="" width={46} height={46} />
-        <span>
-          <b>Global Carbon</b>
-          <small>ฐานข้อมูลลูกค้า GCC</small>
-        </span>
+      {/* stays in view beside a long form */}
+      <div className="auth-brand-in">
+        <div className="auth-logo">
+          <img src={mark} alt="" width={46} height={46} />
+          <span>
+            <b>Global Carbon</b>
+            <small>ฐานข้อมูลลูกค้า GCC</small>
+          </span>
+        </div>
+        <div className="auth-pitch">
+          <p className="auth-headline">
+            <span className="nw">ติดตามลูกค้าและงานขาย</span>
+            <wbr />
+            <span className="nw">ของทีม ในที่เดียว</span>
+          </p>
+          <ul className="auth-points">
+            {POINTS.map(([ic, t], i) => (
+              <li key={i}>
+                <span className="auth-pt" aria-hidden="true"><Icon name={ic} size={16} /></span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {url && (
+          <span className="auth-team" title={url}>
+            <Icon name="link" size={15} />
+            ทีม …{deploymentId(url)}
+          </span>
+        )}
       </div>
-      <div className="auth-pitch">
-        <p className="auth-headline">ติดตามลูกค้าและงานขายของทีม ในที่เดียว</p>
-        <ul className="auth-points">
-          {POINTS.map(([ic, t]) => (
-            <li key={t}>
-              <span className="auth-pt" aria-hidden="true"><Icon name={ic} size={16} /></span>
-              {t}
-            </li>
-          ))}
-        </ul>
-      </div>
-      {url && (
-        <span className="auth-team" title={url}>
-          <Icon name="link" size={15} />
-          ทีม …{deploymentId(url)}
-        </span>
-      )}
     </section>
   );
 }
@@ -431,9 +439,9 @@ function RecoverForm({ onBack }: { onBack: () => void }) {
         <h1 className="auth-h">เป็นผู้ดูแลระบบและลืมรหัสผ่าน?</h1>
       </header>
       <ol className="auth-steps">
-        <li>เปิด Google Sheet ของทีม → ส่วนขยาย → Apps Script</li>
-        <li>เลือกฟังก์ชัน setup แล้วกด Run</li>
-        <li>คัดลอกรหัสกู้คืนจาก Execution log (ใช้ได้ 24 ชั่วโมง)</li>
+        <li><span>เปิด Google Sheet ของทีม → ส่วนขยาย → Apps Script</span></li>
+        <li><span>เลือกฟังก์ชัน setup แล้วกด Run</span></li>
+        <li><span>คัดลอกรหัสกู้คืนจาก Execution log (ใช้ได้ 24 ชั่วโมง)</span></li>
       </ol>
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy || undefined}>
         <TextField label="รหัสกู้คืน" value={code} onChange={(v) => setCode(fmtCode(v))} inputMode="numeric" autoComplete="one-time-code" placeholder="1234-5678" className="auth-input auth-code" autoFocus />
@@ -518,10 +526,10 @@ function SetupForm({ askLead }: { askLead: boolean }) {
         <h1 className="auth-h">เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</h1>
       </header>
       <ol className="auth-steps">
-        <li>เปิด Google Sheet ของทีม</li>
-        <li>ส่วนขยาย → Apps Script</li>
-        <li>เลือกฟังก์ชัน setup → กด Run</li>
-        <li>คัดลอก <b>รหัสตั้งค่าผู้ดูแลระบบ</b> จาก Execution log</li>
+        <li><span>เปิด Google Sheet ของทีม</span></li>
+        <li><span>ส่วนขยาย → Apps Script</span></li>
+        <li><span>เลือกฟังก์ชัน setup → กด Run</span></li>
+        <li><span>คัดลอก <b>รหัสตั้งค่าผู้ดูแลระบบ</b> จาก Execution log</span></li>
       </ol>
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy || undefined}>
         <TextField label="รหัสตั้งค่า" value={code} onChange={(v) => setCode(fmtCode(v))} inputMode="numeric" autoComplete="one-time-code" placeholder="1234-5678" className="auth-input auth-code" autoFocus />
@@ -748,7 +756,7 @@ export function ReLogin({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="หมดเวลาการเข้าระบบ" onClose={onClose} width={440}>
       <form className="auth-form dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
-        <p className="auth-sub">{n > 0 ? `งานที่แก้ไว้ ${fmtN(n)} รายการยังอยู่ในเครื่อง จะส่งหลังเข้าสู่ระบบ` : 'หมดเวลาการเข้าระบบ กรุณาเข้าสู่ระบบอีกครั้ง'}</p>
+        <p className="auth-sub">{n > 0 ? `งานที่แก้ไว้ ${fmtN(n)} รายการยังอยู่ในเครื่อง จะส่งหลังเข้าสู่ระบบ` : 'กรุณาเข้าสู่ระบบอีกครั้ง'}</p>
         <div className="auth-field">
           <label htmlFor="relogin-u">ชื่อผู้ใช้</label>
           <div className="auth-ro">

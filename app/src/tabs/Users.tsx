@@ -319,7 +319,7 @@ export function Users() {
         />
       )}
       {cred && (
-        <Modal title={`ตั้งรหัสผ่านชั่วคราวใหม่ให้ ${cred.user.name} แล้ว`} onClose={() => { setCred(null); refocus(`[data-more="${cred.user.u}"]`); }} width={520} focus="dialog">
+        <Modal title="ตั้งรหัสผ่านชั่วคราวใหม่" onClose={() => { setCred(null); refocus(`[data-more="${cred.user.u}"]`); }} width={520} focus="dialog">
           <CredCard cred={cred} onDone={() => { setCred(null); refocus(`[data-more="${cred.user.u}"]`); }} />
         </Modal>
       )}
@@ -543,7 +543,7 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
     }
   };
   return (
-    <Modal title={cred ? `สร้างบัญชี ${cred.user.name} แล้ว` : 'เพิ่มผู้ใช้'} onClose={busy ? () => {} : onClose} width={560}>
+    <Modal title="เพิ่มผู้ใช้" onClose={busy ? () => {} : onClose} width={560}>
       {cred ? (
         <CredCard cred={cred} onDone={onClose} />
       ) : (
