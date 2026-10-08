@@ -267,11 +267,11 @@ export function Search() {
             return (
               <div key={c.id} style={{ background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <button onClick={() => open(c.id)} style={{ cursor: 'pointer', flex: 1, border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, color: '#0E1430' }}>
+                  <button onClick={() => open(c.id)} className="hv-tx" style={{ cursor: 'pointer', flex: 1, border: 0, textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069' }}>{c.code} · {D.prov[c.prov] || '—'}</span>
                   </button>
-                  {edit ? <button onClick={st.toggle} aria-label="ติดตาม" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, background: 'transparent', fontSize: 22, color: st.fg }}>{st.star}</button> : roStar(st.on, { width: 44, height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 })}
+                  {edit ? <button onClick={st.toggle} aria-label="ติดตาม" className="hv" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, borderRadius: '50%', fontSize: 22, color: st.fg }}>{st.star}</button> : roStar(st.on, { width: 44, height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 })}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
@@ -302,7 +302,7 @@ export function Search() {
           {(sl as Cert[]).map((ct) => {
             const [bg, fg] = PILL[ct.st];
             return (
-              <button key={ct.cid} onClick={() => open(ct.gid)} style={{ cursor: 'pointer', textAlign: 'left', background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, color: '#0E1430' }}>
+              <button key={ct.cid} onClick={() => open(ct.gid)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', '--bg': '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, color: '#0E1430' }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                   <span style={{ fontSize: 12.5, fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <span style={{ fontSize: 12, fontWeight: 500, padding: '3px 10px', borderRadius: 999, background: bg, color: fg }}>{CST[ct.st][0]}</span>

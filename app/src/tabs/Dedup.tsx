@@ -37,7 +37,7 @@ export function Dedup() {
         {kp.map(([k, label, n, sub]) => {
           const on = ui.ddF === k;
           return (
-            <button key={k} onClick={() => set({ ddF: k, ddPage: 0 })} aria-pressed={on} style={{ cursor: 'pointer', textAlign: 'left', background: on ? '#EEF2FF' : '#fff', border: `1.5px solid ${on ? '#1F5BD8' : '#E3E7F1'}`, borderRadius: 18, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <button key={k} onClick={() => set({ ddF: k, ddPage: 0 })} aria-pressed={on} className="hv" style={{ cursor: 'pointer', textAlign: 'left', ...(on ? { '--bg': '#EEF2FF', '--hv': '#DCE5FA' } : { '--bg': '#fff' }), border: `1.5px solid ${on ? '#1F5BD8' : '#E3E7F1'}`, borderRadius: 18, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontSize: 13, color: '#475069' }}>{label}</span>
               <span style={{ fontSize: 28, fontWeight: 500, color: '#0E1430' }}>{fmtN(n)}</span>
               <span style={{ fontSize: 12, color: '#475069', fontWeight: 300 }}>{sub}</span>
@@ -62,9 +62,9 @@ export function Dedup() {
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {!admin && <span style={{ fontSize: 12.5, color: '#5E6680' }}>การตัดสินข้อมูลซ้ำทำโดยผู้ดูแลระบบ</span>}
-                  {admin && canMerge && <button onClick={() => e.decide(g.key, g.why === 'auto' ? null : 'merge')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>รวมเป็นบริษัทเดียว</button>}
-                  {admin && canSplit && <button onClick={() => e.decide(g.key, 'split')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>{g.state === 'pending' ? 'ไม่ซ้ำ แยกกัน' : 'แยกออก'}</button>}
-                  {admin && canUndo && <button onClick={() => e.decide(g.key, null)} style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13, textDecoration: 'underline' }}>ยกเลิกการตัดสินใจ</button>}
+                  {admin && canMerge && <button onClick={() => e.decide(g.key, g.why === 'auto' ? null : 'merge')} className="btn pri" style={{ height: 34, padding: '0 14px', fontSize: 13 }}>รวมเป็นบริษัทเดียว</button>}
+                  {admin && canSplit && <button onClick={() => e.decide(g.key, 'split')} className="btn out" style={{ height: 34, padding: '0 14px', fontSize: 13 }}>{g.state === 'pending' ? 'ไม่ซ้ำ แยกกัน' : 'แยกออก'}</button>}
+                  {admin && canUndo && <button onClick={() => e.decide(g.key, null)} className="hv" style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13, textDecoration: 'underline' }}>ยกเลิกการตัดสินใจ</button>}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,280px),1fr))', gap: 10 }}>
@@ -72,7 +72,7 @@ export function Dedup() {
                   const r = e.B.rawById.get(id)!;
                   const facts: [string, string][] = [['รหัส', gccCode(id)], ['เลขนิติบุคคล', r.jur || '—'], ['ประเภท', D.type[r.type]], ['จังหวัด', D.prov[r.prov] || '—'], ['โทรศัพท์', r.phone || '—']];
                   return (
-                    <button key={id} onClick={() => open(id)} style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid #EEF1F8', background: '#F7F8FC', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 5, color: '#0E1430' }}>
+                    <button key={id} onClick={() => open(id)} className="hv2" style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid #EEF1F8', '--bg': '#F7F8FC', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 5, color: '#0E1430' }}>
                       <span style={{ fontSize: 14, fontWeight: 500, textWrap: 'pretty' }}>{r.name}</span>
                       <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}><SrcTags mask={r.src} /></span>
                       {facts.map(([k, v]) => (

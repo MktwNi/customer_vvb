@@ -4,7 +4,7 @@ import { CONFIG } from '../lib/constants';
 import { dtTh, fmtN } from '../lib/format';
 import { ROLE_TH } from '../lib/auth';
 import { deploymentId, type TeamStatus } from '../lib/teamSync';
-import { Notice, card, inputStyle, labelCol } from './ui';
+import { Notice, card, labelCol } from './ui';
 import { Icon } from './icons';
 
 /** [label, dot colour on white, dot colour on the dark header] */
@@ -42,9 +42,8 @@ export function TeamSyncCard() {
   const cfg = e.teamCfg, t = e.team;
   const acct = cfg?.mode === 'accounts' && e.session ? e.session : null;
   const [label, dot] = TEAM_ST[t.status];
-  const btn: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 };
-  const ghost: CSSProperties = { ...btn, background: '#fff', color: '#1F5BD8', border: '1.5px solid #1F5BD8' };
-  const plain: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13.5, textDecoration: 'underline' };
+  // with class "hv" (buttons are "btn pri" / "btn out")
+  const plain: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 10px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13.5, textDecoration: 'underline' };
   // step 2 of connecting (the team code) once the link turned out to be a team-code team; the home
   // team's form starts there
   const keyStep = !!home || (!!e.teamJoinUrl && url.trim() === e.teamJoinUrl);
@@ -141,19 +140,19 @@ export function TeamSyncCard() {
             {!home && (
               <label style={{ ...labelCol, flex: '1 1 320px', minWidth: 0, maxWidth: keyStep ? undefined : 640 }}>
                 ลิงก์ Web app ของ Google Apps Script
-                <input name="url" value={url} onChange={(ev) => setUrl(ev.target.value)} placeholder="https://script.google.com/macros/s/…/exec" style={inputStyle} autoComplete="off" spellCheck={false} />
+                <input name="url" value={url} onChange={(ev) => setUrl(ev.target.value)} placeholder="https://script.google.com/macros/s/…/exec" className="fld" autoComplete="off" spellCheck={false} />
               </label>
             )}
             {keyStep && (
               <label style={{ ...labelCol, flex: '1 1 240px', minWidth: 0, maxWidth: home ? 420 : undefined }}>
                 รหัสทีม
-                <input name="key" type="password" placeholder="รหัสที่ตั้งไว้ในสคริปต์ (TEAM_KEY)" style={inputStyle} autoComplete="off" autoFocus />
+                <input name="key" type="password" placeholder="รหัสที่ตั้งไว้ในสคริปต์ (TEAM_KEY)" className="fld" autoComplete="off" autoFocus />
               </label>
             )}
             {keyStep ? (
-              <button type="submit" disabled={t.status === 'connecting'} style={btn}>{t.status === 'connecting' ? 'กำลังเชื่อมต่อ…' : 'เชื่อมต่อ'}</button>
+              <button type="submit" disabled={t.status === 'connecting'} className="btn pri">{t.status === 'connecting' ? 'กำลังเชื่อมต่อ…' : 'เชื่อมต่อ'}</button>
             ) : (
-              <button type="submit" disabled={busy === 'open' || !url.trim()} style={{ ...btn, opacity: url.trim() ? 1 : 0.6 }}>{busy === 'open' ? 'กำลังตรวจสอบ…' : 'ถัดไป'}</button>
+              <button type="submit" disabled={busy === 'open' || !url.trim()} className="btn pri" style={{ opacity: url.trim() ? 1 : 0.6 }}>{busy === 'open' ? 'กำลังตรวจสอบ…' : 'ถัดไป'}</button>
             )}
           </div>
           <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5, alignSelf: 'flex-start' }}>วิธีตั้งค่า Google Sheet ของทีม (ทำครั้งเดียว ประมาณ 5 นาที)</a>
@@ -203,7 +202,8 @@ export function TeamSyncCard() {
                 }}
                 aria-label="ปิดข้อความ"
                 title="ปิดข้อความ"
-                style={{ cursor: 'pointer', flex: 'none', width: 34, height: 34, marginTop: 6, borderRadius: '50%', border: 0, background: '#F6F8FE', color: '#475069', fontSize: 18 }}
+                className="hv2"
+                style={{ cursor: 'pointer', flex: 'none', width: 34, height: 34, marginTop: 6, borderRadius: '50%', border: 0, '--bg': '#F6F8FE', color: '#475069', fontSize: 18 }}
               >
                 ×
               </button>
@@ -212,7 +212,7 @@ export function TeamSyncCard() {
           {stuck && (
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#FFF4DC', borderRadius: 14, padding: '10px 14px' }}>
               <span style={{ flex: 1, minWidth: 220, fontSize: 13.5, color: '#6B4100', lineHeight: 1.6 }}>บัญชีดูอย่างเดียวส่งการแก้ไขไม่ได้ · รอส่ง {fmtN(e.teamPendingN)} รายการ</span>
-              <button onClick={dropUnsent} disabled={!!busy} style={{ ...ghost, borderColor: '#6B4100', color: '#6B4100' }}>ทิ้งรายการที่ส่งไม่ได้</button>
+              <button onClick={dropUnsent} disabled={!!busy} className="btn out" style={{ borderColor: '#6B4100', color: '#6B4100', '--hv': '#FFEDC7' }}>ทิ้งรายการที่ส่งไม่ได้</button>
             </div>
           )}
           {t.status !== 'ok' && t.msg && (
@@ -221,7 +221,7 @@ export function TeamSyncCard() {
               {e.auth === 'expired' && (
                 <>
                   {' '}
-                  <button onClick={() => set({ hideRelogin: false })} style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0, color: 'inherit', font: 'inherit', fontWeight: 500, textDecoration: 'underline' }}>
+                  <button onClick={() => set({ hideRelogin: false })} className="hv-tx" style={{ cursor: 'pointer', border: 0, padding: 0, color: 'inherit', font: 'inherit', fontWeight: 500, textDecoration: 'underline', '--hv': 'rgba(6,22,90,.08)' }}>
                     เข้าสู่ระบบ
                   </button>
                 </>
@@ -235,16 +235,16 @@ export function TeamSyncCard() {
             >
               <label style={labelCol}>
                 รหัสทีมใหม่ (หัวหน้าทีมเปลี่ยนรหัสแล้ว)
-                <input type="password" value={newKey} onChange={(ev) => setNewKey(ev.target.value)} style={inputStyle} autoComplete="off" />
+                <input type="password" value={newKey} onChange={(ev) => setNewKey(ev.target.value)} className="fld" autoComplete="off" />
               </label>
-              <button type="submit" disabled={!!busy} style={btn}>{busy === 'key' ? 'กำลังตรวจรหัส…' : 'ใช้รหัสใหม่'}</button>
+              <button type="submit" disabled={!!busy} className="btn pri">{busy === 'key' ? 'กำลังตรวจรหัส…' : 'ใช้รหัสใหม่'}</button>
             </form>
           )}
           {caps && caps.v === 3 && caps.mode === 'legacy' && (
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: 'var(--brand-soft)', borderRadius: 14, padding: '12px 14px' }}>
               <span style={{ color: 'var(--brand-deep)', display: 'inline-flex' }}><Icon name="shield" size={22} /></span>
               <span style={{ flex: 1, minWidth: 220, fontSize: 13.5, color: 'var(--brand-deep)', lineHeight: 1.6 }}>สคริปต์รองรับบัญชีผู้ใช้แล้ว</span>
-              <button onClick={enableAccounts} style={btn}>เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</button>
+              <button onClick={enableAccounts} className="btn pri">เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</button>
             </div>
           )}
           {caps && caps.v === 2 && (
@@ -253,15 +253,15 @@ export function TeamSyncCard() {
             </span>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button onClick={() => e.teamSync()} disabled={t.status === 'syncing' || !!busy || !!e.auth} style={btn}>{t.status === 'syncing' ? 'กำลังซิงก์…' : 'ซิงก์ตอนนี้'}</button>
-            {(!acct || acct.role === 'admin') && <button onClick={copy} style={ghost}>{copied ? 'คัดลอกลิงก์แล้ว ✓' : 'คัดลอกลิงก์เชิญทีม'}</button>}
+            <button onClick={() => e.teamSync()} disabled={t.status === 'syncing' || !!busy || !!e.auth} className="btn pri">{t.status === 'syncing' ? 'กำลังซิงก์…' : 'ซิงก์ตอนนี้'}</button>
+            {(!acct || acct.role === 'admin') && <button onClick={copy} className="btn out">{copied ? 'คัดลอกลิงก์แล้ว ✓' : 'คัดลอกลิงก์เชิญทีม'}</button>}
             {acct ? (
-              <button onClick={() => set({ acctDlg: 'logout' })} style={plain}>
+              <button onClick={() => set({ acctDlg: 'logout' })} className="hv" style={plain}>
                 ออกจากระบบ
               </button>
             ) : (
               !home && (
-                <button onClick={disconnect} disabled={!!busy} style={plain}>
+                <button onClick={disconnect} disabled={!!busy} className="hv" style={plain}>
                   {busy === 'leave' ? 'กำลังส่งรายการที่ค้าง…' : 'ยกเลิกการเชื่อมต่อ'}
                 </button>
               )

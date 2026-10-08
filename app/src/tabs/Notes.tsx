@@ -72,7 +72,7 @@ export function Notes() {
                 ))}
                 <div style={{ borderTop: '1px solid #EEF1F8', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 13, color: '#475069' }}>ต้องยื่นรอบนี้ <span style={{ fontSize: 20, fontWeight: 500, color: '#1F5BD8' }}>{fmtN(n)}</span> บริษัท</span>
-                  {n > 0 && <button onClick={() => setF({ rnd: x.no, view: 'co', sort: 'exp', tgt: '' })} style={{ cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 12.5 }}>ดูรายชื่อ</button>}
+                  {n > 0 && <button onClick={() => setF({ rnd: x.no, view: 'co', sort: 'exp', tgt: '' })} className="btn pri" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }}>ดูรายชื่อ</button>}
                 </div>
               </div>
             );

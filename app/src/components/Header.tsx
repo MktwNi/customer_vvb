@@ -60,24 +60,24 @@ export function TopBar({ navOpen, docked, onMenu, onToggle }: { navOpen: boolean
             <div style={{ position: 'absolute', top: 46, right: 0, zIndex: 30, background: '#fff', color: '#0E1430', borderRadius: 18, padding: 18, boxShadow: '0 24px 60px -16px rgba(4,10,60,.5)', border: '1px solid #E3E7F1', display: 'flex', flexDirection: 'column', gap: 14, width: 'min(340px,86vw)' }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, color: '#475069' }}>
                 ดูสถานะ ณ วันที่
-                <input type="date" value={e.ref} onChange={(ev) => ev.target.value && setRef(ev.target.value)} style={{ height: 42, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14, color: '#0E1430' }} />
+                <input type="date" value={e.ref} onChange={(ev) => ev.target.value && setRef(ev.target.value)} className="fld" style={{ height: 42, borderRadius: 10, padding: '0 10px', color: '#0E1430' }} />
               </label>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {quick.map(([label, v]) => {
                   const on = e.ref === v;
                   return (
-                    <button key={label} onClick={() => setRef(v)} style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5, border: `1.5px solid ${on ? 'var(--brand)' : '#D5DBEA'}`, background: on ? 'var(--brand)' : '#fff', color: on ? '#fff' : '#0E1430' }}>{label}</button>
+                    <button key={label} onClick={() => setRef(v)} className="hv" style={{ cursor: 'pointer', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5, border: `1.5px solid ${on ? 'var(--brand)' : '#D5DBEA'}`, '--bg': on ? 'var(--brand)' : '#fff', ...(on ? { '--hv': 'var(--brand-deep)' } : {}), color: on ? '#fff' : '#0E1430' }}>{label}</button>
                   );
                 })}
               </div>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, color: '#475069' }}>
                 ช่วง "ใกล้หมดอายุ"
-                <select value={String(e.win)} onChange={(ev) => setRef(null, +ev.target.value)} style={{ height: 42, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' }}>
+                <select value={String(e.win)} onChange={(ev) => setRef(null, +ev.target.value)} className="fld sel" style={{ height: 42, borderRadius: 10 }}>
                   {[30, 60, 90, 180].map((n) => <option key={n} value={n}>{n} วัน</option>)}
                 </select>
               </label>
               <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.55, textWrap: 'pretty' }}>ใช้ดูล่วงหน้าหรือย้อนหลัง สถานะ กลุ่มเป้าหมาย และรอบ อบก. จะคำนวณใหม่ทั้งเว็บ</span>
-              <button onClick={() => setDateOpen(false)} style={{ cursor: 'pointer', alignSelf: 'flex-end', height: 34, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>เสร็จ</button>
+              <button onClick={() => setDateOpen(false)} className="btn pri" style={{ alignSelf: 'flex-end', height: 34, fontSize: 13 }}>เสร็จ</button>
             </div>
           )}
         </div>
@@ -228,7 +228,7 @@ export function Banners() {
             <span style={{ fontSize: 13.5, color: '#6B4100', flex: 1, minWidth: 220 }}>
               กำลังดูสถานะ ณ <b style={{ fontWeight: 600 }}>{isoTh(e.ref)}</b> ซึ่งไม่ใช่วันนี้ ตัวเลขทั้งหมดคำนวณตามวันที่นี้ และการตรวจสถานะอัตโนมัติหยุดไว้ชั่วคราว
             </span>
-            <button onClick={() => setRef(today)} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#6B4100', color: '#fff', fontSize: 13 }}>กลับไปวันนี้</button>
+            <button onClick={() => setRef(today)} className="hv" style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, '--bg': '#6B4100', '--hv': '#523200', color: '#fff', fontSize: 13 }}>กลับไปวันนี้</button>
           </div>
         </div>
       )}
@@ -237,8 +237,8 @@ export function Banners() {
           <div style={{ background: '#fff', border: '1px solid #E3E7F1', borderRadius: 16, padding: '12px 16px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#E8A23B', flex: 'none' }} />
             <span style={{ fontSize: 13.5, flex: 1, minWidth: 240, textWrap: 'pretty' }}>{ev.text}</span>
-            <button onClick={() => go('track')} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>ดูเหตุการณ์</button>
-            <button onClick={() => e.ackEvents()} style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, background: 'transparent', color: '#475069', fontSize: 13, textDecoration: 'underline' }}>รับทราบ</button>
+            <button onClick={() => go('track')} className="btn pri" style={{ height: 34, padding: '0 14px', fontSize: 13 }}>ดูเหตุการณ์</button>
+            <button onClick={() => e.ackEvents()} className="hv" style={{ cursor: 'pointer', height: 34, padding: '0 10px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13, textDecoration: 'underline' }}>รับทราบ</button>
           </div>
         </div>
       )}

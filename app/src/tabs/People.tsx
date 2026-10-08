@@ -9,7 +9,7 @@ import type { Company, LogEntry, Person, Task } from '../lib/types';
 import { CoAvatar } from '../components/CoAvatar';
 import { Modal } from './Sales';
 import { DoneBox, taskInfo } from './Plan';
-import { Notice, PageHead, Pager, btnOutline, btnPrimary, heroGrad, inputStyle, labelCol, selectStyle } from '../components/ui';
+import { Notice, PageHead, Pager, heroGrad, labelCol } from '../components/ui';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 const PER_PAGE = 30;
@@ -119,7 +119,7 @@ function PeopleList() {
       <PageHead
         title="ผู้ติดต่อ"
         sub={all.length ? `${fmtN(active.length)} คน · จาก ${fmtN(cos)} บริษัท · ทั้งทีมเห็นข้อมูลเดียวกัน` : 'บันทึกคนที่คุยด้วยในแต่ละบริษัท พร้อมประวัติการติดต่อ นัด และโน้ต'}
-        right={e.can('edit') ? <button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button> : undefined}
+        right={e.can('edit') ? <button onClick={() => set({ addPerson: {} })} className="btn pri">+ เพิ่มผู้ติดต่อ</button> : undefined}
       />
       {sugg.length > 0 && e.can('edit') && (
         <div className="pe-sugg">
@@ -131,12 +131,13 @@ function PeopleList() {
               {showSugg && (
                 <button
                   onClick={() => e.addPeople(sugg.map((s) => ({ id: s.id, name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email })))}
-                  style={{ ...btnOutline, height: 34, background: '#fff' }}
+                  className="btn out"
+                  style={{ height: 34 }}
                 >
                   เพิ่มทั้งหมด
                 </button>
               )}
-              <button onClick={() => setShowSugg(!showSugg)} aria-expanded={showSugg} style={{ ...btnPrimary, height: 34 }}>{showSugg ? 'ซ่อนรายการ' : 'ดูและเพิ่ม'}</button>
+              <button onClick={() => setShowSugg(!showSugg)} aria-expanded={showSugg} className="btn pri" style={{ height: 34 }}>{showSugg ? 'ซ่อนรายการ' : 'ดูและเพิ่ม'}</button>
             </span>
           </div>
           {showSugg && (
@@ -148,8 +149,8 @@ function PeopleList() {
                     <span style={{ fontSize: 12.5, color: '#475069' }}>{[s.company, s.phone, s.email].filter(Boolean).join(' · ')} · จาก {s.from}</span>
                   </span>
                   <span style={{ display: 'flex', gap: 6, flex: 'none' }}>
-                    <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} style={{ ...btnPrimary, height: 30, fontSize: 12.5, padding: '0 12px' }} aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
-                    <button onClick={() => e.hideSuggestion(s.id)} style={{ ...btnOutline, height: 30, fontSize: 12.5, padding: '0 12px', borderColor: '#D5DBEA', color: '#475069' }} aria-label={'ไม่ต้องเพิ่ม ' + s.name}>ไม่ต้อง</button>
+                    <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} className="btn pri" style={{ height: 30, fontSize: 12.5, padding: '0 12px' }} aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
+                    <button onClick={() => e.hideSuggestion(s.id)} className="btn" style={{ height: 30, fontSize: 12.5, padding: '0 12px', color: '#475069' }} aria-label={'ไม่ต้องเพิ่ม ' + s.name}>ไม่ต้อง</button>
                   </span>
                 </div>
               ))}
@@ -173,14 +174,14 @@ function PeopleList() {
             <span style={{ fontSize: 16, fontWeight: 500, color: '#0E1430' }}>ยังไม่มีรายชื่อผู้ติดต่อ</span>
             <span>บันทึกคนที่คุยด้วยในแต่ละบริษัท เพื่อดูประวัติการโทร นัด และโน้ตของแต่ละคน ทั้งทีมเห็นเหมือนกัน</span>
             <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              {e.can('edit') && <button onClick={() => set({ addPerson: {} })} style={btnPrimary}>+ เพิ่มผู้ติดต่อ</button>}
-              {sugg.length > 0 && e.can('edit') && <button onClick={() => setShowSugg(true)} style={btnOutline}>นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
+              {e.can('edit') && <button onClick={() => set({ addPerson: {} })} className="btn pri">+ เพิ่มผู้ติดต่อ</button>}
+              {sugg.length > 0 && e.can('edit') && <button onClick={() => setShowSugg(true)} className="btn out">นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
             </span>
           </div>
         ) : !list.length ? (
           <div className="pe-empty">
             <span>{q ? `ไม่พบผู้ติดต่อที่ตรงกับ “${ui.pQ}”` : ui.pView === 'mine' ? (me ? `ยังไม่มีผู้ติดต่อที่ ${me} ดูแล` : 'ใส่ชื่อของคุณที่ "ฉันคือ" (แท็บอัปเดตข้อมูล) ก่อน') : 'ไม่มีรายการ'}</span>
-            {q && <button onClick={() => set({ pQ: '' })} style={{ ...btnOutline, height: 34 }}>ล้างคำค้นหา</button>}
+            {q && <button onClick={() => set({ pQ: '' })} className="btn out" style={{ height: 34 }}>ล้างคำค้นหา</button>}
           </div>
         ) : (
           <>
@@ -262,7 +263,7 @@ function PersonPage({ id }: { id: string }) {
     return (
       <div className="pe-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
         <span style={{ fontSize: 16 }}>ไม่พบผู้ติดต่อนี้ — อาจมีคนในทีมลบไปแล้ว</span>
-        <button onClick={back} style={btnOutline}>← กลับไปที่รายชื่อ</button>
+        <button onClick={back} className="btn out">← กลับไปที่รายชื่อ</button>
       </div>
     );
   const c = e.personCompany(p);
@@ -345,8 +346,8 @@ function PersonPage({ id }: { id: string }) {
               </a>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
-              <button onClick={startLog} disabled={ro} style={{ ...btnPrimary, padding: 0, opacity: ro ? 0.5 : 1 }}>บันทึกการโทร</button>
-              <button onClick={() => (c && !ro ? openSched({ ids: [c.id], pid: p.id }) : undefined)} disabled={!c || ro} title={c ? '' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'} style={{ ...btnOutline, padding: 0, opacity: c && !ro ? 1 : 0.5 }}>นัดหมาย</button>
+              <button onClick={startLog} disabled={ro} className="btn pri" style={{ padding: 0, opacity: ro ? 0.5 : 1 }}>บันทึกการโทร</button>
+              <button onClick={() => (c && !ro ? openSched({ ids: [c.id], pid: p.id }) : undefined)} disabled={!c || ro} title={c ? '' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'} className="btn out" style={{ padding: 0, opacity: c && !ro ? 1 : 0.5 }}>นัดหมาย</button>
             </div>
           </div>
         </section>
@@ -465,7 +466,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="pe-sub">{c ? 'นัดของบริษัทนี้ · ที่ทำกับ ' + p.name + ' มีป้ายกำกับ' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'}</span>
-            {c && !ro && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} style={{ ...btnOutline, height: 34 }}>+ นัดหมาย</button>}
+            {c && !ro && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn out" style={{ height: 34 }}>+ นัดหมาย</button>}
           </div>
           {!upcoming.length && <span className="pe-sub">ยังไม่มีนัดที่จะถึง</span>}
           <ol className="pe-tl">
@@ -491,7 +492,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
           {c && !deals.length && (
             <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="pe-sub">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
-              {!ro && <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btnOutline, height: 34 }}>+ ส่งเข้า Sales Tracker</button>}
+              {!ro && <button onClick={() => set({ sendIds: [c.id] })} className="btn out" style={{ height: 34 }}>+ ส่งเข้า Sales Tracker</button>}
             </span>
           )}
           {deals.map((d) => (
@@ -582,7 +583,7 @@ function NoteForm({ pid }: { pid: string }) {
       style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
     >
       <textarea value={t} onChange={(ev) => setT(ev.target.value)} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ชอบให้ส่งข้อมูลทาง LINE ก่อนโทร" aria-label="โน้ตใหม่" className="pe-ta" />
-      <button type="submit" disabled={!t.trim()} style={{ ...btnPrimary, height: 34, alignSelf: 'flex-end', opacity: t.trim() ? 1 : 0.5 }}>บันทึกโน้ต</button>
+      <button type="submit" disabled={!t.trim()} className="btn pri" style={{ height: 34, alignSelf: 'flex-end', opacity: t.trim() ? 1 : 0.5 }}>บันทึกโน้ต</button>
     </form>
   );
 }
@@ -602,7 +603,7 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
   return (
     <form onSubmit={save} className="pe-logform">
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={type} onChange={(ev) => setType(ev.target.value)} aria-label="ประเภท" style={{ ...selectStyle, height: 34, fontSize: 13 }}>
+        <select value={type} onChange={(ev) => setType(ev.target.value)} aria-label="ประเภท" className="fld sel" style={{ height: 34, fontSize: 13 }}>
           {CONTACT.map((k) => <option key={k} value={k}>{LOG_TYPES[k][0]}</option>)}
         </select>
         {LOG_RESULTS.map((r) => (
@@ -610,7 +611,7 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
         ))}
       </div>
       <textarea ref={taRef} value={text} onChange={(ev) => setText(ev.target.value)} rows={2} placeholder="คุยเรื่องอะไร ผลเป็นอย่างไร" aria-label="รายละเอียดการติดต่อ" className="pe-ta" />
-      <button type="submit" disabled={!text.trim() && !result} style={{ ...btnPrimary, height: 34, alignSelf: 'flex-end', opacity: text.trim() || result ? 1 : 0.5 }}>บันทึก</button>
+      <button type="submit" disabled={!text.trim() && !result} className="btn pri" style={{ height: 34, alignSelf: 'flex-end', opacity: text.trim() || result ? 1 : 0.5 }}>บันทึก</button>
     </form>
   );
 }
@@ -703,27 +704,27 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
   };
   return (
     <form onSubmit={save} className="pe-form">
-      <label style={labelCol}>ชื่อ *<input value={f.name} onChange={up('name')} required maxLength={200} style={inputStyle} /></label>
-      <label style={labelCol}>ชื่อเล่น<input value={f.nick} onChange={up('nick')} maxLength={100} style={inputStyle} /></label>
-      <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} style={inputStyle} /></label>
-      <label style={labelCol}>ฝ่าย / แผนก<input value={f.dept} onChange={up('dept')} maxLength={200} style={inputStyle} /></label>
+      <label style={labelCol}>ชื่อ *<input value={f.name} onChange={up('name')} required maxLength={200} className="fld" /></label>
+      <label style={labelCol}>ชื่อเล่น<input value={f.nick} onChange={up('nick')} maxLength={100} className="fld" /></label>
+      <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} className="fld" /></label>
+      <label style={labelCol}>ฝ่าย / แผนก<input value={f.dept} onChange={up('dept')} maxLength={200} className="fld" /></label>
       <label style={labelCol}>
         บทบาทในการซื้อ
-        <select value={f.role} onChange={up('role')} style={selectStyle}>{ROLES.map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}</select>
+        <select value={f.role} onChange={up('role')} className="fld sel">{ROLES.map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}</select>
       </label>
-      <label style={labelCol}>โทรศัพท์ (หลายเบอร์คั่นด้วย |)<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} style={inputStyle} /></label>
-      <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} style={inputStyle} /></label>
-      <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} style={inputStyle} /></label>
+      <label style={labelCol}>โทรศัพท์ (หลายเบอร์คั่นด้วย |)<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} className="fld" /></label>
+      <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
+      <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
       <label style={labelCol}>
         ผู้ดูแล
-        <select value={f.owner} onChange={up('owner')} style={selectStyle}>
+        <select value={f.owner} onChange={up('owner')} className="fld sel">
           <option value="">ไม่ระบุ</option>
           {team.map((x) => <option key={x} value={x}>{x}</option>)}
         </select>
       </label>
       <label style={labelCol}>
         สถานะ
-        <select value={f.status} onChange={up('status')} style={selectStyle}>
+        <select value={f.status} onChange={up('status')} className="fld sel">
           <option value="active">ยังติดต่อได้</option>
           <option value="left">ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว</option>
         </select>
@@ -736,9 +737,9 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
         <textarea value={f.note} onChange={up('note')} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ช่วงเวลาที่สะดวก ความสนใจ" className="pe-ta" />
       </label>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        {e.can('delete') ? <button type="button" onClick={del} style={{ ...btnOutline, borderColor: '#E9B9AC', color: '#8A2B12', marginRight: 'auto' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
-        <button type="button" onClick={onDone} style={{ ...btnOutline, borderColor: '#D5DBEA', color: '#0E1430' }}>ยกเลิก</button>
-        <button type="submit" style={btnPrimary}>บันทึก</button>
+        {e.can('delete') ? <button type="button" onClick={del} className="btn out" style={{ borderColor: '#E9B9AC', color: '#8A2B12', marginRight: 'auto', '--hv': '#FDF0EB' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
+        <button type="button" onClick={onDone} className="btn">ยกเลิก</button>
+        <button type="submit" className="btn pri">บันทึก</button>
       </div>
     </form>
   );
@@ -792,7 +793,7 @@ function CompanyPicker({ gid, company, onChange }: { gid: number | null; company
             autoFocus={changing}
             placeholder="พิมพ์ชื่อบริษัทหรือเลขนิติบุคคล"
             aria-label="ค้นหาบริษัท"
-            style={inputStyle}
+            className="fld"
           />
           {found.map((c) => (
             <button type="button" key={c.id} className="pe-other" onClick={() => pick(c.id, c.name)}>
@@ -843,18 +844,18 @@ export function AddPerson() {
   return (
     <Modal title="เพิ่มผู้ติดต่อ" onClose={close} width={620}>
       <form onSubmit={submit} className="pe-form">
-        <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ชื่อ *<input value={f.name} onChange={up('name')} required autoFocus maxLength={200} placeholder="เช่น คุณสมชาย ใจดี" style={inputStyle} /></label>
+        <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ชื่อ *<input value={f.name} onChange={up('name')} required autoFocus maxLength={200} placeholder="เช่น คุณสมชาย ใจดี" className="fld" /></label>
         <div style={{ gridColumn: '1 / -1' }}>
           <CompanyPicker gid={f.gid} company={f.company} onChange={(gid, company) => setF({ ...f, gid, company })} />
         </div>
-        <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} placeholder="เช่น ผู้จัดการฝ่ายจัดซื้อ" style={inputStyle} /></label>
+        <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} placeholder="เช่น ผู้จัดการฝ่ายจัดซื้อ" className="fld" /></label>
         <label style={labelCol}>
           บทบาทในการซื้อ
-          <select value={f.role} onChange={up('role')} style={selectStyle}>{ROLES.map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}</select>
+          <select value={f.role} onChange={up('role')} className="fld sel">{ROLES.map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}</select>
         </label>
-        <label style={labelCol}>โทรศัพท์<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} style={inputStyle} /></label>
-        <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} style={inputStyle} /></label>
-        <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} style={inputStyle} /></label>
+        <label style={labelCol}>โทรศัพท์<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} className="fld" /></label>
+        <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
+        <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
         {dup && (
           <div style={{ gridColumn: '1 / -1' }}>
             <Notice kind="error" role="status">
@@ -864,8 +865,8 @@ export function AddPerson() {
           </div>
         )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={close} style={{ ...btnOutline, borderColor: '#D5DBEA', color: '#0E1430' }}>ยกเลิก</button>
-          <button type="submit" style={btnPrimary}>เพิ่มผู้ติดต่อ</button>
+          <button type="button" onClick={close} className="btn">ยกเลิก</button>
+          <button type="submit" className="btn pri">เพิ่มผู้ติดต่อ</button>
         </div>
       </form>
     </Modal>
@@ -882,7 +883,7 @@ export function CompanyPeople({ c }: { c: Company }) {
     <div style={box}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: '#1F5BD8' }}>ผู้ติดต่อ{list.length ? ` (${fmtN(list.length)})` : ''}</span>
-        {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>+ เพิ่มผู้ติดต่อ</button>}
+        {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>+ เพิ่มผู้ติดต่อ</button>}
       </div>
       {!list.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่มี — บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติของแต่ละคน</span>}
       {list.map((p) => (

@@ -126,15 +126,15 @@ export function Track() {
       <div style={{ position: 'sticky', top: 'var(--sticky-top)', zIndex: 5, background: 'rgba(246,248,254,.92)', backdropFilter: 'blur(8px)', margin: '-8px -8px 0', padding: '10px 8px', borderRadius: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 13, color: '#475069' }}>ตัวกรอง:</span>
         {chips.map((c) => (
-          <button key={c.label} onClick={() => set(c.p)} style={{ cursor: 'pointer', height: 32, padding: '0 8px 0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button key={c.label} onClick={() => set(c.p)} className="btn pri" style={{ height: 32, padding: '0 8px 0 14px', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' }}>
             {c.label}
             <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(255,255,255,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>×</span>
           </button>
         ))}
         {!chips.length && <span style={{ fontSize: 13, color: '#5E6680' }}>ยังไม่ได้เลือก · คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งแดชบอร์ด (คลิกซ้ำเพื่อยกเลิก)</span>}
         <span style={{ flex: 1 }} />
-        {chips.length > 0 && <button onClick={() => set({ oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '' })} style={{ cursor: 'pointer', height: 32, padding: '0 10px', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>ล้างทั้งหมด</button>}
-        <button onClick={goTable} style={{ cursor: 'pointer', height: 32, padding: '0 16px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13, fontWeight: 500 }}>ดูรายชื่อ {fmtN(ob.count)} รายการในตาราง →</button>
+        {chips.length > 0 && <button onClick={() => set({ oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '' })} className="hv" style={{ cursor: 'pointer', height: 32, padding: '0 10px', border: 0, borderRadius: 999, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>ล้างทั้งหมด</button>}
+        <button onClick={goTable} className="btn out" style={{ height: 32, fontSize: 13, fontWeight: 500 }}>ดูรายชื่อ {fmtN(ob.count)} รายการในตาราง →</button>
       </div>
 
       <div style={{ background: 'linear-gradient(135deg,#071060 0%,#0D2390 60%,#1C3FE6 100%)', color: '#fff', borderRadius: 24, padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -156,7 +156,7 @@ export function Track() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12,minmax(0,1fr))', gap: 8, alignItems: 'end', height: 200 }}>
           {ob.expMonths.map((m) => (
-            <button key={m.key} onClick={() => set({ oExpM: oExpM === m.key ? '' : m.key })} aria-label={`${m.label}: ${m.count}`} style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 6, height: '100%' }}>
+            <button key={m.key} onClick={() => set({ oExpM: oExpM === m.key ? '' : m.key })} aria-label={`${m.label}: ${m.count}`} className="hv-w" style={{ cursor: 'pointer', border: 0, borderRadius: 10, padding: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 6, height: '100%' }}>
               <span style={{ fontSize: 13, fontWeight: 500, color: '#fff' }}>{m.count}</span>
               <span className="h-op" style={{ width: '100%', height: `${m.h}%`, minHeight: 3, background: m.color, opacity: m.op, outline: m.ol, outlineOffset: 2, borderRadius: '8px 8px 3px 3px' }} />
             </button>
@@ -171,7 +171,7 @@ export function Track() {
         <div style={panel}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 17, fontWeight: 500 }}>ใกล้หมดอายุที่สุด</span>
-            <button onClick={goSoon} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0, whiteSpace: 'nowrap' }}>ดูทั้งหมด {fmtN(ob.soonN)} รายการ</button>
+            <button onClick={goSoon} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0, whiteSpace: 'nowrap' }}>ดูทั้งหมด {fmtN(ob.soonN)} รายการ</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {ob.nextUp.map((ct) => (
@@ -225,7 +225,7 @@ export function Track() {
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {ob.statusMix.map((x) => (
-                <button key={x.k} onClick={() => set({ oSt: x.on ? '' : x.k })} aria-pressed={x.on} style={{ cursor: 'pointer', fontSize: 12.5, color: '#384155', display: 'flex', gap: 6, alignItems: 'center', height: 28, padding: '0 10px', borderRadius: 999, border: `1.5px solid ${x.on ? '#1F5BD8' : 'transparent'}`, background: x.on ? '#EEF2FF' : 'transparent' }}>
+                <button key={x.k} onClick={() => set({ oSt: x.on ? '' : x.k })} aria-pressed={x.on} className="hv" style={{ cursor: 'pointer', fontSize: 12.5, color: '#384155', display: 'flex', gap: 6, alignItems: 'center', height: 28, padding: '0 10px', borderRadius: 999, border: `1.5px solid ${x.on ? '#1F5BD8' : 'transparent'}`, ...(x.on ? { '--bg': '#EEF2FF', '--hv': '#DCE5FA' } : {}) }}>
                   <span style={{ width: 9, height: 9, borderRadius: '50%', background: x.color }} />
                   {x.label} {fmtN(x.n)}
                 </button>
@@ -240,7 +240,7 @@ export function Track() {
           </div>
           <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 220, flex: 1 }}>
             {ob.fyCols.map((c) => (
-              <button key={c.label} onClick={() => set({ oFy: oFy === c.label ? '' : c.label })} style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0, flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 4, height: '100%' }}>
+              <button key={c.label} onClick={() => set({ oFy: oFy === c.label ? '' : c.label })} className="hv" style={{ cursor: 'pointer', border: 0, borderRadius: 8, padding: 0, flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 4, height: '100%' }}>
                 <span style={{ fontSize: 10.5, color: '#384155', whiteSpace: 'nowrap' }}>{fmtN(c.count)}</span>
                 <span style={{ width: '100%', height: `${c.h}%`, minHeight: 3, background: c.color, borderRadius: '6px 6px 2px 2px' }} />
                 <span style={{ fontSize: 10.5, fontWeight: 500, color: '#475069' }}>{c.label}</span>
@@ -286,13 +286,13 @@ export function Track() {
               {months.length > 0 && (
                 <div className="no-scrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
                   {months.map(([ym, n]) => (
-                    <button key={ym} onClick={() => setF({ ym, feed: '', tgt: '', view: 'co', sort: 'invest' })} style={{ cursor: 'pointer', height: 30, padding: '0 10px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', fontSize: 12.5, color: '#0E1430', whiteSpace: 'nowrap', flex: 'none' }}>{ymTh(ym)} · {fmtN(n)}</button>
+                    <button key={ym} onClick={() => setF({ ym, feed: '', tgt: '', view: 'co', sort: 'invest' })} className="btn" style={{ height: 30, padding: '0 10px', fontSize: 12.5, whiteSpace: 'nowrap', flex: 'none' }}>{ymTh(ym)} · {fmtN(n)}</button>
                   ))}
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 205 }}>
                 {all.slice(0, 5).map((c) => (
-                  <button key={c.id} className="h-blue" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', background: 'transparent', textAlign: 'left', padding: '9px 0', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: '#0E1430' }}>
+                  <button key={c.id} className="h-blue hv" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', textAlign: 'left', padding: '9px 8px', margin: '0 -8px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: '#0E1430' }}>
                     <span style={{ fontSize: 13.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069', whiteSpace: 'nowrap' }}>{feedMeta(D, k, c)}</span>
                   </button>
@@ -302,9 +302,9 @@ export function Track() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 4, minHeight: 40 }}>
                 {all.length > 0 && (
                   <>
-                    <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>ดูทั้งหมด</button>
-                    <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>วางแผนติดต่อ</button>
-                    {k === 'watch' && e.can('edit') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
+                    <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="btn pri" style={{ height: 36, padding: '0 14px', fontSize: 13 }}>ดูทั้งหมด</button>
+                    <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} className="btn out" style={{ height: 36, padding: '0 14px', fontSize: 13 }}>วางแผนติดต่อ</button>
+                    {k === 'watch' && e.can('edit') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="btn out" style={{ height: 36, padding: '0 14px', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
                   </>
                 )}
               </div>
@@ -319,7 +319,7 @@ export function Track() {
             <span style={{ fontSize: 17, fontWeight: 500 }}>เหตุการณ์จากการตรวจสถานะอัตโนมัติ</span>
             <span style={{ fontSize: 13, color: '#475069', fontWeight: 300 }}>{mon.last ? `ตรวจล่าสุด ${dtTh(mon.last)} · ${e.monMsg || 'ตรวจเองทุก 10 นาทีที่เปิดเว็บค้างไว้ และเมื่อขึ้นวันใหม่'}` : 'ยังไม่เคยตรวจ'}</span>
           </div>
-          <button onClick={() => e.checkMonitor(true)} style={{ cursor: 'pointer', height: 38, padding: '0 16px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13.5 }}>ตรวจเดี๋ยวนี้</button>
+          <button onClick={() => e.checkMonitor(true)} className="btn out" style={{ height: 38 }}>ตรวจเดี๋ยวนี้</button>
         </div>
         {!(mon.events || []).length && <span style={{ fontSize: 13.5, color: '#475069' }}>ระบบบันทึกสถานะตั้งต้นแล้ว จะเริ่มบันทึกเหตุการณ์เมื่อสถานะบริษัทเปลี่ยน</span>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflow: 'auto' }}>
@@ -327,7 +327,7 @@ export function Track() {
             const c = e.company(x.id);
             const [tag, bg, fg] = EV_LBL[x.t] || ['เหตุการณ์', '#EEF1F8', '#475069'];
             return (
-              <button key={i} onClick={() => c && open(c.id)} style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid #EEF1F8', background: '#fff', borderRadius: 12, padding: '9px 12px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <button key={i} onClick={() => c && open(c.id)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid #EEF1F8', '--bg': '#fff', borderRadius: 12, padding: '9px 12px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11.5, fontWeight: 500, padding: '2px 8px', borderRadius: 999, background: bg, color: fg }}>{tag}</span>
                 <span style={{ fontSize: 13.5, color: '#0E1430' }}>{c ? c.name : String(x.id)}</span>
                 <span style={{ fontSize: 12.5, color: '#475069' }}>{`${c && c.cfoEx ? 'CFO หมดอายุ ' + isoTh(c.cfoEx) + ' · ' : ''}บันทึก ${dtTh(x.at)}`}</span>
@@ -342,7 +342,7 @@ export function Track() {
 
 function CertRow({ ct, onOpen, badge, sub, right }: { ct: Cert; onOpen: () => void; badge: React.ReactNode; sub: string; right: string }) {
   return (
-    <button onClick={onOpen} style={{ cursor: 'pointer', border: 0, borderBottom: '1px solid #EEF1F8', background: 'transparent', padding: '11px 0', display: 'grid', gridTemplateColumns: '64px minmax(0,1fr) auto', gap: 12, alignItems: 'center', textAlign: 'left', color: '#0E1430' }}>
+    <button onClick={onOpen} className="hv" style={{ cursor: 'pointer', border: 0, borderBottom: '1px solid #EEF1F8', padding: '11px 8px', margin: '0 -8px', display: 'grid', gridTemplateColumns: '64px minmax(0,1fr) auto', gap: 12, alignItems: 'center', textAlign: 'left', color: '#0E1430' }}>
       {badge}
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
         <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ct.org}</span>
@@ -358,7 +358,7 @@ function Bars({ bars, labelW, ellipsis, onPick }: { bars: BarItem[]; labelW: num
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {bars.map((b) => (
-        <button key={b.key} onClick={() => onPick(b.key, b.on)} aria-pressed={b.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0, display: 'grid', gridTemplateColumns: `${labelW}px minmax(0,1fr) 76px`, gap: 10, alignItems: 'center', fontSize: 13, textAlign: 'left', color: '#0E1430' }}>
+        <button key={b.key} onClick={() => onPick(b.key, b.on)} aria-pressed={b.on} className="hv-tx" style={{ cursor: 'pointer', border: 0, borderRadius: 8, padding: 0, display: 'grid', gridTemplateColumns: `${labelW}px minmax(0,1fr) 76px`, gap: 10, alignItems: 'center', fontSize: 13, textAlign: 'left', color: '#0E1430' }}>
           <span style={{ fontWeight: b.fw, ...(ellipsis ? { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>{b.label}</span>
           <span style={{ position: 'relative', height: 14, background: '#EEF1F8', borderRadius: 7 }}>
             <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${b.w}%`, background: b.ct, borderRadius: 7 }} />

@@ -6,7 +6,7 @@ import { TGT } from '../lib/constants';
 import { dataUrl } from '../lib/core';
 import { fmtN, isoTh } from '../lib/format';
 import type { Company } from '../lib/types';
-import { PageHead, card, heroGrad, selectStyle } from '../components/ui';
+import { PageHead, card, heroGrad } from '../components/ui';
 
 type Geo = FeatureCollection<Geometry, { th: string }>;
 type Metric = 'all' | 'act' | 'soon' | 'exp' | 'opp' | 'gi';
@@ -160,21 +160,21 @@ export function MapTab() {
             ระบายสีแผนที่ตาม
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', background: '#E6ECFD', padding: 4, borderRadius: 999 }}>
               {METRICS.map(([k, l]) => (
-                <button key={k} onClick={() => setMetric(k)} aria-pressed={metric === k} style={{ border: 0, cursor: 'pointer', height: 32, padding: '0 13px', borderRadius: 999, fontSize: 13, background: metric === k ? '#1F5BD8' : 'transparent', color: metric === k ? '#fff' : '#1745B8' }}>{l}</button>
+                <button key={k} onClick={() => setMetric(k)} aria-pressed={metric === k} className="hv" style={{ border: 0, cursor: 'pointer', height: 32, padding: '0 13px', borderRadius: 999, fontSize: 13, ...(metric === k ? { '--bg': '#1F5BD8', '--hv': 'var(--brand-deep)' } : {}), color: metric === k ? '#fff' : '#1745B8' }}>{l}</button>
               ))}
             </div>
           </div>
           <span style={{ flex: 1 }} />
           <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
             กลุ่มอุตสาหกรรม
-            <select value={fInd} onChange={(ev) => setFInd(ev.target.value)} style={{ ...selectStyle, minWidth: 200 }}>
+            <select value={fInd} onChange={(ev) => setFInd(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
               <option value="">ทั้งหมด</option>
               {indCounts.map(([k, n]) => <option key={k} value={k}>{`${k} (${fmtN(n)})`}</option>)}
             </select>
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' }}>
             กลุ่มเป้าหมาย
-            <select value={fTgt} onChange={(ev) => setFTgt(ev.target.value)} style={{ ...selectStyle, minWidth: 200 }}>
+            <select value={fTgt} onChange={(ev) => setFTgt(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
               <option value="">ทั้งหมด</option>
               {TGT.map((l, i) => <option key={i} value={String(i)}>{`${i + 1}. ${l}`}</option>)}
             </select>
@@ -203,6 +203,7 @@ export function MapTab() {
                         fill={fill(val(A[name]))}
                         stroke={isSel ? '#081247' : '#fff'}
                         strokeWidth={(isSel ? 2 : 0.8) / k0}
+                        className="map-prov"
                         style={{ cursor: 'pointer', transition: 'fill .25s' }}
                         onMouseMove={(ev) => moveTip(ev, name)}
                         onMouseLeave={hideTip}
@@ -242,7 +243,7 @@ export function MapTab() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(210px,1fr))', gap: 8 }}>
             {rank.map(([k, n], i) => (
-              <button key={k} onClick={() => setSel(k)} style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: '26px minmax(0,1fr) auto', gap: 8, alignItems: 'center', padding: '9px 12px', borderRadius: 12, border: `1px solid ${k === sel ? '#081247' : '#E3E7F1'}`, background: k === sel ? '#EEF2FF' : '#fff', fontSize: 13, color: '#0E1430', textAlign: 'left' }}>
+              <button key={k} onClick={() => setSel(k)} className="hv" style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: '26px minmax(0,1fr) auto', gap: 8, alignItems: 'center', padding: '9px 12px', borderRadius: 12, border: `1px solid ${k === sel ? '#081247' : '#E3E7F1'}`, ...(k === sel ? { '--bg': '#EEF2FF', '--hv': '#DCE5FA' } : { '--bg': '#fff' }), fontSize: 13, color: '#0E1430', textAlign: 'left' }}>
                 <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#E6ECFD', color: '#1F5BD8', fontSize: 11.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
                 <b style={{ fontWeight: 500 }}>{fmtN(n)}</b>
@@ -275,7 +276,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
             <span style={{ fontSize: 12.5, color: '#fff' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
             <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.3 }}>{name || 'ทั้งประเทศ'}</span>
           </div>
-          {name && <button onClick={onClear} style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', background: 'rgba(6,22,90,.2)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
+          {name && <button onClick={onClear} className="hv-w" style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', '--bg': 'rgba(6,22,90,.2)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8 }}>
           {([['บริษัท', a.n], ['CFO ในอายุ', a.act], ['ใกล้หมดอายุ', a.soon], ['มีเบอร์โทร', a.ph]] as const).map(([k, n]) => (
@@ -310,7 +311,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
               {orgs.map((r) => {
                 const s = r.tgt === 0 ? ['ใกล้หมดอายุ', '#FDECC8', '#9A5A00'] : ['หมดอายุไม่เกิน 12 เดือน', '#EEF1F8', '#475069'];
                 return (
-                  <button key={r.id} className="map-org" onClick={() => onOpen(r.id)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '10px 0', border: 0, borderBottom: '1px solid #EEF1F8', cursor: 'pointer', background: 'none', textAlign: 'left', font: 'inherit', color: 'inherit', width: '100%' }}>
+                  <button key={r.id} className="map-org hv" onClick={() => onOpen(r.id)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '10px 8px', margin: '0 -8px', border: 0, borderBottom: '1px solid #EEF1F8', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: 'calc(100% + 16px)' }}>
                     <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <span className="on" style={{ fontSize: 13.5, fontWeight: 500, ...ell }}>{r.name}</span>
                       <span style={{ fontSize: 12.5, color: '#475069', lineHeight: 1.5 }}>CFO หมดอายุ {isoTh(r.cfoEx)}</span>
@@ -322,7 +323,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
               {!orgs.length && <span style={{ fontSize: 12.5, color: '#475069' }}>ไม่มี</span>}
             </div>
           </div>
-          <div><button onClick={onTable} style={{ cursor: 'pointer', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5, fontWeight: 500 }}>ดูรายชื่อทั้งหมด {fmtN(a.n)} บริษัท →</button></div>
+          <div><button onClick={onTable} className="btn pri" style={{ height: 38, fontWeight: 500 }}>ดูรายชื่อทั้งหมด {fmtN(a.n)} บริษัท →</button></div>
         </>
       ) : (
         <span style={{ fontSize: 12.5, color: '#475069', lineHeight: 1.5 }}>กดจังหวัดบนแผนที่หรือในอันดับด้านล่างเพื่อดูรายละเอียด</span>

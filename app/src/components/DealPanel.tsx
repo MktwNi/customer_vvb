@@ -9,13 +9,13 @@ import {
 import { Modal } from '../tabs/Sales';
 import { DocAttach } from './DocAttach';
 import { ReadOnly } from './ReadOnly';
-import { heroGrad, inputStyle, labelCol, selectStyle } from './ui';
+import { heroGrad, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 
 const box: CSSProperties = { background: '#fff', border: '1px solid #E3E7F1', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 };
 const kicker: CSSProperties = { fontSize: 13, fontWeight: 600, color: '#1F5BD8' };
-const chip = (on: boolean, c: [string, string]): CSSProperties => ({ cursor: 'pointer', fontSize: 12.5, padding: '4px 11px', borderRadius: 999, border: `1.5px solid ${on ? c[1] : '#D5DBEA'}`, background: on ? c[0] : '#fff', color: on ? c[1] : '#475069' });
-const small: CSSProperties = { cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 12.5 };
+/** A SOURCE / Services toggle (class "hv"): c = [fill, ink, the fill under the pointer] when it is on. */
+const chip = (on: boolean, c: [string, string, string]): CSSProperties => ({ cursor: 'pointer', fontSize: 12.5, padding: '4px 11px', borderRadius: 999, border: `1.5px solid ${on ? c[1] : '#D5DBEA'}`, color: on ? c[1] : '#475069', '--bg': on ? c[0] : '#fff', ...(on ? { '--hv': c[2] } : {}) });
 const TARGET_TH = { forecast: 'นับเป็น Forecast', actual: 'นับเป็น Actual', none: 'ไม่นับยอด' };
 
 /** Date + note editor for one stage (from the table). */
@@ -42,23 +42,23 @@ export function StepEditor({ dealId, stage, onClose }: { dealId: string; stage: 
       <span style={{ fontSize: 13.5, color: '#475069' }}>{d.client}</span>
       <label style={labelCol}>
         วันที่
-        <input type="date" value={date} onChange={(ev) => setDate(ev.target.value)} style={inputStyle} />
+        <input type="date" value={date} onChange={(ev) => setDate(ev.target.value)} className="fld" />
       </label>
       {stage === DEAL_STAGE && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={() => save('YES')} style={{ ...small, borderColor: '#14633F', color: '#14633F' }}>✓ ปิดการขายได้ (YES)</button>
-          <button onClick={() => save('NO')} style={{ ...small, borderColor: '#8A2B12', color: '#8A2B12' }}>✕ ไม่สำเร็จ (NO)</button>
+          <button onClick={() => save('YES')} className="btn xs" style={{ borderColor: '#14633F', color: '#14633F', '--hv': '#E5F5EB' }}>✓ ปิดการขายได้ (YES)</button>
+          <button onClick={() => save('NO')} className="btn xs" style={{ borderColor: '#8A2B12', color: '#8A2B12', '--hv': '#FDF0EB' }}>✕ ไม่สำเร็จ (NO)</button>
         </div>
       )}
       <label style={labelCol}>
         {stage === DEAL_STAGE ? 'ผล (YES / NO) หรือหมายเหตุ เช่น รอผู้บริหารอนุมัติ' : 'โน้ต'}
-        <textarea value={note} onChange={(ev) => setNote(ev.target.value)} maxLength={NOTE_MAX} rows={5} autoFocus style={{ ...inputStyle, height: 'auto', padding: 10, resize: 'vertical', lineHeight: 1.6 }} />
+        <textarea value={note} onChange={(ev) => setNote(ev.target.value)} maxLength={NOTE_MAX} rows={5} autoFocus className="fld" style={{ height: 'auto', padding: 10, resize: 'vertical', lineHeight: 1.6 }} />
       </label>
       <span style={{ fontSize: 12, color: '#5E6680' }}>ใส่โน้ตโดยไม่ใส่วันที่ ระบบใส่วันนี้ให้ · วันที่ที่ผ่านมาแล้วนับเป็นวันที่ติดต่อล่าสุด</span>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        {(st.d || st.n) && <button onClick={() => save('', '')} style={{ ...small, color: '#8A2B12' }}>ล้างขั้นนี้</button>}
-        <button onClick={onClose} style={small}>ยกเลิก</button>
-        <button onClick={() => save()} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>บันทึก</button>
+        {(st.d || st.n) && <button onClick={() => save('', '')} className="btn xs" style={{ color: '#8A2B12', '--hv': '#FDF0EB' }}>ล้างขั้นนี้</button>}
+        <button onClick={onClose} className="btn xs">ยกเลิก</button>
+        <button onClick={() => save()} className="btn xs pri">บันทึก</button>
       </div>
     </Modal>
   );
@@ -104,7 +104,7 @@ function Field({ label, value, onSave, type = 'text', list, placeholder }: { lab
   return (
     <label style={labelCol}>
       {label}
-      <input {...box} type={type} list={list} placeholder={placeholder} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={inputStyle} />
+      <input {...box} type={type} list={list} placeholder={placeholder} onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} className="fld" />
     </label>
   );
 }
@@ -112,13 +112,13 @@ function Field({ label, value, onSave, type = 'text', list, placeholder }: { lab
 /** A stage's note in the deal panel. */
 function StepNote({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
   const box = useEditBox<HTMLTextAreaElement>(value, (v) => onSave(v));
-  return <textarea {...box} aria-label={label} rows={value.split('\n').length > 2 ? 4 : 2} maxLength={NOTE_MAX} placeholder="โน้ต…" style={{ ...inputStyle, height: 'auto', padding: '7px 10px', resize: 'vertical', lineHeight: 1.55, fontSize: 13 }} />;
+  return <textarea {...box} aria-label={label} rows={value.split('\n').length > 2 ? 4 : 2} maxLength={NOTE_MAX} placeholder="โน้ต…" className="fld" style={{ height: 'auto', padding: '7px 10px', resize: 'vertical', lineHeight: 1.55, fontSize: 13 }} />;
 }
 
 /** The customer's name in the panel's header. */
 function ClientName({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const box = useEditBox<HTMLInputElement>(value, (v, el) => (v.trim() ? onSave(v) : (el.value = value)), (v) => !!v.trim());
-  return <input {...box} aria-label="ชื่อลูกค้า" onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} style={{ fontSize: 22, fontWeight: 500, background: 'transparent', border: 0, borderBottom: '1px dashed rgba(255,255,255,.35)', color: '#fff', padding: '2px 0', fontFamily: 'inherit' }} />;
+  return <input {...box} aria-label="ชื่อลูกค้า" onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} className="dp-name" />;
 }
 
 /** The last amount a MoneyField refused (closing the panel right after must say so). */
@@ -153,7 +153,7 @@ function MoneyField({ label, value, onSave, placeholder, readOnly }: { label: st
         placeholder={placeholder}
         aria-invalid={!!err}
         onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()}
-        style={{ ...inputStyle, ...(readOnly ? { background: '#F6F8FE', color: '#475069' } : {}) }}
+        className="fld" style={{ ...(readOnly ? { background: '#F6F8FE', color: '#475069' } : {}) }}
       />
       {err && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>{err}</span>}
     </label>
@@ -177,8 +177,8 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
         <span style={{ flex: 1, minWidth: 200 }}>
           เชื่อมกับบริษัท <b style={{ fontWeight: 500 }}>{c.name}</b> <span style={{ color: '#5E6680' }}>({c.code})</span>
         </span>
-        <button onClick={() => set({ sel: c.id, dTab: 'info' })} style={small}>เปิดหน้าบริษัท</button>
-        {!ro && <button onClick={() => e.updateDeal(d.id, { gid: null })} style={{ ...small, color: '#475069' }}>ยกเลิกการเชื่อม</button>}
+        <button onClick={() => set({ sel: c.id, dTab: 'info' })} className="btn xs">เปิดหน้าบริษัท</button>
+        {!ro && <button onClick={() => e.updateDeal(d.id, { gid: null })} className="btn xs" style={{ color: '#475069' }}>ยกเลิกการเชื่อม</button>}
       </div>
     );
   if (ro) return <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่ได้เชื่อมกับบริษัทในทะเบียน</span>;
@@ -186,8 +186,8 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่ได้เชื่อมกับบริษัทในทะเบียน — เชื่อมแล้วจะเห็นสถานะ CFO / GI และสถานะการขายนี้ในหน้าบริษัท</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="พิมพ์ชื่อบริษัทเพื่อค้นในทะเบียน" aria-label="ค้นบริษัทในทะเบียน" style={{ ...inputStyle, flex: '1 1 220px', minWidth: 0 }} />
-        <button onClick={() => set({ addCust: { deal: false, name: d.client, link: d.id } })} style={small}>เพิ่มเป็นลูกค้าใหม่ในทะเบียน</button>
+        <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="พิมพ์ชื่อบริษัทเพื่อค้นในทะเบียน" aria-label="ค้นบริษัทในทะเบียน" className="fld" style={{ flex: '1 1 220px', minWidth: 0 }} />
+        <button onClick={() => set({ addCust: { deal: false, name: d.client, link: d.id } })} className="btn xs">เพิ่มเป็นลูกค้าใหม่ในทะเบียน</button>
       </div>
       {found.map((x) => (
         <button key={x.id} onClick={() => e.updateDeal(d.id, { gid: x.id })} className="h-bg" style={{ cursor: 'pointer', border: '1px solid #E3E7F1', borderRadius: 10, background: '#fff', textAlign: 'left', padding: '8px 12px', fontSize: 13.5, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
@@ -247,15 +247,15 @@ function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button onClick={open} style={small}>{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>
+        <button onClick={open} className="btn xs">{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>
         {link && (
           <>
             {SHOWABLE.test(doc.mime) && <a href={link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>}
             <a href={link} download={doc.name} style={{ fontSize: 13 }}>ดาวน์โหลด</a>
           </>
         )}
-        {!ro && <button onClick={() => setEdit(!edit)} style={small}>{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>}
-        {!ro && <button onClick={() => window.confirm(`ลบเอกสาร "${doc.name}"?`) && e.deleteDoc(d.id, doc.id)} style={{ ...small, color: '#8A2B12' }}>ลบ</button>}
+        {!ro && <button onClick={() => setEdit(!edit)} className="btn xs">{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>}
+        {!ro && <button onClick={() => window.confirm(`ลบเอกสาร "${doc.name}"?`) && e.deleteDoc(d.id, doc.id)} className="btn xs" style={{ color: '#8A2B12', '--hv': '#FDF0EB' }}>ลบ</button>}
         {busy && <span style={{ fontSize: 12, color: '#475069' }}>{busy}</span>}
       </div>
       {edit && (
@@ -270,11 +270,11 @@ function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           }}
           style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, alignItems: 'end' }}
         >
-          <label style={labelCol}>ยอด (บาท)<input name="amount" defaultValue={doc.amount ?? ''} inputMode="decimal" style={inputStyle} /></label>
-          <label style={labelCol}>นับเป็น<select name="target" defaultValue={doc.target} style={selectStyle}><option value="forecast">Forecast</option><option value="actual">Actual</option><option value="none">ไม่นับยอด</option></select></label>
-          <label style={labelCol}>ประเภท<select name="kind" defaultValue={doc.kind} style={selectStyle}>{(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}</select></label>
-          <label style={labelCol}>เลขที่เอกสาร<input name="docNo" defaultValue={doc.docNo} style={inputStyle} /></label>
-          <button type="submit" style={{ ...small, height: 40, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>บันทึก</button>
+          <label style={labelCol}>ยอด (บาท)<input name="amount" defaultValue={doc.amount ?? ''} inputMode="decimal" className="fld" /></label>
+          <label style={labelCol}>นับเป็น<select name="target" defaultValue={doc.target} className="fld sel"><option value="forecast">Forecast</option><option value="actual">Actual</option><option value="none">ไม่นับยอด</option></select></label>
+          <label style={labelCol}>ประเภท<select name="kind" defaultValue={doc.kind} className="fld sel">{(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}</select></label>
+          <label style={labelCol}>เลขที่เอกสาร<input name="docNo" defaultValue={doc.docNo} className="fld" /></label>
+          <button type="submit" className="btn xs pri" style={{ height: 40 }}>บันทึก</button>
         </form>
       )}
     </div>
@@ -322,8 +322,8 @@ export function DealPanel() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#fff' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              {!ro && <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>}
-              <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
+              {!ro && <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} className="hv-w" style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>}
+              <button onClick={close} aria-label="ปิด" className="hv-w" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
           <ReadOnly ro={ro}>
@@ -354,7 +354,7 @@ export function DealPanel() {
               <Field label="แหล่งที่มา (Referral)" value={d.referral} onSave={(v) => up({ referral: v })} list="sl-ref" />
               <label style={labelCol}>
                 วันที่ติดต่อ
-                <input type="date" value={d.contactDate} onChange={(ev) => up({ contactDate: ev.target.value })} style={inputStyle} />
+                <input type="date" value={d.contactDate} onChange={(ev) => up({ contactDate: ev.target.value })} className="fld" />
                 {(() => {
                   const lc = lastContact(S, d, todayISO());
                   return lc && lc !== d.contactDate ? <span style={{ fontSize: 12, color: '#475069', fontWeight: 400 }}>ติดต่อล่าสุดตามขั้นตอน {isoTh(lc)}</span> : null;
@@ -362,13 +362,13 @@ export function DealPanel() {
               </label>
               <label style={labelCol}>
                 หมวด
-                <select value={d.section} onChange={(ev) => e.moveDeal(d.id, ev.target.value, null)} style={selectStyle}>
+                <select value={d.section} onChange={(ev) => e.moveDeal(d.id, ev.target.value, null)} className="fld sel">
                   {[...new Set([...C.sections, d.section])].map((x) => <option key={x} value={x}>{x || 'ไม่ระบุหมวด'}</option>)}
                 </select>
               </label>
               <label style={labelCol}>
                 ปี (พ.ศ.)
-                <select value={d.year} onChange={(ev) => up({ year: ev.target.value })} style={selectStyle}>
+                <select value={d.year} onChange={(ev) => up({ year: ev.target.value })} className="fld sel">
                   {years.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </label>
@@ -382,11 +382,11 @@ export function DealPanel() {
           <div style={box}>
             <span style={kicker}>SOURCE (ช่องทาง)</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {C.sources.map((x) => <button key={x} aria-pressed={d.source.includes(x)} onClick={() => toggle('source', x)} style={chip(d.source.includes(x), ['#E6ECFD', '#1745B8'])}>{d.source.includes(x) ? '✓ ' : ''}{x}</button>)}
+              {C.sources.map((x) => <button key={x} aria-pressed={d.source.includes(x)} onClick={() => toggle('source', x)} className="hv" style={chip(d.source.includes(x), ['#E6ECFD', '#1745B8', '#D6E2FB'])}>{d.source.includes(x) ? '✓ ' : ''}{x}</button>)}
             </div>
             <span style={kicker}>Services (บริการ)</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {C.services.map((x) => <button key={x} aria-pressed={d.service.includes(x)} onClick={() => toggle('service', x)} style={chip(d.service.includes(x), ['#DDF5F1', '#0B6E66'])}>{d.service.includes(x) ? '✓ ' : ''}{x}</button>)}
+              {C.services.map((x) => <button key={x} aria-pressed={d.service.includes(x)} onClick={() => toggle('service', x)} className="hv" style={chip(d.service.includes(x), ['#DDF5F1', '#0B6E66', '#C8EDE6'])}>{d.service.includes(x) ? '✓ ' : ''}{x}</button>)}
             </div>
           </div>
 
@@ -402,7 +402,7 @@ export function DealPanel() {
                 <span style={{ fontSize: 12, color: fcDoc ? '#14633F' : '#6B4100', lineHeight: 1.5 }}>
                   {fcDoc ? `✓ จาก${KIND_TH[fcDoc.kind]}${fcDoc.docNo ? ' ' + fcDoc.docNo : ''} · พิมพ์ยอดใหม่เพื่อใช้แทน` : m.fcOverride ? 'ใช้ยอดที่พิมพ์ (ยังไม่ได้ยืนยันด้วยเอกสาร) ' : m.forecast != null ? 'ยังไม่ได้ยืนยันด้วยเอกสาร' : ''}
                   {m.fcOverride && fcLatest && (
-                    <button onClick={() => up({ forecast: null })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', textDecoration: 'underline', fontSize: 12, padding: 0 }}>
+                    <button onClick={() => up({ forecast: null })} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', textDecoration: 'underline', fontSize: 12, padding: 0 }}>
                       ใช้ยอดจาก{KIND_TH[fcLatest.kind]} {fmtMoney(fcLatest.amount)} บาทแทน
                     </button>
                   )}
@@ -417,10 +417,10 @@ export function DealPanel() {
             </ReadOnly>
             {!ro && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={() => setAttach('quotation')} style={small}>📎 แนบใบเสนอราคา</button>
-                <button onClick={() => setAttach('invoice')} style={small}>📎 แนบใบแจ้งหนี้</button>
-                <button onClick={() => setAttach('receipt')} style={small}>📎 แนบใบเสร็จ / ใบกำกับภาษี</button>
-                <button onClick={() => setAttach('other')} style={small}>📎 เอกสารอื่น</button>
+                <button onClick={() => setAttach('quotation')} className="btn xs">📎 แนบใบเสนอราคา</button>
+                <button onClick={() => setAttach('invoice')} className="btn xs">📎 แนบใบแจ้งหนี้</button>
+                <button onClick={() => setAttach('receipt')} className="btn xs">📎 แนบใบเสร็จ / ใบกำกับภาษี</button>
+                <button onClick={() => setAttach('other')} className="btn xs">📎 เอกสารอื่น</button>
               </div>
             )}
             {docs.map((doc) => <DocRow key={doc.id} d={d} doc={doc} inUse={doc.target === 'forecast' ? fcDoc?.id === doc.id : doc.target === 'actual' && doc.amount != null} />)}
@@ -438,12 +438,12 @@ export function DealPanel() {
                     <span style={{ fontSize: 13.5, fontWeight: 500 }}>{p}</span>
                     <span style={{ fontSize: 11.5, color: '#5E6680' }}>{STAGE_TH[p] || ''}</span>
                   </span>
-                  <input type="date" value={x.d} aria-label={p + ' วันที่'} onChange={(ev) => e.setStep(d.id, p, { d: ev.target.value, n: x.n })} style={{ ...inputStyle, height: 36, fontSize: 13 }} />
+                  <input type="date" value={x.d} aria-label={p + ' วันที่'} onChange={(ev) => e.setStep(d.id, p, { d: ev.target.value, n: x.n })} className="fld" style={{ height: 36, fontSize: 13 }} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {p === DEAL_STAGE && (
                       <span style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => e.setStep(d.id, p, { d: x.d, n: 'YES' })} style={{ ...small, height: 28, borderColor: '#14633F', color: '#14633F' }}>✓ YES</button>
-                        <button onClick={() => e.setStep(d.id, p, { d: x.d, n: 'NO' })} style={{ ...small, height: 28, borderColor: '#8A2B12', color: '#8A2B12' }}>✕ NO</button>
+                        <button onClick={() => e.setStep(d.id, p, { d: x.d, n: 'YES' })} className="btn xs" style={{ height: 28, borderColor: '#14633F', color: '#14633F', '--hv': '#E5F5EB' }}>✓ YES</button>
+                        <button onClick={() => e.setStep(d.id, p, { d: x.d, n: 'NO' })} className="btn xs" style={{ height: 28, borderColor: '#8A2B12', color: '#8A2B12', '--hv': '#FDF0EB' }}>✕ NO</button>
                       </span>
                     )}
                     <StepNote label={p + ' โน้ต'} value={x.n} onSave={(n) => e.setStep(d.id, p, { d: stepOf(e.sales, d.id, p).d, n })} />
@@ -469,7 +469,7 @@ export function DealPanel() {
           </div>
 
           {e.can('delete') && (
-            <button onClick={() => window.confirm(`ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต และเอกสารที่แนบ ทุกเครื่องในทีม)`) && (e.deleteDeal(d.id), close())} style={{ ...small, alignSelf: 'flex-start', color: '#8A2B12' }}>
+            <button onClick={() => window.confirm(`ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต และเอกสารที่แนบ ทุกเครื่องในทีม)`) && (e.deleteDeal(d.id), close())} className="btn xs" style={{ alignSelf: 'flex-start', color: '#8A2B12', '--hv': '#FDF0EB' }}>
               ลบรายการนี้
             </button>
           )}

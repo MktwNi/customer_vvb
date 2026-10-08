@@ -7,7 +7,7 @@ import {
 } from '../lib/sales';
 import { beYearInput, facetOptions, yearOptions } from '../lib/salesUi';
 import { useMedia } from '../components/Sidebar';
-import { Notice, Opts, PageHead, btnOutline, btnPrimary, card, inputStyle, selectStyle, tabular } from '../components/ui';
+import { Notice, Opts, PageHead, card, tabular } from '../components/ui';
 import { StepEditor } from '../components/DealPanel';
 import { CoAvatar } from '../components/CoAvatar';
 import { SalesDash } from './SalesDash';
@@ -22,7 +22,6 @@ const RES: Record<string, [string, string, string]> = {
   WAIT: ['รอผล', '#FFF4DC', '#6B4100'],
   '': ['', '#F6F8FE', '#475069'],
 };
-const small: CSSProperties = { cursor: 'pointer', height: 32, padding: '0 12px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 12.5 };
 
 export function Sales() {
   const { engine: e, ui, set } = useApp();
@@ -51,7 +50,7 @@ export function Sales() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#475069' }}>
               ปี
-              <select value={year} onChange={(ev) => set({ slYear: ev.target.value })} style={{ ...selectStyle, height: 36 }} aria-label="ปี (พ.ศ.)">
+              <select value={year} onChange={(ev) => set({ slYear: ev.target.value })} className="fld sel" style={{ height: 36 }} aria-label="ปี (พ.ศ.)">
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </label>
@@ -70,7 +69,7 @@ export function Sales() {
         <Notice kind="ok" role="status">
           <span style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
             {ui.slNote}
-            <button onClick={() => set({ slNote: '' })} aria-label="ปิดข้อความ" style={{ cursor: 'pointer', border: 0, background: 'transparent', color: 'inherit', fontSize: 16 }}>×</button>
+            <button className="hv" onClick={() => set({ slNote: '' })} aria-label="ปิดข้อความ" style={{ cursor: 'pointer', border: 0, borderRadius: 8, color: 'inherit', fontSize: 16, '--hv': 'rgba(6,22,90,.08)' }}>×</button>
           </span>
         </Notice>
       )}
@@ -78,7 +77,7 @@ export function Sales() {
         {tabs.map(([k, label, n]) => {
           const on = v === k;
           return (
-            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} style={{ cursor: 'pointer', flex: 'none', border: 0, background: 'transparent', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} className="hv" style={{ cursor: 'pointer', flex: 'none', border: 0, borderRadius: '10px 10px 0 0', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
               {label}
               {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
             </button>
@@ -129,7 +128,7 @@ function AddMenu() {
   const sub: CSSProperties = { fontSize: 12, color: '#5E6680' };
   return (
     <div {...wrap} style={{ position: 'relative' }}>
-      <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnPrimary, height: 36 }}>+ เพิ่มลูกค้า ▾</button>
+      <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} className="btn pri" style={{ height: 36 }}>+ เพิ่มลูกค้า ▾</button>
       {open && (
         <div style={{ ...menuBox, width: 'min(320px,86vw)' }}>
           <button className="h-bg" style={item} onClick={() => { close(); go('search'); }}>
@@ -201,7 +200,7 @@ function MoreMenu({ year, deals, quick }: { year: string; deals: Deal[]; quick?:
   };
   return (
     <div {...wrap} style={{ position: 'relative' }}>
-      <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} style={{ ...btnOutline, height: 36 }}>เพิ่มเติม ▾</button>
+      <button ref={btn} onClick={() => setOpen(!open)} aria-expanded={open} className="btn out" style={{ height: 36 }}>เพิ่มเติม ▾</button>
       {open && (
         <div style={{ ...menuBox, width: 'min(300px,86vw)' }}>
           <button className="h-bg" style={item} onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
@@ -219,7 +218,7 @@ function MoreMenu({ year, deals, quick }: { year: string; deals: Deal[]; quick?:
           {imp.years && imp.years.some((y) => y !== year) && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {imp.years.filter((y) => y !== year).map((y) => (
-                <button key={y} onClick={() => { set({ slYear: y, slView: 'table' }); setImp(null); }} style={{ ...btnOutline, height: 36 }}>ดูตารางปี {y}</button>
+                <button key={y} onClick={() => { set({ slYear: y, slView: 'table' }); setImp(null); }} className="btn out" style={{ height: 36 }}>ดูตารางปี {y}</button>
               ))}
             </div>
           )}
@@ -230,7 +229,8 @@ function MoreMenu({ year, deals, quick }: { year: string; deals: Deal[]; quick?:
                 const n = e.undoImport(imp.batch!);
                 setImp({ msg: `ยกเลิกการนำเข้าแล้ว ลบ ${fmtN(n)} รายการ` });
               }}
-              style={{ ...btnOutline, height: 36, alignSelf: 'flex-start', color: '#8A2B12', borderColor: '#E7B9AC' }}
+              className="btn out"
+              style={{ height: 36, alignSelf: 'flex-start', color: '#8A2B12', borderColor: '#E7B9AC', '--hv': '#FDF0EB' }}
             >
               ยกเลิกการนำเข้านี้
             </button>
@@ -268,7 +268,7 @@ export function Modal({ title, children, onClose, width = 520, focus }: { title:
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: `min(${width}px,94vw)`, maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 22, padding: 22, zIndex: 55, display: 'flex', flexDirection: 'column', gap: 14, outline: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>{title}</span>
-          <button onClick={onClose} aria-label="ปิด" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, background: '#F6F8FE', fontSize: 18, color: '#475069' }}>×</button>
+          <button onClick={onClose} aria-label="ปิด" className="hv2" style={{ cursor: 'pointer', width: 34, height: 34, borderRadius: '50%', border: 0, '--bg': '#F6F8FE', fontSize: 18, color: '#475069' }}>×</button>
         </div>
         {children}
       </div>
@@ -289,15 +289,15 @@ function ListsModal({ onClose }: { onClose: () => void }) {
           <span key={x} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, padding: '3px 4px 3px 10px', borderRadius: 999, background: '#F6F8FE', border: '1px solid #E3E7F1' }}>
             {x}
             {name === 'sections' && (
-              <button title="เปลี่ยนชื่อ" onClick={() => { const n = window.prompt('ชื่อหมวดใหม่', x); if (n) e.renameSection(x, n); }} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#475069', fontSize: 12 }}>✎</button>
+              <button title="เปลี่ยนชื่อ" onClick={() => { const n = window.prompt('ชื่อหมวดใหม่', x); if (n) e.renameSection(x, n); }} className="hv2" style={{ cursor: 'pointer', border: 0, borderRadius: 999, color: '#475069', fontSize: 12 }}>✎</button>
             )}
-            <button title="ลบ" aria-label={'ลบ ' + x} onClick={() => window.confirm(`ลบ "${x}" ออกจากรายการ? (รายการที่ใช้อยู่ยังคงเดิม)`) && e.setSalesList(name, C[name].filter((y) => y !== x))} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#8A2B12', fontSize: 14 }}>×</button>
+            <button title="ลบ" aria-label={'ลบ ' + x} onClick={() => window.confirm(`ลบ "${x}" ออกจากรายการ? (รายการที่ใช้อยู่ยังคงเดิม)`) && e.setSalesList(name, C[name].filter((y) => y !== x))} className="hv" style={{ cursor: 'pointer', border: 0, borderRadius: 999, color: '#8A2B12', fontSize: 14, '--hv': '#FBE3DC' }}>×</button>
           </span>
         ))}
       </div>
       <form onSubmit={(ev) => { ev.preventDefault(); const inp = ev.currentTarget.elements.namedItem('v') as HTMLInputElement; if (inp.value.trim()) e.setSalesList(name, [...C[name], inp.value]); inp.value = ''; }} style={{ display: 'flex', gap: 8 }}>
-        <input name="v" placeholder="เพิ่มใหม่…" style={{ ...inputStyle, height: 36, flex: 1 }} />
-        <button type="submit" style={{ ...btnOutline, height: 36 }}>เพิ่ม</button>
+        <input name="v" placeholder="เพิ่มใหม่…" className="fld" style={{ height: 36, flex: 1 }} />
+        <button type="submit" className="btn out" style={{ height: 36 }}>เพิ่ม</button>
       </form>
     </div>
   );
@@ -319,25 +319,25 @@ function Filters({ S, facets, ignoreQuick }: { S: SalesState; facets: Deal[]; ig
   const F = ui.slF;
   const up = (p: Partial<typeof F>) => set({ slF: { ...F, ...p } });
   const uniq = (k: 'resp' | 'referral') => facetOptions(facets, k, F[k]);
-  const sel = { ...selectStyle, height: 36, fontSize: 13 };
+  const sel = { height: 36, fontSize: 13 };
   const any = filtersOn(ignoreQuick ? { ...F, quick: '' } : F);
   const nSet = Object.entries(F).filter(([k, v]) => k !== 'q' && k !== 'quick' && v).length;
   // phones: the selects fold behind one button (they would take half the screen)
   const [more, setMore] = useState(false);
   return (
     <div className={'sl-filters' + (more ? ' open' : '')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <input value={F.q || ''} onChange={(ev) => { const q = ev.target.value; set({ slF: { ...F, q }, ...(q.trim() && !(F.q || '').trim() ? { slCollapsed: {} } : {}) }); }} placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต" aria-label="ค้นหา" style={{ ...inputStyle, height: 36, flex: '1 1 220px', minWidth: 0 }} />
-      <button className="sl-ftoggle" onClick={() => setMore(!more)} aria-expanded={more} style={{ ...small, height: 36 }}>ตัวกรอง{nSet ? ` (${nSet})` : ''} {more ? '▴' : '▾'}</button>
-      <select value={F.source || ''} onChange={(ev) => up({ source: ev.target.value })} style={sel} aria-label="SOURCE"><Opts all="SOURCE: ทั้งหมด" options={S.cfg.sources.map((x) => ({ v: x, label: x }))} /></select>
-      <select value={F.service || ''} onChange={(ev) => up({ service: ev.target.value })} style={sel} aria-label="Services"><Opts all="Services: ทั้งหมด" options={S.cfg.services.map((x) => ({ v: x, label: x }))} /></select>
-      <select value={F.resp || ''} onChange={(ev) => up({ resp: ev.target.value })} style={sel} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: x }))} /></select>
-      <select value={F.referral || ''} onChange={(ev) => up({ referral: ev.target.value })} style={sel} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: x }))} /></select>
-      <select value={F.result || ''} onChange={(ev) => up({ result: ev.target.value as typeof F.result })} style={sel} aria-label="ผลการขาย">
+      <input value={F.q || ''} onChange={(ev) => { const q = ev.target.value; set({ slF: { ...F, q }, ...(q.trim() && !(F.q || '').trim() ? { slCollapsed: {} } : {}) }); }} placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต" aria-label="ค้นหา" className="fld" style={{ height: 36, flex: '1 1 220px', minWidth: 0 }} />
+      <button className="sl-ftoggle btn xs" onClick={() => setMore(!more)} aria-expanded={more} style={{ height: 36 }}>ตัวกรอง{nSet ? ` (${nSet})` : ''} {more ? '▴' : '▾'}</button>
+      <select value={F.source || ''} onChange={(ev) => up({ source: ev.target.value })} className="fld sel" style={sel} aria-label="SOURCE"><Opts all="SOURCE: ทั้งหมด" options={S.cfg.sources.map((x) => ({ v: x, label: x }))} /></select>
+      <select value={F.service || ''} onChange={(ev) => up({ service: ev.target.value })} className="fld sel" style={sel} aria-label="Services"><Opts all="Services: ทั้งหมด" options={S.cfg.services.map((x) => ({ v: x, label: x }))} /></select>
+      <select value={F.resp || ''} onChange={(ev) => up({ resp: ev.target.value })} className="fld sel" style={sel} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: x }))} /></select>
+      <select value={F.referral || ''} onChange={(ev) => up({ referral: ev.target.value })} className="fld sel" style={sel} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: x }))} /></select>
+      <select value={F.result || ''} onChange={(ev) => up({ result: ev.target.value as typeof F.result })} className="fld sel" style={sel} aria-label="ผลการขาย">
         <Opts all="ผลการขาย: ทั้งหมด" options={[{ v: 'YES', label: 'ปิดการขายได้ (YES)' }, { v: 'NO', label: 'ไม่สำเร็จ (NO)' }, { v: 'WAIT', label: 'มีหมายเหตุ / รอผล' }, { v: 'EMPTY', label: 'ยังไม่มีผล' }]} />
       </select>
-      <select value={F.month || ''} onChange={(ev) => up({ month: ev.target.value })} style={sel} aria-label="เดือนที่ติดต่อ"><Opts all="ติดต่อ: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อ ' + m }))} /></select>
-      <select value={F.day || ''} onChange={(ev) => up({ day: ev.target.value })} style={sel} aria-label="วันที่ติดต่อ"><Opts all="ทุกวัน" options={Array.from({ length: 31 }, (_, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'วันที่ ' + (i + 1) }))} /></select>
-      {any && <button onClick={() => set({ slF: {} })} style={{ ...small, height: 36 }}>ล้างตัวกรอง</button>}
+      <select value={F.month || ''} onChange={(ev) => up({ month: ev.target.value })} className="fld sel" style={sel} aria-label="เดือนที่ติดต่อ"><Opts all="ติดต่อ: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อ ' + m }))} /></select>
+      <select value={F.day || ''} onChange={(ev) => up({ day: ev.target.value })} className="fld sel" style={sel} aria-label="วันที่ติดต่อ"><Opts all="ทุกวัน" options={Array.from({ length: 31 }, (_, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'วันที่ ' + (i + 1) }))} /></select>
+      {any && <button onClick={() => set({ slF: {} })} className="btn xs" style={{ height: 36 }}>ล้างตัวกรอง</button>}
     </div>
   );
 }
@@ -349,7 +349,7 @@ function NoMatch({ text }: { text: string }) {
   return (
     <span style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: 14, color: '#475069' }}>
       <span role="status">{text}</span>
-      <button onClick={() => set({ slF: {} })} style={{ ...small, height: 36 }}>ล้างตัวกรอง</button>
+      <button onClick={() => set({ slF: {} })} className="btn xs" style={{ height: 36 }}>ล้างตัวกรอง</button>
     </span>
   );
 }
@@ -378,7 +378,8 @@ function Summary({ S, open, all, today }: { S: SalesState; open: Deal[]; all: De
           </>
         );
         const st: CSSProperties = { ...card, borderRadius: 16, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' };
-        return on ? <button key={l} onClick={on} className="sl-tile" style={{ ...st, cursor: 'pointer', font: 'inherit' }}>{body}</button> : <div key={l} style={st}>{body}</div>;
+        // the button's white comes through --bg (an inline background would beat the hover tint)
+        return on ? <button key={l} onClick={on} className="sl-tile hv" style={{ ...st, background: undefined, '--bg': '#fff', cursor: 'pointer', font: 'inherit' }}>{body}</button> : <div key={l} style={st}>{body}</div>;
       })}
     </div>
   );
@@ -618,7 +619,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, color: '#475069' }}>
           หมวดที่ยังไม่มีลูกค้า (กดเพื่อเพิ่ม):
           {empty.map((s) => (
-            <button key={s} onClick={() => addIn(s)} style={{ ...small, height: 28 }}>+ {s}</button>
+            <button key={s} onClick={() => addIn(s)} className="btn xs" style={{ height: 28 }}>+ {s}</button>
           ))}
         </div>
       )}
@@ -906,14 +907,14 @@ function ClosedView({ S, deals, facets, total }: { S: SalesState; deals: Deal[];
               const m = dealMoney(S, d);
               return (
                 <tr key={d.id} className="sl-row">
-                  <td><button onClick={() => set({ deal: d.id })} className="h-blue" style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0, textAlign: 'left', fontSize: 14, color: '#0E1430' }}>{d.client}</button></td>
+                  <td><button onClick={() => set({ deal: d.id })} className="h-blue hv-tx" style={{ cursor: 'pointer', border: 0, padding: 0, textAlign: 'left', fontSize: 14, color: '#0E1430' }}>{d.client}</button></td>
                   <td>{d.section}</td>
                   <td>{d.resp}</td>
                   <td>{RES[dealResult(S, d)][0] || '—'}</td>
                   <td style={{ textAlign: 'right', ...tabular }}>{fmtMoney(m.forecast)}{m.fcConfirmed ? ' ✓' : ''}</td>
                   <td style={{ textAlign: 'right', ...tabular }}>{fmtMoney(m.actual)}{m.acConfirmed ? ' ✓' : ''}</td>
                   <td>{isoTh(d.closedDate)}</td>
-                  <td>{e.can('edit') && <button onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })} style={small}>เปิดงานอีกครั้ง</button>}</td>
+                  <td>{e.can('edit') && <button onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })} className="btn xs">เปิดงานอีกครั้ง</button>}</td>
                 </tr>
               );
             })}
@@ -934,7 +935,7 @@ function LogView({ S, year }: { S: SalesState; year: string }) {
     .sort((a, b) => b.at.localeCompare(a.at));
   return (
     <>
-      <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="ค้นหาในประวัติ" aria-label="ค้นหาในประวัติ" style={{ ...inputStyle, height: 36, maxWidth: 360 }} />
+      <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="ค้นหาในประวัติ" aria-label="ค้นหาในประวัติ" className="fld" style={{ height: 36, maxWidth: 360 }} />
       <div style={{ ...card, borderRadius: 18, overflowX: 'auto' }}>
         <table className="sl-table" style={{ minWidth: 720 }}>
           <thead><tr><th>เวลา</th><th>ผู้แก้ไข</th><th>การกระทำ</th><th>ลูกค้า</th><th>รายละเอียด</th></tr></thead>
@@ -945,7 +946,7 @@ function LogView({ S, year }: { S: SalesState; year: string }) {
                 <td style={{ whiteSpace: 'nowrap' }}>{dtTh(l.at)}</td>
                 <td>{l.by || '—'}</td>
                 <td>{l.action}</td>
-                <td>{l.deal && S.deals[l.deal] ? <button onClick={() => set({ deal: l.deal })} className="h-blue" style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0, textAlign: 'left', fontSize: 13.5, color: '#0E1430' }}>{l.client}</button> : l.client}</td>
+                <td>{l.deal && S.deals[l.deal] ? <button onClick={() => set({ deal: l.deal })} className="h-blue hv-tx" style={{ cursor: 'pointer', border: 0, padding: 0, textAlign: 'left', fontSize: 13.5, color: '#0E1430' }}>{l.client}</button> : l.client}</td>
                 <td style={{ color: '#475069' }}>{l.detail}</td>
               </tr>
             ))}

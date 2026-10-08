@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { beYear } from '../lib/sales';
 import type { Company } from '../lib/types';
 import { Modal } from '../tabs/Sales';
-import { Notice, inputStyle, labelCol, selectStyle } from './ui';
+import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 
-const small: CSSProperties = { cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 13 };
 const EMPTY = { name: '', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' };
 const RO_NOTE = 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้';
 
@@ -81,7 +80,7 @@ export function AddCustomer() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,250px),1fr))', gap: 10 }}>
           <label style={{ ...labelCol, gridColumn: '1 / -1' }}>
             ชื่อบริษัท / ลูกค้า *
-            <input value={f.name} onChange={up('name')} autoFocus required maxLength={200} placeholder="เช่น บริษัท ตัวอย่าง จำกัด" style={inputStyle} />
+            <input value={f.name} onChange={up('name')} autoFocus required maxLength={200} placeholder="เช่น บริษัท ตัวอย่าง จำกัด" className="fld" />
           </label>
           {/* right under the name, where it is seen while typing (on a phone the rest of the form is below the fold) */}
           {similar.length > 0 && (
@@ -92,37 +91,37 @@ export function AddCustomer() {
                   <span>
                     {c.name} <span style={{ color: '#6B4100', fontSize: 12 }}>· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
                   </span>
-                  <button type="button" onClick={() => useExisting(c)} style={{ ...small, height: 30 }}>ใช้บริษัทนี้</button>
+                  <button type="button" onClick={() => useExisting(c)} className="btn sm" style={{ height: 30 }}>ใช้บริษัทนี้</button>
                 </div>
               ))}
             </div>
           )}
-          <label style={labelCol}>เลขนิติบุคคล (13 หลัก)<input value={f.jur} onChange={up('jur')} inputMode="numeric" maxLength={20} style={inputStyle} /></label>
-          <label style={labelCol}>ผู้ติดต่อ<input value={f.contact} onChange={up('contact')} style={inputStyle} /></label>
-          <label style={labelCol}>เบอร์โทร<input value={f.phone} onChange={up('phone')} type="tel" style={inputStyle} /></label>
-          <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="email" style={inputStyle} /></label>
+          <label style={labelCol}>เลขนิติบุคคล (13 หลัก)<input value={f.jur} onChange={up('jur')} inputMode="numeric" maxLength={20} className="fld" /></label>
+          <label style={labelCol}>ผู้ติดต่อ<input value={f.contact} onChange={up('contact')} className="fld" /></label>
+          <label style={labelCol}>เบอร์โทร<input value={f.phone} onChange={up('phone')} type="tel" className="fld" /></label>
+          <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="email" className="fld" /></label>
           <label style={labelCol}>
             จังหวัด
-            <select value={f.prov} onChange={up('prov')} style={selectStyle}>
+            <select value={f.prov} onChange={up('prov')} className="fld sel">
               <option value="">ไม่ระบุ</option>
               {provs.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
           <label style={labelCol}>
             กลุ่มอุตสาหกรรม
-            <select value={f.ind} onChange={up('ind')} style={selectStyle}>
+            <select value={f.ind} onChange={up('ind')} className="fld sel">
               <option value="">ไม่ระบุ</option>
               {D.ind.filter((x) => x && x !== 'ไม่ระบุ').map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
           </label>
-          <label style={labelCol}>ประกอบกิจการ<input value={f.biz} onChange={up('biz')} style={inputStyle} /></label>
-          <label style={labelCol}>เว็บไซต์<input value={f.web} onChange={up('web')} style={inputStyle} /></label>
-          <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ที่อยู่<input value={f.addr} onChange={up('addr')} style={inputStyle} /></label>
-          <label style={{ ...labelCol, gridColumn: '1 / -1' }}>หมายเหตุ<textarea value={f.note} onChange={up('note')} rows={2} style={{ ...inputStyle, height: 'auto', padding: 10, resize: 'vertical' }} /></label>
+          <label style={labelCol}>ประกอบกิจการ<input value={f.biz} onChange={up('biz')} className="fld" /></label>
+          <label style={labelCol}>เว็บไซต์<input value={f.web} onChange={up('web')} className="fld" /></label>
+          <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ที่อยู่<input value={f.addr} onChange={up('addr')} className="fld" /></label>
+          <label style={{ ...labelCol, gridColumn: '1 / -1' }}>หมายเหตุ<textarea value={f.note} onChange={up('note')} rows={2} className="fld" style={{ height: 'auto', padding: 10, resize: 'vertical' }} /></label>
           {a.deal && !edit && (
             <label style={labelCol}>
               เพิ่มเข้า Sales Tracker ในหมวด
-              <select value={section} onChange={(ev) => setSection(ev.target.value)} style={selectStyle}>
+              <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
                 {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
             </label>
@@ -133,12 +132,12 @@ export function AddCustomer() {
         <span style={{ fontSize: 12, color: '#5E6680' }}>ลูกค้าที่เพิ่มเองจะมีป้าย "เพิ่มเอง" ค้นหา ติดดาว นัดหมาย และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน และทั้งทีมเห็นด้วย (เมื่อเชื่อมต่อทีม)</span>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           {edit && e.can('delete') && (
-            <button type="button" onClick={() => { if (window.confirm(`ลบ "${edit.name}" ออกจากรายชื่อลูกค้า?`)) { e.deleteCustomer(edit.id); set({ addCust: null, sel: null }); } }} style={{ ...small, color: '#8A2B12', marginRight: 'auto' }}>
+            <button type="button" onClick={() => { if (window.confirm(`ลบ "${edit.name}" ออกจากรายชื่อลูกค้า?`)) { e.deleteCustomer(edit.id); set({ addCust: null, sel: null }); } }} className="btn sm" style={{ color: '#8A2B12', marginRight: 'auto', '--hv': '#FDF0EB' }}>
               ลบลูกค้านี้
             </button>
           )}
-          <button type="button" onClick={close} style={small}>ยกเลิก</button>
-          {!ro && <button type="submit" style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>}
+          <button type="button" onClick={close} className="btn sm">ยกเลิก</button>
+          {!ro && <button type="submit" className="btn sm pri">{edit ? 'บันทึก' : a.deal ? 'เพิ่มลูกค้าและเข้า Sales Tracker' : 'เพิ่มลูกค้า'}</button>}
         </div>
       </form>
     </Modal>
@@ -180,21 +179,21 @@ export function SendToTracker() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
         <label style={labelCol}>
           หมวด
-          <select value={section} onChange={(ev) => setSection(ev.target.value)} style={selectStyle}>
+          <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
             {cos.length > 1 && <option value={AUTO}>อัตโนมัติ — ตามแหล่งที่พบ (TGO / SET/mai)</option>}
             {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
           </select>
         </label>
         <label style={labelCol}>
           ปี (พ.ศ.)
-          <select value={year} onChange={(ev) => setYear(ev.target.value)} style={selectStyle}>
+          <select value={year} onChange={(ev) => setYear(ev.target.value)} className="fld sel">
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </label>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
         {cos.map((c) => (
-          <label key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, padding: '6px 4px', borderTop: '1px solid #EEF1F8', opacity: has(c) ? 0.55 : 1 }}>
+          <label key={c.id} className={has(c) ? undefined : 'hv'} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, padding: '6px 4px', borderTop: '1px solid #EEF1F8', opacity: has(c) ? 0.55 : 1, cursor: has(c) ? 'default' : 'pointer' }}>
             <input type="checkbox" checked={!!pick[c.id] && !has(c)} disabled={has(c)} onChange={(ev) => setPick({ ...pick, [c.id]: ev.target.checked })} />
             <span style={{ flex: 1 }}>{c.name}</span>
             <span style={{ fontSize: 12, color: '#5E6680' }}>{has(c) ? `มีในตารางปี ${year} แล้ว` : c.phone || 'ยังไม่มีเบอร์'}</span>
@@ -203,8 +202,8 @@ export function SendToTracker() {
       </div>
       </ReadOnly>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button onClick={close} style={small}>ยกเลิก</button>
-        {!ro && <button onClick={send} disabled={!chosen.some((c) => !has(c))} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff' }}>
+        <button onClick={close} className="btn sm">ยกเลิก</button>
+        {!ro && <button onClick={send} disabled={!chosen.some((c) => !has(c))} className="btn sm pri">
           ส่ง {chosen.filter((c) => !has(c)).length} รายการ
         </button>}
       </div>

@@ -2,7 +2,7 @@ import { type CSSProperties, type FormEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
-import { Notice, Opts, PageHead, card, inputStyle, labelCol, selectStyle } from '../components/ui';
+import { Notice, Opts, PageHead, card, labelCol } from '../components/ui';
 import { TeamSyncCard } from '../components/TeamSync';
 
 const section: CSSProperties = { ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 14 };
@@ -52,7 +52,7 @@ export function Update() {
             <span style={{ fontSize: 17, fontWeight: 500 }}>อัปโหลดฐานข้อมูลลูกค้าฉบับใหม่</span>
             <span style={intro}>ไฟล์ Excel รูปแบบเดียวกับ ฐานข้อมูลลูกค้า_GCC (ชีต ทะเบียนบริษัท, TGO_CFO, GI, กรอ., SET) ระบบจะแทนข้อมูลบริษัททั้งหมด ส่วนที่เก็บในเครื่อง (ดาว สถานะการขาย โน้ต นัด ข้อมูลติดต่อที่แก้ไข การตัดสินข้อมูลซ้ำ) ยังอยู่ครบ</span>
           </div>
-          <label style={{ cursor: 'pointer', height: 44, padding: '0 20px', borderRadius: 999, background: '#1F5BD8', color: '#fff', fontSize: 14.5, display: 'flex', alignItems: 'center' }}>
+          <label className="btn pri" style={{ height: 44, padding: '0 20px', fontSize: 14.5, display: 'flex', alignItems: 'center' }}>
             เลือกไฟล์ .xlsx
             <input type="file" accept=".xlsx" onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) e.onFile(f); }} style={{ display: 'none' }} />
           </label>
@@ -72,12 +72,12 @@ export function Update() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => e.applyUpload()} style={{ cursor: 'pointer', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>ใช้ข้อมูลชุดนี้</button>
-              <button onClick={() => e.cancelUpload()} style={{ cursor: 'pointer', height: 38, padding: '0 12px', border: 0, background: 'transparent', color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}>ยกเลิก</button>
+              <button onClick={() => e.applyUpload()} className="btn pri" style={{ height: 38 }}>ใช้ข้อมูลชุดนี้</button>
+              <button onClick={() => e.cancelUpload()} className="hv" style={{ cursor: 'pointer', height: 38, padding: '0 12px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}>ยกเลิก</button>
             </div>
           </div>
         )}
-        {e.base.source === 'upload' && <button onClick={() => e.revertUpload()} style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0 }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
+        {e.base.source === 'upload' && <button onClick={() => e.revertUpload()} className="hv-tx" style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0 }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
       </section>
 
       <section style={section}>
@@ -86,7 +86,7 @@ export function Update() {
             <span style={{ fontSize: 17, fontWeight: 500 }}>ดึงใบรับรอง CFO ใหม่จากเว็บไซต์ TGO</span>
             <span style={intro}>อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO) ทำงานเมื่อถึงรอบหรือเมื่อกดปุ่ม</span>
           </div>
-          <button onClick={() => e.runSync(false)} disabled={y.status === 'running'} style={{ cursor: 'pointer', height: 44, padding: '0 20px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 14.5 }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>
+          <button onClick={() => e.runSync(false)} disabled={y.status === 'running'} className="btn pri" style={{ height: 44, padding: '0 20px', fontSize: 14.5 }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
           {syncBoxes.map(([k, v]) => (
@@ -99,20 +99,20 @@ export function Update() {
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label style={labelCol}>
             รอบอัปเดตอัตโนมัติ
-            <select value={sc.freq} onChange={(ev) => e.saveSync({ freq: ev.target.value as SyncCfg['freq'] })} style={{ ...selectStyle, padding: '0 12px' }}>
+            <select value={sc.freq} onChange={(ev) => e.saveSync({ freq: ev.target.value as SyncCfg['freq'] })} className="fld sel" style={{ padding: '0 12px' }}>
               <Opts options={[{ v: 'open', label: 'ทุกครั้งที่เปิดเว็บ' }, { v: 'daily', label: 'วันละครั้ง' }, { v: 'weekly', label: 'สัปดาห์ละครั้ง' }, { v: 'off', label: 'ปิด (กดเองเท่านั้น)' }]} />
             </select>
           </label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', height: 40, fontSize: 13.5, cursor: 'pointer' }}>
+          <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 40, padding: '0 8px', margin: '0 -8px', borderRadius: 10, fontSize: 13.5, cursor: 'pointer' }}>
             <input type="checkbox" checked={!!sc.autoApply} onChange={(ev) => e.saveSync({ autoApply: ev.target.checked })} style={{ width: 18, height: 18 }} />
             เมื่อถึงรอบ ให้อัปเดตทันทีโดยไม่ต้องยืนยัน
           </label>
         </div>
         <details style={{ fontSize: 13, color: '#475069' }}>
-          <summary style={{ cursor: 'pointer' }}>ตั้งค่าขั้นสูง: Proxy</summary>
+          <summary className="hv-tx" style={{ cursor: 'pointer' }}>ตั้งค่าขั้นสูง: Proxy</summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 10 }}>
             <span style={{ lineHeight: 1.6 }}>ใช้ {'{u}'} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ project/tools/tgo-proxy-worker.js</span>
-            <input defaultValue={sc.proxy} onBlur={(ev) => e.saveSync({ proxy: ev.target.value.trim() })} placeholder="https://tgo-proxy.example.workers.dev/?url={u}" style={{ ...inputStyle, maxWidth: 560 }} />
+            <input defaultValue={sc.proxy} onBlur={(ev) => e.saveSync({ proxy: ev.target.value.trim() })} placeholder="https://tgo-proxy.example.workers.dev/?url={u}" className="fld" style={{ maxWidth: 560 }} />
           </div>
         </details>
         {y.status === 'running' && <span style={{ fontSize: 13.5, color: '#1F5BD8' }}>{y.msg}</span>}
@@ -131,8 +131,8 @@ export function Update() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => e.applySync(false)} style={{ cursor: 'pointer', height: 38, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>อัปเดตเข้าระบบ</button>
-              <button onClick={() => e.cancelSync()} style={{ cursor: 'pointer', height: 38, padding: '0 12px', border: 0, background: 'transparent', color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}>ยกเลิก</button>
+              <button onClick={() => e.applySync(false)} className="btn pri" style={{ height: 38 }}>อัปเดตเข้าระบบ</button>
+              <button onClick={() => e.cancelSync()} className="hv" style={{ cursor: 'pointer', height: 38, padding: '0 12px', border: 0, borderRadius: 999, color: '#475069', fontSize: 13.5, textDecoration: 'underline' }}>ยกเลิก</button>
             </div>
           </div>
         )}
@@ -149,20 +149,20 @@ export function Update() {
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label style={labelCol}>
               ฉันคือ
-              <select value={me} onChange={(ev) => e.setMe(ev.target.value)} style={{ ...selectStyle, minWidth: 200 }}>
+              <select value={me} onChange={(ev) => e.setMe(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
                 <Opts all="ยังไม่เลือก" options={C.team.map((v) => ({ v, label: v }))} />
               </select>
             </label>
             <form onSubmit={addTeam} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <label style={labelCol}>เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" style={inputStyle} /></label>
-              <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>เพิ่ม</button>
+              <label style={labelCol}>เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" className="fld" /></label>
+              <button type="submit" className="btn pri">เพิ่ม</button>
             </form>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {C.team.map((name) => (
               <span key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', height: 32, padding: '0 6px 0 12px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', fontSize: 13 }}>
                 {name} · {fmtN(ownN[name] || 0)} บริษัท
-                <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} style={{ cursor: 'pointer', width: 22, height: 22, borderRadius: '50%', border: 0, background: 'rgba(10,26,134,.12)', color: '#1745B8', fontSize: 13, padding: 0 }}>×</button>
+                <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} className="hv" style={{ cursor: 'pointer', width: 22, height: 22, borderRadius: '50%', border: 0, '--bg': 'rgba(10,26,134,.12)', '--hv': 'rgba(10,26,134,.24)', color: '#1745B8', fontSize: 13, padding: 0 }}>×</button>
               </span>
             ))}
             {!C.team.length && <span style={{ fontSize: 13, color: '#5E6680' }}>ยังไม่มีรายชื่อทีม เพิ่มชื่อเพื่อกำหนดผู้รับผิดชอบบริษัท</span>}
@@ -176,8 +176,8 @@ export function Update() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button onClick={() => e.exportCrm()} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>ส่งออกไฟล์สำรอง (.json)</button>
-            <label style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: '1.5px solid #1F5BD8', color: '#1F5BD8', fontSize: 13.5, display: 'flex', alignItems: 'center' }}>
+            <button onClick={() => e.exportCrm()} className="btn pri">ส่งออกไฟล์สำรอง (.json)</button>
+            <label className="btn out" style={{ display: 'flex', alignItems: 'center' }}>
               นำเข้าไฟล์สำรอง
               <input type="file" accept=".json" onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) e.importCrm(f); }} style={{ display: 'none' }} />
             </label>
@@ -189,7 +189,7 @@ export function Update() {
       <section style={{ ...section, gap: 12 }}>
         <span style={{ fontSize: 17, fontWeight: 500 }}>ตรวจสถานะหมดอายุอัตโนมัติ</span>
         <span style={intro}>ตรวจทุกบริษัทเทียบกับวันนี้ ทุกครั้งที่เปิดเว็บ หลังอัปเดตข้อมูล ทุก 10 นาทีที่เปิดค้าง และเมื่อขึ้นวันใหม่ บันทึกเหตุการณ์ CFO ใกล้หมดอายุ / หมดอายุ / ต่ออายุแล้ว และ GI หมดอายุหรือถูกลดระดับ ดูได้ในแท็บติดตาม</span>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, cursor: 'pointer' }}>
+        <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 8px', margin: '-4px -8px', borderRadius: 10, fontSize: 13.5, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!mon.notify} onChange={(ev) => e.setNotify(ev.target.checked)} style={{ width: 18, height: 18 }} />
           แจ้งเตือนผ่านเบราว์เซอร์เมื่อมีเหตุการณ์ใหม่
         </label>

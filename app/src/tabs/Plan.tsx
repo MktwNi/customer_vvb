@@ -7,7 +7,7 @@ import { feedMeta } from '../lib/feeds';
 import { Opts, PageHead, card, heroGrad, labelCol } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
 
-const sel = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' } as const;
+const sel = { borderRadius: 10 } as const;
 
 export function taskInfo(e: ReturnType<typeof useApp>['engine'], t: Task) {
   const today = todayISO();
@@ -28,7 +28,7 @@ export function taskInfo(e: ReturnType<typeof useApp>['engine'], t: Task) {
  *  can only read): it only shows whether the task is done, and says why it can't be pressed. */
 export function DoneBox({ t, color, onToggle, size = 13, ro = false }: { t: Task; color: string; onToggle: () => void; size?: number; ro?: boolean }) {
   return (
-    <button onClick={onToggle} disabled={ro} title={ro ? 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้' : undefined} aria-label="ทำเสร็จ" aria-pressed={t.done} style={{ cursor: ro ? 'default' : 'pointer', width: 22, height: 22, flex: 'none', borderRadius: 6, border: `1.5px solid ${color}`, background: t.done ? color : '#fff', color: '#fff', fontSize: size, padding: 0 }}>
+    <button onClick={onToggle} disabled={ro} title={ro ? 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้' : undefined} aria-label="ทำเสร็จ" aria-pressed={t.done} className={t.done ? 'hv-dk' : 'hv'} style={{ cursor: ro ? 'default' : 'pointer', width: 22, height: 22, flex: 'none', borderRadius: 6, border: `1.5px solid ${color}`, '--bg': t.done ? color : '#fff', color: '#fff', fontSize: size, padding: 0 }}>
       {t.done ? '✓' : ''}
     </button>
   );
@@ -159,14 +159,14 @@ export function Plan() {
                 <DoneBox t={t} color={ti.color} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
                 {avOf(t.id, t.gid, t.title, ti.color, 40)}
                 <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                  <button onClick={() => ti.company && open(ti.company.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: '#0E1430', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
+                  <button onClick={() => ti.company && open(ti.company.id)} className="hv-tx" style={{ cursor: 'pointer', border: 0, textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: '#0E1430', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
                   <span style={{ fontSize: 12.5, color: '#475069' }}>{ti.meta}</span>
                   {t.note && <span style={{ fontSize: 12.5, color: '#384155' }}>{t.note}</span>}
                 </div>
                 <div className="pl-task-act">
-                  {ti.tel && <a href={ti.tel} style={{ fontSize: 12.5, textDecoration: 'none', border: '1.5px solid #D5DBEA', borderRadius: 999, padding: '4px 10px' }}>โทร</a>}
-                  {!ro && <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} style={{ cursor: 'pointer', border: '1.5px solid #D5DBEA', background: '#fff', borderRadius: 999, padding: '4px 10px', fontSize: 12.5 }}>เลื่อน</button>}
-                  {!ro && <button onClick={() => e.delTask(t)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12.5 }}>ลบ</button>}
+                  {ti.tel && <a href={ti.tel} className="hv" style={{ fontSize: 12.5, textDecoration: 'none', border: '1.5px solid #D5DBEA', borderRadius: 999, padding: '4px 10px', '--bg': '#fff' }}>โทร</a>}
+                  {!ro && <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} className="hv" style={{ cursor: 'pointer', border: '1.5px solid #D5DBEA', '--bg': '#fff', borderRadius: 999, padding: '4px 10px', fontSize: 12.5 }}>เลื่อน</button>}
+                  {!ro && <button onClick={() => e.delTask(t)} className="hv" style={{ cursor: 'pointer', border: 0, borderRadius: 8, color: '#A33A1A', fontSize: 12.5, '--hv': '#FDF0EB' }}>ลบ</button>}
                 </div>
               </div>
             );
@@ -176,7 +176,7 @@ export function Plan() {
           {upcoming.map((t) => {
             const ti = taskInfo(e, t);
             return (
-              <button key={t.id} className="pl-up" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', background: 'transparent', textAlign: 'left', padding: '8px 0', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, color: '#0E1430' }}>
+              <button key={t.id} className="pl-up hv" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid #EEF1F8', textAlign: 'left', padding: '8px', margin: '0 4px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, color: '#0E1430' }}>
                 <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>{avOf(t.id, t.gid, t.title, ti.color, 30)}<span style={{ minWidth: 0 }}>{ti.title}</span></span>
                 <span style={{ color: '#475069', whiteSpace: 'nowrap' }}>{ti.when}</span>
               </button>
@@ -192,11 +192,11 @@ export function Plan() {
             <span style={{ fontSize: 13, color: '#475069', fontWeight: 300 }}>{`${fmtN(tg.length)} บริษัท · ยังไม่มีนัด ${fmtN(unpl.length)}`}</span>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <label style={labelCol}>รายการ<select value={feedKey} onChange={(ev) => set({ plFeed: ev.target.value as FeedKey, picked: {}, plLim: 60 })} style={sel}><Opts options={FEEDS.map(([v, label]) => ({ v, label }))} /></select></label>
-            <label style={labelCol}>สถานะการขาย<select value={ui.plStage} onChange={(ev) => set({ plStage: ev.target.value as StageKey | '', picked: {} })} style={sel}><Opts all="ทั้งหมด" options={STG.map(([v, label]) => ({ v, label }))} /></select></label>
-            <label style={labelCol}>ผู้รับผิดชอบ<select value={ui.plOwner} onChange={(ev) => set({ plOwner: ev.target.value, picked: {} })} style={sel}><Opts all="ทั้งหมด" options={teamOpts} /></select></label>
-            {!ro && <label style={labelCol}>นัดอัตโนมัติวันละ<select value={String(ui.perDay)} onChange={(ev) => set({ perDay: +ev.target.value })} style={sel}>{[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n} ราย</option>)}</select></label>}
-            {!ro && <button onClick={() => unpl.length && e.autoPlan(unpl, ui.perDay || 5)} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>นัดรายที่ยังไม่มีแผน ({fmtN(unpl.length)})</button>}
+            <label style={labelCol}>รายการ<select value={feedKey} onChange={(ev) => set({ plFeed: ev.target.value as FeedKey, picked: {}, plLim: 60 })} className="fld sel" style={sel}><Opts options={FEEDS.map(([v, label]) => ({ v, label }))} /></select></label>
+            <label style={labelCol}>สถานะการขาย<select value={ui.plStage} onChange={(ev) => set({ plStage: ev.target.value as StageKey | '', picked: {} })} className="fld sel" style={sel}><Opts all="ทั้งหมด" options={STG.map(([v, label]) => ({ v, label }))} /></select></label>
+            <label style={labelCol}>ผู้รับผิดชอบ<select value={ui.plOwner} onChange={(ev) => set({ plOwner: ev.target.value, picked: {} })} className="fld sel" style={sel}><Opts all="ทั้งหมด" options={teamOpts} /></select></label>
+            {!ro && <label style={labelCol}>นัดอัตโนมัติวันละ<select value={String(ui.perDay)} onChange={(ev) => set({ perDay: +ev.target.value })} className="fld sel" style={sel}>{[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n} ราย</option>)}</select></label>}
+            {!ro && <button onClick={() => unpl.length && e.autoPlan(unpl, ui.perDay || 5)} className="btn pri">นัดรายที่ยังไม่มีแผน ({fmtN(unpl.length)})</button>}
           </div>
         </div>
         {/* picking companies only leads to making appointments or sending them to the tracker */}
@@ -208,13 +208,14 @@ export function Plan() {
               else shown.forEach((c) => (p[c.id] = 1));
               set({ picked: p });
             }}
-            style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}
+            className="hv-tx"
+            style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}
           >
             {allOn ? 'ยกเลิกเลือกทั้งหมด' : `เลือก ${fmtN(shown.length)} รายที่แสดง`}
           </button>
           <span style={{ fontSize: 13, color: '#475069', flex: 1 }}>{pkIds.length ? `เลือกแล้ว ${fmtN(pkIds.length)} ราย` : 'ติ๊กช่องหน้าชื่อเพื่อนัดหลายรายพร้อมกัน'}</span>
-          {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
-          {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
+          {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} className="btn pri" style={{ height: 34, padding: '0 14px', fontSize: 13 }}>นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
+          {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} className="btn out" style={{ height: 34, padding: '0 14px', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
         </div>}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {shown.map((c) => {
@@ -232,12 +233,13 @@ export function Plan() {
                       set({ picked: q });
                     }}
                     aria-label="เลือก" aria-pressed={p}
-                    style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: `1.5px solid ${p ? '#1F5BD8' : '#C9D1E6'}`, background: p ? '#1F5BD8' : '#fff', color: '#fff', fontSize: 12, padding: 0 }}
+                    className={p ? 'hv-dk' : 'hv'}
+                    style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: `1.5px solid ${p ? '#1F5BD8' : '#C9D1E6'}`, '--bg': p ? '#1F5BD8' : '#fff', color: '#fff', fontSize: 12, padding: 0 }}
                   >
                     {p ? '✓' : ''}
                   </button>
                 )}
-                <button onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', gap: 12, alignItems: 'center', minWidth: 0, color: '#0E1430' }}>
+                <button onClick={() => open(c.id)} className="hv-tx" style={{ cursor: 'pointer', border: 0, textAlign: 'left', padding: 0, display: 'flex', gap: 12, alignItems: 'center', minWidth: 0, color: '#0E1430' }}>
                   <CoAvatar name={c.name} web={c.web} set={c.set} size={38} />
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
                     <span style={{ fontSize: 14, fontWeight: 500 }}>{c.name}</span>
@@ -245,21 +247,21 @@ export function Plan() {
                   </span>
                 </button>
                 <span style={{ fontSize: 12.5, color: '#384155', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
-                <select value={st[0]} disabled={ro} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} aria-label="สถานะการขาย" style={{ height: 32, borderRadius: 999, border: 0, padding: '0 10px', fontSize: 12.5, background: st[2], color: st[3] }}>
+                <select value={st[0]} disabled={ro} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} aria-label="สถานะการขาย" className="fld sel" style={{ height: 32, borderRadius: 999, padding: '0 10px', fontSize: 12.5, '--bd': st[2], background: st[2], color: st[3] }}>
                   <Opts options={STG.map(([v, label]) => ({ v, label }))} />
                 </select>
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {ro ? null : ot ? (
-                    <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} style={{ cursor: 'pointer', border: 0, fontSize: 12, padding: '5px 10px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8' }}>นัดแล้ว {isoTh(ot.date)}</button>
+                    <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="hv" style={{ cursor: 'pointer', border: 0, fontSize: 12, padding: '5px 10px', borderRadius: 999, '--bg': '#E6ECFD', '--hv': '#D6E2FB', color: '#1745B8' }}>นัดแล้ว {isoTh(ot.date)}</button>
                   ) : (
-                    <button onClick={() => openSched({ ids: [c.id] })} style={{ cursor: 'pointer', border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 12.5, padding: '5px 12px', borderRadius: 999 }}>+ นัด</button>
+                    <button onClick={() => openSched({ ids: [c.id] })} className="btn out" style={{ height: 'auto', fontSize: 12.5, padding: '5px 12px' }}>+ นัด</button>
                   )}
                 </span>
               </div>
             );
           })}
           {!tg.length && <span style={{ fontSize: 13.5, color: '#475069', padding: '16px 0' }}>ไม่มีรายชื่อในรายการนี้</span>}
-          {tg.length > shown.length && <button onClick={() => set({ plLim: (ui.plLim || 60) + 120 })} style={{ cursor: 'pointer', alignSelf: 'center', marginTop: 10, border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline' }}>{`แสดงเพิ่ม (อีก ${fmtN(tg.length - shown.length)} ราย)`}</button>}
+          {tg.length > shown.length && <button onClick={() => set({ plLim: (ui.plLim || 60) + 120 })} className="hv-tx" style={{ cursor: 'pointer', alignSelf: 'center', marginTop: 10, border: 0, color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline' }}>{`แสดงเพิ่ม (อีก ${fmtN(tg.length - shown.length)} ราย)`}</button>}
         </div>
       </section>
     </>

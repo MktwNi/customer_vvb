@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../state';
 import { isoTh } from '../lib/format';
 import { norm } from '../lib/core';
@@ -7,9 +7,8 @@ import type { DocFacts } from '../lib/docExtract';
 import { Modal } from '../tabs/Sales';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { prefs } from '../lib/storage';
-import { Notice, inputStyle, labelCol, selectStyle } from './ui';
+import { Notice, labelCol } from './ui';
 
-const small: CSSProperties = { cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 13 };
 const BASIS_PREF = 'gcc-doc-basis';
 const defaultTarget = (k: DocKind): DocTarget => (k === 'quotation' ? 'forecast' : k === 'invoice' ? 'actual' : 'none');
 
@@ -178,7 +177,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
                 </span>
               </span>
               {opts.map(([b, label, v]) => (
-                <label key={b} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, cursor: 'pointer' }}>
+                <label key={b} className="hv-tx" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, cursor: 'pointer' }}>
                   <input type="radio" name="basis" checked={basis === b && amt === v} onChange={() => choose(b, v)} />
                   <span style={{ flex: 1 }}>{label}</span>
                   <b style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(v)} บาท</b>
@@ -190,25 +189,25 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
                 <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: '#475069' }}>
                   ตัวเลขอื่นที่พบ:
                   {others.map((c) => (
-                    <button key={c.value} onClick={() => choose('manual', c.value)} title={c.line} style={{ ...small, height: 28, fontSize: 12 }}>{fmtMoney(c.value)}</button>
+                    <button key={c.value} onClick={() => choose('manual', c.value)} title={c.line} className="btn sm" style={{ height: 28, fontSize: 12 }}>{fmtMoney(c.value)}</button>
                   ))}
                 </span>
               )}
             </div>
           )}
           {method === 'pdf-text' && facts && (facts.total == null || facts.confidence !== 'high') && (
-            <button onClick={() => pick(file, true)} style={{ ...small, alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
+            <button onClick={() => pick(file, true)} className="btn sm" style={{ alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
           )}
           {partyWarn && <Notice kind="error">ชื่อลูกค้าในเอกสาร "{facts!.party}" ไม่ตรงกับ "{deal.client}" — ตรวจว่าแนบถูกรายการ</Notice>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
             <label style={labelCol}>
               ยอดเงินที่ยืนยัน (บาท)
-              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} style={{ ...inputStyle, fontSize: 16, fontWeight: 500 }} />
+              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} className="fld" style={{ fontSize: 16, fontWeight: 500 }} />
               {badAmt && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>อ่านเป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
             </label>
             <label style={labelCol}>
               นับยอดนี้เป็น
-              <select value={target} onChange={(ev) => setTarget(ev.target.value as DocTarget)} style={selectStyle}>
+              <select value={target} onChange={(ev) => setTarget(ev.target.value as DocTarget)} className="fld sel">
                 <option value="forecast">Forecast (ยอดที่คาดว่าจะได้)</option>
                 <option value="actual">Actual (ยอดที่ได้จริง)</option>
                 <option value="none">ไม่นับยอด (แนบไว้เป็นหลักฐาน)</option>
@@ -216,23 +215,23 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
             </label>
             <label style={labelCol}>
               ประเภทเอกสาร
-              <select value={kind} onChange={(ev) => { const k = ev.target.value as DocKind; setKind(k); setTarget(defaultTarget(k)); }} style={selectStyle}>
+              <select value={kind} onChange={(ev) => { const k = ev.target.value as DocKind; setKind(k); setTarget(defaultTarget(k)); }} className="fld sel">
                 {(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}
               </select>
             </label>
             <label style={labelCol}>
               เลขที่เอกสาร
-              <input value={docNo} onChange={(ev) => setDocNo(ev.target.value)} style={inputStyle} />
+              <input value={docNo} onChange={(ev) => setDocNo(ev.target.value)} className="fld" />
             </label>
             <label style={labelCol}>
               ลงวันที่{docDate ? ` (${isoTh(docDate)})` : ''}
-              <input type="date" value={docDate} onChange={(ev) => setDocDate(ev.target.value)} style={inputStyle} />
+              <input type="date" value={docDate} onChange={(ev) => setDocDate(ev.target.value)} className="fld" />
             </label>
           </div>
           {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? '#8A2B12' : '#475069' }}>{saving}</span>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button onClick={onClose} style={small}>ยกเลิก</button>
-            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff', opacity: badAmt ? 0.5 : 1 }}>
+            <button onClick={onClose} className="btn sm">ยกเลิก</button>
+            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} className="btn sm pri" style={{ opacity: badAmt ? 0.5 : 1 }}>
               {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
             </button>
           </div>

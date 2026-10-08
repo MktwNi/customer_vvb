@@ -7,7 +7,7 @@ import { Opts } from './ui';
 import { useDialog } from './useDialog';
 
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, color: '#475069' };
-const ctl: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14 };
+const ctl: CSSProperties = { borderRadius: 10, padding: '0 10px' }; // with class "fld"
 
 export function ScheduleModal() {
   const { ui } = useApp();
@@ -47,16 +47,16 @@ function ScheduleForm() {
         <span style={{ fontSize: 13, color: '#475069' }}>{c ? c.name + (o.pid && e.people[o.pid] ? ' · กับ ' + e.people[o.pid].name : '') : o.ids.length > 1 ? 'ระบบจะกระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
         <label style={field}>
           ประเภท
-          <select name="type" defaultValue={init ? init.type : 'call'} style={ctl}><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
+          <select name="type" defaultValue={init ? init.type : 'call'} className="fld sel" style={ctl}><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
         </label>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <label style={field}>วันที่<input name="date" type="date" defaultValue={init ? init.date : nextWork(addDays(todayISO(), 1))} style={ctl} /></label>
-          <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} style={ctl} /></label>
+          <label style={field}>วันที่<input name="date" type="date" defaultValue={init ? init.date : nextWork(addDays(todayISO(), 1))} className="fld" style={ctl} /></label>
+          <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} className="fld" style={ctl} /></label>
         </div>
         {isMulti && (
           <label style={field}>
             กระจายนัด
-            <select name="spread" defaultValue="5" style={ctl}>
+            <select name="spread" defaultValue="5" className="fld sel" style={ctl}>
               <option value="0">ทั้งหมดในวันเดียว</option>
               <option value="3">วันละ 3 ราย (วันทำการ)</option>
               <option value="5">วันละ 5 ราย (วันทำการ)</option>
@@ -64,11 +64,11 @@ function ScheduleForm() {
             </select>
           </label>
         )}
-        <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} style={ctl} /></label>
+        <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} className="fld" style={ctl} /></label>
         {gone && <span role="alert" style={{ fontSize: 13, color: '#8A2B12' }}>คนในทีมลบนัดนี้ไปแล้วระหว่างที่เปิดอยู่ จึงบันทึกไม่ได้ — กดยกเลิก แล้วเพิ่มนัดใหม่ถ้ายังต้องการ</span>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={cancel} style={{ cursor: 'pointer', height: 40, padding: '0 14px', border: 0, background: 'transparent', color: '#475069', fontSize: 14 }}>ยกเลิก</button>
-          <button type="submit" disabled={gone} style={{ cursor: gone ? 'default' : 'pointer', height: 40, padding: '0 18px', borderRadius: 999, border: 0, background: gone ? '#A8B0C8' : '#1F5BD8', color: '#fff', fontSize: 14 }}>บันทึกนัด</button>
+          <button type="button" onClick={cancel} className="hv" style={{ cursor: 'pointer', height: 40, padding: '0 14px', border: 0, borderRadius: 999, color: '#475069', fontSize: 14 }}>ยกเลิก</button>
+          <button type="submit" disabled={gone} className="btn pri" style={{ padding: '0 18px', fontSize: 14, ...(gone ? { background: '#A8B0C8', opacity: 1 } : {}) }}>บันทึกนัด</button>
         </div>
       </form>
     </>

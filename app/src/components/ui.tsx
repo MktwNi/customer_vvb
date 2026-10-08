@@ -3,12 +3,9 @@ import { tagsOf } from '../lib/constants';
 
 export const card: CSSProperties = { background: '#fff', border: '1px solid #E6EBF5', borderRadius: 24, boxShadow: '0 1px 2px rgba(16,40,120,.04), 0 10px 28px -18px rgba(16,40,120,.22)' };
 export const heroGrad = 'linear-gradient(125deg,#1745B8 0%,#1F5BD8 62%,#2462DD 100%)';
-export const selectStyle: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 12, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' };
-export const inputStyle: CSSProperties = { height: 40, border: '1.5px solid #D5DBEA', borderRadius: 12, padding: '0 12px', fontSize: 14 };
+// fields and buttons are classes (.fld, .fld.sel, .btn.pri, .btn.out in index.css), not inline styles: an
+// inline background or border would beat their :hover
 export const labelCol: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: '#475069' };
-export const btnPrimary: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 };
-export const btnOutline: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13.5 };
-export const linkBtn: CSSProperties = { cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, textDecoration: 'underline', padding: 0 };
 export const tabular: CSSProperties = { fontVariantNumeric: 'tabular-nums' };
 
 /** Page title row: big heading + light subtitle. */
@@ -44,12 +41,12 @@ export function Pill({ bg, fg, children, style }: { bg: string; fg: string; chil
 
 /** Prev/next pager. `color` is optional: without it the browser's default (and its disabled grey) applies, as in the design's dedup pager. */
 export function Pager({ page, pages, onPrev, onNext, wrap, color }: { page: number; pages: number; onPrev: () => void; onNext: () => void; wrap?: boolean; color?: string }) {
-  const b: CSSProperties = { cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color, fontSize: 14 };
+  const b: CSSProperties = { color, fontSize: 14 };
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, flexWrap: wrap ? 'wrap' : undefined }}>
-      <button onClick={onPrev} disabled={page <= 0} style={b}>‹ ก่อนหน้า</button>
+      <button className="btn" onClick={onPrev} disabled={page <= 0} style={b}>‹ ก่อนหน้า</button>
       <span style={{ fontSize: 14, color: '#475069' }}>หน้า {(page + 1).toLocaleString('en-US')} / {pages.toLocaleString('en-US')}</span>
-      <button onClick={onNext} disabled={page >= pages - 1} style={b}>ถัดไป ›</button>
+      <button className="btn" onClick={onNext} disabled={page >= pages - 1} style={b}>ถัดไป ›</button>
     </div>
   );
 }
