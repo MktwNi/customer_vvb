@@ -166,7 +166,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
       {file && !prog && (
         <>
           {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid #E3E7F1', background: '#F6F8FE' }} />}
-          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
+          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
           {!isImg && docMime(file) !== 'application/pdf' && <span style={{ fontSize: 13, color: '#5E6680' }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) — เทียบยอดกับรูปในเครื่องของคุณ</span>}
           {facts && (opts.length > 0 || others.length > 0) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F7F8FC', borderRadius: 14, padding: '12px 14px' }}>

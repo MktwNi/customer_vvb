@@ -1144,4 +1144,183 @@ describe('a site with its home team built in', () => {
     expect(rows('watch/' + id1)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
     expect(await queue(B, pendKey(HOME) + '#aem')).toEqual([]);
   });
+
+  it('a browser that left the team on the older site: what it queued there is sent after signing in at the gate', async () => {
+    // team code: disconnected with an edit queued, then the lead turned accounts on
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const id = await disconnectedWithEdit('A', store);
+    const L = await turnOnAccounts();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const B = home('A', store);
+    await loaded(B, pageLoad(B));
+    expect([B.e.auth, B.e.authUrl]).toEqual(['login', HOME]);
+    expect(await queue(B, pendKey(URL))).toEqual([]);
+    await B.e.teamLogin('aem', temp, true);
+    await B.e.teamChangePassword('', 'aem-pass-123');
+    await settle(B);
+    expect(rows('watch/' + id).at(-1)).toMatchObject({ del: true, by: 'เอ' });
+    expect(B.e.crm.watch).not.toContain(id);
+
+    // accounts: signed out, then "ใช้งานแบบไม่เชื่อมทีม" with an edit of เอ's still queued
+    const C = await member(L, 'cee', 'ซี', 'sales', 'X', memoryStore());
+    const id2 = company(C, 3);
+    C.e.toggleWatch(id2);
+    await settle(C);
+    C.net.offline = true;
+    C.e.toggleWatch(id2);
+    await stored(C);
+    await C.e.teamLogout();
+    C.e.teamForget();
+    C.e.dispose();
+    const D = home('X', C.store);
+    await loaded(D, pageLoad(D));
+    expect(D.e.auth).toBe('login');
+    expect(await queue(D, pendKey(URL) + '#cee')).toEqual([]);
+    await D.e.teamLogin('cee', 'cee-pass-123', true);
+    await settle(D);
+    expect(rows('watch/' + id2).at(-1)).toMatchObject({ del: true, by: 'ซี' });
+  });
+
+  it('the team code first, accounts later: an edit queued under the older link before disconnecting is still sent', async () => {
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const id = await disconnectedWithEdit('A', store);
+    const B = home('A', store);
+    await loaded(B, pageLoad(B));
+    expect([B.e.auth, B.e.teamJoinUrl]).toEqual(['', HOME]); // the code is not entered
+    B.e.dispose();
+    const L = await turnOnAccounts();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const C = home('A', store);
+    await loaded(C, pageLoad(C));
+    await C.e.teamLogin('aem', temp, true);
+    await C.e.teamChangePassword('', 'aem-pass-123');
+    await settle(C);
+    expect(rows('watch/' + id).at(-1)).toMatchObject({ del: true });
+  });
+
+  it('storage that fails on the first page of the new site: nothing is moved, and the next page load sends the edit', async () => {
+    // stored with the older link: stays on it
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const A = mk('A', store);
+    at('A', () => prefs.set(PREF.me, 'เอ'));
+    expect(await A.e.teamConnect(URL, KEY)).toBe(true);
+    const id = company(A);
+    A.e.toggleWatch(id);
+    await settle(A);
+    A.net.offline = true;
+    A.e.toggleWatch(id);
+    await stored(A);
+    A.e.dispose();
+    for (const broken of [brokenIdb(), unreadable(store, pendKey(URL))]) {
+      const T1 = home('A', broken);
+      T1.net.offline = true;
+      await loaded(T1, pageLoad(T1));
+      expect(pref<TeamCfg>(T1, PREF.team)?.url).toBe(URL);
+      expect(at('A', () => prefs.getRaw(PREF.teamLast))).toBe(URL);
+      T1.e.dispose();
+    }
+    expect(await queue(A, pendKey(URL))).toHaveLength(1);
+    const T2 = home('A', store);
+    await loaded(T2, pageLoad(T2));
+    await settle(T2);
+    expect(T2.e.teamCfg?.url).toBe(HOME);
+    expect(rows('watch/' + id).at(-1)).toMatchObject({ del: true });
+
+    // left on the older site (nothing stored): the gate keeps the older link as the last one until it moved
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const s2 = memoryStore();
+    const id2 = await disconnectedWithEdit('B', s2);
+    const L = await turnOnAccounts();
+    const { temp } = await L.e.adminCreate({ u: 'bee', name: 'บี', role: 'sales' });
+    const G1 = home('B', brokenIdb());
+    await loaded(G1, pageLoad(G1));
+    expect(G1.e.auth).toBe('login');
+    expect(at('B', () => prefs.getRaw(PREF.teamLast))).toBe(URL);
+    G1.e.dispose();
+    const G2 = home('B', s2);
+    await loaded(G2, pageLoad(G2));
+    expect(at('B', () => prefs.getRaw(PREF.teamLast))).toBe(HOME);
+    await G2.e.teamLogin('bee', temp, true);
+    await G2.e.teamChangePassword('', 'bee-pass-123');
+    await settle(G2);
+    expect(rows('watch/' + id2).at(-1)).toMatchObject({ del: true });
+  });
+
+  it('a page load on the ตั้งรหัสผ่านของคุณ screen shows it from the first frame, with the name', async () => {
+    const L = await lead();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const store = memoryStore();
+    const A = home('A', store);
+    await loaded(A, pageLoad(A));
+    await A.e.teamLogin('aem', temp, true);
+    expect(A.e.auth).toBe('change');
+    A.e.dispose();
+    const B = home('A', store);
+    const p = pageLoad(B);
+    expect([B.e.auth, B.e.session?.name]).toEqual(['change', 'เอ']); // before the data has loaded
+    await loaded(B, p);
+    expect(B.e.auth).toBe('change');
+    await B.e.teamChangePassword(temp, 'aem-pass-123');
+    await settle(B);
+    expect([B.e.auth, B.e.team.status]).toEqual(['', 'ok']);
+  });
+
+  it('the lead who claims the first admin is in the ผู้รับผิดชอบ list', async () => {
+    const L = await lead();
+    expect(L.e.crm.team).toContain('หัวหน้า');
+    await settle(L);
+    expect(rows('team/หัวหน้า')).toEqual([expect.objectContaining({ v: 1 })]);
+  });
 });
+
+/** The lead turns accounts on for a team-code script (same sim, so the sheet keeps its rows). */
+async function turnOnAccounts() {
+  sim.setup();
+  const L = mk('L');
+  expect(await L.e.teamConnect(URL, KEY)).toBe(true);
+  L.e.teamBeginSetup();
+  await L.e.teamClaim(sim.ownerCode()!, 'lead', 'หัวหน้า', 'lead-pass-123');
+  expect(L.e.role()).toBe('admin');
+  return L;
+}
+/** A team-code browser on the older link (the older site: no home team) with an edit queued offline,
+ *  then disconnected ("queued changes are sent with the next connect"). */
+async function disconnectedWithEdit(browser: string, store: Store) {
+  const A = mk(browser, store);
+  at(browser, () => prefs.set(PREF.me, 'เอ'));
+  expect(await A.e.teamConnect(URL, KEY)).toBe(true);
+  await settle(A);
+  const id = company(A);
+  A.e.toggleWatch(id);
+  await settle(A);
+  A.net.offline = true;
+  A.e.toggleWatch(id); // un-watched, queued
+  await stored(A);
+  A.e.teamDisconnect();
+  A.e.dispose();
+  expect(await queue(A, pendKey(URL))).toHaveLength(1);
+  expect(at(browser, () => prefs.getRaw(PREF.teamLast))).toBe(URL);
+  return id;
+}
+/** IndexedDB that could not be opened in this page: reads give null (as indexedDbStore.get does), writes fail. */
+function brokenIdb(): Store {
+  const no = async () => {
+    throw new DOMException('Connection to Indexed Database server lost', 'UnknownError');
+  };
+  return { get: async () => null, set: no, del: no, update: no };
+}
+/** `inner`, except that `key` reads as nothing once (a failed read). */
+function unreadable(inner: Store, key: string): Store {
+  let n = 1;
+  return {
+    ...inner,
+    get: async <T,>(k: string) => (k === key && n-- > 0 ? null : inner.get<T>(k)),
+    update: async <T,>(k: string, fn: (c: T | null) => T) => {
+      if (k === key && n-- > 0) throw new DOMException('Transaction aborted', 'AbortError');
+      return inner.update<T>(k, fn);
+    },
+  };
+}

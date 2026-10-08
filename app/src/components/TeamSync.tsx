@@ -155,7 +155,7 @@ export function TeamSyncCard() {
               <button type="submit" disabled={busy === 'open' || !url.trim()} className="btn pri" style={{ opacity: url.trim() ? 1 : 0.6 }}>{busy === 'open' ? 'กำลังตรวจสอบ…' : 'ถัดไป'}</button>
             )}
           </div>
-          <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5, alignSelf: 'flex-start' }}>วิธีตั้งค่า Google Sheet ของทีม (ทำครั้งเดียว ประมาณ 5 นาที)</a>
+          <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ fontSize: 13.5, alignSelf: 'flex-start' }}>วิธีตั้งค่า Google Sheet ของทีม (ทำครั้งเดียว ประมาณ 5 นาที)</a>
           <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
             {(home ? 'ใส่รหัสทีมที่ได้จากหัวหน้าทีม แล้วกด เชื่อมต่อ · ' : '') +
               (keyStep
@@ -249,7 +249,7 @@ export function TeamSyncCard() {
           )}
           {caps && caps.v === 2 && (
             <span style={{ fontSize: 12.5, color: '#5E6680', lineHeight: 1.6 }}>
-              หัวหน้าทีม: อัปเดต Code.gs เพื่อเปิดระบบเข้าสู่ระบบด้วยรหัสผ่าน (<a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer">ดูคู่มือ</a>)
+              หัวหน้าทีม: อัปเดต Code.gs เพื่อเปิดระบบเข้าสู่ระบบด้วยรหัสผ่าน (<a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" className="hv-tx">ดูคู่มือ</a>)
             </span>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

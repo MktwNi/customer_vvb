@@ -625,6 +625,13 @@ function SetupForm({ askLead }: { askLead: boolean }) {
 
   return (
     <>
+      {askLead && (
+        // "ฉันคือหัวหน้าทีม" tapped by a member: back to waiting for the lead
+        <button type="button" className="auth-back" onClick={() => setLead(false)}>
+          <Icon name="collapse" size={18} />
+          กลับ
+        </button>
+      )}
       <header className="auth-head">
         <h1 className="auth-h">เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</h1>
       </header>

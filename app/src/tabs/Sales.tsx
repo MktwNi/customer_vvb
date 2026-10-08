@@ -77,7 +77,7 @@ export function Sales() {
         {tabs.map(([k, label, n]) => {
           const on = v === k;
           return (
-            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} className="hv" style={{ cursor: 'pointer', flex: 'none', border: 0, borderRadius: '10px 10px 0 0', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button key={k} role="tab" aria-selected={on} onClick={() => set({ slView: k })} className="hv2" style={{ cursor: 'pointer', flex: 'none', border: 0, borderRadius: '10px 10px 0 0', padding: '10px 14px', fontSize: 14.5, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
               {label}
               {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
             </button>

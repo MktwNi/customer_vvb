@@ -250,8 +250,8 @@ function DocRow({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
         <button onClick={open} className="btn xs">{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>
         {link && (
           <>
-            {SHOWABLE.test(doc.mime) && <a href={link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>}
-            <a href={link} download={doc.name} style={{ fontSize: 13 }}>ดาวน์โหลด</a>
+            {SHOWABLE.test(doc.mime) && <a href={link} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ fontSize: 13 }}>เปิดในแท็บใหม่ ↗</a>}
+            <a href={link} download={doc.name} className="hv-tx" style={{ fontSize: 13 }}>ดาวน์โหลด</a>
           </>
         )}
         {!ro && <button onClick={() => setEdit(!edit)} className="btn xs">{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>}
@@ -322,8 +322,8 @@ export function DealPanel() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#fff' }}>Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              {!ro && <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} className="hv-w" style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>}
-              <button onClick={close} aria-label="ปิด" className="hv-w" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
+              {!ro && <button onClick={() => up({ jobStatus: d.jobStatus === 'closed' ? 'open' : 'closed' })} className="hv-n" style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{d.jobStatus === 'closed' ? 'เปิดงานอีกครั้ง' : 'ปิดงาน'}</button>}
+              <button onClick={close} aria-label="ปิด" className="hv-n" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
           <ReadOnly ro={ro}>

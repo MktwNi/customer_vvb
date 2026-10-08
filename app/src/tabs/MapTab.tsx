@@ -276,7 +276,7 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
             <span style={{ fontSize: 12.5, color: '#fff' }}>{name ? 'จังหวัด' : 'ภาพรวม'} · สถานะ ณ {isoTh(refISO)}</span>
             <span style={{ fontSize: 24, fontWeight: 500, lineHeight: 1.3 }}>{name || 'ทั้งประเทศ'}</span>
           </div>
-          {name && <button onClick={onClear} className="hv-w" style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', '--bg': 'rgba(6,22,90,.2)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
+          {name && <button onClick={onClear} className="hv-n" style={{ cursor: 'pointer', border: '1px solid rgba(185,200,255,.5)', '--bg': 'rgba(6,22,90,.2)', color: '#fff', height: 30, padding: '0 12px', borderRadius: 999, fontSize: 12.5 }}>ดูทั้งประเทศ</button>}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8 }}>
           {([['บริษัท', a.n], ['CFO ในอายุ', a.act], ['ใกล้หมดอายุ', a.soon], ['มีเบอร์โทร', a.ph]] as const).map(([k, n]) => (

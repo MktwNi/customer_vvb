@@ -62,7 +62,7 @@ export function Overview() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 10 }}>
           {ov.src.map((n, i) => (
-            <button key={i} onClick={() => setF({ src: String(i), tgt: '', view: 'co' })} className="hv-w" style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid rgba(255,255,255,.22)', '--bg': 'rgba(6,22,90,.2)', color: '#fff', borderRadius: 20, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <button key={i} onClick={() => setF({ src: String(i), tgt: '', view: 'co' })} className="hv-n" style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid rgba(255,255,255,.22)', '--bg': 'rgba(6,22,90,.2)', color: '#fff', borderRadius: 20, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontSize: 13, color: '#fff' }}>{SRCC[i][0]}</span>
               <span style={{ fontSize: 28, fontWeight: 500 }}>{fmtN(n)}</span>
               <span style={{ fontSize: 12, color: '#fff', fontWeight: 300 }}>{SRC_SUB[i]}</span>
@@ -84,7 +84,7 @@ export function Overview() {
             </button>
           ))}
         </div>
-        <button onClick={() => go('track')} className="hv-tx" style={{ cursor: 'pointer', alignSelf: 'flex-start', border: 0, color: '#1F5BD8', fontSize: 14, textDecoration: 'underline', padding: 0 }}>
+        <button onClick={() => go('track')} className="hv-tx" style={{ cursor: 'pointer', alignSelf: 'flex-start', '--hv': 'var(--hv2)', border: 0, color: '#1F5BD8', fontSize: 14, textDecoration: 'underline', padding: 0 }}>
           เปิดแท็บติดตาม: กราฟใบรับรองหมดอายุ 12 เดือน และรายชื่อแต่ละรายการ →
         </button>
       </section>
@@ -137,7 +137,7 @@ export function Overview() {
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <PageHead no="04" title="จังหวัด" nowrap right={<button onClick={() => go('map')} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 14, textDecoration: 'underline' }}>เปิดแผนที่</button>} />
+          <PageHead no="04" title="จังหวัด" nowrap right={<button onClick={() => go('map')} className="hv-tx" style={{ cursor: 'pointer', '--hv': 'var(--hv2)', border: 0, color: '#1F5BD8', fontSize: 14, textDecoration: 'underline' }}>เปิดแผนที่</button>} />
           <div style={{ ...card, padding: '6px 0' }}>
             {provs.map(([k, x]) => (
               <button key={k} className="h-bg" onClick={() => setF({ prov: k, tgt: '', view: 'co' })} style={{ cursor: 'pointer', width: '100%', border: 0, background: 'transparent', textAlign: 'left', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr) 80px', gap: 12, padding: '8px 20px', alignItems: 'center', fontSize: 13.5, ...tabular }}>

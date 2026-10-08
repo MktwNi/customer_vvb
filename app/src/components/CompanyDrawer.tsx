@@ -23,6 +23,7 @@ export function CompanyDrawer() {
   const { engine: e, ui, set, go, openSched } = useApp();
   // an account that can only read: no star, no edits, no new calls or appointments
   const ro = !e.can('edit');
+  const role = e.role(); // null: no accounts (team code, or this browser only)
   useEngineVersion();
   const c = ui.sel != null ? e.company(ui.sel) : undefined;
   const [det, setDet] = useState<{ id: number; d: Detail } | null>(null);
@@ -164,8 +165,8 @@ export function CompanyDrawer() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#fff' }}>{c.code} · {D.type[c.type]}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              {!ro && <button onClick={() => e.toggleWatch(c.id)} className="hv-w" style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{watched ? '★ ติดตามอยู่' : '☆ ติดตาม'}</button>}
-              <button onClick={close} aria-label="ปิด" className="hv-w" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
+              {!ro && <button onClick={() => e.toggleWatch(c.id)} className="hv-n" style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{watched ? '★ ติดตามอยู่' : '☆ ติดตาม'}</button>}
+              <button onClick={close} aria-label="ปิด" className="hv-n" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, '--bg': 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
@@ -192,7 +193,7 @@ export function CompanyDrawer() {
           {dTabs.map(([k, label, n]) => {
             const on = dt === k;
             return (
-              <button key={k} role="tab" aria-selected={on} onClick={() => set({ dTab: k })} className="hv" style={{ cursor: 'pointer', flex: 'none', border: 0, borderRadius: '10px 10px 0 0', padding: '12px 12px 10px', fontSize: 14, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button key={k} role="tab" aria-selected={on} onClick={() => set({ dTab: k })} className="hv2" style={{ cursor: 'pointer', flex: 'none', border: 0, borderRadius: '10px 10px 0 0', padding: '12px 12px 10px', fontSize: 14, fontWeight: on ? 600 : 400, color: on ? '#1F5BD8' : '#475069', borderBottom: `2.5px solid ${on ? '#1F5BD8' : 'transparent'}`, display: 'flex', gap: 6, alignItems: 'center' }}>
                 {label}
                 {n > 0 && <span style={{ fontSize: 11, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fmtN(n)}</span>}
               </button>
@@ -239,15 +240,15 @@ export function CompanyDrawer() {
                   {!ro && <button onClick={() => setEditC(editC ? null : { phone: c.phone || '', email: c.email || '', web: c.web || '', note: (ce && ce.note) || '' })} className="hv-tx" style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>}
                 </div>
                 {!ph.length && !em.length && !c.web && !dc && <span style={{ fontSize: 14, color: '#475069' }}>ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span>}
-                {ph.map((t) => <a key={t} href={telHref(t)} style={{ fontSize: 16, fontWeight: 500, textDecoration: 'none' }}>{t}</a>)}
-                {em.map((t) => <a key={t} href={'mailto:' + t} style={{ fontSize: 14 }}>{t}</a>)}
-                {c.web && <a href={/^https?:\/\//.test(c.web) ? c.web : 'https://' + c.web} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, wordBreak: 'break-all' }}>{c.web}</a>}
+                {ph.map((t) => <a key={t} href={telHref(t)} className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 16, fontWeight: 500, textDecoration: 'none' }}>{t}</a>)}
+                {em.map((t) => <a key={t} href={'mailto:' + t} className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 14 }}>{t}</a>)}
+                {c.web && <a href={/^https?:\/\//.test(c.web) ? c.web : 'https://' + c.web} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 14, wordBreak: 'break-all' }}>{c.web}</a>}
                 {dc && (
                   <span style={{ display: 'flex', gap: '4px 12px', flexWrap: 'wrap', alignItems: 'baseline', fontSize: 14, wordBreak: 'break-word' }}>
                     <span style={{ fontSize: 12.5, color: '#475069' }}>ผู้ติดต่อใน Sales Tracker</span>
                     {dc.name && <span>{dc.name}</span>}
-                    {dc.phones.map((t) => <a key={t} href={telHref(t)}>{t}</a>)}
-                    {dc.emails.map((t) => <a key={t} href={'mailto:' + t}>{t}</a>)}
+                    {dc.phones.map((t) => <a key={t} href={telHref(t)} className="hv-tx">{t}</a>)}
+                    {dc.emails.map((t) => <a key={t} href={'mailto:' + t} className="hv-tx">{t}</a>)}
                   </span>
                 )}
                 {ctSrc && <span style={{ fontSize: 12, color: '#475069' }}>{ctSrc}</span>}
@@ -332,7 +333,14 @@ export function CompanyDrawer() {
                     <Opts all="ยังไม่มีผู้รับผิดชอบ" options={C.team.map((v) => ({ v, label: v }))} />
                   </select>
                 </label>
-                {!C.team.length && <button onClick={() => go('update', { sel: null })} className="hv-tx" style={{ cursor: 'pointer', gridColumn: '1/-1', justifySelf: 'start', textAlign: 'left', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline', padding: 0 }}>ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล</button>}
+                {/* with accounts the names come from the accounts an admin creates (the Update page has no team list) */}
+                {!C.team.length && (role == null || role === 'admin' ? (
+                  <button onClick={() => go(role ? 'users' : 'update', { sel: null })} className="hv-tx" style={{ cursor: 'pointer', gridColumn: '1/-1', justifySelf: 'start', textAlign: 'left', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline', padding: 0 }}>
+                    {role ? 'ยังไม่มีรายชื่อทีม สร้างบัญชีให้ทีมได้ที่ ผู้ใช้และสิทธิ์' : 'ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล'}
+                  </button>
+                ) : (
+                  <span style={{ gridColumn: '1/-1', fontSize: 13, color: '#5E6680' }}>ยังไม่มีรายชื่อทีม ผู้ดูแลระบบเพิ่มได้เมื่อสร้างบัญชีให้ทีม</span>
+                ))}
               </div>
               </ReadOnly>
               <ReadOnly ro={ro}>

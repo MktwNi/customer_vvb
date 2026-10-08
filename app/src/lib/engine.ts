@@ -160,6 +160,9 @@ export class GccEngine {
   private wipeRaw = '';
   /** While load() runs: settles when it ends. */
   private loadEnd: Promise<void> | null = null;
+  /** An older link of the site whose queues this page could not move (stays PREF.teamLast, so the
+   *  next load moves them). */
+  private unmoved = '';
   /** When `caps` was last asked for (a team-code team's lead may update the script meanwhile). */
   private capsAt = 0;
   /** PREF.session as last read or written by this tab (to notice other tabs signing in and out). */
@@ -236,6 +239,11 @@ export class GccEngine {
       const home = this.homeTeam;
       // the site's own team stored with another of its links (an older deployment): moved below
       const from = home && team0 && team0.url && team0.url !== home ? team0.url : '';
+      // an older link with no team stored for it (left on the old site, unsent edits staying queued
+      // under it) or one a move could not store: its queues move too, before the gate's answer makes
+      // the home link the last one and nothing reads them again
+      const last = prefs.getRaw(PREF.teamLast);
+      const left = home && !from && last && last !== home ? last : '';
       // a team with accounts: the session signed in on this browser, if it can still be used (one not
       // remembered ends 12 h after sign-in, for a shared computer); otherwise the sign-in screen
       this.sessionRaw = prefs.getRaw(PREF.session);
@@ -245,6 +253,11 @@ export class GccEngine {
         if (s0 && s0.url === team0.url && s0.u && (s0.rm || s0.exp > Date.now())) {
           acct = s0;
           if (!s0.tok) this.auth = 'expired'; // signed out by the script: sign in again over the app
+          else if (s0.mc) {
+            // a password to set: its screen from the first frame (with the name it greets), not the app
+            this.auth = 'change';
+            this.session = s0;
+          }
         } else {
           if (s0) this.saveSession(null);
           this.authUrl = from ? home : team0.url;
@@ -257,7 +270,6 @@ export class GccEngine {
         this.auth = 'connect';
         this.authUrl = home;
         this.emit();
-        this.teamRetry();
       }
       if (from) {
         // the same script (and sheet) under the built-in link: the queues move first, then the stored
@@ -265,9 +277,14 @@ export class GccEngine {
         if (await this.moveTeam(from, home, acct?.u || '')) {
           team0 = { ...team0!, url: home };
           if (acct) this.saveSession((acct = { ...acct, url: home }));
+          if (this.session === s0) this.session = acct;
           this.saveTeamCfg(team0);
         } else if (this.authUrl === home) this.authUrl = from;
+      } else if (left) {
+        if (await this.moveTeam(left, home, acct?.u || '')) prefs.set(PREF.teamLast, home);
+        else this.unmoved = left; // stays the last link (saveTeamCfg): moved at the next load
       }
+      if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
       const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people] = await Promise.all([
@@ -2205,7 +2222,7 @@ export class GccEngine {
     // who is signed in is in PREF.session, not here
     prefs.set(PREF.team, cfg && (({ u: _u, ...rest }) => rest)(cfg));
     this.teamRaw = prefs.getRaw(PREF.team);
-    if (cfg) prefs.set(PREF.teamLast, cfg.url);
+    if (cfg) prefs.set(PREF.teamLast, this.unmoved || cfg.url);
   }
   /**
    * Every tab shares the team config (localStorage). If another tab connected, disconnected,
@@ -3050,21 +3067,24 @@ export class GccEngine {
    * Move what this browser keeps per link from `from` to `to` (an older deployment of the same script:
    * the same sheet and token secret): the team-code queue, each account's queue and who has signed in
    * here. Each op is added to the new queue before it leaves the old one, so a page closed halfway loses
-   * nothing; tabs moving at once take turns. False when it could not be stored (the old link stays).
+   * nothing; tabs moving at once take turns. False when it could not be read or stored (the old link stays).
    */
   private async moveTeam(from: string, to: string, u: string) {
     const run = async () => {
       await this.pq; // this tab's writes to the old queues first
-      const who = await this.accts(from);
+      // read in a transaction: store.get gives null when IndexedDB fails, which would pass for "nothing
+      // to move" and leave the queues under a link nothing reads again
+      type Acct = { u: string; name: string };
+      const who = ((await this.store.update<Acct[] | null>(acctKey(from), (cur) => cur)) || []).filter((a) => a && a.u);
       for (const x of new Set(['', ...who.map((a) => '#' + a.u), ...(u ? ['#' + u] : [])])) {
-        const old = (await this.store.get<SyncOp[]>(pendKey(from) + x)) || [];
+        const old = await this.writePending(pendKey(from) + x, (cur) => cur);
         if (!old.length) continue;
         const ids = new Set(old.map((o) => o.id));
         await this.writePending(pendKey(to) + x, (cur) => newestPerKey([...cur, ...old]));
         await this.writePending(pendKey(from) + x, (cur) => cur.filter((o) => !ids.has(o.id)));
       }
       if (who.length) {
-        await this.store.update<{ u: string; name: string }[]>(acctKey(to), (cur) => {
+        await this.store.update<Acct[]>(acctKey(to), (cur) => {
           const had = (cur || []).filter((a) => a && a.u);
           return [...had, ...who.filter((a) => !had.some((b) => b.u === a.u))];
         });
@@ -3207,6 +3227,9 @@ export class GccEngine {
     const pk = await derivePk(c.tid!, c.it!, u, pw);
     const r = await call<SignIn>(this.transport, url, null, { action: 'claim', code, u, name: name.trim(), pk, rm });
     await this.signedIn(url, r, rm, '');
+    // the lead can be chosen as ผู้รับผิดชอบ too, like the accounts they create (adminCreate)
+    const n = this.session?.name;
+    if (n && this.ready && this.can('admin') && !this.crm.team.includes(n)) this.addTeam(n);
   }
   /** A forgotten admin password: a new one with a recovery code from setup(). */
   async teamRecover(code: string, u: string, pw: string, rm = true) {

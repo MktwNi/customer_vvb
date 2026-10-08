@@ -209,7 +209,7 @@ export function Plan() {
               set({ picked: p });
             }}
             className="hv-tx"
-            style={{ cursor: 'pointer', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}
+            style={{ cursor: 'pointer', '--hv': 'var(--hv2)', border: 0, color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}
           >
             {allOn ? 'ยกเลิกเลือกทั้งหมด' : `เลือก ${fmtN(shown.length)} รายที่แสดง`}
           </button>
