@@ -1,18 +1,42 @@
-import type { CSSProperties, FormEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
 import { Notice, Opts, PageHead, card, inputStyle, labelCol, selectStyle } from '../components/ui';
 import { TeamSyncCard } from '../components/TeamSync';
+import { SignedInAs } from '../components/Login';
 
 const section: CSSProperties = { ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 14 };
 const intro: CSSProperties = { fontSize: 13.5, color: '#475069', fontWeight: 300, lineHeight: 1.65, textWrap: 'pretty' };
 const box: CSSProperties = { background: '#F6F8FE', borderRadius: 12, display: 'flex', flexDirection: 'column' };
 
-export function Update() {
+/** Display names that have an account (lower case), for an admin; null while the list isn't known
+ *  (loading, offline, it couldn't be read, or anyone else). */
+function useAccountNames(on: boolean) {
   const { engine: e } = useApp();
+  const [names, setNames] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!on || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+    let live = true;
+    e.adminUsers().then(
+      (us) => live && setNames(new Set(us.map((u) => u.name.trim().toLowerCase()))),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [e, on]);
+  return names;
+}
+
+export function Update() {
+  const { engine: e, go } = useApp();
   useEngineVersion();
   const C = e.crm;
+  // a team that signs in: who you are is your account (no "ฉันคือ"), and only admins change the team list
+  const role = e.role();
+  const admin = e.can('admin');
+  const accounts = useAccountNames(role === 'admin');
   const u = e.up, y = e.sy, st = e.pendingSync, sc = e.syncCfg(), mon = e.monCfg();
   const me = e.me();
   const ownN: Record<string, number> = {};
@@ -138,29 +162,49 @@ export function Update() {
       <section style={section}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 17, fontWeight: 500 }}>ทีมขายและข้อมูลที่บันทึก</span>
-          <span style={intro}>{e.teamCfg
+          <span style={intro}>{role
+            ? 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ แชร์กับทีมผ่าน Google Sheet แล้ว ทุกการแก้ไขบันทึกในชื่อบัญชีที่เข้าสู่ระบบ · ข้อมูลของบริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้'
+            : e.teamCfg
             ? 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ แชร์กับทีมผ่าน Google Sheet แล้ว ส่วน "ฉันคือ" ตั้งแยกในแต่ละเครื่อง ไฟล์สำรองยังส่งออก/นำเข้าได้ (นำเข้าจะเพิ่มเฉพาะรายการที่ทีมยังไม่มี รายการที่ทีมมีแล้วใช้ค่าของทีม) · ข้อมูลของบริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้'
             : 'ดาว สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บอยู่ในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร) หรือเชื่อม Google Sheet ด้านบนเพื่อให้ทุกเครื่องเห็นเหมือนกัน'}</span>
         </div>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label style={labelCol}>
-            ฉันคือ
-            <select value={me} onChange={(ev) => e.setMe(ev.target.value)} style={{ ...selectStyle, minWidth: 200 }}>
-              <Opts all="ยังไม่เลือก" options={C.team.map((v) => ({ v, label: v }))} />
-            </select>
-          </label>
-          <form onSubmit={addTeam} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            <label style={labelCol}>เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" style={inputStyle} /></label>
-            <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>เพิ่ม</button>
-          </form>
-        </div>
+        {role && e.session && (
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+            <SignedInAs name={e.session.name} role={role} />
+            {role === 'admin' && (
+              <button onClick={() => go('users')} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13.5, padding: 0 }}>จัดการผู้ใช้และสิทธิ์ ›</button>
+            )}
+          </div>
+        )}
+        {(!role || admin) && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            {!role && (
+              <label style={labelCol}>
+                ฉันคือ
+                <select value={me} onChange={(ev) => e.setMe(ev.target.value)} style={{ ...selectStyle, minWidth: 200 }}>
+                  <Opts all="ยังไม่เลือก" options={C.team.map((v) => ({ v, label: v }))} />
+                </select>
+              </label>
+            )}
+            <form onSubmit={addTeam} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <label style={labelCol}>เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" style={inputStyle} /></label>
+              <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>เพิ่ม</button>
+            </form>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {C.team.map((name) => (
-            <span key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', height: 32, padding: '0 6px 0 12px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', fontSize: 13 }}>
-              {name} · {fmtN(ownN[name] || 0)} บริษัท
-              <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} style={{ cursor: 'pointer', width: 22, height: 22, borderRadius: '50%', border: 0, background: 'rgba(10,26,134,.12)', color: '#1745B8', fontSize: 13, padding: 0 }}>×</button>
-            </span>
-          ))}
+          {C.team.map((name) => {
+            // names with an account stay (they are people signing in); partners without one can go,
+            // which is known only once the users list is read
+            const hasAccount = !!role && !!accounts?.has(name.trim().toLowerCase());
+            const locked = !admin || (!!role && (!accounts || hasAccount));
+            return (
+              <span key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', height: 32, padding: locked ? '0 12px' : '0 6px 0 12px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8', fontSize: 13 }} title={hasAccount ? 'มีบัญชีผู้ใช้' : undefined}>
+                {name} · {fmtN(ownN[name] || 0)} บริษัท
+                {!locked && <button onClick={() => e.delTeam(name)} aria-label={`ลบ ${name}`} style={{ cursor: 'pointer', width: 22, height: 22, borderRadius: '50%', border: 0, background: 'rgba(10,26,134,.12)', color: '#1745B8', fontSize: 13, padding: 0 }}>×</button>}
+              </span>
+            );
+          })}
           {!C.team.length && <span style={{ fontSize: 13, color: '#5E6680' }}>ยังไม่มีรายชื่อทีม เพิ่มชื่อเพื่อกำหนดผู้รับผิดชอบบริษัท</span>}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
@@ -171,14 +215,17 @@ export function Update() {
             </div>
           ))}
         </div>
+        {admin && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button onClick={() => e.exportCrm()} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>ส่งออกไฟล์สำรอง (.json)</button>
           <label style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: '1.5px solid #1F5BD8', color: '#1F5BD8', fontSize: 13.5, display: 'flex', alignItems: 'center' }}>
             นำเข้าไฟล์สำรอง
             <input type="file" accept=".json" onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) e.importCrm(f); }} style={{ display: 'none' }} />
           </label>
+          {role && <span style={{ fontSize: 12.5, color: '#5E6680' }}>ไฟล์สำรองมีข้อมูลทั้งทีม</span>}
           {e.tmMsg && <span style={{ fontSize: 13.5, color: '#0B6E66' }}>{e.tmMsg}</span>}
         </div>
+        )}
       </section>
 
       <section style={{ ...section, gap: 12 }}>

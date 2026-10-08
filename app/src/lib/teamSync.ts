@@ -34,14 +34,24 @@ export interface SyncOp {
 export interface ListEdit { add: string[]; rm: string[] }
 export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by: string; at: string }
 /** `seeded` = local records that the sheet didn't have yet were queued for upload (first connect). */
-export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean }
+/** `mode: 'accounts'`: the team signs in with personal accounts (then `key` is unused and `u` is the
+ *  signed-in username, kept in memory only); otherwise the shared team code in `key`. */
+export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean; mode?: 'accounts'; u?: string }
+export type Role = 'admin' | 'sales' | 'viewer';
+/** What a request is signed with: the team code (legacy), a session token, or nothing (hello / login). */
+export type Cred = string | { tok: string } | null;
+/** A signed-in account on this browser (PREF.session). */
+export interface Session { url: string; u: string; name: string; role: Role; tok: string; exp: number; rm: boolean; mc?: boolean }
+/** What the team script supports (from `hello`): v2 = the team code only; v3 = accounts possible. */
+export interface Caps { v: 2 | 3; mode?: 'legacy' | 'setup' | 'accounts'; tid?: string; it?: number; files?: boolean }
 export type TeamStatus = 'off' | 'connecting' | 'syncing' | 'ok' | 'error' | 'offline';
 export interface TeamState { status: TeamStatus; msg: string; last: string }
 
 export type Transport = (url: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 export class TeamSyncError extends Error {
-  constructor(msg: string, readonly code = '') {
+  /** `extra`: the rest of the error reply (e.g. `retryIn` seconds for a locked account) */
+  constructor(msg: string, readonly code = '', readonly extra: Record<string, unknown> = {}) {
     super(msg);
   }
 }
@@ -63,6 +73,29 @@ const ERR_TH: Record<string, string> = {
   not_found: 'ไม่พบไฟล์ในโฟลเดอร์เอกสารของทีม',
   unknown_action: 'สคริปต์ของทีมยังเป็นเวอร์ชันเก่า — อัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่ เพื่อเปิดใช้การแนบเอกสาร',
   drive_permission: 'หัวหน้าทีมยังไม่ได้อนุญาตให้สคริปต์ใช้ Google Drive — เปิด Apps Script กด Run ฟังก์ชัน setup แล้วกด Allow',
+  // accounts (Code.gs v3)
+  bad_login: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+  locked: 'ใส่รหัสผ่านผิดหลายครั้ง ลองใหม่ภายหลัง หรือให้ผู้ดูแลระบบปลดล็อก',
+  too_many_attempts: 'มีการลองรหัสผ่านผิดจำนวนมาก ระบบปิดการเข้าสู่ระบบชั่วคราว (ประมาณ 10 นาที)',
+  account_disabled: 'บัญชีนี้ถูกปิดการใช้งาน ติดต่อผู้ดูแลระบบของทีม',
+  no_accounts: 'ทีมนี้ยังไม่ได้เปิดใช้บัญชีผู้ใช้',
+  bad_code: 'รหัสตั้งค่าไม่ถูกต้องหรือหมดอายุ — กด Run setup ใน Apps Script อีกครั้งเพื่อขอรหัสใหม่',
+  bad_user: 'ชื่อผู้ใช้ใช้ได้เฉพาะภาษาอังกฤษตัวเล็ก ตัวเลข . _ - ยาว 3–32 ตัว',
+  bad_name: 'ชื่อที่แสดงต้องยาว 1–40 ตัวอักษร',
+  bad_password_data: 'ข้อมูลรหัสผ่านไม่ถูกต้อง ลองใหม่อีกครั้ง',
+  name_taken: 'มีบัญชีที่ใช้ชื่อที่แสดงนี้แล้ว',
+  user_exists: 'มีชื่อผู้ใช้นี้แล้ว',
+  too_many_users: 'มีผู้ใช้ครบจำนวนสูงสุดแล้ว',
+  session_expired: 'หมดเวลาการเข้าระบบ กรุณาเข้าสู่ระบบอีกครั้ง',
+  login_required: 'กรุณาเข้าสู่ระบบ',
+  must_change_password: 'ตั้งรหัสผ่านใหม่ก่อนเริ่มใช้งาน',
+  wrong_password: 'รหัสผ่านปัจจุบันไม่ถูกต้อง',
+  forbidden: 'บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้',
+  unknown_user: 'ไม่พบผู้ใช้นี้',
+  not_self: 'เปลี่ยนบทบาทหรือปิดบัญชีของตัวเองไม่ได้',
+  last_admin: 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน',
+  name_locked: 'แก้ชื่อที่แสดงได้เฉพาะก่อนเข้าสู่ระบบครั้งแรก',
+  bad_role: 'เลือกบทบาทของบัญชี (ผู้ดูแลระบบ / พนักงานขาย / ดูอย่างเดียว)',
 };
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
@@ -114,14 +147,31 @@ export const fetchTransport: Transport = async (url, body) => {
   }
 };
 
-/** Call the server and unwrap {ok:false,error} into a TeamSyncError. */
-export async function call<T extends Record<string, unknown>>(t: Transport, url: string, key: string, body: Record<string, unknown>): Promise<T> {
-  const r = await t(url, { ...body, key });
+/** Call the server and unwrap {ok:false,error} into a TeamSyncError. Every request says it comes
+ *  from this client version (`cv: 3`), so an accounts-mode script answers `login_required` to a
+ *  team-code request instead of the message meant for old app builds. */
+export async function call<T extends Record<string, unknown>>(t: Transport, url: string, cred: Cred, body: Record<string, unknown>): Promise<T> {
+  const auth = cred == null ? {} : typeof cred === 'string' ? { key: cred } : { tok: cred.tok };
+  const r = await t(url, { ...body, cv: 3, ...auth });
   if (!r || r.ok !== true) {
     const code = String((r && r.error) || 'unknown');
-    throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code, code);
+    throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code, code, r || {});
   }
   return r as T;
+}
+
+/** What the team script supports. A v2 script (team code only) answers a keyless `hello` with
+ *  `unauthorized` / `no_team_key` (or `unknown_action`); a v3 one says its mode and the public
+ *  values the browser needs to hash a password (`tid`, `it`). */
+export async function hello(t: Transport, url: string): Promise<Caps> {
+  const r = await t(url, { action: 'hello', cv: 3 });
+  if (r && r.ok === true && Number(r.v) >= 3) {
+    const mode = r.mode === 'accounts' || r.mode === 'setup' ? r.mode : 'legacy';
+    return { v: 3, mode, tid: String(r.tid || ''), it: Number(r.it) || 0, files: !!r.files };
+  }
+  const code = String((r && r.error) || 'unknown');
+  if (['unauthorized', 'no_team_key', 'unknown_action'].includes(code)) return { v: 2 };
+  throw new TeamSyncError(ERR_TH[code] || 'เชื่อมต่อไม่สำเร็จ: ' + code, code, r || {});
 }
 
 // ------------------------------------------------------------------ records

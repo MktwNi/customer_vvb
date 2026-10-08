@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
 import { CONFIG, CST, FEEDS, GCOL, GDESC, GI_COL, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
@@ -6,6 +6,7 @@ import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
 import type { Cert, Company } from '../lib/types';
 import { Opts, Pager, SrcTags, card, heroGrad, tabular } from '../components/ui';
 import { Icon } from '../components/icons';
+import { useSlide } from '../components/useSlide';
 import { PREF, prefs } from '../lib/storage';
 
 const empty = (text: string, boxed?: boolean) => (
@@ -25,6 +26,9 @@ export function Search() {
   const ftoggleRef = useRef<HTMLButtonElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
   const s = ui.f;
+  // the white pill slides between บริษัท and ใบรับรอง CFO
+  const toggleRef = useRef<HTMLDivElement>(null);
+  useSlide(toggleRef, 'button[aria-pressed=true]', s.view);
   // Typing only defers the query; memo on the other filter fields (not the `s` object, which
   // changes identity on every keystroke) so the urgent render reuses the previous result.
   const q = useDeferredValue(s.q);
@@ -98,15 +102,25 @@ export function Search() {
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
 
+  // an account that can only read adds nothing and can't star (the star is the team's watch list):
+  // it sees ★ on the companies the team follows, not a button
+  const edit = e.can('edit');
   const star = (id: number) => {
     const on = C.watch.includes(id);
-    return { star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => e.toggleWatch(id) };
+    return { on, star: on ? '★' : '☆', fg: on ? '#E8A23B' : '#C9D1E6', toggle: () => (edit ? e.toggleWatch(id) : undefined) };
   };
+  const roStar = (on: boolean, style: CSSProperties) => (on ? <span role="img" aria-label="ทีมติดตามอยู่" title="ทีมติดตามอยู่" style={{ ...style, color: '#E8A23B' }}>★</span> : <span />);
   const rndPill = (c: Company) =>
     c.rnd ? { label: (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd, bg: c.rndLapse ? '#FBE3DC' : '#E6ECFD', fg: c.rndLapse ? '#8A2B12' : '#1745B8' } : null;
   const cfoView = (c: Company) => {
     const [t, fg] = CST[c.cfoSt];
     return { t, fg, sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' };
+  };
+  /** A click anywhere on a result row opens the company (not on its buttons, nor when text was selected). */
+  const rowOpen = (ev: React.MouseEvent, id: number) => {
+    if ((ev.target as HTMLElement).closest('button, a, input, select, label')) return;
+    if (window.getSelection()?.toString()) return;
+    open(id);
   };
   const contactOf = (c: Company) => (c.phone ? c.phone.split('|')[0].trim() : c.web ? c.web.replace(/^https?:\/\//, '') : '—');
   const go = (p: number) => {
@@ -123,7 +137,8 @@ export function Search() {
         <div className="sx-band hero" style={{ background: heroGrad }}>
           <h2 className="sr-only">ค้นหาลูกค้า</h2>
           <div className="sx-row">
-            <div className="sx-toggle" role="group" aria-label="ค้นหาจาก">
+            <div className="sx-toggle" role="group" aria-label="ค้นหาจาก" ref={toggleRef}>
+              <span className="slide-ind" aria-hidden="true" />
               {([['co', 'บริษัท'], ['cert', 'ใบรับรอง CFO']] as const).map(([k, label]) => (
                 <button
                   key={k}
@@ -148,10 +163,12 @@ export function Search() {
               <Icon name="download" />
               ส่งออก CSV
             </button>
-            <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
-              <Icon name="plus" />
-              เพิ่มลูกค้าใหม่
-            </button>
+            {edit && (
+              <button className="sx-btn sx-white" onClick={() => set({ addCust: { deal: false, name: q } })} title="เพิ่มบริษัทที่ไม่มีในทะเบียน">
+                <Icon name="plus" />
+                เพิ่มลูกค้าใหม่
+              </button>
+            )}
           </div>
         </div>
         <div className="sx-body">
@@ -254,7 +271,7 @@ export function Search() {
                     <span style={{ fontSize: 15, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069' }}>{c.code} · {D.prov[c.prov] || '—'}</span>
                   </button>
-                  <button onClick={st.toggle} aria-label="ติดตาม" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, background: 'transparent', fontSize: 22, color: st.fg }}>{st.star}</button>
+                  {edit ? <button onClick={st.toggle} aria-label="ติดตาม" style={{ cursor: 'pointer', width: 44, height: 44, flex: 'none', border: 0, background: 'transparent', fontSize: 22, color: st.fg }}>{st.star}</button> : roStar(st.on, { width: 44, height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 })}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 6, background: GCOL[c.tgt][0], color: GCOL[c.tgt][1] }}>กลุ่ม {c.tgt + 1}</span>
@@ -309,8 +326,8 @@ export function Search() {
               const st = star(c.id), cv = cfoView(c), g = GI_COL[c.giLive || 1] || GI_COL[1], rp = rndPill(c), sg = stageOf(C.stages[c.id]);
               const owner = C.owners[c.id];
               return (
-                <div key={c.id} style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: rowPad, borderBottom: '1px solid #EEF1F8', alignItems: 'center' }}>
-                  <button onClick={st.toggle} title="ติดตาม" style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
+                <div key={c.id} className="sxr" onClick={(ev) => rowOpen(ev, c.id)} style={{ display: 'grid', gridTemplateColumns: coCols, gap: 14, padding: rowPad, alignItems: 'center' }}>
+                  {edit ? <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button> : roStar(st.on, { fontSize: 19 })}
                   <button onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontSize: 14.5, fontWeight: 500, textWrap: 'pretty' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: '#475069', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -357,8 +374,8 @@ export function Search() {
               const st = star(ct.gid), [bg, fg] = PILL[ct.st];
               const rp = ct.isLatest && !ct.bad && ct.co ? rndPill(ct.co) : null;
               return (
-                <div key={ct.cid} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, borderBottom: '1px solid #EEF1F8', alignItems: 'center', fontSize: 13.5 }}>
-                  <button onClick={st.toggle} title="ติดตาม" style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button>
+                <div key={ct.cid} className="sxr" onClick={(ev) => rowOpen(ev, ct.gid)} style={{ display: 'grid', gridTemplateColumns: ctCols, gap: 14, padding: rowPad, alignItems: 'center', fontSize: 13.5 }}>
+                  {edit ? <button onClick={st.toggle} title="ติดตาม" aria-pressed={st.on} style={{ cursor: 'pointer', border: 0, background: 'transparent', fontSize: 19, color: st.fg, padding: 0 }}>{st.star}</button> : roStar(st.on, { fontSize: 19 })}
                   <span style={{ fontWeight: 500, color: '#1F5BD8' }}>{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, color: '#0E1430' }}>
                     <span style={{ fontWeight: 500, textWrap: 'pretty' }}>{ct.org}</span>

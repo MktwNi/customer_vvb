@@ -24,10 +24,11 @@ export function taskInfo(e: ReturnType<typeof useApp>['engine'], t: Task) {
   };
 }
 
-/** Checkbox-style "done" toggle used in the plan list and the company drawer. */
-export function DoneBox({ t, color, onToggle, size = 13 }: { t: Task; color: string; onToggle: () => void; size?: number }) {
+/** Checkbox-style "done" toggle used in the plan list and the company drawer. `ro` (an account that
+ *  can only read): it only shows whether the task is done, and says why it can't be pressed. */
+export function DoneBox({ t, color, onToggle, size = 13, ro = false }: { t: Task; color: string; onToggle: () => void; size?: number; ro?: boolean }) {
   return (
-    <button onClick={onToggle} aria-label="ทำเสร็จ" aria-pressed={t.done} style={{ cursor: 'pointer', width: 22, height: 22, flex: 'none', borderRadius: 6, border: `1.5px solid ${color}`, background: t.done ? color : '#fff', color: '#fff', fontSize: size, padding: 0 }}>
+    <button onClick={onToggle} disabled={ro} title={ro ? 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้' : undefined} aria-label="ทำเสร็จ" aria-pressed={t.done} style={{ cursor: ro ? 'default' : 'pointer', width: 22, height: 22, flex: 'none', borderRadius: 6, border: `1.5px solid ${color}`, background: t.done ? color : '#fff', color: '#fff', fontSize: size, padding: 0 }}>
       {t.done ? '✓' : ''}
     </button>
   );
@@ -35,6 +36,8 @@ export function DoneBox({ t, color, onToggle, size = 13 }: { t: Task; color: str
 
 export function Plan() {
   const { engine: e, ui, set, open, openSched } = useApp();
+  // an account that can only read sees the plan but makes no appointments
+  const ro = !e.can('edit');
   const v = useEngineVersion();
   const C = e.crm, D = e.B.D;
   const today = todayISO();
@@ -153,7 +156,7 @@ export function Plan() {
             const ti = taskInfo(e, t);
             return (
               <div key={t.id} className="pl-task">
-                <DoneBox t={t} color={ti.color} onToggle={() => e.toggleTask(t)} />
+                <DoneBox t={t} color={ti.color} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
                 {avOf(t.id, t.gid, t.title, ti.color, 40)}
                 <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                   <button onClick={() => ti.company && open(ti.company.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: '#0E1430', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
@@ -162,8 +165,8 @@ export function Plan() {
                 </div>
                 <div className="pl-task-act">
                   {ti.tel && <a href={ti.tel} style={{ fontSize: 12.5, textDecoration: 'none', border: '1.5px solid #D5DBEA', borderRadius: 999, padding: '4px 10px' }}>โทร</a>}
-                  <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} style={{ cursor: 'pointer', border: '1.5px solid #D5DBEA', background: '#fff', borderRadius: 999, padding: '4px 10px', fontSize: 12.5 }}>เลื่อน</button>
-                  <button onClick={() => e.delTask(t)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12.5 }}>ลบ</button>
+                  {!ro && <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} style={{ cursor: 'pointer', border: '1.5px solid #D5DBEA', background: '#fff', borderRadius: 999, padding: '4px 10px', fontSize: 12.5 }}>เลื่อน</button>}
+                  {!ro && <button onClick={() => e.delTask(t)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12.5 }}>ลบ</button>}
                 </div>
               </div>
             );
@@ -192,11 +195,12 @@ export function Plan() {
             <label style={labelCol}>รายการ<select value={feedKey} onChange={(ev) => set({ plFeed: ev.target.value as FeedKey, picked: {}, plLim: 60 })} style={sel}><Opts options={FEEDS.map(([v, label]) => ({ v, label }))} /></select></label>
             <label style={labelCol}>สถานะการขาย<select value={ui.plStage} onChange={(ev) => set({ plStage: ev.target.value as StageKey | '', picked: {} })} style={sel}><Opts all="ทั้งหมด" options={STG.map(([v, label]) => ({ v, label }))} /></select></label>
             <label style={labelCol}>ผู้รับผิดชอบ<select value={ui.plOwner} onChange={(ev) => set({ plOwner: ev.target.value, picked: {} })} style={sel}><Opts all="ทั้งหมด" options={teamOpts} /></select></label>
-            <label style={labelCol}>นัดอัตโนมัติวันละ<select value={String(ui.perDay)} onChange={(ev) => set({ perDay: +ev.target.value })} style={sel}>{[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n} ราย</option>)}</select></label>
-            <button onClick={() => unpl.length && e.autoPlan(unpl, ui.perDay || 5)} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>นัดรายที่ยังไม่มีแผน ({fmtN(unpl.length)})</button>
+            {!ro && <label style={labelCol}>นัดอัตโนมัติวันละ<select value={String(ui.perDay)} onChange={(ev) => set({ perDay: +ev.target.value })} style={sel}>{[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n} ราย</option>)}</select></label>}
+            {!ro && <button onClick={() => unpl.length && e.autoPlan(unpl, ui.perDay || 5)} style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>นัดรายที่ยังไม่มีแผน ({fmtN(unpl.length)})</button>}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F6F8FE', borderRadius: 12, padding: '8px 12px' }}>
+        {/* picking companies only leads to making appointments or sending them to the tracker */}
+        {!ro && <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F6F8FE', borderRadius: 12, padding: '8px 12px' }}>
           <button
             onClick={() => {
               const p = { ...pk };
@@ -211,7 +215,7 @@ export function Plan() {
           <span style={{ fontSize: 13, color: '#475069', flex: 1 }}>{pkIds.length ? `เลือกแล้ว ${fmtN(pkIds.length)} ราย` : 'ติ๊กช่องหน้าชื่อเพื่อนัดหลายรายพร้อมกัน'}</span>
           {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13 }}>นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
           {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} style={{ cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 }}>ส่งเข้า Sales Tracker</button>}
-        </div>
+        </div>}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {shown.map((c) => {
             const st = stageOf(C.stages[c.id]);
@@ -219,18 +223,20 @@ export function Plan() {
             const p = !!pk[c.id];
             return (
               <div key={c.id} className="plan-row">
-                <button
-                  onClick={() => {
-                    const q = { ...pk };
-                    if (q[c.id]) delete q[c.id];
-                    else q[c.id] = 1;
-                    set({ picked: q });
-                  }}
-                  aria-label="เลือก" aria-pressed={p}
-                  style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: `1.5px solid ${p ? '#1F5BD8' : '#C9D1E6'}`, background: p ? '#1F5BD8' : '#fff', color: '#fff', fontSize: 12, padding: 0 }}
-                >
-                  {p ? '✓' : ''}
-                </button>
+                {ro ? <span /> : (
+                  <button
+                    onClick={() => {
+                      const q = { ...pk };
+                      if (q[c.id]) delete q[c.id];
+                      else q[c.id] = 1;
+                      set({ picked: q });
+                    }}
+                    aria-label="เลือก" aria-pressed={p}
+                    style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: `1.5px solid ${p ? '#1F5BD8' : '#C9D1E6'}`, background: p ? '#1F5BD8' : '#fff', color: '#fff', fontSize: 12, padding: 0 }}
+                  >
+                    {p ? '✓' : ''}
+                  </button>
+                )}
                 <button onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, background: 'transparent', textAlign: 'left', padding: 0, display: 'flex', gap: 12, alignItems: 'center', minWidth: 0, color: '#0E1430' }}>
                   <CoAvatar name={c.name} web={c.web} set={c.set} size={38} />
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
@@ -239,11 +245,11 @@ export function Plan() {
                   </span>
                 </button>
                 <span style={{ fontSize: 12.5, color: '#384155', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
-                <select value={st[0]} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} aria-label="สถานะการขาย" style={{ height: 32, borderRadius: 999, border: 0, padding: '0 10px', fontSize: 12.5, background: st[2], color: st[3] }}>
+                <select value={st[0]} disabled={ro} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} aria-label="สถานะการขาย" style={{ height: 32, borderRadius: 999, border: 0, padding: '0 10px', fontSize: 12.5, background: st[2], color: st[3] }}>
                   <Opts options={STG.map(([v, label]) => ({ v, label }))} />
                 </select>
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  {ot ? (
+                  {ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} style={{ cursor: 'pointer', border: 0, fontSize: 12, padding: '5px 10px', borderRadius: 999, background: '#E6ECFD', color: '#1745B8' }}>นัดแล้ว {isoTh(ot.date)}</button>
                   ) : (
                     <button onClick={() => openSched({ ids: [c.id] })} style={{ cursor: 'pointer', border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 12.5, padding: '5px 12px', borderRadius: 999 }}>+ นัด</button>

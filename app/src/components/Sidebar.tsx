@@ -4,8 +4,11 @@ import { fmtN, isoTh, todayISO } from '../lib/format';
 import { Icon, type IconName } from './icons';
 import { dealResult, overdueDays } from '../lib/sales';
 import mark from '../assets/gcc-mark.png';
+import { useSlide } from './useSlide';
+import { RoleChip, nameLetter } from './Login';
 
-export interface NavItem { key: Tab; label: string; icon: IconName }
+/** `admin`: shown only to an admin of a team that signs in with accounts. */
+export interface NavItem { key: Tab; label: string; icon: IconName; admin?: boolean }
 
 /**
  * Main navigation, grouped like a CRM sidebar. To add a feature: add its key to `Tab` (state.tsx),
@@ -30,6 +33,7 @@ export const NAV: { title: string; items: NavItem[] }[] = [
       { key: 'dedup', label: 'ตรวจข้อมูลซ้ำ', icon: 'dedup' },
       { key: 'update', label: 'อัปเดตข้อมูล', icon: 'update' },
       { key: 'notes', label: 'หมายเหตุ', icon: 'notes' },
+      { key: 'users', label: 'ผู้ใช้และสิทธิ์', icon: 'shield', admin: true },
     ],
   },
 ];
@@ -73,6 +77,13 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
   const ready = e.ready;
   const rail = !mobile && !docked && !open; // icons only
   const mode = mobile ? '' : docked ? ' dock tabs' : open ? ' over' : ' rail tabs';
+  // the open page's tab slides to the page chosen (folding the menu just moves it, see useSlide)
+  const navRef = useRef<HTMLElement>(null);
+  const role = e.role();
+  const admin = role === 'admin';
+  // (the admin's extra item moves nothing above it, but the highlight is placed again when it comes or goes)
+  useSlide(navRef, '.side-item[aria-current=page]', ready ? ui.tab + (admin ? '|a' : '') : '');
+  const s = e.session;
 
   const badges: Partial<Record<Tab, number>> = {};
   let won = 0, deals = 0;
@@ -119,25 +130,34 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
           </button>
         </div>
         <div className="side-cta">
-          <button
-            className="side-add"
-            disabled={!ready}
-            title={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
-            aria-label={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
-            onClick={() => {
-              set({ addCust: { deal: false } });
-              onClose();
-            }}
-          >
-            <Icon name="plus" />
-            <span className="lbl">เพิ่มลูกค้าใหม่</span>
-          </button>
+          {role === 'viewer' ? (
+            // a view-only account adds nothing: say so where the add button would be
+            <span className="side-ro" title="บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้" aria-label={rail ? 'ดูอย่างเดียว: บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้' : undefined} role={rail ? 'img' : undefined}>
+              <Icon name="eye" />
+              <span className="lbl">ดูอย่างเดียว</span>
+            </span>
+          ) : (
+            <button
+              className="side-add"
+              disabled={!ready}
+              title={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
+              aria-label={rail ? 'เพิ่มลูกค้าใหม่' : undefined}
+              onClick={() => {
+                set({ addCust: { deal: false } });
+                onClose();
+              }}
+            >
+              <Icon name="plus" />
+              <span className="lbl">เพิ่มลูกค้าใหม่</span>
+            </button>
+          )}
         </div>
-        <nav className="side-nav">
+        <nav className="side-nav" ref={navRef}>
+          <span className="slide-ind" aria-hidden="true" />
           {NAV.map((g) => (
             <div key={g.title} className="side-group" role="group" aria-label={g.title}>
               <span className="side-group-title lbl" aria-hidden="true">{g.title}</span>
-              {g.items.map((it) => {
+              {g.items.filter((it) => !it.admin || admin).map((it) => {
                 const on = ready && ui.tab === it.key;
                 const b = badges[it.key] || 0;
                 return (
@@ -164,6 +184,42 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
             </div>
           ))}
         </nav>
+        {/* phones: the top bar has no room for the account, so it is here (above the data card) */}
+        {mobile && s && role && (
+          <div className="side-acct">
+            <div className="side-acct-who">
+              <span className="acct-ava" aria-hidden="true">{nameLetter(s.name)}</span>
+              <span className="side-acct-t">
+                <b>{s.name}</b>
+                <small>@{s.u}</small>
+              </span>
+              <RoleChip role={role} />
+            </div>
+            <div className="side-acct-btns">
+              <button
+                onClick={() => {
+                  onClose();
+                  document.getElementById('menu-btn')?.focus();
+                  set({ acctDlg: 'passwd' });
+                }}
+              >
+                <Icon name="key" />
+                เปลี่ยนรหัสผ่าน
+              </button>
+              <button
+                className="out"
+                onClick={() => {
+                  onClose();
+                  document.getElementById('menu-btn')?.focus();
+                  set({ acctDlg: 'logout' });
+                }}
+              >
+                <Icon name="logout" />
+                ออกจากระบบ
+              </button>
+            </div>
+          </div>
+        )}
         {ready && (
           <div className="side-foot lbl">
             <span className="side-foot-title">ข้อมูลในระบบ</span>

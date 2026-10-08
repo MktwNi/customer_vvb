@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { ReadOnly } from './ReadOnly';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, LOG_TYPES, PILL, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, money, telHref, todayISO, ymTh } from '../lib/format';
@@ -20,6 +21,8 @@ interface Block { k: 't' | 'g' | 'f' | 's'; src: number; title: string; items: B
 
 export function CompanyDrawer() {
   const { engine: e, ui, set, go, openSched } = useApp();
+  // an account that can only read: no star, no edits, no new calls or appointments
+  const ro = !e.can('edit');
   useEngineVersion();
   const c = ui.sel != null ? e.company(ui.sel) : undefined;
   const [det, setDet] = useState<{ id: number; d: Detail } | null>(null);
@@ -161,7 +164,7 @@ export function CompanyDrawer() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: '#fff' }}>{c.code} · {D.type[c.type]}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => e.toggleWatch(c.id)} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{watched ? '★ ติดตามอยู่' : '☆ ติดตาม'}</button>
+              {!ro && <button onClick={() => e.toggleWatch(c.id)} style={{ cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 13 }}>{watched ? '★ ติดตามอยู่' : '☆ ติดตาม'}</button>}
               <button onClick={close} aria-label="ปิด" style={{ cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', border: 0, background: 'rgba(6,22,90,.2)', color: '#fff', fontSize: 18 }}>×</button>
             </div>
           </div>
@@ -233,7 +236,7 @@ export function CompanyDrawer() {
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                   <span style={kicker}>ข้อมูลติดต่อ</span>
-                  <button onClick={() => setEditC(editC ? null : { phone: c.phone || '', email: c.email || '', web: c.web || '', note: (ce && ce.note) || '' })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>
+                  {!ro && <button onClick={() => setEditC(editC ? null : { phone: c.phone || '', email: c.email || '', web: c.web || '', note: (ce && ce.note) || '' })} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline' }}>{editC ? 'ปิดการแก้ไข' : 'แก้ไข'}</button>}
                 </div>
                 {!ph.length && !em.length && !c.web && !dc && <span style={{ fontSize: 14, color: '#475069' }}>ยังไม่มีเบอร์โทร อีเมล หรือเว็บไซต์ในทุกแหล่ง</span>}
                 {ph.map((t) => <a key={t} href={telHref(t)} style={{ fontSize: 16, fontWeight: 500, textDecoration: 'none' }}>{t}</a>)}
@@ -315,6 +318,7 @@ export function CompanyDrawer() {
 
           {dt === 'crm' && (
             <>
+              <ReadOnly ro={ro}>
               <div style={{ ...box, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
                 <label style={{ ...field, gap: 5 }}>
                   สถานะการขาย
@@ -330,6 +334,8 @@ export function CompanyDrawer() {
                 </label>
                 {!C.team.length && <button onClick={() => go('update', { sel: null })} style={{ cursor: 'pointer', gridColumn: '1/-1', textAlign: 'left', border: 0, background: 'transparent', color: '#1F5BD8', fontSize: 13, textDecoration: 'underline', padding: 0 }}>ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล</button>}
               </div>
+              </ReadOnly>
+              <ReadOnly ro={ro}>
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <span style={kicker}>นัดหมาย</span>
@@ -348,9 +354,10 @@ export function CompanyDrawer() {
                   );
                 })}
               </div>
+              </ReadOnly>
               <div style={{ ...box, gap: 12 }}>
                 <span style={kicker}>บันทึกการติดต่อ</span>
-                <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F6F8FE', borderRadius: 14, padding: 12 }}>
+                {!ro && <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F6F8FE', borderRadius: 14, padding: 12 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <select name="type" aria-label="ประเภท" style={{ height: 40, border: '1.5px solid #D5DBEA', borderRadius: 10, padding: '0 10px', fontSize: 14, background: '#fff', color: '#0E1430' }}>
                       <Opts options={[{ v: 'call', label: 'โทร' }, { v: 'email', label: 'อีเมล' }, { v: 'meet', label: 'นัดพบ' }, { v: 'note', label: 'โน้ต' }]} />
@@ -363,7 +370,7 @@ export function CompanyDrawer() {
                     <input name="text" aria-label="รายละเอียด" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
                     <button type="submit" style={{ cursor: 'pointer', height: 40, padding: '0 16px', borderRadius: 999, border: 0, background: '#1F5BD8', color: '#fff', fontSize: 13.5 }}>บันทึก</button>
                   </div>
-                </form>
+                </form>}
                 {!logs.length && <span style={{ fontSize: 13.5, color: '#5E6680' }}>ยังไม่มีประวัติการติดต่อ</span>}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {logs.map((l, i) => {
@@ -379,7 +386,7 @@ export function CompanyDrawer() {
                           {l.text && <span style={{ fontSize: 13.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</span>}
                           <span style={{ fontSize: 11.5, color: '#5E6680' }}>{[dtTh(l.at), l.by].filter(Boolean).join(' · ')}</span>
                         </span>
-                        <button onClick={() => e.delLog(c.id, l)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12, alignSelf: 'flex-start' }}>ลบ</button>
+                        {(e.can('admin') || (!ro && l.by === e.me())) && <button onClick={() => e.delLog(c.id, l)} style={{ cursor: 'pointer', border: 0, background: 'transparent', color: '#A33A1A', fontSize: 12, alignSelf: 'flex-start' }}>ลบ</button>}
                       </div>
                     );
                   })}
@@ -428,6 +435,7 @@ const newestFirst = (deals: Deal[]) => deals.sort((a, b) => b.year.localeCompare
 /** Where the company stands in the Sales Tracker, and a one-click way to put it there. */
 function SalesBox({ c }: { c: Company }) {
   const { engine: e, set } = useApp();
+  const ro = !e.can('edit');
   const deals = newestFirst(e.dealsOf(c.id));
   const custom = e.custom[c.id];
   const btn: CSSProperties = { cursor: 'pointer', height: 34, padding: '0 14px', borderRadius: 999, border: '1.5px solid #1F5BD8', background: '#fff', color: '#1F5BD8', fontSize: 13 };
@@ -436,8 +444,8 @@ function SalesBox({ c }: { c: Company }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={kicker}>Sales Tracker</span>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {custom && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} style={{ ...btn, borderColor: '#D5DBEA', color: '#0E1430' }}>แก้ไขข้อมูลลูกค้า</button>}
-          <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btn, background: '#1F5BD8', color: '#fff' }}>+ ส่งเข้า Sales Tracker</button>
+          {custom && !ro && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} style={{ ...btn, borderColor: '#D5DBEA', color: '#0E1430' }}>แก้ไขข้อมูลลูกค้า</button>}
+          {!ro && <button onClick={() => set({ sendIds: [c.id] })} style={{ ...btn, background: '#1F5BD8', color: '#fff' }}>+ ส่งเข้า Sales Tracker</button>}
         </span>
       </div>
       {!deals.length && <span style={{ fontSize: 13, color: '#475069' }}>ยังไม่อยู่ในตารางติดตามการขาย — กดส่งเข้า แล้วข้อมูลติดต่อจะถูกกรอกให้อัตโนมัติ</span>}
