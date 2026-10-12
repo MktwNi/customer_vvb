@@ -7,6 +7,8 @@ import { dataUrl } from '../lib/core';
 import { fmtN, isoTh } from '../lib/format';
 import type { Company } from '../lib/types';
 import { Kpi, PageHead, card } from '../components/ui';
+import { FilterBar } from '../components/FilterBar';
+import { Select } from '../components/Select';
 
 type Geo = FeatureCollection<Geometry, { th: string }>;
 type Metric = 'all' | 'act' | 'soon' | 'exp' | 'opp' | 'gi';
@@ -158,27 +160,18 @@ export function MapTab() {
     <>
       <PageHead title="แผนที่ลูกค้ารายจังหวัด" sub="กดจังหวัดบนแผนที่หรือในอันดับ เพื่อดูกลุ่มเป้าหมายและรายชื่อที่ต้องติดต่อก่อน" />
       <div className="map-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div className="card" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', padding: '16px 18px' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}>
-            ระบายสีตาม
-            <select value={metric} onChange={(ev) => setMetric(ev.target.value as Metric)} className="fld sel" style={{ minWidth: 220 }}>
-              {METRICS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}>
-            กลุ่มอุตสาหกรรม
-            <select value={fInd} onChange={(ev) => setFInd(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
-              <option value="">ทั้งหมด</option>
-              {indCounts.map(([k, n]) => <option key={k} value={k}>{`${k} (${fmtN(n)})`}</option>)}
-            </select>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}>
-            กลุ่มเป้าหมาย
-            <select value={fTgt} onChange={(ev) => setFTgt(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
-              <option value="">ทั้งหมด</option>
-              {TGT.map((l, i) => <option key={i} value={String(i)}>{`${i + 1}. ${l}`}</option>)}
-            </select>
-          </label>
+        <div className="card map-tools">
+          <Select variant="tool" prefix="ระบายสีตาม" label="ระบายสีตาม" value={metric} onChange={setMetric} options={METRICS.map(([v, label]) => ({ v, label }))} search={false} width={280} />
+          {/* two filters, always shown as pills: the industry (with how many companies, a find field) and the target group */}
+          <FilterBar
+            fields={[
+              { key: 'ind', label: 'กลุ่มอุตสาหกรรม', kind: 'single', all: 'ทั้งหมด', pinned: true, rest: 'ทั้งหมด', options: indCounts.map(([k, n]) => ({ v: k, label: k, n })) },
+              { key: 'tgt', label: 'กลุ่มเป้าหมาย', kind: 'single', all: 'ทั้งหมด', pinned: true, rest: 'ทั้งหมด', options: TGT.map((l, i) => ({ v: String(i), label: `${i + 1}. ${l}` })) },
+            ]}
+            value={{ ind: fInd ? { v: [fInd] } : undefined, tgt: fTgt ? { v: [fTgt] } : undefined }}
+            onChange={(k, x) => (k === 'ind' ? setFInd(x?.v[0] ?? '') : setFTgt(x?.v[0] ?? ''))}
+            anySet={false}
+          />
         </div>
 
         <div className="map-grid">

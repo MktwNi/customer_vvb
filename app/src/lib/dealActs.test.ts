@@ -52,11 +52,11 @@ describe('a contact record (dact/<deal>/<id>)', () => {
     expect(lastContact(S, d, TODAY)).toBe('2026-08-20');
   });
 
-  it('is found by the table search and the contact month / day filters', () => {
+  it('is found by the table search and a contact date range', () => {
     const d = deal({ id: 'x' }), o = deal({ id: 'o', client: 'บริษัท ข' });
     const S = state([d, o], {}, [act('x', 'a1', '2026-07-14', { note: 'ขอใบรับรองโรงงาน' })]);
     expect(filterDeals(S, { year: '2569', q: 'ใบรับรองโรงงาน' }).map((x) => x.id)).toEqual(['x']);
-    expect(filterDeals(S, { year: '2569', month: '07', day: '14' }).map((x) => x.id)).toEqual(['x']);
+    expect(filterDeals(S, { year: '2569', date: { basis: 'contact', preset: 'custom', from: '2026-07-14', to: '2026-07-14' } }, TODAY).map((x) => x.id)).toEqual(['x']);
   });
 
   it('belongs by default to the stage the deal is at: the last one done, else the next one', () => {

@@ -8,6 +8,7 @@ import { RoleChip, hhmm, nameLetter, sessionLine } from './Login';
 import { menuKeys, usePopover } from './usePopover';
 import { TABS, useDataLine } from './Sidebar';
 import { DateField } from './ui';
+import { SelField } from './Select';
 import { EMPTY_FILTERS } from '../lib/search';
 import mark from '../assets/gcc-mark.png';
 
@@ -84,12 +85,7 @@ function RefDate() {
               <button key={label} type="button" aria-pressed={e.ref === v} onClick={() => setRef(v)}>{label}</button>
             ))}
           </div>
-          <label className="tb-pop-f">
-            ช่วง "ใกล้หมดอายุ"
-            <select value={String(e.win)} onChange={(ev) => setRef(null, +ev.target.value)} className="fld sel">
-              {[30, 60, 90, 180].map((n) => <option key={n} value={n}>{n} วัน</option>)}
-            </select>
-          </label>
+          <SelField className="tb-pop-f" text={'ช่วง "ใกล้หมดอายุ"'} value={String(e.win)} onChange={(v) => setRef(null, +v)} options={[30, 60, 90, 180].map((n) => ({ v: String(n), label: `${n} วัน` }))} />
           <span className="t-meta" style={{ lineHeight: 1.5 }}>สถานะ กลุ่มเป้าหมาย และรอบ อบก. คำนวณใหม่ทั้งเว็บ · ข้อมูล ณ {isoTh(e.base.asOf)} · {src}</span>
         </div>
       )}

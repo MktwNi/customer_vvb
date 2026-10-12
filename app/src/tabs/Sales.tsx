@@ -1,14 +1,15 @@
-import { Fragment, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
+import { Fragment, createContext, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
 import {
-  ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, closeReady, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
-  overdueDays, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, salesStats, sectionsFor, stageActs, stageDocs, stageTh, stageTrack, stepOf,
-  type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type SalesFilter, type SalesState, type StageState,
+  ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
+  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, sectionsFor, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex,
+  type BasisDate, type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState,
 } from '../lib/sales';
-import { acFig, actualSource, beYearInput, closingView, facetOptions, fcFig, lineMeta, lineStatusView, nextStepView, overPlan, relText, shortName, stageFig, statusView, yearOptions, type FigView } from '../lib/salesUi';
+import { BASIS_TH, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, trackerFields, yearOptions, type FigView } from '../lib/salesUi';
+import { rangeTh, resolveDate, type DateBasis, type DateF, type Range } from '../lib/dateRange';
 import { useMedia } from '../components/Sidebar';
-import { Kpi, Notice, Opts, PageHead, Status } from '../components/ui';
+import { Kpi, Notice, PageHead, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
 import { Icon } from '../components/icons';
 import { Modal } from '../components/Dialog';
@@ -17,13 +18,16 @@ import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } fr
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
+import { Av, insidePop } from '../components/Pop';
+import { Select } from '../components/Select';
+import { FilterBar, ReadChip, type FVal } from '../components/FilterBar';
+import { DateFilter, dateWords } from '../components/DateFilter';
 import { SalesDash } from './SalesDash';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
 export { Modal } from '../components/Dialog';
 
 type Engine = ReturnType<typeof useApp>['engine'];
-const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 /** A stage's Thai name in the tracker's rows (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
 const agoTh = (iso: string, today: string) => {
@@ -37,21 +41,41 @@ const isAutoNote = (S: SalesState, d: Deal, stage: string) => {
   return !!n && ((stageDocs(S, d).by[stage] || []).some((x) => x.auto?.n === n) || (!!line && n === paidNote(line.line)));
 };
 
+/** The table's filters as one shape (old string values read too: filterDeals normalises at every read). */
+const useSalesF = (): SalesFilter => {
+  const { ui } = useApp();
+  return normSalesFilter({ year: ui.slYear, ...ui.slF });
+};
+/** Filters back into view state (without the year: the year picker owns it). */
+const toSlF = (F: SalesFilter): UIState['slF'] => {
+  const { year: _y, ...rest } = F;
+  return Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== '' && v !== null)) as UIState['slF'];
+};
+/** Anything that narrows the rows besides the quick view (the count and "ล้างทั้งหมด" show then). */
+const narrowed = (F: SalesFilter) => !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.result || (F.q || '').trim() || F.quick === 'paylate');
+/** The date filter in force: its basis and today's range of it (a named preset is worked out again). */
+export interface DateIn { f: DateF; basis: DateBasis; r: Range }
+const dateIn = (F: SalesFilter, today: string): DateIn | null => (F.date ? { f: F.date, basis: F.date.basis, r: resolveDate(F.date, F.year, today) } : null);
+
 export function Sales() {
   const { engine: e, ui, set } = useApp();
   useEngineVersion();
   const S = e.sales;
   const year = ui.slYear;
   const today = todayISO();
-  const f: SalesFilter = { year, ...ui.slF };
-  const yearDeals = filterDeals(S, { year });
-  const shown = filterDeals(S, f);
+  const f = useSalesF();
+  const yearDeals = filterDeals(S, { year }, today);
+  const shown = filterDeals(S, f, today);
   // the quick views are about open work: their counts come from the other filters, and the closed tab ignores them
-  const noQuick = f.quick ? filterDeals(S, { ...f, quick: '' }) : shown;
+  const noQuick = f.quick ? filterDeals(S, { ...f, quick: '' }, today) : shown;
   // not memoised: the engine changes S.deals in place (an import or a team sync can add a year)
-  const years = yearOptions(Object.values(S.deals), year);
+  const all = Object.values(S.deals);
+  const years = yearOptions(all, year);
+  const perYear = new Map<string, number>();
+  all.forEach((d) => perYear.set(d.year, (perYear.get(d.year) || 0) + 1));
   const openN = yearDeals.filter((d) => d.jobStatus === 'open').length;
   const closedN = yearDeals.length - openN;
+  const [said, setSaid] = useState('');
   const v = ui.slView;
   const tabs: [typeof v, ReactNode, number | null, string?][] = [
     ['table', 'ตารางติดตาม', openN],
@@ -59,6 +83,7 @@ export function Sales() {
     ['closed', 'ปิดงาน', closedN, 'งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี'],
     ['log', <>ประวัติ<span className="sl-long">การแก้ไข</span></>, null],
   ];
+  const now = beYear();
 
   return (
     <>
@@ -67,18 +92,28 @@ export function Sales() {
         sub="ตารางติดตามสถานะการขาย · ทั้งทีมเห็นข้อมูลเดียวกัน"
         right={
           <div className="sl-ph-r">
-            <label className="btn sl-yr" title="ปี (พ.ศ.)">
-              ปี {year}
-              <Chevron />
-              <select value={year} onChange={(ev) => set({ slYear: ev.target.value })} aria-label="ปี (พ.ศ.)">
-                {years.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </label>
+            {/* the year picks the table (and the Dashboard, ปิดงาน and history follow it); a date range goes
+                back to the whole year, the other filters stay */}
+            <Select
+              variant="head"
+              value={year}
+              shown={`ปี ${year}`}
+              label="ปี (พ.ศ.)"
+              ariaLabel={`ปี ${year} (พ.ศ.)`}
+              width={240}
+              search={false}
+              options={years.map((y) => ({ v: y, label: `ปี ${y}`, sub: y === now ? 'ปีนี้' : undefined, n: perYear.get(y) ? `${fmtN(perYear.get(y)!)} งาน` : 'ยังไม่มีงาน' }))}
+              onChange={(y) => {
+                set({ slYear: y, slF: toSlF({ ...f, date: null }), slCollapsed: {} });
+                setSaid(f.date ? `ช่วงเวลากลับเป็นทั้งปี ${y}` : '');
+              }}
+            />
             {e.can('edit') && <AddMenu />}
             <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...noQuick.filter((d) => d.jobStatus === 'closed')]} />
           </div>
         }
       />
+      <span className="sr-only" role="status">{said}</span>
       {e.docMsg && <Notice kind="error">{e.docMsg}</Notice>}
       {ui.slNote && (
         <Notice kind="ok" role="status">
@@ -103,9 +138,9 @@ export function Sales() {
       <p className="sl-m-hint">
         <b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b> ปิดงานแล้วงานจะย้ายไปแท็บ “ปิดงาน”
       </p>
-      {v === 'table' && <TableView e={e} S={S} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={yearDeals} today={today} />}
+      {v === 'table' && <TableView e={e} S={S} F={f} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={yearDeals} today={today} openN={openN} />}
       {v === 'dash' && <SalesDash S={S} deals={yearDeals} today={today} year={ui.slYear} />}
-      {v === 'closed' && <ClosedView S={S} deals={noQuick.filter((d) => d.jobStatus === 'closed')} facets={yearDeals} total={closedN} />}
+      {v === 'closed' && <ClosedView S={S} F={f} deals={noQuick.filter((d) => d.jobStatus === 'closed')} facets={yearDeals} total={closedN} today={today} />}
       {v === 'log' && <LogView S={S} year={year} />}
     </>
   );
@@ -151,7 +186,7 @@ function useMenu() {
   const wrap = {
     ref,
     onBlur: (ev: ReactFocusEvent) => {
-      if (open && !ref.current?.contains(ev.relatedTarget as Node)) setOpen(false);
+      if (open && !ref.current?.contains(ev.relatedTarget as Node) && !insidePop(ev.relatedTarget)) setOpen(false);
     },
     onKeyDown: (ev: ReactKeyboardEvent) => {
       if (!open) return;
@@ -332,35 +367,59 @@ function ListsModal({ onClose }: { onClose: () => void }) {
 
 // ------------------------------------------------------------------ filters and quick views
 
-/** Search, the quick views (table only) and the filters folded behind "ตัวกรอง". `facets`: all of the
- *  year's deals (the ผู้รับผิดชอบ / แหล่งที่มา choices). */
-function Toolbar({ S, facets, base, today }: { S: SalesState; facets: Deal[]; base?: Deal[]; today: string }) {
+/**
+ * Above the rows (filters spec §6.1). Table tab: the quick views and the search, then the filter row: the
+ * date chip, ผู้รับผิดชอบ (the same filter as "ของฉัน"), "เฉพาะงวดเลยกำหนด" when reached from ค้างรับ, the
+ * chips in use, "เพิ่มตัวกรอง", "ล้างทั้งหมด" and "แสดง 5 จาก 32 งาน". ปิดงาน: no quick views, the search leads
+ * the filter row. Filters are view state only: an account that can only read uses them too.
+ */
+function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: SalesState; F: SalesFilter; yearDeals: Deal[]; base?: Deal[]; today: string; job: 'open' | 'closed'; shown: number; total: number }) {
   const { engine: e, ui, set } = useApp();
-  const F = ui.slF;
-  const up = (p: Partial<typeof F>) => set({ slF: { ...F, ...p } });
-  const uniq = (k: 'resp' | 'referral') => facetOptions(facets, k, F[k]);
-  const nSet = Object.entries(F).filter(([k, v]) => k !== 'q' && k !== 'quick' && v).length;
-  const [more, setMore] = useState(nSet > 0);
+  const ver = useEngineVersion();
   const me = e.me();
-  const mine = !!me && F.resp === me;
+  const up = (p: Partial<SalesFilter>, more?: Partial<UIState>) => set({ slF: toSlF({ ...F, ...p }), ...more });
+  const mine = !!me && !!F.resp && !F.resp.not && F.resp.v.length === 1 && F.resp.v[0] === me;
   const quick = F.quick || '';
   const seg = quick === 'paylate' ? 'payment' : quick;
   const views: [QuickView, string][] = [['', 'ทั้งหมด'], ['overdue', 'ค้างติดตาม'], ['notstarted', 'ยังไม่เริ่ม'], ['active', 'กำลังติดตาม'], ['payment', 'รอชำระเงิน'], ['ready', 'พร้อมปิดงาน']];
-  const anyLate = !!base?.some((d) => quickMatch(S, d, 'paylate', today));
-  const pick = (q: QuickView) => set({ slF: { ...F, quick: q }, slCollapsed: {} });
+  const pick = (q: QuickView) => up({ quick: q }, { slCollapsed: {} });
+  // the quick views' counts: one pass each over the rows, the contact records indexed once (ค้างติดตาม reads them)
+  const viewN = base ? withActIndex(S, () => views.map(([k]) => (k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length))) : [];
+  const anyLate = !!base && withActIndex(S, () => base.some((d) => quickMatch(S, d, 'paylate', today)));
+  // the counts in the field menu follow the search too, a little behind the typing (six passes over the year)
+  const key = useDeferredValue(JSON.stringify(ui.slF));
+  const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key) }), { yearDeals, job, me, today }), [ver, key, F.year, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const value: Record<string, FVal | undefined> = { resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section, result: F.result ? { v: [F.result] } : undefined };
+  const toF = (k: string, v: FVal | null): Partial<SalesFilter> => (k === 'result' ? { result: (v?.v[0] || '') as ResultF } : { [k]: v || undefined });
+  const search = (
+    <label className="sl-search">
+      <Icon name="search" size={17} />
+      <input
+        value={F.q || ''}
+        onChange={(ev) => {
+          const q = ev.target.value;
+          up({ q }, q.trim() && !(F.q || '').trim() ? { slCollapsed: {} } : undefined);
+        }}
+        placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต"
+        aria-label="ค้นหา"
+      />
+    </label>
+  );
+  // the closed tab has no quick views: เฉพาะงวดเลยกำหนด is neither shown nor counted there
+  const on = narrowed(job === 'open' ? F : { ...F, quick: '' });
   return (
-    <>
-      <div className="sl-tools">
-        {base && (
+    <div className="sl-filt">
+      {base && (
+        <div className="sl-tools">
           <div className="seg sl-seg" role="group" aria-label="มุมมอง">
-            {/* the jobs of whoever is using this browser (their ผู้รับผิดชอบ), on top of any view */}
+            {/* the jobs of whoever is using this browser: ผู้รับผิดชอบ คือ (me), on top of any view */}
             {me && (
-              <button type="button" aria-pressed={mine} onClick={() => set({ slF: { ...F, resp: mine ? '' : me }, slCollapsed: {} })} title={mine ? 'แสดงงานของทุกคน' : `เฉพาะงานที่ ${me} รับผิดชอบ`}>
+              <button type="button" aria-pressed={mine} onClick={() => up({ resp: mine ? undefined : { v: [me] } }, { slCollapsed: {} })} title={mine ? 'แสดงงานของทุกคน' : `เฉพาะงานที่ ${me} รับผิดชอบ`}>
                 ของฉัน<span className="n">{fmtN(base.filter((d) => d.resp === me).length)}</span>
               </button>
             )}
-            {views.map(([k, label]) => {
-              const n = k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length;
+            {views.map(([k, label], i) => {
+              const n = viewN[i];
               const od = (k === 'overdue' && n > 0) || (k === 'payment' && anyLate);
               return (
                 <button key={k || 'all'} type="button" aria-pressed={seg === k} onClick={() => pick(k)}>
@@ -369,59 +428,53 @@ function Toolbar({ S, facets, base, today }: { S: SalesState; facets: Deal[]; ba
               );
             })}
           </div>
-        )}
-        <label className="sl-search">
-          <Icon name="search" size={17} />
-          <input
-            value={F.q || ''}
-            onChange={(ev) => { const q = ev.target.value; set({ slF: { ...F, q }, ...(q.trim() && !(F.q || '').trim() ? { slCollapsed: {} } : {}) }); }}
-            placeholder="ค้นหาบริษัท / ผู้ติดต่อ / โน้ต"
-            aria-label="ค้นหา"
-          />
-        </label>
-        <button type="button" className="btn" onClick={() => setMore(!more)} aria-expanded={more} aria-controls="sl-filters">
-          ตัวกรอง{nSet ? ` (${nSet})` : ''}
-        </button>
-        {quick === 'paylate' && (
-          <button type="button" className="ftag" onClick={() => pick('payment')} aria-label="ล้างตัวกรอง เฉพาะงวดเลยกำหนด">
-            เฉพาะงวดเลยกำหนด<span aria-hidden="true">×</span>
-          </button>
-        )}
-      </div>
-      {more && (
-        <div className="sl-filters" id="sl-filters">
-          <select value={F.source || ''} onChange={(ev) => up({ source: ev.target.value })} className="fld sel" aria-label="SOURCE"><Opts all="SOURCE: ทั้งหมด" options={S.cfg.sources.map((x) => ({ v: x, label: x }))} /></select>
-          <select value={F.service || ''} onChange={(ev) => up({ service: ev.target.value })} className="fld sel" aria-label="Services"><Opts all="Services: ทั้งหมด" options={S.cfg.services.map((x) => ({ v: x, label: x }))} /></select>
-          <select value={F.resp || ''} onChange={(ev) => up({ resp: ev.target.value })} className="fld sel" aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: x }))} /></select>
-          <select value={F.referral || ''} onChange={(ev) => up({ referral: ev.target.value })} className="fld sel" aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: x }))} /></select>
-          <select value={F.result || ''} onChange={(ev) => up({ result: ev.target.value as typeof F.result })} className="fld sel" aria-label="ผลการขาย">
-            <Opts all="ผลการขาย: ทั้งหมด" options={[{ v: 'YES', label: 'ได้งาน (YES)' }, { v: 'NO', label: 'ไม่ได้งาน (NO)' }, { v: 'WAIT', label: 'รอผล / มีหมายเหตุ' }, { v: 'EMPTY', label: 'ยังไม่มีผล' }]} />
-          </select>
-          <select value={F.month || ''} onChange={(ev) => up({ month: ev.target.value })} className="fld sel" aria-label="เดือนที่ติดต่อ"><Opts all="ติดต่อ: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อ ' + m }))} /></select>
-          <select value={F.day || ''} onChange={(ev) => up({ day: ev.target.value })} className="fld sel" aria-label="วันที่ติดต่อ"><Opts all="ทุกวัน" options={Array.from({ length: 31 }, (_, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'วันที่ ' + (i + 1) }))} /></select>
-          {filtersOn({ ...F, quick: '' }) && <button type="button" onClick={() => set({ slF: {} })} className="quiet">ล้างตัวกรอง</button>}
+          {search}
         </div>
       )}
-    </>
+      <FilterBar
+        fields={fields}
+        value={value}
+        onChange={(k, v) => up(toF(k, v))}
+        search={base ? undefined : search}
+        lead={
+          <DateFilter
+            value={F.date}
+            onChange={(date) => up({ date })}
+            year={F.year}
+            today={today}
+            count={(draft) => liveCount(S, F, 'date', draft, job, today)}
+            monthCounts={(basis, y) => monthCounts(S, F, basis, y, job, today)}
+            // open jobs have no closing date: say where the jobs closed in the range are (the KPIs count them)
+            elsewhere={job === 'open' ? (draft) => (draft.basis === 'closed' ? `อยู่ในแท็บ “ปิดงาน” ${fmtN(liveCount(S, F, 'date', draft, 'closed', today))} งาน` : null) : undefined}
+          />
+        }
+        extra={job === 'open' && quick === 'paylate' ? <ReadChip text="เฉพาะงวดเลยกำหนด" onClear={() => pick('payment')} /> : undefined}
+        anySet={on}
+        // chips and the search go; the quick view stays (เฉพาะงวดเลยกำหนด goes back to รอชำระเงิน)
+        onClearAll={() => set({ slF: job === 'open' ? { quick: quick === 'paylate' ? 'payment' : quick } : { quick: F.quick }, slCollapsed: {} })}
+        count={on ? { shown, total } : null}
+        liveCount={(k, d) => liveCount(S, F, k, k === 'result' ? ((d?.v[0] || '') as ResultF) : d, job, today)}
+      />
+    </div>
   );
 }
-const filtersOn = (F: Omit<SalesFilter, 'year'>) => Object.values(F).some(Boolean);
 
-/** In place of the rows when the filters leave none. */
+/** In place of the rows when the filters leave none: "ล้างทั้งหมด" resets every filter, the quick view too. */
 function NoMatch({ text }: { text: string }) {
   const { set } = useApp();
   return (
     <span className="sl-nomatch">
       <span role="status">{text}</span>
-      <button onClick={() => set({ slF: {} })} className="lnk">ล้างตัวกรอง</button>
+      <button type="button" onClick={() => set({ slF: {} })} className="quiet">ล้างทั้งหมด</button>
     </span>
   );
 }
 
 /** The KPI cards (design §7.1): the year's money (open and closed jobs: closing a paid job must not take
  *  its revenue out of the totals), what is still to be received, and the share of jobs won. They follow
- *  the filters, not the quick view. */
-function Kpis({ S, open, all, today, year }: { S: SalesState; open: Deal[]; all: Deal[]; today: string; year: string }) {
+ *  the filters (the date range too), not the quick view; money is each matching job's whole figure, and
+ *  the caption says the range. Only the footers of รับเงิน and ครบกำหนดชำระ count money inside the range. */
+function Kpis({ S, open, all, today, year, date }: { S: SalesState; open: Deal[]; all: Deal[]; today: string; year: string; date: DateIn | null }) {
   const { ui, set } = useApp();
   const st = salesStats(S, all, today);
   const rc = receivables(S, open, today);
@@ -433,10 +486,29 @@ function Kpis({ S, open, all, today, year }: { S: SalesState; open: Deal[]; all:
   });
   const m = (n: number) => fmtMoney(Math.round(n)) || '0';
   const pct = st.forecast > 0 ? Math.round((st.actual / st.forecast) * 100) : null;
+  const words = date ? BASIS_TH[date.basis] : null;
+  const label = date && words ? <>Forecast รวม · {words.short} <span className="sl-kpi-r">{rangeTh(date.r, { dropYear: year })}</span></> : `Forecast รวม · ปี ${year}`;
+  const title = date && words ? `นับเฉพาะงานตามตัวกรอง · ${words.sent} ${rangeTh(date.r)} · ตัวเลขเป็นยอดเต็มของแต่ละงาน` : undefined;
+  const got = date?.basis === 'paid' ? receivedIn(S, all, date.r, today) : null;
+  const owed = date?.basis === 'due' ? owedIn(S, all, date.r, today) : null;
   return (
     <div className="kpis sl-kpis">
-      <Kpi hero label={`Forecast รวม · ปี ${year}`} value={m(st.forecast)} unit="บาท" foot={<>งานเปิด <b>{m(fcOpen)}</b> · ปิดแล้ว <b>{m(fcClosed)}</b></>} />
-      <Kpi label="Actual รวม" value={m(st.actual)} unit="บาท" zero={!st.actual} foot={pct != null ? <><b className="ok">{pct}%</b> ของ Forecast</> : 'ยังไม่มี Forecast'} />
+      <Kpi hero label={label} title={title} value={m(st.forecast)} unit="บาท" foot={<>งานเปิด <b>{m(fcOpen)}</b> · ปิดแล้ว <b>{m(fcClosed)}</b></>} />
+      <Kpi
+        label="Actual รวม"
+        value={m(st.actual)}
+        unit="บาท"
+        zero={!st.actual}
+        foot={
+          got != null ? (
+            <>รับในช่วงนี้ <b>{m(got)}</b>{st.forecast > 0 && got > 0 ? <> · {Math.round((got / st.forecast) * 100)}% ของ Forecast</> : null}</>
+          ) : pct != null ? (
+            <><b className="ok">{pct}%</b> ของ Forecast</>
+          ) : (
+            'ยังไม่มี Forecast'
+          )
+        }
+      />
       <Kpi
         label="ค้างรับ"
         value={m(rc.receivable)}
@@ -451,7 +523,7 @@ function Kpis({ S, open, all, today, year }: { S: SalesState; open: Deal[]; all:
             ) : (
               <span>ไม่มีงวดเลยกำหนด</span>
             )}
-            <span>ถึงกำหนดเดือนนี้ {m(rc.dueMonth)}</span>
+            {owed != null ? <span>ค้างในช่วงนี้ <b>{m(owed)}</b></span> : <span>ถึงกำหนดเดือนนี้ {m(rc.dueMonth)}</span>}
           </span>
         }
       />
@@ -465,6 +537,8 @@ function Kpis({ S, open, all, today, year }: { S: SalesState; open: Deal[]; all:
 /** What the rows, child rows and phone cards share (one table at a time). */
 interface Tk {
   e: Engine; S: SalesState; today: string; ro: boolean; team: string[];
+  /** the date filter in force: the rows show its date (the contact column keeps its editor on the default basis) */
+  date: DateIn | null; year: string;
   /** the deal being worked on (open, or opened last) */
   cur: string | undefined;
   edit: UIState['slEdit'];
@@ -488,8 +562,9 @@ const drafts = new Map<string, string>();
 const scroller = () => (window.innerWidth > 900 ? document.getElementById('scroller') : null);
 const stickyTop = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sticky-top')) || 0;
 
-function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: SalesState; deals: Deal[]; base: Deal[]; all: Deal[]; facets: Deal[]; today: string }) {
+function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Engine; S: SalesState; F: SalesFilter; deals: Deal[]; base: Deal[]; all: Deal[]; facets: Deal[]; today: string; openN: number }) {
   const { ui, set } = useApp();
+  const date = dateIn(F, today);
   const mobile = useMedia('(max-width: 760px)');
   const acts = useSalesActs();
   // an account that can only read: no adding, no stage notes, no edits in the rows
@@ -540,7 +615,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
     });
   };
   const tk: Tk = {
-    e, S, today, ro, team: e.crm.team, cur, edit: ui.slEdit, menu, setMenu, pop, setPop, toggle, openEditor, closeEditor, acts,
+    e, S, today, ro, team: e.crm.team, date, year: ui.slYear, cur, edit: ui.slEdit, menu, setMenu, pop, setPop, toggle, openEditor, closeEditor, acts,
     attach: (deal, stage, kind, more) => {
       setMenu('');
       if (ui.slEdit) set({ slEdit: null });
@@ -586,7 +661,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   useEffect(() => {
     if (!menu && !pop) return;
     const onScroll = () => {
-      const btn = document.querySelector<HTMLElement>(menu ? `.sl-more[aria-expanded="true"]` : `[data-pop="${CSS.escape(pop)}"]`);
+      const btn = document.querySelector<HTMLElement>(menu ? `.sl-more[aria-expanded="true"]` : `[data-cpop="${CSS.escape(pop)}"]`);
       if (!btn) return;
       const box = scroller();
       const line = (box ? box.getBoundingClientRect().top : 0) + stickyTop() + (mobile ? 0 : headH() + 48);
@@ -670,11 +745,21 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   const stages = S.cfg.stages;
   return (
     <TkCtx.Provider value={tk}>
-      <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} />
-      <Toolbar S={S} facets={facets} base={base} today={today} />
+      <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} />
+      <Toolbar S={S} F={F} yearDeals={facets} base={base} today={today} job="open" shown={deals.length} total={openN} />
       {!deals.length ? (
         <div className="card sl-empty-card">
-          {filtersOn(ui.slF) ? <NoMatch text="ไม่พบงานที่ยังเปิดตามตัวกรองนี้" /> : <span className="t-sec">ไม่มีงานที่ยังเปิดในปี {ui.slYear} งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”</span>}
+          {date?.basis === 'closed' ? (
+            // open jobs have no closing date: the closed ones are on their own tab (the filters go along)
+            <span className="sl-nomatch">
+              <span role="status">งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”</span>
+              <button type="button" className="lnk" onClick={() => set({ slView: 'closed' })}>ดูในแท็บปิดงาน</button>
+            </span>
+          ) : narrowed(F) || F.quick ? (
+            <NoMatch text="ไม่พบงานที่ยังเปิดตามตัวกรองนี้" />
+          ) : (
+            <span className="t-sec">ไม่มีงานที่ยังเปิดในปี {ui.slYear} งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”</span>
+          )}
         </div>
       ) : mobile ? (
         <div className="sl-mlist" onClick={rowClick}>
@@ -726,7 +811,12 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
                 <th className="k-resp"><span className="sl-th2">ผู้รับ</span><span className="sl-th2">ผิดชอบ</span></th>
                 <th className="k-src" />
                 <th className="k-stage">ขั้นตอน · ถัดไป</th>
-                <th className="k-last" title="ติดต่อล่าสุด คือวันที่ติดต่อที่พิมพ์ไว้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า · เกิน 14 วันขึ้นว่า ค้าง">ติดต่อล่าสุด</th>
+                {date && date.basis !== 'contact' ? (
+                  // the date the filter is about takes the column (its words in link blue)
+                  <th className="k-last sl-th-basis" title={'วันที่ตามตัวกรอง: ' + BASIS_TH[date.basis].hint}>{BASIS_TH[date.basis].head}</th>
+                ) : (
+                  <th className="k-last" title="ติดต่อล่าสุด คือวันที่ติดต่อที่พิมพ์ไว้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า · เกิน 14 วันขึ้นว่า ค้าง">ติดต่อล่าสุด</th>
+                )}
                 {/* one short line under it: "และ Actual" in its place once the Actual column folds into this one */}
                 <th className="k-fc" title="Forecast คือยอดในใบเสนอราคาที่แนบที่ขั้น QUOTATION (หรือยอดที่พิมพ์เอง)">Forecast<small className="sl-th-fc">จาก QUOTATION</small><small className="sl-th-ac2">และ Actual</small></th>
                 <th className="k-ac" title={`Actual คือยอดใบแจ้งหนี้ / ใบเสร็จที่แนบที่ ${payStages(S.cfg).join(', ') || 'PAY'} รวมกัน`}>Actual<small>{actualSource(S.cfg)}</small></th>
@@ -870,7 +960,7 @@ function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Tr
           <MiniTrack stages={stages} states={t.states} next={t.next} done={t.done} late={late} />
         </span>
       </td>
-      <td className="k-last"><ContactCell d={d} /></td>
+      <td className="k-last">{tk.date && tk.date.basis !== 'contact' ? <BasisCell d={d} /> : <ContactCell d={d} />}</td>
       <td className="k-fc"><MoneyFc d={d} /></td>
       <td className="k-ac"><MoneyAc d={d} /></td>
       <td className="k-st"><StatusCell d={d} /></td>
@@ -879,20 +969,28 @@ function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Tr
   );
 }
 
-/** ผู้รับผิดชอบ: the name as text over a real <select> (one avatar per row: the company's). */
+/** ผู้รับผิดชอบ: the name as text, a styled picker under the pointer (one avatar per row: the company's;
+ *  the people's initials are in the list). Its list renders only while open, so a long table costs nothing. */
 function Owner({ d }: { d: Deal }) {
   const { e, ro, team } = useTk();
   const name = d.resp || 'มอบหมาย';
   if (ro) return <span className="sl-owner ro" title={'ผู้รับผิดชอบ ' + (d.resp || 'ยังไม่ระบุ')}><span className="sl-owner-name">{d.resp || '—'}</span></span>;
   const resps = [...new Set([...team, d.resp].filter(Boolean))];
   return (
-    <label className="sl-owner" title={`ผู้รับผิดชอบ: ${name} กดเพื่อเปลี่ยน`}>
-      <span className={'sl-owner-name' + (d.resp ? '' : ' none')}>{name}</span>
-      <select value={d.resp} data-owner={d.id} onChange={(ev) => e.updateDeal(d.id, { resp: ev.target.value })} aria-label={`ผู้รับผิดชอบ ${shortName(d.client)}`}>
-        {resps.map((x) => <option key={x} value={x}>{x}</option>)}
-        <option value="">ไม่ระบุ</option>
-      </select>
-    </label>
+    <Select
+      variant="cell"
+      id={'sl-owner-' + d.id}
+      className={'sl-owner-sel' + (d.resp ? '' : ' none')}
+      value={d.resp}
+      shown={name}
+      title={`ผู้รับผิดชอบ: ${name} กดเพื่อเปลี่ยน`}
+      label={`ผู้รับผิดชอบ ${shortName(d.client)}`}
+      valueText={d.resp || 'ไม่ระบุ'}
+      width={220}
+      search={false}
+      onChange={(v) => e.updateDeal(d.id, { resp: v })}
+      options={[...resps.map((x) => ({ v: x, label: x, lead: <Av name={x} /> })), { v: '', label: 'ไม่ระบุ', lead: <Av name="" /> }]}
+    />
   );
 }
 
@@ -938,14 +1036,27 @@ function ContactCell({ d }: { d: Deal }) {
   const od = overdueDays(S, d, today);
   const src = from === 'act' && act ? `จากบันทึกการติดต่อ (${ACT_TH[act.type]}${act.stage ? ' ที่ ' + act.stage : ''})` : from && from !== 'typed' ? `จากขั้น ${from}` : from === 'typed' ? 'วันที่ติดต่อที่พิมพ์ไว้' : '';
   const main = date ? dmTh(date) : '—';
-  const sub = od != null ? <span className="chip bad" title="ไม่ได้ติดต่อเกิน 14 วัน">ค้าง {fmtN(od)} วัน</span> : <span className="sl-ago">{date ? agoTh(date, today) : 'ยังไม่ได้ติดต่อ'}</span>;
+  // a contact range on: the latest contact inside it, when that is not the last one ("ในช่วงนี้ 20 ก.ย. · CALL2")
+  const inR = tk.date?.basis === 'contact' ? dateMatch(S, d, tk.date.r, 'contact', today) : null;
+  const other = inR && inR.d !== date ? inR : null;
+  const sub =
+    od != null ? <span className="chip bad" title="ไม่ได้ติดต่อเกิน 14 วัน">ค้าง {fmtN(od)} วัน</span>
+    : other ? (
+      // two short lines (the column is narrow): the day in the range, then what it was, both whole
+      <span className="sl-inrange">
+        <span>ในช่วงนี้ {dmTh(other.d)}</span>
+        <span>{other.what}</span>
+      </span>
+    )
+    : <span className="sl-ago">{date ? agoTh(date, today) : 'ยังไม่ได้ติดต่อ'}</span>;
+  const rangeNote = other && tk.date ? ` · ติดต่อในช่วง ${rangeTh(tk.date.r)}: ${isoTh(other.d)} (${other.what})` : '';
   const open = tk.pop === d.id;
   const btn = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) box.current?.querySelector<HTMLElement>('.sl-datechip')?.focus();
   }, [open]);
-  if (ro) return <span className="sl-cdw"><span className="sl-cdate ro" title={`ติดต่อล่าสุด ${date ? isoTh(date) : 'ยังไม่มี'} ${src}`}>{main}</span>{sub}</span>;
+  if (ro) return <span className="sl-cdw"><span className="sl-cdate ro" title={`ติดต่อล่าสุด ${date ? isoTh(date) : 'ยังไม่มี'} ${src}${rangeNote}`}>{main}</span>{sub}</span>;
   const close = () => {
     tk.setPop('');
     btn.current?.focus();
@@ -953,7 +1064,7 @@ function ContactCell({ d }: { d: Deal }) {
   return (
     <span
       className={'sl-cdw' + (open ? ' open' : '')}
-      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && tk.setPop('')}
+      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && !insidePop(ev.relatedTarget) && tk.setPop('')}
       onKeyDown={(ev) => {
         if (open && ev.key === 'Escape') {
           ev.stopPropagation();
@@ -967,8 +1078,8 @@ function ContactCell({ d }: { d: Deal }) {
         className="sl-cdate hv"
         aria-haspopup="dialog"
         aria-expanded={open}
-        data-pop={d.id}
-        title={`ติดต่อล่าสุด ${date ? isoTh(date) + ' · ' + src : 'ยังไม่มี'} กดเพื่อแก้วันที่ติดต่อ`}
+        data-cpop={d.id}
+        title={`ติดต่อล่าสุด ${date ? isoTh(date) + ' · ' + src : 'ยังไม่มี'}${rangeNote} กดเพื่อแก้วันที่ติดต่อ`}
         aria-label={`ติดต่อล่าสุด ${date ? isoTh(date) : 'ยังไม่มี'}${src ? ' (' + src + ')' : ''} แก้วันที่ติดต่อ`}
         onClick={() => tk.setPop(open ? '' : d.id)}
       >
@@ -985,6 +1096,37 @@ function ContactCell({ d }: { d: Deal }) {
           <p>ติดต่อล่าสุดในตาราง คือวันที่นี้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า{from && from !== 'typed' ? ` · ตอนนี้${src} ${isoTh(date)}` : ''}</p>
         </div>
       )}
+    </span>
+  );
+}
+
+/** How long ago, or until, a basis date: "อีก 8 วัน" / "วันนี้" / "เลยมา 4 วัน" (red when owed) / "รับแล้ว"
+ *  for due dates; "รับแล้ว" for money received; "5 วันก่อน" for the rest. */
+function basisRel(x: BasisDate, basis: DateBasis, today: string): { text: string; tone: '' | 'ok' | 'bad' } {
+  if (basis === 'paid' || (basis === 'due' && x.tone === 'ok')) return { text: 'รับแล้ว', tone: 'ok' };
+  if (basis !== 'due') return { text: agoTh(x.d, today), tone: '' };
+  const n = daysBetween(today, x.d);
+  return n > 0 ? { text: `อีก ${fmtN(n)} วัน`, tone: '' } : n === 0 ? { text: 'วันนี้', tone: '' } : { text: `เลยมา ${fmtN(-n)} วัน`, tone: x.tone === 'bad' ? 'bad' : '' };
+}
+/** What a basis date was, short enough for the column and the card: "PAY1" without its amount (the
+ *  title says it). */
+const whatShort = (x: BasisDate, basis: DateBasis) => (basis === 'paid' || basis === 'due' ? x.what.split(' · ')[0] : x.what);
+/** The row's date when the date filter is about another date than contacts: read-only, the date over
+ *  what it was and how long ago or until ("PAY1 · 175,000 · อีก 3 วัน"); the year only when not the table's. */
+function BasisCell({ d }: { d: Deal }) {
+  const { S, today, date, year } = useTk();
+  const x = date ? dateMatch(S, d, date.r, date.basis, today) : null;
+  if (!date || !x) return <span className="sl-bdate"><span className="sl-bdate-d none">—</span></span>;
+  const rel = basisRel(x, date.basis, today);
+  const when = x.d.slice(0, 4) === String(+year - 543) ? dmTh(x.d) : isoTh(x.d);
+  return (
+    <span className="sl-bdate" title={`${BASIS_TH[date.basis].head} ${isoTh(x.d)} · ${x.what} · ${rel.text}`}>
+      <span className="sl-bdate-d">{when}</span>
+      <span className="sl-bdate-w">
+        {date.basis === 'result' ? <span className={'st ' + (x.tone === 'ok' ? 'ok' : 'bad')}>{x.what}</span> : whatShort(x, date.basis)}
+        {' · '}
+        <span className={rel.tone ? 't-' + rel.tone : undefined}>{rel.text}</span>
+      </span>
     </span>
   );
 }
@@ -1161,7 +1303,7 @@ function RowMenu({ d }: { d: Deal }) {
     <span
       ref={ref}
       className="sl-actw"
-      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && tk.setMenu('')}
+      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && !insidePop(ev.relatedTarget) && tk.setMenu('')}
       onKeyDown={(ev) => {
         if (!open) return;
         if (ev.key === 'Escape') {
@@ -1189,13 +1331,10 @@ function RowMenu({ d }: { d: Deal }) {
                 role="menuitem"
                 className="menu-i"
                 onClick={pick(() => {
-                  const sel = document.querySelector<HTMLSelectElement>(`select[data-owner="${d.id}"]`);
-                  sel?.focus();
-                  try {
-                    sel?.showPicker();
-                  } catch {
-                    /* the focused select still opens with the keyboard */
-                  }
+                  // the row's ผู้รับผิดชอบ picker opens (its list takes the keyboard)
+                  const b = document.getElementById('sl-owner-' + d.id);
+                  b?.focus();
+                  b?.click();
                 })}
               >
                 เปลี่ยนผู้รับผิดชอบ
@@ -1531,7 +1670,7 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
   useEffect(() => {
     const down = (ev: PointerEvent) => {
       const t = ev.target as HTMLElement;
-      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live')) return;
+      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live,[data-pop]')) return;
       cancelRef.current();
     };
     document.addEventListener('pointerdown', down, true);
@@ -1806,7 +1945,7 @@ function useStepEditor(d: Deal, stage: string) {
   useEffect(() => {
     const down = (ev: PointerEvent) => {
       const t = ev.target as HTMLElement;
-      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live')) return;
+      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live,[data-pop]')) return;
       cancelRef.current();
     };
     document.addEventListener('pointerdown', down, true);
@@ -1928,7 +2067,7 @@ function DealCard({ d }: { d: Deal }) {
           <button type="button" className="sl-nm-b hv-tx" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
           <span className="sl-nm-s">
             {cur && <span className="sl-tg">เปิดล่าสุด</span>}
-            <span className="sl-ct">{d.resp || 'ยังไม่มอบหมาย'} · {lc ? 'ติดต่อ ' + dmTh(lc) : 'ยังไม่ได้ติดต่อ'}</span>
+            <CardWhen d={d} lc={lc} />
             {od != null && <span className="chip bad">ค้าง {fmtN(od)} วัน</span>}
           </span>
         </div>
@@ -1957,6 +2096,28 @@ function DealCard({ d }: { d: Deal }) {
       </div>
       {open && <CardKids d={d} t={t} />}
     </article>
+  );
+}
+
+/** The card's line under the name: "หมิว · ติดต่อ 5 ต.ค.", with a contact range "· ในช่วงนี้ 20 ก.ย." when
+ *  that is not the last contact; another date basis: "หมิว · ครบกำหนด 15 ต.ค. · PAY1 · อีก 3 วัน". */
+function CardWhen({ d, lc }: { d: Deal; lc: string }) {
+  const { S, today, date } = useTk();
+  const who = d.resp || 'ยังไม่มอบหมาย';
+  const x = date ? dateMatch(S, d, date.r, date.basis, today) : null;
+  if (date && x && date.basis !== 'contact') {
+    const rel = basisRel(x, date.basis, today);
+    return (
+      <span className="sl-ct">
+        {who} · {BASIS_TH[date.basis].short} {dmTh(x.d)} · {whatShort(x, date.basis)} · <span className={rel.tone ? 't-' + rel.tone : undefined}>{rel.text}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="sl-ct">
+      {who} · {lc ? 'ติดต่อ ' + dmTh(lc) : 'ยังไม่ได้ติดต่อ'}
+      {x && x.d !== lc && <span className="t-link"> · ในช่วงนี้ {dmTh(x.d)}</span>}
+    </span>
   );
 }
 
@@ -2146,23 +2307,26 @@ function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Lin
 // ------------------------------------------------------------------ closed + log
 
 /** Closed jobs of the year, with the same filters as the table (shown here too, so what is counted is what is listed). */
-function ClosedView({ S, deals, facets, total }: { S: SalesState; deals: Deal[]; facets: Deal[]; total: number }) {
+function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: SalesFilter; deals: Deal[]; facets: Deal[]; total: number; today: string }) {
   const { engine: e, ui, set } = useApp();
-  const on = filtersOn({ ...ui.slF, quick: '' }); // the quick views are about open work: not applied here
+  const on = narrowed({ ...F, quick: '' }); // the quick views are about open work: not applied here
+  const date = dateIn(F, today);
+  // another date than contacts or closing: the date the filter found, under ปิดเมื่อ
+  const extra = date && date.basis !== 'contact' && date.basis !== 'closed' ? date : null;
   let fc = 0, ac = 0;
   deals.forEach((d) => {
     const m = dealMoney(S, d);
     fc += m.forecast || 0;
     ac += m.actual || 0;
   });
-  const today = todayISO();
+  const which = date ? `ตามตัวกรอง · ${dateWords(date.f, date.r).field} ${dateWords(date.f, date.r).op} ${rangeTh(date.r)}` : 'ตามตัวกรอง';
   return (
     <>
       <p className="sl-closed-sum">
-        <span>ปิดแล้ว <b>{fmtN(deals.length)}</b> งาน{on ? ` จาก ${fmtN(total)} (ตามตัวกรอง)` : ''} · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></span>
+        <span>ปิดแล้ว <b>{fmtN(deals.length)}</b> งาน{on ? ` จาก ${fmtN(total)} (${which})` : ''} · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></span>
         <span className="t-meta">งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี</span>
       </p>
-      <Toolbar S={S} facets={facets} today={today} />
+      <Toolbar S={S} F={F} yearDeals={facets} today={today} job="closed" shown={deals.length} total={total} />
       <div className="card sl-list">
         {!deals.length ? (
           <div className="sl-list-empty">
@@ -2189,7 +2353,13 @@ function ClosedView({ S, deals, facets, total }: { S: SalesState; deals: Deal[];
                     <td><Status kind={r === 'YES' ? 'ok' : r === 'NO' ? 'bad' : 'neutral'}>{r === 'YES' ? 'ได้งาน' : r === 'NO' ? 'ไม่ได้งาน' : 'ไม่ระบุผล'}</Status></td>
                     <td className="r"><span className="sl-mn"><b className={m.forecast == null ? 'none' : ''}>{m.forecast == null ? '—' : fmtMoney(m.forecast)}</b><FigSub v={fcFig(S, d)} /></span></td>
                     <td className="r c-opt"><span className="sl-mn"><b className={m.actual == null ? 'none' : ''}>{m.actual == null ? '—' : fmtMoney(m.actual)}</b><FigSub v={acFig(S, d)} /></span></td>
-                    <td className="c-opt t-sec">{d.closedDate ? isoTh(d.closedDate) : '—'}</td>
+                    <td className="c-opt t-sec">
+                      {d.closedDate ? isoTh(d.closedDate) : '—'}
+                      {extra && (() => {
+                        const x = dateMatch(S, d, extra.r, extra.basis, today);
+                        return x && <span className="sl-bdate-w">{BASIS_TH[extra.basis].short} {dmTh(x.d)} · {x.what}</span>;
+                      })()}
+                    </td>
                     <td className="r">{e.can('edit') && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}</td>
                   </tr>
                 );

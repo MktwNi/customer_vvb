@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useApp } from '../state';
 import { dmTh, isoTh, todayISO } from '../lib/format';
 import { ACT_TH, ACT_TYPES, NOTE_MAX, actStage, planLines, type ActType, type Deal, type DealAct, type SalesState } from '../lib/sales';
 import type { GccEngine } from '../lib/engine';
 import { DateChip } from './DateChip';
+import { Select } from './Select';
 
 /**
  * Contacts beyond the stages ("บันทึกการติดต่อ"): the stages are milestones (CALL1 = the first call);
@@ -45,13 +46,12 @@ export function ActTypeSeg({ f }: { f: ActFormState }) {
 export function ActStageSel({ f, d, label = 'ขั้น' }: { f: ActFormState; d: Deal; label?: string }) {
   const { engine: e } = useApp();
   const list = actStages(e.sales, d);
+  const id = useId();
   return (
-    <label className="sl-af-l">
-      {label}
-      <select className="fld sel" value={f.stage} onChange={(ev) => f.setStage(ev.target.value)} aria-label="ขั้นที่การติดต่อนี้อยู่">
-        {[...new Set([...list, f.stage])].map((p) => <option key={p} value={p}>{p || 'ไม่ระบุขั้น'}</option>)}
-      </select>
-    </label>
+    <div className="sl-af-l">
+      <span id={id}>{label}</span>
+      <Select className="sm" labelledBy={id} label="ขั้นที่การติดต่อนี้อยู่" value={f.stage} onChange={f.setStage} width={220} options={[...new Set([...list, f.stage])].map((p) => ({ v: p, label: p || 'ไม่ระบุขั้น' }))} />
+    </div>
   );
 }
 
@@ -67,6 +67,7 @@ export function ActForm({ d, stage, onDone, compact }: { d: Deal; stage?: string
     input.current?.closest('.sl-af')?.scrollIntoView?.({ block: 'nearest' });
   }, []);
   const save = () => onDone(f.save());
+  const withId = useId();
   const keys = (ev: KeyboardEvent) => {
     if (ev.key === 'Escape') {
       ev.preventDefault();
@@ -93,13 +94,10 @@ export function ActForm({ d, stage, onDone, compact }: { d: Deal; stage?: string
       <div className="sl-af-r">
         <ActStageSel f={f} d={d} />
         {people.length > 0 && (
-          <label className="sl-af-l">
-            กับ
-            <select className="fld sel" value={f.pid} onChange={(ev) => f.setPid(ev.target.value)} aria-label="ผู้ติดต่อ">
-              <option value="">ไม่ระบุ</option>
-              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
+          <div className="sl-af-l">
+            <span id={withId}>กับ</span>
+            <Select className="sm" labelledBy={withId} label="ผู้ติดต่อ" value={f.pid} onChange={f.setPid} width={240} options={[{ v: '', label: 'ไม่ระบุ' }, ...people.map((p) => ({ v: p.id, label: p.name }))]} />
+          </div>
         )}
         <span className="sl-af-a">
           <button type="button" className="quiet" onClick={() => onDone(null)}>ยกเลิก</button>

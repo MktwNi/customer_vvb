@@ -4,6 +4,7 @@ import type { FeedKey, StageKey } from './lib/types';
 import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
+import { withoutDate } from './lib/salesUi';
 
 export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users' | 'help';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
@@ -123,6 +124,9 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
           }
         }
         if (n.person && n.person !== s.person) n.last = { ...n.last, person: n.person };
+        // another year of the tracker (the year picker, ส่งเข้า Sales Tracker, an import's "ดูตารางปี"): a date
+        // range goes back to the whole year, the other filters stay (filters spec §7.6)
+        if (n.slYear !== s.slYear) n.slF = withoutDate(n.slF);
         return n;
       }),
     [engine],

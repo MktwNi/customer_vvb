@@ -6,7 +6,7 @@ import { isoTh } from '../lib/format';
 export const card: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)' };
 /** The brand gradient: the shell, the hero KPI card and the sign-in panel only. */
 export const heroGrad = 'var(--hero)';
-// fields and buttons are classes (.fld, .fld.sel, .btn.pri, .btn, .lnk, .quiet in index.css), not inline
+// fields and buttons are classes (.fld, .btn.pri, .btn, .lnk, .quiet in index.css; dropdowns are Select.tsx), not inline
 // styles: an inline background or border would beat their :hover
 export const labelCol: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
 export const tabular: CSSProperties = { fontVariantNumeric: 'tabular-nums' };
@@ -155,17 +155,5 @@ export function DateField({ value, onChange, label, placeholder = 'เลือ�
       />
       <span className={'dfld-tx' + (value ? '' : ' empty')} aria-hidden="true">{value ? isoTh(value) : placeholder}</span>
     </span>
-  );
-}
-
-/** <select> for an options list with a leading "ทั้งหมด" option. */
-export function Opts({ options, all }: { options: { v: string; label: string }[]; all?: string }) {
-  return (
-    <>
-      {all != null && <option value="">{all}</option>}
-      {options.map((o) => (
-        <option key={o.v} value={o.v}>{o.label}</option>
-      ))}
-    </>
   );
 }

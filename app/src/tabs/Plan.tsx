@@ -6,7 +6,9 @@ import { fmtMoney, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import type { Company, FeedKey, StageKey, Task } from '../lib/types';
 import { feedLine } from './Track';
-import { Opts, PageHead, labelCol } from '../components/ui';
+import { PageHead } from '../components/ui';
+import { FilterBar } from '../components/FilterBar';
+import { Select } from '../components/Select';
 import { Icon } from '../components/icons';
 import { CoAvatar } from '../components/CoAvatar';
 
@@ -200,11 +202,19 @@ export function Plan() {
             <h3 className="card-t">รายชื่อที่ต้องติดต่อ</h3>
             <span className="t-sec">{`${fmtN(tg.length)} บริษัท · ยังไม่มีนัด ${fmtN(unpl.length)}`}</span>
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <label style={labelCol}>รายการ<select value={feedKey} onChange={(ev) => set({ plFeed: ev.target.value as FeedKey, picked: {}, plLim: 60 })} className="fld sel"><Opts options={FEEDS.map(([v, label]) => ({ v, label }))} /></select></label>
-            <label style={labelCol}>สถานะการขาย<select value={ui.plStage} onChange={(ev) => set({ plStage: ev.target.value as StageKey | '', picked: {} })} className="fld sel"><Opts all="ทั้งหมด" options={STG.map(([v, label]) => ({ v, label }))} /></select></label>
-            <label style={labelCol}>ผู้รับผิดชอบ<select value={ui.plOwner} onChange={(ev) => set({ plOwner: ev.target.value, picked: {} })} className="fld sel"><Opts all="ทั้งหมด" options={teamOpts} /></select></label>
-            {!ro && <label style={labelCol}>นัดอัตโนมัติวันละ<select value={String(ui.perDay)} onChange={(ev) => set({ perDay: +ev.target.value })} className="fld sel">{[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n} ราย</option>)}</select></label>}
+          <div className="pl-tools">
+            <Select variant="tool" prefix="รายการ" label="รายการ" value={feedKey} onChange={(v) => set({ plFeed: v as FeedKey, picked: {}, plLim: 60 })} options={FEEDS.map(([v, label]) => ({ v, label }))} search={false} width={280} />
+            {/* two filters, always shown as pills (no field menu) */}
+            <FilterBar
+              fields={[
+                { key: 'stage', label: 'สถานะการขาย', kind: 'single', all: 'ทั้งหมด', pinned: true, rest: 'ทั้งหมด', options: STG.map(([v, label]) => ({ v, label })) },
+                { key: 'owner', label: 'ผู้รับผิดชอบ', kind: 'single', all: 'ทั้งหมด', pinned: true, rest: 'ทุกคน', people: true, options: teamOpts },
+              ]}
+              value={{ stage: ui.plStage ? { v: [ui.plStage] } : undefined, owner: ui.plOwner ? { v: [ui.plOwner] } : undefined }}
+              onChange={(k, x) => set(k === 'stage' ? { plStage: (x?.v[0] ?? '') as StageKey | '', picked: {} } : { plOwner: x?.v[0] ?? '', picked: {} })}
+              anySet={false}
+            />
+            {!ro && <Select variant="tool" prefix="นัดอัตโนมัติวันละ" label="นัดอัตโนมัติวันละ" value={String(ui.perDay)} onChange={(v) => set({ perDay: +v })} options={[3, 5, 10, 20].map((n) => ({ v: String(n), label: `${n} ราย` }))} search={false} />}
             {!ro && unpl.length > 0 && (
               <button
                 onClick={() => window.confirm(`นัด ${fmtN(unpl.length)} รายที่ยังไม่มีแผน วันละ ${ui.perDay || 5} ราย (วันทำการ)?`) && e.autoPlan(unpl, ui.perDay || 5)}
@@ -262,10 +272,8 @@ export function Plan() {
                   </span>
                 </button>
                 <span style={{ fontSize: 13, color: 'var(--ink-2)', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
-                {/* the stage reads as plain text; it is still a select (a border shows under the pointer) */}
-                <select value={st[0]} disabled={ro} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} aria-label="สถานะการขาย" className="fld sel pl-stage">
-                  <Opts options={STG.map(([v, label]) => ({ v, label }))} />
-                </select>
+                {/* the stage reads as plain text; a picker under the pointer (plain text for viewers) */}
+                <Select variant="cell" className="pl-stage" value={st[0]} disabled={ro} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>

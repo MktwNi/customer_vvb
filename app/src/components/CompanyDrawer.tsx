@@ -7,7 +7,8 @@ import { ACT_TH, actsOf, beYear, dealMoney, fmtMoney, lastContact, trackerStatus
 import { fcFig } from '../lib/salesUi';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
-import { Opts, srcWords } from './ui';
+import { srcWords } from './ui';
+import { SelField, Select } from './Select';
 import { Icon } from './icons';
 import { CoAvatar } from './CoAvatar';
 import { CompanyPeople, logType } from '../tabs/People';
@@ -34,6 +35,9 @@ export function CompanyDrawer() {
   const [more, setMore] = useState<Record<string, boolean>>({});
   // the contact form's values when it was opened: saving writes only what was changed in it
   const [editC, setEditC] = useState<ContactForm | null>(null);
+  // the log form's type and result (back to โทร / none after each entry)
+  const [lgType, setLgType] = useState('call');
+  const [lgRes, setLgRes] = useState('');
   const ref = useRef<HTMLElement>(null);
   // takes the keyboard (also when opened over the deal panel), gives focus back on close
   useDialog(ref, { focus: 'dialog', on: !!c });
@@ -172,6 +176,8 @@ export function CompanyDrawer() {
     if (!g('text') && !g('result')) return;
     e.addLog(c.id, g('type') || 'note', g('result'), g('text'));
     f.reset();
+    setLgType('call');
+    setLgRes('');
   };
 
   return (
@@ -331,18 +337,8 @@ export function CompanyDrawer() {
                 </div>
               ) : (
               <div style={{ ...box, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
-                <label style={field}>
-                  สถานะในแผนติดต่อ
-                  <select value={st[0]} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} className="fld sel">
-                    <Opts options={STG.map(([v, label]) => ({ v, label }))} />
-                  </select>
-                </label>
-                <label style={field}>
-                  ผู้รับผิดชอบ
-                  <select value={C.owners[c.id] || ''} onChange={(ev) => e.setOwner(c.id, ev.target.value)} className="fld sel">
-                    <Opts all="ยังไม่มีผู้รับผิดชอบ" options={C.team.map((v) => ({ v, label: v }))} />
-                  </select>
-                </label>
+                <SelField style={field} text="สถานะในแผนติดต่อ" value={st[0]} onChange={(v) => e.setStage(c.id, v as StageKey)} options={STG.map(([v, label]) => ({ v, label }))} />
+                <SelField style={field} text="ผู้รับผิดชอบ" value={C.owners[c.id] || ''} onChange={(v) => e.setOwner(c.id, v)} options={[{ v: '', label: 'ยังไม่มีผู้รับผิดชอบ' }, ...C.team.map((v) => ({ v, label: v }))]} />
                 {/* with accounts the names come from the accounts an admin creates (the Update page has no team list) */}
                 {!C.team.length && (role == null || role === 'admin' ? (
                   <button onClick={() => go(role ? 'users' : 'update', { sel: null })} className="lnk" style={{ gridColumn: '1/-1', justifySelf: 'start', fontSize: 13 }}>
@@ -379,12 +375,8 @@ export function CompanyDrawer() {
                 <H>บันทึกการติดต่อ</H>
                 {!ro && <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <select name="type" aria-label="ประเภท" className="fld sel">
-                      <Opts options={[{ v: 'call', label: 'โทร' }, { v: 'email', label: 'อีเมล' }, { v: 'meet', label: 'นัดพบ' }, { v: 'note', label: 'โน้ต' }]} />
-                    </select>
-                    <select name="result" aria-label="ผลการติดต่อ" className="fld sel">
-                      <Opts all="ผลการติดต่อ" options={LOG_RESULTS.map((v) => ({ v, label: v }))} />
-                    </select>
+                    <Select name="type" label="ประเภท" value={lgType} onChange={setLgType} options={[{ v: 'call', label: 'โทร' }, { v: 'email', label: 'อีเมล' }, { v: 'meet', label: 'นัดพบ' }, { v: 'note', label: 'โน้ต' }]} />
+                    <Select name="result" label="ผลการติดต่อ" value={lgRes} onChange={setLgRes} placeholder="ผลการติดต่อ" options={[{ v: '', label: 'ผลการติดต่อ' }, ...LOG_RESULTS.map((v) => ({ v, label: v }))]} />
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input name="text" aria-label="รายละเอียด" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" className="fld" style={{ flex: 1, minWidth: 0 }} />

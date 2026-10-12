@@ -1,13 +1,16 @@
-import { useRef, useState, type ReactNode } from 'react';
-import { useApp } from '../state';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useApp, useEngineVersion } from '../state';
 import { addDays, dow, fmtN, isoTh } from '../lib/format';
-import { DEAL_STAGE, STAGE_TH, dealMoney, dealResult, fmtMoney, lastContact, overdueDays, salesStats, stepOf, type Deal, type SalesState, type SalesStats } from '../lib/sales';
-import { winRateBySource } from '../lib/salesUi';
+import { DEAL_STAGE, STAGE_TH, dealMoney, dealResult, filterDeals, fmtMoney, lastContact, normSalesFilter, overdueDays, salesStats, stepOf, type Deal, type SalesFilter, type SalesState, type SalesStats } from '../lib/sales';
+import { liveCount, monthCounts, trackerFields, winRateBySource, withoutDate } from '../lib/salesUi';
+import { rangeTh, resolveDate } from '../lib/dateRange';
+import { FilterBar, type FVal } from '../components/FilterBar';
+import { DateFilter, dateWords } from '../components/DateFilter';
 import { TT } from '../lib/constants';
 import type { Task } from '../lib/types';
 import { CoAvatar, coreName } from '../components/CoAvatar';
 import { Icon } from '../components/icons';
-import { Opts, heroGrad } from '../components/ui';
+import { heroGrad } from '../components/ui';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -92,21 +95,37 @@ function Acc({ title, sub, open, onToggle, children }: { title: string; sub?: st
  * Sales dashboard (the owner's own layout, kept as designed; only weights, text colours and glyphs follow
  * the design system): greeting + headline numbers, the pipeline by stage, the top seller, this week's
  * contacts, sales against forecast, win rate, follow-ups, this week's appointments and the breakdowns.
- * One filter row on top scopes everything.
+ * One filter row on top scopes everything: the tracker's row (ช่วงเวลา, ผู้รับผิดชอบ, เพิ่มตัวกรอง) with its own
+ * values, kept apart from the table's.
  */
 export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Deal[]; today: string; year: string }) {
   const { engine: e, set, open } = useApp();
-  const [f, setF] = useState({ resp: '', referral: '', month: '' });
+  const [f, setF] = useState<Omit<SalesFilter, 'year'>>({});
+  // another year: its own date range goes back to the whole year, as the table's does (filters spec §7.6)
+  const [fYear, setFYear] = useState(year);
+  if (fYear !== year) {
+    setFYear(year);
+    setF(withoutDate(f));
+  }
   const [acc, setAcc] = useState<Record<string, boolean>>({ resp: true });
   const [showAll, setShowAll] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [wk, setWk] = useState(0); // weeks from this one, for the appointments
   const [evTip, setEvTip] = useState<string | null>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
-  const list = deals.filter((d) => (!f.resp || (d.resp || '(ไม่ระบุ)') === f.resp) && (!f.referral || (d.referral || '(ไม่ระบุ)') === f.referral) && (!f.month || lastContact(S, d, today).slice(5, 7) === f.month));
+  const F = normSalesFilter({ year, ...f });
+  const list = filterDeals(S, F, today);
   const st = salesStats(S, list, today);
-  const uniq = (k: 'resp' | 'referral') => [...new Set(deals.map((d) => d[k] || '(ไม่ระบุ)'))].sort();
   const me = e.me();
+  const ver = useEngineVersion();
+  const key = JSON.stringify(f);
+  // the Dashboard reports results: no ผลการขาย; the rest in the table's order (one menu on both tabs)
+  const fields = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const up = (p: Partial<SalesFilter>) => {
+    const { year: _y, ...rest } = normSalesFilter({ ...F, ...p });
+    setF(rest);
+  };
+  const date = F.date ? { f: F.date, r: resolveDate(F.date, year, today) } : null;
 
   // top sellers: actual first, then forecast; closed deals per person
   const yesBy: Record<string, number> = {};
@@ -145,9 +164,10 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const wMon = addDays(mon, wk * 7);
   const wDays = Array.from({ length: 7 }, (_, i) => addDays(wMon, i));
   // with a filter set, only the filtered customers' appointments (and, for an owner, the companies they own)
-  const filtered = !!(f.resp || f.referral || f.month);
+  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section);
   const gids = new Set(list.filter((d) => d.gid != null).map((d) => e.canonical(d.gid as number)));
-  const inScope = (t: Task) => !filtered || gids.has(e.canonical(t.gid)) || (!!f.resp && !f.referral && !f.month && e.crm.owners[e.canonical(t.gid)] === f.resp);
+  const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section;
+  const inScope = (t: Task) => !filtered || gids.has(e.canonical(t.gid)) || (onlyResp && F.resp!.v.includes(e.crm.owners[e.canonical(t.gid)]));
   const tasks = e.crm.tasks.filter((t) => t.date >= wDays[0] && t.date <= wDays[6] && inScope(t));
   const m0 = +wDays[0].slice(5, 7), m6 = +wDays[6].slice(5, 7), y0 = +wDays[0].slice(0, 4) + 543, y6 = +wDays[6].slice(0, 4) + 543;
   const wLabel = m0 === m6 ? `${TH_MONTH[m0]} ${y0}` : y0 === y6 ? `${TH_M[m0]} – ${TH_M[m6]} ${y6}` : `${TH_M[m0]} ${y0} – ${TH_M[m6]} ${y6}`;
@@ -182,7 +202,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
       <div className="sd-head">
         <div className="sd-hello">
           <h3>{me ? `สวัสดี, ${me}` : 'สวัสดีทีมขาย'}</h3>
-          <span>{`ภาพรวมการขาย ปี ${year}${f.resp || f.referral || f.month ? ' · ตามตัวกรอง' : ''}`}</span>
+          <span>{date ? `ภาพรวมการขาย · ${dateWords(date.f, date.r).field} ${rangeTh(date.r)} · ตามตัวกรอง` : `ภาพรวมการขาย ปี ${year}${filtered ? ' · ตามตัวกรอง' : ''}`}</span>
         </div>
         <div className="sd-heroes">
           {([
@@ -199,11 +219,29 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </div>
       </div>
 
-      <div className="sd-filters" role="group" aria-label="ตัวกรอง Dashboard">
-        <select className={'fld sel' + (f.resp ? ' on' : '')} value={f.resp} onChange={(ev) => setF({ ...f, resp: ev.target.value })} aria-label="ผู้รับผิดชอบ"><Opts all="ผู้รับผิดชอบ: ทั้งหมด" options={uniq('resp').map((x) => ({ v: x, label: 'ผู้รับผิดชอบ: ' + x }))} /></select>
-        <select className={'fld sel' + (f.referral ? ' on' : '')} value={f.referral} onChange={(ev) => setF({ ...f, referral: ev.target.value })} aria-label="แหล่งที่มา"><Opts all="แหล่งที่มา: ทั้งหมด" options={uniq('referral').map((x) => ({ v: x, label: 'แหล่งที่มา: ' + x }))} /></select>
-        <select className={'fld sel' + (f.month ? ' on' : '')} value={f.month} onChange={(ev) => setF({ ...f, month: ev.target.value })} aria-label="เดือนที่ติดต่อล่าสุด"><Opts all="ติดต่อล่าสุด: ทุกเดือน" options={TH_M.slice(1).map((m, i) => ({ v: String(i + 1).padStart(2, '0'), label: 'ติดต่อล่าสุด ' + m }))} /></select>
-        {filtered && <button className="btn sm" onClick={() => setF({ resp: '', referral: '', month: '' })}>ล้างตัวกรอง</button>}
+      <div className="sd-filters">
+        <FilterBar
+          fields={fields}
+          value={{ resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section } as Record<string, FVal | undefined>}
+          onChange={(k, v) => up({ [k]: v || undefined })}
+          lead={
+            <DateFilter
+              value={F.date}
+              onChange={(d) => up({ date: d })}
+              year={year}
+              today={today}
+              count={(draft) => liveCount(S, F, 'date', draft, '', today)}
+              monthCounts={(basis, y) => monthCounts(S, F, basis, y, '', today)}
+              unit="ราย"
+            />
+          }
+          anySet={filtered}
+          onClearAll={() => setF({})}
+          count={filtered ? { shown: list.length, total: deals.length } : null}
+          liveCount={(k, d) => liveCount(S, F, k, d, '', today)}
+          // the cards count customers in ราย ("ลูกค้า 25 ราย"): the row says it the same way
+          unit="ราย"
+        />
       </div>
 
       <div className="sd-pipe" role="list" aria-label="จำนวนลูกค้าที่ผ่านแต่ละขั้น">

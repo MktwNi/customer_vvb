@@ -10,6 +10,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore, type KVStore } from './storage';
 import { dealMoney, filterDeals, lastContact, toDoc } from './sales';
+import { localDay } from './format';
 import type { SyncOp } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -296,12 +297,16 @@ describe('Sales Tracker: second review', () => {
     expect(dealMoney(A.sales, A.sales.deals[d.id]).forecast).toBe(150000);
   });
 
-  it('round 3: the table\'s contact month filter finds deals by their last contact (or the day added)', () => {
-    const d = A.addDeal({ client: 'ลูกค้ากรองเดือน', year: '2558' });
+  it('round 3: the table\'s date filter finds deals by contact date, or by the day added', () => {
+    // a year of its own (2570), whose calendar reaches back to 2026
+    const d = A.addDeal({ client: 'ลูกค้ากรองเดือน', year: '2570' });
     A.setStep(d.id, 'CALL1', { d: '2026-09-15', n: 'โทร' });
-    expect(filterDeals(A.sales, { year: '2558', month: '09' }).map((x) => x.id)).toEqual([d.id]);
-    const e2 = A.addDeal({ client: 'ลูกค้ายังไม่ติดต่อ', year: '2558' });
-    expect(filterDeals(A.sales, { year: '2558', month: e2.at.slice(5, 7) }).map((x) => x.id)).toContain(e2.id);
+    const sep = { basis: 'contact', preset: 'custom', from: '2026-09-01', to: '2026-09-30' } as const;
+    expect(filterDeals(A.sales, { year: '2570', date: sep }, '2026-10-06').map((x) => x.id)).toEqual([d.id]);
+    const e2 = A.addDeal({ client: 'ลูกค้ายังไม่ติดต่อ', year: '2570' });
+    expect(filterDeals(A.sales, { year: '2570', date: sep }, '2026-10-06').map((x) => x.id)).not.toContain(e2.id);
+    const day = localDay(e2.at);
+    expect(filterDeals(A.sales, { year: '2570', date: { basis: 'added', preset: 'custom', from: day, to: day } }, '2026-10-06').map((x) => x.id)).toContain(e2.id);
   });
 
   it('round 3: a backup restored while connected keeps its extra lists and shares them', async () => {

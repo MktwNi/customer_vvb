@@ -1,9 +1,11 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
 import { daysBetween, dmTh, localDay } from './format';
+import { basisDates, filterDeals, listValues, NONE, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
   DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
 } from './sales';
+import type { FField, FOpt } from '../components/FilterBar';
 
 /**
  * A Buddhist-era year typed by a person ("2569", "พ.ศ. 2569", Thai digits too) → `{ year }`.
@@ -26,12 +28,118 @@ export function yearOptions(deals: Iterable<Deal>, shown: string, now = beYear()
   return [...ys].sort();
 }
 
-/** Choices of a ผู้รับผิดชอบ / แหล่งที่มา filter: taken from all of the year's deals (not the rows left
- *  after filtering, or the chosen value would drop out of its own list) and always including it. */
-export function facetOptions(deals: Deal[], k: 'resp' | 'referral', chosen = '') {
-  const s = new Set(deals.map((d) => d[k] || '(ไม่ระบุ)'));
-  if (chosen) s.add(chosen);
-  return [...s].sort();
+// ------------------------------------------------------------------ the filter row (filters spec §6)
+
+/** Filters when the tracker's year changes (filters spec §7.6), from wherever it changes (the year picker,
+ *  ส่งเข้า Sales Tracker, an import's "ดูตารางปี", the Dashboard's own row): a date range goes back to the
+ *  whole year (a named range of the old year is not one of the new year's), the other filters stay. */
+export function withoutDate<F extends { date?: unknown }>(f: F): F {
+  if (!f.date) return f;
+  const { date: _d, ...rest } = f;
+  return rest as F;
+}
+
+/** What each date basis is called: in the basis list (`label`, `sub`), the hint under it, the chip's
+ *  and caption's word (`short`), the column heading in the rows (`head`) and the popover's sentence. */
+export const BASIS_TH: Record<DateBasis, { label: string; sub: string; hint: string; short: string; head: string; sent: string }> = {
+  contact: { label: 'มีการติดต่อ', sub: 'ติดต่อแล้ว ไม่นับนัดล่วงหน้า', hint: 'นับวันที่ติดต่อที่พิมพ์ไว้ วันที่ของขั้นตอน และบันทึกการติดต่อ ที่ไม่เกินวันนี้', short: 'ติดต่อ', head: 'ติดต่อล่าสุด', sent: 'งานที่มีการติดต่อ' },
+  added: { label: 'เพิ่มเข้าตาราง', sub: 'วันที่ส่งเข้า Sales Tracker', hint: 'นับวันที่ลูกค้าถูกเพิ่มเข้าตารางของปีนี้', short: 'เพิ่มเข้าตาราง', head: 'เพิ่มเข้าตาราง', sent: 'งานที่เพิ่มเข้าตาราง' },
+  result: { label: 'ได้ผลการขาย', sub: 'ได้งาน / ไม่ได้งาน', hint: 'นับวันที่ของขั้น CLOSED DEAL เมื่อรู้ผลแล้ว ทั้งได้งานและไม่ได้งาน', short: 'ได้ผลการขาย', head: 'วันที่ได้ผล', sent: 'งานที่ได้ผลการขาย' },
+  paid: { label: 'รับเงิน', sub: 'งวดที่รับเงินแล้ว', hint: 'นับวันที่รับเงินของแต่ละงวด งานที่ไม่มีแผนนับวันที่ของขั้น PAY ที่ทำแล้ว', short: 'รับเงิน', head: 'รับเงิน', sent: 'งานที่รับเงิน' },
+  due: { label: 'ครบกำหนดชำระ', sub: 'งวดตามแผนการชำระ', hint: 'นับวันครบกำหนดของงวดในแผนการชำระ ไม่นับงวดที่ยกเลิก', short: 'ครบกำหนด', head: 'ครบกำหนด', sent: 'งานที่มีงวดครบกำหนด' },
+  closed: { label: 'ปิดงาน', sub: 'วันที่กดปิดงาน', hint: 'นับวันที่กดปิดงาน งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”', short: 'ปิดงาน', head: 'ปิดงาน', sent: 'งานที่ปิด' },
+};
+
+/** ผลการขาย's choices (radios) and what its chip says. */
+export const RESULT_OPTS: { v: Exclude<ResultF, ''>; label: string; chip: string }[] = [
+  { v: 'YES', label: 'ได้งาน (YES)', chip: 'ได้งาน' },
+  { v: 'NO', label: 'ไม่ได้งาน (NO)', chip: 'ไม่ได้งาน' },
+  { v: 'WAIT', label: 'รอผล / มีหมายเหตุ', chip: 'รอผล' },
+  { v: 'EMPTY', label: 'ยังไม่มีผล', chip: 'ยังไม่มีผล' },
+];
+
+/** The rows a view counts from: the table's open jobs (with its quick view), the closed tab's closed jobs
+ *  (no quick view), or the Dashboard's every job of the year. */
+export type ViewJob = 'open' | 'closed' | '';
+const viewOf = (F: SalesFilter, job: ViewJob): SalesFilter => ({ ...F, job, quick: job === 'open' ? F.quick : '' });
+
+/** The rows of the view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date'
+ *  takes a date draft). */
+export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string): number {
+  return filterDeals(S, { ...viewOf(F, job), [key]: draft ?? undefined }, today).length;
+}
+
+/** How many rows of the view (date filter off) have a date of `basis` in each month of `ceYear`. */
+export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceYear: number, job: ViewJob, today: string): number[] {
+  const out = Array(12).fill(0) as number[], y = String(ceYear);
+  withActIndex(S, () =>
+    filterDeals(S, { ...viewOf(F, job), date: null }, today).forEach((d) => {
+      const ms = new Set(basisDates(S, d, basis, today).filter((x) => x.d.startsWith(y)).map((x) => +x.d.slice(5, 7) - 1));
+      ms.forEach((m) => out[m]++);
+    }),
+  );
+  return out;
+}
+
+const thCmp = (a: string, b: string) => a.localeCompare(b, 'th');
+/**
+ * The tracker's filter fields with their choices and counts (filters spec §6.3). A count is how many rows
+ * of the view pass every other filter and have that value (a deal counts once under each of its SOURCE
+ * and Services). Choices come from all of the year's deals, not the rows left (a chosen value never drops
+ * out of its own list), and always include the chosen ones. ผู้รับผิดชอบ: you first ("ฉัน"), then the
+ * busiest; SOURCE / Services: the configured order; หมวด: the table's order; empty values last.
+ * `dash`: the Dashboard's row (no ผลการขาย: it reports results).
+ */
+export function trackerFields(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean }): FField[] {
+  // six passes over the year's deals: the contact records indexed once for all of them
+  return withActIndex(S, () => fieldsOf(S, F, ctx));
+}
+function fieldsOf(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean }): FField[] {
+  const { yearDeals, job, me, today } = ctx;
+  const counts = (k: ListKey) => {
+    const m = new Map<string, number>();
+    filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today).forEach((d) => listValues(d, k).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
+    return m;
+  };
+  const used = (k: ListKey) => new Set(yearDeals.flatMap((d) => listValues(d, k)));
+  const opt = (v: string, n: Map<string, number>, sub?: string): FOpt => ({ v, label: v === NONE ? 'ไม่ระบุ' : v, n: n.get(v) || 0, sub });
+  const chosen = (k: ListKey) => F[k]?.v || [];
+  /** configured values first (in their order), then any other value the deals use or the filter holds; empty last */
+  const ordered = (k: ListKey, cfg: string[]) => {
+    const n = counts(k), seen = used(k), extra = [...seen, ...chosen(k)].filter((v) => !cfg.includes(v) && v !== NONE);
+    const vs = [...new Set([...cfg, ...extra.sort(thCmp)])];
+    if (seen.has(NONE) || chosen(k).includes(NONE)) vs.push(NONE);
+    return vs.map((v) => opt(v, n));
+  };
+  /** by how many rows have it, then by name; empty last */
+  const busiest = (k: ListKey, first?: string) => {
+    const n = counts(k), vs = [...new Set([...used(k), ...chosen(k), ...(first ? [first] : [])])];
+    const rest = vs.filter((v) => v !== first && v !== NONE).sort((a, b) => (n.get(b) || 0) - (n.get(a) || 0) || thCmp(a, b));
+    return [...(first ? [opt(first, n, 'ฉัน')] : []), ...rest.map((v) => opt(v, n)), ...(vs.includes(NONE) ? [opt(NONE, n)] : [])];
+  };
+  const fields: FField[] = [
+    { key: 'resp', label: 'ผู้รับผิดชอบ', kind: 'multi', ops: true, people: true, pinned: true, rest: 'ทุกคน', options: busiest('resp', me || undefined) },
+    { key: 'source', label: 'SOURCE', hint: 'ช่องทางที่ได้ลูกค้า', kind: 'multi', ops: true, options: ordered('source', S.cfg.sources) },
+    { key: 'service', label: 'Services', hint: 'บริการที่เสนอ', kind: 'multi', ops: true, options: ordered('service', S.cfg.services) },
+    { key: 'referral', label: 'แหล่งที่มา', hint: 'ใครแนะนำ / มาจากไหน', kind: 'multi', ops: true, find: 'ค้นหาชื่อ', options: busiest('referral') },
+    {
+      key: 'section', label: 'หมวด', hint: 'กลุ่มแถวในตาราง', kind: 'multi', ops: true, find: 'ค้นหาหมวด',
+      options: (() => {
+        const n = counts('section');
+        const vs = [...new Set([...sectionsFor(S, yearDeals).map((x) => x || NONE), ...chosen('section')])];
+        return [...vs.filter((v) => v !== NONE), ...(vs.includes(NONE) ? [NONE] : [])].map((v) => opt(v, n));
+      })(),
+    },
+  ];
+  if (!ctx.dash) {
+    const n = new Map<string, number>();
+    filterDeals(S, { ...viewOf(F, job), result: '' }, today).forEach((d) => {
+      const r = dealResult(S, d) || 'EMPTY';
+      n.set(r, (n.get(r) || 0) + 1);
+    });
+    fields.push({ key: 'result', label: 'ผลการขาย', hint: 'ได้งาน / ไม่ได้งาน / รอผล', kind: 'single', all: 'ทั้งหมด', options: RESULT_OPTS.map((o) => ({ ...o, n: n.get(o.v) || 0 })) });
+  }
+  return fields;
 }
 
 /** Win rate (%) of each SOURCE that has deals with a known result — a channel at 0% is kept. */

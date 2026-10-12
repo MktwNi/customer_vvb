@@ -5,6 +5,14 @@ import type { Company } from '../lib/types';
 import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
+import { SelField, type SelOpt } from './Select';
+
+/** The หมวด choices with how many of the year's deals each has ("4 ราย"). */
+function sectionOpts(e: ReturnType<typeof useApp>['engine'], year: string): SelOpt[] {
+  const n = new Map<string, number>();
+  Object.values(e.sales.deals).forEach((d) => d.year === year && n.set(d.section, (n.get(d.section) || 0) + 1));
+  return e.sales.cfg.sections.map((x) => ({ v: x, label: x, n: n.get(x) ? `${n.get(x)} ราย` : undefined }));
+}
 
 const EMPTY = { name: '', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' };
 const RO_NOTE = 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้';
@@ -99,12 +107,7 @@ export function AddCustomer() {
             </div>
           )}
           {a.deal && !edit && (
-            <label style={labelCol}>
-              หมวดใน Sales Tracker
-              <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
-                {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
-              </select>
-            </label>
+            <SelField style={labelCol} text="หมวดใน Sales Tracker" value={section} onChange={setSection} options={sectionOpts(e, ui.slYear || beYear())} />
           )}
           <label style={labelCol}>ผู้ติดต่อ<input value={f.contact} onChange={up('contact')} className="fld" /></label>
           <label style={labelCol}>เบอร์โทร<input value={f.phone} onChange={up('phone')} type="tel" className="fld" /></label>
@@ -114,20 +117,8 @@ export function AddCustomer() {
           <summary className="lnk">ข้อมูลบริษัท (ไม่บังคับ)</summary>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,250px),1fr))', gap: 10, paddingTop: 10 }}>
           <label style={labelCol}>เลขนิติบุคคล (13 หลัก)<input value={f.jur} onChange={up('jur')} inputMode="numeric" maxLength={20} className="fld" /></label>
-          <label style={labelCol}>
-            จังหวัด
-            <select value={f.prov} onChange={up('prov')} className="fld sel">
-              <option value="">ไม่ระบุ</option>
-              {provs.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </label>
-          <label style={labelCol}>
-            กลุ่มอุตสาหกรรม
-            <select value={f.ind} onChange={up('ind')} className="fld sel">
-              <option value="">ไม่ระบุ</option>
-              {D.ind.filter((x) => x && x !== 'ไม่ระบุ').map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </label>
+          <SelField style={labelCol} text="จังหวัด" value={f.prov} onChange={(v) => setF({ ...f, prov: v })} search options={[{ v: '', label: 'ไม่ระบุ' }, ...provs.map((p) => ({ v: p, label: p }))]} />
+          <SelField style={labelCol} text="กลุ่มอุตสาหกรรม" value={f.ind} onChange={(v) => setF({ ...f, ind: v })} search options={[{ v: '', label: 'ไม่ระบุ' }, ...D.ind.filter((x) => x && x !== 'ไม่ระบุ').map((x) => ({ v: x, label: x }))]} />
           <label style={labelCol}>ประกอบกิจการ<input value={f.biz} onChange={up('biz')} className="fld" /></label>
           <label style={labelCol}>เว็บไซต์<input value={f.web} onChange={up('web')} className="fld" /></label>
           <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ที่อยู่<input value={f.addr} onChange={up('addr')} className="fld" /></label>
@@ -185,19 +176,15 @@ export function SendToTracker() {
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* (minmax: the long "อัตโนมัติ — …" choice must not widen the column past the dialog) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 120px', gap: 10 }}>
-        <label style={{ ...labelCol, minWidth: 0 }}>
-          หมวด
-          <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
-            {cos.length > 1 && <option value={AUTO}>อัตโนมัติ — ตามแหล่งที่พบ (TGO / SET/mai)</option>}
-            {e.sales.cfg.sections.map((x) => <option key={x} value={x}>{x}</option>)}
-          </select>
-        </label>
-        <label style={labelCol}>
-          ปี (พ.ศ.)
-          <select value={year} onChange={(ev) => setYear(ev.target.value)} className="fld sel">
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </label>
+        <SelField
+          style={{ ...labelCol, minWidth: 0 }}
+          text="หมวด"
+          value={section}
+          onChange={setSection}
+          options={[...(cos.length > 1 ? [{ v: AUTO, label: 'อัตโนมัติ', sub: 'ตามแหล่งที่พบ (TGO / SET/mai)' }] : []), ...sectionOpts(e, year)]}
+          width={320}
+        />
+        <SelField style={labelCol} text="ปี (พ.ศ.)" value={year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
         {cos.map((c) => (

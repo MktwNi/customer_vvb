@@ -76,12 +76,12 @@ describe('sales tracker rules (same as the original tracker)', () => {
     expect(st.byResp['(ไม่ระบุ)'].n).toBe(2);
   });
 
-  it('filters: year, text in notes, source, result, contact day/month; section order', () => {
+  it('filters: year, text in notes, result, a contact date range; section order', () => {
     const ds = [deal({ id: '1', section: 'TGO', contactDate: '2026-10-05' }), deal({ id: '2', section: 'Retention', client: 'อีกบริษัท' }), deal({ id: '3', year: '2568' })];
     const S = state(ds, { '2/CALL1': { d: '', n: 'ลูกค้าสนใจ CFO มาก' } });
     expect(filterDeals(S, { year: '2569' }).map((d) => d.id)).toEqual(['2', '1']); // Retention comes before TGO in the sections list
     expect(filterDeals(S, { year: '2569', q: 'สนใจ' }).map((d) => d.id)).toEqual(['2']);
-    expect(filterDeals(S, { year: '2569', month: '10', day: '05' }).map((d) => d.id)).toEqual(['1']);
+    expect(filterDeals(S, { year: '2569', date: { basis: 'contact', preset: 'custom', from: '2026-10-05', to: '2026-10-05' } }, '2026-10-12').map((d) => d.id)).toEqual(['1']);
     expect(filterDeals(S, { year: '2569', result: 'EMPTY' })).toHaveLength(2);
     expect(filterDeals(S, { year: '2568' })).toHaveLength(1);
   });

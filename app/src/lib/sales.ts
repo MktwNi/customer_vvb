@@ -12,7 +12,8 @@
  * Pure functions only (no DOM) so everything here is unit-tested.
  */
 import { norm } from './core';
-import { addDays, daysBetween, localDay, todayISO } from './format';
+import { addDays, daysBetween, localDay, pad, todayISO } from './format';
+import { ceOf, inRange, isDay, monthEnd, normDateF, resolveDate, type DateBasis, type DateF, type Range } from './dateRange';
 import type { CustomCo } from './types';
 
 /** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
@@ -399,11 +400,35 @@ export function dealMoney(s: SalesState, d: Deal) {
   };
 }
 
-/** A deal's contacts beyond the stages, newest first (by date, then when they were written). */
+const actOrder = (a: DealAct, b: DealAct) => b.d.localeCompare(a.d) || (b.at || '').localeCompare(a.at || '');
+/** The contact records by deal while a pass over many deals runs (withActIndex); null otherwise. */
+let actIx: { s: SalesState; by: Map<string, DealAct[]> } | null = null;
+/** A deal's contacts beyond the stages, newest first (by date, then when they were written). One scan of
+ *  every record per call, unless a pass over many deals has indexed them (withActIndex). */
 export const actsOf = (s: SalesState, id: string): DealAct[] =>
-  Object.values(s.acts || {})
-    .filter((a) => a.deal === id)
-    .sort((a, b) => b.d.localeCompare(a.d) || (b.at || '').localeCompare(a.at || ''));
+  actIx && actIx.s === s ? [...(actIx.by.get(id) || [])] : Object.values(s.acts || {}).filter((a) => a.deal === id).sort(actOrder);
+/**
+ * Runs `fn` with the contact records indexed by deal, so a pass over many deals (filterDeals, the filter
+ * row's counts) reads each deal's records without scanning them all again. The index lives only for this
+ * synchronous call: the engine changes `s.acts` in place, so nothing is kept between calls.
+ */
+export function withActIndex<T>(s: SalesState, fn: () => T): T {
+  if (actIx && actIx.s === s) return fn();
+  const by = new Map<string, DealAct[]>();
+  for (const a of Object.values(s.acts || {})) {
+    const l = by.get(a.deal);
+    if (l) l.push(a);
+    else by.set(a.deal, [a]);
+  }
+  by.forEach((l) => l.sort(actOrder));
+  const was = actIx;
+  actIx = { s, by };
+  try {
+    return fn();
+  } finally {
+    actIx = was;
+  }
+}
 /** Contacts by the stage they belong to; no stage, or one no longer in the list → `other`. */
 export function stageActs(s: SalesState, d: Deal): { by: Record<string, DealAct[]>; other: DealAct[] } {
   const by: Record<string, DealAct[]> = {}, other: DealAct[] = [];
@@ -866,34 +891,144 @@ export function quickMatch(s: SalesState, d: Deal, q: QuickView, today: string) 
   return st.result === 'YES' && payState(s, d, today).left.length > 0;
 }
 
-export interface SalesFilter { year: string; q?: string; section?: string; source?: string; service?: string; resp?: string; referral?: string; result?: '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY'; day?: string; month?: string; job?: '' | 'open' | 'closed'; quick?: QuickView }
+export type { DateBasis, DateF } from './dateRange';
+/** A list filter: any of these values (OR inside the field); `not` = none of them. */
+export interface ListF { v: string[]; not?: true }
+export type ListKey = 'resp' | 'source' | 'service' | 'referral' | 'section';
+export const LIST_KEYS: ListKey[] = ['resp', 'source', 'service', 'referral', 'section'];
+export type ResultF = '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY';
+/** The table's filters (AND across fields). `quick`: a quick view; `job`: open or closed jobs only;
+ *  `date`: a date range on one of a deal's dates (null = the whole year). */
+export interface SalesFilter {
+  year: string; q?: string; quick?: QuickView; job?: '' | 'open' | 'closed';
+  resp?: ListF; source?: ListF; service?: ListF; referral?: ListF; section?: ListF;
+  result?: ResultF; date?: DateF | null;
+}
+/** What callers may pass: a list as one string (older callers and tests), and the retired month / day of
+ *  the last contact (read as a contact range). */
+export type SalesFilterIn = Omit<SalesFilter, ListKey> & Partial<Record<ListKey, ListF | string>> & { month?: string; day?: string };
+/** An empty value of a list field (no ผู้รับผิดชอบ, no SOURCE …), as the filters name it. */
+export const NONE = '(ไม่ระบุ)';
+const RESULTS: ResultF[] = ['', 'YES', 'NO', 'WAIT', 'EMPTY'];
 
-/** Deals of a year that pass the filters, in section order then row order. */
-export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
+/** Filters in one shape, whatever came in: a string list value becomes `{v:[x]}` ('' and [] none, no
+ *  duplicates); the retired month ('01'–'12', with an optional day) becomes a contact range in the year;
+ *  the date is checked (dateRange normDateF). */
+export function normSalesFilter(f: SalesFilterIn): SalesFilter {
+  const out: SalesFilter = { year: f.year };
+  if (f.q) out.q = f.q;
+  if (f.quick) out.quick = f.quick;
+  if (f.job) out.job = f.job;
+  for (const k of LIST_KEYS) {
+    const v = f[k];
+    const list = typeof v === 'string' ? (v ? [v] : []) : v && Array.isArray(v.v) ? [...new Set(v.v.filter((x) => typeof x === 'string'))] : [];
+    if (list.length) out[k] = typeof v === 'object' && v.not ? { v: list, not: true } : { v: list };
+  }
+  if (f.result && RESULTS.includes(f.result)) out.result = f.result;
+  let date = normDateF(f.date, f.year);
+  if (!f.date && f.month && /^(0[1-9]|1[0-2])$/.test(f.month)) {
+    const from = `${ceOf(f.year)}-${f.month}-01`;
+    const day = f.day ? `${from.slice(0, 8)}${pad(+f.day)}` : '';
+    date = !f.day ? { basis: 'contact', preset: 'custom', from, to: monthEnd(from) } : /^\d{1,2}$/.test(f.day) && isDay(day) ? { basis: 'contact', preset: 'custom', from: day, to: day } : null;
+  }
+  if (date) out.date = date;
+  return out;
+}
+
+/** A deal's values of a list field: ผู้รับผิดชอบ / แหล่งที่มา / หมวด one each, SOURCE / Services a list;
+ *  empty is NONE. */
+export function listValues(d: Deal, k: ListKey): string[] {
+  if (k === 'source' || k === 'service') return d[k].length ? d[k] : [NONE];
+  return [d[k] || NONE];
+}
+export function listMatch(d: Deal, k: ListKey, f: ListF): boolean {
+  const vs = listValues(d, k), hit = f.v.some((x) => vs.includes(x));
+  return f.not ? !hit : hit;
+}
+
+/** One date of a deal on a basis: `what` it was ("CALL2", "PAY1 · 50,000"), the amount, its tone (ok =
+ *  won / received, bad = lost / late), and for due dates whether something is still owed on it. */
+export interface BasisDate { d: string; what: string; amt?: number; tone?: 'ok' | 'bad' | ''; owed?: boolean }
+/**
+ * A deal's dates on a basis, newest first:
+ * - contact: what the last contact counts (lastContactInfo): the typed contact date, every stage date and
+ *   every contact record, up to today (a planned call is not a contact yet);
+ * - added: the day it was added to the table (local day);
+ * - result: the CLOSED DEAL date once the result is YES or NO;
+ * - paid: when each installment came in (with a plan); without a plan, each paid PAY stage dated up to today;
+ * - due: each installment's due date (not those of a lost deal);
+ * - closed: the day it was closed (ปิดงาน).
+ */
+export function basisDates(s: SalesState, d: Deal, basis: DateBasis, today: string): BasisDate[] {
+  const out: BasisDate[] = [];
+  if (basis === 'contact') {
+    if (d.contactDate && d.contactDate <= today) out.push({ d: d.contactDate, what: 'วันที่ติดต่อ' });
+    for (const p of s.cfg.stages) {
+      const x = s.steps[`${d.id}/${p}`]?.d;
+      if (x && x <= today) out.push({ d: x, what: p });
+    }
+    for (const a of actsOf(s, d.id)) if (a.d && a.d <= today) out.push({ d: a.d, what: ACT_TH[a.type] + (a.stage ? ' · ' + a.stage : '') });
+  } else if (basis === 'added') {
+    if (d.at) out.push({ d: localDay(d.at), what: 'เพิ่มเข้าตาราง' });
+  } else if (basis === 'result') {
+    const r = dealResult(s, d), x = stepOf(s, d.id, DEAL_STAGE).d;
+    if (x && (r === 'YES' || r === 'NO')) out.push({ d: x, what: r === 'YES' ? 'ได้งาน' : 'ไม่ได้งาน', tone: r === 'YES' ? 'ok' : 'bad' });
+  } else if (basis === 'paid') {
+    const plan = planOf(s, d, today);
+    if (plan) plan.lines.forEach((l) => l.got > 0 && l.rcvDate && out.push({ d: l.rcvDate, what: `${l.stage} · ${fmtMoney(l.got)}`, amt: l.got, tone: 'ok' }));
+    else {
+      const acs = docsOf(s, d.id).filter(countsActual);
+      payState(s, d, today).paid.forEach((p) => {
+        const x = stepOf(s, d.id, p).d;
+        if (!x || x > today) return;
+        const at = acs.filter((z) => z.stage === p);
+        const amt = at.length ? at.reduce((a, z) => a + (z.amount || 0), 0) : undefined;
+        out.push({ d: x, what: amt != null ? `${p} · ${fmtMoney(amt)}` : p, amt, tone: 'ok' });
+      });
+    }
+  } else if (basis === 'due') {
+    planOf(s, d, today)?.lines.forEach((l) => {
+      if (!l.due || l.status === 'off') return;
+      out.push({ d: l.due, what: `${l.stage} · ${fmtMoney(l.amt)}`, amt: l.left || l.amt, owed: l.left > 0, tone: l.lateDays ? 'bad' : l.status === 'paid' ? 'ok' : '' });
+    });
+  } else if (basis === 'closed') {
+    if (d.closedDate) out.push({ d: d.closedDate, what: 'ปิดงาน' });
+  }
+  return out.sort((a, b) => b.d.localeCompare(a.d));
+}
+
+/** The date a row shows for a range (null = the deal is not in it): the latest one inside it; for due
+ *  dates the earliest one still owed, else the latest. */
+export function dateMatch(s: SalesState, d: Deal, r: Range, basis: DateBasis, today: string): BasisDate | null {
+  const xs = basisDates(s, d, basis, today).filter((x) => inRange(x.d, r));
+  if (!xs.length) return null;
+  if (basis === 'due') return [...xs].reverse().find((x) => x.owed) || xs[0];
+  return xs[0];
+}
+
+/** Deals of a year that pass the filters, in section order then row order. `today` is a parameter for
+ *  tests (the quick views and the date filter depend on it). */
+export function filterDeals(s: SalesState, fIn: SalesFilterIn, today = todayISO()): Deal[] {
+  return withActIndex(s, () => filterPass(s, fIn, today));
+}
+function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
+  const f = normSalesFilter(fIn);
   const q = (f.q || '').trim().toLowerCase();
   const terms = q ? q.split(/\s+/) : [];
   const secIx = new Map(s.cfg.sections.map((x, i) => [x, i]));
+  const lists = LIST_KEYS.filter((k) => f[k]);
+  const range = f.date ? resolveDate(f.date, f.year, today) : null;
   return Object.values(s.deals)
     .filter((d) => {
       if (d.year !== f.year) return false;
       if (f.job && d.jobStatus !== f.job) return false;
-      if (f.section && d.section !== f.section) return false;
-      if (f.source && !d.source.includes(f.source)) return false;
-      if (f.service && !d.service.includes(f.service)) return false;
-      if (f.resp && (d.resp || '') !== (f.resp === '(ไม่ระบุ)' ? '' : f.resp)) return false;
-      if (f.referral && (d.referral || '') !== (f.referral === '(ไม่ระบุ)' ? '' : f.referral)) return false;
+      if (!lists.every((k) => listMatch(d, k, f[k]!))) return false;
       if (f.result) {
         const r = dealResult(s, d);
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;
       }
-      if (f.quick && !quickMatch(s, d, f.quick, todayISO())) return false;
-      if (f.day || f.month) {
-        // the last contact (typed date, latest stage date or contact record), or the day it was added — as shown in the row
-        const cd = lastContact(s, d, todayISO()) || (d.at || '').slice(0, 10);
-        if (cd.length < 10) return false;
-        if (f.month && cd.slice(5, 7) !== f.month) return false;
-        if (f.day && cd.slice(8, 10) !== f.day) return false;
-      }
+      if (f.quick && !quickMatch(s, d, f.quick, today)) return false;
+      if (range && !dateMatch(s, d, range, f.date!.basis, today)) return false;
       if (terms.length) {
         const plan = (planLines(s, d) || []).map((x) => `${x.line.note} ${x.line.howT}`);
         const notes = [...s.cfg.stages.map((p) => stepOf(s, d.id, p).n), ...plan, ...actsOf(s, d.id).map((a) => a.note)].join(' ');
@@ -903,6 +1038,47 @@ export function filterDeals(s: SalesState, f: SalesFilter): Deal[] {
       return true;
     })
     .sort((a, b) => (secIx.get(a.section) ?? 1e9) - (secIx.get(b.section) ?? 1e9) || a.section.localeCompare(b.section) || a.order - b.order || a.at.localeCompare(b.at));
+}
+
+/**
+ * Money received inside a range (the KPI footer "รับในช่วงนี้"): with a plan, what each installment got
+ * when it came in; without one, the Actual documents (on their stage's date, else the document date,
+ * else the day attached); and a deal with neither but a typed Actual counts it once, on its latest paid
+ * PAY stage's date.
+ */
+export function receivedIn(s: SalesState, deals: Deal[], r: Range, today: string): number {
+  let sum = 0;
+  for (const d of deals) {
+    const plan = planOf(s, d, today);
+    if (plan) {
+      plan.lines.forEach((l) => l.got > 0 && inRange(l.rcvDate, r) && (sum += l.got));
+      continue;
+    }
+    const acs = docsOf(s, d.id).filter(countsActual);
+    if (acs.length) {
+      acs.forEach((x) => {
+        const st = x.stage && s.cfg.stages.includes(x.stage) ? stepOf(s, d.id, x.stage).d : '';
+        const day = st && st <= today ? st : x.docDate || localDay(x.at);
+        if (inRange(day, r)) sum += x.amount || 0;
+      });
+      continue;
+    }
+    const typed = dealMoney(s, d).actual;
+    if (typed && typed > 0) {
+      const last = payState(s, d, today).paid.map((p) => stepOf(s, d.id, p).d).filter((x) => x && x <= today).sort().pop();
+      if (last && inRange(last, r)) sum += typed;
+    }
+  }
+  return sum;
+}
+/** Still owed on installments due inside a range (open, won deals): the KPI footer "ค้างในช่วงนี้". */
+export function owedIn(s: SalesState, deals: Deal[], r: Range, today: string): number {
+  let sum = 0;
+  for (const d of deals) {
+    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES') continue;
+    planOf(s, d, today)?.lines.forEach((l) => l.left > 0 && inRange(l.due, r) && (sum += l.left));
+  }
+  return sum;
 }
 
 /** Sections to show for a year: configured order first, then any extra ones used by deals. */
