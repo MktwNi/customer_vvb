@@ -400,11 +400,35 @@ export function dealMoney(s: SalesState, d: Deal) {
   };
 }
 
-/** A deal's contacts beyond the stages, newest first (by date, then when they were written). */
+const actOrder = (a: DealAct, b: DealAct) => b.d.localeCompare(a.d) || (b.at || '').localeCompare(a.at || '');
+/** The contact records by deal while a pass over many deals runs (withActIndex); null otherwise. */
+let actIx: { s: SalesState; by: Map<string, DealAct[]> } | null = null;
+/** A deal's contacts beyond the stages, newest first (by date, then when they were written). One scan of
+ *  every record per call, unless a pass over many deals has indexed them (withActIndex). */
 export const actsOf = (s: SalesState, id: string): DealAct[] =>
-  Object.values(s.acts || {})
-    .filter((a) => a.deal === id)
-    .sort((a, b) => b.d.localeCompare(a.d) || (b.at || '').localeCompare(a.at || ''));
+  actIx && actIx.s === s ? [...(actIx.by.get(id) || [])] : Object.values(s.acts || {}).filter((a) => a.deal === id).sort(actOrder);
+/**
+ * Runs `fn` with the contact records indexed by deal, so a pass over many deals (filterDeals, the filter
+ * row's counts) reads each deal's records without scanning them all again. The index lives only for this
+ * synchronous call: the engine changes `s.acts` in place, so nothing is kept between calls.
+ */
+export function withActIndex<T>(s: SalesState, fn: () => T): T {
+  if (actIx && actIx.s === s) return fn();
+  const by = new Map<string, DealAct[]>();
+  for (const a of Object.values(s.acts || {})) {
+    const l = by.get(a.deal);
+    if (l) l.push(a);
+    else by.set(a.deal, [a]);
+  }
+  by.forEach((l) => l.sort(actOrder));
+  const was = actIx;
+  actIx = { s, by };
+  try {
+    return fn();
+  } finally {
+    actIx = was;
+  }
+}
 /** Contacts by the stage they belong to; no stage, or one no longer in the list → `other`. */
 export function stageActs(s: SalesState, d: Deal): { by: Record<string, DealAct[]>; other: DealAct[] } {
   const by: Record<string, DealAct[]> = {}, other: DealAct[] = [];
@@ -985,6 +1009,9 @@ export function dateMatch(s: SalesState, d: Deal, r: Range, basis: DateBasis, to
 /** Deals of a year that pass the filters, in section order then row order. `today` is a parameter for
  *  tests (the quick views and the date filter depend on it). */
 export function filterDeals(s: SalesState, fIn: SalesFilterIn, today = todayISO()): Deal[] {
+  return withActIndex(s, () => filterPass(s, fIn, today));
+}
+function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
   const f = normSalesFilter(fIn);
   const q = (f.q || '').trim().toLowerCase();
   const terms = q ? q.split(/\s+/) : [];

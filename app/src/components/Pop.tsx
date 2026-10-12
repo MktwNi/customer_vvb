@@ -34,6 +34,35 @@ function tabStops(box: HTMLElement) {
   });
 }
 
+/** Swallows the click that follows this press (and nothing later: it is dropped at the next press or
+ *  key, or soon after the press ends without one). */
+function eatClick() {
+  let tm = 0;
+  const eat = (ev: Event) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    off();
+  };
+  const up = () => {
+    clearTimeout(tm);
+    tm = window.setTimeout(off, 400);
+  };
+  const off = () => {
+    clearTimeout(tm);
+    window.removeEventListener('click', eat, true);
+    window.removeEventListener('pointerup', up, true);
+    window.removeEventListener('pointercancel', off, true);
+    window.removeEventListener('pointerdown', off, true);
+    window.removeEventListener('keydown', off, true);
+  };
+  window.addEventListener('click', eat, true);
+  window.addEventListener('pointerup', up, true);
+  window.addEventListener('pointercancel', off, true);
+  // added while this press is past the window's capture phase: only a later press removes it
+  window.addEventListener('pointerdown', off, true);
+  window.addEventListener('keydown', off, true);
+}
+
 /**
  * A floating panel on a control (a filter chip, a picker, the field menu), portalled to the body and
  * fixed to the window, so no scrolling card clips it. Desktop: under its anchor (start- or end-aligned),
@@ -43,11 +72,17 @@ function tabStops(box: HTMLElement) {
  * with a grab bar, its title and ×, over a veil that cancels when tapped.
  *
  * Keys (the last popover opened only): Escape closes it and gives the focus back (`back`, else the
- * anchor). Tab cycles inside a `kind:'dialog'` popover; a `kind:'list'` one (a menu or listbox) closes
- * and the focus moves on from the anchor, as from a native select. A press outside it (and outside its
- * anchor and the popovers opened from it) closes it and leaves the focus where it went.
+ * anchor). Tab cycles inside a `kind:'dialog'` popover and inside any sheet; a `kind:'list'` popover (a
+ * menu or listbox) closes and the focus moves on from the anchor, as from a native select. A press
+ * outside it (and outside its anchor and the popovers opened from it) closes it and leaves the focus
+ * where it went; inside a modal dialog or panel, a press on its dimmed backdrop only closes the popover
+ * (as a native select's list: the dialog and what was typed in it stay).
+ *
+ * The first focus: `[data-autofocus]`, else the first stop. A sheet opened by touch takes the focus
+ * itself (a text field would bring the phone's keyboard up over it); opened from the keyboard (a 900px
+ * window: a laptop zoomed in) it focuses as a popover does, so arrows, Enter and Tab work.
  */
-export function Pop({ anchor, onClose, place = 'below', align = 'start', width, label, title, kind, role = 'dialog', back, sheet = true, className = '', initialFocus = 'auto', boxRef, children }: {
+export function Pop({ anchor, onClose, place = 'below', align = 'start', width, label, title, kind, role = 'dialog', back, sheet = true, className = '', initialFocus = 'auto', boxRef, id: domId, children }: {
   anchor: RefObject<HTMLElement | null> | HTMLElement | null;
   onClose: (why: PopWhy) => void;
   /** 'below' = under the anchor; 'side' = beside a menu box (the anchor), tops lined up */
@@ -70,9 +105,15 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
   initialFocus?: 'auto' | 'container';
   /** gets the popover's box (the field menu: what the value popover lines up with) */
   boxRef?: RefObject<HTMLDivElement | null>;
+  /** the box's id, for the opener's aria-controls */
+  id?: string;
   children: ReactNode;
 }) {
   const asSheet = useMedia('(max-width: 900px)') && sheet;
+  // opened from the keyboard? (read while rendering: the opener may be gone once this mounts)
+  const [kb] = useState(() => typeof document !== 'undefined' && !!document.activeElement?.matches?.(':focus-visible'));
+  /** a press on the veil that began there (a drag out of the sheet that ends on it is not a tap on it) */
+  const veilDown = useRef(false);
   const box = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<CSSProperties>({ visibility: 'hidden' });
   const [at, setAt] = useState('');
@@ -137,6 +178,10 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
           side = 'above';
           maxH = room;
         }
+        // a short page cannot scroll it into place: when the window holds it, it is shown whole, over
+        // its anchor if it must (cut short, its preset or the last week of the month would be out of view)
+        if (h <= H - 2 * M && top + h > H - M) top = H - M - h;
+        if (h <= H - 2 * M) maxH = H - M - top;
         maxH = Math.max(160, maxH);
         left = align === 'end' ? r.right - w : r.left;
       }
@@ -184,8 +229,9 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
     const raf = requestAnimationFrame(() => {
       const b = box.current;
       if (!b || b.contains(document.activeElement)) return;
-      // a phone sheet takes the focus itself: a focused text field would pop the keyboard over it
-      const f = initialFocus === 'container' || asSheet ? null : b.querySelector<HTMLElement>('[data-autofocus]') || tabStops(b)[0];
+      // a sheet opened by touch takes the focus itself (a focused text field would pop the keyboard up over
+      // it); opened from the keyboard, its first control does, as in a popover (a sheet's own × is not that)
+      const f = initialFocus === 'container' || (asSheet && !kb) ? null : b.querySelector<HTMLElement>('[data-autofocus]') || tabStops(b).find((x) => !x.classList.contains('pop-x'));
       (f || b).focus({ preventScroll: true });
     });
     const key = (ev: KeyboardEvent) => {
@@ -199,7 +245,8 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
         return close('esc');
       }
       if (!b || !b.contains(document.activeElement)) return;
-      if (kind === 'list') {
+      // a list closes on Tab, as a native select; a sheet is a modal layer: Tab goes round inside it
+      if (kind === 'list' && !asSheet) {
         // leave Tab to the browser, from the anchor: the focus moves on to the next field
         (live.current.back?.isConnected ? live.current.back : el())?.focus({ preventScroll: true });
         return close('tab');
@@ -221,6 +268,10 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
         const other = +(host.getAttribute('data-pop') || 0);
         if (other === me || stack.indexOf(other) > stack.indexOf(me)) return;
       }
+      // opened in a modal dialog or panel, pressed outside it (its dimmed backdrop): the press only closes
+      // this list, as a native select's would; the backdrop's click would close the dialog and lose what was typed
+      const modal = a?.closest('[aria-modal="true"]');
+      if (modal && !modal.contains(t) && !host) eatClick();
       close('out');
     };
     window.addEventListener('keydown', key, true);
@@ -244,8 +295,18 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
   const aria = role === 'none' ? {} : { role, 'aria-label': label };
   if (asSheet)
     return createPortal(
-      <div className="pop-back" data-pop={id.current} onPointerDown={(ev) => ev.target === ev.currentTarget && close('cancel')}>
-        <div ref={setBox} className={'pop-sheet ' + className} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+      <div
+        className="pop-back"
+        data-pop={id.current}
+        // the veil cancels on a tap's click, not its press: closed on the press, the veil would be gone
+        // before the click, and the click would land on whatever was under it
+        onPointerDown={(ev) => (veilDown.current = ev.target === ev.currentTarget)}
+        onClick={(ev) => {
+          if (ev.target === ev.currentTarget && veilDown.current) close('cancel');
+          veilDown.current = false;
+        }}
+      >
+        <div ref={setBox} id={domId} className={'pop-sheet ' + className} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
           <div className="pop-grab" aria-hidden="true" />
           <div className="pop-head">
             <span className="pop-title">{title ?? label}</span>
@@ -259,7 +320,7 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
       document.body,
     );
   return createPortal(
-    <div ref={setBox} data-pop={id.current} data-at={at || undefined} className={'pop ' + className} style={{ ...pos, width: width ? `min(${width}px, calc(100vw - 24px))` : undefined }} {...aria} tabIndex={-1}>
+    <div ref={setBox} id={domId} data-pop={id.current} data-at={at || undefined} className={'pop ' + className} style={{ ...pos, width: width ? `min(${width}px, calc(100vw - 24px))` : undefined }} {...aria} tabIndex={-1}>
       {children}
     </div>,
     document.body,
@@ -273,7 +334,8 @@ export function useHL() {
   const ref = useRef<HTMLDivElement>(null);
   const move = (t: EventTarget | null, kb?: boolean) => {
     const box = ref.current, it = (t as HTMLElement | null)?.closest?.<HTMLElement>('[data-hl]');
-    if (!box || !it || !box.contains(it)) return;
+    // the list itself carries data-hl (its on / off state): focus on the list is not an item
+    if (!box || !it || it === box || !box.contains(it)) return;
     // the focus a popover gives on opening does not move it: only the keyboard's
     if (kb && !document.activeElement?.matches(':focus-visible')) return;
     box.style.setProperty('--hy', it.offsetTop + 'px');

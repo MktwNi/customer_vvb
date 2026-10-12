@@ -4,10 +4,10 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  basisDates, dateMatch, emptySales, filterDeals, listMatch, newDeal, normSalesFilter, owedIn, receivedIn,
+  actsOf, basisDates, dateMatch, emptySales, filterDeals, listMatch, newDeal, normSalesFilter, owedIn, receivedIn, withActIndex,
   type Deal, type DealAct, type DealDoc, type PayLine, type SalesState,
 } from './sales';
-import { liveCount, monthCounts, trackerFields } from './salesUi';
+import { liveCount, monthCounts, trackerFields, withoutDate } from './salesUi';
 
 const T = '2026-10-12';
 const deal = (p: Partial<Deal> = {}): Deal => newDeal({ id: p.id || 'd' + Math.random().toString(36).slice(2), client: 'บริษัท ' + (p.id || 'ก'), year: '2569', ...p }, 'me', p.at || '2026-09-01T03:00:00.000Z');
@@ -43,6 +43,9 @@ describe('old filter shapes are read safely', () => {
     expect(normSalesFilter({ year: '2569', month: '10' }).date).toEqual({ basis: 'contact', preset: 'custom', from: '2026-10-01', to: '2026-10-31' });
     expect(normSalesFilter({ year: '2569', month: '10', day: '05' }).date).toEqual({ basis: 'contact', preset: 'custom', from: '2026-10-05', to: '2026-10-05' });
     expect(normSalesFilter({ year: '2569', month: '02', day: '30' }).date).toBeUndefined();
+    // a day off the calendar is dropped (it used to throw a RangeError inside filterDeals)
+    for (const day of ['32', '00', '99']) expect(normSalesFilter({ year: '2569', month: '10', day }).date).toBeUndefined();
+    expect(filterDeals(emptySales(), { year: '2569', month: '10', day: '32' }, '2026-10-12')).toEqual([]);
     expect(normSalesFilter({ year: '2569', day: '05' }).date).toBeUndefined();
     const out = normSalesFilter({ year: '2569', month: '10', day: '05' });
     expect('month' in out || 'day' in out).toBe(false);
@@ -180,5 +183,40 @@ describe('counts in the filter row', () => {
     expect(m[1]).toBe(2); // ก.พ.: deals 1 and 2 (the date filter itself is off)
     expect(m[9]).toBe(1);
     expect(m[11]).toBe(0); // December is after today
+  });
+});
+
+describe('one pass over many deals', () => {
+  it('reads contact records from an index made for that call only (the engine edits them in place)', () => {
+    const ds = [deal({ id: 'a' }), deal({ id: 'b' })];
+    const S = state(ds, {}, [act('a', 'x1', '2026-10-01'), act('a', 'x2', '2026-10-05'), act('b', 'y1', '2026-09-20')]);
+    const plain = actsOf(S, 'a').map((x) => x.id);
+    expect(plain).toEqual(['x2', 'x1']); // newest first
+    expect(withActIndex(S, () => actsOf(S, 'a').map((x) => x.id))).toEqual(plain);
+    // a caller may change what it gets: the index keeps its own list
+    withActIndex(S, () => {
+      actsOf(S, 'a').pop();
+      expect(actsOf(S, 'a')).toHaveLength(2);
+      expect(withActIndex(S, () => actsOf(S, 'b')).map((x) => x.id)).toEqual(['y1']); // nested: the same index
+    });
+    // after the call a record added in place is seen at once
+    S.acts!['b/y2'] = act('b', 'y2', '2026-10-08');
+    expect(actsOf(S, 'b').map((x) => x.id)).toEqual(['y2', 'y1']);
+    const F = { year: '2569', date: { basis: 'contact' as const, preset: 'custom' as const, from: '2026-10-06', to: '2026-10-10' } };
+    expect(ids(filterDeals(S, F, T))).toEqual(['b']);
+    // a throw inside the pass does not leave the index behind
+    expect(() => withActIndex(S, () => { throw new Error('x'); })).toThrow('x');
+    delete S.acts!['b/y2'];
+    expect(ids(filterDeals(S, F, T))).toEqual([]);
+  });
+});
+
+describe('another year of the tracker', () => {
+  it('drops the date range and keeps the other filters', () => {
+    const f = { quick: 'active' as const, resp: { v: ['เอ'] }, date: { basis: 'contact' as const, preset: 'month' as const, from: '2026-10-01', to: '2026-10-31' } };
+    expect(withoutDate(f)).toEqual({ quick: 'active', resp: { v: ['เอ'] } });
+    const none: { quick: string; date?: unknown } = { quick: 'active' };
+    expect(withoutDate(none)).toBe(none);
+    expect(withoutDate({ date: null, q: 'x' })).toEqual({ date: null, q: 'x' });
   });
 });

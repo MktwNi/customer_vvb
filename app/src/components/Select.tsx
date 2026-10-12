@@ -14,6 +14,13 @@ export interface SelOpt<V extends string = string> {
 }
 
 const lower = (s: string) => s.toLocaleLowerCase('th');
+/** Type-ahead: the label starts with what was typed, or one of its words does ("2568" finds "ปี 2568"). */
+const typedHit = (label: string, s: string) => {
+  const l = lower(label), t = lower(s);
+  return l.startsWith(t) || l.split(/\s+/).some((w) => w.startsWith(t));
+};
+/** "ค้นหาจังหวัด", "ค้นหาหมวด", "ค้นหา SOURCE" (a space before a Latin name), as the filter popovers say it. */
+export const findWordOf = (label: string) => 'ค้นหา' + (/^[A-Za-z]/.test(label) ? ' ' : '') + label;
 
 /** What a Select takes (see Select). */
 export interface SelectProps<V extends string> {
@@ -28,8 +35,11 @@ export interface SelectProps<V extends string> {
   prefix?: string;
   /** the button's text in place of the chosen label ("ปี 2569") */
   shown?: ReactNode;
-  /** how the button's accessible name says the value ("ปี (พ.ศ.): 2569"), when not the option's label */
+  /** how the button's accessible name says the value, when not the option's label */
   valueText?: string;
+  /** the button's whole accessible name, in place of "{label}: {value}" (it must hold the visible words:
+   *  "ปี 2569 (พ.ศ.)" for a button that shows "ปี 2569") */
+  ariaLabel?: string;
   /** shown (grey) when the value matches no option */
   placeholder?: string;
   /** a find field over the list: 'auto' = more than 8 options */
@@ -55,7 +65,7 @@ export interface SelectProps<V extends string> {
  * `head` (the page-head pill), `cell` (a table cell that reads as text). Never inside a <label> (a click
  * on an option would click the button again): give a visible label an id and pass `labelledBy`.
  */
-export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, placeholder, search = 'auto', width, align, name, id, disabled, className = '', title }: SelectProps<V>) {
+export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, ariaLabel, placeholder, search = 'auto', width, align, name, id, disabled, className = '', title }: SelectProps<V>) {
   const [own, setOwn] = useState<V | undefined>(defaultValue);
   const cur = value !== undefined ? value : own;
   const [open, setOpen] = useState<{ seed: string } | null>(null);
@@ -83,7 +93,7 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
         aria-haspopup="listbox"
         aria-expanded={!!open}
         aria-controls={open ? lid : undefined}
-        aria-label={labelledBy ? undefined : `${label}: ${valueText ?? opt?.label ?? placeholder ?? 'ยังไม่ได้เลือก'}`}
+        aria-label={labelledBy ? undefined : ariaLabel ?? `${label}: ${valueText ?? opt?.label ?? placeholder ?? 'ยังไม่ได้เลือก'}`}
         aria-labelledby={labelledBy ? `${labelledBy} ${bid}` : undefined}
         aria-describedby={describedBy}
         onClick={() => setOpen(open ? null : { seed: '' })}
@@ -115,12 +125,14 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
 
 /** The listbox of a Select (and of any picker that shows choices the same way). */
 function SelList<V extends string>({ id, value, options, label, search, seed, onPick }: { id: string; value: V | undefined; options: SelOpt<V>[]; label: string; search: boolean; seed: string; onPick: (v: V) => void }) {
-  const [q, setQ] = useState('');
+  // a letter typed on the closed button opens the list: with a find field, it is the first letter of the search
+  const [q, setQ] = useState(search ? seed : '');
   const t = lower(q.trim());
   const list = t ? options.filter((o) => lower(o.label).includes(t)) : options;
   const ok = (i: number) => !!list[i] && !list[i].disabled;
   const [act, setAct] = useState(() => {
-    const s = seed ? list.findIndex((o) => !o.disabled && lower(o.label).startsWith(lower(seed))) : -1;
+    if (search && t) return Math.max(0, list.findIndex((o) => !o.disabled));
+    const s = seed ? list.findIndex((o) => !o.disabled && typedHit(o.label, seed)) : -1;
     const c = list.findIndex((o) => o.v === value);
     return s >= 0 ? s : c >= 0 ? c : Math.max(0, list.findIndex((o) => !o.disabled));
   });
@@ -147,8 +159,9 @@ function SelList<V extends string>({ id, value, options, label, search, seed, on
     const k = ev.key;
     if (k === 'ArrowDown') go(act + 1, 1);
     else if (k === 'ArrowUp') go(act - 1, -1);
-    else if (k === 'Home') go(0, 1);
-    else if (k === 'End') go(list.length - 1, -1);
+    // in the find field Home and End move the caret (an editable combobox)
+    else if (k === 'Home' && !search) go(0, 1);
+    else if (k === 'End' && !search) go(list.length - 1, -1);
     else if (k === 'PageDown') go(act + 8, 1);
     else if (k === 'PageUp') go(act - 8, -1);
     else if (k === 'Enter' || (k === ' ' && !search)) {
@@ -158,7 +171,7 @@ function SelList<V extends string>({ id, value, options, label, search, seed, on
       const b = typed.current, now = Date.now();
       b.s = (now - b.t < 600 ? b.s : '') + k;
       b.t = now;
-      const i = list.findIndex((o) => !o.disabled && lower(o.label).startsWith(lower(b.s)));
+      const i = list.findIndex((o) => !o.disabled && typedHit(o.label, b.s));
       if (i >= 0) go(i);
     } else return;
     ev.preventDefault();
@@ -176,8 +189,8 @@ function SelList<V extends string>({ id, value, options, label, search, seed, on
               requestAnimationFrame(() => show(0));
             }}
             onKeyDown={key}
-            placeholder="ค้นหา"
-            aria-label={'ค้นหา ' + label}
+            placeholder={findWordOf(label)}
+            aria-label={findWordOf(label)}
             data-autofocus=""
             role="combobox"
             aria-expanded="true"
@@ -220,8 +233,9 @@ function SelList<V extends string>({ id, value, options, label, search, seed, on
             <span className="sel-ck">{o.v === value && <Tick />}</span>
           </div>
         ))}
-        {!list.length && <div className="pop-empty">ไม่พบ “{q.trim()}”</div>}
+        {!list.length && <div className="pop-empty" aria-hidden="true">ไม่พบ “{q.trim()}”</div>}
       </div>
+      {search && <span className="sr-only" role="status">{list.length ? '' : `ไม่พบ “${q.trim()}”`}</span>}
     </>
   );
 }

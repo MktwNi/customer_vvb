@@ -51,8 +51,11 @@ export interface FilterResult { out: (Company | Cert)[]; tc: number[]; ph: numbe
  * Applies the filters. `tc` counts matches per target group ignoring the target-group
  * filter itself (for the chips). In certificate view, company filters apply to the
  * certificate's owner and query words may match either the certificate or the company.
+ * `o.sort: false`: the matches unsorted (a count only: the filter popovers' "เหลือ N", where a Thai
+ * name sort of 55,000 rows would cost half a second a key).
  */
-export function filterAll(e: GccEngine, s: Filters): FilterResult {
+export function filterAll(e: GccEngine, s: Filters, o: { sort?: boolean } = {}): FilterResult {
+  const sorted = o.sort !== false;
   const q = s.q.toLowerCase().split(/\s+/).filter(Boolean);
   const tc = Array(9).fill(0);
   if (s.view === 'cert') {
@@ -75,7 +78,7 @@ export function filterAll(e: GccEngine, s: Filters): FilterResult {
       ap: (a, b) => (b.ap || '').localeCompare(a.ap || ''),
       name: (a, b) => a.org.localeCompare(b.org, 'th'),
     };
-    certs.sort(S[s.sort] || S.ap);
+    if (sorted) certs.sort(S[s.sort] || S.ap);
     return { out: certs, tc, ph: 0 };
   }
   const cos: Company[] = [];
@@ -93,6 +96,6 @@ export function filterAll(e: GccEngine, s: Filters): FilterResult {
     fac: (a, b) => (b.fac || 0) - (a.fac || 0),
     name: (a, b) => a.name.localeCompare(b.name, 'th'),
   };
-  if (S[s.sort]) cos.sort(S[s.sort]);
+  if (sorted && S[s.sort]) cos.sort(S[s.sort]);
   return { out: cos, tc, ph: cos.reduce((n, c) => n + (c.hasPh ? 1 : 0), 0) };
 }

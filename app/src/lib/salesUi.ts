@@ -1,6 +1,6 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
 import { daysBetween, dmTh, localDay } from './format';
-import { basisDates, filterDeals, listValues, NONE, sectionsFor, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
+import { basisDates, filterDeals, listValues, NONE, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
   DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
@@ -29,6 +29,15 @@ export function yearOptions(deals: Iterable<Deal>, shown: string, now = beYear()
 }
 
 // ------------------------------------------------------------------ the filter row (filters spec §6)
+
+/** Filters when the tracker's year changes (filters spec §7.6), from wherever it changes (the year picker,
+ *  ส่งเข้า Sales Tracker, an import's "ดูตารางปี", the Dashboard's own row): a date range goes back to the
+ *  whole year (a named range of the old year is not one of the new year's), the other filters stay. */
+export function withoutDate<F extends { date?: unknown }>(f: F): F {
+  if (!f.date) return f;
+  const { date: _d, ...rest } = f;
+  return rest as F;
+}
 
 /** What each date basis is called: in the basis list (`label`, `sub`), the hint under it, the chip's
  *  and caption's word (`short`), the column heading in the rows (`head`) and the popover's sentence. */
@@ -63,10 +72,12 @@ export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: Lis
 /** How many rows of the view (date filter off) have a date of `basis` in each month of `ceYear`. */
 export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceYear: number, job: ViewJob, today: string): number[] {
   const out = Array(12).fill(0) as number[], y = String(ceYear);
-  filterDeals(S, { ...viewOf(F, job), date: null }, today).forEach((d) => {
-    const ms = new Set(basisDates(S, d, basis, today).filter((x) => x.d.startsWith(y)).map((x) => +x.d.slice(5, 7) - 1));
-    ms.forEach((m) => out[m]++);
-  });
+  withActIndex(S, () =>
+    filterDeals(S, { ...viewOf(F, job), date: null }, today).forEach((d) => {
+      const ms = new Set(basisDates(S, d, basis, today).filter((x) => x.d.startsWith(y)).map((x) => +x.d.slice(5, 7) - 1));
+      ms.forEach((m) => out[m]++);
+    }),
+  );
   return out;
 }
 
@@ -80,6 +91,10 @@ const thCmp = (a: string, b: string) => a.localeCompare(b, 'th');
  * `dash`: the Dashboard's row (no ผลการขาย: it reports results).
  */
 export function trackerFields(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean }): FField[] {
+  // six passes over the year's deals: the contact records indexed once for all of them
+  return withActIndex(S, () => fieldsOf(S, F, ctx));
+}
+function fieldsOf(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean }): FField[] {
   const { yearDeals, job, me, today } = ctx;
   const counts = (k: ListKey) => {
     const m = new Map<string, number>();

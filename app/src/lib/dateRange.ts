@@ -18,8 +18,9 @@ const PRESETS: DatePreset[] = ['today', 'week', 'last7', 'next7', 'month', 'prev
 export interface DateF { basis: DateBasis; preset: Exclude<DatePreset, 'year'>; from: string; to: string }
 export interface Range { from: string; to: string }
 
-/** A real calendar day as 'YYYY-MM-DD' ('2026-02-30' is not). */
-export const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && addDays(s, 0) === s;
+/** A real calendar day as 'YYYY-MM-DD' ('2026-02-30', '2026-13-01' and '2026-10-00' are not): false for
+ *  anything else, never a throw (a month 13 is an Invalid Date that the round-trip cannot print). */
+export const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d\d-\d\d$/.test(s) && !isNaN(Date.parse(s + 'T00:00:00Z')) && addDays(s, 0) === s;
 export const inRange = (x: string, r: Range) => !!x && r.from <= x && x <= r.to;
 /** Monday of the week of `iso`. */
 export const weekStart = (iso: string) => addDays(iso, -((dow(iso) + 6) % 7));
@@ -44,9 +45,23 @@ export interface PresetItem { k: DatePreset; label: string; r: Range | null }
  * The ready-made ranges of the year `be`. When today is in that year: วันนี้, สัปดาห์นี้, 7 วันล่าสุด (or
  * 7 วันข้างหน้า when `forward`, for due dates), เดือนนี้, เดือนที่แล้ว (or เดือนหน้า; neither across the year
  * end), ไตรมาสนี้. Another year: its four quarters. Then ทั้งปี (no filter) and กำหนดเอง. Every range is
- * clamped to the year (7 วันล่าสุด on 3 Jan is 1–3 ม.ค.).
+ * clamped to the year (7 วันล่าสุด on 3 Jan is 1–3 ม.ค.). A 7-day range the same as one before it is not
+ * offered twice (7 วันข้างหน้า on a Monday is สัปดาห์นี้, 7 วันล่าสุด on a Sunday too, and on 31 Dec it is วันนี้).
  */
 export function presetList(be: string, today: string, forward = false): PresetItem[] {
+  const all = allPresets(be, today, forward);
+  return all.filter((p, i) => !(p.k === 'last7' || p.k === 'next7') || !all.slice(0, i).some((q) => sameRange(q.r, p.r)));
+}
+const sameRange = (a: Range | null, b: Range | null) => !!a && !!b && a.from === b.from && a.to === b.to;
+/** The offered preset for `k` (presetList): itself, or for a 7-day range not offered today the one with
+ *  the same days; undefined when the year has no such range (เดือนนี้ in another year). */
+export function presetKey(be: string, today: string, forward: boolean, k: DatePreset): PresetItem | undefined {
+  const list = presetList(be, today, forward), own = list.find((p) => p.k === k);
+  if (own) return own;
+  const r = allPresets(be, today, forward).find((p) => p.k === k)?.r || null;
+  return list.find((p) => sameRange(p.r, r));
+}
+function allPresets(be: string, today: string, forward: boolean): PresetItem[] {
   const Y = ceOf(be), lo = `${Y}-01-01`, hi = `${Y}-12-31`;
   const clamp = (r: Range): Range => ({ from: r.from < lo ? lo : r.from, to: r.to > hi ? hi : r.to });
   const quarter = (n: number): Range => ({ from: `${Y}-${pad(n * 3 - 2)}-01`, to: monthEnd(`${Y}-${pad(n * 3)}-01`) });
@@ -74,7 +89,8 @@ export const twinOf = (k: DatePreset): DatePreset => ({ last7: 'next7', next7: '
  *  it), else its stored days. */
 export function resolveDate(f: DateF, be: string, today: string): Range {
   if (f.preset !== 'custom') {
-    const p = presetList(be, today, f.basis === 'due').find((x) => x.k === f.preset);
+    // every range of the year, those presetList leaves out as a twin too (their days are the same)
+    const p = allPresets(be, today, f.basis === 'due').find((x) => x.k === f.preset);
     if (p?.r) return p.r;
   }
   return { from: f.from, to: f.to };

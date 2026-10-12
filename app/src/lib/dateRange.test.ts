@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { monthEnd, normDateF, presetList, rangeTh, resolveDate, twinOf, weekStart, type DatePreset, type Range } from './dateRange';
+import { isDay, monthEnd, normDateF, presetKey, presetList, rangeTh, resolveDate, twinOf, weekStart, type DatePreset, type Range } from './dateRange';
 import { localDay, todayISO } from './format';
 
 // 2026-10-12 is a Monday; the tracker's year 2569
@@ -27,19 +27,32 @@ describe('ready-made ranges', () => {
     expect(presetList('2569', T).map((p) => p.k)).toEqual(['today', 'week', 'last7', 'month', 'prevMonth', 'quarter', 'year', 'custom']);
   });
   it('due dates look forward', () => {
-    const r = ranges('2569', T, true);
-    expect(r.next7).toEqual({ from: '2026-10-12', to: '2026-10-18' });
+    const r = ranges('2569', '2026-10-13', true); // a Tuesday
+    expect(r.next7).toEqual({ from: '2026-10-13', to: '2026-10-19' });
     expect(r.nextMonth).toEqual({ from: '2026-11-01', to: '2026-11-30' });
     expect('last7' in r || 'prevMonth' in r).toBe(false);
+  });
+  it('a 7-day range the same as one before it is offered once (a Monday, a Sunday, 31 Dec)', () => {
+    // Monday: 7 วันข้างหน้า is สัปดาห์นี้
+    expect(presetList('2569', T, true).map((p) => p.k)).toEqual(['today', 'week', 'month', 'nextMonth', 'quarter', 'year', 'custom']);
+    // Sunday: 7 วันล่าสุด is สัปดาห์นี้
+    expect(presetList('2569', '2026-10-18').map((p) => p.k)).toEqual(['today', 'week', 'month', 'prevMonth', 'quarter', 'year', 'custom']);
+    // 31 Dec (a Thursday): 7 วันข้างหน้า clamped to the year is วันนี้
+    expect(presetList('2569', '2026-12-31', true).map((p) => p.k)).toEqual(['today', 'week', 'month', 'quarter', 'year', 'custom']);
+    // a stored 7 วันข้างหน้า is still worked out from today, and opens as the range it equals
+    expect(resolveDate({ basis: 'due', preset: 'next7', from: '2026-10-11', to: '2026-10-17' }, '2569', T)).toEqual({ from: T, to: '2026-10-18' });
+    expect(presetKey('2569', T, true, 'next7')?.k).toBe('week');
+    expect(presetKey('2569', '2026-10-13', true, 'next7')?.k).toBe('next7');
+    expect(presetKey('2570', T, false, 'month')).toBeUndefined();
   });
   it('stays inside the year: January and December', () => {
     const jan = ranges('2569', '2026-01-03');
     expect('prevMonth' in jan).toBe(false);
     expect(jan.last7).toEqual({ from: '2026-01-01', to: '2026-01-03' });
     expect(jan.week).toEqual({ from: '2026-01-01', to: '2026-01-04' });
-    const dec = ranges('2569', '2026-12-28', true);
+    const dec = ranges('2569', '2026-12-29', true);
     expect('nextMonth' in dec).toBe(false);
-    expect(dec.next7).toEqual({ from: '2026-12-28', to: '2026-12-31' });
+    expect(dec.next7).toEqual({ from: '2026-12-29', to: '2026-12-31' });
   });
   it('another year: its quarters', () => {
     const P = presetList('2570', T);
@@ -93,6 +106,12 @@ describe('a stored date filter made safe', () => {
     expect(normDateF({ basis: 'contact', preset: 'decade', from: T, to: T }, '2569')).toBeNull();
     expect(normDateF({ basis: 'contact', preset: 'year', from: T, to: T }, '2569')).toBeNull(); // ทั้งปี is never stored
     expect(normDateF(null, '2569')).toBeNull();
+  });
+  it('days that are not on the calendar are dropped, never thrown on', () => {
+    for (const s of ['2026-13-01', '2026-10-32', '2026-10-00', '2026-00-10', '2026-02-30', '2026-1-01', 20261012, null]) expect(isDay(s)).toBe(false);
+    expect(isDay('2028-02-29')).toBe(true);
+    expect(normDateF({ basis: 'contact', preset: 'custom', from: '2026-13-01', to: '2026-10-12' }, '2569')).toBeNull();
+    expect(normDateF({ basis: 'contact', preset: 'month', from: '2026-10-01', to: '2026-10-32' }, '2569')).toEqual({ basis: 'contact', preset: 'month', from: '2026-10-01', to: '2026-10-01' });
   });
   it('keeps a custom range inside the year before to the year after', () => {
     expect(normDateF({ basis: 'due', preset: 'custom', from: '2026-12-15', to: '2027-01-15' }, '2569')).not.toBeNull();

@@ -196,7 +196,7 @@ export function Search() {
               // the keyword too, as the help says
               onClearAll={() => setF(CLEAR_FILTERS)}
               unit={unit}
-              liveCount={(k, x) => filterAll(e, { ...fs, [k]: x?.v[0] ?? '' } as Filters).out.length}
+              liveCount={(k, x) => filterAll(e, { ...fs, [k]: x?.v[0] ?? '' } as Filters, { sort: false }).out.length}
             />
           </div>
           <span className="sr-only" role="status">{said}</span>

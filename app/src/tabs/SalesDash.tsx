@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { addDays, dow, fmtN, isoTh } from '../lib/format';
 import { DEAL_STAGE, STAGE_TH, dealMoney, dealResult, filterDeals, fmtMoney, lastContact, normSalesFilter, overdueDays, salesStats, stepOf, type Deal, type SalesFilter, type SalesState, type SalesStats } from '../lib/sales';
-import { liveCount, monthCounts, trackerFields, winRateBySource } from '../lib/salesUi';
+import { liveCount, monthCounts, trackerFields, winRateBySource, withoutDate } from '../lib/salesUi';
 import { rangeTh, resolveDate } from '../lib/dateRange';
 import { FilterBar, type FVal } from '../components/FilterBar';
 import { DateFilter, dateWords } from '../components/DateFilter';
@@ -101,6 +101,12 @@ function Acc({ title, sub, open, onToggle, children }: { title: string; sub?: st
 export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Deal[]; today: string; year: string }) {
   const { engine: e, set, open } = useApp();
   const [f, setF] = useState<Omit<SalesFilter, 'year'>>({});
+  // another year: its own date range goes back to the whole year, as the table's does (filters spec §7.6)
+  const [fYear, setFYear] = useState(year);
+  if (fYear !== year) {
+    setFYear(year);
+    setF(withoutDate(f));
+  }
   const [acc, setAcc] = useState<Record<string, boolean>>({ resp: true });
   const [showAll, setShowAll] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
@@ -113,9 +119,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const me = e.me();
   const ver = useEngineVersion();
   const key = JSON.stringify(f);
-  // the Dashboard reports results: no ผลการขาย; แหล่งที่มา first in its menu
-  const order = ['resp', 'referral', 'source', 'service', 'section'];
-  const fields = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the Dashboard reports results: no ผลการขาย; the rest in the table's order (one menu on both tabs)
+  const fields = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
   const up = (p: Partial<SalesFilter>) => {
     const { year: _y, ...rest } = normSalesFilter({ ...F, ...p });
     setF(rest);
@@ -227,12 +232,15 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               today={today}
               count={(draft) => liveCount(S, F, 'date', draft, '', today)}
               monthCounts={(basis, y) => monthCounts(S, F, basis, y, '', today)}
+              unit="ราย"
             />
           }
           anySet={filtered}
           onClearAll={() => setF({})}
           count={filtered ? { shown: list.length, total: deals.length } : null}
           liveCount={(k, d) => liveCount(S, F, k, d, '', today)}
+          // the cards count customers in ราย ("ลูกค้า 25 ราย"): the row says it the same way
+          unit="ราย"
         />
       </div>
 

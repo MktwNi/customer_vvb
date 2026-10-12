@@ -937,6 +937,15 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 @media (max-width:760px){.sl-close-hint{display:none}.sl-m-hint{display:block}.sl-tabbar .sl-long{display:none}.sl-tabbar .utabs>button{padding:10px 8px 9px}}
 /* KPI ค้างรับ: two lines, the late figure a link that filters */
 .sl-kpi-two{display:flex;flex-direction:column;align-items:flex-start}
+/* the range in the Forecast caption breaks before it, never inside a date; with a caption on two lines the
+   four cards keep their figures and hairlines level (one grid of label / figure / footer rows) */
+.sl-kpi-r{white-space:nowrap}
+@media (min-width:1101px){
+  .sl-kpis{grid-template-rows:auto auto auto;row-gap:0}
+  .sl-kpis>.kpi{display:grid;grid-row:span 3;grid-template-rows:subgrid;row-gap:0}
+  .sl-kpis>.kpi>.kpi-v{margin-top:6px}
+  .sl-kpis>.kpi>.kpi-f{margin-top:6px;align-self:end}
+}
 .kpi-f .sl-kpi-link,.kpi-f .sl-kpi-link b{font-size:var(--fs-sec);color:var(--bad)}
 /* toolbar: the quick views (one segmented control) and the search; the filter row of chips under them
    (filters.css: .fb, .fchip, …) */
@@ -960,7 +969,8 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-bdate-w{display:block;font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .sl-bdate-w .st{font-size:var(--fs-meta);gap:4px}
 .sl-bdate-w .st::before{width:6px;height:6px}
-.sl-inrange{font-size:var(--fs-meta);color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.sl-inrange{display:flex;flex-direction:column;font-size:var(--fs-meta);color:var(--link);line-height:1.35;max-width:100%;min-width:0}
+.sl-inrange>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sl-nomatch{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink-2)}
 .sl-empty-card{padding:24px 26px;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 

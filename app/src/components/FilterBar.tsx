@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtN } from '../lib/format';
 import { useMedia } from './Sidebar';
 import { Chevron } from './StageTrack';
@@ -81,6 +81,10 @@ export function FilterBar({ fields, value, onChange, lead, extra, search, onClea
   const chipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const hl = useHL();
+  const uid = useId();
+  const menuId = uid + '-menu', valId = uid + '-val';
+  /** the field menu's type-ahead: the letters typed within 600ms */
+  const typed = useRef({ s: '', t: 0 });
   const on = (f: FField) => !!value[f.key]?.v.length;
   const pinned = fields.filter((f) => f.pinned);
   const listed = fields.filter((f) => !f.pinned);
@@ -103,6 +107,7 @@ export function FilterBar({ fields, value, onChange, lead, extra, search, onClea
           className="fchip-b"
           aria-haspopup="dialog"
           aria-expanded={open}
+          aria-controls={open ? valId : undefined}
           title={s}
           aria-label={isOn ? `ตัวกรอง ${s} — แก้ไข` : `ตัวกรอง ${s} — เลือก`}
           onClick={() => {
@@ -153,6 +158,18 @@ export function FilterBar({ fields, value, onChange, lead, extra, search, onClea
     } else if (ev.key === 'ArrowRight' && i >= 0) {
       ev.preventDefault();
       items[i].click();
+    } else if (ev.key.length === 1 && /\S/.test(ev.key) && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      // type-ahead: the next field whose name starts with what was typed (Thai or Latin)
+      const b = typed.current, now = Date.now();
+      b.s = (now - b.t < 600 ? b.s : '') + ev.key.toLocaleLowerCase('th');
+      b.t = now;
+      const name = (x: HTMLElement) => (x.querySelector('.fmi-l')?.firstChild?.textContent || x.textContent || '').trim().toLocaleLowerCase('th');
+      const order = [...items.slice(i + 1), ...items.slice(0, i + 1)];
+      const hit = (b.s.length > 1 ? [items[i], ...order] : order).find((x) => x && name(x).startsWith(b.s));
+      if (hit) {
+        ev.preventDefault();
+        hit.focus();
+      }
     }
   };
 
@@ -164,39 +181,44 @@ export function FilterBar({ fields, value, onChange, lead, extra, search, onClea
         {pinned.map(chip)}
         {extra}
         {used.map(chip)}
-        {used.length < listed.length && (
-          <button
-            ref={addBtn}
-            type="button"
-            className={'fb-add' + (menu ? ' open' : '')}
-            aria-haspopup="menu"
-            aria-expanded={menu}
-            onClick={() => {
-              setEdit(null);
-              setMenu(!menu);
-            }}
-          >
-            {menuTitle}
-          </button>
-        )}
-        {anySet && onClearAll && (
-          <button
-            type="button"
-            className="fb-clear quiet"
-            onClick={() => {
-              onClearAll();
-              requestAnimationFrame(() => row.current?.querySelector<HTMLElement>('.fchip-b')?.focus({ preventScroll: true }));
-            }}
-          >
-            ล้างทั้งหมด
-          </button>
-        )}
-        <span className="fb-count" role="status" aria-live="polite">
-          {count ? `แสดง ${fmtN(count.shown)} จาก ${fmtN(count.total)} ${unit}` : ''}
+        {/* เพิ่มตัวกรอง, ล้างทั้งหมด and the count wrap as one piece: none of them is left alone on a line */}
+        <span className="fb-tail">
+          {used.length < listed.length && (
+            <button
+              ref={addBtn}
+              type="button"
+              className={'fb-add' + (menu ? ' open' : '')}
+              aria-haspopup="menu"
+              aria-expanded={menu}
+              aria-controls={menu ? menuId : undefined}
+              onClick={() => {
+                setEdit(null);
+                setMenu(!menu);
+              }}
+            >
+              {menuTitle}
+            </button>
+          )}
+          {anySet && onClearAll && (
+            <button
+              type="button"
+              className="fb-clear quiet"
+              onClick={() => {
+                onClearAll();
+                requestAnimationFrame(() => row.current?.querySelector<HTMLElement>('.fchip-b')?.focus({ preventScroll: true }));
+              }}
+            >
+              ล้างทั้งหมด
+            </button>
+          )}
+          <span className="fb-count" role="status" aria-live="polite">
+            {count ? `แสดง ${fmtN(count.shown)} จาก ${fmtN(count.total)} ${unit}` : ''}
+          </span>
         </span>
       </div>
       {menu && !(phone && edit) && (
         <Pop
+          id={menuId}
           anchor={addBtn}
           boxRef={menuBox}
           onClose={() => {
@@ -221,6 +243,7 @@ export function FilterBar({ fields, value, onChange, lead, extra, search, onClea
                   data-hl=""
                   aria-haspopup="dialog"
                   aria-expanded={edit?.key === f.key}
+                  aria-controls={edit?.key === f.key ? valId : undefined}
                   className={'fmi' + (edit?.key === f.key ? ' cur' : '')}
                   onClick={() => setEdit({ key: f.key, from: 'menu' })}
                 >
@@ -238,6 +261,7 @@ export function FilterBar({ fields, value, onChange, lead, extra, search, onClea
       {editing && (
         <ValuePop
           key={editing.key}
+          id={valId}
           f={editing}
           init={value[editing.key]}
           anchor={fromMenu && !phone ? menuBox : fromMenu ? addBtn : { current: chipRefs.current[editing.key] ?? null }}
@@ -293,7 +317,8 @@ function FragmentSep({ sep, children }: { sep?: boolean; children: ReactNode }) 
 
 /** A field's values: "คือ / ไม่ใช่", a find field over a long list, ticks (a list) or radios (a single
  *  choice) with their counts and a person's initial, "เหลือ N งาน" from the draft, ยกเลิก / ใช้ตัวกรอง. */
-function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onApply, onBack }: {
+function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, onApply, onBack }: {
+  id: string;
   f: FField; init?: FVal;
   anchor: { current: HTMLElement | null };
   place: 'side' | 'below';
@@ -304,7 +329,6 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
   onApply: (v: FVal | null) => void;
   onBack?: () => void;
 }) {
-  const phone = useMedia('(max-width: 900px)');
   const single = f.kind === 'single';
   const [sel, setSel] = useState<string[]>(init?.v || []);
   const [not, setNot] = useState(!!init?.not);
@@ -321,9 +345,13 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
   });
   const t = q.trim().toLocaleLowerCase('th');
   const list = t ? order.filter((o) => o.label.toLocaleLowerCase('th').includes(t)) : order;
+  // the roving stop of the ticks: on the list as it is now (the find field narrows it)
+  const actI = Math.max(0, Math.min(act, list.length - 1));
   const draft: FVal | null = sel.length ? { v: sel, ...(f.ops && not ? { not: true as const } : {}) } : null;
-  const left = liveCount?.(f.key, draft);
-  const allN = single && f.all != null ? liveCount?.(f.key, null) : undefined;
+  // "เหลือ N": a pass over every row (55,000 companies on ค้นหา), so once per draft, not on every key
+  const dKey = JSON.stringify(draft);
+  const left = useMemo(() => liveCount?.(f.key, draft), [dKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [allN] = useState(() => (single && f.all != null ? liveCount?.(f.key, null) : undefined));
   const flip = (v: string) => setSel(single ? (v ? [v] : []) : sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v]);
   const apply = () => onApply(draft);
   const boxes = () => [...(listRef.current?.querySelectorAll<HTMLInputElement>('input') || [])];
@@ -354,7 +382,11 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
           name={name}
           className="sr-only"
           checked={isOn}
-          tabIndex={single ? undefined : i === act ? 0 : -1}
+          tabIndex={single ? undefined : i === actI ? 0 : -1}
+          // a short list opens on its ticks (the first chosen one is first), not on "คือ"
+          data-autofocus={!single && !long && i === actI ? '' : undefined}
+          // "หมิว (ฉัน), 12 งาน": the name, the grey word and the count apart, with what is counted
+          aria-label={`${label}${sub ? ` (${sub})` : ''}${n != null ? `, ${fmtN(n)} ${unit}` : ''}`}
           onChange={() => flip(v)}
           onFocus={() => !single && setAct(i)}
         />
@@ -370,6 +402,7 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
   };
   return (
     <Pop
+      id={id}
       anchor={anchor}
       back={back}
       onClose={onClose}
@@ -404,16 +437,26 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
           <div className="fval-find">
             <input
               value={q}
-              onChange={(ev) => setQ(ev.target.value)}
+              onChange={(ev) => {
+                setQ(ev.target.value);
+                setAct(0);
+              }}
               onKeyDown={(ev) => {
                 if (ev.key === 'ArrowDown') {
                   ev.preventDefault();
                   moveTo(0);
+                } else if (ev.key === 'Enter') {
+                  // Enter here ticks the one match; with nothing ticked it does nothing (not an empty filter)
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  if (list.length === 1 && !(single ? sel[0] === list[0].v : sel.includes(list[0].v))) flip(list[0].v);
+                  else if (sel.length) apply();
                 }
               }}
               placeholder={findWord}
               aria-label={findWord}
-              data-autofocus={phone ? undefined : ''}
+              // a sheet opened by touch does not take it (Pop): the phone's keyboard would cover the list
+              data-autofocus=""
             />
           </div>
         )}
@@ -422,7 +465,17 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
             {sel.length ? (
               <>
                 เลือกแล้ว {fmtN(sel.length)} ·{' '}
-                <button type="button" className="quiet" onClick={() => setSel([])}>ล้างที่เลือก</button>
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => {
+                    // this button goes once nothing is chosen: the focus moves to the first tick first
+                    moveTo(0);
+                    setSel([]);
+                  }}
+                >
+                  ล้างที่เลือก
+                </button>
               </>
             ) : (
               'เลือกได้หลายรายการ'
@@ -446,8 +499,9 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
           <i className="hl" aria-hidden="true" />
           {single && f.all != null && !t && row('', f.all, allN)}
           {list.map((o, i) => row(o.v, o.label, o.n, o.sub, i))}
-          {!list.length && <div className="pop-empty">ไม่พบ “{q.trim()}”</div>}
+          {!list.length && <div className="pop-empty" aria-hidden="true">ไม่พบ “{q.trim()}”</div>}
         </div>
+        <span className="sr-only" role="status">{list.length ? '' : `ไม่พบ “${q.trim()}”`}</span>
         <div className="fval-foot">
           <span className="pop-sum">{left != null && <>เหลือ <b>{fmtN(left)}</b> {unit}</>}</span>
           <button type="button" className="quiet fval-cancel" onClick={() => onClose('cancel')}>ยกเลิก</button>

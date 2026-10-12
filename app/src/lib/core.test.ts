@@ -116,6 +116,14 @@ describe('engine', () => {
     const r = filterAll(e, { ...EMPTY_FILTERS, view: 'cert', cfo: 'expired', sort: 'ap' });
     expect(r.out.length).toBeGreaterThan(0);
   });
+  it('a count without the sort (the filter popovers) finds the same rows', () => {
+    for (const f of [{ ...EMPTY_FILTERS, sort: 'name' }, { ...EMPTY_FILTERS, view: 'cert' as const, cfo: 'expired', sort: 'name' }]) {
+      const a = filterAll(e, f), b = filterAll(e, f, { sort: false });
+      expect(b.out.length).toBe(a.out.length);
+      expect(b.tc).toEqual(a.tc);
+      expect(new Set(b.out)).toEqual(new Set(a.out));
+    }
+  });
   it('search matches every word against the haystack', () => {
     const c = e.B.companies.find((x) => x.set)!;
     const r = filterAll(e, { ...EMPTY_FILTERS, q: c.set.toLowerCase() });

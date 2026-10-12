@@ -27,9 +27,11 @@
 
 /* phones: a bottom sheet over a light veil, 20px top corners, 16px gutters */
 .pop-back{position:fixed;inset:0;z-index:80;background:rgba(6,22,90,.28);display:flex;align-items:flex-end;animation:pop-fade .16s ease-out}
-.pop-sheet{width:100%;max-height:88vh;max-height:88dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;background:var(--card);border-radius:20px 20px 0 0;padding:0 16px calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;outline:none;color:var(--ink);font-size:var(--fs-body);animation:sheet-in .22s cubic-bezier(.2,.8,.2,1)}
+.pop-sheet{width:100%;max-height:88vh;max-height:88dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;background:var(--card);border-radius:20px 20px 0 0;padding:0 16px calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;outline:none;color:var(--ink);font-size:var(--fs-body);animation:sheet-in .18s cubic-bezier(.2,.8,.2,1)}
 .pop-grab{flex:none;width:40px;height:4px;border-radius:2px;background:var(--field);margin:8px auto 6px}
 .pop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:0 0 6px}
+/* a tall sheet scrolls under its title and ×: they stay at the top (the footer stays at the bottom) */
+.pop-sheet>.pop-head{position:sticky;top:0;z-index:3;background:var(--card);margin:0 -16px;padding:6px 16px}
 .pop-title{font-size:var(--fs-card);font-weight:500;min-width:0}
 .pop-x{cursor:pointer;flex:none;width:34px;height:34px;border:0;border-radius:50%;background-color:var(--neutral-bg);color:var(--ink-2);display:grid;place-items:center;padding:0;transition:background-color .12s}
 @media (hover:hover){.pop-x:hover{background-color:var(--hv2);color:var(--ink)}}
@@ -53,6 +55,8 @@
 /* ---- the filter row: the date chip, pinned pills, chips in use, เพิ่มตัวกรอง, ล้างทั้งหมด; the count at the end */
 .fb{display:flex;gap:8px;align-items:flex-start;min-width:0}
 .fb-chips{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+/* เพิ่มตัวกรอง · ล้างทั้งหมด · the count: one piece that wraps whole and takes the rest of its line (the count at its end) */
+.fb-tail{flex:1 0 auto;display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}
 .fb-count{margin-left:auto;font-size:var(--fs-sec);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .fb-count:empty{display:none}
 
@@ -106,7 +110,8 @@
 .seg.fval-ops{padding:2px;align-self:center}
 .seg.fval-ops>button{height:28px;padding:0 12px;font-size:var(--fs-sec)}
 .fval-line{padding:0 8px 6px;font-size:var(--fs-meta);color:var(--muted);display:flex;align-items:center;gap:2px;min-height:24px}
-.fval-line .quiet{font-size:var(--fs-meta);color:var(--link)}
+.fval-line .quiet{font-size:var(--fs-meta);color:var(--link);min-height:24px;padding:0 8px;margin-left:-4px;border-radius:var(--r-pill)}
+.pop-sheet .fval-line .quiet{min-height:32px}
 .fval-list{max-height:296px;overflow:auto;padding:0 2px;scrollbar-width:thin;scrollbar-color:var(--field) transparent}
 .fck{cursor:pointer;display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 8px;border-radius:10px;font-size:var(--fs-body);color:var(--ink)}
 .fck-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -155,11 +160,15 @@
 .fslot span.ph{color:var(--muted)}
 .fslot.on{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.12)}
 @media (hover:hover){.fslot:not(.on):hover{border-color:var(--tint-line);background-color:var(--hv)}}
-.fslot:focus-visible{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
+/* the keyboard's place is a ring outside the slot, apart from the brand frame of the end being set */
+.fslot:focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:var(--r-field)}
 /* the month: quiet "เดือนก่อน / เดือนถัดไป" (words, no arrows), the title opens the 12 months */
 .cal{display:flex;flex-direction:column;gap:6px}
 .cal-h{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
 .cal-h .quiet{height:28px;border-radius:var(--r-pill);padding:0 10px}
+/* at the calendar's bound: greyed, still there for the keyboard */
+.cal-nav[aria-disabled]{color:var(--muted);opacity:.5;cursor:default}
+@media (hover:hover){.cal-h .cal-nav[aria-disabled]:hover{background-color:transparent}}
 .cal-t{cursor:pointer;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:0;border-radius:var(--r-pill);background-color:transparent;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);transition:background-color .12s}
 .cal-t svg{color:var(--ink-2)}
 .cal-t.static{cursor:default}
@@ -180,7 +189,11 @@
 .cal-d:is(.a,.b)>span{background:var(--brand);color:var(--card);font-weight:500}
 .cal-d.today:not(.a,.b)>span{box-shadow:inset 0 0 0 1.5px var(--brand);color:var(--link)}
 @media (hover:hover){.cal-d:not(.a,.b,.blank):hover>span{background:var(--hv2)}}
-.cal-d:focus-visible>span{outline:2px solid var(--brand);outline-offset:1px}
+/* the keyboard's day: a tint inside and a ring 2px out (today's mark is a thin ring inside the circle); the
+   day's own button stays square, so the range band keeps its edges */
+.cal-d:focus-visible{outline:none;border-radius:0}
+.cal-d:focus-visible>span{outline:2px solid var(--brand);outline-offset:2px}
+.cal-d:focus-visible:not(.a,.b)>span{background:var(--hv2)}
 /* the 12 months: the abbreviation over how many rows; the ends brand, the range tinted */
 .cal-mg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .cal-m{cursor:pointer;height:52px;border:0;border-radius:var(--r-field);background-color:transparent;font:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;line-height:1.35;color:var(--ink);transition:background-color .12s}

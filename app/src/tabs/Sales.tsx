@@ -1,9 +1,9 @@
-import { Fragment, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
+import { Fragment, createContext, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
 import {
   ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
-  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, sectionsFor, stageActs, stageDocs, stageTh, stageTrack, stepOf,
+  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, sectionsFor, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex,
   type BasisDate, type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState,
 } from '../lib/sales';
 import { BASIS_TH, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, trackerFields, yearOptions, type FigView } from '../lib/salesUi';
@@ -99,7 +99,7 @@ export function Sales() {
               value={year}
               shown={`ปี ${year}`}
               label="ปี (พ.ศ.)"
-              valueText={year}
+              ariaLabel={`ปี ${year} (พ.ศ.)`}
               width={240}
               search={false}
               options={years.map((y) => ({ v: y, label: `ปี ${y}`, sub: y === now ? 'ปีนี้' : undefined, n: perYear.get(y) ? `${fmtN(perYear.get(y)!)} งาน` : 'ยังไม่มีงาน' }))}
@@ -382,10 +382,13 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   const quick = F.quick || '';
   const seg = quick === 'paylate' ? 'payment' : quick;
   const views: [QuickView, string][] = [['', 'ทั้งหมด'], ['overdue', 'ค้างติดตาม'], ['notstarted', 'ยังไม่เริ่ม'], ['active', 'กำลังติดตาม'], ['payment', 'รอชำระเงิน'], ['ready', 'พร้อมปิดงาน']];
-  const anyLate = !!base?.some((d) => quickMatch(S, d, 'paylate', today));
   const pick = (q: QuickView) => up({ quick: q }, { slCollapsed: {} });
-  const key = JSON.stringify(ui.slF);
-  const fields = useMemo(() => trackerFields(S, F, { yearDeals, job, me, today }), [ver, key, F.year, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the quick views' counts: one pass each over the rows, the contact records indexed once (ค้างติดตาม reads them)
+  const viewN = base ? withActIndex(S, () => views.map(([k]) => (k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length))) : [];
+  const anyLate = !!base && withActIndex(S, () => base.some((d) => quickMatch(S, d, 'paylate', today)));
+  // the counts in the field menu follow the search too, a little behind the typing (six passes over the year)
+  const key = useDeferredValue(JSON.stringify(ui.slF));
+  const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key) }), { yearDeals, job, me, today }), [ver, key, F.year, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
   const value: Record<string, FVal | undefined> = { resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section, result: F.result ? { v: [F.result] } : undefined };
   const toF = (k: string, v: FVal | null): Partial<SalesFilter> => (k === 'result' ? { result: (v?.v[0] || '') as ResultF } : { [k]: v || undefined });
   const search = (
@@ -402,7 +405,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
       />
     </label>
   );
-  const on = narrowed(F);
+  // the closed tab has no quick views: เฉพาะงวดเลยกำหนด is neither shown nor counted there
+  const on = narrowed(job === 'open' ? F : { ...F, quick: '' });
   return (
     <div className="sl-filt">
       {base && (
@@ -414,8 +418,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
                 ของฉัน<span className="n">{fmtN(base.filter((d) => d.resp === me).length)}</span>
               </button>
             )}
-            {views.map(([k, label]) => {
-              const n = k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length;
+            {views.map(([k, label], i) => {
+              const n = viewN[i];
               const od = (k === 'overdue' && n > 0) || (k === 'payment' && anyLate);
               return (
                 <button key={k || 'all'} type="button" aria-pressed={seg === k} onClick={() => pick(k)}>
@@ -440,9 +444,11 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
             today={today}
             count={(draft) => liveCount(S, F, 'date', draft, job, today)}
             monthCounts={(basis, y) => monthCounts(S, F, basis, y, job, today)}
+            // open jobs have no closing date: say where the jobs closed in the range are (the KPIs count them)
+            elsewhere={job === 'open' ? (draft) => (draft.basis === 'closed' ? `อยู่ในแท็บ “ปิดงาน” ${fmtN(liveCount(S, F, 'date', draft, 'closed', today))} งาน` : null) : undefined}
           />
         }
-        extra={quick === 'paylate' ? <ReadChip text="เฉพาะงวดเลยกำหนด" onClear={() => pick('payment')} /> : undefined}
+        extra={job === 'open' && quick === 'paylate' ? <ReadChip text="เฉพาะงวดเลยกำหนด" onClear={() => pick('payment')} /> : undefined}
         anySet={on}
         // chips and the search go; the quick view stays (เฉพาะงวดเลยกำหนด goes back to รอชำระเงิน)
         onClearAll={() => set({ slF: job === 'open' ? { quick: quick === 'paylate' ? 'payment' : quick } : { quick: F.quick }, slCollapsed: {} })}
@@ -481,7 +487,7 @@ function Kpis({ S, open, all, today, year, date }: { S: SalesState; open: Deal[]
   const m = (n: number) => fmtMoney(Math.round(n)) || '0';
   const pct = st.forecast > 0 ? Math.round((st.actual / st.forecast) * 100) : null;
   const words = date ? BASIS_TH[date.basis] : null;
-  const label = date && words ? `Forecast รวม · ${words.short} ${rangeTh(date.r, { dropYear: year })}` : `Forecast รวม · ปี ${year}`;
+  const label = date && words ? <>Forecast รวม · {words.short} <span className="sl-kpi-r">{rangeTh(date.r, { dropYear: year })}</span></> : `Forecast รวม · ปี ${year}`;
   const title = date && words ? `นับเฉพาะงานตามตัวกรอง · ${words.sent} ${rangeTh(date.r)} · ตัวเลขเป็นยอดเต็มของแต่ละงาน` : undefined;
   const got = date?.basis === 'paid' ? receivedIn(S, all, date.r, today) : null;
   const owed = date?.basis === 'due' ? owedIn(S, all, date.r, today) : null;
@@ -1035,7 +1041,13 @@ function ContactCell({ d }: { d: Deal }) {
   const other = inR && inR.d !== date ? inR : null;
   const sub =
     od != null ? <span className="chip bad" title="ไม่ได้ติดต่อเกิน 14 วัน">ค้าง {fmtN(od)} วัน</span>
-    : other ? <span className="sl-inrange">ในช่วงนี้ {dmTh(other.d)} · {other.what}</span>
+    : other ? (
+      // two short lines (the column is narrow): the day in the range, then what it was, both whole
+      <span className="sl-inrange">
+        <span>ในช่วงนี้ {dmTh(other.d)}</span>
+        <span>{other.what}</span>
+      </span>
+    )
     : <span className="sl-ago">{date ? agoTh(date, today) : 'ยังไม่ได้ติดต่อ'}</span>;
   const rangeNote = other && tk.date ? ` · ติดต่อในช่วง ${rangeTh(tk.date.r)}: ${isoTh(other.d)} (${other.what})` : '';
   const open = tk.pop === d.id;

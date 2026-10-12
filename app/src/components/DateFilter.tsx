@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { TH_M, addDays, dow, fmtN, isoTh } from '../lib/format';
-import { BASES, ceOf, monthEnd, monthStart, navBounds, presetList, rangeTh, resolveDate, twinOf, weekStart, type DateBasis, type DateF, type DatePreset, type Range } from '../lib/dateRange';
+import { BASES, ceOf, monthEnd, monthStart, navBounds, presetKey, presetList, rangeTh, resolveDate, twinOf, weekStart, type DateBasis, type DateF, type DatePreset, type Range } from '../lib/dateRange';
 import { BASIS_TH } from '../lib/salesUi';
 import { Chevron } from './StageTrack';
 import { Pop, XMark, useHL } from './Pop';
@@ -28,7 +28,7 @@ export function dateWords(f: DateF, r: Range) {
  * one click away, which date of a deal counts (นับจากวันที่), จาก – ถึง, a Monday-first month (or the 12
  * months with their counts), and the rows the draft would leave. Nothing applies before "ใช้ตัวกรอง".
  */
-export function DateFilter({ value, onChange, year, today, count, monthCounts, bases = BASES, unit = 'งาน' }: {
+export function DateFilter({ value, onChange, year, today, count, monthCounts, bases = BASES, unit = 'งาน', elsewhere }: {
   value: DateF | null | undefined;
   onChange: (v: DateF | null) => void;
   /** the Buddhist-era year of the table */
@@ -40,13 +40,16 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
   monthCounts: (basis: DateBasis, ceYear: number) => number[];
   bases?: DateBasis[];
   unit?: string;
+  /** a draft whose rows are not in this view: where they are, in place of "· 0 งาน" (null: they are here) */
+  elsewhere?: (draft: DateF) => string | null;
 }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  const popId = useId() + '-date';
   const f = value || null;
   const r = f ? resolveDate(f, year, today) : null;
   const w = f && r ? dateWords(f, r) : null;
-  const pre = f ? presetList(year, today, f.basis === 'due').find((p) => p.k === f.preset)?.label || 'กำหนดเอง' : '';
+  const pre = f ? (f.preset !== 'custom' && presetKey(year, today, f.basis === 'due', f.preset)?.label) || 'กำหนดเอง' : '';
   const title = f && r ? `${pre} · ${BASIS_TH[f.basis].sent} ${rangeTh(r)}` : `ทั้งปี ${year} · ไม่กรองวันที่`;
   return (
     <>
@@ -57,8 +60,10 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
           className="fchip-b"
           aria-haspopup="dialog"
           aria-expanded={open}
+          aria-controls={open ? popId : undefined}
           title={title}
-          aria-label={w ? `ตัวกรอง ช่วงเวลา: ${w.field} ${w.op} ${w.value} — แก้ไข` : `ตัวกรอง ช่วงเวลา: ทั้งปี ${year} — เลือก`}
+          // the words on the chip, whole (no colon inside them): what a person using speech says
+          aria-label={w ? `ตัวกรอง ช่วงเวลา ${w.field} ${w.op} ${w.value} — แก้ไข` : `ตัวกรอง ช่วงเวลา ทั้งปี ${year} — เลือก`}
           onClick={() => setOpen(!open)}
         >
           {w ? (
@@ -98,6 +103,8 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
           unit={unit}
           count={count}
           monthCounts={monthCounts}
+          elsewhere={elsewhere}
+          id={popId}
           anchor={btn}
           onClose={() => setOpen(false)}
           onApply={(x) => {
@@ -111,10 +118,12 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
   );
 }
 
-function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, onClose, onApply }: {
+function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere, id, anchor, onClose, onApply }: {
   init: DateF | null; year: string; today: string; bases: DateBasis[]; unit: string;
   count: (draft: DateF | null) => number;
   monthCounts: (basis: DateBasis, ceYear: number) => number[];
+  elsewhere?: (draft: DateF) => string | null;
+  id: string;
   anchor: { current: HTMLElement | null };
   onClose: () => void;
   onApply: (v: DateF | null) => void;
@@ -124,7 +133,8 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
   const [basis, setBasis] = useState<DateBasis>(init?.basis || 'contact');
   const P = presetList(year, today, basis === 'due');
   const r0 = init ? resolveDate(init, year, today) : null;
-  const [preset, setPreset] = useState<DatePreset>(init ? (P.some((p) => p.k === init.preset) ? init.preset : 'custom') : 'year');
+  // a 7-day range not offered today opens as the one with the same days (สัปดาห์นี้ on a Monday)
+  const [preset, setPreset] = useState<DatePreset>(init ? (init.preset !== 'custom' && presetKey(year, today, init.basis === 'due', init.preset)?.k) || 'custom' : 'year');
   const [from, setFrom] = useState(r0?.from || '');
   const [to, setTo] = useState(r0?.to || '');
   const [end, setEnd] = useState<'from' | 'to'>('from');
@@ -134,11 +144,15 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
   const [gy, setGy] = useState(+ym.slice(0, 4));
   const [mPick, setMPick] = useState('');
   const [fday, setFday] = useState('');
+  /** the month of the 12 that takes Tab (a roving stop, as the days) */
+  const [fm, setFm] = useState(0);
+  const titleBtn = useRef<HTMLButtonElement>(null);
   const grid = useRef<HTMLDivElement>(null);
   const hl = useHL();
   const on = preset !== 'year' && !!from;
   const draft: DateF | null = on ? { basis, preset: preset as DateF['preset'], from, to: to || from } : null;
   const n = useMemo(() => count(draft), [basis, preset, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const away = useMemo(() => (draft && elsewhere ? elsewhere(draft) : null), [basis, preset, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
   const mc = useMemo(() => (months ? monthCounts(basis, gy) : []), [months, basis, gy]); // eslint-disable-line react-hooks/exhaustive-deps
   /** where กำหนดเอง starts with nothing picked: today (when the calendar may show it), else the month shown */
   const startDay = () => (today >= nb.from && today <= nb.to ? today : ym);
@@ -165,7 +179,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
     setBasis(b);
     if (!flip || preset === 'year' || preset === 'custom') return;
     // 7 วันล่าสุด ↔ 7 วันข้างหน้า, เดือนที่แล้ว ↔ เดือนหน้า; one the new list lacks stays as its days
-    const twin = presetList(year, today, b === 'due').find((x) => x.k === twinOf(preset));
+    const twin = presetKey(year, today, b === 'due', twinOf(preset));
     if (twin?.r) {
       setPreset(twin.k);
       setFrom(twin.r.from);
@@ -229,6 +243,11 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
   const inMonth = (x: string) => !!x && x.slice(0, 7) === ym.slice(0, 7);
   const tabDay = inMonth(fday) ? fday : on && inMonth(from) ? from : inMonth(today) ? today : ym;
   const prevOk = monthStart(ym, -1) >= nb.from, nextOk = monthStart(ym, 1) <= nb.to;
+  /** เดือนก่อน / เดือนถัดไป / ปีก่อน / ปีถัดไป: at the calendar's bound it stays where it is (a focused button
+   *  that vanished would drop the focus to the page), greyed and aria-disabled */
+  const navBtn = (ok: boolean, text: string, go: () => void) => (
+    <button type="button" className="quiet cal-nav" aria-disabled={!ok || undefined} onClick={() => ok && go()}>{text}</button>
+  );
   const gridKeys = (ev: KeyboardEvent) => {
     const cur = (ev.target as HTMLElement).dataset?.day;
     if (!cur) return;
@@ -270,7 +289,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
   };
 
   return (
-    <Pop anchor={anchor} onClose={onClose} label="ช่วงเวลา" title="ช่วงเวลา" kind="dialog" width={640} className="date">
+    <Pop id={id} anchor={anchor} onClose={onClose} label="ช่วงเวลา" title="ช่วงเวลา" kind="dialog" width={640} className="date">
       <div className="fdate">
         <div className="hl-list fdate-pre" role="radiogroup" aria-label="ช่วงที่ใช้บ่อย" onKeyDown={presetKeys} {...hl.bind}>
           <i className="hl" aria-hidden="true" />
@@ -324,23 +343,27 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
           {!months ? (
             <div className="cal">
               <div className="cal-h">
-                <button type="button" className="quiet" style={prevOk ? undefined : { visibility: 'hidden' }} onClick={() => setYm(monthStart(ym, -1))} tabIndex={prevOk ? 0 : -1}>เดือนก่อน</button>
+                {navBtn(prevOk, 'เดือนก่อน', () => setYm(monthStart(ym, -1)))}
                 <button
+                  ref={titleBtn}
                   type="button"
                   className="cal-t"
-                  aria-expanded={false}
+                  // it swaps the days for the 12 months (and goes away): a name that says so, no expanded state
+                  aria-label={`${monthTitle(ym)} — เลือกทั้งเดือน`}
                   title="เลือกทั้งเดือน"
                   onClick={() => {
+                    const m = +ym.slice(5, 7) - 1;
                     setGy(+ym.slice(0, 4));
                     setMPick('');
+                    setFm(m);
                     setMonths(true);
-                    requestAnimationFrame(() => grid.current?.querySelector<HTMLElement>(`[data-m="${+ym.slice(5, 7) - 1}"]`)?.focus());
+                    requestAnimationFrame(() => grid.current?.querySelector<HTMLElement>(`[data-m="${m}"]`)?.focus());
                   }}
                 >
                   {monthTitle(ym)}
                   <Chevron size={12} />
                 </button>
-                <button type="button" className="quiet" style={nextOk ? undefined : { visibility: 'hidden' }} onClick={() => setYm(monthStart(ym, 1))} tabIndex={nextOk ? 0 : -1}>เดือนถัดไป</button>
+                {navBtn(nextOk, 'เดือนถัดไป', () => setYm(monthStart(ym, 1)))}
               </div>
               <div ref={grid} className="cal-g" role="grid" aria-label={monthTitle(ym)} onKeyDown={gridKeys} onPointerLeave={() => setHover('')}>
                 <div role="row" className="cal-row">
@@ -377,15 +400,17 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
           ) : (
             <div className="cal">
               <div className="cal-h">
-                <button type="button" className="quiet" style={gyPrev ? undefined : { visibility: 'hidden' }} tabIndex={gyPrev ? 0 : -1} onClick={() => setGy(gy - 1)}>ปีก่อน</button>
+                {navBtn(gyPrev, 'ปีก่อน', () => setGy(gy - 1))}
                 <span className="cal-t static">เลือกเดือน · ปี {gy + 543}</span>
-                <button type="button" className="quiet" style={gyNext ? undefined : { visibility: 'hidden' }} tabIndex={gyNext ? 0 : -1} onClick={() => setGy(gy + 1)}>ปีถัดไป</button>
+                {navBtn(gyNext, 'ปีถัดไป', () => setGy(gy + 1))}
                 <button
                   type="button"
                   className="lnk cal-back"
                   onClick={() => {
                     setMonths(false);
                     if (on) setYm(monthStart(from));
+                    // this button goes with the months: the focus moves to the month's title, not the page
+                    requestAnimationFrame(() => titleBtn.current?.focus());
                   }}
                 >
                   ดูรายวัน
@@ -401,6 +426,8 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
                       key={m}
                       type="button"
                       data-m={i}
+                      tabIndex={i === fm ? 0 : -1}
+                      onFocus={() => setFm(i)}
                       aria-pressed={inR}
                       aria-label={`${MONTHS[i]} ${gy + 543}: ${c ? fmtN(c) + ' ' + unit : 'ไม่มี' + unit}`}
                       className={'cal-m' + (inR ? ' in' : '') + (isEnd ? ' end' : '') + (key === today.slice(0, 7) ? ' today' : '') + (mPick === m1 ? ' first' : '')}
@@ -412,7 +439,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
                   );
                 })}
               </div>
-              <p className="fdate-hint">{mPick ? 'กดอีกเดือนเพื่อเลือกเป็นช่วง' : 'กดเดือนเพื่อเลือกทั้งเดือน · ตัวเลขคือจำนวน' + unit}</p>
+              <p className="fdate-hint" role="status">{mPick ? 'กดอีกเดือนเพื่อเลือกเป็นช่วง' : 'กดเดือนเพื่อเลือกทั้งเดือน · ตัวเลขคือจำนวน' + unit}</p>
             </div>
           )}
         </div>
@@ -421,7 +448,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, anchor, o
         <span className="pop-sum" aria-live="polite">
           {draft ? (
             <>
-              {BASIS_TH[basis].sent} <b>{rangeTh({ from: draft.from, to: draft.to })}</b> · {fmtN(n)} {unit}
+              {BASIS_TH[basis].sent} <b>{rangeTh({ from: draft.from, to: draft.to })}</b> · {away ?? `${fmtN(n)} ${unit}`}
             </>
           ) : (
             <>ทั้งปี {year} · ไม่กรองวันที่ · {fmtN(n)} {unit}</>
