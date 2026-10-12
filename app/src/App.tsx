@@ -17,22 +17,23 @@ import { Update } from './tabs/Update';
 import { Notes } from './tabs/Notes';
 import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
+import { SalesMessages } from './components/SalesToast';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
 import { AddPerson, People } from './tabs/People';
 import { Users } from './tabs/Users';
+import { HelpPage } from './tabs/Help';
 import { AuthScreen, ChangePasswordDialog, LogoutDialog, ReLogin } from './components/Login';
 import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
-  const sk = { height: 64, borderRadius: 16, background: '#E6EAF4' };
+  const sk = { height: 120, borderRadius: 'var(--r-card)', background: '#E9EDF6' };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }} aria-busy="true">
-      <div style={{ height: 210, borderRadius: 28, background: 'linear-gradient(135deg,#1745B8,#1F5BD8)', opacity: 0.2 }} />
-      <span style={{ fontSize: 14, color: '#475069' }}>{msg}</span>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>
-        <div style={sk} /><div style={sk} /><div style={sk} /><div style={sk} />
+      <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{msg}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16 }}>
+        <div style={{ ...sk, background: 'var(--hero)', opacity: 0.25 }} /><div style={sk} /><div style={sk} /><div style={sk} />
       </div>
-      <div style={{ height: 320, borderRadius: 22, background: '#E6EAF4' }} />
+      <div style={{ height: 320, borderRadius: 'var(--r-card)', background: '#E9EDF6' }} />
     </div>
   );
 }
@@ -60,7 +61,7 @@ export default function App() {
   }, [wide, mobile]);
 
   useEffect(() => {
-    e.load();
+    e.load(); // (already started by main.tsx, so a gate is there from the first frame)
     // a team that signs in: the sign-in screen shows while this browser's data loads behind it
     if (e.auth) e.emit();
     return () => e.dispose();
@@ -68,7 +69,8 @@ export default function App() {
 
   // invite link: #team=<web-app url> → a team with accounts shows its sign-in (or first-admin setup);
   // a team-code team prefills the team-sync card on the update tab, as before.
-  // Only Apps Script web-app URLs are accepted, so a forged link can't collect the team code.
+  // Only Apps Script web-app URLs are accepted, so a forged link can't collect the team code; a site
+  // with a home team takes only that team's link (it belongs to one team).
   const [invited, setInvited] = useState(false);
   useEffect(() => {
     const onHash = () => {
@@ -81,7 +83,7 @@ export default function App() {
         /* ignore */
       }
       history.replaceState(null, '', window.location.pathname + window.location.search);
-      if (!isTeamUrl(url)) return;
+      if (!isTeamUrl(url) || e.foreign(url)) return;
       setInvited(true);
       e.teamOpen(url).then((m) => {
         if (m === 'legacy' || m === '') set({ tab: 'update', sel: null }); // the team-code form (or why the link failed)
@@ -109,9 +111,15 @@ export default function App() {
     return () => document.removeEventListener('keydown', kd);
   }, [set]);
 
+  // the home team uses the team code and this browser has not joined it: its code form, on the update tab
+  const joinHome = !!e.homeTeam && e.teamJoinUrl === e.homeTeam && !e.teamCfg && !e.auth;
+  useEffect(() => {
+    if (joinHome) set({ tab: 'update', sel: null });
+  }, [joinHome, set]);
+
   const ready = e.ready;
   const auth = e.auth;
-  const gate = auth === 'login' || auth === 'setup' || auth === 'change' || auth === 'disabled';
+  const gate = auth === 'connect' || auth === 'login' || auth === 'setup' || auth === 'change' || auth === 'disabled';
   // once loaded, Page Down / Space scroll the page straight away (on desktop the content scrolls inside
   // the window, so it must hold the focus rather than the document)
   useEffect(() => {
@@ -128,8 +136,8 @@ export default function App() {
     if (auth !== 'expired' && ui.hideRelogin) set({ hideRelogin: false });
   }, [auth, ui.acctDlg, ui.hideRelogin, set]);
 
-  // signed out, first-admin setup, a password to set, account disabled: a screen in front of the app
-  // (the data keeps loading behind it, so the app is there right after signing in)
+  // checking the home team, signed out, first-admin setup, a password to set, account disabled: a
+  // screen instead of the app (the data keeps loading behind it, so the app is there right after signing in)
   if (gate) return <AuthScreen invited={invited} />;
   return (
     <div className={'shell' + (docked ? ' docked' : '')}>
@@ -139,9 +147,10 @@ export default function App() {
           <Sidebar open={open} docked={docked} mobile={mobile} onClose={closeNav} />
           <div className="content" id="scroller" tabIndex={-1} role="region" aria-labelledby="page-title">
             <Banners />
-            {/* a new page fades in (keyed by the tab, so each switch plays it once) */}
-            <main className="main page-in" key={ready ? ui.tab : 'loading'}>
-              {!ready && <Loading msg={e.loadMsg} />}
+            {/* a new page fades in (keyed by the tab, so each switch plays it once); the help center needs
+                no data, so it shows (and stays, with what is open in it) while the data loads */}
+            <main className="main page-in" key={ready || ui.tab === 'help' ? ui.tab : 'loading'}>
+              {!ready && ui.tab !== 'help' && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
                 {ready && ui.tab === 'overview' && <Overview />}
                 {ready && ui.tab === 'sales' && <Sales />}
@@ -154,6 +163,7 @@ export default function App() {
                 {ready && ui.tab === 'update' && <Update />}
                 {ready && ui.tab === 'notes' && <Notes />}
                 {ready && ui.tab === 'users' && (admin ? <Users /> : <Overview />)}
+                {ui.tab === 'help' && <HelpPage />}
               </ErrorBoundary>
             </main>
           </div>
@@ -164,6 +174,8 @@ export default function App() {
           <DealPanel />
         </ErrorBoundary>
       )}
+      {/* the Sales Tracker's messages and its closing question, over the table and the deal panel alike */}
+      {ready && <SalesMessages />}
       {ready && ui.sel != null && (
         <ErrorBoundary resetKey={String(ui.sel)}>
           <CompanyDrawer />

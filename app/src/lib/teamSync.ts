@@ -9,7 +9,7 @@
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { toCust, toDeal, toDoc, toLog, toStep, type SalesCfg, type SalesState } from './sales';
+import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -99,16 +99,19 @@ const ERR_TH: Record<string, string> = {
 };
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
- * a network error usually means a deployment setting); `sync` = background sync of a working setup.
+ * a network error usually means a deployment setting); `home` = the same with the site's built-in
+ * team (no link was typed: a network error is said plainly); `sync` = background sync of a working setup.
  */
-export const errText = (e: unknown, ctx: 'connect' | 'sync' = 'sync') => {
+export const errText = (e: unknown, ctx: 'connect' | 'home' | 'sync' = 'sync') => {
   const name = (e as Error)?.name;
+  const once = ctx !== 'sync';
   const transient = name === 'TimeoutError' || name === 'AbortError' || (e instanceof TeamSyncError && e.code === 'busy');
-  if (transient) return ctx === 'connect' ? 'ชีตไม่ตอบกลับตอนนี้ ลองกดอีกครั้งในอีกสักครู่' : 'ชีตไม่ตอบกลับ จะลองใหม่อัตโนมัติ';
+  if (transient) return once ? 'ชีตไม่ตอบกลับตอนนี้ ลองกดอีกครั้งในอีกสักครู่' : 'ชีตไม่ตอบกลับ จะลองใหม่อัตโนมัติ';
   if (e instanceof TeamSyncError) return e.message;
   if (e instanceof TypeError) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false)
-      return ctx === 'connect' ? 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วกดอีกครั้ง' : 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
+      return once ? 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วกดอีกครั้ง' : 'ออฟไลน์ — จะส่งข้อมูลให้เองเมื่อกลับมาออนไลน์';
+    if (ctx === 'home') return 'ติดต่อ Google Sheet ของทีมไม่ได้ — ตรวจว่าเครื่องต่ออินเทอร์เน็ตอยู่ แล้วกดอีกครั้ง ถ้ายังไม่ได้ แจ้งหัวหน้าทีม';
     // a cross-origin redirect to Google sign-in (access not "Anyone", or a /dev URL) surfaces as a network error
     return ctx === 'connect'
       ? 'เชื่อมต่อไม่ได้ — ตรวจว่าใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้ง Who has access เป็น "Anyone (ทุกคน)" แล้ว'
@@ -201,6 +204,10 @@ export const keyOf = {
   deal: (id: string) => `deal/${id}`,
   dstep: (id: string, stage: string) => `dstep/${id}/${stage}`,
   ddoc: (id: string, docId: string) => `ddoc/${id}/${docId}`,
+  /** one installment of a deal's payment plan */
+  dpay: (id: string, stage: string) => `dpay/${id}/${stage}`,
+  /** one more contact with a deal's customer (a call, e-mail, meeting beyond the stages) */
+  dact: (id: string, actId: string) => `dact/${id}/${actId}`,
   dlog: (id: string) => `dlog/${id}`,
   scfg: (name: keyof SalesCfg) => `scfg/${name}`,
   cust: (id: number) => `cust/${id}`,
@@ -263,6 +270,9 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.values(S.deals || {}).forEach((d) => m.set(keyOf.deal(d.id), { ...d }));
     Object.entries(S.steps || {}).forEach(([k, v]) => (v.d || v.n) && m.set('dstep/' + k, { ...v }));
     Object.entries(S.docs || {}).forEach(([k, v]) => m.set('ddoc/' + k, { ...v }));
+    Object.entries(S.pays || {}).forEach(([k, v]) => m.set('dpay/' + k, { ...v }));
+    // stored without its own key fields (deal, id), as the record is written
+    Object.values(S.acts || {}).forEach(({ deal, id, ...v }) => m.set(keyOf.dact(deal, id), v));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
     // the lists too: customised before connecting, they are uploaded like every other record
@@ -380,6 +390,33 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.sales = true;
       break;
     }
+    case 'dpay': {
+      // a record type older builds don't know: they skip it here, and never send or delete it
+      const P = s.sales.pays || (s.sales.pays = {});
+      if (rest.indexOf('/') < 0) return;
+      if (del) delete P[rest];
+      else {
+        const v = toPay(row.v);
+        if (!v) return;
+        P[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
+    case 'dact': {
+      // like dpay: older builds skip the prefix, so they never send or delete one
+      const A = s.sales.acts || (s.sales.acts = {});
+      const j = rest.indexOf('/');
+      if (j <= 0) return;
+      if (del) delete A[rest];
+      else {
+        const v = toAct(row.v, rest.slice(0, j), rest.slice(j + 1));
+        if (!v) return;
+        A[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
     case 'dundo': {
       const U = s.sales.undone || (s.sales.undone = {});
       if (del) {
@@ -422,7 +459,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep|person)\//;
+const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\//;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.
@@ -452,6 +489,8 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
   if (row.del || row.v == null) {
     // a stage step a teammate cleared: what was written here since is new, kept on the empty step
     if (o.k.startsWith('dstep/')) return { v: withFields({ d: '', n: '' }, o) };
+    // a plan line written here as new (all its plan fields): not an edit of the one a teammate removed
+    if (o.k.startsWith('dpay/') && PLAN_FIELDS.every((x) => o.f!.includes(x))) return { v: withFields({}, o) };
     return { drop: true };
   }
   if (typeof row.v !== 'object') return null;

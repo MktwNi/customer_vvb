@@ -11,12 +11,14 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore, prefs, PREF } from './storage';
 import type { Role, Session, SyncOp, TeamCfg } from './teamSync';
-import type { DealDoc, SalesState } from './sales';
+import { closeReady, type DealDoc, type PlanInput, type SalesState } from './sales';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
 const KEY = 'test-key-123';
 const URL = 'https://script.google.com/macros/s/c/exec';
+/** The link built into the site (a later deployment of the same script: same sheet, same secret). */
+const HOME = 'https://script.google.com/macros/s/home/exec';
 const ROOT = join(__dirname, '..', '..', '..');
 const DATA = join(ROOT, 'project', 'data');
 const V2 = readFileSync(join(ROOT, 'team-sync', 'fixtures', 'Code.v2.gs'), 'utf8');
@@ -66,6 +68,7 @@ afterEach(() => {
  *  that browser's localStorage. */
 function mk(browser: string, store: Store = memoryStore()): Tab {
   const raw = new GccEngine();
+  raw.homeTeam = ''; // whatever VITE_TEAM_URL says: home-team tests set it (home())
   raw.base = structuredClone(base);
   raw.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) }));
   raw.ref = '2026-10-06';
@@ -107,6 +110,12 @@ function mk(browser: string, store: Store = memoryStore()): Tab {
   tabs.push(tab);
   return tab;
 }
+/** An engine of the site with the home team's link built in. */
+function home(browser: string, store?: Store) {
+  const t = mk(browser, store);
+  t.e.homeTeam = HOME;
+  return t;
+}
 const tick = () => new Promise<void>((r) => setImmediate(r));
 async function settle(...ts: Tab[]) {
   for (let i = 0; i < 3; i++)
@@ -130,6 +139,7 @@ const later = (s: number) => vi.setSystemTime(Date.now() + s * 1000);
 const company = (t: Tab, n = 0) => t.e.B.companies.filter((c) => c.id < 900000 && !c.fl.watch)[n].id;
 const pdf = (name: string) => Object.assign(new Blob(['%PDF-1.4 ' + name], { type: 'application/pdf' }), { name });
 const quote = { kind: 'quotation', amount: 1000, target: 'forecast', basis: 'total', detected: 1000, docNo: 'Q-1', docDate: '' } as const;
+const line = (stage: string, amt: number, o: Partial<PlanInput> = {}): PlanInput => ({ stage, amt, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', ...o });
 /** A promise, and the function that settles it. */
 function gate() {
   let open = () => {};
@@ -567,6 +577,8 @@ describe('what a team-code browser queued, sent by an account', () => {
     expect(await A.e.teamConnect(URL, KEY)).toBe(true);
     const d = A.e.addDeal({ client: 'บริษัท ทดสอบ จำกัด' });
     A.e.setStep(d.id, 'PROPOSAL', { d: '2026-10-01', n: 'นัดคุยแล้ว' });
+    A.e.setPlan(d.id, [line('PAY1', 1000, { note: 'มัดจำ' })]);
+    const act = A.e.addAct(d.id, { type: 'call', note: 'โทรตามเอกสาร' })!;
     const doc = await A.e.attachDoc(d.id, pdf('qt.pdf'), quote);
     await settle(A);
     await A.e.uploadDocs();
@@ -594,10 +606,12 @@ describe('what a team-code browser queued, sent by an account', () => {
     await settle(A);
     await A.e.uploadDocs();
     await settle(A, L);
-    for (const x of ['deal/' + d.id, `dstep/${d.id}/PROPOSAL`, 'ddoc/' + k]) expect(rows(x).map((r) => r.del)).not.toContain(true);
+    for (const x of ['deal/' + d.id, `dstep/${d.id}/PROPOSAL`, 'ddoc/' + k, `dpay/${d.id}/PAY1`, `dact/${d.id}/${act.id}`]) expect(rows(x).map((r) => r.del)).not.toContain(true);
     for (const t of [A, L]) {
       expect(t.e.sales.deals[d.id]).toBeTruthy();
+      expect(t.e.sales.acts![`${d.id}/${act.id}`]?.note).toBe('โทรตามเอกสาร');
       expect(t.e.sales.steps[d.id + '/PROPOSAL']?.n).toBe('นัดคุยแล้ว');
+      expect(t.e.sales.pays[d.id + '/PAY1']?.note).toBe('มัดจำ');
       expect(t.e.sales.docs[k]?.fileId).toBe(fileId);
     }
     expect(Object.values(A.e.sales.log).some((x) => x.deal === d.id && x.action === 'ลบลูกค้า')).toBe(false);
@@ -979,3 +993,459 @@ describe('viewers and new deals', () => {
     expect(rows('deal/' + d.id)).toEqual([]);
   });
 });
+
+describe('payment plans and roles', () => {
+  /** A won deal of the lead's, with a one-installment plan the team has. */
+  async function wonDeal(L: Tab) {
+    const d = L.e.addDeal({ client: 'บริษัท แผนชำระ จำกัด' });
+    L.e.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    L.e.setPlan(d.id, [line('PAY1', 1000)]);
+    await settle(L);
+    return d;
+  }
+
+  it('a sales account sets a plan, records a payment and removes an installment; the team gets them in its name', async () => {
+    const L = await lead();
+    const d = await wonDeal(L);
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    A.e.setPlan(d.id, [line('PAY1', 1000), line('PAY2', 500)]);
+    expect(A.e.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: null })).toBe(false);
+    A.e.clearPlan(d.id); // PAY2 goes, the received PAY1 stays
+    await settle(A, L);
+    expect(rows(`dpay/${d.id}/PAY1`).at(-1)).toMatchObject({ del: false, by: 'เอ', v: { rcv: '2026-10-05', amt: 1000 } });
+    expect(rows(`dpay/${d.id}/PAY2`).at(-1)).toMatchObject({ del: true, by: 'เอ' });
+    expect(L.e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ rcv: '2026-10-05' });
+    expect(L.e.sales.pays[`${d.id}/PAY2`]).toBeUndefined();
+    expect(closeReady(L.e.sales, L.e.sales.deals[d.id], '2026-10-06')).toBe(true);
+    expect(A.e.teamPendingN).toBe(0);
+  });
+
+  it('a viewer cannot change a plan or record a payment: nothing changes here and nothing is sent', async () => {
+    const L = await lead();
+    const d = await wonDeal(L);
+    const V = await member(L, 'vee', 'วี', 'viewer');
+    const before = JSON.stringify(V.e.sales);
+    expect(V.e.setPlan(d.id, [line('PAY1', 5)])).toEqual({ kept: [] });
+    expect(V.e.quickPlan(d.id, 2)).toBeNull();
+    V.e.updatePayLine(d.id, 'PAY1', { note: 'x' });
+    expect(V.e.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: null })).toBe(false);
+    expect(V.e.setPayFull(d.id, 'PAY1', true)).toBe(false);
+    V.e.unmarkPaid(d.id, 'PAY1');
+    V.e.clearPlan(d.id);
+    await expect(V.e.attachDoc(d.id, pdf('rc.pdf'), { ...quote, kind: 'receipt', target: 'actual', stage: 'PAY1' })).rejects.toThrow(/ดูอย่างเดียว/);
+    expect(JSON.stringify(V.e.sales)).toBe(before);
+    expect(V.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
+    expect(V.e.teamPendingN).toBe(0);
+    await settle(V);
+    expect(V.net.sent).not.toContain('push');
+    expect(rows(`dpay/${d.id}/PAY1`)).toHaveLength(1);
+  });
+
+  it('a sales account made a viewer with a payment queued: it is not sent, and dropping it puts the team\'s plan back', async () => {
+    const L = await lead();
+    const d = await wonDeal(L);
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    A.net.offline = true;
+    A.e.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: null });
+    A.e.setPlan(d.id, [line('PAY1', 1000), line('PAY3', 500)]);
+    expect(A.e.sales.steps[`${d.id}/PAY1`]?.n).toBe('รับชำระแล้ว 1,000 บาท · โอน');
+    await stored(A);
+    await L.e.adminUpdate('aem', { role: 'viewer' });
+    A.net.offline = false;
+    await settle(A);
+    expect(A.e.role()).toBe('viewer');
+    expect(rows(`dpay/${d.id}/PAY1`).at(-1)!.v).toMatchObject({ rcv: '' });
+    expect(rows(`dpay/${d.id}/PAY3`)).toEqual([]);
+    await A.e.teamDropUnsent();
+    await settle(A);
+    expect(A.e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ rcv: '', amt: 1000 });
+    expect(A.e.sales.pays[`${d.id}/PAY3`]).toBeUndefined();
+    expect(A.e.sales.steps[`${d.id}/PAY1`]).toBeUndefined(); // the note the payment filled in goes too
+    expect(A.net.sent.filter((x) => x === 'push')).toHaveLength(0);
+  });
+});
+
+describe('contacts beyond the stages with accounts (dact records)', () => {
+  it('a sales account adds and removes its own (sent in its name), not another\'s; the lead removes any', async () => {
+    const L = await lead();
+    const d = L.e.addDeal({ client: 'บริษัท ติดต่อหลายครั้ง จำกัด' });
+    const la = L.e.addAct(d.id, { type: 'call', note: 'หัวหน้าโทร' })!;
+    await settle(L);
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    const aa = A.e.addAct(d.id, { type: 'meet', note: 'เอไปพบลูกค้า', d: '2026-10-05' })!;
+    expect(aa).toMatchObject({ by: 'เอ', type: 'meet' });
+    await settle(A, L);
+    expect(rows(`dact/${d.id}/${aa.id}`)).toEqual([expect.objectContaining({ by: 'เอ', v: expect.objectContaining({ by: 'เอ', note: 'เอไปพบลูกค้า' }) })]);
+    expect(L.e.sales.acts![`${d.id}/${aa.id}`]).toMatchObject({ by: 'เอ' });
+    // the lead's is not the seller's to remove: nothing happens, and it is said why
+    expect(A.e.canDelAct(A.e.sales.acts![`${d.id}/${la.id}`])).toBe(false);
+    A.e.delAct(d.id, la.id);
+    expect(A.e.sales.acts![`${d.id}/${la.id}`]).toBeDefined();
+    expect(A.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
+    A.e.delAct(d.id, aa.id);
+    await settle(A, L);
+    expect(rows(`dact/${d.id}/${aa.id}`).at(-1)).toMatchObject({ del: true, by: 'เอ' });
+    expect(L.e.sales.acts![`${d.id}/${aa.id}`]).toBeUndefined();
+    // the lead (admin) removes anyone's
+    const ab = A.e.addAct(d.id, { type: 'email', note: 'อีกครั้ง' })!;
+    await settle(A, L);
+    expect(L.e.canDelAct(L.e.sales.acts![`${d.id}/${ab.id}`])).toBe(true);
+    L.e.delAct(d.id, ab.id);
+    await settle(L, A);
+    expect(A.e.sales.acts![`${d.id}/${ab.id}`]).toBeUndefined();
+  });
+
+  it('a viewer adds and removes nothing: nothing changes here and nothing is sent', async () => {
+    const L = await lead();
+    const d = L.e.addDeal({ client: 'บริษัท ดูอย่างเดียว จำกัด' });
+    const la = L.e.addAct(d.id, { type: 'call', note: 'โทรแล้ว' })!;
+    await settle(L);
+    const V = await member(L, 'vee', 'วี', 'viewer');
+    const before = JSON.stringify(V.e.sales);
+    expect(V.e.addAct(d.id, { type: 'call', note: 'x' })).toBeNull();
+    expect(V.e.canDelAct(V.e.sales.acts![`${d.id}/${la.id}`])).toBe(false);
+    V.e.delAct(d.id, la.id);
+    expect(JSON.stringify(V.e.sales)).toBe(before);
+    expect(V.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
+    expect(V.e.teamPendingN).toBe(0);
+    await settle(V);
+    expect(V.net.sent).not.toContain('push');
+    expect(rows(`dact/${d.id}/${la.id}`)).toHaveLength(1);
+  });
+});
+
+describe('a site with its home team built in', () => {
+  it('a new browser: the gate shows before anything else, then the team\'s sign-in, with no way around it', async () => {
+    const L = await lead();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const A = home('A');
+    const p = pageLoad(A);
+    expect([A.e.auth, A.e.authUrl]).toEqual(['connect', HOME]); // from the first frame
+    await loaded(A, p);
+    expect([A.e.auth, A.e.authUrl]).toEqual(['login', HOME]);
+    expect(pref<TeamCfg>(A, PREF.team)).toMatchObject({ url: HOME, mode: 'accounts' });
+    A.e.teamCancelAuth();
+    A.e.teamForget();
+    expect(A.e.auth).toBe('login');
+    expect(pref<TeamCfg>(A, PREF.team)?.url).toBe(HOME);
+    await A.e.teamLogin('aem', temp, true);
+    await A.e.teamChangePassword('', 'aem-pass-123');
+    await settle(A);
+    expect([A.e.auth, A.e.me(), A.e.teamCfg?.url, A.e.team.status]).toEqual(['', 'เอ', HOME, 'ok']);
+  });
+
+  it('a new browser of a team without its first admin: the setup screen, and ลองอีกครั้ง once the lead is done', async () => {
+    sim = createGasSim({ teamKey: '', kdfIter: 1000 });
+    sim.setup();
+    const A = home('A');
+    await loaded(A, pageLoad(A));
+    expect(A.e.auth).toBe('setup');
+    const L = mk('L');
+    expect(await L.e.teamOpen(URL)).toBe('setup');
+    await L.e.teamClaim(sim.ownerCode()!, 'lead', 'หัวหน้า', 'lead-pass-123');
+    expect(await A.e.teamRetry()).toBe('accounts');
+    expect([A.e.auth, A.e.authUrl]).toEqual(['login', HOME]);
+  });
+
+  it('a new browser of a team-code team (or the older script): the app, with the team code to enter; it stays connected', async () => {
+    for (const code of ['', V2]) {
+      sim = createGasSim(code ? { teamKey: KEY, code } : { teamKey: KEY, kdfIter: 1000 });
+      const A = home(code ? 'A2' : 'A');
+      const p = pageLoad(A);
+      expect(A.e.auth).toBe('connect');
+      await loaded(A, p);
+      expect([A.e.auth, A.e.authUrl, A.e.teamJoinUrl]).toEqual(['', '', HOME]);
+      expect(pref(A, PREF.team)).toBe(null);
+      expect(await A.e.teamConnect(HOME, KEY)).toBe(true);
+      expect(A.e.teamJoinUrl).toBe('');
+      A.e.teamDisconnect(); // the site belongs to its team
+      expect(A.e.teamCfg?.url).toBe(HOME);
+      expect(pref<TeamCfg>(A, PREF.team)).toMatchObject({ url: HOME, key: KEY });
+    }
+  });
+
+  it('offline: the gate waits and says why; ลองอีกครั้ง goes on to the sign-in', async () => {
+    await lead();
+    const A = home('A');
+    A.net.offline = true;
+    await loaded(A, pageLoad(A));
+    expect(A.e.auth).toBe('connect');
+    expect(A.e.authMsg).toMatch(/ติดต่อ Google Sheet ของทีมไม่ได้/);
+    expect(A.e.team).toMatchObject({ status: 'off', msg: '' }); // said on the gate only
+    A.net.offline = false;
+    expect(await A.e.teamRetry()).toBe('accounts');
+    expect([A.e.auth, A.e.authMsg]).toEqual(['login', '']);
+  });
+
+  it('another team\'s invite link is ignored', async () => {
+    await lead();
+    const A = home('A');
+    await loaded(A, pageLoad(A));
+    expect(A.e.auth).toBe('login');
+    const n = A.net.sent.length;
+    expect([A.e.foreign(URL), A.e.foreign(HOME)]).toEqual([true, false]);
+    expect(await A.e.teamOpen(URL)).toBe('');
+    expect(await A.e.teamConnect(URL, KEY)).toBe(false);
+    expect(A.net.sent.length).toBe(n);
+    expect([A.e.auth, A.e.authUrl, A.e.teamJoinUrl]).toEqual(['login', HOME, '']);
+    expect(pref<TeamCfg>(A, PREF.team)?.url).toBe(HOME);
+  });
+
+  it('a team-code browser on the older link moves to the home link: its queued edit is sent once, also with two tabs loading at once', async () => {
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const A = mk('A', store);
+    at('A', () => prefs.set(PREF.me, 'เอ'));
+    expect(await A.e.teamConnect(URL, KEY)).toBe(true);
+    await settle(A);
+    const id = company(A);
+    A.net.offline = true;
+    A.e.toggleWatch(id);
+    await stored(A);
+    A.e.dispose();
+    const [op, ...more] = await queue(A, pendKey(URL));
+    expect([op.k, more]).toEqual(['watch/' + id, []]);
+
+    // the site with the home link built in, opened in two tabs at once (offline, so neither sends yet)
+    const T1 = home('A', store), T2 = home('A', store);
+    T1.net.offline = T2.net.offline = true;
+    const p1 = pageLoad(T1), p2 = pageLoad(T2);
+    expect([T1.e.auth, T2.e.auth]).toEqual(['', '']); // a team-code team: the app, no gate
+    await loaded(T1, p1);
+    await loaded(T2, p2);
+    expect(await queue(T1, pendKey(URL))).toEqual([]);
+    expect((await queue(T1, pendKey(HOME))).map((o) => o.id)).toEqual([op.id]);
+    expect(pref<TeamCfg>(T1, PREF.team)).toMatchObject({ url: HOME, key: KEY });
+    expect(T1.e.teamCfg?.url).toBe(HOME);
+    T2.e.dispose();
+    T1.net.offline = false;
+    await settle(T1);
+    expect(rows('watch/' + id)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
+    expect(await queue(T1, pendKey(HOME))).toEqual([]);
+    expect(T1.net.sent.filter((x) => x === 'push')).toHaveLength(1);
+  });
+
+  it('a browser signed in on the older link: each account\'s queue moves, and the session goes on', async () => {
+    const L = await lead();
+    const store = memoryStore();
+    const A = await member(L, 'aem', 'เอ', 'sales', 'X', store);
+    const [id1, id2] = [company(A, 0), company(A, 1)];
+    A.net.offline = true;
+    A.e.toggleWatch(id1);
+    await stored(A);
+    await A.e.teamLogout(); // remembered: the team data stays in this browser
+    A.net.offline = false;
+    const { temp } = await L.e.adminCreate({ u: 'bee', name: 'บี', role: 'sales' });
+    await A.e.teamLogin('bee', temp, true);
+    await A.e.teamChangePassword('', 'bee-pass-123');
+    await settle(A);
+    A.net.offline = true;
+    A.e.toggleWatch(id2);
+    await stored(A);
+    A.e.dispose();
+    const tok = pref<Session>(A, PREF.session)!.tok;
+
+    // the site with the home link built in: บี is still signed in, on the home link
+    const B = home('X', store);
+    await loaded(B, pageLoad(B));
+    expect(B.e.auth).toBe('');
+    expect(B.e.session).toMatchObject({ u: 'bee', url: HOME, tok });
+    expect(pref<Session>(B, PREF.session)).toMatchObject({ u: 'bee', url: HOME, tok });
+    expect(pref<TeamCfg>(B, PREF.team)).toMatchObject({ url: HOME, mode: 'accounts' });
+    for (const x of ['', '#aem', '#bee']) expect(await queue(B, pendKey(URL) + x)).toEqual([]);
+    expect((await queue(B, pendKey(HOME) + '#aem')).map((o) => o.k)).toEqual(['watch/' + id1]);
+    expect((await store.get<{ u: string }[]>('teamAccts:' + HOME))?.map((a) => a.u).sort()).toEqual(['aem', 'bee']);
+    expect(await store.get('teamAccts:' + URL)).toBe(null);
+    await settle(B);
+    expect(B.e.team.status).toBe('ok');
+    expect(rows('watch/' + id2)).toEqual([expect.objectContaining({ v: 1, by: 'บี' })]);
+    expect(await queue(B, pendKey(HOME) + '#bee')).toEqual([]);
+    expect(rows('watch/' + id1)).toEqual([]); // เอ's: waits for เอ, out of บี's view
+    expect(B.e.crm.watch).not.toContain(id1);
+
+    await B.e.teamLogout();
+    await B.e.teamLogin('aem', 'aem-pass-123', true);
+    await settle(B);
+    expect(rows('watch/' + id1)).toEqual([expect.objectContaining({ v: 1, by: 'เอ' })]);
+    expect(await queue(B, pendKey(HOME) + '#aem')).toEqual([]);
+  });
+
+  it('a browser that left the team on the older site: what it queued there is sent after signing in at the gate', async () => {
+    // team code: disconnected with an edit queued, then the lead turned accounts on
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const id = await disconnectedWithEdit('A', store);
+    const L = await turnOnAccounts();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const B = home('A', store);
+    await loaded(B, pageLoad(B));
+    expect([B.e.auth, B.e.authUrl]).toEqual(['login', HOME]);
+    expect(await queue(B, pendKey(URL))).toEqual([]);
+    await B.e.teamLogin('aem', temp, true);
+    await B.e.teamChangePassword('', 'aem-pass-123');
+    await settle(B);
+    expect(rows('watch/' + id).at(-1)).toMatchObject({ del: true, by: 'เอ' });
+    expect(B.e.crm.watch).not.toContain(id);
+
+    // accounts: signed out, then "ใช้งานแบบไม่เชื่อมทีม" with an edit of เอ's still queued
+    const C = await member(L, 'cee', 'ซี', 'sales', 'X', memoryStore());
+    const id2 = company(C, 3);
+    C.e.toggleWatch(id2);
+    await settle(C);
+    C.net.offline = true;
+    C.e.toggleWatch(id2);
+    await stored(C);
+    await C.e.teamLogout();
+    C.e.teamForget();
+    C.e.dispose();
+    const D = home('X', C.store);
+    await loaded(D, pageLoad(D));
+    expect(D.e.auth).toBe('login');
+    expect(await queue(D, pendKey(URL) + '#cee')).toEqual([]);
+    await D.e.teamLogin('cee', 'cee-pass-123', true);
+    await settle(D);
+    expect(rows('watch/' + id2).at(-1)).toMatchObject({ del: true, by: 'ซี' });
+  });
+
+  it('the team code first, accounts later: an edit queued under the older link before disconnecting is still sent', async () => {
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const id = await disconnectedWithEdit('A', store);
+    const B = home('A', store);
+    await loaded(B, pageLoad(B));
+    expect([B.e.auth, B.e.teamJoinUrl]).toEqual(['', HOME]); // the code is not entered
+    B.e.dispose();
+    const L = await turnOnAccounts();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const C = home('A', store);
+    await loaded(C, pageLoad(C));
+    await C.e.teamLogin('aem', temp, true);
+    await C.e.teamChangePassword('', 'aem-pass-123');
+    await settle(C);
+    expect(rows('watch/' + id).at(-1)).toMatchObject({ del: true });
+  });
+
+  it('storage that fails on the first page of the new site: nothing is moved, and the next page load sends the edit', async () => {
+    // stored with the older link: stays on it
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const store = memoryStore();
+    const A = mk('A', store);
+    at('A', () => prefs.set(PREF.me, 'เอ'));
+    expect(await A.e.teamConnect(URL, KEY)).toBe(true);
+    const id = company(A);
+    A.e.toggleWatch(id);
+    await settle(A);
+    A.net.offline = true;
+    A.e.toggleWatch(id);
+    await stored(A);
+    A.e.dispose();
+    for (const broken of [brokenIdb(), unreadable(store, pendKey(URL))]) {
+      const T1 = home('A', broken);
+      T1.net.offline = true;
+      await loaded(T1, pageLoad(T1));
+      expect(pref<TeamCfg>(T1, PREF.team)?.url).toBe(URL);
+      expect(at('A', () => prefs.getRaw(PREF.teamLast))).toBe(URL);
+      T1.e.dispose();
+    }
+    expect(await queue(A, pendKey(URL))).toHaveLength(1);
+    const T2 = home('A', store);
+    await loaded(T2, pageLoad(T2));
+    await settle(T2);
+    expect(T2.e.teamCfg?.url).toBe(HOME);
+    expect(rows('watch/' + id).at(-1)).toMatchObject({ del: true });
+
+    // left on the older site (nothing stored): the gate keeps the older link as the last one until it moved
+    sim = createGasSim({ teamKey: KEY, kdfIter: 1000 });
+    const s2 = memoryStore();
+    const id2 = await disconnectedWithEdit('B', s2);
+    const L = await turnOnAccounts();
+    const { temp } = await L.e.adminCreate({ u: 'bee', name: 'บี', role: 'sales' });
+    const G1 = home('B', brokenIdb());
+    await loaded(G1, pageLoad(G1));
+    expect(G1.e.auth).toBe('login');
+    expect(at('B', () => prefs.getRaw(PREF.teamLast))).toBe(URL);
+    G1.e.dispose();
+    const G2 = home('B', s2);
+    await loaded(G2, pageLoad(G2));
+    expect(at('B', () => prefs.getRaw(PREF.teamLast))).toBe(HOME);
+    await G2.e.teamLogin('bee', temp, true);
+    await G2.e.teamChangePassword('', 'bee-pass-123');
+    await settle(G2);
+    expect(rows('watch/' + id2).at(-1)).toMatchObject({ del: true });
+  });
+
+  it('a page load on the ตั้งรหัสผ่านของคุณ screen shows it from the first frame, with the name', async () => {
+    const L = await lead();
+    const { temp } = await L.e.adminCreate({ u: 'aem', name: 'เอ', role: 'sales' });
+    const store = memoryStore();
+    const A = home('A', store);
+    await loaded(A, pageLoad(A));
+    await A.e.teamLogin('aem', temp, true);
+    expect(A.e.auth).toBe('change');
+    A.e.dispose();
+    const B = home('A', store);
+    const p = pageLoad(B);
+    expect([B.e.auth, B.e.session?.name]).toEqual(['change', 'เอ']); // before the data has loaded
+    await loaded(B, p);
+    expect(B.e.auth).toBe('change');
+    await B.e.teamChangePassword(temp, 'aem-pass-123');
+    await settle(B);
+    expect([B.e.auth, B.e.team.status]).toEqual(['', 'ok']);
+  });
+
+  it('the lead who claims the first admin is in the ผู้รับผิดชอบ list', async () => {
+    const L = await lead();
+    expect(L.e.crm.team).toContain('หัวหน้า');
+    await settle(L);
+    expect(rows('team/หัวหน้า')).toEqual([expect.objectContaining({ v: 1 })]);
+  });
+});
+
+/** The lead turns accounts on for a team-code script (same sim, so the sheet keeps its rows). */
+async function turnOnAccounts() {
+  sim.setup();
+  const L = mk('L');
+  expect(await L.e.teamConnect(URL, KEY)).toBe(true);
+  L.e.teamBeginSetup();
+  await L.e.teamClaim(sim.ownerCode()!, 'lead', 'หัวหน้า', 'lead-pass-123');
+  expect(L.e.role()).toBe('admin');
+  return L;
+}
+/** A team-code browser on the older link (the older site: no home team) with an edit queued offline,
+ *  then disconnected ("queued changes are sent with the next connect"). */
+async function disconnectedWithEdit(browser: string, store: Store) {
+  const A = mk(browser, store);
+  at(browser, () => prefs.set(PREF.me, 'เอ'));
+  expect(await A.e.teamConnect(URL, KEY)).toBe(true);
+  await settle(A);
+  const id = company(A);
+  A.e.toggleWatch(id);
+  await settle(A);
+  A.net.offline = true;
+  A.e.toggleWatch(id); // un-watched, queued
+  await stored(A);
+  A.e.teamDisconnect();
+  A.e.dispose();
+  expect(await queue(A, pendKey(URL))).toHaveLength(1);
+  expect(at(browser, () => prefs.getRaw(PREF.teamLast))).toBe(URL);
+  return id;
+}
+/** IndexedDB that could not be opened in this page: reads give null (as indexedDbStore.get does), writes fail. */
+function brokenIdb(): Store {
+  const no = async () => {
+    throw new DOMException('Connection to Indexed Database server lost', 'UnknownError');
+  };
+  return { get: async () => null, set: no, del: no, update: no };
+}
+/** `inner`, except that `key` reads as nothing once (a failed read). */
+function unreadable(inner: Store, key: string): Store {
+  let n = 1;
+  return {
+    ...inner,
+    get: async <T,>(k: string) => (k === key && n-- > 0 ? null : inner.get<T>(k)),
+    update: async <T,>(k: string, fn: (c: T | null) => T) => {
+      if (k === key && n-- > 0) throw new DOMException('Transaction aborted', 'AbortError');
+      return inner.update<T>(k, fn);
+    },
+  };
+}

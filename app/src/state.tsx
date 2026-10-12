@@ -5,7 +5,7 @@ import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
 
-export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users';
+export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users' | 'help';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
 /** `pid`: made from a person's page (the appointment is with them). */
 export interface SchedReq { ids: number[]; taskId?: string; pid?: string }
@@ -25,8 +25,20 @@ export interface UIState {
   ddF: 'pending' | 'auto' | 'decided' | 'all'; ddPage: number;
   // Sales Tracker
   slView: 'table' | 'dash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
+  /** Deals whose stages are open under their row; deals whose done stages are unfolded ("แสดง"); the
+   *  one stage editor open in the table. This browser only, never synced. */
+  slOpen: Record<string, 1>; slShowAll: Record<string, 1>;
+  /** The editor open in the table / phone card: a stage's date and note, or (`act`) a new contact record at that stage. */
+  slEdit: { id: string; stage: string; act?: 1 } | null;
+  /** The one message at the bottom of the screen (saved, "ปิดงานเลยไหม?", moved to ปิดงาน). */
+  slToast: SalesToast | null;
+  /** The deal the closing prompt is about (its panel's closing card asks too); the deal asked about
+   *  before closing it unfinished. */
+  slPrompt: string | null; slConfirm: string | null;
   /** Open deal panel (deal id). */
   deal: string | null;
+  /** The deal panel opened at its payment plan: the editor, or the receive form of one installment. */
+  dpPlan: '' | 'edit' | `recv:${string}`;
   /** "Add a customer by hand" dialog: open, and whether to also start a deal in the tracker. */
   addCust: { deal: boolean; section?: string; name?: string; link?: string; edit?: number } | null;
   /** "Send to Sales Tracker" dialog for these company ids. */
@@ -45,8 +57,13 @@ export interface UIState {
   hideRelogin: boolean;
 }
 
+/** A button of the bottom message: what it does is named, the handler lives with the message's host
+ *  (components/SalesToast.tsx). */
+export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan'; deal?: string; primary?: boolean }
+export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
+
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
-const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users'];
+const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users', 'help'];
 
 const initial = (): UIState => {
   const s = prefs.get<{ tab?: unknown; view?: unknown } | null>(PREF.ui, {}) || {};
@@ -59,7 +76,8 @@ const initial = (): UIState => {
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
     ddF: 'pending', ddPage: 0,
-    slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, deal: null, addCust: null, sendIds: null, slNote: '',
+    slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
+    deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', hideRelogin: false,
   };
 };
@@ -90,7 +108,10 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
   const set = useCallback<Ctx['set']>(
     (p) =>
       setUi((s) => {
-        const n = { ...s, ...(typeof p === 'function' ? p(s) : p) };
+        const patch = typeof p === 'function' ? p(s) : p;
+        const n = { ...s, ...patch };
+        // another deal (or none): its panel opens at the top, not at the plan editor of the last one
+        if (n.deal !== s.deal && !('dpPlan' in patch)) n.dpPlan = '';
         // opening a deal or a person makes it the one marked in its list
         if (n.deal && n.deal !== s.deal) {
           n.last = { ...n.last, deal: n.deal };

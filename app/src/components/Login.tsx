@@ -6,8 +6,9 @@ import { TeamSyncError, deploymentId, errText, type Role } from '../lib/teamSync
 import { PREF, prefs } from '../lib/storage';
 import { CONFIG } from '../lib/constants';
 import { fmtN, isoTh, localDay, pad } from '../lib/format';
-import { Icon, type IconName } from './icons';
-import { Modal } from '../tabs/Sales';
+import { Icon } from './icons';
+import { Modal } from './Dialog';
+import { HelpOverlay } from './Help';
 import mark from '../assets/gcc-mark.png';
 
 /**
@@ -46,7 +47,7 @@ export function authError(err: unknown): { msg: string; until?: number; code?: s
   }
   if (err instanceof TeamSyncError) return { msg: err.message, code };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { msg: 'ออฟไลน์ — ต่ออินเทอร์เน็ตแล้วลองอีกครั้ง', code: 'offline' };
-  if (err instanceof TypeError) return { msg: errText(err, 'connect') };
+  if (err instanceof TypeError) return { msg: errText(err, CONFIG.teamUrl ? 'home' : 'connect') }; // (no link typed on a site with its own team)
   return { msg: (err as Error)?.message || String(err) };
 }
 
@@ -87,11 +88,10 @@ function Spinner() {
   return <span className="auth-spin" aria-hidden="true" />;
 }
 
+/** A message: one quiet line (an error on its light red fill), no icon. */
 function Msg({ kind, children, id }: { kind: 'err' | 'ok' | 'info' | 'warn'; children: ReactNode; id?: string }) {
-  const icon: IconName = kind === 'ok' ? 'check' : kind === 'info' ? 'info' : 'alert';
   return (
     <div id={id} className={'auth-msg ' + kind} role={kind === 'err' ? 'alert' : kind === 'ok' ? 'status' : undefined}>
-      <Icon name={icon} size={18} />
       <span>{children}</span>
     </div>
   );
@@ -145,8 +145,8 @@ function PwField({ label, value, onChange, autoComplete, hints, inputRef, autoFo
       </div>
       {hints && (
         <span id={id + '-h'} className="auth-hints" aria-live="polite">
-          {caps && <span className="auth-kb"><Icon name="alert" size={15} />Caps Lock เปิดอยู่</span>}
-          {thai && <span className="auth-kb"><Icon name="alert" size={15} />แป้นพิมพ์เป็นภาษาไทยอยู่หรือเปล่า?</span>}
+          {caps && <span className="auth-kb">Caps Lock เปิดอยู่</span>}
+          {thai && <span className="auth-kb">แป้นพิมพ์เป็นภาษาไทยอยู่หรือเปล่า?</span>}
         </span>
       )}
     </div>
@@ -167,7 +167,7 @@ function Checklist({ pw, confirm, u, name, old, oldLabel = '' }: { pw: string; c
     <ul className="auth-checks" aria-label="เงื่อนไขรหัสผ่านใหม่">
       {rows.map(([ok, t]) => (
         <li key={t} className={ok ? 'ok' : undefined}>
-          <span className="auth-tick" aria-hidden="true">{ok && <Icon name="check" size={12} />}</span>
+          <span className="auth-tick" aria-hidden="true" />
           {t}
           <span className="sr-only">{ok ? ' (ผ่าน)' : ' (ยังไม่ผ่าน)'}</span>
         </li>
@@ -224,34 +224,90 @@ function useUnsent(url: string, u: string) {
 
 // ------------------------------------------------------------------ full-screen sign-in
 
-/** In front of the app while signed out, setting up the first admin, setting a password or disabled.
- *  `invited`: the team was opened from an invite link (a member, rarely the lead). */
+/** Instead of the app while checking the home team, signed out, setting up the first admin, setting a
+ *  password or disabled. `invited`: the team was opened from an invite link (a member, rarely the lead). */
 export function AuthScreen({ invited }: { invited?: boolean }) {
   const { engine: e } = useApp();
   useEngineVersion();
+  // the help center over these screens: held here, above the screen that changes (waiting for the team
+  // ends in the sign-in or the setup screen), so it stays open while the person reads
+  const [help, setHelp] = useState(false);
+  const onHelp = () => setHelp(true);
   const url = e.authUrl || e.teamCfg?.url || e.session?.url || '';
   const mode = e.auth;
+  // the site's own team, not connected here yet: most likely a member (the lead says so to set it up)
+  const member = !!invited || (!!e.homeTeam && !e.teamCfg);
   return (
     <div className="auth">
       <div className="auth-card">
         <BrandPanel url={url} />
         <main className="auth-main" key={mode}>
+          {mode === 'connect' && <Connect />}
           {mode === 'login' && <LoginForm url={url} />}
-          {mode === 'setup' && <SetupForm askLead={!!invited} />}
-          {mode === 'change' && <ChangeForm />}
-          {mode === 'disabled' && <Disabled />}
-          {(mode === 'login' || mode === 'setup') && <AuthFooter />}
+          {mode === 'setup' && <SetupForm askLead={member} />}
+          {mode === 'change' && <ChangeForm onHelp={onHelp} />}
+          {mode === 'disabled' && <Disabled onHelp={onHelp} />}
+          {(mode === 'login' || mode === 'setup' || mode === 'connect') && <AuthFooter onHelp={onHelp} />}
         </main>
       </div>
+      {help && (
+        <HelpOverlay
+          onClose={() => {
+            setHelp(false);
+            // back to the link (the one that opened it may have gone with the screen it was on)
+            document.getElementById(HELP_LINK)?.focus();
+          }}
+        />
+      )}
     </div>
   );
 }
 
+/** "วิธีใช้งาน" at the foot of every sign-in screen: opens the help center over it. */
+const HELP_LINK = 'auth-help';
+function HelpLink({ onHelp }: { onHelp: () => void }) {
+  return (
+    <button type="button" id={HELP_LINK} className="auth-link" aria-haspopup="dialog" onClick={onHelp}>
+      วิธีใช้งาน
+    </button>
+  );
+}
+
+/** The home team is being asked what it is (sign in, set up, or the team code); or it can't be reached. */
+function Connect() {
+  const { engine: e } = useApp();
+  const err = e.authMsg;
+  // back online after it failed: ask again by itself
+  useEffect(() => {
+    const online = () => void (e.authMsg && e.teamRetry());
+    window.addEventListener('online', online);
+    return () => window.removeEventListener('online', online);
+  }, [e]);
+  if (!err)
+    return (
+      <div className="auth-wait" role="status">
+        <span className="auth-spin dark" aria-hidden="true" />
+        <span>กำลังเชื่อมต่อทีม…</span>
+      </div>
+    );
+  return (
+    <>
+      <header className="auth-head">
+        <h1 className="auth-h">เชื่อมต่อทีมไม่ได้</h1>
+      </header>
+      <Msg kind="err">{err}</Msg>
+      <button type="button" className="auth-btn" onClick={() => e.teamRetry()}>
+        ลองอีกครั้ง
+      </button>
+    </>
+  );
+}
+
 // (role names and the headline's halves are kept whole: Thai line breaking would split them)
-const POINTS: [IconName, ReactNode][] = [
-  ['notes', 'ข้อมูลทีมเก็บใน Google Sheet ของบริษัท'],
-  ['user', 'บันทึกชื่อผู้ทำทุกการเปลี่ยนแปลง'],
-  ['shield', <>สิทธิ์แยกตามบทบาท: <span className="nw">ผู้ดูแลระบบ</span> · <span className="nw">พนักงานขาย</span> · <span className="nw">ดูอย่างเดียว</span></>],
+const POINTS: ReactNode[] = [
+  'ข้อมูลทีมเก็บใน Google Sheet ของบริษัท',
+  'บันทึกชื่อผู้ทำทุกการเปลี่ยนแปลง',
+  <>สิทธิ์แยกตามบทบาท: <span className="nw">ผู้ดูแลระบบ</span> · <span className="nw">พนักงานขาย</span> · <span className="nw">ดูอย่างเดียว</span></>,
 ];
 function BrandPanel({ url }: { url: string }) {
   return (
@@ -272,9 +328,8 @@ function BrandPanel({ url }: { url: string }) {
             <span className="nw">ของทีม ในที่เดียว</span>
           </p>
           <ul className="auth-points">
-            {POINTS.map(([ic, t], i) => (
+            {POINTS.map((t, i) => (
               <li key={i}>
-                <span className="auth-pt" aria-hidden="true"><Icon name={ic} size={16} /></span>
                 <span>{t}</span>
               </li>
             ))}
@@ -282,7 +337,6 @@ function BrandPanel({ url }: { url: string }) {
         </div>
         {url && (
           <span className="auth-team" title={url}>
-            <Icon name="link" size={15} />
             ทีม …{deploymentId(url)}
           </span>
         )}
@@ -395,7 +449,6 @@ function LoginForm({ url }: { url: string }) {
         </div>
         {err && <Msg kind="err">{err.msg}</Msg>}
         <SubmitBtn busy={busy} disabled={locked} busyText="กำลังตรวจสอบ…">
-          {locked ? <Icon name="lock" size={18} /> : null}
           เข้าสู่ระบบ
         </SubmitBtn>
         {unsent > 0 && <p className="auth-note">มี {fmtN(unsent)} รายการที่แก้ไว้ในเครื่องนี้ยังไม่ถึงทีม จะส่งให้หลังเข้าสู่ระบบ</p>}
@@ -467,14 +520,13 @@ function RecoverForm({ onBack }: { onBack: () => void }) {
   return (
     <>
       <button type="button" className="auth-back" onClick={onBack}>
-        <Icon name="collapse" size={18} />
-        เข้าสู่ระบบ
+        กลับไปที่เข้าสู่ระบบ
       </button>
       <header className="auth-head">
         <h1 className="auth-h">เป็นผู้ดูแลระบบและลืมรหัสผ่าน?</h1>
       </header>
       <ol className="auth-steps">
-        <li><span>เปิด Google Sheet ของทีม → ส่วนขยาย → Apps Script</span></li>
+        <li><span>เปิด Google Sheet ของทีม แล้วเปิดเมนู ส่วนขยาย แล้วเลือก Apps Script</span></li>
         <li><span>เลือกฟังก์ชัน setup แล้วกด Run</span></li>
         <li><span>คัดลอกรหัสกู้คืนจาก Execution log (ใช้ได้ 24 ชั่วโมง)</span></li>
       </ol>
@@ -543,14 +595,20 @@ function SetupForm({ askLead }: { askLead: boolean }) {
   const user = normUser(u);
   const uErr = uTouched && u && !USER_RE.test(user) ? 'ใช้ได้เฉพาะภาษาอังกฤษตัวเล็ก ตัวเลข . _ - ยาว 3–32 ตัว' : '';
 
+  // the site's own team (no invite link to open again): ask it again once the lead is done
+  const home = !!e.homeTeam && !e.teamCfg;
   if (!lead)
     return (
       <>
         <header className="auth-head">
-          <span className="auth-state-ic" aria-hidden="true"><Icon name="shield" size={26} /></span>
           <h1 className="auth-h">ทีมนี้ยังไม่ได้เปิดใช้บัญชีผู้ใช้</h1>
-          <p className="auth-sub">รอหัวหน้าทีมตั้งค่า แล้วเปิดลิงก์เชิญอีกครั้ง</p>
+          <p className="auth-sub">{home ? 'รอหัวหน้าทีมตั้งค่า แล้วกด ลองอีกครั้ง' : 'รอหัวหน้าทีมตั้งค่า แล้วเปิดลิงก์เชิญอีกครั้ง'}</p>
         </header>
+        {home && (
+          <button type="button" className="auth-btn" onClick={() => e.teamRetry()}>
+            ลองอีกครั้ง
+          </button>
+        )}
         <button type="button" className="auth-btn ghost" onClick={() => setLead(true)}>
           ฉันคือหัวหน้าทีม
         </button>
@@ -584,13 +642,19 @@ function SetupForm({ askLead }: { askLead: boolean }) {
 
   return (
     <>
+      {askLead && (
+        // "ฉันคือหัวหน้าทีม" tapped by a member: back to waiting for the lead
+        <button type="button" className="auth-back" onClick={() => setLead(false)}>
+          กลับ
+        </button>
+      )}
       <header className="auth-head">
         <h1 className="auth-h">เปิดใช้บัญชีผู้ใช้ (หัวหน้าทีม)</h1>
       </header>
       <ol className="auth-steps">
         <li><span>เปิด Google Sheet ของทีม</span></li>
-        <li><span>ส่วนขยาย → Apps Script</span></li>
-        <li><span>เลือกฟังก์ชัน setup → กด Run</span></li>
+        <li><span>เปิดเมนู ส่วนขยาย แล้วเลือก Apps Script</span></li>
+        <li><span>เลือกฟังก์ชัน setup แล้วกด Run</span></li>
         <li><span>คัดลอก <b>รหัสตั้งค่าผู้ดูแลระบบ</b> จาก Execution log</span></li>
       </ol>
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy || undefined}>
@@ -645,7 +709,7 @@ function SetupForm({ askLead }: { askLead: boolean }) {
 }
 
 /** Signed in with a temporary password: set your own before starting. */
-function ChangeForm() {
+function ChangeForm({ onHelp }: { onHelp: () => void }) {
   const { engine: e } = useApp();
   const alive = useAlive();
   const s = e.session;
@@ -682,7 +746,6 @@ function ChangeForm() {
   return (
     <>
       <header className="auth-head">
-        <span className="auth-state-ic" aria-hidden="true"><Icon name="key" size={26} /></span>
         <h1 className="auth-h">ตั้งรหัสผ่านของคุณ</h1>
         <p className="auth-sub">{name} · รหัสผ่านชั่วคราวใช้ได้ครั้งเดียว ตั้งรหัสผ่านใหม่ก่อนเริ่มใช้งาน</p>
       </header>
@@ -706,18 +769,18 @@ function ChangeForm() {
         >
           ออกจากระบบ
         </button>
+        <HelpLink onHelp={onHelp} />
       </div>
     </>
   );
 }
 
-function Disabled() {
+function Disabled({ onHelp }: { onHelp: () => void }) {
   const { engine: e } = useApp();
   const [busy, setBusy] = useState(false);
   return (
     <>
       <header className="auth-head">
-        <span className="auth-state-ic bad" aria-hidden="true"><Icon name="lock" size={26} /></span>
         <h1 className="auth-h">บัญชีนี้ถูกปิดการใช้งาน</h1>
         <p className="auth-sub">ติดต่อผู้ดูแลระบบของทีม</p>
       </header>
@@ -742,12 +805,16 @@ function Disabled() {
         {busy && <Spinner />}
         ออกจากระบบ
       </button>
+      <div className="auth-foot">
+        <HelpLink onHelp={onHelp} />
+      </div>
     </>
   );
 }
 
-/** Leave the sign-in screen: back to the team still connected (team code), or to this browser only. */
-function AuthFooter() {
+/** Leave the sign-in screen: back to the team still connected (team code), or to this browser only
+ *  (not on a site with a home team: it belongs to that team). */
+function AuthFooter({ onHelp }: { onHelp: () => void }) {
   const { engine: e } = useApp();
   const [ask, setAsk] = useState(false);
   const yes = useRef<HTMLButtonElement>(null);
@@ -755,6 +822,7 @@ function AuthFooter() {
     if (ask) yes.current?.focus();
   }, [ask]);
   const back = !!e.teamCfg;
+  const leave = back || !e.homeTeam;
   return (
     <div className="auth-foot">
       {ask ? (
@@ -771,12 +839,12 @@ function AuthFooter() {
         </div>
       ) : (
         <>
-          <button type="button" className="auth-link" onClick={() => (back ? e.teamCancelAuth() : setAsk(true))}>
-            {back ? 'กลับไปที่แอป' : 'ใช้งานแบบไม่เชื่อมทีม (ข้อมูลอยู่ในเครื่องนี้)'}
-          </button>
-          <a className="auth-link" href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer">
-            วิธีใช้งาน
-          </a>
+          {leave && (
+            <button type="button" className="auth-link" onClick={() => (back ? e.teamCancelAuth() : setAsk(true))}>
+              {back ? 'กลับไปที่แอป' : 'ใช้งานแบบไม่เชื่อมทีม (ข้อมูลอยู่ในเครื่องนี้)'}
+            </button>
+          )}
+          <HelpLink onHelp={onHelp} />
         </>
       )}
     </div>
@@ -898,7 +966,7 @@ export function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
           <PwField label="รหัสผ่านใหม่" value={pw} onChange={setPw} autoComplete="new-password" hints />
           <PwField label="ยืนยันรหัสผ่านใหม่" value={pw2} onChange={setPw2} autoComplete="new-password" />
           <Checklist pw={pw} confirm={pw2} u={u} name={name} old={old} oldLabel="ไม่ใช่รหัสผ่านปัจจุบัน" />
-          <p className="auth-note"><Icon name="alert" size={15} /> เครื่องอื่นที่เข้าสู่ระบบไว้จะถูกออกจากระบบ</p>
+          <p className="auth-note">เครื่องอื่นที่เข้าสู่ระบบไว้จะถูกออกจากระบบ</p>
           {err && <Msg kind="err">{err}</Msg>}
           <div className="auth-row">
             <SubmitBtn busy={busy} busyText="กำลังบันทึก…">เปลี่ยนรหัสผ่าน</SubmitBtn>
@@ -983,18 +1051,6 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </Modal>
-  );
-}
-
-/** The signed-in account in one line (used on the update page): "เข้าสู่ระบบในชื่อ … · role". */
-export function SignedInAs({ name, role }: { name: string; role: Role }) {
-  return (
-    <span className="acct-line">
-      <span className="acct-ava sm" aria-hidden="true">{nameLetter(name)}</span>
-      <span>
-        เข้าสู่ระบบในชื่อ <b>{name}</b> · {ROLE_TH[role]}
-      </span>
-    </span>
   );
 }
 

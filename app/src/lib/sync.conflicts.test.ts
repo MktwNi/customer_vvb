@@ -11,6 +11,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { TeamSyncError } from './teamSync';
+import type { PlanInput } from './sales';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -417,5 +418,81 @@ describe('a person with two tabs, and pushes that fail', () => {
     expect(sheet('stage/' + c.id)).toBe('won');
     for (const e of [A, B]) expect(e.stage(c.id)).toBe('won');
     done(A, B);
+  });
+});
+
+describe('payment plan installments (dpay) edited by two people', () => {
+  const line = (stage: string, amt: number, o: Partial<PlanInput> = {}): PlanInput => ({ stage, amt, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', ...o });
+  /** A won deal with a two-installment plan that both browsers have. */
+  async function planned(A: GccEngine, B: GccEngine, client: string) {
+    const d = A.addDeal({ client, section: 'Partner', year: '2569' });
+    A.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    A.setPlan(d.id, [line('PAY1', 53500, { rel: 0 }), line('PAY2', 53500, { due: '2026-10-20' })]);
+    await settle(A, B);
+    expect(B.sales.pays[`${d.id}/PAY2`]).toMatchObject({ amt: 53500 });
+    return d;
+  }
+
+  it('one records a payment while the other (stale) edits the terms: both are kept, in either order', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const d = await planned(A, B, 'แผนชำระพร้อมกัน');
+    A.markPaid(d.id, 'PAY2', { date: '2026-10-05', amount: 52000, how: 'cheque' });
+    await A.teamSync();
+    later(10);
+    B.updatePayLine(d.id, 'PAY2', { note: 'เมื่อส่งรายงาน CFO', due: '2026-10-25' }); // has not seen the payment
+    await settle(B, A);
+    for (const e of [A, B]) expect(e.sales.pays[`${d.id}/PAY2`]).toMatchObject({ rcv: '2026-10-05', got: 52000, how: 'cheque', note: 'เมื่อส่งรายงาน CFO', due: '2026-10-25', amt: 53500 });
+    A.updatePayLine(d.id, 'PAY1', { amt: 50000, note: 'มัดจำ' });
+    await A.teamSync();
+    later(10);
+    B.markPaid(d.id, 'PAY1', { date: '2026-10-06', amount: null }); // the stale one records the payment
+    await settle(B, A);
+    for (const e of [A, B]) expect(e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ amt: 50000, note: 'มัดจำ', rcv: '2026-10-06', got: null });
+    expect(sheet(`dpay/${d.id}/PAY1`)).toMatchObject({ amt: 50000, rcv: '2026-10-06' });
+    done(A, B);
+  });
+
+  it('different fields of one installment both stay; the same field: the later edit', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const d = await planned(A, B, 'แก้งวดพร้อมกัน');
+    A.updatePayLine(d.id, 'PAY2', { amt: 60000 });
+    await A.teamSync();
+    B.updatePayLine(d.id, 'PAY2', { how: 'cash' });
+    await settle(B, A);
+    for (const e of [A, B]) expect(e.sales.pays[`${d.id}/PAY2`]).toMatchObject({ amt: 60000, how: 'cash' });
+    A.updatePayLine(d.id, 'PAY2', { note: 'ของเอ' });
+    await A.teamSync();
+    later(5);
+    B.updatePayLine(d.id, 'PAY2', { note: 'ของบี' });
+    await settle(B, A);
+    for (const e of [A, B]) expect(e.sales.pays[`${d.id}/PAY2`].note).toBe('ของบี');
+    done(A, B);
+  });
+
+  it('an installment one person removed stays removed when a stale browser edits it', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const d = await planned(A, B, 'ลบงวดพร้อมกัน');
+    expect(A.setPlan(d.id, [line('PAY1', 107000, { rel: 0 })])).toEqual({ kept: [] });
+    await A.teamSync();
+    B.updatePayLine(d.id, 'PAY2', { note: 'แก้ทีหลัง' });
+    await settle(B, A);
+    for (const e of [A, B]) {
+      expect(e.sales.pays[`${d.id}/PAY2`]).toBeUndefined();
+      expect(e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ amt: 107000 });
+    }
+    expect(sheet(`dpay/${d.id}/PAY2`)).toBeNull();
+    done(A, B);
+  });
+
+  it('a plan made in one tab and a payment recorded in the other tab of the same browser both go out', async () => {
+    const [{ e: A }, { e: A2 }, { e: B }] = await team({ name: 'A' }, { name: 'A', tab: true }, { name: 'B' });
+    const d = await planned(A, B, 'สองแท็บแผนชำระ');
+    await settle(A2);
+    A.updatePayLine(d.id, 'PAY1', { note: 'แก้ในแท็บแรก' });
+    await stored(A);
+    A2.markPaid(d.id, 'PAY1', { date: '2026-10-04', amount: null });
+    await settle(A2, A, B);
+    for (const e of [A, A2, B]) expect(e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ note: 'แก้ในแท็บแรก', rcv: '2026-10-04' });
+    done(A, A2, B);
   });
 });

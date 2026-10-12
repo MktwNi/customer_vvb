@@ -200,7 +200,7 @@ async function readPdf(file: DocFile, progress: Progress | undefined, signal: Ab
       doc = await abortable(task.promise, signal);
     } catch (e) {
       checkAbort(signal);
-      if ((e as Error)?.name === 'PasswordException') throw new Error('PDF นี้ตั้งรหัสผ่านไว้ — เปิดด้วยรหัสแล้วบันทึกเป็นไฟล์ใหม่ (Print → Save as PDF) ก่อนแนบ');
+      if ((e as Error)?.name === 'PasswordException') throw new Error('PDF นี้ตั้งรหัสผ่านไว้ — เปิดด้วยรหัสแล้วบันทึกเป็นไฟล์ใหม่ (สั่ง Print แล้วเลือก Save as PDF) ก่อนแนบ');
       // pdf.js's own worker script did not load (offline, or an old page after a new version went up)
       if (/fake worker|dynamically imported|importScripts|failed to fetch|networkerror/i.test(String((e as Error)?.message ?? e))) throw new Error(PDF_LOAD_FAILED, { cause: e });
       throw new Error('เปิดไฟล์ PDF ไม่ได้ ไฟล์อาจเสียหรือไม่ใช่ PDF', { cause: e });
@@ -307,6 +307,44 @@ async function imageToCanvas(file: Blob): Promise<HTMLCanvasElement> {
   ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
   done();
   return canvas;
+}
+
+// ------------------------------------------------------------------ thumbnails
+
+/** A small JPEG of a document (its first page, or the image) as a data URL, `px` on the long side: the
+ *  deal panel shows it on the document's card so the figure can be checked by eye. HEIC and unreadable
+ *  files reject (the card then shows a word). */
+export async function docThumb(file: DocFile, px = 168): Promise<string> {
+  const kind = await sniff(file);
+  let src: HTMLCanvasElement;
+  if (kind === 'pdf') {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    const params = { data: new Uint8Array(await file.arrayBuffer()), wasmUrl: assetBase() + 'pdfjs/', isEvalSupported: false };
+    const task = pdfjs.getDocument(params);
+    try {
+      const pg = (await (await task.promise).getPage(1)) as unknown as PdfPage;
+      const base = pg.getViewport({ scale: 1 });
+      const viewport = pg.getViewport({ scale: px / Math.max(base.width, base.height) });
+      src = document.createElement('canvas');
+      src.width = Math.ceil(viewport.width);
+      src.height = Math.ceil(viewport.height);
+      await pg.render({ canvas: src, viewport: viewport as never }).promise;
+    } finally {
+      void task.destroy().catch(() => {});
+    }
+  } else if (kind === 'image') src = await imageToCanvas(file);
+  else throw new Error('ไม่มีภาพตัวอย่างของไฟล์นี้');
+  const s = Math.min(1, px / Math.max(src.width, src.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(src.width * s));
+  c.height = Math.max(1, Math.round(src.height * s));
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
 }
 
 // ------------------------------------------------------------------ OCR

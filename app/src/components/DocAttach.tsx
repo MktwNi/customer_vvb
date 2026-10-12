@@ -1,17 +1,43 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../state';
-import { isoTh } from '../lib/format';
 import { norm } from '../lib/core';
-import { KIND_TH, fmtMoney, parseAmount, type Deal, type DealDoc, type DocKind, type DocTarget } from '../lib/sales';
+import { dmTh, isoTh, todayISO } from '../lib/format';
+import {
+  KIND_TH, attachPreview, closeReady, countedAt, dealMoney, fmtMoney, kindForStage, mismatchText, parseAmount, planOf, stageTh, stageTrack, targetForStage,
+  type Deal, type DealDoc, type DocKind, type DocTarget,
+} from '../lib/sales';
 import type { DocFacts } from '../lib/docExtract';
-import { Modal } from '../tabs/Sales';
+import type { GccEngine } from '../lib/engine';
+import { Modal } from './Dialog';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { prefs } from '../lib/storage';
-import { Notice, inputStyle, labelCol, selectStyle } from './ui';
+import { DateField, Notice, labelCol } from './ui';
+import { Bead } from './StageTrack';
+import { useSalesActs } from './SalesToast';
 
-const small: CSSProperties = { cursor: 'pointer', height: 36, padding: '0 14px', borderRadius: 999, border: '1.5px solid #D5DBEA', background: '#fff', color: '#0E1430', fontSize: 13 };
 const BASIS_PREF = 'gcc-doc-basis';
-const defaultTarget = (k: DocKind): DocTarget => (k === 'quotation' ? 'forecast' : k === 'invoice' ? 'actual' : 'none');
+
+/** Browsers show PDF and common images in a tab; anything else (HEIC from an iPhone) is downloaded. */
+export const SHOWABLE = /^(application\/pdf|image\/(png|jpeg|webp|gif))$/;
+/** Open an attached document's file (from this browser, or the team's Drive). The tab is opened within
+ *  the click, then filled: a pop-up opened after a slow download would be blocked. */
+export async function openDocFile(e: GccEngine, doc: DealDoc) {
+  const w = SHOWABLE.test(doc.mime) ? window.open('', '_blank') : null;
+  try {
+    const url = URL.createObjectURL(await e.docBlob(doc));
+    if (w) w.location.href = url;
+    else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.name;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    w?.close();
+    window.alert('เปิดไฟล์ไม่สำเร็จ: ' + ((err as Error)?.message || err));
+  }
+}
 
 /** Two names refer to the same company? (ignores company-type words and punctuation) */
 function sameParty(a: string, b: string) {
@@ -20,12 +46,33 @@ function sameParty(a: string, b: string) {
   return !x || !y || x.includes(y) || y.includes(x);
 }
 
+/** The figure a document is checked against: "แผน" 160,000, "Forecast ที่พิมพ์ไว้" 350,000, … */
+export interface DocCheck { what: string; value: number }
+/** What the attach ended with: the document's own figure, and whether the user kept theirs instead. */
+export interface DocSaved { doc: DealDoc; docFig: number | null; kept: boolean }
+/** Where an attach comes from: the figure it backs presets what it counts toward (`target`) and what it
+ *  is checked against (`check`; without it the stage's figure is used, see DocAttach); `add`: more for a
+ *  part-paid installment ("แนบใบเสร็จเพิ่ม"), so it adds to what came in unless the user picks "ใช้ยอดนี้แทน". */
+export interface AttachMore { target?: DocTarget; check?: DocCheck; add?: boolean; onSaved?: (r: DocSaved) => void }
+const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
+
 /**
  * Attach a quotation / invoice: the document is read in the browser (PDF text, or OCR for scans and
  * photos), the amounts found are shown, and nothing is saved until the user confirms the figure.
+ * `stage`: the stage it was attached at (QUOTATION is the Forecast, a PAY the Actual of that
+ * installment); without it the stage is chosen ("ระบบเลือกขั้นให้"), '' = a document of no stage
+ * ("เอกสารอื่น"). `file`: a file dropped on the panel, read at once. The amount read is checked
+ * against the figure it should match (`check`, else the typed Forecast / the installment's plan / the
+ * typed Actual): when they differ the user chooses "ใช้ยอดจากเอกสาร" or "คงยอดเดิม" (the document is
+ * attached either way, and a kept figure shows "ไม่ตรงเอกสาร"). Nothing changes silently, nothing blocks saving.
  */
-export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: DocKind; onClose: () => void }) {
+export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, target: target0, check, add: add0, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
   const { engine: e } = useApp();
+  const acts = useSalesActs();
+  const cfg = e.sales.cfg, today = todayISO();
+  const kind0: DocKind = kindIn ?? (stage ? kindForStage(cfg, stage) : dealMoney(e.sales, deal).fcDoc ? 'invoice' : 'quotation');
+  // what a kind counts toward at this stage (a receipt at a PAY stage is Actual); a figure's own attach keeps its target
+  const defaultTarget = (k: DocKind): DocTarget => target0 ?? targetForStage(cfg, stage ?? '', k);
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [prog, setProg] = useState<{ msg: string; pct?: number } | null>(null);
@@ -39,11 +86,22 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const [docNo, setDocNo] = useState('');
   const [docDate, setDocDate] = useState('');
   const [saving, setSaving] = useState('');
+  // a document (or a hand receipt) already counted at this stage: the new one replaces it (kept as
+  // evidence) or adds to it
+  const [mode, setMode] = useState<'replace' | 'add'>(add0 ? 'add' : 'replace');
+  // "ถือว่ารับครบงวดนี้" on a short payment: null = as suggested (ticked when it matches withholding tax)
+  const [full, setFull] = useState<boolean | null>(null);
+  // the document's figure differs from the one it should match: keep the user's ("คงยอดเดิม")
+  const [keep, setKeep] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => () => {
     abort.current?.abort();
   }, []);
+  // a file dropped on the deal panel is read right away
+  useEffect(() => {
+    if (dropped) pick(dropped);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => {
     if (url) URL.revokeObjectURL(url);
   }, [url]);
@@ -68,6 +126,7 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
     setAmount('');
     setDocNo('');
     setDocDate('');
+    setKeep(false);
     const bad = f.size > DOC_MAX_BYTES ? 'ไฟล์ใหญ่เกิน 10 MB' : !docMime(f) ? 'รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)' : '';
     if (bad) {
       setReadErr(`${bad} — เลือกไฟล์อื่น (${f.name})`);
@@ -124,13 +183,60 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const parsed = parseAmount(amount);
   const amt = parsed ?? null;
   const badAmt = parsed === undefined;
+  const counted = stage && target === 'actual' ? countedAt(e.sales, deal, stage) : [];
+  const old = counted[counted.length - 1];
+  const tgt: DocTarget = amt == null ? 'none' : target;
+  // only money received (Actual, with an amount) replaces what is counted
+  const replace = old && mode === 'replace' && tgt === 'actual' ? old.id : undefined;
+  // the installment planned at this stage, and the stage's circle
+  const line = stage ? planOf(e.sales, deal, today)?.lines.find((l) => l.stage === stage) : undefined;
+  const st = stage ? stageTrack(e.sales, deal, today).states[stage] : undefined;
+  // part paid by hand with no document yet: this one is the receipt for that money, or for the rest
+  const handPart = !!line && line.hand && !line.docs.length && line.status === 'part' && target === 'actual';
+  const addHand = handPart && mode === 'add' && tgt === 'actual';
+  // the figure this document should match: given by the figure it was attached from, else the typed
+  // Forecast, the installment's plan (or what was received by hand), or the typed Actual
+  const m0 = dealMoney(e.sales, deal);
+  const chk: DocCheck | null =
+    check ? check
+    : tgt === 'forecast' ? (!m0.fcDoc && m0.forecast != null ? { what: 'Forecast ที่พิมพ์ไว้', value: m0.forecast } : null)
+    : tgt !== 'actual' ? null
+    : line ? (line.hand && !line.docs.length && !addHand ? { what: 'ยอดที่รับ', value: line.got } : line.amt > 0 ? ((old || handPart) && mode === 'add' ? { what: 'ยอดที่ยังขาดตามแผน', value: Math.max(0, line.amt - line.got) } : { what: 'แผน', value: line.amt }) : null)
+    : !m0.acDocs && !m0.hand && deal.actual != null ? { what: 'Actual ที่พิมพ์ไว้', value: deal.actual } : null;
+  const same = !!chk && amt != null && Math.abs(amt - chk.value) < 0.005;
+  const differs = !!chk && amt != null && !same && tgt !== 'none';
+  // the figure confirmed: the document's, or the user's own when they keep it (the document is attached either way)
+  const fin = differs && keep ? chk!.value : amt;
+  // what attaching changes: the installment of the plan, the Actual, and whether the job becomes ready to close
+  const pv = file && fin != null && tgt !== 'none' ? attachPreview(e.sales, deal, { kind, amount: fin, target: tgt, docDate, stage, replace, addHand }, today) : null;
+  const short = !!pv?.line && pv.short > 0 && pv.line.got > 0;
+  const fullOn = short && (full ?? pv?.wht != null);
+  const ad = docDate && docDate <= today ? docDate : today;
+  const after = !pv
+    ? ''
+    : [
+        pv.line
+          ? `หลังแนบ: ${pv.stage} รับแล้ว ${fmtMoney(pv.line.got)} บาท · ${pv.short > 0 ? `ขาด ${fmtMoney(pv.short)} จากแผน ${fmtMoney(pv.line.amt)}` : pv.line.amt > 0 && pv.line.got > pv.line.amt ? `รับเกินแผน ${fmtMoney(pv.line.got - pv.line.amt)}` : 'ครบตามแผน'}`
+          : tgt === 'forecast'
+            ? `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Forecast จะเป็น ${fmtMoney(fin)}`
+            : `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Actual จะเป็น ${fmtMoney(pv.actual)}${pv.fcFull ? ' (ครบตาม Forecast)' : ''}`,
+        pv.ready || (fullOn && pv.readyIfFull) ? (pv.line ? 'รับครบทุกงวดแล้ว งานนี้จะพร้อมปิดงาน' : 'งานนี้จะพร้อมปิดงาน') : '',
+      ].filter(Boolean).join(' · ');
   const save = async () => {
     if (!file || badAmt) return;
     setSaving('กำลังบันทึก…');
     try {
       if (amt != null && basis !== 'manual') prefs.set(BASIS_PREF, basis);
-      await e.attachDoc(deal.id, file, { kind, amount: amt, target: amt == null ? 'none' : target, basis: amt == null ? 'manual' : basis, detected: facts?.total ?? facts?.candidates[0]?.value ?? null, docNo, docDate });
+      const was = closeReady(e.sales, deal, today);
+      const kept = differs && keep;
+      // `detected` keeps the document's own figure: a kept one differs from it ("ไม่ตรงเอกสาร", docMismatch)
+      const doc = await e.attachDoc(deal.id, file, { kind, amount: fin, target: tgt, basis: amt == null || kept ? 'manual' : basis, detected: amt, docNo, docDate, stage, replace, addHand, kept });
+      // a short payment counted complete (withholding tax): the installment is received
+      if (fullOn && doc.stage) e.setPayFull(deal.id, doc.stage, true);
       onClose();
+      onSaved?.({ doc, docFig: amt, kept });
+      const d = e.sales.deals[deal.id];
+      if (d) acts.after(d, was, 'payment', `แนบ${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''}${doc.stage ? ' ที่ ' + doc.stage : ''} แล้ว${kept ? ' · คงยอดเดิม ' + fmtMoney(fin) : ''}`);
     } catch (err) {
       setSaving('บันทึกไม่สำเร็จ: ' + ((err as Error)?.message || err));
     }
@@ -149,66 +255,76 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
   const isImg = file && docMime(file).startsWith('image/') && !/hei[cf]/.test(docMime(file)); // browsers can't show HEIC
 
   return (
-    <Modal title={`แนบ${KIND_TH[kind]} · ${deal.client}`} onClose={onClose} width={620}>
+    <Modal title={stage ? `แนบเอกสารที่ ${stage}${stageTh(stage) ? ' · ' + stageTh(stage) : ''}` : `แนบ${KIND_TH[kind]}`} onClose={onClose} width={620}>
+      <span className="sl-dlg-sub">{deal.client}</span>
+      {stage && (
+        <div className="sl-stagebar">
+          <Bead state={st || 'future'} now stage={stage} />
+          <span>
+            เอกสารนี้จะผูกกับขั้น <b>{stage}</b> · ยอดที่ยืนยัน{target === 'forecast' ? 'เป็น Forecast' : target === 'actual' ? 'รวมเข้า Actual' : 'ไม่นับยอด'}
+            {line && line.amt > 0 && <> · <b>แผนงวดนี้ {fmtMoney(line.amt)} บาท{line.due ? ' ครบกำหนด ' + dmTh(line.due) : ''}</b></>}
+          </span>
+        </div>
+      )}
       <label style={{ ...labelCol, gap: 8 }}>
         เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)
-        <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 13.5 }} />
+        <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 14 }} />
       </label>
       {prog && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 13.5, color: '#475069' }}>{prog.msg}</span>
-          <span style={{ height: 6, background: '#EEF1F8', borderRadius: 999, overflow: 'hidden' }}>
-            <span style={{ display: 'block', height: '100%', width: `${prog.pct ?? 30}%`, background: '#1F5BD8', transition: 'width .2s' }} />
+          <span className="t-sec" style={{ fontSize: 14 }}>{prog.msg}</span>
+          <span style={{ height: 6, background: 'var(--bar-track)', borderRadius: 999, overflow: 'hidden' }}>
+            <span style={{ display: 'block', height: '100%', width: `${prog.pct ?? 30}%`, background: 'var(--bar)', transition: 'width .2s' }} />
           </span>
-          <span style={{ fontSize: 12, color: '#5E6680' }}>อ่านในเครื่องนี้ ไม่ได้ส่งไฟล์ไปที่อื่น · รูปถ่าย / สแกนใช้เวลาอ่านนานกว่า PDF (ครั้งแรกต้องโหลดตัวอ่านภาษาไทย)</span>
+          <span className="t-meta">อ่านในเครื่องนี้ ไม่ได้ส่งไฟล์ไปที่อื่น · รูปถ่าย / สแกนใช้เวลาอ่านนานกว่า PDF</span>
         </div>
       )}
       {readErr && <Notice kind="error" role="alert">{readErr}</Notice>}
       {file && !prog && (
         <>
-          {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid #E3E7F1', background: '#F6F8FE' }} />}
-          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13.5 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด ↗</a>}
-          {!isImg && docMime(file) !== 'application/pdf' && <span style={{ fontSize: 13, color: '#5E6680' }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) — เทียบยอดกับรูปในเครื่องของคุณ</span>}
+          {isImg && <img src={url} alt="ตัวอย่างเอกสาร" style={{ maxHeight: 220, objectFit: 'contain', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--frame)' }} />}
+          {!isImg && docMime(file) === 'application/pdf' && <a href={url} target="_blank" rel="noopener noreferrer" className="hv-tx" style={{ alignSelf: 'flex-start', fontSize: 14 }}>เปิดดูไฟล์ {file.name} เพื่อเทียบยอด</a>}
+          {!isImg && docMime(file) !== 'application/pdf' && <span className="t-meta" style={{ fontSize: 13 }}>เบราว์เซอร์นี้แสดงตัวอย่างรูป {file.name} ไม่ได้ (HEIC) เทียบยอดกับรูปในเครื่องของคุณ</span>}
           {facts && (opts.length > 0 || others.length > 0) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F7F8FC', borderRadius: 14, padding: '12px 14px' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 500 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px' }}>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>
                 ยอดเงินที่ระบบอ่านได้{' '}
-                <span style={{ fontSize: 12, fontWeight: 400, color: facts.confidence === 'high' ? '#14633F' : facts.confidence === 'medium' ? '#6B4100' : '#8A2B12' }}>
-                  · ความมั่นใจ{facts.confidence === 'high' ? 'สูง' : facts.confidence === 'medium' ? 'ปานกลาง' : 'ต่ำ — โปรดตรวจกับเอกสาร'}
+                <span style={{ fontSize: 12, fontWeight: 400, color: facts.confidence === 'high' ? 'var(--ok)' : facts.confidence === 'medium' ? 'var(--warn)' : 'var(--bad)' }}>
+                  · ความมั่นใจ{facts.confidence === 'high' ? 'สูง' : facts.confidence === 'medium' ? 'ปานกลาง' : 'ต่ำ โปรดตรวจกับเอกสาร'}
                 </span>
               </span>
               {opts.map(([b, label, v]) => (
-                <label key={b} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5, cursor: 'pointer' }}>
-                  <input type="radio" name="basis" checked={basis === b && amt === v} onChange={() => choose(b, v)} />
+                <label key={b} className="hv-tx" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                  <input type="radio" name="basis" checked={basis === b && amt === v} onChange={() => choose(b, v)} style={{ accentColor: 'var(--brand)' }} />
                   <span style={{ flex: 1 }}>{label}</span>
                   <b style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(v)} บาท</b>
                 </label>
               ))}
-              {facts.vat != null && <span style={{ fontSize: 12, color: '#5E6680' }}>VAT {fmtMoney(facts.vat)} บาท{facts.wht != null ? ` · หัก ณ ที่จ่าย ${fmtMoney(facts.wht)} บาท` : ''}</span>}
-              {wordsOk && <span style={{ fontSize: 12, color: '#14633F' }}>✓ ตรงกับจำนวนเงินตัวอักษรในเอกสาร</span>}
+              {facts.vat != null && <span className="t-meta">VAT {fmtMoney(facts.vat)} บาท{facts.wht != null ? ` · หัก ณ ที่จ่าย ${fmtMoney(facts.wht)} บาท` : ''}</span>}
+              {wordsOk && <span className="t-ok" style={{ fontSize: 12 }}>ตรงกับจำนวนเงินตัวอักษรในเอกสาร</span>}
               {others.length > 0 && (
-                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: '#475069' }}>
+                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 13, color: 'var(--ink-2)' }}>
                   ตัวเลขอื่นที่พบ:
                   {others.map((c) => (
-                    <button key={c.value} onClick={() => choose('manual', c.value)} title={c.line} style={{ ...small, height: 28, fontSize: 12 }}>{fmtMoney(c.value)}</button>
+                    <button key={c.value} onClick={() => choose('manual', c.value)} title={c.line} className="btn xs">{fmtMoney(c.value)}</button>
                   ))}
                 </span>
               )}
             </div>
           )}
           {method === 'pdf-text' && facts && (facts.total == null || facts.confidence !== 'high') && (
-            <button onClick={() => pick(file, true)} style={{ ...small, alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
+            <button onClick={() => pick(file, true)} className="lnk" style={{ alignSelf: 'flex-start' }}>ยอดไม่ถูก? อ่านใหม่จากภาพของเอกสาร (OCR)</button>
           )}
           {partyWarn && <Notice kind="error">ชื่อลูกค้าในเอกสาร "{facts!.party}" ไม่ตรงกับ "{deal.client}" — ตรวจว่าแนบถูกรายการ</Notice>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
             <label style={labelCol}>
-              ยอดเงินที่ยืนยัน (บาท)
-              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} style={{ ...inputStyle, fontSize: 16, fontWeight: 500 }} />
-              {badAmt && <span role="alert" style={{ fontSize: 12, color: '#8A2B12', fontWeight: 400 }}>อ่านเป็นจำนวนเงินไม่ได้ — พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
+              {chk ? 'ยอดในเอกสาร (บาท)' : 'ยอดเงินที่ยืนยัน (บาท)'}
+              <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} className="fld" style={{ fontWeight: 500, ...(badAmt ? { borderColor: 'var(--bad)' } : {}) }} />
+              {badAmt && <span role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>อ่านเป็นจำนวนเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
             </label>
             <label style={labelCol}>
               นับยอดนี้เป็น
-              <select value={target} onChange={(ev) => setTarget(ev.target.value as DocTarget)} style={selectStyle}>
+              <select value={target} onChange={(ev) => setTarget(ev.target.value as DocTarget)} className="fld sel">
                 <option value="forecast">Forecast (ยอดที่คาดว่าจะได้)</option>
                 <option value="actual">Actual (ยอดที่ได้จริง)</option>
                 <option value="none">ไม่นับยอด (แนบไว้เป็นหลักฐาน)</option>
@@ -216,25 +332,66 @@ export function DocAttach({ deal, kind: kind0, onClose }: { deal: Deal; kind: Do
             </label>
             <label style={labelCol}>
               ประเภทเอกสาร
-              <select value={kind} onChange={(ev) => { const k = ev.target.value as DocKind; setKind(k); setTarget(defaultTarget(k)); }} style={selectStyle}>
+              <select value={kind} onChange={(ev) => { const k = ev.target.value as DocKind; setKind(k); setTarget(defaultTarget(k)); }} className="fld sel">
                 {(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}
               </select>
             </label>
             <label style={labelCol}>
               เลขที่เอกสาร
-              <input value={docNo} onChange={(ev) => setDocNo(ev.target.value)} style={inputStyle} />
+              <input value={docNo} onChange={(ev) => setDocNo(ev.target.value)} className="fld" />
             </label>
             <label style={labelCol}>
-              ลงวันที่{docDate ? ` (${isoTh(docDate)})` : ''}
-              <input type="date" value={docDate} onChange={(ev) => setDocDate(ev.target.value)} style={inputStyle} />
+              ลงวันที่
+              <DateField value={docDate} onChange={setDocDate} placeholder="ไม่ระบุ" />
             </label>
           </div>
-          {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? '#8A2B12' : '#475069' }}>{saving}</span>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button onClick={onClose} style={small}>ยกเลิก</button>
-            <button onClick={save} disabled={saving === 'กำลังบันทึก…' || badAmt} style={{ ...small, background: '#1F5BD8', borderColor: '#1F5BD8', color: '#fff', opacity: badAmt ? 0.5 : 1 }}>
-              {amt != null ? `ยืนยันยอด ${fmtMoney(amt)} บาท และแนบเอกสาร` : 'แนบเอกสาร (ไม่ระบุยอด)'}
-            </button>
+          {chk && amt != null && tgt !== 'none' && (
+            same ? (
+              <p className="sl-xchk ok" role="status"><b>ตรงกับเอกสาร</b> <span>{chk.what} {fmtMoney(chk.value)} บาท · {BASIS_TH[basis]}</span></p>
+            ) : (
+              <fieldset className="sl-xchk warn">
+                <legend>{mismatchText(amt, chk.value, chk.what)}</legend>
+                {opts.length > 1 && (
+                  <span className="sl-xchk-b" role="group" aria-label="ยอดในเอกสารที่ใช้เทียบ">
+                    เทียบด้วย
+                    {opts.map(([b, label, v]) => (
+                      <button key={b} type="button" className="btn xs" aria-pressed={basis === b && amt === v} onClick={() => choose(b, v)} title={label}>{BASIS_TH[b]} {fmtMoney(v)}</button>
+                    ))}
+                  </span>
+                )}
+                <label className="hv-tx"><input type="radio" name="xchk" checked={!keep} onChange={() => setKeep(false)} /> ใช้ยอดจากเอกสาร <b>{fmtMoney(amt)}</b> <span className="t-meta">{BASIS_TH[basis]}</span></label>
+                <label className="hv-tx"><input type="radio" name="xchk" checked={keep} onChange={() => setKeep(true)} /> คงยอดเดิม <b>{fmtMoney(chk.value)}</b> <span className="t-meta">แนบไว้ ขึ้นว่าไม่ตรงเอกสาร</span></label>
+              </fieldset>
+            )
+          )}
+          {handPart && amt != null && tgt === 'actual' && (
+            <fieldset className="sl-repl">
+              <legend>{stage} บันทึกรับเงินเองไว้ {fmtMoney(line!.got)} บาท ยังไม่มีเอกสาร</legend>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'replace'} onChange={() => setMode('replace')} /> ใช้ยอดนี้แทน <span className="t-meta">ใบนี้เป็นใบเสร็จของเงินก้อนนั้น</span></label>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'add'} onChange={() => setMode('add')} /> นับเพิ่ม <span className="t-meta">ใบนี้คือส่วนที่เหลือ รวมกับยอดที่บันทึกไว้</span></label>
+            </fieldset>
+          )}
+          {old && amt != null && (
+            <fieldset className="sl-repl">
+              <legend>{stage} นับยอดจาก{KIND_TH[old.kind]}{old.docNo ? ' ' + old.docNo : ''} {fmtMoney(old.amount)} บาท อยู่แล้ว</legend>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'replace'} onChange={() => setMode('replace')} /> ใช้ยอดนี้แทน <span className="t-meta">ใบเดิมเก็บไว้เป็นหลักฐาน ไม่นับยอด</span></label>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'add'} onChange={() => setMode('add')} /> นับเพิ่ม <span className="t-meta">งวดนี้จ่ายหลายครั้ง</span></label>
+            </fieldset>
+          )}
+          {after && <div className="sl-after">{after}</div>}
+          {short && (
+            <label className="sl-rf-full hv-tx">
+              <input type="checkbox" checked={fullOn} onChange={(ev) => setFull(ev.target.checked)} /> ถือว่ารับครบงวดนี้ (เช่น หัก ณ ที่จ่าย)
+            </label>
+          )}
+          {saving && <span role="status" style={{ fontSize: 13, color: saving.startsWith('บันทึกไม่') ? 'var(--bad)' : 'var(--ink-2)' }}>{saving}</span>}
+          <div className="dlg-act">
+            <button onClick={onClose} className="quiet">ยกเลิก</button>
+            {!badAmt && (
+              <button onClick={save} disabled={saving === 'กำลังบันทึก…'} className="btn pri">
+                {fin != null ? `ยืนยันยอด ${fmtMoney(fin)} บาท และ${stage ? 'แนบที่ ' + stage : 'แนบเอกสาร'}` : 'แนบเอกสาร (ไม่ระบุยอด)'}
+              </button>
+            )}
           </div>
         </>
       )}

@@ -31,7 +31,7 @@ describe('sales tracker rules (same as the original tracker)', () => {
     const S = state([a, b, c], { 'a/CLOSED DEAL': { d: '2026-09-20', n: ' yes ' }, 'c/CALL1': { d: '2026-10-02', n: '' }, 'b/CLOSED DEAL': { d: '', n: 'รอผู้บริหาร' } });
     expect(dealResult(S, a)).toBe('YES');
     expect(dealResult(S, b)).toBe('WAIT');
-    expect(dealStatus(S, a).overall).toBe('ปิดการขายแล้ว');
+    expect(dealStatus(S, a).overall).toBe('ได้งาน'); // the result never says "ปิด": that is ปิดงาน
     expect(dealStatus(S, b).overall).toBe('ปิดงาน');
     expect(dealStatus(S, c).overall).toBe('กำลังดำเนินการ');
     expect(dealStatus(S, deal()).overall).toBe('ยังไม่เริ่ม');

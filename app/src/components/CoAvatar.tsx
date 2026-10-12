@@ -1,14 +1,5 @@
 import { useState, type CSSProperties } from 'react';
 
-/** Background colours for monogram avatars (white text on each is at least 4.5:1). */
-const SWATCH = ['#1F5BD8', '#0B6E66', '#6D4BD8', '#B4570B', '#B03A64', '#2E7D32', '#3949AB', '#0E7490'];
-
-const hash = (s: string) => {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-};
-
 /** The company's own name without the legal-form words around it ("บริษัท … จำกัด (มหาชน)"). */
 export function coreName(name: string) {
   return name
@@ -29,6 +20,22 @@ export function monogram(name: string, set?: string) {
   return Array.from(n).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '•';
 }
 
+/** A monogram's font size for an avatar of `size` px with this many letters: on the type scale (§4) and
+ *  never under 12px — the letters stay readable in the smallest bubbles. */
+export function monoSize(size: number, letters: number) {
+  if (letters > 2) return size >= 80 ? 24 : size >= 56 ? 16 : size >= 44 ? 13 : 12;
+  if (letters > 1) return size >= 80 ? 28 : size >= 56 ? 18 : size >= 40 ? 14 : 13;
+  return size >= 80 ? 40 : size >= 64 ? 28 : size >= 56 ? 24 : size >= 44 ? 18 : size >= 40 ? 16 : 14;
+}
+
+/** The Sales dashboard keeps the owner's coloured monograms (`colored`): white text on each is at least 4.5:1. */
+const SWATCH = ['#1F5BD8', '#0B6E66', '#6D4BD8', '#B4570B', '#B03A64', '#2E7D32', '#3949AB', '#0E7490'];
+const hash = (s: string) => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+};
+
 const hostOf = (web?: string) => {
   if (!web) return '';
   try {
@@ -40,27 +47,29 @@ const hostOf = (web?: string) => {
 
 /**
  * A company's picture: its website icon when it has a website (fetched by the browser from Google's
- * favicon service, shown only if it is a real, sharp icon), otherwise a coloured monogram — the SET
+ * favicon service, shown only if it is a real, sharp icon), otherwise a monogram on the light tint — the SET
  * symbol for listed companies, else the first letter of the name. Decorative: the name is always
  * written next to it.
  */
-type AvatarProps = { name: string; web?: string; set?: string; size?: number; ring?: string; style?: CSSProperties };
+type AvatarProps = { name: string; web?: string; set?: string; size?: number; ring?: string; colored?: boolean; style?: CSSProperties };
 export function CoAvatar(p: AvatarProps) {
   // a new website (contact edited) starts its logo check afresh
   return <CoAvatarInner key={hostOf(p.web)} {...p} />;
 }
-function CoAvatarInner({ name, web, set, size = 36, ring, style }: AvatarProps) {
+function CoAvatarInner({ name, web, set, size = 36, ring, colored, style }: AvatarProps) {
   const host = hostOf(web);
   const [logo, setLogo] = useState<'wait' | 'ok' | 'none'>(host ? 'wait' : 'none');
   const full = monogram(name, set);
-  const text = size < 28 ? Array.from(full)[0] : full; // small bubbles: one readable letter
-  const bg = SWATCH[hash(coreName(name) || name) % SWATCH.length];
-  const fs = Math.round(size * (text.length > 2 ? 0.3 : text.length > 1 ? 0.36 : 0.44));
+  // small bubbles: one readable letter; a four-letter symbol that would not fit at 12px: the name's own
+  // letter (a symbol is never cut: a cut one can be another company's)
+  const text = size < 28 ? Array.from(full)[0] : full.length > 3 && size < 36 ? monogram(name) : full;
+  const fs = monoSize(size, text.length);
+  const bg = colored ? SWATCH[hash(coreName(name) || name) % SWATCH.length] : 'var(--info-bg)';
   return (
     <span
       className="co-ava"
       aria-hidden="true"
-      style={{ width: size, height: size, fontSize: fs, background: logo === 'ok' ? '#fff' : bg, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, ...style }}
+      style={{ width: size, height: size, fontSize: fs, background: logo === 'ok' ? '#fff' : bg, color: colored ? '#fff' : undefined, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, ...style }}
     >
       {logo !== 'ok' && text}
       {host && logo !== 'none' && (
