@@ -19,50 +19,88 @@ export interface HelpProps {
   tabName?: (tab: Tab) => string;
   /** Over the sign-in screen: the overlay's bar holds the title. */
   overlay?: boolean;
+  /** Show the one-time team setup quick start: before signing in, and to whoever can manage the team. */
+  setup?: boolean;
 }
+
+/** Where the reader was: kept while they visit another page ("ไปที่หน้านี้" or the menu) and come back,
+ *  so they land on the topic they left, as they left it (in the app and over the sign-in screen apart).
+ *  `at`: the topic ("t:id") or question ("f:id") opened or used last. */
+const saved: Record<'page' | 'ov', { q: string; open: Record<string, true>; at: string }> = {
+  page: { q: '', open: {}, at: '' },
+  ov: { q: '', open: {}, at: '' },
+};
 
 /**
  * The help center (คู่มือการใช้งาน): a search, the table of contents (one card per group, its topics as
- * links), two quick starts, the topics by group, the FAQ and who to contact. Topics and questions open
- * one by one (closed at first: title and summary); what is open stays open while searching. Needs no
- * data, so it also works before signing in (HelpOverlay).
+ * links; on phones the groups only), the quick starts, the topics by group, the FAQ and who to contact.
+ * Topics and questions open one by one (closed at first: title and summary); what is open stays open
+ * while searching, and while the reader is on another page. Needs no data, so it also works before
+ * signing in (HelpOverlay).
  */
-export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
+export function Help({ onGo, canGo, tabName, overlay, setup }: HelpProps) {
   const pfx = 'hp' + useId().replace(/[^a-zA-Z0-9]/g, '');
-  const [q, setQ] = useState('');
-  const [open, setOpen] = useState<Record<string, true>>({});
-  // where to go after the next render: scroll to it and give its button the keyboard
-  const [jump, setJump] = useState<{ id: string; focus?: string; n: number } | null>(null);
-  const res = useMemo(() => searchHelp(q), [q]);
-  const searching = q.trim() !== '';
-
-  useEffect(() => {
-    if (!jump) return;
-    const el = document.getElementById(jump.id);
-    if (!el) return;
-    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    el.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
-    document.getElementById(jump.focus || jump.id)?.focus({ preventScroll: true });
-  }, [jump]);
-
   const tId = (id: string) => `${pfx}-t-${id}`;
   const fId = (id: string) => `${pfx}-f-${id}`;
   const gId = (id: string) => `${pfx}-g-${id}`;
-  const toggle = (k: string) =>
+  /** The row of "t:id" / "f:id". */
+  const rowId = (k: string) => (k.startsWith('f:') ? fId : tId)(k.slice(2));
+  const keep = saved[overlay ? 'ov' : 'page'];
+  const [q, setQ] = useState(keep.q);
+  const [open, setOpen] = useState<Record<string, true>>(keep.open);
+  // where to go after the next render: scroll to it and give its button the keyboard (back from another
+  // page: straight to the topic left, without the smooth scroll)
+  const [jump, setJump] = useState<{ id: string; focus?: string; n: number; back?: boolean } | null>(() =>
+    keep.at ? { id: rowId(keep.at), focus: rowId(keep.at) + '-btn', n: 1, back: true } : null,
+  );
+  const res = useMemo(() => searchHelp(q), [q]);
+  const searching = q.trim() !== '';
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    keep.q = q;
+    keep.open = open;
+  }, [keep, q, open]);
+
+  useEffect(() => {
+    if (!jump) return;
+    const to = () => {
+      const el = document.getElementById(jump.id);
+      if (!el) return;
+      const still = jump.back || (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      el.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+      document.getElementById(jump.focus || jump.id)?.focus({ preventScroll: true });
+    };
+    if (!jump.back) return to();
+    // (after the page switch, which scrolls to the top and gives the page the keyboard in the next frame)
+    const f = requestAnimationFrame(to);
+    return () => cancelAnimationFrame(f);
+  }, [jump]);
+
+  const toggle = (k: string) => {
+    if (!open[k]) keep.at = k;
     setOpen((o) => {
       const n = { ...o };
       if (n[k]) delete n[k];
       else n[k] = true;
       return n;
     });
+  };
   /** Open a topic and bring it into view (from the contents, a quick start, or Enter in the search). */
   const goTopic = (id: string) => {
+    keep.at = 't:' + id;
     setOpen((o) => ({ ...o, ['t:' + id]: true }));
     setJump({ id: tId(id), focus: tId(id) + '-btn', n: Date.now() });
   };
   const goFaq = (id: string) => {
+    keep.at = 'f:' + id;
     setOpen((o) => ({ ...o, ['f:' + id]: true }));
     setJump({ id: fId(id), focus: fId(id) + '-btn', n: Date.now() });
+  };
+  const clear = () => {
+    setQ('');
+    // the button goes with the search: the keyboard stays in the search field
+    inputRef.current?.focus();
   };
   // (a section takes the keyboard itself: tabIndex -1, no ring, see .hp-sec in index.css)
   const goGroup = (id: string) => setJump({ id: gId(id), n: Date.now() });
@@ -90,10 +128,20 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
     return (
       <div key={t.id} className="hp-t" id={id}>
         <h3 className="hp-th">
-          <button type="button" id={id + '-btn'} className="hp-tg hv" aria-expanded={on} aria-controls={id + '-body'} aria-describedby={id + '-sum'} onClick={() => toggle('t:' + t.id)}>
+          {/* (named by its title, not by everything in it; the summary is its description) */}
+          <button
+            type="button"
+            id={id + '-btn'}
+            className="hp-tg hv"
+            aria-expanded={on}
+            aria-controls={id + '-body'}
+            aria-labelledby={(meta ? id + '-gm ' : '') + id + '-tt'}
+            aria-describedby={id + '-sum'}
+            onClick={() => toggle('t:' + t.id)}
+          >
             <span className="hp-tg-tx">
-              {meta && <span className="hp-tg-meta">{GROUP_NAME[t.group]}</span>}
-              <span className="hp-tg-t">{t.title}</span>
+              {meta && <span className="hp-tg-meta" id={id + '-gm'}>{GROUP_NAME[t.group]}</span>}
+              <span className="hp-tg-t" id={id + '-tt'}>{t.title}</span>
               <span className="hp-tg-s" id={id + '-sum'}>{t.summary}</span>
             </span>
             <span className="hp-tg-w" aria-hidden="true">{on ? 'ซ่อน' : 'วิธีทำ'}</span>
@@ -118,7 +166,16 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
           <div className="hp-tfoot">
             <span className="hp-role">ใครทำได้: {t.roles}</span>
             {goable && (
-              <button type="button" className="lnk" aria-label={page ? `ไปที่หน้านี้ (${page})` : undefined} title={page ? `ไปที่หน้า ${page}` : undefined} onClick={() => onGo!(t.tab!)}>
+              <button
+                type="button"
+                className="lnk"
+                aria-label={page ? `ไปที่หน้านี้ (${page})` : undefined}
+                title={page ? `ไปที่หน้า ${page}` : undefined}
+                onClick={() => {
+                  keep.at = 't:' + t.id;
+                  onGo!(t.tab!);
+                }}
+              >
                 ไปที่หน้านี้
               </button>
             )}
@@ -152,6 +209,7 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
     <label className="hp-search">
       <Icon name="search" />
       <input
+        ref={inputRef}
         type="search"
         className="fld"
         value={q}
@@ -166,6 +224,7 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
     </label>
   );
   const n = res.topics.length + res.faq.length;
+  const found = [res.topics.length && `${res.topics.length} หัวข้อ`, res.faq.length && `${res.faq.length} คำถาม`].filter(Boolean).join(' และ ');
 
   return (
     <div className={'hp' + (overlay ? ' in-ov' : '')}>
@@ -178,10 +237,10 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
       {/* (always there, so a screen reader hears the count change; out of sight until there is a search) */}
       <div className={'hp-count' + (searching ? '' : ' sr-only')}>
         <span id={`${pfx}-count`} role="status">
-          {searching ? (n ? `พบ ${res.topics.length} หัวข้อ${res.faq.length ? ` และ ${res.faq.length} คำถาม` : ''}` : `ไม่พบหัวข้อที่ตรงกับ “${q.trim()}”`) : ''}
+          {searching ? (n ? `พบ ${found}` : `ไม่พบหัวข้อที่ตรงกับ “${q.trim()}”`) : ''}
         </span>
         {searching && (
-          <button type="button" className="quiet" onClick={() => setQ('')}>
+          <button type="button" className="quiet" onClick={clear}>
             ล้างคำค้น
           </button>
         )}
@@ -189,46 +248,66 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
 
       {searching ? (
         <>
-          {res.topics.length > 0 && <div className="card hp-list">{res.topics.map((t) => topicRow(t, true))}</div>}
+          {res.topics.length > 0 && (
+            <section className="hp-sec" aria-labelledby={`${pfx}-res-h`}>
+              <SectionHead id={`${pfx}-res-h`} title="หัวข้อที่พบ" />
+              <div className="card hp-list">{res.topics.map((t) => topicRow(t, true))}</div>
+            </section>
+          )}
           {res.faq.length > 0 && (
             <section className="hp-sec" aria-labelledby={`${pfx}-faq-h`}>
               <SectionHead id={`${pfx}-faq-h`} title="คำถามที่พบบ่อย" />
               <div className="card hp-list">{res.faq.map(faqRow)}</div>
             </section>
           )}
-          {!n && <p className="hp-none">ลองคำที่สั้นลง เช่น แผนชำระ โทร รหัสผ่าน หรือดูสารบัญหลังล้างคำค้น</p>}
+          {!n && <p className="hp-none">ลองคำที่สั้นลง เช่น แผนชำระ โทร รหัสผ่าน หรือกด “ล้างคำค้น” เพื่อกลับไปดูสารบัญ</p>}
         </>
       ) : (
         <>
           <section className="hp-sec" id={`${pfx}-toc`} tabIndex={-1} aria-labelledby={`${pfx}-toc-h`}>
-            <SectionHead id={`${pfx}-toc-h`} title="สารบัญ" sub="กดชื่อหัวข้อเพื่ออ่านวิธีทำ" />
+            {/* (phones: each group is one card that goes to its section, which lists its topics; the
+                topics' links are for wider screens, see .hp-gc in index.css) */}
+            <SectionHead
+              id={`${pfx}-toc-h`}
+              title="สารบัญ"
+              sub={
+                <>
+                  <span className="hp-wide">กดชื่อหัวข้อเพื่ออ่านวิธีทำ</span>
+                  <span className="hp-narrow">กดหมวดเพื่อดูหัวข้อในหมวดนั้น</span>
+                </>
+              }
+            />
             <div className="hp-toc">
-              {HELP_GROUPS.map((g) => (
-                <div key={g.id} className="card hp-gc">
-                  <h3 className="hp-gc-h">
-                    <button type="button" className="hv-tx" onClick={() => goGroup(g.id)}>
-                      {g.name}
-                    </button>
-                  </h3>
-                  <p className="hp-gc-d">{g.desc}</p>
-                  <ul className="hp-gc-l">
-                    {HELP_TOPICS.filter((t) => t.group === g.id).map((t) => (
-                      <li key={t.id}>
-                        <button type="button" className="lnk" onClick={() => goTopic(t.id)}>
-                          {t.title}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+              {HELP_GROUPS.map((g) => {
+                const list = HELP_TOPICS.filter((t) => t.group === g.id);
+                return (
+                  <div key={g.id} className="card hp-gc">
+                    <h3 className="hp-gc-h">
+                      <button type="button" className="hv-tx" onClick={() => goGroup(g.id)}>
+                        {g.name}
+                      </button>
+                    </h3>
+                    <p className="hp-gc-d">{g.desc}</p>
+                    <span className="hp-gc-n">{list.length} หัวข้อ</span>
+                    <ul className="hp-gc-l">
+                      {list.map((t) => (
+                        <li key={t.id}>
+                          <button type="button" className="lnk" onClick={() => goTopic(t.id)}>
+                            {t.title}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
             </div>
           </section>
 
           <section className="hp-sec" aria-labelledby={`${pfx}-qs-h`}>
             <SectionHead id={`${pfx}-qs-h`} title="เริ่มต้นใช้งาน" sub="กดแต่ละขั้นเพื่ออ่านวิธีทำ" />
             <div className="hp-qs">
-              {QUICK_STARTS.map((s) => (
+              {QUICK_STARTS.filter((s) => !s.setup || setup).map((s) => (
                 <div key={s.id} className="card hp-qc">
                   <h3 className="card-t">{s.title}</h3>
                   <p className="hp-qc-who">{s.who}</p>
@@ -242,11 +321,10 @@ export function Help({ onGo, canGo, tabName, overlay }: HelpProps) {
                       </li>
                     ))}
                   </ol>
-                  {s.devGuide && (
+                  {s.setup && (
                     <p className="hp-dev">
-                      ขั้นตอนละเอียดสำหรับผู้ตั้งค่าระบบและผู้พัฒนา:{' '}
                       <a className="lnk" href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer">
-                        team-sync/README.md
+                        คู่มือตั้งค่าสำหรับผู้พัฒนา
                       </a>
                     </p>
                   )}
@@ -317,7 +395,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
         </button>
       </header>
       <div className="hp-ov-main">
-        <Help overlay />
+        <Help overlay setup />
       </div>
     </div>,
     document.body,

@@ -229,6 +229,10 @@ function useUnsent(url: string, u: string) {
 export function AuthScreen({ invited }: { invited?: boolean }) {
   const { engine: e } = useApp();
   useEngineVersion();
+  // the help center over these screens: held here, above the screen that changes (waiting for the team
+  // ends in the sign-in or the setup screen), so it stays open while the person reads
+  const [help, setHelp] = useState(false);
+  const onHelp = () => setHelp(true);
   const url = e.authUrl || e.teamCfg?.url || e.session?.url || '';
   const mode = e.auth;
   // the site's own team, not connected here yet: most likely a member (the lead says so to set it up)
@@ -241,12 +245,31 @@ export function AuthScreen({ invited }: { invited?: boolean }) {
           {mode === 'connect' && <Connect />}
           {mode === 'login' && <LoginForm url={url} />}
           {mode === 'setup' && <SetupForm askLead={member} />}
-          {mode === 'change' && <ChangeForm />}
-          {mode === 'disabled' && <Disabled />}
-          {(mode === 'login' || mode === 'setup' || mode === 'connect') && <AuthFooter />}
+          {mode === 'change' && <ChangeForm onHelp={onHelp} />}
+          {mode === 'disabled' && <Disabled onHelp={onHelp} />}
+          {(mode === 'login' || mode === 'setup' || mode === 'connect') && <AuthFooter onHelp={onHelp} />}
         </main>
       </div>
+      {help && (
+        <HelpOverlay
+          onClose={() => {
+            setHelp(false);
+            // back to the link (the one that opened it may have gone with the screen it was on)
+            document.getElementById(HELP_LINK)?.focus();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** "วิธีใช้งาน" at the foot of every sign-in screen: opens the help center over it. */
+const HELP_LINK = 'auth-help';
+function HelpLink({ onHelp }: { onHelp: () => void }) {
+  return (
+    <button type="button" id={HELP_LINK} className="auth-link" aria-haspopup="dialog" onClick={onHelp}>
+      วิธีใช้งาน
+    </button>
   );
 }
 
@@ -686,7 +709,7 @@ function SetupForm({ askLead }: { askLead: boolean }) {
 }
 
 /** Signed in with a temporary password: set your own before starting. */
-function ChangeForm() {
+function ChangeForm({ onHelp }: { onHelp: () => void }) {
   const { engine: e } = useApp();
   const alive = useAlive();
   const s = e.session;
@@ -746,12 +769,13 @@ function ChangeForm() {
         >
           ออกจากระบบ
         </button>
+        <HelpLink onHelp={onHelp} />
       </div>
     </>
   );
 }
 
-function Disabled() {
+function Disabled({ onHelp }: { onHelp: () => void }) {
   const { engine: e } = useApp();
   const [busy, setBusy] = useState(false);
   return (
@@ -781,16 +805,18 @@ function Disabled() {
         {busy && <Spinner />}
         ออกจากระบบ
       </button>
+      <div className="auth-foot">
+        <HelpLink onHelp={onHelp} />
+      </div>
     </>
   );
 }
 
 /** Leave the sign-in screen: back to the team still connected (team code), or to this browser only
  *  (not on a site with a home team: it belongs to that team). */
-function AuthFooter() {
+function AuthFooter({ onHelp }: { onHelp: () => void }) {
   const { engine: e } = useApp();
   const [ask, setAsk] = useState(false);
-  const [help, setHelp] = useState(false);
   const yes = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (ask) yes.current?.focus();
@@ -818,13 +844,9 @@ function AuthFooter() {
               {back ? 'กลับไปที่แอป' : 'ใช้งานแบบไม่เชื่อมทีม (ข้อมูลอยู่ในเครื่องนี้)'}
             </button>
           )}
-          <button type="button" className="auth-link" aria-haspopup="dialog" onClick={() => setHelp(true)}>
-            วิธีใช้งาน
-          </button>
+          <HelpLink onHelp={onHelp} />
         </>
       )}
-      {/* the help center itself, over this screen (no app, no data needed) */}
-      {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </div>
   );
 }

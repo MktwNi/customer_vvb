@@ -12,15 +12,48 @@ describe('help search', () => {
     expect(ids(searchHelp('LOGIN').topics)).toEqual(ids(searchHelp('login').topics));
   });
 
-  it('matches title, summary and keywords, the title first', () => {
+  it('matches title, keywords, summary, then steps and tips, the title first', () => {
     const t: HelpTopic[] = [
+      { id: 'steps', group: 'g', title: 'จ', summary: 'ฉ', steps: ['payment plan'], tips: [], roles: '', keywords: [] },
       { id: 'kw', group: 'g', title: 'ก', summary: 'ข', steps: [], tips: [], roles: '', keywords: ['payment plan'] },
       { id: 'sum', group: 'g', title: 'ค', summary: 'มี payment plan ในนี้', steps: [], tips: [], roles: '', keywords: [] },
       { id: 'title', group: 'g', title: 'Payment Plan', summary: 'ง', steps: [], tips: [], roles: '', keywords: [] },
-      { id: 'steps', group: 'g', title: 'จ', summary: 'ฉ', steps: ['payment plan'], tips: ['payment plan'], roles: '', keywords: [] },
+      { id: 'tips', group: 'g', title: 'ช', summary: 'ซ', steps: [], tips: ['ดู payment plan'], roles: '', keywords: [] },
     ];
-    expect(ids(searchHelp('paymentplan', t, []).topics)).toEqual(['title', 'kw', 'sum']);
-    expect(topicScore(t[3], 'paymentplan')).toBe(0);
+    expect(ids(searchHelp('paymentplan', t, []).topics)).toEqual(['title', 'kw', 'sum', 'steps', 'tips']);
+    expect(topicScore(t[0], 'paymentplan')).toBe(0.5);
+    // a keyword counts when it starts with the query, not when the query is somewhere inside it
+    expect(topicScore(t[1], 'payment')).toBe(1);
+    expect(topicScore(t[1], 'plan')).toBe(0);
+    // one step's end and the next one's start don't make a match
+    const two: HelpTopic = { ...t[0], steps: ['ไปที่แผน', 'ชำระแล้ว'] };
+    expect(topicScore(two, normHelp('แผนชำระ'))).toBe(0);
+  });
+
+  it('reads "ำ" typed as two characters as one', () => {
+    expect(normHelp('แผนช\u0E4D\u0E32ระ')).toBe(normHelp('แผนชำระ'));
+    expect(normHelp('น\u0E49\u0E4D\u0E32')).toBe(normHelp('น้ำ'));
+    expect(normHelp('น\u0E4D\u0E49\u0E32')).toBe(normHelp('น้ำ'));
+    expect(ids(searchHelp('แผนช\u0E4D\u0E32ระ').topics)).toEqual(ids(searchHelp('แผนชำระ').topics));
+  });
+
+  it('finds LINE without the offline topic ("ไลน์" sits inside "ออฟไลน์")', () => {
+    const thai = ids(searchHelp('ไลน์').topics);
+    expect(thai.slice(0, 3)).toEqual(expect.arrayContaining(['add-person', 'person-page', 'sales-contact']));
+    expect(thai).not.toContain('offline-queue');
+    expect(ids(searchHelp('line').topics)).not.toContain('offline-queue');
+    expect(ids(searchHelp('ออฟไลน์').topics)[0]).toBe('offline-queue');
+    expect(ids(searchHelp('ไลน์').faq)).not.toContain('pending');
+  });
+
+  it('finds the words sales staff type', () => {
+    expect(searchHelp('อีเมล์').topics.length).toBeGreaterThan(0);
+    expect(searchHelp('แดชบอร์ด').topics[0].id).toBe('sales-dash');
+    expect(searchHelp('เพิ่มพนักงาน').topics[0].id).toBe('add-user');
+    expect(searchHelp('เพิ่มคน').topics[0].id).toBe('add-user');
+    expect(searchHelp('ลบลูกค้า').topics[0].id).toBe('sales-panel');
+    expect(ids(searchHelp('VAT').topics)).toEqual(expect.arrayContaining(['sales-attach', 'sales-partial']));
+    expect(searchHelp('Esc').topics.length).toBeGreaterThan(0);
   });
 
   it('puts the payment plan first for "แผนชำระ" and a call for "โทร" (Enter opens the first)', () => {

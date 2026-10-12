@@ -13,7 +13,8 @@ export interface NavItem { key: Tab; label: string; icon: IconName; admin?: bool
 
 /**
  * Main navigation, grouped like a CRM sidebar. To add a feature: add its key to `Tab` (state.tsx),
- * render it in App.tsx, and add an entry here (in an existing group or a new one).
+ * render it in App.tsx, and add an entry here (in an existing group or a new one). A group with no
+ * title stands apart at the foot of the menu (the help center: not a page of data).
  */
 export const NAV: { title: string; items: NavItem[] }[] = [
   {
@@ -35,9 +36,9 @@ export const NAV: { title: string; items: NavItem[] }[] = [
       { key: 'update', label: 'อัปเดตข้อมูล', icon: 'update' },
       { key: 'notes', label: 'หมายเหตุ', icon: 'notes' },
       { key: 'users', label: 'ผู้ใช้และสิทธิ์', icon: 'shield', admin: true },
-      { key: 'help', label: 'คู่มือการใช้งาน', icon: 'info' },
     ],
   },
+  { title: '', items: [{ key: 'help', label: 'คู่มือการใช้งาน', icon: 'info' }] },
 ];
 export const TABS: [Tab, string][] = NAV.flatMap((g) => g.items.map((i): [Tab, string] => [i.key, i.label]));
 
@@ -138,9 +139,9 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
         </div>
         <nav className="side-nav" ref={navRef}>
           <span className="slide-ind" aria-hidden="true" />
-          {NAV.map((g) => (
-            <div key={g.title} className="side-group" role="group" aria-label={g.title}>
-              <span className="side-group-title lbl" aria-hidden="true">{g.title}</span>
+          {NAV.map((g, gi) => (
+            <div key={g.title || gi} className={'side-group' + (g.title ? '' : ' foot')} role={g.title ? 'group' : undefined} aria-label={g.title || undefined}>
+              {g.title && <span className="side-group-title lbl" aria-hidden="true">{g.title}</span>}
               {g.items.filter((it) => !it.admin || admin).map((it) => {
                 const on = ready && ui.tab === it.key;
                 const b = badges[it.key] || 0;
