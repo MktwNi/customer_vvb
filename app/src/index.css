@@ -446,8 +446,10 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side.rail .side-group+.side-group{border-top:1px solid rgba(255,255,255,.22);padding-top:14px;margin-right:14px}
 .side.rail .side-group+.side-group .side-item[aria-current=page]{margin-right:-14px}
 .side-close,.menu-btn,.tb-mark{display:none}
-/* short windows: the menu must fit without scrolling */
-@media (min-width:901px) and (max-height:700px){.side-item{height:36px}.side-nav{gap:8px}.side.tabs .side-item[aria-current=page],.side.tabs .side-nav .slide-ind{border-radius:18px 0 0 18px}}
+/* short windows: the menu must fit without scrolling. Below the steps, the items share what height
+   is left (to 26px), so any number of items (an admin's extra one, the help center) still fits */
+@media (min-width:901px){.side-nav,.side-group{min-height:0}.side-group-title{flex:none}.side-item{min-height:26px}}
+@media (min-width:901px) and (max-height:700px){.side-group.foot{padding-top:8px}.side-item{height:36px}.side-nav{gap:8px}.side.tabs .side-item[aria-current=page],.side.tabs .side-nav .slide-ind{border-radius:18px 0 0 18px}}
 @media (min-width:901px) and (max-height:640px){.side-cta,.side.rail .side-cta{padding-top:10px}.side-item{height:32px}.side-group{gap:3px}.side-nav{gap:6px;padding-bottom:10px}.side.tabs .side-item[aria-current=page],.side.tabs .side-nav .slide-ind{border-radius:16px 0 0 16px}}
 /* a scrollbar would push the tab off the content edge: the tab modes never show one */
 .side.tabs{scrollbar-width:none}
