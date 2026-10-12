@@ -14,7 +14,7 @@ import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import { NOTE_CAP, PERSON_FIELDS, personSuggestions, toPerson, type PersonForm } from './people';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, newestTagRows, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
@@ -24,8 +24,8 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import {
-  CT_BULK_MAX, CT_CFG, CT_DESC_MAX, CT_ID_RE, CT_LABEL, CT_SLOTS, CT_SVC_MAX, activeDefs, ckeyOfCompany, ckeyOfDeal, countByType, ctIndex, freeSlot, mergeDefs, nameKey, newTypeId, pickTag, rekeyOps,
-  svcToType, toCTag, toCTypeDef, trackerOnly, typeNameError, typeNames, validCKey, type CtCounts, type CtIndex, type CtSuggestion, type CTypeRec, type Cust, type CustTags,
+  CT_BULK_MAX, CT_CFG, CT_DESC_MAX, CT_ID_RE, CT_LABEL, CT_SLOTS, CT_SVC_MAX, activeDefs, ckeyOfCompany, ckeyOfDeal, cmpTag, countByType, ctIndex, freeSlot, mergeDefs, moveTagOps, nameKey, newTypeId,
+  parseCTagKey, pickTag, svcToType, toCTag, toCTypeDef, trackerOnly, typeNameError, typeNames, validCKey, type CtCounts, type CtIndex, type CtSuggestion, type CTypeRec, type Cust, type CustTags,
 } from './ctypes';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
@@ -64,6 +64,10 @@ export interface PendingSync extends TGOSync.TgoResult { nw: (TGOSync.TgoItem & 
 export type CtRef = Company | Deal | number | string;
 
 const emptyCrm = (): Crm => ({ stages: {}, notes: {}, tasks: [], watch: [], owners: {}, team: [], log: {} });
+/** What a customer with no types, answers or suggestions reads (shared, so read-only). */
+const NONE: readonly string[] = Object.freeze([]);
+const NONE_SUG: readonly CtSuggestion[] = Object.freeze([]);
+const NO_TAGS: ReadonlyMap<string, Readonly<CTag>> = new Map();
 
 export class GccEngine {
   // ---- observable state
@@ -302,7 +306,7 @@ export class GccEngine {
       if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, ctags, ctypes] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, ctags0, ctypes0, ctWipe] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -318,7 +322,18 @@ export class GccEngine {
         this.store.get<Record<string, Person>>('people'),
         this.store.get<CustTags>('ctags'),
         this.store.get<Record<string, CTypeRec>>('ctypes'),
+        this.store.get<string>('ctWipe'),
       ]);
+      // A sign-out that wiped the team data, done by an older build's tab (during an update), knows
+      // nothing of the customer types: they are wiped here, before anything shows or is shared.
+      let ctags = ctags0, ctypes = ctypes0;
+      if (ctWipe !== this.wipeRaw) {
+        if (ctWipe != null) {
+          ctags = ctypes = null;
+          await Promise.all(['ctags', 'ctypes'].map((k) => this.store.del(k).catch(() => {})));
+        }
+        await this.store.set('ctWipe', this.wipeRaw).catch(() => {});
+      }
       this.people = people || {};
       this.ctags = ctags || {};
       this.ctypes = ctypes || {};
@@ -802,13 +817,11 @@ export class GccEngine {
     if (!this.can('admin')) return this.deny();
     if (v == null) delete this.dec[key];
     else this.dec[key] = v;
-    // the decision and the customer types it moves to the primary id go out together
-    this.batchOps(() => {
-      this.op(keyOf.dedup(key), v ?? undefined);
-      this.persist('dedup', this.dec);
-      this.rebuild();
-      if (v === 'merge') this.rekeyMerged(key);
-    });
+    // customer types move nothing: a company reads the answers of every id it is made of (ctIndex), so
+    // a merge refused by the script (an admin made sales meanwhile) or undone leaves each with its own
+    this.op(keyOf.dedup(key), v ?? undefined);
+    this.persist('dedup', this.dec);
+    this.rebuild();
     this.emit();
   }
 
@@ -1201,7 +1214,8 @@ export class GccEngine {
       this.op(keyOf.cust(id), { ...c });
       this.persist('customCos', this.custom);
       this.rebuild();
-      if (types.length && this.can('edit') && this.putTypes(id, types, [], 'new')) this.tagsChanged();
+      // under its own id, also when it joins a registry row at once: a split later leaves them with it
+      if (types.length && this.can('edit') && this.putTypes(id, types, [], 'new', false, String(id))) this.tagsChanged();
     });
     this.emit();
     return id;
@@ -1390,17 +1404,21 @@ export class GccEngine {
   // ------------------------------------------------------------------ customer types (ประเภทลูกค้า, ctypes.ts)
   /** The list and the index of the last ctagVer (rebuilt only when something they depend on changed). */
   private ctMemo: { ver: number; B: Built; defs: CTypeDef[]; svc: Map<string, string>; ix: CtIndex } | null = null;
-  private localCos: { B: Built; cos: Company[] } | null = null;
   private ct() {
     const m = this.ctMemo;
     if (m && m.ver === this.ctagVer && m.B === this.B) return m;
     const defs = mergeDefs(this.ctypes);
-    if (!this.localCos || this.localCos.B !== this.B) this.localCos = { B: this.B, cos: this.B.companies.filter((c) => isLocalId(c.id)) };
     const ix = ctIndex({
       tags: this.ctags, defs, deals: Object.values(this.sales.deals), result: (d) => dealResult(this.sales, d), company: (id) => this.company(id),
-      locals: this.localCos.cos, custom: Object.values(this.custom).map((c) => c.id),
+      // every TGO-sync company as synced, also one build() has merged into a registry row since: its tags
+      // are under its name
+      locals: this.localRaw(), custom: Object.values(this.custom).map((c) => c.id),
     });
     return (this.ctMemo = { ver: this.ctagVer, B: this.B, defs, svc: svcToType(defs), ix });
+  }
+  /** The companies from the TGO website sync (ids of this device), as synced. */
+  private localRaw() {
+    return this.added.filter((a): a is Partial<RawCompany> & { id: number; name: string } => typeof a.id === 'number' && isLocalId(a.id) && typeof a.name === 'string');
   }
   /** The customer types in list order: retired ones too (`off`: tags still show them, the Sales Tracker
    *  filters by them, CSV names them), or only those that can be picked (`active`). */
@@ -1432,29 +1450,32 @@ export class GccEngine {
     const id = typeof x === 'object' ? x.id : +x, c = this.company(id);
     return c ? ckeyOfCompany(c) : isLocalId(id) ? '' : String(id);
   }
+  // The readers below hand out the index's own lists, shared by every screen until the next change:
+  // read-only (frozen), so copy one before sorting it.
   /** The customer's types (s 'y'), in list order: what its tags show. */
-  typesOf(x: CtRef): string[] {
-    return this.ctIndex().yes.get(this.custOf(x)) || [];
+  typesOf(x: CtRef): readonly string[] {
+    return this.ctIndex().yes.get(this.custOf(x)) || NONE;
   }
   /** The types of a deal's customer (the company it is linked to, or its client by name). */
-  typesOfDeal(d: Deal): string[] {
+  typesOfDeal(d: Deal): readonly string[] {
     return this.typesOf(d);
   }
   /** The customer's answers that count, type → CTag ('y' and the remembered "no"s), e.g. for
    *  "ระบุโดย หมิว · 6 ต.ค. 2569". */
-  ctagsOf(x: CtRef): Map<string, CTag> {
-    return this.ctIndex().tags.get(this.custOf(x)) || new Map();
+  ctagsOf(x: CtRef): ReadonlyMap<string, Readonly<CTag>> {
+    return this.ctIndex().tags.get(this.custOf(x)) || NO_TAGS;
   }
   /** Types the customer's deals suggest (a service mapped to a type it has no answer for; not from lost
    *  deals), with why. Nothing is stored until someone confirms. */
-  suggestionsOf(x: CtRef): CtSuggestion[] {
-    return this.ctIndex().sug.get(this.custOf(x)) || [];
+  suggestionsOf(x: CtRef): readonly CtSuggestion[] {
+    return this.ctIndex().sug.get(this.custOf(x)) || NONE_SUG;
   }
   /** The type a service just ticked on a deal points to, when its customer has no answer for it yet
-   *  ("บริการ VVB ตรงกับประเภท ทวนสอบ ซึ่งบริษัทนี้ยังไม่มี"); null otherwise. */
+   *  ("บริการ VVB ตรงกับประเภท ทวนสอบ ซึ่งบริษัทนี้ยังไม่มี"); null otherwise, and on a lost deal
+   *  (ผลการขาย NO), which suggests nothing. */
   typeForService(d: Deal, svc: string): string | null {
     const t = this.ct().svc.get(svc);
-    return t && this.ckeyOf(d) && !this.ctagsOf(d).has(t) ? t : null;
+    return t && this.ckeyOf(d) && dealResult(this.sales, d) !== 'NO' && !this.ctagsOf(d).has(t) ? t : null;
   }
   /** The type a service suggests now ('' = none): picking it for another type moves it (confirm first). */
   serviceOwner(svc: string) {
@@ -1539,31 +1560,40 @@ export class GccEngine {
   }
   /** Write the answers that change (a retired type cannot be added; one not in the list is skipped; `rm`
    *  only where the customer has the type, unless `no`: a "no" either way), each stamped after the answer
-   *  this browser sees, so a deliberate change wins whatever the clocks. */
-  private putTypes(x: CtRef, add: string[], rm: string[], src: CTag['src'], no = false) {
-    const ck = this.ckeyOf(x);
+   *  this browser sees (and the record it replaces), so a deliberate change wins whatever the clocks.
+   *  `ck`: the key to write under (default: the customer's). An answer given on a deal row remembers
+   *  the deal, so it follows the deal's customer (ctIndex). */
+  private putTypes(x: CtRef, add: string[], rm: string[], src: CTag['src'], no = false, ck = this.ckeyOf(x)) {
     if (!ck) return 0;
-    const cur = this.ctIndex().tags.get(this.custOf(x)), defs = this.typeDefs(), by = this.me();
+    const cur = this.ctIndex().tags.get(this.custOf(x)), defs = this.typeDefs(), by = this.me(), deal = this.answerDeal(x, ck);
     let n = 0;
     const want: [string, 'y' | 'n'][] = [...new Set(add)].map((t) => [t, 'y']);
     [...new Set(rm)].forEach((t) => !add.includes(t) && want.push([t, 'n']));
     want.forEach(([t, s]) => {
       const d = defs.find((x) => x.id === t), was = cur?.get(t);
       if (!d || (s === 'y' && d.off) || was?.s === s || (s === 'n' && !no && was?.s !== 'y')) return;
-      this.putTag(ck, t, { s, at: this.stampAfter([was?.at]), by, src });
+      this.putTag(ck, t, { s, at: this.stampAfter([was?.at, this.ctags[ck]?.[t]?.at]), by, src, ...(deal ? { d: deal } : {}) });
       n++;
     });
     return n;
   }
-  /** Set (or remove: null) one record and queue it; `was`: see SyncOp.was. */
-  private putTag(ck: string, t: string, v: CTag | null, was?: string) {
-    const T = this.ctags;
-    if (v) (T[ck] || (T[ck] = {}))[t] = v;
-    else if (T[ck]) {
-      delete T[ck][t];
-      if (!Object.keys(T[ck]).length) delete T[ck];
-    }
-    this.op(keyOf.ctag(ck, t), v ? { ...v } : undefined, was !== undefined ? { was } : {});
+  /** The deal an answer is given on: the deal itself, or for a Sales Tracker client not in the registry
+   *  (its name key, e.g. in search's group) the newest deal standing on that name. '' = a company's own. */
+  private answerDeal(x: CtRef, ck: string): string {
+    if (typeof x === 'object' && !('ids' in x)) return x.id;
+    if (typeof x !== 'string' || !ck.startsWith('n:')) return '';
+    const ds = (this.ctIndex().deals.get(this.custOf(x)) || []).filter((d) => this.ckeyOf(d) === ck);
+    return ds.sort((a, b) => b.year.localeCompare(a.year) || (b.at || '').localeCompare(a.at || ''))[0]?.id || '';
+  }
+  /** This browser's record of a `ctag/…` key. */
+  private localTag(k: string): CTag | undefined {
+    const p = parseCTagKey(k.slice(5));
+    return p ? this.ctags[p.ckey]?.[p.t] : undefined;
+  }
+  /** Set one record and queue it (a moved answer leaves a mark, never a deletion: see ctypes.ts). */
+  private putTag(ck: string, t: string, v: CTag) {
+    (this.ctags[ck] || (this.ctags[ck] = {}))[t] = v;
+    this.op(keyOf.ctag(ck, t), { ...v });
   }
   private tagsChanged() {
     this.ctagVer++;
@@ -1571,16 +1601,29 @@ export class GccEngine {
     this.emit();
   }
   /**
-   * Move a customer's tags to another key, queued with the change that moved the customer (ctypes.ts
-   * rekeyOps: per type the later answer wins). `keepFrom`: the old key keeps them (another unlinked deal
-   * still uses the name).
+   * A deal's customer key changed (`d` → `n`: linked, re-linked, unlinked, its client renamed): the
+   * answers that go with it move to its new key, queued with the deal (ctypes.ts moveTagOps). From a
+   * client name: that name's answers (not those of another deal that is elsewhere now), kept there too
+   * while another deal not linked to a company (any year) or a TGO-sync company stands on the name.
+   * From a company: only the answers given on this deal (a link corrected takes them along; the
+   * company's own stay). A teammate's answer made meanwhile on the old key still counts for this deal's
+   * customer (ctIndex), and outranks the mark.
    */
-  private rekey(from: string, to: string, keepFrom: boolean) {
-    if (!this.can('edit') || !from || !to || from === to || !this.ctags[from] || !validCKey(to)) return;
-    const r = rekeyOps(this.ctags, from, to, keepFrom);
+  private moveDealTags(d: Deal, n: Deal) {
+    const from = this.ckeyOf(d), to = this.ckeyOf(n);
+    if (!this.can('edit') || !from || !to || from === to || !this.ctags[from]) return;
+    const name = from.startsWith('n:');
+    const keep = name && (this.nameInUse(from, d.id) || this.localRaw().some((c) => nameKey(c.name) === from));
+    const take = (v: CTag) => {
+      if (v.d === d.id) return true;
+      if (!name) return false;
+      const o = v.d ? this.sales.deals[v.d] : undefined;
+      return !o || this.ckeyOf(o) === from;
+    };
+    const r = moveTagOps(this.ctags[from], this.ctags[to], to, d.id, keep, take);
     r.set.forEach(({ t, v }) => this.putTag(to, t, v));
-    r.del.forEach(({ t, was }) => this.putTag(from, t, null, was));
-    if (r.set.length || r.del.length) {
+    r.mark.forEach(({ t, v }) => this.putTag(from, t, v));
+    if (r.set.length || r.mark.length) {
       this.ctagVer++;
       this.persist('ctags', this.ctags);
     }
@@ -1588,20 +1631,6 @@ export class GccEngine {
   /** Whether a deal not linked to a company (other than `except`) has this client name key. */
   private nameInUse(k: string, except?: string) {
     return Object.values(this.sales.deals).some((d) => d.id !== except && (d.gid == null || isLocalId(d.gid)) && nameKey(d.client) === k);
-  }
-  /** After a merge decision: the tags of every merged id (a duplicate, a customer added by hand, a
-   *  TGO-sync company by its name) move to the company's primary id. A split moves nothing back: they
-   *  stay with the primary. */
-  private rekeyMerged(key: string) {
-    const g = this.B.groups.find((x) => x.key === key);
-    const c = g && this.company(g.ids[0]);
-    if (!c) return;
-    const to = ckeyOfCompany(c);
-    c.ids.forEach((id) => {
-      if (id === c.id) return;
-      const from = isLocalId(id) ? nameKey(this.B.rawById.get(id)?.name) : String(id);
-      if (from && from !== to) this.rekey(from, to, from.startsWith('n:') && this.nameInUse(from));
-    });
   }
 
   // ---- the list (admin only): one record per type, edited field by field (scfg/ct.<id>)
@@ -1815,11 +1844,9 @@ export class GccEngine {
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
     const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
     if (!changed.length) return;
-    // a free-text client's customer types follow it: to the company it is linked to now, or to its new
-    // name; the old name keeps them while another deal not linked to a company (any year) still uses it.
-    // Queued in one write with the deal.
-    const fromK = d.gid == null ? nameKey(d.client) : '';
-    const toK = fromK && (changed.includes('gid') || changed.includes('client')) ? ckeyOfDeal(n, n.gid != null ? this.company(n.gid) : undefined) : '';
+    // its customer types follow it (moveDealTags): to the company it is linked to now, or back to its
+    // client's name, or to its new name. Queued in one write with the deal.
+    const moves = (changed.includes('gid') || changed.includes('client')) && this.ckeyOf(d) !== this.ckeyOf(n);
     const write = () => {
       // SOURCE / Services: the items ticked and unticked, so a teammate ticking another item keeps theirs
       const fl: Record<string, ListEdit> = {};
@@ -1829,7 +1856,7 @@ export class GccEngine {
         fl[k] = { add: b.filter((x) => !a.includes(x)), rm: a.filter((x) => !b.includes(x)) };
       });
       this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
-      if (toK && toK !== fromK) this.rekey(fromK, toK, this.nameInUse(fromK, id));
+      if (moves) this.moveDealTags(d, n);
       const TH: Partial<Record<keyof Deal, string>> = {
         client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
         jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
@@ -1837,7 +1864,7 @@ export class GccEngine {
       const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
       if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     };
-    if (toK && toK !== fromK) this.batchOps(write);
+    if (moves) this.batchOps(write);
     else write();
     this.saveSales();
   }
@@ -2679,7 +2706,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; was?: string } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     if (!this.canWriteKey(k, v === undefined)) {
@@ -2721,7 +2748,6 @@ export class GccEngine {
     }
     // conditional only while every queued write to this record is a document's own (setStep auto)
     if (opt.base !== undefined && (!prev || prev.base !== undefined)) o.base = prev ? prev.base : opt.base;
-    if (v === undefined && opt.was !== undefined) o.was = opt.was;
     this.pending.set(k, o);
     this.unsaved.delete(k);
     if (this.opBatch) this.opBatch.push(o);
@@ -2778,6 +2804,13 @@ export class GccEngine {
         // a change replacing another tab's queued change to the same record is always the newer one
         if (!newer(o, p)) o.t = this.opT = Math.max(this.opT, (p.t || 0) + 1);
         // Another tab of this browser queued a change to the record; this tab's copy of it may be older.
+        if (k.startsWith('ctag/')) {
+          // a customer-type answer: the newer one stays queued (as rebaseOp does with the team's), so a
+          // stale tab moving an older answer never replaces the newer one another tab has not sent yet
+          const a = toCTag(o.v), b = toCTag(p.v);
+          if (a && b && cmpTag(b, a) > 0) drop.add(k);
+          return;
+        }
         if (o.f && p.del) {
           drop.add(k); // that tab deleted it: the deletion wins over an edit (as rebaseOp does)
           return;
@@ -3213,13 +3246,17 @@ export class GccEngine {
     const rows = pulled.rows;
     let since = pulled.since;
     if (!live()) return;
+    // customer-type answers are kept by time (newestTagRows): an older one pushed late replaces nothing;
+    // a full reload takes the team's newest (what this browser has but never shared does not count)
+    const tagRows = newestTagRows(rows, seeding ? undefined : (k) => this.localTag(k));
     // the team's value of each refused record (its last row since the start; no row: it goes)
     const back: SyncRow[] = [], quiet = new Set<string>();
     if (rv.size || hd.size) {
       const all = from === 0 ? rows : (await this.pullFrom(cfg, 0)).rows;
       if (!live()) return;
-      const last = new Map<string, SyncRow>(), now = new Set(rows.map((r) => r.k));
-      all.forEach((r) => (rv.has(r.k) || hd.has(r.k)) && last.set(r.k, r));
+      // (a customer-type answer older than this browser's applies nothing this round: its team value comes back)
+      const last = new Map<string, SyncRow>(), now = new Set(tagRows.map((r) => r.k));
+      newestTagRows(all).forEach((r) => (rv.has(r.k) || hd.has(r.k)) && last.set(r.k, r));
       rv.forEach((k) => {
         // queued again since, or in this round's rows anyway (newer than the full pull's)
         if (this.pending.has(k) || now.has(k)) return;
@@ -3319,7 +3356,7 @@ export class GccEngine {
     // A teammate changed a record this browser still has a queued change for: merge field by field
     // instead of pushing the stale copy over theirs, and let their deletion win over an edit (rebaseOp).
     const lastRow = new Map<string, SyncRow>();
-    rows.forEach((r) => this.pending.has(r.k) && lastRow.set(r.k, r));
+    tagRows.forEach((r) => this.pending.has(r.k) && lastRow.set(r.k, r));
     const merged: SyncRow[] = [], dropped: SyncOp[] = [], revised = new Map<string, SyncOp>();
     // a deal the team deleted: notes, documents, plan lines and contacts this browser queued for it are dropped too
     const lastDeal = new Map<string, SyncRow>();
@@ -3373,7 +3410,7 @@ export class GccEngine {
         if (doc?.fileId) this.dropDocFile(doc);
       });
     }
-    this.applyRows(rows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged, back), quiet);
+    this.applyRows(tagRows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged, back), quiet);
     onApplied();
     cfg.seq = since;
     // only a round that seeded may mark the session seeded, not while part of the upload exists only
@@ -3572,7 +3609,6 @@ export class GccEngine {
           if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
           if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
           if (p.base !== undefined) o.base = p.base; // still only over what was seen there
-          if (p.was !== undefined && o.v === undefined) o.was = p.was; // a moved tag's removal still yields to a newer answer
           return o;
         })
         .concat(acctOps);

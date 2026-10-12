@@ -9,7 +9,7 @@
  */
 import type { ContactEdit, Crm, CTag, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { CT_CFG, CT_ID_RE, parseCTagKey, toCTag, toCTypeDef, type CTypeRec } from './ctypes';
+import { CT_CFG, CT_ID_RE, cmpTag, parseCTagKey, toCTag, toCTypeDef, type CTypeRec } from './ctypes';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
@@ -30,9 +30,6 @@ export interface SyncOp {
   /** How far the tab that made the change had pulled (its cursor): another tab of the browser that
    *  sends it may have pulled further, and puts those newer rows under the change's fields. */
   seen?: number;
-  /** A customer-type tag removed because it moved to another key (ctypes.ts rekeyOps): the `at` of the
-   *  answer it moved. A newer answer a teammate wrote there meanwhile stays (rebaseOp). */
-  was?: string;
 }
 /** What a queued list change (scfg/…) does: items added and removed (a rename is both). */
 export interface ListEdit { add: string[]; rm: string[] }
@@ -547,16 +544,38 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
 }
 
 /**
- * A customer-type answer: the newer one (by `at`) wins, whichever push reached the sheet first, as
- * when one customer's keys are read together. A removal that moved the answer to another key (`was`)
- * yields to a newer answer a teammate wrote there meanwhile; a teammate's removal leaves ours.
+ * A customer-type answer: the newer one wins (ctypes.ts cmpTag), whichever push reached the sheet
+ * first, as when one customer's keys are read together. A moved answer's mark is stamped with the
+ * answer it moved, so a teammate's newer answer there stays.
  */
 function rebaseTag(row: SyncRow, o: SyncOp): { drop: true } | null {
   const theirs = row.del || row.v == null ? null : toCTag(row.v);
-  if (!theirs) return null;
-  if (o.del || o.v == null) return o.was !== undefined && theirs.at > o.was ? { drop: true } : null;
-  const mine = toCTag(o.v);
-  return mine && theirs.at > mine.at ? { drop: true } : null;
+  const mine = o.del || o.v == null ? null : toCTag(o.v);
+  return theirs && mine && cmpTag(theirs, mine) > 0 ? { drop: true } : null;
+}
+
+/**
+ * Customer-type answers are kept by time, not by the order their rows reach the sheet: of pulled rows,
+ * each ctag record keeps only its newest (cmpTag), and none when `local` (this browser's answer, for a
+ * round that is not a full reload) is newer still. An older answer pushed late (an older build's tab
+ * sending a queued change of this build) then replaces nothing, on any browser. A deletion applies
+ * where it is. Other rows are returned as they are, in their order.
+ */
+export function newestTagRows(rows: SyncRow[], local?: (k: string) => CTag | undefined): SyncRow[] {
+  const keep = new Map<string, number>(), cur = new Map<string, CTag | null>();
+  rows.forEach((r, i) => {
+    if (!r.k.startsWith('ctag/')) return;
+    const gone = r.del || r.v == null, v = gone ? null : toCTag(r.v);
+    if (!gone && !v) return; // malformed: never applied
+    const was = cur.has(r.k) ? cur.get(r.k)! : (local?.(r.k) ?? null);
+    if (v && was && cmpTag(was, v) > 0) {
+      if (!cur.has(r.k)) cur.set(r.k, was);
+      return;
+    }
+    cur.set(r.k, v);
+    keep.set(r.k, i);
+  });
+  return rows.filter((r, i) => !r.k.startsWith('ctag/') || keep.get(r.k) === i);
 }
 
 /** A teammate's record with the fields a queued change names (`f`) put on top; a list field edited

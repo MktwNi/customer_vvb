@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
-import { ctMatcher } from './ctypes';
+import { ctMatcher, nameKey } from './ctypes';
+import { norm } from './core';
 import { memoryStore, prefs, PREF } from './storage';
 import type { Role } from './teamSync';
 import type { Company, Dataset, RoundRaw } from './types';
@@ -258,6 +259,40 @@ describe('suggestions from deals', () => {
     expect(S.e.ctCounts('2569').sug).toBe(0);
   });
 
+  it('a lost deal (NO) prompts nothing on its Services either; a client name too short to key waits for nothing', async () => {
+    const { S } = await team();
+    const [c] = cos(S, 1, 140);
+    const d = S.e.addDeal({ gid: c.id, year: '2569' });
+    S.e.setStep(d.id, 'CLOSED DEAL', { d: '', n: 'NO' });
+    S.e.updateDeal(d.id, { service: ['VVB'] });
+    expect(S.e.suggestionsOf(c)).toEqual([]);
+    expect(S.e.typeForService(S.e.sales.deals[d.id], 'VVB')).toBeNull();
+    S.e.setStep(d.id, 'CLOSED DEAL', { d: '', n: 'รอผู้บริหาร' });
+    expect(S.e.typeForService(S.e.sales.deals[d.id], 'VVB')).toBe('vvb');
+    // "AB": counted as a customer with no type, never as a suggestion nobody could confirm or dismiss
+    const ab = S.e.addDeal({ client: 'AB', year: '2569', service: ['CFO'] });
+    expect(S.e.ckeyOf(S.e.sales.deals[ab.id])).toBe('');
+    expect(S.e.suggestionsOf(S.e.sales.deals[ab.id])).toEqual([]);
+    expect(S.e.typeForService(S.e.sales.deals[ab.id], 'CFO')).toBeNull();
+    const n = S.e.ctCounts('2569');
+    expect(n.sug).toBe(1); // company c's VVB
+    expect(S.e.confirmSuggestions()).toBe(1);
+    expect(S.e.ctCounts('2569')).toMatchObject({ sug: 0, none: 1 });
+  });
+
+  it('what the readers hand out is shared and read-only: sorting a copy is fine, sorting it throws', async () => {
+    const { S } = await team();
+    const [c] = cos(S, 1, 150);
+    S.e.setTypes(c, ['vvb', 'cfo'], []);
+    S.e.addDeal({ gid: c.id, year: '2569', service: ['CFP', 'GCT'] });
+    const t = S.e.typesOf(c);
+    expect(() => (t as string[]).sort().reverse()).toThrow(TypeError);
+    expect([...t].reverse()).toEqual(['vvb', 'cfo']);
+    expect(S.e.typesOf(c)).toEqual(['cfo', 'vvb']);
+    expect(() => (S.e.suggestionsOf(c) as unknown[]).push(1)).toThrow(TypeError);
+    expect(Object.isFrozen(S.e.typesOf(cos(S, 1, 151)[0]))).toBe(true);
+  });
+
   it('a customer added with types, and companies sent to the tracker with types: written as "new", only added', async () => {
     const { L, S } = await team();
     const id = S.e.addCustomer({ name: 'บริษัท เพิ่มเองพร้อมประเภท จำกัด', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, ['cfo', 'tvr']);
@@ -388,23 +423,30 @@ describe('tags follow the customer', () => {
     expect(ctagRows(p).map((o) => o.k).sort()).toEqual([`ctag/${c.id}/cfo`, `ctag/${c.id}/vvb`]); // nothing removed yet
     for (const t of [L, S]) {
       expect(t.e.typesOf(c)).toEqual(['cfo', 'vvb']);
-      expect(t.e.typesOf(t.e.sales.deals[d68.id])).toEqual(['cfo', 'vvb']); // the same customer now: the company
-      expect(t.e.ctTrackerOnly()).toEqual([]);
+      // the 2568 deal is still a client by name (not linked): it keeps the answers it had
+      expect(t.e.typesOf(t.e.sales.deals[d68.id])).toEqual(['cfo', 'vvb']);
+      expect(t.e.ctTrackerOnly().map((x) => x.key)).toEqual(['n:ฟรีเท็กซ์']);
     }
-    expect(last('ctag/n:ฟรีเท็กซ์/cfo')!.del).toBe(false);
-    // the last deal by that name is linked: the name's records go
+    expect(last('ctag/n:ฟรีเท็กซ์/cfo')!.v).not.toHaveProperty('mv');
+    // the 2568 deal answers on the name; then it is linked too: its answer goes to the company and the
+    // name's record is marked as moved (never deleted); the 2569 deal's answers there count for its company only
+    S.e.setType(S.e.sales.deals[d68.id], 'tvr', 'y');
+    await settle(S, L);
     S.e.updateDeal(d68.id, { gid: c.id });
     await settle(S, L);
-    expect(last('ctag/n:ฟรีเท็กซ์/cfo')!.del).toBe(true);
-    expect(L.e.ctags['n:ฟรีเท็กซ์']).toBeUndefined();
-    expect(L.e.typesOf(c)).toEqual(['cfo', 'vvb']);
+    expect(last('ctag/n:ฟรีเท็กซ์/tvr')).toMatchObject({ del: false, v: { s: 'y', d: d68.id, mv: String(c.id) } });
+    expect(last(`ctag/${c.id}/tvr`)).toMatchObject({ del: false, v: { s: 'y', d: d68.id, m: 1 } });
+    expect(L.e.ctagsOf('n:ฟรีเท็กซ์').size).toBe(0);
+    expect(L.e.ctTrackerOnly()).toEqual([]);
+    expect(L.e.typesOf(c)).toEqual(['cfo', 'vvb', 'tvr']);
     // a client renamed: its tags follow the new name
     const d2 = S.e.addDeal({ client: 'ลูกค้าเปลี่ยนชื่อ', year: '2569' });
     S.e.setType(d2, 'tvr', 'y');
     S.e.updateDeal(d2.id, { client: 'ลูกค้าชื่อใหม่' });
     await settle(S, L);
     expect(L.e.typesOf(L.e.sales.deals[d2.id])).toEqual(['tvr']);
-    expect(Object.keys(L.e.ctags).filter((k) => k.startsWith('n:ลูกค้า'))).toEqual(['n:ลูกค้าชื่อใหม่']);
+    expect(L.e.ctagsOf('n:ลูกค้าเปลี่ยนชื่อ').size).toBe(0);
+    expect(Object.values(L.e.ctags['n:ลูกค้าเปลี่ยนชื่อ']).every((v) => v.mv === 'n:ลูกค้าชื่อใหม่')).toBe(true);
   });
 
   it('linking while a teammate answers on the name: the newer answer stays, in either order', async () => {
@@ -439,10 +481,10 @@ describe('tags follow the customer', () => {
     S.e.setType(e2, 'tvr', 'y');
     S.net.offline = false;
     await settle(S, L, S);
-    for (const t of [L, S]) expect(t.e.typesOf(c2)).toEqual(['cfp', 'tvr']); // read through the deal linked under that name
+    for (const t of [L, S]) expect(t.e.typesOf(c2)).toEqual(['cfp', 'tvr']); // answered on the deal, which is linked to c2 now
   });
 
-  it('merging duplicates (a customer added by hand into its registry row): tags move to the primary with the decision; the later answer wins; a teammate\'s answer meanwhile stays', async () => {
+  it('merging duplicates (a customer added by hand into its registry row): nothing moves, the company reads both ids, the later answer wins; a split leaves each its own', async () => {
     const { L, S } = await team();
     const reg = L.e.B.companies.find((c) => c.id < 900000 && c.jur && c.ids.length === 1 && L.e.B.companies.filter((x) => x.name === c.name).length === 1)!;
     const x = S.e.addCustomer({ name: reg.name, jur: '0000000000001', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' });
@@ -459,25 +501,171 @@ describe('tags follow the customer', () => {
     L.e.decide(g.key, 'merge');
     expect(L.e.company(x)!.id).toBe(reg.id);
     await settle(L, S);
+    // the decision goes alone: a refused one (see below) can move nothing
     const p = L.pushes.slice(n0).find((ops) => ops.some((o) => o.k === `dedup/${g.key}`))!;
-    expect(ctagRows(p).map((o) => `${o.k}${o.del ? ' del' : ''}`).sort()).toEqual([`ctag/${reg.id}/cfo`, `ctag/${reg.id}/vvb`, `ctag/${x}/cfo del`, `ctag/${x}/vvb del`].sort());
+    expect(ctagRows(p)).toEqual([]);
     for (const t of [L, S]) {
       expect(t.e.typesOf(reg)).toEqual(['cfo']);
+      expect(t.e.typesOf(x)).toEqual(['cfo']); // the same company now
       expect(t.e.ctagsOf(reg).get('vvb')!.s).toBe('n');
-      expect(t.e.ctags[String(x)]).toBeUndefined();
     }
-    // the same decision again moves nothing more
-    const n1 = L.pushes.length;
-    L.e.decide(g.key, 'merge');
-    await settle(L);
-    expect(L.pushes.slice(n1).flatMap(ctagRows)).toEqual([]);
-    // a teammate who had not pulled the merge answers on the added-by-hand id: still read on the company
-    S.net.offline = true;
+    // an answer given on the merged company goes to its primary id
     later(10);
     S.e.setTypes(x, ['tvr'], []);
-    S.net.offline = false;
     await settle(S, L);
+    expect(last(`ctag/${reg.id}/tvr`)!.v).toMatchObject({ s: 'y' });
     for (const t of [L, S]) expect(t.e.typesOf(reg)).toEqual(['cfo', 'tvr']);
+    // undone: each company shows its own answers again (the duplicate's are not lost)
+    L.e.decide(g.key, 'split');
+    await settle(L, S);
+    for (const t of [L, S]) {
+      expect(t.e.typesOf(x)).toEqual(['cfo']);
+      expect(t.e.typesOf(reg)).toEqual(['vvb', 'tvr']);
+    }
+  });
+
+  it('a customer added with types joins its registry row at once; split later, it keeps them', async () => {
+    const { L, S } = await team();
+    const reg = L.e.B.companies.find((c) => c.id < 900000 && c.jur && c.ids.length === 1 && L.e.B.companies.filter((x) => x.name === c.name).length === 1)!;
+    const x = S.e.addCustomer({ name: reg.name, jur: reg.jur, prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, ['cfo']);
+    expect(S.e.company(x)!.id).toBe(reg.id); // the same juristic id: merged by itself
+    expect(S.e.typesOf(reg)).toEqual(['cfo']);
+    await settle(S, L);
+    expect(last(`ctag/${x}/cfo`)!.v).toMatchObject({ s: 'y', src: 'new' });
+    const g = L.e.B.groups.find((y) => y.ids.includes(x) && y.ids.includes(reg.id))!;
+    L.e.decide(g.key, 'split');
+    await settle(L, S);
+    for (const t of [L, S]) expect([t.e.typesOf(x), t.e.typesOf(reg)]).toEqual([['cfo'], []]);
+  });
+
+  it('an admin made sales with a merge decision queued: the script refuses it, and every company keeps its own types', async () => {
+    const L = await lead();
+    const B = await member(L, 'boss', 'บอส', 'admin');
+    const reg = L.e.B.companies.find((c) => c.id < 900000 && c.jur && c.ids.length === 1 && L.e.B.companies.filter((x) => x.name === c.name).length === 1)!;
+    const x = B.e.addCustomer({ name: reg.name, jur: '0000000000001', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, ['cfo', 'tvr']);
+    await settle(B, L);
+    const g = B.e.B.groups.find((y) => y.ids.includes(x) && y.ids.includes(reg.id))!;
+    B.net.offline = true;
+    B.e.decide(g.key, 'merge');
+    await L.e.adminUpdate('boss', { role: 'sales' });
+    B.net.offline = false;
+    await settle(B, L, B, L);
+    expect(B.e.role()).toBe('sales');
+    expect(last('dedup/' + g.key)).toBeNull();
+    expect(last(`ctag/${reg.id}/cfo`)).toBeNull();
+    for (const t of [L, B]) {
+      expect(t.e.company(x)!.id).toBe(x);
+      expect([t.e.typesOf(x), t.e.typesOf(reg)]).toEqual([['cfo', 'tvr'], []]);
+    }
+  });
+});
+
+describe('tags follow the deal, whatever teammates do meanwhile', () => {
+  it('a client renamed while a teammate, who has not seen it, answers on the old name: every answer counts, the newest wins', async () => {
+    const { L, S } = await team();
+    const d = S.e.addDeal({ client: 'ลูกค้าเดิมเอ', year: '2569' });
+    S.e.setType(d, 'cfo', 'y');
+    await settle(S, L);
+    L.net.offline = true;
+    L.e.updateDeal(d.id, { client: 'ลูกค้าใหม่บี' });
+    later(30);
+    S.e.setType(S.e.sales.deals[d.id], 'tvr', 'y');
+    S.e.setType(S.e.sales.deals[d.id], 'cfo', 'n');
+    await settle(S);
+    L.net.offline = false;
+    await settle(L, S, L, S);
+    for (const t of [L, S]) {
+      const dd = t.e.sales.deals[d.id];
+      expect(dd.client).toBe('ลูกค้าใหม่บี');
+      expect(t.e.typesOf(dd)).toEqual(['tvr']);
+      expect(t.e.ctagsOf(dd).get('cfo')).toMatchObject({ s: 'n', by: 'สมชาย' });
+      expect(t.e.ctCounts('2569').by.tvr).toMatchObject({ cos: 1, deals: 1 });
+      expect(t.e.ctTrackerOnly().map((x) => x.key)).toEqual(['n:ลูกค้าใหม่บี']);
+    }
+    // the same without anyone offline: a teammate's answer sent ten seconds before a typo is fixed
+    const e = S.e.addDeal({ client: 'ลูกค้าพิมพ์ผิด', year: '2569' });
+    await settle(S, L);
+    S.e.setType(e, 'vvb', 'y');
+    await settle(S);
+    later(10);
+    L.e.updateDeal(e.id, { client: 'ลูกค้าพิมพ์ถูก' }); // L has not pulled the answer yet
+    await settle(L, S, L);
+    for (const t of [L, S]) expect(t.e.typesOf(t.e.sales.deals[e.id])).toEqual(['vvb']);
+    // and a later rename takes that answer along too
+    S.e.updateDeal(e.id, { client: 'ลูกค้าชื่อที่สาม' });
+    await settle(S, L);
+    for (const t of [L, S]) expect(t.e.typesOf(t.e.sales.deals[e.id])).toEqual(['vvb']);
+  });
+
+  it('a link corrected (re-linked or unlinked): the deal\'s types go with it, the wrongly picked company keeps only its own', async () => {
+    const { L, S } = await team();
+    const [wrong, right] = cos(S, 2, 8);
+    S.e.setType(wrong, 'tvr', 'y'); // the company's own
+    const d = S.e.addDeal({ client: 'ลูกค้าเชื่อมผิด', year: '2569' });
+    S.e.setTypes(d, ['cfo', 'vvb'], []);
+    await settle(S, L);
+    S.e.updateDeal(d.id, { gid: wrong.id });
+    await settle(S, L);
+    expect(L.e.typesOf(wrong)).toEqual(['cfo', 'vvb', 'tvr']);
+    S.e.updateDeal(d.id, { gid: right.id });
+    await settle(S, L);
+    for (const t of [L, S]) expect([t.e.typesOf(wrong), t.e.typesOf(right), t.e.typesOf(t.e.sales.deals[d.id])]).toEqual([['tvr'], ['cfo', 'vvb'], ['cfo', 'vvb']]);
+    // an answer given on the deal while it is linked follows it too; the company's own stays
+    S.e.setType(S.e.sales.deals[d.id], 'cfp', 'y');
+    S.e.updateDeal(d.id, { gid: null });
+    await settle(S, L);
+    for (const t of [L, S]) {
+      expect([t.e.typesOf(wrong), t.e.typesOf(right)]).toEqual([['tvr'], []]);
+      expect(t.e.typesOf(t.e.sales.deals[d.id])).toEqual(['cfo', 'cfp', 'vvb']);
+    }
+    // and linked again: back on the right company (each move outranks the mark it left)
+    S.e.updateDeal(d.id, { gid: right.id });
+    await settle(S, L);
+    for (const t of [L, S]) expect(t.e.typesOf(right)).toEqual(['cfo', 'cfp', 'vvb']);
+  });
+
+  it('a row not linked to a company is its own customer, even with the same client text as a linked one: what it shows is what it writes', async () => {
+    const { L, S } = await team();
+    const [c] = cos(S, 1, 5);
+    const d68 = S.e.addDeal({ client: 'ลูกค้าสองปี', year: '2568' });
+    const d69 = S.e.addDeal({ client: 'ลูกค้าสองปี', year: '2569' });
+    S.e.updateDeal(d68.id, { gid: c.id });
+    S.e.setType(c, 'cfo', 'y');
+    const row = () => S.e.sales.deals[d69.id];
+    expect(S.e.custOf(row())).toBe('n:ลูกค้าสองปี');
+    expect(S.e.typesOf(row())).toEqual([]);
+    S.e.setType(row(), 'vvb', 'y');
+    expect(S.e.ckeyOf(row())).toBe('n:ลูกค้าสองปี');
+    expect([S.e.typesOf(c), S.e.typesOf(row())]).toEqual([['cfo'], ['vvb']]);
+    await settle(S, L);
+    L.e.updateDeal(d68.id, { gid: null }); // the other year's link undone
+    await settle(L, S);
+    for (const t of [L, S]) expect([t.e.typesOf(c), t.e.typesOf(t.e.sales.deals[d69.id])]).toEqual([['cfo'], ['vvb']]);
+    // the placeholder of a new row: one linked never makes the others that company
+    const a = S.e.addDeal({ client: 'ลูกค้าใหม่', year: '2569' });
+    const b = S.e.addDeal({ client: 'ลูกค้าใหม่', year: '2569', section: 'อื่นๆ', service: ['VVB'], forecast: 999 });
+    S.e.updateDeal(a.id, { gid: c.id });
+    expect(S.e.custOf(S.e.sales.deals[b.id])).toBe('n:ลูกค้าใหม่');
+    expect(S.e.typesOfDeal(S.e.sales.deals[b.id])).toEqual([]);
+    expect(S.e.suggestionsOf(c)).toEqual([]);
+    expect(S.e.ctCounts('2569').by.cfo).toEqual({ cos: 1, deals: 1, forecast: 0 });
+  });
+
+  it('a TGO-sync company tagged on this device, later merged into a registry row by the data itself: its types show on the company', async () => {
+    const { S } = await team();
+    const reg = S.e.B.companies.find((c) => c.id < 900000 && c.jur && c.ids.length === 1 && S.e.B.companies.filter((x) => x.name === c.name).length === 1)!;
+    const key = 'n:' + norm(reg.name);
+    S.raw.dec[key] = 'split'; // standalone at first (as before the registry listed it)
+    S.raw.added.push({ id: 900555, name: reg.name, jur: '', src: 1 } as never);
+    S.raw.rebuild();
+    expect(S.e.company(900555)!.id).toBe(900555);
+    S.e.setType(900555, 'cfo', 'y');
+    expect(S.e.ckeyOf(900555)).toBe(nameKey(reg.name));
+    delete S.raw.dec[key]; // now merged by build() itself: no decision, nothing moved
+    S.raw.rebuild();
+    expect(S.e.company(900555)!.id).toBe(reg.id);
+    expect(S.e.typesOf(reg)).toEqual(['cfo']);
+    expect(S.e.ctCounts('2569').by.cfo.cos).toBe(1);
   });
 });
 
@@ -570,6 +758,26 @@ describe('who may, counting, files and storage', () => {
     expect(await S.store.get('ctags')).toEqual({ [String(a.id)]: { cfo: expect.objectContaining({ s: 'y' }) } });
   });
 
+  it('dropping unsent answers puts back the team\'s, also when a teammate\'s older answer arrives in that same round', async () => {
+    const { L, S } = await team();
+    const [a] = cos(S, 1, 75);
+    S.e.setType(a, 'cfo', 'y');
+    await settle(S, L);
+    S.net.offline = true;
+    later(10);
+    S.e.setType(a, 'vvb', 'y'); // unsent, newer than what the lead writes next (the lead's clock is behind)
+    later(-5);
+    L.e.setType(a, 'vvb', 'n');
+    await settle(L);
+    later(5);
+    await S.e.teamDropUnsent();
+    S.net.offline = false;
+    await settle(S);
+    expect(S.e.teamPendingN).toBe(0);
+    expect(S.e.ctagsOf(a).get('vvb')).toMatchObject({ s: 'n', by: 'หัวหน้า' });
+    expect(S.e.typesOf(a)).toEqual(['cfo']);
+  });
+
   it('counting: the overview, the search type row and the tracker group agree; the CSVs carry the names', async () => {
     const { L, S } = await team();
     const [a, b, c] = cos(S, 3, 40);
@@ -629,6 +837,37 @@ describe('who may, counting, files and storage', () => {
     await S.e.teamLogout({ wipe: true });
     expect(await S.store.get('ctags')).toBeNull();
     expect(await S.store.get('ctypes')).toBeNull();
+  });
+
+  it('an older build\'s tab that signs out with a wipe: the next page of this build wipes the customer types too', async () => {
+    const { S } = await team();
+    const [a] = cos(S, 1);
+    S.e.setTypes(a, ['cfo'], []);
+    await settle(S);
+    // a page of this build loads first (it notes the wipe it has seen)
+    S.net.offline = true;
+    const page = async () => {
+      const T = mk('somchai', S.store);
+      T.net.offline = true;
+      at('somchai', () => prefs.set(PREF.sync, { freq: 'off' }));
+      const p = T.e.load();
+      for (let i = 0; i < 20; i++) await tick();
+      await at('somchai', () => vi.advanceTimersByTimeAsync(40));
+      await p;
+      return T;
+    };
+    expect((await page()).e.typesOf(a)).toEqual(['cfo']);
+    // what an older build's wipe does: its own stores, and the wipe noted for every tab
+    for (const k of ['dedup', 'sales', 'customCos', 'people']) await S.store.del(k);
+    at('somchai', () => prefs.set(PREF.wipe, String(Date.now())));
+    const T = await page();
+    expect(T.e.typesOf(a)).toEqual([]);
+    expect(await S.store.get('ctags')).toBeNull();
+    expect(await S.store.get('ctypes')).toBeNull();
+    // and only once: what is tagged after it stays
+    T.e.setType(a, 'vvb', 'y');
+    await at('somchai', () => vi.advanceTimersByTimeAsync(10));
+    expect((await page()).e.typesOf(a)).toEqual(['vvb']);
   });
 
   it('an older build\'s tab on the same browser, saving its whole Sales Tracker and CRM, never touches the customer types', async () => {

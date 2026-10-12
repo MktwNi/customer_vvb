@@ -17,7 +17,15 @@
  * A customer key (`ckey`) is the primary id of a registry company or of one added by hand, or
  * `n:<name key>` for a Sales Tracker client with no company, and for a company from the TGO website
  * sync (its id differs on each device). Reading one customer takes every key that stands for it (merged
- * ids, the client names its deals were linked under); per type the answer with the latest `at` wins.
+ * ids, a TGO-sync company's name); per type the answer with the latest `at` wins (cmpTag).
+ *
+ * An answer given on a deal row remembers the deal (`d`) and belongs to that deal's customer wherever
+ * the deal goes: linked, re-linked, unlinked, its client renamed. The engine also moves such answers to
+ * the deal's new key (moveTagOps), leaving a mark (`mv`) on the old one instead of deleting it, so every
+ * record is kept by time, never by which push reached the sheet last: a teammate's answer made meanwhile
+ * on the old key (or pushed late) is still read for the right customer, and a mark never hides it.
+ * Merging duplicates moves nothing: a company reads every id it is made of, so a refused or undone
+ * merge leaves each company with its own answers.
  * Pure functions only (no engine, no DOM), so everything here is unit-tested.
  */
 import { norm } from './core';
@@ -69,7 +77,7 @@ export const CT_SRC_TH: Record<CTag['src'], string> = { hand: 'ระบุเ�
 export type CTypeRec = Partial<Omit<CTypeDef, 'id'>>;
 /** Who a customer is: a company id (the primary of merged rows), or a name key ('n:…') for a Sales
  *  Tracker client not linked to a company ('d:<deal id>' when its name is too short to be a key: such a
- *  client counts, but cannot be tagged until it is renamed or linked). */
+ *  client counts, but cannot be tagged, nor be suggested a type, until it is renamed or linked). */
 export type Cust = number | string;
 export type CustTags = Record<string, Record<string, CTag>>;
 
@@ -119,7 +127,11 @@ export function toCTag(v: unknown): CTag | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
   if (o.s !== 'y' && o.s !== 'n') return null;
-  return { s: o.s, at: iso(o.at), by: str(o.by, 100), src: SRCS.includes(o.src as string) ? (o.src as CTag['src']) : 'hand' };
+  const t: CTag = { s: o.s, at: iso(o.at), by: str(o.by, 100), src: SRCS.includes(o.src as string) ? (o.src as CTag['src']) : 'hand' };
+  if (typeof o.d === 'string' && /^[^/\s]{1,100}$/.test(o.d)) t.d = o.d;
+  if (typeof o.m === 'number' && Number.isInteger(o.m) && o.m > 0 && o.m < 1e6) t.m = o.m;
+  if (typeof o.mv === 'string' && o.mv) t.mv = o.mv.slice(0, CT_KEY_MAX + 2);
+  return t;
 }
 /** A type record as this app can use it (only the fields that are valid), or null when not an object. */
 export function toCTypeDef(v: unknown): CTypeRec | null {
@@ -204,43 +216,57 @@ export function typeNameError(n: string, defs: CTypeDef[], id = ''): string {
 
 // ------------------------------------------------------------------ answers
 
-/** Of two answers for one type, the one that counts: the later `at`; at the same moment a "no" (never
- *  suggested again) over a "yes". */
+/**
+ * Which of two versions of one record is newer (> 0: `a`): the later `at`; at the same `at` the later
+ * move (`m`), then a moved answer's mark over a "no" (never suggested again) over a "yes". Every browser
+ * keeps the newer one, whatever order the rows reach it in (an older build's tab may push a change late).
+ */
+export function cmpTag(a: CTag, b: CTag): number {
+  if (a.at !== b.at) return a.at > b.at ? 1 : -1;
+  const m = (a.m || 0) - (b.m || 0);
+  if (m) return m;
+  const r = (x: CTag) => (x.mv ? 2 : x.s === 'n' ? 1 : 0);
+  return r(a) - r(b);
+}
+/** Of two answers for one type, the one that counts (cmpTag; the first when equal). */
 export function pickTag(a: CTag | undefined, b: CTag | undefined): CTag | undefined {
   if (!a || !b) return a || b;
-  if (a.at !== b.at) return a.at > b.at ? a : b;
-  return a.s === 'n' ? a : b.s === 'n' ? b : a;
+  return cmpTag(b, a) > 0 ? b : a;
 }
-/** Each type's answer that counts over several keys' records (merged companies, name keys). */
+/** Each type's answer that counts over several keys' records (merged companies, name keys); a moved
+ *  answer's mark is no answer. */
 export function unionTags(recs: (Record<string, CTag> | undefined)[]): Map<string, CTag> {
   const m = new Map<string, CTag>();
-  recs.forEach((r) => Object.entries(r || {}).forEach(([t, v]) => v && m.set(t, pickTag(m.get(t), v)!)));
+  recs.forEach((r) => Object.entries(r || {}).forEach(([t, v]) => v && !v.mv && m.set(t, pickTag(m.get(t), v)!)));
   return m;
 }
 
 /**
- * Moving a customer's tags to another key (`from` → `to`): a free-text deal linked to a company, its
- * client renamed, merged companies. Per type the answer with the later `at` wins (a "yes" over none; a
- * newer "no" stays "no"); `keepFrom`: the old key's records stay (another unlinked deal still uses the
- * name). Applying the result twice changes nothing more. `del[].was` = the answer each removal moved,
- * so it yields to a newer one a teammate wrote there meanwhile (teamSync rebaseOp).
+ * Moving a deal's answers to its new key (`to`): the deal linked to a company, re-linked, unlinked, or
+ * its client renamed. `from` = the old key's records, `take` = those that go with the deal. Each goes to
+ * `to` as the deal's (`d`), one move later (`m`), unless `to` already has that answer, or a newer one;
+ * the old key gets a mark at the answer's own time (a teammate's newer answer there stays the answer),
+ * or keeps it (`keep`: another deal not linked to a company still uses the name). Applying the result
+ * twice changes nothing more.
  */
-export function rekeyOps(tags: CustTags, from: string, to: string, keepFrom: boolean): { set: { t: string; v: CTag }[]; del: { t: string; was: string }[] } {
-  const set: { t: string; v: CTag }[] = [], del: { t: string; was: string }[] = [];
-  if (!from || !to || from === to) return { set, del };
-  Object.entries(tags[from] || {}).forEach(([t, v]) => {
-    if (!v) return;
-    const cur = tags[to]?.[t];
-    if (pickTag(cur, v) !== cur) set.push({ t, v: { ...v } });
-    if (!keepFrom) del.push({ t, was: v.at });
+export function moveTagOps(
+  from: Record<string, CTag> | undefined, to: Record<string, CTag> | undefined, toKey: string, deal: string, keep: boolean, take: (v: CTag) => boolean,
+): { set: { t: string; v: CTag }[]; mark: { t: string; v: CTag }[] } {
+  const set: { t: string; v: CTag }[] = [], mark: { t: string; v: CTag }[] = [];
+  Object.entries(from || {}).forEach(([t, v]) => {
+    if (!v || v.mv || !take(v)) return;
+    const m = (v.m || 0) + 1, cur = to?.[t];
+    const nv: CTag = { ...v, d: deal, m };
+    if (!cur || (cur.mv ? cmpTag(nv, cur) > 0 : cur.s !== v.s && cmpTag(nv, cur) > 0)) set.push({ t, v: nv });
+    if (!keep) mark.push({ t, v: { ...v, m, mv: toKey } });
   });
-  return { set, del };
+  return { set, mark };
 }
 
 // ------------------------------------------------------------------ customers, suggestions, counting
 
 /** A type the deals suggest, with why: each deal (newest year first) and the service that maps to it. */
-export interface CtSuggestion { t: string; why: { deal: string; year: string; svc: string }[] }
+export interface CtSuggestion { readonly t: string; readonly why: readonly { readonly deal: string; readonly year: string; readonly svc: string }[] }
 export interface CtIndexInput {
   tags: CustTags;
   defs: CTypeDef[];
@@ -250,27 +276,30 @@ export interface CtIndexInput {
   result: (d: Deal) => string;
   /** the company an id stands for here (merged rows: the primary); undefined = not known on this device */
   company: (id: number) => { id: number; name: string } | undefined;
-  /** companies from the TGO website sync (ids of this device only): their tags are under their name key */
+  /** every company from the TGO website sync, as synced (ids of this device only, also one merged into
+   *  another company since): its tags are under its name key */
   locals: { id: number; name: string }[];
   /** ids of the customers added by hand */
   custom: number[];
 }
 /** Everything the screens ask about customer types, built once per change (never per company: the
- *  55k-row search looks a company up with one Map.get). */
+ *  55k-row search looks a company up with one Map.get). Read-only, shared by every screen: copy a list
+ *  before sorting it. */
 export interface CtIndex {
   /** customer → type → the answer that counts ('y' or 'n'; types not in the list too) */
-  tags: Map<Cust, Map<string, CTag>>;
+  tags: ReadonlyMap<Cust, ReadonlyMap<string, Readonly<CTag>>>;
   /** customer → the types it has, in list order (types in the list only, retired included) */
-  yes: Map<Cust, string[]>;
+  yes: ReadonlyMap<Cust, readonly string[]>;
   /** customer → its deals (any year) */
-  deals: Map<Cust, Deal[]>;
+  deals: ReadonlyMap<Cust, readonly Deal[]>;
   /** the customers: a deal (any year), added by hand, or a type; every other registry company is a prospect */
-  pop: Set<Cust>;
+  pop: ReadonlySet<Cust>;
   /** customers with no company row here: Sales Tracker clients by name, and deals linked to a company
    *  this device does not know (e.g. one added by hand, since deleted); listed after the search results */
-  outside: Set<Cust>;
-  /** customer → the types its deals suggest that it has no answer for, in list order */
-  sug: Map<Cust, CtSuggestion[]>;
+  outside: ReadonlySet<Cust>;
+  /** customer → the types its deals suggest that it has no answer for, in list order (only customers
+   *  that can be tagged: never a client whose name is too short to key, 'd:…') */
+  sug: ReadonlyMap<Cust, readonly CtSuggestion[]>;
   /** the customer a record key stands for */
   custOf: (ckey: string) => Cust;
   /** the customer of a deal */
@@ -278,49 +307,60 @@ export interface CtIndex {
 }
 
 /**
- * Build the index. A name key stands for the company the deals with that client name are linked to
- * (when they all name one: so a teammate's tag on the name, made while another linked the deal, still
- * shows), else for the TGO-sync company of that name, else for itself (a client not in the registry).
+ * Build the index. A name key stands for the TGO-sync company of that name (the company it is merged
+ * into now, also when build() merged it by itself), else for itself: a client not in the registry,
+ * every deal not linked to a company with that client name, any year. A client text never stands for a
+ * registry company (the placeholder "ลูกค้าใหม่" is on many rows): a deal is that company's when it is
+ * linked to it.
+ * An answer given on a deal (`d`) counts for that deal's customer now; one left on a name some other
+ * deal not linked to a company still uses counts for that name too (it was that customer's answer as
+ * well). A moved answer's mark counts for nobody.
  * A customer is: anyone with a deal (any year), anyone added by hand, and any company with a type. Tags
  * left on a name no deal uses any more, or on a company not known here, count for nobody.
  */
 export function ctIndex(I: CtIndexInput): CtIndex {
   const order = new Map(I.defs.map((d, i) => [d.id, i]));
-  const linked = new Map<string, Set<number>>();
-  I.deals.forEach((d) => {
-    if (d.gid == null || localId(d.gid)) return;
-    const c = I.company(d.gid), k = nameKey(d.client);
-    if (c && k && !localId(c.id)) (linked.get(k) || linked.set(k, new Set()).get(k)!).add(c.id);
-  });
   const names = new Map<string, Cust>();
-  linked.forEach((s, k) => s.size === 1 && names.set(k, [...s][0]));
   I.locals.forEach((c) => {
     const k = nameKey(c.name);
-    if (k && !names.has(k)) names.set(k, c.id);
+    if (k && !names.has(k)) names.set(k, I.company(c.id)?.id ?? c.id);
   });
-  const ofName = (k: string): Cust => names.get(k) ?? k;
-  const custOf = (ckey: string): Cust => (/^\d+$/.test(ckey) ? (I.company(+ckey)?.id ?? +ckey) : ofName(ckey));
+  const custOf = (ckey: string): Cust => (/^\d+$/.test(ckey) ? (I.company(+ckey)?.id ?? +ckey) : names.get(ckey) ?? ckey);
   const custOfDeal = (d: Deal): Cust => {
     if (d.gid != null && !localId(d.gid)) return I.company(d.gid)?.id ?? d.gid;
     const k = nameKey(d.client);
-    return k ? ofName(k) : 'd:' + d.id;
+    return k ? custOf(k) : 'd:' + d.id;
   };
+  // name keys someone stands on: a TGO-sync company, a deal not linked to a company
+  const live = new Set(names.keys()), byId = new Map<string, Deal>();
+  I.deals.forEach((d) => {
+    byId.set(d.id, d);
+    if (d.gid != null && !localId(d.gid)) return;
+    const k = nameKey(d.client);
+    if (k) live.add(k);
+  });
 
   const tags = new Map<Cust, Map<string, CTag>>();
+  const put = (cu: Cust, t: string, v: CTag) => {
+    let m = tags.get(cu);
+    if (!m) tags.set(cu, (m = new Map()));
+    m.set(t, pickTag(m.get(t), v)!);
+  };
   Object.entries(I.tags).forEach(([ck, rec]) => {
     if (!rec) return;
-    const cu = custOf(ck);
-    let m = tags.get(cu);
+    const home = custOf(ck);
     Object.entries(rec).forEach(([t, v]) => {
-      if (!v) return;
-      if (!m) tags.set(cu, (m = new Map()));
-      m.set(t, pickTag(m.get(t), v)!);
+      if (!v || v.mv) return;
+      const dl = v.d ? byId.get(v.d) : undefined;
+      const cu = dl ? custOfDeal(dl) : home;
+      put(cu, t, v);
+      if (cu !== home && live.has(ck)) put(home, t, v);
     });
   });
-  const yes = new Map<Cust, string[]>();
+  const yes = new Map<Cust, readonly string[]>();
   tags.forEach((m, cu) => {
     const y = [...m].filter(([t, v]) => v.s === 'y' && order.has(t)).map(([t]) => t);
-    if (y.length) yes.set(cu, y.sort((a, b) => order.get(a)! - order.get(b)!));
+    if (y.length) yes.set(cu, Object.freeze(y.sort((a, b) => order.get(a)! - order.get(b)!)));
   });
 
   const deals = new Map<Cust, Deal[]>();
@@ -335,9 +375,11 @@ export function ctIndex(I: CtIndexInput): CtIndex {
   pop.forEach((cu) => (typeof cu === 'string' || !I.company(cu)) && outside.add(cu));
 
   const svc = svcToType(I.defs);
-  const sug = new Map<Cust, CtSuggestion[]>();
+  const sug = new Map<Cust, readonly CtSuggestion[]>();
   deals.forEach((ds, cu) => {
-    const have = tags.get(cu), by = new Map<string, CtSuggestion>();
+    // a client name too short to key cannot be answered: nothing to confirm or dismiss there
+    if (typeof cu === 'string' && cu.startsWith('d:')) return;
+    const have = tags.get(cu), by = new Map<string, { t: string; why: { deal: string; year: string; svc: string }[] }>();
     ds.forEach((d) => {
       if (I.result(d) === 'NO') return;
       d.service.forEach((s) => {
@@ -350,7 +392,11 @@ export function ctIndex(I: CtIndexInput): CtIndex {
     if (by.size)
       sug.set(
         cu,
-        [...by.values()].sort((a, b) => order.get(a.t)! - order.get(b.t)!).map((x) => ({ ...x, why: x.why.sort((a, b) => b.year.localeCompare(a.year)) })),
+        Object.freeze(
+          [...by.values()]
+            .sort((a, b) => order.get(a.t)! - order.get(b.t)!)
+            .map((x) => Object.freeze({ t: x.t, why: Object.freeze(x.why.sort((a, b) => b.year.localeCompare(a.year)).map((w) => Object.freeze(w))) })),
+        ),
       );
   });
   return { tags, yes, deals, pop, outside, sug, custOf, custOfDeal };

@@ -121,9 +121,19 @@ export interface CTypeDef {
 /**
  * One customer's answer for one type (record `ctag/<ckey>/<typeId>`): 'y' = has it, 'n' = a remembered
  * "no" (a suggestion dismissed, or the type removed by hand: never suggested again). Over all the keys
- * that stand for one customer, the answer with the latest `at` wins.
+ * that stand for one customer, the answer with the latest `at` wins (lib/ctypes.ts cmpTag).
  */
-export interface CTag { s: 'y' | 'n'; at: string; by: string; src: 'hand' | 'deal' | 'bulk' | 'new' }
+export interface CTag {
+  s: 'y' | 'n'; at: string; by: string; src: 'hand' | 'deal' | 'bulk' | 'new';
+  /** the Sales Tracker deal it was answered on (or moved with): the answer belongs to that deal's
+   *  customer, wherever the deal is now (linked, re-linked, unlinked, its client renamed) */
+  d?: string;
+  /** how many times the answer moved to another key: at the same `at`, the later move wins */
+  m?: number;
+  /** a moved answer's mark (the key it moved to): no answer here any more, and it outranks the answer
+   *  it moved, never a newer one a teammate wrote meanwhile */
+  mv?: string;
+}
 export interface Crm {
   stages: Record<string, StageKey>;
   notes: Record<string, { at: string; text: string }[]>;

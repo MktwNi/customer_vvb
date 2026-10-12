@@ -5,12 +5,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  CT_KEY_MAX, DEFAULT_CTYPES, activeDefs, ckeyOfCompany, ckeyOfDeal, countByType, ctClass, ctIndex, ctMatcher, dealTsMatch, freeSlot, localId, mergeDefs, nameKey,
-  orderTypes, parseCTagKey, pickTag, rekeyOps, svcToType, toCTag, toCTypeDef, trackerOnly, typeNameError, typeNames, unionTags,
+  CT_KEY_MAX, DEFAULT_CTYPES, activeDefs, ckeyOfCompany, ckeyOfDeal, cmpTag, countByType, ctClass, ctIndex, ctMatcher, dealTsMatch, freeSlot, localId, mergeDefs, moveTagOps,
+  nameKey, orderTypes, parseCTagKey, pickTag, svcToType, toCTag, toCTypeDef, trackerOnly, typeNameError, typeNames, unionTags,
   type CtIndexInput, type CTypeRec, type CustTags,
 } from './ctypes';
 import { DEFAULT_SERVICES, emptySales, newDeal, type Deal } from './sales';
-import { applyRow, isLocalId, isLocalOnly, keyOf, localRecords, noEffects, rebaseOp, type SharedState, type SyncOp, type SyncRow } from './teamSync';
+import { applyRow, isLocalId, isLocalOnly, keyOf, localRecords, newestTagRows, noEffects, rebaseOp, type SharedState, type SyncOp, type SyncRow } from './teamSync';
 import * as Old from './fixtures/teamSync.before-ctypes';
 import type { CTag } from './types';
 
@@ -108,6 +108,10 @@ describe('the list (mergeDefs)', () => {
     }
     expect(toCTag({ s: 'maybe' })).toBeNull();
     expect(toCTag({ s: 'y', at: 'yesterday', by: 7, src: 'robot' })).toEqual({ s: 'y', at: '', by: '', src: 'hand' });
+    // the deal it was given on, how often it moved, a moved answer's mark: kept when well formed
+    expect(toCTag({ ...tag('y'), d: 'deal-1', m: 2, mv: '42' })).toEqual({ ...tag('y'), d: 'deal-1', m: 2, mv: '42' });
+    expect(toCTag({ ...tag('y'), d: 'a/b', m: 1.5, mv: '' })).toEqual(tag('y'));
+    expect(toCTag({ ...tag('y'), d: 7, m: -1, mv: 3 })).toEqual(tag('y'));
     expect(toCTypeDef({ n: 'x'.repeat(60), c: 2.5, o: 'first', svc: 'VVB', off: 'soon' })).toEqual({ n: 'x'.repeat(40), off: '', at: '', by: '' });
   });
 });
@@ -178,18 +182,37 @@ describe('records on the team sheet (teamSync.ts)', () => {
     expect(t.ctypes).toEqual(s.ctypes);
   });
 
-  it('rebaseOp: the newer answer wins whoever pushed first; a moved tag\'s removal yields to a newer answer', () => {
-    const op = (k: string, v?: CTag, was?: string): SyncOp => (v ? { k, v, t: 1 } : { k, del: true, t: 1, ...(was !== undefined ? { was } : {}) });
+  it('rebaseOp: the newer answer wins whoever pushed first; a moved answer\'s mark yields to a newer answer', () => {
+    const op = (k: string, v: CTag): SyncOp => ({ k, v, t: 1 });
     expect(rebaseOp(row(1, 'ctag/1/cfo', tag('n', T2)), op('ctag/1/cfo', tag('y', T1)))).toEqual({ drop: true });
     expect(rebaseOp(row(1, 'ctag/1/cfo', tag('n', T0)), op('ctag/1/cfo', tag('y', T1)))).toBeNull();
     expect(rebaseOp(row(1, 'ctag/1/cfo', null, true), op('ctag/1/cfo', tag('y', T1)))).toBeNull();
-    // a removal that moved an answer of T1 elsewhere: a teammate's newer answer stays, the same one goes
-    expect(rebaseOp(row(1, 'ctag/n:abc/cfo', tag('n', T2)), op('ctag/n:abc/cfo', undefined, T1))).toEqual({ drop: true });
-    expect(rebaseOp(row(1, 'ctag/n:abc/cfo', tag('y', T1)), op('ctag/n:abc/cfo', undefined, T1))).toBeNull();
-    expect(rebaseOp(row(1, 'ctag/n:abc/cfo', tag('y', T2)), op('ctag/n:abc/cfo'))).toBeNull(); // a plain removal: ours stands
+    // a mark left by moving an answer of T1 elsewhere: a teammate's newer answer stays, the same one goes
+    const mark = { ...tag('y', T1), m: 1, mv: '42' };
+    expect(rebaseOp(row(1, 'ctag/n:abc/cfo', tag('n', T2)), op('ctag/n:abc/cfo', mark))).toEqual({ drop: true });
+    expect(rebaseOp(row(1, 'ctag/n:abc/cfo', tag('y', T1)), op('ctag/n:abc/cfo', mark))).toBeNull();
+    expect(rebaseOp(row(1, 'ctag/n:abc/cfo', tag('n', T0)), op('ctag/n:abc/cfo', mark))).toBeNull();
     // a type is edited field by field: a teammate's rename and this browser's services both stay
     const mine: SyncOp = { k: 'scfg/ct.vvb', v: { svc: ['VVB', 'GCT'], at: T2, by: 'บี' }, f: ['svc', 'at', 'by'], fl: { svc: { add: ['GCT'], rm: [] } } };
     expect(rebaseOp(row(1, 'scfg/ct.vvb', { n: 'Verification', svc: ['VVB', 'CC'], at: T1, by: 'เอ' }), mine)).toEqual({ v: { n: 'Verification', svc: ['VVB', 'CC', 'GCT'], at: T2, by: 'บี' } });
+  });
+
+  it('pulled answers are kept by time, not by the order they reach the sheet (an older build\'s tab may push one late)', () => {
+    const k = 'ctag/12/cfo', other = row(9, 'deal/x', { id: 'x' });
+    const newer = row(5, k, tag('n', T2)), late = row(6, k, tag('y', T1)), later = row(7, k, tag('y', T2, 'hand', 'บี'));
+    // a full reload: the newest of the rows
+    expect(newestTagRows([newer, other, late])).toEqual([newer, other]);
+    // a round on top of what this browser has: nothing when its own answer is newer
+    expect(newestTagRows([late, other], () => tag('n', T2))).toEqual([other]);
+    expect(newestTagRows([late], () => tag('n', T0))).toEqual([late]);
+    // same moment: a "no" over a "yes", a later move over an earlier one, a mark over the answer it moved
+    expect(newestTagRows([newer, later])).toEqual([newer]);
+    expect(cmpTag({ ...tag('y', T1), m: 2 }, { ...tag('n', T1), m: 1 })).toBeGreaterThan(0);
+    expect(cmpTag({ ...tag('y', T1), m: 1, mv: '7' }, { ...tag('y', T1), m: 1 })).toBeGreaterThan(0);
+    // a deletion applies where it is; a malformed row never does
+    const del = row(8, k, null, true), bad = row(9, k, { s: 'x' });
+    expect(newestTagRows([newer, del, late, bad])).toEqual([late]);
+    expect(newestTagRows([newer, late, del])).toEqual([del]);
   });
 
   it('an older build (the live site before this) skips both record types: nothing changes, nothing breaks, nothing is sent back', () => {
@@ -219,18 +242,21 @@ describe('records on the team sheet (teamSync.ts)', () => {
 });
 
 describe('a customer\'s types (ctIndex)', () => {
-  it('the union over merged ids and the client names its deals were linked under; per type the latest answer wins', () => {
+  it('the union over merged ids and the answers given on its deals; per type the latest answer wins', () => {
     const tags: CustTags = {
       10: { cfo: tag('y', T0), vvb: tag('y', T2) },
       11: { cfo: tag('n', T1), tvr: tag('y', T0) }, // merged into 10
-      'n:ลูกค้าเก่า': { vvb: tag('n', T1), cfp: tag('y', T1) }, // the client name a deal of 10 is linked under
+      // answered on deal d1 while it was not linked yet (a teammate who had not seen the link)
+      'n:ลูกค้าเก่า': { vvb: { ...tag('n', T1), d: 'd1' }, cfp: { ...tag('y', T1), d: 'd1' }, plt: tag('y', T1) },
     };
     const deals = [deal({ id: 'd1', gid: 10, client: 'ลูกค้าเก่า', year: '2568' })];
     const ix = index({ cos: { 10: 'บริษัท สิบ จำกัด' }, alias: { 11: 10 }, tags, deals });
     expect(ix.yes.get(10)).toEqual(['cfp', 'vvb', 'tvr']); // cfo: a newer "no"; vvb: the newer "yes"
     expect(ix.tags.get(10)!.get('cfo')).toEqual(tag('n', T1));
     expect(ix.custOf('11')).toBe(10);
-    expect(ix.custOf('n:ลูกค้าเก่า')).toBe(10);
+    // the client text itself is no company: plt, given on no deal, stays with the name nobody uses now
+    expect(ix.custOf('n:ลูกค้าเก่า')).toBe('n:ลูกค้าเก่า');
+    expect(ix.pop.has('n:ลูกค้าเก่า')).toBe(false);
     expect(unionTags([tags[10], tags[11]]).get('cfo')!.s).toBe('n');
     // at the same moment a "no" wins (it is never suggested again)
     expect(pickTag(tag('y', T1), tag('n', T1))!.s).toBe('n');
@@ -256,6 +282,43 @@ describe('a customer\'s types (ctIndex)', () => {
     expect([...ix.pop].sort()).toEqual([1, 2, 'd:f', 'n:ชื่อซ้ำ', 'n:ฟรี'].sort());
   });
 
+  it('a client text never stands for a company: the placeholder "ลูกค้าใหม่" on many rows, one of them linked', () => {
+    const deals = [
+      deal({ id: 'a', gid: 1, client: 'ลูกค้าใหม่', year: '2569' }), // linked: only the gid changed
+      deal({ id: 'b', client: 'ลูกค้าใหม่', year: '2569', service: ['VVB'], forecast: 999 }), // another customer
+    ];
+    const ix = index({ cos: { 1: 'บริษัท หนึ่ง จำกัด' }, deals, tags: { 1: { cfo: tag('y') } } });
+    expect(ix.custOfDeal(deals[1])).toBe('n:ลูกค้าใหม่');
+    expect(ix.yes.get('n:ลูกค้าใหม่')).toBeUndefined();
+    expect(ix.sug.has(1)).toBe(false); // b's service suggests nothing for company 1
+    expect(countByType(ix, defs, '2569', (d) => d.forecast).by.cfo).toEqual({ cos: 1, deals: 1, forecast: 0 });
+  });
+
+  it('an answer follows the deal it was given on: linked, re-linked, unlinked, renamed; one left on a name another deal still uses counts there too', () => {
+    const on = (d: string) => ({ ...tag('y', T1), d });
+    const at = (tags: CustTags, ...ds: Partial<Deal>[]) => index({ cos: { 1: 'หนึ่ง', 2: 'สอง' }, tags, deals: ds.map((x, i) => deal({ id: 'xy'[i], ...x })) });
+    const named: CustTags = { 'n:เดิม': { cfo: on('x'), vvb: on('y') }, 2: { cfp: tag('y') } };
+    // x renamed: its answer goes with it; y still stands on the old name, which keeps both
+    let ix = at(named, { client: 'ใหม่' }, { client: 'เดิม' });
+    expect(ix.yes.get('n:ใหม่')).toEqual(['cfo']);
+    expect(ix.yes.get('n:เดิม')).toEqual(['cfo', 'vvb']);
+    // y renamed too and x linked to 2: the old name counts for nobody; x's answer is with company 2's own
+    ix = at(named, { gid: 2, client: 'เดิม' }, { client: 'อื่น' });
+    expect(ix.yes.get(2)).toEqual(['cfo', 'cfp']);
+    expect(ix.yes.get('n:อื่น')).toEqual(['vvb']);
+    expect(ix.yes.has('n:เดิม')).toBe(false);
+    // an answer given on x while it was linked to company 1 leaves 1 when x is re-linked, or unlinked
+    const linked: CustTags = { 1: { tvr: on('x') }, 2: { cfp: tag('y') } };
+    expect(at(linked, { gid: 1 }).yes.get(1)).toEqual(['tvr']);
+    ix = at(linked, { gid: 2 });
+    expect([ix.yes.get(1), ix.yes.get(2)]).toEqual([undefined, ['cfp', 'tvr']]);
+    expect(at(linked, { client: 'เดิม' }).yes.get('n:เดิม')).toEqual(['tvr']);
+    // its deal deleted: the answer stays where it is
+    expect(at(linked).yes.get(1)).toEqual(['tvr']);
+    // a moved answer's mark counts for nobody
+    expect(at({ 1: { tvr: { ...tag('y'), m: 1, mv: 'n:เดิม' } } }).tags.has(1)).toBe(false);
+  });
+
   it('a TGO-sync company reads the tags under its name; tags nobody stands for any more count for nobody', () => {
     const ix = index({
       cos: { 900123: 'บริษัท ทีจีโอ จำกัด', 5: 'ห้า' },
@@ -267,6 +330,30 @@ describe('a customer\'s types (ctIndex)', () => {
     expect(ix.pop.has('n:ไม่มีใครใช้')).toBe(false); // no deal uses the name
     expect(ix.pop.has(999)).toBe(false); // no such company here
     expect(ix.pop.has(5)).toBe(true);
+  });
+
+  it('a TGO-sync company merged into a registry row (by build() or a decision) keeps the tags under its name; a deal text never takes them', () => {
+    const local = { id: 900011, name: 'บริษัท ท้องถิ่นรวม จำกัด' };
+    const ix = index({ cos: { 77: 'บริษัท ท้องถิ่นรวม จำกัด' }, alias: { 900011: 77 }, locals: [local], tags: { 'n:ท้องถิ่นรวม': { cfo: tag('y') } } });
+    expect(ix.yes.get(77)).toEqual(['cfo']);
+    expect(ix.pop.has(77)).toBe(true);
+    // its own name first: a deal linked to another company with that client text changes nothing
+    const own = { id: 900010, name: 'บริษัท ท้องถิ่นทดสอบ จำกัด' };
+    const ix2 = index({
+      cos: { 900010: own.name, 55: 'บริษัท อื่น จำกัด' }, locals: [own],
+      deals: [deal({ id: 'a', gid: 55, client: own.name })], tags: { [ckeyOfCompany(own)]: { cfo: tag('y') } },
+    });
+    expect(ix2.yes.get(900010)).toEqual(['cfo']);
+    expect(ix2.yes.get(55)).toBeUndefined();
+  });
+
+  it('what the index hands out is read-only: a screen sorting a list cannot change it for the others', () => {
+    const ix = index({ cos: { 1: 'หนึ่ง' }, tags: { 1: { vvb: tag('y'), cfo: tag('y') } }, deals: [deal({ id: 'a', gid: 1, service: ['CFP', 'GCT'] })] });
+    expect(Object.isFrozen(ix.yes.get(1))).toBe(true);
+    expect(() => (ix.yes.get(1) as string[]).sort().reverse()).toThrow(TypeError);
+    expect(ix.yes.get(1)).toEqual(['cfo', 'vvb']);
+    const sug = ix.sug.get(1)!;
+    expect(Object.isFrozen(sug) && Object.isFrozen(sug[0]) && Object.isFrozen(sug[0].why)).toBe(true);
   });
 });
 
@@ -290,6 +377,13 @@ describe('suggestions from deal Services', () => {
     expect(ix.sug.get(2)!.map((s) => s.t)).toEqual(['vvb']);
     expect(ix.sug.get(3)!.map((s) => s.t)).toEqual(['vvb']);
     expect(ix.sug.get(4)!.map((s) => s.t)).toEqual(['cfp']);
+  });
+
+  it('a client whose name is too short to key gets none: nothing there could confirm or dismiss it', () => {
+    const ix = index({ deals: [deal({ id: 'f', client: 'AB', service: ['CFO'] })] });
+    expect(ix.pop.has('d:f')).toBe(true);
+    expect(ix.sug.size).toBe(0);
+    expect(countByType(ix, defs, '2569', () => 0)).toMatchObject({ pop: 1, none: 1, sug: 0 });
   });
 
   it('one service suggests at most one type: two types listing it (a concurrent edit), the first in the list has it', () => {
@@ -338,32 +432,45 @@ describe('counting (one definition for every screen)', () => {
   });
 });
 
-describe('moving tags to another key (rekeyOps)', () => {
-  it('a free-text deal linked to a company: copied over, the name\'s records removed (with the answer each moved)', () => {
-    const tags: CustTags = { 'n:abc': { cfo: tag('y', T1), vvb: tag('n', T1) } };
-    const r = rekeyOps(tags, 'n:abc', '42', false);
-    expect(r.set).toEqual([{ t: 'cfo', v: tag('y', T1) }, { t: 'vvb', v: tag('n', T1) }]);
-    expect(r.del).toEqual([{ t: 'cfo', was: T1 }, { t: 'vvb', was: T1 }]);
-    // another unlinked deal (another year) still uses the name: it keeps them
-    expect(rekeyOps(tags, 'n:abc', '42', true).del).toEqual([]);
-    expect(rekeyOps(tags, 'n:abc', 'n:abc', false)).toEqual({ set: [], del: [] });
-    expect(rekeyOps(tags, 'n:zzz', '42', false)).toEqual({ set: [], del: [] });
+describe('moving a deal\'s answers to its new key (moveTagOps)', () => {
+  const all = () => true;
+  it('to the company it is linked to: as the deal\'s, one move later; the name gets a mark at each answer\'s own time', () => {
+    const from: Record<string, CTag> = { cfo: tag('y', T1), vvb: { ...tag('n', T1), d: 'x' } };
+    const r = moveTagOps(from, undefined, '42', 'x', false, all);
+    expect(r.set).toEqual([{ t: 'cfo', v: { ...tag('y', T1), d: 'x', m: 1 } }, { t: 'vvb', v: { ...tag('n', T1), d: 'x', m: 1 } }]);
+    expect(r.mark).toEqual([{ t: 'cfo', v: { ...tag('y', T1), m: 1, mv: '42' } }, { t: 'vvb', v: { ...tag('n', T1), d: 'x', m: 1, mv: '42' } }]);
+    // the mark outranks the answer it moved, never a teammate's newer one
+    expect(cmpTag(r.mark[0].v, from.cfo)).toBeGreaterThan(0);
+    expect(cmpTag(tag('n', T2), r.mark[0].v)).toBeGreaterThan(0);
+    // another deal (another year) still stands on the name: it keeps them
+    expect(moveTagOps(from, undefined, '42', 'x', true, all).mark).toEqual([]);
+    // only what `take` lets go: a company keeps its own answers when a deal\'s link is corrected
+    expect(moveTagOps(from, undefined, '43', 'x', false, (v) => v.d === 'x').set.map((x) => x.t)).toEqual(['vvb']);
   });
 
-  it('merging: per type the later answer wins (a newer "no" stays "no"); applied twice it changes nothing more', () => {
-    const tags: CustTags = { 10: { cfo: tag('n', T2), vvb: tag('y', T0), cfp: tag('y', T1) }, 11: { cfo: tag('y', T1), vvb: tag('n', T1), tvr: tag('y', T0) } };
-    const r = rekeyOps(tags, '11', '10', false);
-    expect(r.set).toEqual([{ t: 'vvb', v: tag('n', T1) }, { t: 'tvr', v: tag('y', T0) }]);
-    expect(r.del.map((x) => x.t)).toEqual(['cfo', 'vvb', 'tvr']);
-    const after: CustTags = structuredClone(tags);
-    r.set.forEach(({ t, v }) => (after[10][t] = v));
-    r.del.forEach(({ t }) => delete after[11][t]);
-    expect(after[10]).toEqual({ cfo: tag('n', T2), vvb: tag('n', T1), cfp: tag('y', T1), tvr: tag('y', T0) });
-    expect(rekeyOps(after, '11', '10', false)).toEqual({ set: [], del: [] });
-    // kept on the old key: the second run copies nothing again
-    const keep = structuredClone(tags);
-    rekeyOps(keep, '11', '10', true).set.forEach(({ t, v }) => (keep[10][t] = v));
-    expect(rekeyOps(keep, '11', '10', true).set).toEqual([]);
+  it('the new key\'s answers: the same answer or a newer one stays (its own); an older different one is replaced; a mark there is outranked', () => {
+    const from: Record<string, CTag> = { cfo: tag('y', T1), vvb: tag('y', T1), tvr: tag('y', T1), cfp: { ...tag('y', T1), m: 2 } };
+    const to: Record<string, CTag> = { cfo: tag('y', T0), vvb: tag('n', T2), tvr: tag('n', T0), cfp: { ...tag('y', T1), m: 2, mv: 'n:abc' } };
+    const r = moveTagOps(from, to, '42', 'x', false, all);
+    expect(r.set.map((x) => [x.t, x.v.s, x.v.m])).toEqual([['tvr', 'y', 1], ['cfp', 'y', 3]]);
+    // linked, unlinked and linked again: every step wins over the marks it left
+    const there = { ...tag('y', T1), m: 1, d: 'x' }, back = moveTagOps({ cfo: there }, { cfo: { ...tag('y', T1), m: 1, mv: '42' } }, 'n:abc', 'x', false, all);
+    expect(back.set[0].v.m).toBe(2);
+    expect(cmpTag(back.set[0].v, { ...tag('y', T1), m: 1, mv: '42' })).toBeGreaterThan(0);
+    expect(cmpTag(back.mark[0].v, there)).toBeGreaterThan(0);
+  });
+
+  it('applied twice it changes nothing more; a mark never moves', () => {
+    const tags: CustTags = { 'n:abc': { cfo: tag('y', T1), vvb: tag('n', T1) } };
+    const r = moveTagOps(tags['n:abc'], tags[42], '42', 'x', false, all);
+    tags[42] = Object.fromEntries(r.set.map((x) => [x.t, x.v]));
+    r.mark.forEach((x) => (tags['n:abc'][x.t] = x.v));
+    expect(moveTagOps(tags['n:abc'], tags[42], '42', 'x', false, all)).toEqual({ set: [], mark: [] });
+    const keep: CustTags = { 'n:abc': { cfo: tag('y', T1) } };
+    keep[42] = Object.fromEntries(moveTagOps(keep['n:abc'], undefined, '42', 'x', true, all).set.map((x) => [x.t, x.v]));
+    expect(moveTagOps(keep['n:abc'], keep[42], '42', 'x', true, all)).toEqual({ set: [], mark: [] });
+    expect(unionTags([tags['n:abc']]).size).toBe(0);
+    expect(unionTags([tags['n:abc'], tags[42]]).get('cfo')).toMatchObject({ s: 'y', d: 'x' });
   });
 });
 
