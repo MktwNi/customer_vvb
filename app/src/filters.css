@@ -212,9 +212,13 @@
 .sel-btn.tool .sel-v{flex:0 1 auto}
 .sel-btn.head{height:var(--ctl);border-radius:var(--r-pill);padding:0 14px 0 16px;font-size:var(--fs-body)}
 .sel-btn.head .sel-v{flex:0 1 auto}
-.sel-btn.cell{height:var(--ctl-sm);border-color:transparent;background-color:transparent;border-radius:10px;padding:0 6px 0 8px;margin-left:-8px;font-size:var(--fs-body);gap:4px}
-.sel-btn.cell svg{opacity:0;transition:opacity .12s,transform .16s}
-.sel-btn.cell:is(:hover,:focus-visible,[aria-expanded=true]) svg{opacity:1}
+/* a table cell: reads as text, the whole width for the name; the caret comes over its end (on the cell's
+   tint) only under the pointer, the keyboard or while open */
+.sel-btn.cell{position:relative;height:var(--ctl-sm);border-color:transparent;background-color:transparent;border-radius:10px;padding:0 6px;margin-left:-6px;font-size:var(--fs-body);gap:0}
+.sel-btn.cell svg{position:absolute;right:4px;top:50%;margin-top:-7px;opacity:0;background:var(--hv);box-shadow:-6px 0 6px var(--hv);border-radius:4px;transition:opacity .12s,transform .16s}
+.sel-btn.cell:is(:focus-visible,[aria-expanded=true]){background-color:var(--hv)}
+.sel-btn.cell:is(:focus-visible,[aria-expanded=true]) svg{opacity:1}
+@media (hover:hover){.sel-btn.cell:hover:not(:disabled){background-color:var(--hv)}.sel-btn.cell:hover:not(:disabled) svg{opacity:1}}
 @media (hover:hover){
   .sel-btn:hover:not(:disabled,[aria-expanded=true]){border-color:var(--tint-line)}
   .sel-btn:is(.tool,.head,.cell):hover:not(:disabled){background-color:var(--hv)}
