@@ -1,10 +1,10 @@
-import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp } from '../state';
 import { TT } from '../lib/constants';
 import { addDays, fmtN, nextWork, todayISO } from '../lib/format';
 import type { TaskForm, TaskType } from '../lib/types';
 import { DateField, Opts } from './ui';
-import { useDialog } from './useDialog';
+import { Modal } from './Dialog';
 
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
 
@@ -16,8 +16,6 @@ export function ScheduleModal() {
 
 function ScheduleForm() {
   const { engine: e, ui, set } = useApp();
-  const ref = useRef<HTMLFormElement>(null);
-  useDialog(ref); // takes keyboard focus, keeps Tab inside, gives it back on close
   const o = ui.sched!;
   const t = o.taskId ? e.crm.tasks.find((x) => x.id === o.taskId) : undefined;
   // the appointment as the form opened: saving writes only what was changed here, so a teammate's
@@ -39,11 +37,10 @@ function ScheduleForm() {
     set({ sched: null, picked: {} });
   };
 
+  // the shared dialog (title row with its ×, keyboard focus kept inside, given back on close)
   return (
-    <>
-      <div onClick={cancel} className="dlg-back" style={{ zIndex: 50 }} />
-      <form ref={ref} role="dialog" aria-modal="true" aria-label="นัดติดต่อ" onSubmit={save} className="dlg" style={{ width: 'min(480px,94vw)', zIndex: 51, gap: 12 }}>
-        <span className="dlg-t">{o.taskId ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'}</span>
+    <Modal title={o.taskId ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'} onClose={cancel} width={480}>
+      <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <span className="t-sec">{c ? c.name + (o.pid && e.people[o.pid] ? ' · กับ ' + e.people[o.pid].name : '') : o.ids.length > 1 ? 'กระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
         <label style={field}>
           ประเภท
@@ -71,6 +68,6 @@ function ScheduleForm() {
           {!gone && <button type="submit" className="btn pri">บันทึกนัด</button>}
         </div>
       </form>
-    </>
+    </Modal>
   );
 }

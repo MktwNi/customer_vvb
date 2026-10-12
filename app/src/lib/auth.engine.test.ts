@@ -345,6 +345,17 @@ describe('sessions', () => {
     expect(rows('watch/' + id)).toHaveLength(1);
   });
 
+  it('renaming an account before its first sign-in renames it in the team list too', async () => {
+    const L = await lead();
+    const { user } = await L.e.adminCreate({ u: 'lek', name: 'เล็ก ยังไม่เข้า', role: 'sales' });
+    expect(L.e.crm.team).toContain('เล็ก ยังไม่เข้า');
+    const r = await L.e.adminRename(user, 'เล็ก ใจเย็น');
+    expect(r.name).toBe('เล็ก ใจเย็น');
+    expect(L.e.crm.team).toContain('เล็ก ใจเย็น');
+    expect(L.e.crm.team).not.toContain('เล็ก ยังไม่เข้า');
+    expect(L.e.legacyNames().map((x) => x.name)).not.toContain('เล็ก ยังไม่เข้า');
+  });
+
   it('a disabled account stops syncing', async () => {
     const L = await lead();
     const A = await member(L, 'aem', 'เอ', 'sales');
@@ -521,8 +532,11 @@ describe('going back and leaving', () => {
     await settle(L);
     const A = await member(L, 'aem', 'เอ', 'sales');
     expect(Object.keys(A.e.sales.deals).length).toBeGreaterThan(0);
+    expect(pref(A, PREF.lastUser)).toMatchObject({ u: 'aem' });
     await A.e.teamLogout({ wipe: true });
     for (const k of ['sales', 'people', 'customCos', 'dedup']) expect(await A.store.get(k)).toBe(null);
+    // a shared computer: the sign-in screen doesn't greet the person who was here
+    expect(pref(A, PREF.lastUser)).toBe(null);
     expect(pref<TeamCfg>(A, PREF.team)).toMatchObject({ url: URL, seq: 0, seeded: true, mode: 'accounts' });
     expect(pref(A, PREF.wipe)).toBeTruthy();
 

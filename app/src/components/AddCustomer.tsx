@@ -183,8 +183,9 @@ export function SendToTracker() {
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
       {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ</span>}
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
-        <label style={labelCol}>
+      {/* (minmax: the long "อัตโนมัติ — …" choice must not widen the column past the dialog) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 120px', gap: 10 }}>
+        <label style={{ ...labelCol, minWidth: 0 }}>
           หมวด
           <select value={section} onChange={(ev) => setSection(ev.target.value)} className="fld sel">
             {cos.length > 1 && <option value={AUTO}>อัตโนมัติ — ตามแหล่งที่พบ (TGO / SET/mai)</option>}

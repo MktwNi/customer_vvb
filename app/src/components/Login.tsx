@@ -896,7 +896,7 @@ export function ReLogin({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal title="หมดเวลาการเข้าระบบ" onClose={onClose} width={440}>
-      <form className="auth-form dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
+      <form className="auth-form in-dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
         <p className="auth-sub">{n > 0 ? `งานที่แก้ไว้ ${fmtN(n)} รายการยังอยู่ในเครื่อง จะส่งหลังเข้าสู่ระบบ` : 'กรุณาเข้าสู่ระบบอีกครั้ง'}</p>
         <div className="auth-field">
           <label htmlFor="relogin-u">ชื่อผู้ใช้</label>
@@ -906,12 +906,16 @@ export function ReLogin({ onClose }: { onClose: () => void }) {
             <span id="relogin-name" className="auth-ro-name">{s.name}</span>
           </div>
         </div>
-        <PwField label="รหัสผ่าน" value={pw} onChange={setPw} autoComplete="current-password" hints inputRef={pwRef} autoFocus />
+        {/* the "fill it in" message goes once the field is filled, not only on the next submit */}
+        <PwField label="รหัสผ่าน" value={pw} onChange={(v) => { setPw(v); if (err?.msg === 'ใส่รหัสผ่าน') setErr(null); }} autoComplete="current-password" hints inputRef={pwRef} autoFocus />
         {err && <Msg kind="err">{err.msg}</Msg>}
-        <SubmitBtn busy={busy} disabled={locked} busyText="กำลังตรวจสอบ…">เข้าสู่ระบบ</SubmitBtn>
-        <button type="button" className="auth-link center" onClick={() => e.teamLogout()}>
-          ใช้บัญชีอื่น
-        </button>
+        {/* the footer every dialog has (§7.11): the other way out quiet, the primary at the right */}
+        <div className="dlg-act">
+          <button type="button" className="quiet" onClick={() => e.teamLogout({ forget: true })}>
+            ใช้บัญชีอื่น
+          </button>
+          <SubmitBtn busy={busy} disabled={locked} busyText="กำลังตรวจสอบ…">เข้าสู่ระบบ</SubmitBtn>
+        </div>
       </form>
     </Modal>
   );
@@ -953,26 +957,28 @@ export function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="เปลี่ยนรหัสผ่าน" onClose={onClose} width={460}>
       {done ? (
-        <div className="auth-form dlg">
+        <div className="auth-form in-dlg">
           <Msg kind="ok">เปลี่ยนรหัสผ่านแล้ว</Msg>
-          <button ref={doneRef} type="button" className="auth-btn" onClick={onClose}>
-            เสร็จ
-          </button>
+          <div className="dlg-act">
+            <button ref={doneRef} type="button" className="auth-btn" onClick={onClose}>
+              เสร็จ
+            </button>
+          </div>
         </div>
       ) : (
-        <form className="auth-form dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
+        <form className="auth-form in-dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
           <input type="text" name="username" autoComplete="username" value={u} readOnly hidden />
-          <PwField label="รหัสผ่านปัจจุบัน" value={old} onChange={setOld} autoComplete="current-password" hints />
+          <PwField label="รหัสผ่านปัจจุบัน" value={old} onChange={(v) => { setOld(v); if (err === 'ใส่รหัสผ่านปัจจุบัน') setErr(''); }} autoComplete="current-password" hints />
           <PwField label="รหัสผ่านใหม่" value={pw} onChange={setPw} autoComplete="new-password" hints />
           <PwField label="ยืนยันรหัสผ่านใหม่" value={pw2} onChange={setPw2} autoComplete="new-password" />
           <Checklist pw={pw} confirm={pw2} u={u} name={name} old={old} oldLabel="ไม่ใช่รหัสผ่านปัจจุบัน" />
           <p className="auth-note">เครื่องอื่นที่เข้าสู่ระบบไว้จะถูกออกจากระบบ</p>
           {err && <Msg kind="err">{err}</Msg>}
-          <div className="auth-row">
-            <SubmitBtn busy={busy} busyText="กำลังบันทึก…">เปลี่ยนรหัสผ่าน</SubmitBtn>
-            <button type="button" className="auth-btn ghost" onClick={onClose}>
+          <div className="dlg-act">
+            <button type="button" className="quiet" onClick={onClose}>
               ยกเลิก
             </button>
+            <SubmitBtn busy={busy} busyText="กำลังบันทึก…">เปลี่ยนรหัสผ่าน</SubmitBtn>
           </div>
         </form>
       )}
@@ -1013,7 +1019,7 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal title="ออกจากระบบ" onClose={busy ? () => {} : onClose} width={480} focus="dialog">
-      <div className="auth-form dlg">
+      <div className="auth-form in-dlg">
         {n === 0 ? (
           <Msg kind="ok">ข้อมูลที่คุณแก้ถึงทีมครบแล้ว</Msg>
         ) : sending ? (
@@ -1040,13 +1046,14 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
             <span>ออกจากระบบทุกเครื่องของฉันด้วย</span>
           </label>
         </div>
-        <div className="auth-row">
-          <button type="button" className="auth-btn danger" onClick={go} disabled={busy}>
+        {/* signing out is not an error: the blue primary, not red */}
+        <div className="dlg-act">
+          <button type="button" className="quiet" onClick={onClose} disabled={busy}>
+            ยกเลิก
+          </button>
+          <button type="button" className="auth-btn" onClick={go} disabled={busy}>
             {busy && <Spinner />}
             {busy ? 'กำลังออกจากระบบ…' : 'ออกจากระบบ'}
-          </button>
-          <button type="button" className="auth-btn ghost" onClick={onClose} disabled={busy}>
-            ยกเลิก
           </button>
         </div>
       </div>

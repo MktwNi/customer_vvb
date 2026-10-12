@@ -93,7 +93,8 @@ export function SalesMessages() {
   const q = ask ? closeConfirm(e.sales, ask, todayISO(), shortName(ask.client)) : '';
   return (
     <>
-      <div className="sl-live" role="status" aria-live="polite">
+      {/* (centred in the deal panel while it is open) */}
+      <div className={'sl-live' + (ui.deal ? ' in-dp' : '')} role="status" aria-live="polite">
         {t && (
           <div className="sl-toast" key={t.n} onMouseEnter={() => (held.current = true)} onMouseLeave={() => (held.current = false)} onFocus={() => (held.current = true)} onBlur={() => (held.current = false)}>
             <span>{t.text}</span>

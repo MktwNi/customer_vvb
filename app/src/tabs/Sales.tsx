@@ -1,4 +1,4 @@
-import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
 import {
@@ -113,6 +113,25 @@ export function Sales() {
 
 // ------------------------------------------------------------------ menus
 
+/** Keeps an open drop-down menu (`[role=menu]` in `box`, under its button) in view: moved sideways into
+ *  the window (on a phone the page's buttons wrap to the left, and a menu anchored at their right edge
+ *  would start off screen), and opened upward (`up`) when the page's scroll area has no room for it
+ *  below the button but more above. */
+function useFitMenu(open: boolean, box: RefObject<HTMLElement | null>) {
+  const [up, setUp] = useState(false);
+  useLayoutEffect(() => {
+    const m = box.current?.querySelector<HTMLElement>('[role=menu]');
+    if (!open || !m) return setUp(false);
+    const r = m.getBoundingClientRect(), b = box.current!.getBoundingClientRect(), pad = 12;
+    const dx = r.left < pad ? pad - r.left : r.right > innerWidth - pad ? Math.max(pad - r.left, innerWidth - pad - r.right) : 0;
+    if (dx) m.style.translate = `${Math.round(dx)}px 0`;
+    const sc = document.getElementById('scroller')?.getBoundingClientRect();
+    const below = Math.min(innerHeight, sc?.bottom ?? innerHeight) - r.bottom, above = b.top - Math.max(0, sc?.top ?? 0) - 6;
+    setUp(below < pad && above > r.height + pad);
+  }, [open, box]);
+  return up;
+}
+
 /** A drop-down menu: closes when focus leaves it, or on Escape (focus goes back to its button); ↑ / ↓
  *  move between its items. Choosing an item also puts focus back on the button, so a dialog it opens
  *  returns there. */
@@ -128,6 +147,7 @@ function useMenu() {
   useEffect(() => {
     if (open) ref.current?.querySelector<HTMLElement>('[role=menuitem]')?.focus();
   }, [open]);
+  const up = useFitMenu(open, ref);
   const wrap = {
     ref,
     onBlur: (ev: ReactFocusEvent) => {
@@ -146,19 +166,19 @@ function useMenu() {
       }
     },
   };
-  return { open, setOpen, close, btn, wrap };
+  return { open, setOpen, close, btn, wrap, cls: 'menu sl-menu' + (up ? ' up' : '') };
 }
 
 function AddMenu() {
   const { engine: e, ui, set, go } = useApp();
-  const { open, setOpen, close, btn, wrap } = useMenu();
+  const { open, setOpen, close, btn, wrap, cls } = useMenu();
   // companies being followed that are not in this year's table yet
   const starred = e.crm.watch.map((id) => e.company(id)).filter((c) => c && !e.dealsOf(c.id).some((d) => d.year === ui.slYear));
   return (
     <div {...wrap} className="sl-menuw">
       <button ref={btn} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} className="btn pri">เพิ่มลูกค้า</button>
       {open && (
-        <div role="menu" aria-label="เพิ่มลูกค้า" className="menu sl-menu">
+        <div role="menu" aria-label="เพิ่มลูกค้า" className={cls}>
           <button role="menuitem" className="menu-i" onClick={() => { close(); go('search'); setTimeout(() => document.getElementById('search-q')?.focus(), 60); }}>
             ค้นหาบริษัทในทะเบียน<small>แล้วส่งเข้า Sales Tracker</small>
           </button>
@@ -179,7 +199,7 @@ function AddMenu() {
 function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
   const { engine: e, set } = useApp();
   const yearTotal = Object.values(e.sales.deals).filter((d) => d.year === year).length;
-  const { open, setOpen, close, btn, wrap } = useMenu();
+  const { open, setOpen, close, btn, wrap, cls } = useMenu();
   const [lists, setLists] = useState(false);
   const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[]; batch?: string; n?: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -229,7 +249,7 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
         <Icon name="more" size={20} />
       </button>
       {open && (
-        <div role="menu" aria-label="เพิ่มเติม" className="menu sl-menu">
+        <div role="menu" aria-label="เพิ่มเติม" className={cls}>
           <button role="menuitem" className="menu-i" onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
             {/* the table's filters apply (also when another tab is open): say so */}
             ส่งออก CSV
@@ -284,11 +304,13 @@ function ListsModal({ onClose }: { onClose: () => void }) {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {C[name].map((x) => (
           <span key={x} className="sl-litem">
-            {x}
-            {name === 'sections' && (
-              <button className="lnk" style={{ fontSize: 12 }} onClick={() => { const n = window.prompt('ชื่อหมวดใหม่', x); if (n) e.renameSection(x, n); }}>เปลี่ยนชื่อ</button>
+            {/* a หมวด's name is its rename button (no "เปลี่ยนชื่อ" link on every item) */}
+            {name === 'sections' ? (
+              <button className="sl-litem-n hv-tx" title="เปลี่ยนชื่อ" aria-label={'เปลี่ยนชื่อ ' + x} onClick={() => { const n = window.prompt('ชื่อหมวดใหม่', x); if (n) e.renameSection(x, n); }}>{x}</button>
+            ) : (
+              x
             )}
-            <button title="ลบ" aria-label={'ลบ ' + x} onClick={() => window.confirm(`ลบ "${x}" ออกจากรายการ? (รายการที่ใช้อยู่ยังคงเดิม)`) && e.setSalesList(name, C[name].filter((y) => y !== x))} className="sl-litem-x hv2">×</button>
+            <button title="ลบ" aria-label={'ลบ ' + x} onClick={() => window.confirm(`ลบ "${x}" ออกจากรายการ? (รายการที่ใช้อยู่ยังคงเดิม)`) && e.setSalesList(name, C[name].filter((y) => y !== x))} className="sl-litem-x"><Icon name="close" size={12} /></button>
           </span>
         ))}
       </div>
@@ -301,7 +323,7 @@ function ListsModal({ onClose }: { onClose: () => void }) {
   return (
     // its fields only add to the lists: focus the dialog (a phone would pop its keyboard up for a field)
     <Modal title="จัดการรายการ" onClose={onClose} width={640} focus="dialog">
-      {box('sections', 'หมวด (กลุ่มแถวในตาราง)', 'แต่ละลูกค้าอยู่ในหมวดเดียว เช่น ช่องทางที่ได้ลูกค้ามา')}
+      {box('sections', 'หมวด (กลุ่มแถวในตาราง)', 'แต่ละลูกค้าอยู่ในหมวดเดียว เช่น ช่องทางที่ได้ลูกค้ามา · กดที่ชื่อหมวดเพื่อเปลี่ยนชื่อ')}
       {box('sources', 'SOURCE (ช่องทาง)', 'ติ๊กได้หลายช่องต่อหนึ่งลูกค้า ใช้ในกราฟและอัตราได้งานตามช่องทาง')}
       {box('services', 'Services (บริการ)', 'บริการที่เสนอให้ลูกค้า')}
     </Modal>
@@ -852,7 +874,7 @@ function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Tr
       <td className="k-fc"><MoneyFc d={d} /></td>
       <td className="k-ac"><MoneyAc d={d} /></td>
       <td className="k-st"><StatusCell d={d} /></td>
-      <td className="k-act"><RowMenu d={d} /></td>
+      <td className="k-act">{!tk.ro && <RowMenu d={d} />}</td>
     </tr>
   );
 }
@@ -1115,12 +1137,14 @@ function StatusCell({ d, compact }: { d: Deal; compact?: boolean }) {
   );
 }
 
-/** ⋯: words only. Viewers get "เปิดรายละเอียด" alone. */
+/** ⋯: words only (not for viewers: "เปิดรายละเอียด" alone would repeat what the name does). Opens
+ *  upward when there is no room below it in the window. */
 function RowMenu({ d }: { d: Deal }) {
   const tk = useTk();
   const open = tk.menu === d.id;
   const ref = useRef<HTMLSpanElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
+  const up = useFitMenu(open, ref);
   useEffect(() => {
     if (open) ref.current?.querySelector<HTMLElement>('[role=menuitem]')?.focus();
   }, [open]);
@@ -1155,7 +1179,7 @@ function RowMenu({ d }: { d: Deal }) {
         <Icon name="more" size={18} />
       </button>
       {open && (
-        <span role="menu" className="menu sl-menu sl-rowmenu">
+        <span role="menu" className={'menu sl-menu sl-rowmenu' + (up ? ' up' : '')}>
           <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id))}>เปิดรายละเอียด</button>
           {!tk.ro && (
             <>
@@ -1389,7 +1413,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         </th>
         <td className="sl-rule" colSpan={4}>
           <span className="sl-clamp">
-            {closingRule(cv.state, P, ps)} · <button type="button" className="lnk" onClick={() => tk.openPanel(d.id)}>รายละเอียดทั้งหมด</button>
+            {closingRule(cv.state, P, ps, ro)} · <button type="button" className="lnk" onClick={() => tk.openPanel(d.id)}>รายละเอียดทั้งหมด</button>
           </span>
         </td>
         <td className="k-m2" colSpan={2}>
@@ -1526,16 +1550,20 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
       <td className="sl-knote" colSpan={3}>
         <span className="sl-qaw">
           <ActTypeSeg f={f} />
-          <input
-            ref={input}
-            className="fld sl-fld"
-            value={f.note}
-            maxLength={NOTE_MAX}
-            placeholder="คุยอะไร ได้ข้อมูลอะไร นัดอะไรต่อ"
-            aria-label="โน้ตการติดต่อ"
-            onChange={(ev) => f.setNote(ev.target.value)}
-            onKeyDown={(ev) => ev.key === 'Enter' && !ev.shiftKey && (ev.preventDefault(), save())}
-          />
+          <span className="sl-qa-row">
+            <input
+              ref={input}
+              className="fld sl-fld"
+              value={f.note}
+              maxLength={NOTE_MAX}
+              placeholder="คุยอะไร ได้ข้อมูลอะไร นัดอะไรต่อ"
+              aria-label="โน้ตการติดต่อ"
+              onChange={(ev) => f.setNote(ev.target.value)}
+              onKeyDown={(ev) => ev.key === 'Enter' && !ev.shiftKey && (ev.preventDefault(), save())}
+            />
+            {/* (the date's own column folds away in a narrow table: it comes here instead) */}
+            <span className="sl-qa-date"><DateChip value={f.date} onChange={f.setDate} label="วันที่ติดต่อ" /></span>
+          </span>
           <span className="sl-qa-hint">Enter บันทึก · Esc ยกเลิก</span>
         </span>
       </td>
@@ -1547,8 +1575,25 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
   );
 }
 
-/** The closing row's sentence (the lead phrase 500). */
-function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnType<typeof planOf>, ps: ReturnType<typeof payState>): ReactNode {
+/** The closing row's sentence (the lead phrase 500); `ro` (an account that can only read): the lead
+ *  phrase alone, without the steps it has no buttons for. */
+function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnType<typeof planOf>, ps: ReturnType<typeof payState>, ro: boolean): ReactNode {
+  if (ro) {
+    switch (state) {
+      case 'no':
+        return <b>ผลการขายเป็น NO</b>;
+      case 'plan':
+        return <b>ได้งานแล้ว · รับ {P?.paidN} จาก {P?.n} งวดตามแผน</b>;
+      case 'pays':
+        return <b>ได้งานแล้ว · รับชำระ {ps.paid.length} จาก {ps.pays.length} งวด</b>;
+      case 'nopay':
+        return <b>ได้งานแล้ว</b>;
+      case 'done':
+        return <b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b>;
+      default:
+        return <>ยังไม่มีผลการขาย</>;
+    }
+  }
   switch (state) {
     case 'no':
       return <><b>ผลการขายเป็น NO</b> ไม่ต้องติดตามต่อ กดปิดงานเพื่อย้ายไปแท็บปิดงาน (เปิดกลับได้)</>;
@@ -1812,6 +1857,8 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
                 } else ed.keys(ev);
               }}
             />
+            {/* (the date's own column folds away in a narrow table: it comes here instead) */}
+            <span className="sl-qa-date" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${stage}`} /></span>
             {line && won && line.status !== 'paid' && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.openPanel(d.id, `recv:${stage}`); }}>รับเงินแล้ว</button>}
           </span>
           <span className="sl-qa-hint">Enter บันทึก · Esc ยกเลิก</span>
@@ -2054,9 +2101,9 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
         <div className="sl-mk-t">
           <div><b>ปิดงาน</b><span>ย้ายไปแท็บปิดงาน</span></div>
           <p className="sl-mk-plan">
-            {cv.state === 'no' ? 'ผลเป็น NO กดปิดงานเพื่อย้ายไปแท็บปิดงาน'
+            {cv.state === 'no' ? (ro ? 'ผลเป็น NO' : 'ผลเป็น NO กดปิดงานเพื่อย้ายไปแท็บปิดงาน')
               : cv.state === 'plan' || cv.state === 'pays' ? `ได้งานแล้ว · รับ ${ps.paid.length}/${ps.pays.length} งวด${P ? 'ตามแผน' : ''} · ${cv.hint}`
-              : cv.state === 'done' || cv.state === 'nopay' ? 'ได้งานและรับชำระครบ ปิดงานได้'
+              : cv.state === 'done' || cv.state === 'nopay' ? (ro ? 'ได้งานและรับชำระครบ' : 'ได้งานและรับชำระครบ ปิดงานได้')
               : 'ผล YES / NO ยังไม่ใช่การปิดงาน'}
           </p>
         </div>

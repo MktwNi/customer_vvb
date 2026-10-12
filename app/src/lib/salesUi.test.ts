@@ -232,6 +232,14 @@ describe('closing', () => {
     const done = c(YES, { PAY1: { amt: 1000 } }, { PAY1: 1000 });
     expect(done).toMatchObject({ ready: true, state: 'done', hint: '' });
     expect(done.text).toBe('ได้งานและรับชำระครบทุกงวดตามแผนแล้ว ปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” ยอด Forecast / Actual ยังนับในสรุปปีเหมือนเดิม');
+    // an account that can only read: where it stands, not the buttons it doesn't have
+    const ro = (steps: SalesState['steps'], pays: Record<string, Partial<PayLine>> = {}, docs: Record<string, number> = {}) => {
+      const { S, d } = one(steps, pays, docs);
+      return closingView(S, d, TODAY, true).text;
+    };
+    expect(ro({})).toBe('ยังไม่มีผลการขาย');
+    expect(ro(YES, { PAY1: { amt: 53500 }, PAY2: { amt: 53500 } }, { PAY1: 53500 })).toBe('ได้งานแล้ว · รับ 1 จาก 2 งวดตามแผน');
+    expect(ro(YES, { PAY1: { amt: 1000 } }, { PAY1: 1000 })).toBe('ได้งานและรับชำระครบทุกงวดตามแผนแล้ว พร้อมปิดงาน');
   });
   it('the prompt after this user\'s action, and the confirm for a deal not ready', () => {
     const won = one(YES, { PAY1: { amt: 1 } }, { PAY1: 1 });

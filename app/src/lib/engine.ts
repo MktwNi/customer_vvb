@@ -3673,8 +3673,9 @@ export class GccEngine {
    * Sign out. What is queued is sent first when online (unsent edits stay for the next sign-in of this
    * account). `all`: also sign out this account's other browsers. `wipe`: delete the team data kept in
    * this browser (shared computer), keeping data of this browser only; `dropUnsent` deletes the queue too.
+   * A wipe, or `forget` ("ใช้บัญชีอื่น"), also forgets the account: the sign-in screen doesn't greet it.
    */
-  async teamLogout(o: { all?: boolean; wipe?: boolean; dropUnsent?: boolean } = {}) {
+  async teamLogout(o: { all?: boolean; wipe?: boolean; dropUnsent?: boolean; forget?: boolean } = {}) {
     const cfg = this.teamCfg, s = this.session;
     if (cfg && !this.auth && (this.pending.size || this.docsUnsent) && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
       this.docRetryAt = 0; // a last try for files waiting after a failed upload, too
@@ -3688,7 +3689,7 @@ export class GccEngine {
     const url = cfg?.url || s?.url || this.authUrl;
     this.endTeam();
     this.saveSession(null);
-    if (!s?.rm) prefs.del(PREF.lastUser);
+    if (!s?.rm || o.wipe || o.forget) prefs.del(PREF.lastUser);
     this.session = null;
     this.authUrl = url;
     this.auth = url ? 'login' : '';
@@ -3807,6 +3808,14 @@ export class GccEngine {
   }
   async adminUpdate(u: string, patch: { name?: string; role?: Role; on?: 0 | 1 }) {
     return (await this.adminCall<{ user: TeamUser }>({ action: 'user_save', u, ...patch })).user;
+  }
+  /** แก้ชื่อที่แสดง (before the account's first sign-in): the team list takes the new name in place of the
+   *  old one, which would otherwise stay behind as a name with no account. */
+  async adminRename(u: TeamUser, name: string) {
+    const r = await this.adminUpdate(u.u, { name });
+    if (r.name !== u.name && this.crm.team.includes(u.name)) this.delTeam(u.name);
+    if (!this.crm.team.includes(r.name)) this.addTeam(r.name);
+    return r;
   }
   /** A new temporary password (signs the account out everywhere). */
   async adminReset(u: string) {

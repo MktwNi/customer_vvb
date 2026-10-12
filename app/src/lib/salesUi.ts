@@ -213,21 +213,22 @@ export const CLOSE_TITLE = 'ปิดงาน · ย้ายงานที่
  * plan left), pays (won, PAY stages left, no plan), nopay (won, the list has no PAY stage), done (won and
  * received); the closing card's `text`; `hint` for the table's closing row ("ปิดได้เมื่อรับ PAY2", "รอผลการขาย";
  * '' when ready: the button shows); `progress` = "รับแล้ว 50% · เหลือ 53,500" on the plan total, else the Forecast.
+ * `ro`: an account that can only read gets where it stands, without the steps it has no buttons for.
  */
 export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null }
-export function closingView(s: SalesState, d: Deal, today: string): ClosingView {
+export function closingView(s: SalesState, d: Deal, today: string, ro = false): ClosingView {
   const r = dealResult(s, d), ready = closeReady(s, d, today);
-  if (r === 'NO') return { ready, state: 'no', text: 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ กดปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” (เปิดกลับได้ ยอดยังนับในสรุปปี)', hint: '', waitFor: [], progress: null };
-  if (r !== 'YES') return { ready, state: 'none', text: 'ยังไม่มีผลการขาย เมื่อบันทึก CLOSED DEAL เป็น NO หรือ YES และรับชำระครบทุกงวด ระบบจะขึ้นปุ่มปิดงาน', hint: 'รอผลการขาย', waitFor: [], progress: null };
+  if (r === 'NO') return { ready, state: 'no', text: ro ? 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ' : 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ กดปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” (เปิดกลับได้ ยอดยังนับในสรุปปี)', hint: '', waitFor: [], progress: null };
+  if (r !== 'YES') return { ready, state: 'none', text: ro ? 'ยังไม่มีผลการขาย' : 'ยังไม่มีผลการขาย เมื่อบันทึก CLOSED DEAL เป็น NO หรือ YES และรับชำระครบทุกงวด ระบบจะขึ้นปุ่มปิดงาน', hint: 'รอผลการขาย', waitFor: [], progress: null };
   const ps = payState(s, d, today), P = ps.plan, m = dealMoney(s, d);
   const base = P ? P.total : m.forecast, got = P ? P.got : m.actual || 0;
   const progress = base ? { pct: Math.min(100, Math.round((got / base) * 100)), got, base, left: Math.max(0, base - got) } : null;
   const left = ps.left, hint = left.length ? 'ปิดได้เมื่อรับ ' + left.join(', ') : '';
   const out = (state: ClosingView['state'], text: string): ClosingView => ({ ready, state, text, hint, waitFor: left, progress });
-  if (P && left.length) return out('plan', `ได้งานแล้ว · รับ ${P.paidN} จาก ${P.n} งวดตามแผน เมื่อรับครบทุกงวด ระบบจะชวนให้ปิดงาน`);
-  if (left.length) return out('pays', `ได้งานแล้ว · รับชำระ ${ps.paid.length} จาก ${ps.pays.length} งวด เมื่อแนบเอกสาร ${left.join(', ')} ระบบจะชวนให้ปิดงาน`);
-  if (!ps.pays.length) return out('nopay', 'ได้งานแล้ว ตารางนี้ไม่มีขั้นชำระเงิน (PAY) กดปิดงานเมื่องานจบ');
-  return out('done', `ได้งานและรับชำระครบทุกงวด${P ? 'ตามแผน' : ''}แล้ว ปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” ยอด Forecast / Actual ยังนับในสรุปปีเหมือนเดิม`);
+  if (P && left.length) return out('plan', `ได้งานแล้ว · รับ ${P.paidN} จาก ${P.n} งวดตามแผน${ro ? '' : ' เมื่อรับครบทุกงวด ระบบจะชวนให้ปิดงาน'}`);
+  if (left.length) return out('pays', `ได้งานแล้ว · รับชำระ ${ps.paid.length} จาก ${ps.pays.length} งวด${ro ? '' : ` เมื่อแนบเอกสาร ${left.join(', ')} ระบบจะชวนให้ปิดงาน`}`);
+  if (!ps.pays.length) return out('nopay', ro ? 'ได้งานแล้ว' : 'ได้งานแล้ว ตารางนี้ไม่มีขั้นชำระเงิน (PAY) กดปิดงานเมื่องานจบ');
+  return out('done', `ได้งานและรับชำระครบทุกงวด${P ? 'ตามแผน' : ''}แล้ว${ro ? ' พร้อมปิดงาน' : ' ปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” ยอด Forecast / Actual ยังนับในสรุปปีเหมือนเดิม'}`);
 }
 /** The prompt after this user's own action made a deal ready (`via` the result, or a payment / document /
  *  "ถือว่ารับครบ"): "รับชำระครบทุกงวดแล้ว ปิดงาน X เลยไหม?". A teammate's change never prompts. */

@@ -174,13 +174,17 @@ button.kpi{cursor:pointer}
 .menu-i:focus-visible{background-color:var(--hv);outline:none;box-shadow:inset 0 0 0 2px var(--brand)}
 /* dialogs (components/Dialog.tsx) */
 .dlg-back{position:fixed;inset:0;background:rgba(4,10,60,.45);z-index:54}
-.dlg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);max-height:90vh;overflow-y:auto;background:#fff;border-radius:var(--r-card);padding:22px;z-index:55;display:flex;flex-direction:column;gap:14px;outline:none;box-shadow:var(--sh-pop);color:var(--ink);font-size:var(--fs-body)}
-.dlg-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.dlg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);max-height:90vh;max-height:90dvh;overflow-y:auto;background:#fff;border-radius:var(--r-card);padding:22px;z-index:55;display:flex;flex-direction:column;gap:14px;outline:none;box-shadow:var(--sh-pop);color:var(--ink);font-size:var(--fs-body)}
+/* the title and its × stay in view while a long dialog scrolls under them (its white reaches the dialog's
+   edges; top -22px: a sticky box keeps clear of the scroller's padding) */
+.dlg-head{display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:-22px;z-index:3;margin:-22px -22px -8px;padding:22px 22px 8px;background:#fff}
 .dlg-t{font-size:var(--fs-section);font-weight:500;line-height:1.4}
 .dlg-x{cursor:pointer;flex:none;width:34px;height:34px;border-radius:50%;border:0;background-color:var(--neutral-bg);color:var(--ink-2);display:flex;align-items:center;justify-content:center;padding:0;transition:background-color .12s}
 @media (hover:hover){.dlg-x:hover{background-color:#E1E5EF;color:var(--ink)}}
 .dlg-x:focus-visible{background-color:#E1E5EF}
 .dlg-act{display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
+/* a long label ("ยืนยันยอด 107,000 บาท และแนบที่ QUOTATION") wraps inside the dialog on a phone, not past its edge */
+.dlg-act>.btn{max-width:100%;white-space:normal;height:auto;min-height:var(--ctl);padding-top:8px;padding-bottom:8px;text-align:center;line-height:1.4}
 /* a date field that reads as Thai text (ui.tsx DateField): the native input picks, its mm/dd/yyyy is hidden */
 .dfld{position:relative;display:flex;min-width:0}
 .dfld>input{width:100%;min-width:0;color:transparent;cursor:pointer;background-color:var(--card)}
@@ -208,7 +212,31 @@ button.kpi{cursor:pointer}
 /* a row's actions show on the row under the pointer or the keyboard (always on touch screens) */
 @media (hover:hover){.dr-row .dr-acts{opacity:0;transition:opacity .12s}.dr-row:hover .dr-acts,.dr-row:focus-within .dr-acts{opacity:1}}
 .dr-acts{display:flex;gap:10px;align-items:center;flex:none}
-@media (max-width:560px){.dr-head,.dr-tabs{padding-left:18px;padding-right:18px}}
+.dr-body{padding:18px 28px 40px;display:flex;flex-direction:column;gap:14px}
+/* CFO · GI · โรงงานใหม่: three white tiles; the round's three dates in hairline boxes */
+.dr-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.dr-kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);padding:14px 16px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.dr-kpi-l{font-size:var(--fs-sec);color:var(--ink-2)}
+.dr-kpi-v{font-size:var(--fs-section);font-weight:500}
+.dr-kpi-s{font-size:var(--fs-meta);color:var(--muted)}
+.dr-rnd{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.dr-rnd>div{border:1px solid var(--divider);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.dr-rnd>div>:first-child{font-size:var(--fs-meta);color:var(--muted)}
+.dr-rnd>div>:last-child{font-size:var(--fs-body)}
+@media (max-width:560px){
+  .dr-head,.dr-tabs,.dr-body{padding-left:18px;padding-right:18px}
+  /* the tabs' short names, so all four fit across a phone (the person page's three too) */
+  .dr-long,.pe-long{display:none}
+  .dr-tabs>button{padding-left:10px;padding-right:10px}
+  /* three columns would break the words: one card, a row each (name, figure, then its line) */
+  .dr-kpis{grid-template-columns:minmax(0,1fr);gap:0;background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner)}
+  .dr-kpi{border:0;border-radius:0;background:transparent;padding:10px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:baseline}
+  .dr-kpi+.dr-kpi{border-top:1px solid var(--divider)}
+  .dr-kpi-v{text-align:right}
+  .dr-kpi-s{grid-column:1/-1}
+  .dr-rnd{grid-template-columns:minmax(0,1fr)}
+  .dr-rnd>div{flex-direction:row;justify-content:space-between;align-items:baseline;gap:12px}
+}
 
 /* ---- หมายเหตุ (tabs/Notes.tsx) */
 .nt-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:16px 28px}
@@ -383,6 +411,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 .side-add[aria-expanded=true]{background:rgba(255,255,255,.14);border-color:#fff}
 /* the add menu (two ways to add a customer), placed beside the button so the rail doesn't clip it */
 .side-addmenu{position:fixed;z-index:60;width:min(300px,calc(100vw - 24px))}
+@media (max-width:900px){.side-addmenu{width:calc(min(290px,86vw) - 32px)}}
 .side-add:focus-visible{outline:2px solid #fff;outline-offset:3px}
 .side-add:disabled{opacity:.55;cursor:default;transform:none;box-shadow:none}
 .side-nav{position:relative;flex:1;display:flex;flex-direction:column;gap:12px;padding:12px 0 16px 14px}
@@ -910,6 +939,8 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-yr:focus-within{outline:2px solid var(--brand);outline-offset:2px}
 .sl-menuw{position:relative}
 .sl-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:min(300px,86vw)}
+/* no room below the button in the window: it opens upward (tabs/Sales.tsx useFitMenu) */
+.sl-menu.up{top:auto;bottom:calc(100% + 6px)}
 .sl-menu hr{border:0;border-top:1px solid var(--divider);margin:4px 6px}
 /* the tabs, and at their right the one closing hint (no box, no icon) */
 .sl-tabbar{display:flex;align-items:flex-end;gap:12px;border-bottom:1px solid var(--line);min-width:0}
@@ -973,6 +1004,8 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
   .sl-table .k-last{padding:0;visibility:hidden;overflow:hidden}
   .sl-sub-last{display:inline}
   .sl-nx em{display:none}
+  /* an editor's date was in that column: it moves beside the note */
+  .sl-table .sl-qa-date{display:flex}
 }
 /* column headings: 12/400 muted on white, a hairline under them; they stick to the top of the page,
    opaque and above every row and band (a row's cell or date chip never shows through them) */
@@ -1237,6 +1270,8 @@ button.sl-amt{cursor:pointer}
 .sl-table .sl-kid.editing>*{background:var(--tint);height:66px}
 .sl-qaw{display:flex;flex-direction:column;gap:4px}
 .sl-qa-row{display:flex;gap:8px;align-items:center}
+/* the editor's date beside the note, only while the ติดต่อล่าสุด column is folded (see sl-box above) */
+.sl-qa-date{display:none;flex:none}
 .fld.sl-fld{width:100%;height:36px;min-width:0;background-color:#fff}
 .sl-qa-hint{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* the closing row: ปิดงาน is the last step of every deal */
@@ -1377,11 +1412,18 @@ button.sl-amt{cursor:pointer}
 .sl-log-t{font-size:var(--fs-meta);color:var(--muted);padding-top:2px}
 .sl-log-s{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
 .sl-log-s .lnk{font-size:var(--fs-body)}
-.sl-litem{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sec);padding:3px 4px 3px 12px;border-radius:var(--r-pill);background:var(--frame);border:1px solid var(--line)}
-.sl-litem-x{cursor:pointer;border:0;width:24px;height:24px;border-radius:50%;color:var(--muted);font-size:var(--fs-body);line-height:1;padding:0}
+/* a list of names, not a row of links: a หมวด's name renames it; each item's × shows under the pointer or
+   the keyboard (always on touch screens), as on the team-name chips */
+.sl-litem{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sec);padding:3px 4px 3px 12px;border-radius:var(--r-pill);background:var(--frame);border:1px solid var(--line);--hv:var(--hv2)}
+.sl-litem-n{cursor:pointer;border:0;padding:0;font:inherit;color:var(--ink);text-align:left}
+.sl-litem-x{cursor:pointer;border:0;width:24px;height:24px;border-radius:50%;background-color:transparent;color:var(--ink-2);display:flex;align-items:center;justify-content:center;padding:0;transition:background-color .12s,opacity .12s}
+@media (hover:hover){.sl-litem .sl-litem-x{opacity:0}.sl-litem:hover .sl-litem-x,.sl-litem-x:focus-visible{opacity:1}.sl-litem-x:hover{background-color:#E1E5EF;color:var(--ink)}}
+.sl-litem-x:focus-visible{background-color:#E1E5EF}
 
 /* ---- the bottom message (components/SalesToast.tsx): one at a time, read out politely */
 .sl-live{position:fixed;left:0;right:0;bottom:22px;z-index:50;display:flex;justify-content:center;padding:0 12px;pointer-events:none}
+/* while the deal panel is open: centred in the panel (as wide as .dp), not across its edge */
+.sl-live.in-dp{left:auto;width:min(720px,100vw)}
 .sl-toast{pointer-events:auto;display:flex;align-items:center;gap:8px 12px;padding:10px 12px 10px 18px;border-radius:16px;background:var(--ink);color:#fff;font-size:var(--fs-body);line-height:1.5;box-shadow:var(--sh-pop);max-width:min(680px,100%)}
 .sl-toast>span{flex:1 1 auto;min-width:0}
 .sl-toast button{cursor:pointer;height:32px;padding:0 14px;border-radius:var(--r-pill);border:0;background:rgba(255,255,255,.14);color:#fff;font:inherit;font-size:var(--fs-sec);white-space:nowrap;transition:background-color .12s}
@@ -1389,7 +1431,7 @@ button.sl-amt{cursor:pointer}
 .sl-toast button.x{width:32px;padding:0;font-size:var(--fs-card);line-height:1}
 @media (hover:hover){.sl-toast button:hover{background:rgba(255,255,255,.26)}.sl-toast button.p:hover{background:var(--tint)}}
 .sl-toast button:focus-visible{outline-color:#fff}
-@media (max-width:760px){.sl-live{bottom:14px}.sl-toast{flex-wrap:wrap}.sl-toast>span{flex-basis:100%}}
+@media (max-width:760px){.sl-live{bottom:14px}.sl-toast{flex-wrap:wrap}.sl-toast:has(button:not(.x))>span{flex-basis:100%}.sl-toast:not(:has(button:not(.x))){flex-wrap:nowrap}}
 
 /* ---- DocAttach at a stage (components/DocAttach.tsx) */
 .sl-dlg-sub{margin-top:-8px;font-size:var(--fs-sec);color:var(--muted)}
@@ -1400,21 +1442,25 @@ button.sl-amt{cursor:pointer}
 .sl-repl legend{padding:0 4px;font-size:var(--fs-sec);color:var(--ink-2)}
 .sl-repl label{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:var(--fs-body);cursor:pointer}
 .sl-after{border-radius:var(--r-inner);padding:10px 14px;background:var(--ok-bg);color:var(--ok);font-size:var(--fs-sec);line-height:1.6}
-/* the document's figure against the one it should match: "ตรงกับเอกสาร", or a warning with the two choices */
+/* the document's figure against the one it should match: "ตรงกับเอกสาร", or a warning with the two choices
+   (a choice on the amber box takes a deeper amber under the pointer: its --hv) */
 .sl-xchk{margin:0;border-radius:var(--r-inner);font-size:var(--fs-sec);line-height:1.6;min-width:0}
 .sl-xchk.ok{padding:8px 14px;background:var(--ok-bg);color:var(--ink-2)}
 .sl-xchk.ok b{color:var(--ok);font-weight:500}
-.sl-xchk.warn{border:0;background:var(--warn-bg);padding:10px 14px 12px;display:flex;flex-direction:column;gap:6px}
+.sl-xchk.warn{border:0;background:var(--warn-bg);padding:10px 14px 12px;display:flex;flex-direction:column;gap:6px;--hv:#FCE6BB}
 .sl-xchk.warn legend{float:left;width:100%;padding:0;color:var(--warn);font-size:var(--fs-body);font-weight:500;line-height:1.5}
 .sl-xchk label{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink);cursor:pointer}
 .sl-xchk-b{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:var(--fs-meta);color:var(--ink-2)}
 .sl-xchk-b .btn[aria-pressed=true]{border-color:var(--warn);color:var(--warn)}
-.sl-rf-full{display:flex;gap:8px;align-items:center;font-size:var(--fs-sec);color:var(--ink);background:var(--warn-bg);border-radius:12px;padding:8px 12px;cursor:pointer}
+.sl-rf-full{display:flex;gap:8px;align-items:center;font-size:var(--fs-sec);color:var(--ink);background-color:var(--warn-bg);border-radius:12px;padding:8px 12px;cursor:pointer;transition:background-color .12s}
+/* (an amber box of its own, not a text link: under the pointer a deeper amber, never the blue tint and its halo) */
+@media (hover:hover){.sl-rf-full:hover{background-color:#FCE6BB}}
 
 /* ---- the deal panel (components/DealPanel.tsx, design §7.8): a white head with one summary strip on
    the page colour, white cards below */
-.dp-back{position:fixed;inset:0;background:rgba(14,20,48,.32);z-index:38}
-.dp{position:fixed;top:0;right:0;bottom:0;width:min(720px,100vw);background:var(--frame);z-index:39;overflow-y:auto;overflow-x:hidden;box-shadow:-20px 0 60px -20px rgba(4,10,60,.30);outline:none;scrollbar-width:thin}
+/* (the company drawer dims the page with the same .dp-back, and has the same shadow) */
+.dp-back{position:fixed;inset:0;background:rgba(4,10,60,.38);z-index:38}
+.dp{position:fixed;top:0;right:0;bottom:0;width:min(720px,100vw);background:var(--frame);z-index:39;overflow-y:auto;overflow-x:hidden;box-shadow:var(--sh-pop);outline:none;scrollbar-width:thin}
 .dp-head{background:#fff;padding:18px 28px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
 .dp-top{display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0}
 .dp-crumb{font-size:var(--fs-sec);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -1579,7 +1625,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .sl-rf-g .fld,.sl-rf-g .sl-datechip{height:40px;width:100%;background-color:#fff}
 .sl-rf-g .sl-dc{display:flex}
 .fld.num{text-align:right}
-.sl-rf-short{background:var(--warn-bg);border-radius:12px;padding:10px 14px;font-size:var(--fs-sec);color:var(--warn);display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center}
+.sl-rf-short{background:var(--warn-bg);border-radius:12px;padding:10px 14px;font-size:var(--fs-sec);color:var(--warn);display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;--hv:#FCE6BB}
 .sl-rf-short p{margin:0;flex-basis:100%;line-height:1.5}
 .sl-rf-short label{display:inline-flex;gap:6px;align-items:center;cursor:pointer;color:var(--ink)}
 .sl-rf-a{display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
@@ -1607,7 +1653,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .sl-pe-due,.sl-pe-how{display:flex;flex-direction:column;gap:4px;min-width:0}
 .sl-pe-due small{font-size:var(--fs-meta);color:var(--muted);padding-left:2px}
 .sl-pe-due .sl-datechip{height:32px}
-.sl-pe-rec{font-size:var(--fs-meta);padding-top:10px}
+.sl-pe-rec{font-size:var(--fs-meta);white-space:nowrap}
 .sl-pe-del{cursor:pointer;width:28px;height:28px;margin-top:4px;border-radius:50%;border:0;color:var(--muted);font-size:var(--fs-card);line-height:1;padding:0}
 .sl-pe-f{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;border-top:1px solid var(--divider);padding-top:12px;font-size:var(--fs-sec);color:var(--ink-2)}
 .sl-pe-f b{color:var(--ink)}
@@ -1616,8 +1662,10 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
   .sl-pq{grid-template-columns:1fr}.sl-pq-l{margin-top:4px}
   .sl-pe-r{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 28px;border-top:1px solid var(--divider);padding:10px 0}
   .sl-pe-r.ph{display:none}
-  .sl-pe-r .c-st{grid-column:1/3;flex-direction:row;padding-top:0}
-  .sl-pe-r .sl-pe-del,.sl-pe-r .sl-pe-rec{grid-column:3;grid-row:1}
+  .sl-pe-r .c-st{grid-column:1/3;flex-direction:row;align-items:baseline;column-gap:8px;padding-top:0}
+  .sl-pe-r :is(.sl-pe-del,.sl-pe-x){grid-column:3;grid-row:1;margin-top:0}
+  /* the installment's name and its × on one line */
+  .sl-pe-r .c-st,.sl-pe-r .sl-pe-del{align-self:center}
   .sl-pe-r .pct{display:none}
   .sl-pe-r .sl-pe-due{grid-column:1/-1}
   .sl-pe-r>input:last-of-type{grid-column:1/-1}
@@ -1821,19 +1869,19 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .auth-check input{flex:none;width:18px;height:18px;margin:2px 0 0;accent-color:var(--brand);cursor:pointer}
 .auth-check.sub{margin-left:28px;font-size:13px;color:var(--bad)}
 .auth-opts{display:flex;flex-direction:column;gap:12px;padding:2px 0}
-/* the form's one primary; .ghost is the secondary, .danger only in a confirm */
+/* the form's one primary; .ghost is the secondary */
 .auth-btn{cursor:pointer;height:44px;padding:0 22px;border-radius:999px;border:0;background:var(--brand);color:#fff;font:inherit;font-size:14px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:10px;white-space:nowrap;transition:background .12s,box-shadow .12s}
 @media (hover:hover){.auth-btn:hover:not(:disabled){background:var(--brand-deep)}}
 .auth-btn:disabled{cursor:default;opacity:.62}
 .auth-btn.ghost{background:#fff;color:var(--ink);font-weight:400;box-shadow:inset 0 0 0 1px var(--field)}
 @media (hover:hover){.auth-btn.ghost:hover:not(:disabled){background:var(--tint);box-shadow:inset 0 0 0 1px var(--tint-line)}}
-.auth-btn.danger{background:var(--bad)}
-@media (hover:hover){.auth-btn.danger:hover:not(:disabled){background:#8A2614}}
 .auth-btn.sm{height:36px;padding:0 16px}
-.auth-row{display:flex;gap:10px;flex-wrap:wrap}
-.auth-row>.auth-btn{flex:1 1 auto}
-.auth-form.dlg{gap:14px}
-.auth-form.dlg .auth-btn{height:40px}
+/* an auth form inside a dialog (not `.dlg`, which is the dialog box itself): the dialog's own footer
+   (.dlg-act: ยกเลิก quiet, the primary at the right) and its 40px controls (§7.10) */
+.auth-form.in-dlg{gap:14px}
+.auth-form.in-dlg .auth-btn{height:var(--ctl)}
+.dlg :is(.auth-input,.auth-ro){height:var(--ctl)}
+.dlg .auth-eye{width:36px;height:36px}
 .auth-spin{display:inline-block;width:18px;height:18px;flex:none;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:auth-spin .8s linear infinite}
 .auth-spin.dark,.auth-msg .auth-spin{border-color:rgba(31,91,216,.22);border-top-color:var(--brand)}
 @keyframes auth-spin{to{transform:rotate(360deg)}}
@@ -1850,7 +1898,6 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .auth-note{margin:0;font-size:13px;color:var(--ink-2);line-height:1.55}
 .auth-link{cursor:pointer;border:0;background:transparent;padding:0;font:inherit;font-size:14px;color:var(--link);text-decoration:none;text-align:left}
 @media (hover:hover){.auth-link:hover{text-decoration:underline}}
-.auth-link.center{align-self:center}
 .auth-forgot{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 .auth-forgot-box{align-self:stretch;display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:var(--r-inner);padding:12px 14px;font-size:13px;color:var(--ink-2);line-height:1.55}
 .auth-forgot-box .auth-link{align-self:flex-start}
@@ -1934,7 +1981,9 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .side-ro svg{width:20px;height:20px;flex:none}
 .side:not(.rail) .side-ro svg{display:none}
 .side.rail .side-ro{width:46px;padding:0}
-.side-acct{flex:none;margin:4px 14px 10px;padding:12px;border-radius:var(--r-card);background:#fff;color:var(--ink);display:flex;flex-direction:column;gap:10px;box-shadow:0 12px 26px -16px rgba(6,22,90,.75)}
+/* (it stays at the foot of the open menu: a menu taller than the phone scrolls under it, the blue ring
+   hiding what passes behind; on a phone its ออกจากระบบ is the only one) */
+.side-acct{flex:none;position:sticky;bottom:10px;z-index:2;margin:4px 14px 10px;padding:12px;border-radius:var(--r-card);background:#fff;color:var(--ink);display:flex;flex-direction:column;gap:10px;box-shadow:0 12px 26px -16px rgba(6,22,90,.75),0 0 0 14px var(--brand)}
 .side-acct-who{display:flex;align-items:center;gap:10px;min-width:0}
 .side-acct-who .acct-ava{width:40px;height:40px;font-size:16px}
 .side-acct-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
@@ -1995,9 +2044,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .us-mi{display:flex;align-items:flex-start;gap:10px;width:100%;min-height:42px;padding:10px 12px;border:0;border-radius:10px;background:transparent;font:inherit;font-size:14px;color:var(--ink);cursor:pointer;text-align:left}
 .us-mi:focus-visible{background:var(--tint);outline:none}@media (hover:hover){.us-mi:hover:not(:disabled){background:var(--tint)}}
 .us-mi:focus-visible{box-shadow:inset 0 0 0 2px var(--brand)}
-.us-mi:disabled{cursor:default;color:var(--muted)}
 .us-mi-t{display:flex;flex-direction:column;gap:2px;line-height:1.4}
-.us-mi-t small{font-size:12px;color:var(--muted)}
 .us-state{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:20px 16px;font-size:14px;color:var(--ink-2);line-height:1.55}
 .us-state.bad{color:var(--bad)}
 .us-skel{display:flex;flex-direction:column;padding:6px}
@@ -2024,8 +2071,8 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .us-chip-ava{flex:none;width:28px;height:28px;border-radius:50%;background:var(--info-bg);color:var(--link);font-size:12px;font-weight:500;display:flex;align-items:center;justify-content:center}
 .us-chip-t{min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:760px){.us-chip{flex-wrap:wrap;border-radius:16px;padding:6px}.us-chip-t{flex:1 1 calc(100% - 36px);white-space:normal}}
-.us-chip .us-btn.quiet{border-color:transparent;background:transparent;color:var(--muted)}
-@media (hover:hover){.us-chip .us-btn.quiet:hover:not(:disabled){background:var(--hv);color:var(--ink)}}
+.us-chip .us-btn.bare{border-color:transparent;background:transparent;color:var(--muted)}
+@media (hover:hover){.us-chip .us-btn.bare:hover:not(:disabled){background:var(--hv);color:var(--ink)}}
 .us-small{font-size:12px}
 .us-tm{font-size:13px;color:var(--ok);line-height:1.6}
 .us-honest ul{margin:0;padding:0 0 0 20px;display:flex;flex-direction:column;gap:8px;font-size:14px;color:var(--ink-2);line-height:1.65}
@@ -2056,6 +2103,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .us-cred-row dd{margin:0;display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
 .us-cred-row code{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:18px;letter-spacing:.04em;color:var(--ink);overflow-wrap:anywhere}
 .us-amber{font-size:13px;line-height:1.55;color:var(--warn)}
+.us-manual{width:100%;height:auto;padding:10px 12px;resize:none;font:inherit;font-size:var(--fs-body);line-height:1.6}
 @media (max-width:760px){.us-card{padding:10px}.us-names,.us-honest,.us-backup{padding:16px}
   /* the cards are the list: no frame around them */
   .us-card:has(>.us-cards){background:transparent;border:0;box-shadow:none;padding:0}

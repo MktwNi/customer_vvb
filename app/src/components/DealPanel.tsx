@@ -472,7 +472,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
   const emptyFuture = (x: { p: string; i: number; extra?: boolean }) =>
     !x.extra && t.states[x.p] === 'future' && x.p !== t.next && x.p !== cardStage && !P?.lines.some((l) => l.stage === x.p) && !stepOf(S, d.id, x.p).n && !byAct.by[x.p] && actAt !== x.p;
   const futs = items.filter(emptyFuture);
-  const cv = closingView(S, d, today);
+  const cv = closingView(S, d, today, ro);
   const asking = ui.slPrompt === d.id && cv.ready && d.jobStatus === 'open';
   let futDone = false;
   return (
@@ -584,7 +584,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           <div className="sl-tl-c">
             <div className={'sl-closing' + (cv.ready ? ' ready' : '')} role={asking ? 'status' : undefined}>
               <b>{asking ? (t.result === 'NO' ? 'ผลการขายเป็น NO แล้ว ปิดงานเลยไหม?' : 'รับชำระครบทุกงวดแล้ว ปิดงานเลยไหม?') : CLOSE_TITLE}</b>
-              <p>{d.jobStatus === 'closed' ? `ปิดงานแล้ว${d.closedDate ? ' ' + isoTh(d.closedDate) : ''} งานอยู่ในแท็บ “ปิดงาน” เปิดกลับได้ที่ปุ่มด้านบน` : cv.text}</p>
+              <p>{d.jobStatus === 'closed' ? `ปิดงานแล้ว${d.closedDate ? ' ' + isoTh(d.closedDate) : ''} งานอยู่ในแท็บ “ปิดงาน”${ro ? '' : ' เปิดกลับได้ที่ปุ่มด้านบน'}` : cv.text}</p>
               {cv.ready && !ro && d.jobStatus === 'open' && (
                 <span className="sl-closing-acts">
                   <button type="button" className="btn pri" onClick={() => acts.close(d.id)}>ปิดงาน</button>
@@ -741,10 +741,14 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
     return (
       <section className="dp-card sl-plan" aria-labelledby="dp-plan">
         <div className="sl-pc-h"><h3 id="dp-plan">แผนการชำระเงิน</h3></div>
-        <div className="sl-pc-empty">
-          <span>{won ? 'ยังไม่มีแผน ตั้งแผนเพื่อติดตามว่าแต่ละงวดต้องรับเท่าไร เมื่อไร' : 'ยังไม่มี พิมพ์ไว้ก่อนได้ เช่น ลูกค้าขอแบ่งจ่าย 2 งวด'}</span>
-          {!ro && <button type="button" className="btn xs" onClick={edit}>ตั้งแผนชำระ</button>}
-        </div>
+        {ro ? (
+          <span className="empty">ยังไม่มีแผนการชำระเงิน</span>
+        ) : (
+          <div className="sl-pc-empty">
+            <span>{won ? 'ยังไม่มีแผน ตั้งแผนเพื่อติดตามว่าแต่ละงวดต้องรับเท่าไร เมื่อไร' : 'ยังไม่มี พิมพ์ไว้ก่อนได้ เช่น ลูกค้าขอแบ่งจ่าย 2 งวด'}</span>
+            <button type="button" className="btn xs" onClick={edit}>ตั้งแผนชำระ</button>
+          </div>
+        )}
       </section>
     );
   const pct = P.total ? Math.min(100, Math.round((P.got / P.total) * 100)) : 0;
@@ -1064,7 +1068,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
         <div className="sl-pe-r ph"><span>งวด</span><span className="r">ยอด (บาท)</span><span className="r">%</span><span>ครบกำหนด</span><span>วิธีชำระ</span><span>หมายเหตุ / เงื่อนไข</span><span /></div>
         {rows.map((r, i) => (
           <div key={r.stage} className="sl-pe-r">
-            <span className="c-st"><b>{r.stage}</b>{!cfg.stages.includes(r.stage) && <i className="sl-xtag">งวดเพิ่ม</i>}</span>
+            <span className="c-st"><b>{r.stage}</b>{!cfg.stages.includes(r.stage) && <i className="sl-xtag">งวดเพิ่ม</i>}{r.got > 0 && <span className="t-ok sl-pe-rec">รับแล้ว</span>}</span>
             <input className="fld num" value={r.amt} inputMode="decimal" aria-label={'ยอด ' + r.stage} aria-invalid={amtOf(r) === undefined} onChange={(ev) => upRow(i, { amt: ev.target.value, pct: '' })} />
             <input
               className="fld num pct"
@@ -1103,7 +1107,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
               {r.how === 'other' && <input className="fld" value={r.howT} placeholder="เช่น บัตรเครดิต" aria-label={'วิธีชำระอื่น ' + r.stage} onChange={(ev) => upRow(i, { howT: ev.target.value })} />}
             </span>
             <input className="fld" value={r.note} maxLength={300} placeholder="เงื่อนไข เช่น เมื่อส่งรายงาน" aria-label={'หมายเหตุ ' + r.stage} onChange={(ev) => upRow(i, { note: ev.target.value })} />
-            {r.got > 0 ? <span className="t-ok sl-pe-rec">รับแล้ว</span> : <button type="button" className="sl-pe-del hv" aria-label={'ลบงวด ' + r.stage} title="ลบงวดนี้" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}
+            {r.got > 0 ? <span className="sl-pe-x" aria-hidden="true" /> : <button type="button" className="sl-pe-del hv" aria-label={'ลบงวด ' + r.stage} title="ลบงวดนี้" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}
           </div>
         ))}
       </div>

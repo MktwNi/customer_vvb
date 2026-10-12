@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useApp } from '../state';
 import { norm } from '../lib/core';
 import { dmTh, isoTh, todayISO } from '../lib/format';
@@ -95,6 +95,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
   const [keep, setKeep] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const pickH = useId();
   useEffect(() => () => {
     abort.current?.abort();
   }, []);
@@ -266,10 +267,17 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
           </span>
         </div>
       )}
-      <label style={{ ...labelCol, gap: 8 }}>
-        เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)
-        <input ref={input} type="file" accept={DOC_ACCEPT} onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} style={{ fontSize: 14 }} />
-      </label>
+      {/* a button in the app's words, as every other file picker (the browser's own control speaks its language) */}
+      <div style={{ ...labelCol, gap: 8 }}>
+        <span id={pickH}>เลือกไฟล์ PDF หรือรูปถ่าย / สแกน (ไม่เกิน 10 MB)</span>
+        <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+          <button type="button" className="btn sm" style={{ flex: 'none' }} onClick={() => input.current?.click()} aria-describedby={pickH} autoFocus={!dropped}>
+            {file ? 'เลือกไฟล์อื่น' : 'เลือกไฟล์'}
+          </button>
+          {file && <span className="t-sec" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>{file.name}</span>}
+        </span>
+        <input ref={input} type="file" accept={DOC_ACCEPT} hidden onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} />
+      </div>
       {prog && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="t-sec" style={{ fontSize: 14 }}>{prog.msg}</span>
@@ -380,7 +388,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
           )}
           {after && <div className="sl-after">{after}</div>}
           {short && (
-            <label className="sl-rf-full hv-tx">
+            <label className="sl-rf-full">
               <input type="checkbox" checked={fullOn} onChange={(ev) => setFull(ev.target.checked)} /> ถือว่ารับครบงวดนี้ (เช่น หัก ณ ที่จ่าย)
             </label>
           )}
