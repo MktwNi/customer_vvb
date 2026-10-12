@@ -2062,6 +2062,88 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 }
 @media (prefers-reduced-motion:reduce){.map-zoom button,.tb-search,.tb-btn,.sx-chip,.pl-cell,.sx-toggle button,.sx-btn,.sx-sel,.pl-nav button,.pe-views button,.pe-q,.pe-crumb button,.pe-colink,.pe-edit,.pe-del,.pe-act,.pe-tablist button,.pe-res,.pe-more summary,.pe-deal,.pe-cobox,.pe-other,.pe-doc,.auth-check,.dp-name,input[type=file]::file-selector-button{transition:none}}
 
+/* ---- help center (คู่มือการใช้งาน, components/Help.tsx): the contents as group cards, two quick starts,
+   the topics and the FAQ as rows that open with a word ("วิธีทำ" / "ซ่อน", no caret). Also full screen over
+   the sign-in screens (.hp-ov). */
+.hp{display:flex;flex-direction:column;gap:28px;min-width:0}
+.hp-head{align-items:flex-end}
+.hp-search{position:relative;display:block;flex:none;width:min(380px,100%)}
+.hp-search svg{position:absolute;left:14px;top:50%;width:18px;height:18px;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.hp-search .fld{width:100%;padding-left:42px;background-color:var(--card)}
+.hp-count{display:flex;align-items:baseline;gap:6px 14px;flex-wrap:wrap;margin-bottom:-12px;font-size:var(--fs-body);color:var(--ink-2)}
+.hp-none{margin:0;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
+.hp-sec{display:flex;flex-direction:column;gap:14px;min-width:0;scroll-margin-top:16px}
+.hp-sec:focus{outline:none}
+/* contents: group cards in balanced columns (a long group doesn't leave holes beside it) */
+.hp-toc{columns:3 290px;column-gap:16px}
+.hp-gc{break-inside:avoid;display:flex;flex-direction:column;gap:4px;margin:0 0 16px;padding:18px 20px 14px}
+.hp-gc-h{margin:0;font-size:var(--fs-card);font-weight:500;line-height:1.4}
+.hp-gc-h button{cursor:pointer;border:0;padding:0;font:inherit;color:var(--ink);text-align:left}
+.hp-gc-d{margin:0 0 6px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.hp-gc-l{list-style:none;margin:0;padding:0}
+.hp-gc-l .lnk{display:block;width:100%;padding:5px 0;line-height:1.45}
+/* quick starts: numbered steps, each a row that opens its topic */
+.hp-qs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.hp-qc{display:flex;flex-direction:column;gap:2px;padding:18px 20px}
+.hp-qc-who{margin:0 0 8px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.hp-qsteps{list-style:none;margin:0 -10px;padding:0}
+.hp-qstep{cursor:pointer;width:100%;display:flex;gap:10px;align-items:baseline;border:0;border-radius:10px;padding:8px 10px;font:inherit;font-size:var(--fs-body);line-height:1.5;color:var(--ink);text-align:left}
+.hp-n{flex:none;min-width:20px;color:var(--muted);font-variant-numeric:tabular-nums}
+.hp-dev{margin:10px 0 0;padding-top:12px;border-top:1px solid var(--divider);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.6;overflow-wrap:anywhere}
+.hp-dev .lnk{font-size:var(--fs-sec)}
+/* topics and questions: one white card per group, flat rows with hairlines */
+/* (no overflow:hidden to clip the hover at the corners: that makes the card a scroll container, and
+   bringing a topic into view would scroll inside it; the first and last rows round their own tint) */
+.hp-list>.hp-t:first-child .hp-tg{border-radius:19px 19px 0 0}
+.hp-list>.hp-t:last-child .hp-tg[aria-expanded=false]{border-radius:0 0 19px 19px}
+.hp-list>.hp-t:only-child .hp-tg[aria-expanded=false]{border-radius:19px}
+.hp-t{scroll-margin-top:16px}
+.hp-t+.hp-t{border-top:1px solid var(--divider)}
+.hp-th{margin:0;font:inherit}
+.hp-tg{cursor:pointer;width:100%;display:flex;align-items:flex-start;gap:16px;border:0;padding:14px 20px;font:inherit;color:var(--ink);text-align:left}
+.hp-tg:focus-visible{outline-offset:-2px}
+.hp-tg-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.hp-tg-meta{font-size:var(--fs-meta);color:var(--muted);line-height:1.4}
+.hp-tg-t{font-size:var(--fs-body);font-weight:500;line-height:1.45;color:var(--ink)}
+.hp-tg-s{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.hp-tg-w{flex:none;font-size:var(--fs-sec);line-height:1.45;color:var(--link);white-space:nowrap}
+.hp-body{display:flex;flex-direction:column;gap:14px;max-width:820px;padding:2px 20px 18px}
+.hp-body[hidden],.hp-ans[hidden]{display:none}
+.hp-steps{list-style:none;counter-reset:hs;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:var(--fs-body);line-height:1.6;color:var(--ink)}
+.hp-steps li{counter-increment:hs;display:flex;gap:10px;align-items:baseline}
+.hp-steps li::before{content:counter(hs) ".";flex:none;min-width:20px;color:var(--muted);font-variant-numeric:tabular-nums}
+.hp-tips{display:flex;flex-direction:column;gap:4px}
+.hp-lbl{margin:0;font-size:var(--fs-sec);font-weight:400;color:var(--ink-2);line-height:1.5}
+.hp-tips ul{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:4px;font-size:var(--fs-body);line-height:1.6;color:var(--ink-2)}
+.hp-tips li::marker{color:var(--muted)}
+.hp-tfoot{display:flex;align-items:baseline;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--divider)}
+.hp-role{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.hp-ans{margin:0;max-width:820px;padding:0 20px 18px;font-size:var(--fs-body);line-height:1.7;color:var(--ink-2)}
+.hp-end{margin:0;padding-top:16px;border-top:1px solid var(--line);font-size:var(--fs-sec);color:var(--muted);line-height:1.6}
+/* over the sign-in screens */
+.hp-ov{position:fixed;inset:0;z-index:70;overflow-y:auto;overscroll-behavior:contain;background:var(--frame);color:var(--ink);font-size:var(--fs-body);outline:none}
+.hp-ov-bar{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:64px;padding:10px max(24px,calc((100% - 1052px) / 2));background:rgba(255,255,255,.96);border-bottom:1px solid var(--line)}
+.hp-ov-bar h1{margin:0;font-size:var(--fs-title);font-weight:500;line-height:1.3;color:var(--ink)}
+.hp.in-ov .hp-head{justify-content:flex-start}
+.hp-ov-main{max-width:1100px;margin:0 auto;padding:20px 24px 56px}
+.hp-ov :is(.hp-t,.hp-sec){scroll-margin-top:80px}
+@media (max-width:900px){
+  .hp{gap:24px}
+  .hp-head{align-items:stretch}
+  .hp-search{width:100%}
+  .hp-qs{grid-template-columns:minmax(0,1fr)}
+  .hp-tg{padding:14px 16px;gap:12px}
+  .hp-body{padding:2px 16px 16px}
+  .hp-ans{padding:0 16px 16px}
+  .hp-gc{padding:16px 16px 12px}
+  .hp-qc{padding:16px}
+  :is(.hp-t,.hp-sec){scroll-margin-top:calc(var(--topbar-h) + 12px)}
+  .hp-ov-bar{min-height:56px;padding:8px 16px}
+  .hp-ov-bar h1{font-size:var(--fs-section)}
+  .hp-ov-sub{display:none}
+  .hp-ov-main{padding:16px 16px 48px}
+}
+
 /* ---- text roles (last, so they win over a component's own colour) */
 .t-meta{font-size:var(--fs-meta);color:var(--muted)}
 .t-sec{font-size:var(--fs-sec);color:var(--ink-2)}

@@ -5,7 +5,7 @@ import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
 
-export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users';
+export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users' | 'help';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
 /** `pid`: made from a person's page (the appointment is with them). */
 export interface SchedReq { ids: number[]; taskId?: string; pid?: string }
@@ -63,7 +63,7 @@ export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
-const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users'];
+const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users', 'help'];
 
 const initial = (): UIState => {
   const s = prefs.get<{ tab?: unknown; view?: unknown } | null>(PREF.ui, {}) || {};

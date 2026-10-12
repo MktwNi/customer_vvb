@@ -8,6 +8,7 @@ import { CONFIG } from '../lib/constants';
 import { fmtN, isoTh, localDay, pad } from '../lib/format';
 import { Icon } from './icons';
 import { Modal } from './Dialog';
+import { HelpOverlay } from './Help';
 import mark from '../assets/gcc-mark.png';
 
 /**
@@ -789,6 +790,7 @@ function Disabled() {
 function AuthFooter() {
   const { engine: e } = useApp();
   const [ask, setAsk] = useState(false);
+  const [help, setHelp] = useState(false);
   const yes = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (ask) yes.current?.focus();
@@ -816,11 +818,13 @@ function AuthFooter() {
               {back ? 'กลับไปที่แอป' : 'ใช้งานแบบไม่เชื่อมทีม (ข้อมูลอยู่ในเครื่องนี้)'}
             </button>
           )}
-          <a className="auth-link" href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer">
+          <button type="button" className="auth-link" aria-haspopup="dialog" onClick={() => setHelp(true)}>
             วิธีใช้งาน
-          </a>
+          </button>
         </>
       )}
+      {/* the help center itself, over this screen (no app, no data needed) */}
+      {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </div>
   );
 }

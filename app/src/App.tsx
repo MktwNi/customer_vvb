@@ -21,6 +21,7 @@ import { SalesMessages } from './components/SalesToast';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
 import { AddPerson, People } from './tabs/People';
 import { Users } from './tabs/Users';
+import { HelpPage } from './tabs/Help';
 import { AuthScreen, ChangePasswordDialog, LogoutDialog, ReLogin } from './components/Login';
 import { commitFocus } from './components/useDialog';
 
@@ -146,9 +147,10 @@ export default function App() {
           <Sidebar open={open} docked={docked} mobile={mobile} onClose={closeNav} />
           <div className="content" id="scroller" tabIndex={-1} role="region" aria-labelledby="page-title">
             <Banners />
-            {/* a new page fades in (keyed by the tab, so each switch plays it once) */}
-            <main className="main page-in" key={ready ? ui.tab : 'loading'}>
-              {!ready && <Loading msg={e.loadMsg} />}
+            {/* a new page fades in (keyed by the tab, so each switch plays it once); the help center needs
+                no data, so it shows (and stays, with what is open in it) while the data loads */}
+            <main className="main page-in" key={ready || ui.tab === 'help' ? ui.tab : 'loading'}>
+              {!ready && ui.tab !== 'help' && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
                 {ready && ui.tab === 'overview' && <Overview />}
                 {ready && ui.tab === 'sales' && <Sales />}
@@ -161,6 +163,7 @@ export default function App() {
                 {ready && ui.tab === 'update' && <Update />}
                 {ready && ui.tab === 'notes' && <Notes />}
                 {ready && ui.tab === 'users' && (admin ? <Users /> : <Overview />)}
+                {ui.tab === 'help' && <HelpPage />}
               </ErrorBoundary>
             </main>
           </div>

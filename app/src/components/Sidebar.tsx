@@ -35,6 +35,7 @@ export const NAV: { title: string; items: NavItem[] }[] = [
       { key: 'update', label: 'อัปเดตข้อมูล', icon: 'update' },
       { key: 'notes', label: 'หมายเหตุ', icon: 'notes' },
       { key: 'users', label: 'ผู้ใช้และสิทธิ์', icon: 'shield', admin: true },
+      { key: 'help', label: 'คู่มือการใช้งาน', icon: 'info' },
     ],
   },
 ];
