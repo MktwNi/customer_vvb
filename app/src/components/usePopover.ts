@@ -1,9 +1,11 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
+import { insidePop } from './Pop';
 
 /**
  * A small menu that drops down from a button (account menu, a row's ⋯ menu): while open, its first
  * item takes the focus; Escape closes it and gives the focus back to the button; a click outside or
- * the focus moving out of it closes it.
+ * the focus moving out of it closes it. A picker opened from it (a Select's list, portalled to the body)
+ * counts as inside.
  */
 export function usePopover(open: boolean, close: () => void, trigger: RefObject<HTMLElement | null>, pop: RefObject<HTMLElement | null>) {
   const closeRef = useRef(close);
@@ -13,7 +15,7 @@ export function usePopover(open: boolean, close: () => void, trigger: RefObject<
     const raf = requestAnimationFrame(() => pop.current?.querySelector<HTMLElement>('[role=menuitem]:not([disabled])')?.focus());
     const down = (ev: PointerEvent) => {
       const t = ev.target as Node;
-      if (pop.current?.contains(t) || trigger.current?.contains(t)) return;
+      if (pop.current?.contains(t) || trigger.current?.contains(t) || insidePop(t)) return;
       closeRef.current();
     };
     const key = (ev: KeyboardEvent) => {
@@ -26,7 +28,7 @@ export function usePopover(open: boolean, close: () => void, trigger: RefObject<
     };
     const out = (ev: FocusEvent) => {
       const to = ev.relatedTarget as Node | null;
-      if (to && !pop.current?.contains(to) && !trigger.current?.contains(to)) closeRef.current();
+      if (to && !pop.current?.contains(to) && !trigger.current?.contains(to) && !insidePop(to)) closeRef.current();
     };
     const el = pop.current;
     document.addEventListener('pointerdown', down, true);

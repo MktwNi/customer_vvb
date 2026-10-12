@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react';
+import { insidePop } from './Pop';
 
 /**
  * Keyboard focus for a modal dialog or side panel (aria-modal): focus moves into it when it opens,
@@ -48,6 +49,8 @@ export function useDialog(ref: RefObject<HTMLElement | null>, { focus = 'field',
     }
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Tab' || ev.defaultPrevented || !isTopDialog(el)) return;
+      // a popover opened from the dialog (a Select's list, portalled to the body) handles its own Tab
+      if (insidePop(document.activeElement)) return;
       // another modal that doesn't use this hook is open (e.g. the appointment form): leave Tab to it
       const others = [...document.querySelectorAll<HTMLElement>('[aria-modal="true"]')].some((x) => !stack.includes(x) && !stack.some((s) => s.contains(x)));
       if (others) return;

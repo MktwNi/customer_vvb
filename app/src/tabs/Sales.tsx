@@ -17,6 +17,7 @@ import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } fr
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
+import { insidePop } from '../components/Pop';
 import { SalesDash } from './SalesDash';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
@@ -151,7 +152,7 @@ function useMenu() {
   const wrap = {
     ref,
     onBlur: (ev: ReactFocusEvent) => {
-      if (open && !ref.current?.contains(ev.relatedTarget as Node)) setOpen(false);
+      if (open && !ref.current?.contains(ev.relatedTarget as Node) && !insidePop(ev.relatedTarget)) setOpen(false);
     },
     onKeyDown: (ev: ReactKeyboardEvent) => {
       if (!open) return;
@@ -586,7 +587,7 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   useEffect(() => {
     if (!menu && !pop) return;
     const onScroll = () => {
-      const btn = document.querySelector<HTMLElement>(menu ? `.sl-more[aria-expanded="true"]` : `[data-pop="${CSS.escape(pop)}"]`);
+      const btn = document.querySelector<HTMLElement>(menu ? `.sl-more[aria-expanded="true"]` : `[data-cpop="${CSS.escape(pop)}"]`);
       if (!btn) return;
       const box = scroller();
       const line = (box ? box.getBoundingClientRect().top : 0) + stickyTop() + (mobile ? 0 : headH() + 48);
@@ -953,7 +954,7 @@ function ContactCell({ d }: { d: Deal }) {
   return (
     <span
       className={'sl-cdw' + (open ? ' open' : '')}
-      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && tk.setPop('')}
+      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && !insidePop(ev.relatedTarget) && tk.setPop('')}
       onKeyDown={(ev) => {
         if (open && ev.key === 'Escape') {
           ev.stopPropagation();
@@ -967,7 +968,7 @@ function ContactCell({ d }: { d: Deal }) {
         className="sl-cdate hv"
         aria-haspopup="dialog"
         aria-expanded={open}
-        data-pop={d.id}
+        data-cpop={d.id}
         title={`ติดต่อล่าสุด ${date ? isoTh(date) + ' · ' + src : 'ยังไม่มี'} กดเพื่อแก้วันที่ติดต่อ`}
         aria-label={`ติดต่อล่าสุด ${date ? isoTh(date) : 'ยังไม่มี'}${src ? ' (' + src + ')' : ''} แก้วันที่ติดต่อ`}
         onClick={() => tk.setPop(open ? '' : d.id)}
@@ -1161,7 +1162,7 @@ function RowMenu({ d }: { d: Deal }) {
     <span
       ref={ref}
       className="sl-actw"
-      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && tk.setMenu('')}
+      onBlur={(ev) => open && !ev.currentTarget.contains(ev.relatedTarget as Node) && !insidePop(ev.relatedTarget) && tk.setMenu('')}
       onKeyDown={(ev) => {
         if (!open) return;
         if (ev.key === 'Escape') {
@@ -1531,7 +1532,7 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
   useEffect(() => {
     const down = (ev: PointerEvent) => {
       const t = ev.target as HTMLElement;
-      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live')) return;
+      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live,[data-pop]')) return;
       cancelRef.current();
     };
     document.addEventListener('pointerdown', down, true);
@@ -1806,7 +1807,7 @@ function useStepEditor(d: Deal, stage: string) {
   useEffect(() => {
     const down = (ev: PointerEvent) => {
       const t = ev.target as HTMLElement;
-      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live')) return;
+      if (!box.current || box.current.contains(t) || t.closest?.('[role=dialog],.sl-live,[data-pop]')) return;
       cancelRef.current();
     };
     document.addEventListener('pointerdown', down, true);

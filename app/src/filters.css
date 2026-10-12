@@ -1,0 +1,204 @@
+/* ---- filters and pickers (components/Pop.tsx, Select.tsx, FilterBar.tsx, DateFilter.tsx): the filter row of
+   chips, "เพิ่มตัวกรอง" → field menu → value popover, the date popover, and the app's dropdown in place of a
+   native <select>. Calm: white popovers with 16px corners, one soft brand tint, brand-blue ticks, two
+   weights. Fresh by motion and shape, not colour: a 160ms fade-and-lift, sheets that slide up, a sliding
+   highlight, ticks that pop in. No raw colours here: the tokens of index.css only. */
+
+/* ---- the popover: white, 16px corners, a hairline and the layered pop shadow; it fades and lifts in.
+   z 80: over dialogs (55), the help overlay (70) and the sidebar's add menu (60). */
+.pop{position:fixed;z-index:80;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-pop);padding:6px;overflow:auto;overscroll-behavior:contain;color:var(--ink);font-size:var(--fs-body);display:flex;flex-direction:column;outline:none;transform-origin:top left;animation:pop-in .16s cubic-bezier(.2,.8,.2,1);scrollbar-width:thin;scrollbar-color:var(--field) transparent}
+.pop[data-at=above]{transform-origin:bottom left;animation-name:pop-up}
+.pop[data-at=right]{animation-name:pop-side}
+.pop[data-at=left]{transform-origin:top right;animation-name:pop-side-l}
+.pop.menu{padding:6px}
+.pop.val,.pop.date{padding:8px}
+.pop.sel{padding:6px}
+@keyframes pop-in{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes pop-up{from{opacity:0;transform:translateY(4px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes pop-side{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+@keyframes pop-side-l{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
+.pop-empty{padding:10px 12px;font-size:var(--fs-sec);color:var(--muted)}
+
+/* phones: a bottom sheet over a light veil, 20px top corners, 16px gutters */
+.pop-back{position:fixed;inset:0;z-index:80;background:rgba(6,22,90,.28);display:flex;align-items:flex-end;animation:pop-fade .16s ease-out}
+.pop-sheet{width:100%;max-height:88vh;max-height:88dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;background:var(--card);border-radius:20px 20px 0 0;padding:0 16px calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;outline:none;color:var(--ink);font-size:var(--fs-body);animation:sheet-in .22s cubic-bezier(.2,.8,.2,1)}
+.pop-grab{flex:none;width:40px;height:4px;border-radius:2px;background:var(--field);margin:8px auto 6px}
+.pop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:0 0 6px}
+.pop-title{font-size:var(--fs-card);font-weight:500;min-width:0}
+.pop-x{cursor:pointer;flex:none;width:34px;height:34px;border:0;border-radius:50%;background-color:var(--neutral-bg);color:var(--ink-2);display:grid;place-items:center;padding:0;transition:background-color .12s}
+@media (hover:hover){.pop-x:hover{background-color:var(--hv2);color:var(--ink)}}
+@keyframes pop-fade{from{opacity:0}to{opacity:1}}
+@keyframes sheet-in{from{opacity:.4;transform:translateY(32px)}to{opacity:1;transform:none}}
+
+/* ---- a list in a popover with the soft highlight that slides to the item under the pointer / keyboard */
+.hl-list{position:relative;display:flex;flex-direction:column;outline:none}
+.hl{position:absolute;left:0;right:0;top:0;height:var(--hh,0);transform:translateY(var(--hy,0));background:var(--tint);border-radius:10px;opacity:0;pointer-events:none;z-index:0;transition:transform .16s cubic-bezier(.2,.8,.2,1),height .16s cubic-bezier(.2,.8,.2,1),opacity .12s}
+.hl-list[data-hl=on]>.hl{opacity:1}
+.hl-still>.hl{transition:none}
+.hl-list>[data-hl],.hl-list>.fmi-sep,.hl-list>.pop-empty{position:relative;z-index:1}
+@media (hover:none){.hl{display:none}}
+
+/* a find field at the top of a list */
+.fval-find{padding:2px 2px 8px}
+.fval-find input{width:100%;height:var(--ctl-tool);border:1px solid var(--field);border-radius:var(--r-field);padding:0 12px;font:inherit;font-size:var(--fs-body);color:var(--ink);outline:none;background:var(--card);transition:border-color .12s,box-shadow .12s}
+@media (hover:hover){.fval-find input:hover{border-color:var(--tint-line)}}
+.fval-find input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
+
+/* ---- the filter row: the date chip, pinned pills, chips in use, เพิ่มตัวกรอง, ล้างทั้งหมด; the count at the end */
+.fb{display:flex;gap:8px;align-items:flex-start;min-width:0}
+.fb-chips{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fb-count{margin-left:auto;font-size:var(--fs-sec);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.fb-count:empty{display:none}
+
+/* a chip: "ผู้รับผิดชอบ คือ หมิว ×" (field ink-2, operator muted, value 500); at rest (pinned pills, the date)
+   white with a caret; in use a soft brand tint with × */
+.fchip{display:inline-flex;align-items:center;height:var(--ctl-tool);max-width:100%;min-width:0;border:1px solid var(--field);border-radius:var(--r-pill);background:var(--card);font-size:var(--fs-sec);transition:border-color .12s,box-shadow .12s,background-color .12s;animation:chip-in .16s cubic-bezier(.2,.8,.2,1)}
+@keyframes chip-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.fchip-b{cursor:pointer;display:inline-flex;align-items:center;gap:5px;height:100%;min-width:0;padding:0 12px 0 14px;border:0;border-radius:var(--r-pill);background-color:transparent;font:inherit;font-size:var(--fs-sec);color:var(--ink);white-space:nowrap;transition:background-color .12s}
+.fchip-b>span{overflow:hidden;text-overflow:ellipsis}
+.fchip-f{color:var(--ink-2);flex:none}
+.fchip-op{color:var(--muted);flex:none}
+.fchip-v{color:var(--ink);font-weight:500;max-width:240px;min-width:0}
+.fchip-b svg{color:var(--ink-2);flex:none;margin-left:1px;transition:transform .16s}
+.fchip.on{background:var(--tint);border-color:var(--tint-line)}
+.fchip.on .fchip-v{color:var(--link)}
+.fchip.on .fchip-b{padding-right:4px}
+.fchip-x{cursor:pointer;flex:none;width:28px;height:28px;margin-right:3px;border:0;border-radius:50%;background-color:transparent;color:var(--link);display:grid;place-items:center;padding:0;transition:background-color .12s}
+.fchip.open{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.12)}
+.fchip.open .fchip-b svg{transform:rotate(180deg)}
+.fchip.ro .fchip-t{display:inline-flex;align-items:center;height:100%;padding:0 4px 0 14px;color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+@media (hover:hover){
+  .fchip:not(.on) .fchip-b:hover{background-color:var(--hv)}
+  .fchip:not(.on,.open):hover{border-color:var(--tint-line)}
+  .fchip.on .fchip-b:hover,.fchip-x:hover{background-color:var(--hv2)}
+}
+.fchip-b:focus-visible,.fchip-x:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+/* เพิ่มตัวกรอง: a dashed slot in link blue (the words say it: no "+") */
+.fb-add{cursor:pointer;flex:none;height:var(--ctl-tool);padding:0 16px;border:1px dashed var(--tint-line);border-radius:var(--r-pill);background-color:transparent;font:inherit;font-size:var(--fs-sec);color:var(--link);white-space:nowrap;transition:background-color .12s,border-color .12s}
+.fb-add.open{background-color:var(--tint);border-style:solid;border-color:var(--brand)}
+@media (hover:hover){.fb-add:hover{background-color:var(--hv);border-style:solid}}
+.fb-clear{flex:none;height:var(--ctl-tool);padding:0 8px;border-radius:var(--r-pill);white-space:nowrap}
+@media (hover:hover){.fb-clear:hover:not(:disabled){box-shadow:none}}
+
+/* ---- the field menu: name over a grey hint; "ใช้อยู่" in link blue */
+.fmenu{gap:1px}
+.fmi{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:6px 12px;border:0;border-radius:10px;background:transparent;font:inherit;font-size:var(--fs-body);color:var(--ink);text-align:left;outline:none}
+.fmi-l{display:flex;flex-direction:column;min-width:0;line-height:1.4}
+.fmi-s{font-size:var(--fs-meta);color:var(--muted)}
+.fmi-on{flex:none;font-size:var(--fs-meta);color:var(--link)}
+.fmi.cur{background:var(--tint-2);color:var(--link);font-weight:500}
+.fmi.cur .fmi-s{font-weight:400}
+.fmi:focus-visible{box-shadow:inset 0 0 0 2px var(--brand)}
+.fmi-sep{display:block;height:1px;background:var(--divider);margin:4px 8px}
+.fmenu:not(:has(.fmi-s)) .fmi{min-height:40px}
+
+/* ---- a field's values: คือ / ไม่ใช่, find, ticks or radios with counts; เหลือ N · ยกเลิก · ใช้ตัวกรอง */
+.fval{display:flex;flex-direction:column;min-height:0}
+.fval-h{display:flex;align-items:center;gap:10px;padding:2px 4px 8px 8px;flex-wrap:wrap}
+.fval-t{flex:1;font-size:var(--fs-body);font-weight:500}
+.fval-back{font-size:var(--fs-sec);margin-right:auto}
+.seg.fval-ops{padding:2px;align-self:center}
+.seg.fval-ops>button{height:28px;padding:0 12px;font-size:var(--fs-sec)}
+.fval-line{padding:0 8px 6px;font-size:var(--fs-meta);color:var(--muted);display:flex;align-items:center;gap:2px;min-height:24px}
+.fval-line .quiet{font-size:var(--fs-meta);color:var(--link)}
+.fval-list{max-height:296px;overflow:auto;padding:0 2px;scrollbar-width:thin;scrollbar-color:var(--field) transparent}
+.fck{cursor:pointer;display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 8px;border-radius:10px;font-size:var(--fs-body);color:var(--ink)}
+.fck-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fck-s{margin-left:6px;font-size:var(--fs-meta);color:var(--muted)}
+.fck-n{flex:none;font-size:var(--fs-meta);color:var(--muted);font-variant-numeric:tabular-nums}
+.fck.on .fck-n{color:var(--link)}
+.fck.zero .fck-l{color:var(--muted)}
+/* the drawn checkbox and radio: 18px, brand when chosen; the tick pops in, the dot grows */
+.fbox,.fradio{position:relative;flex:none;width:18px;height:18px;border:1.5px solid var(--mark-future);background:var(--card);display:grid;place-items:center;color:var(--card);transition:background-color .12s,border-color .12s}
+.fbox{border-radius:6px}
+.fbox svg{animation:tick-in .14s cubic-bezier(.2,.8,.2,1)}
+@keyframes tick-in{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
+.fradio{border-radius:50%}
+.fradio::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--brand);transform:scale(0);transition:transform .12s cubic-bezier(.2,.8,.2,1)}
+.fck.on .fbox{background:var(--brand);border-color:var(--brand)}
+.fck.on .fradio{border-color:var(--brand)}
+.fck.on .fradio::after{transform:scale(1)}
+@media (hover:hover){.fck:hover :is(.fbox,.fradio){border-color:var(--brand)}}
+.fck input:focus-visible+:is(.fbox,.fradio){outline:2px solid var(--brand);outline-offset:2px}
+/* a person's initial */
+.fav{flex:none;width:24px;height:24px;border-radius:50%;background:var(--info-bg);color:var(--link);font-size:var(--fs-meta);font-weight:500;display:grid;place-items:center;line-height:1}
+.fav.none{background:transparent;border:1px dashed var(--field)}
+.fval-foot{display:flex;align-items:center;gap:8px;padding:10px 4px 2px 8px;margin-top:6px;border-top:1px solid var(--divider)}
+.pop-sum{flex:1;min-width:0;font-size:var(--fs-sec);color:var(--muted);line-height:1.45}
+.pop-sum b{font-weight:500;color:var(--ink)}
+.fval-cancel{font-size:var(--fs-body);padding:6px 10px;border-radius:var(--r-pill)}
+@media (hover:hover){.fval-cancel:hover:not(:disabled){box-shadow:none}}
+
+/* ---- the dropdown (Select.tsx) */
+.sel-btn{cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-width:0;max-width:100%;border:1px solid var(--field);background-color:var(--card);font:inherit;color:var(--ink);white-space:nowrap;text-align:left;transition:background-color .12s,border-color .12s,box-shadow .12s}
+.sel-pre{flex:none;color:var(--muted)}
+.sel-v{flex:1;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sel-v.ph{color:var(--muted)}
+.sel-btn svg{flex:none;color:var(--ink-2);transition:transform .16s}
+.sel-btn[aria-expanded=true]{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.12)}
+.sel-btn[aria-expanded=true] svg{transform:rotate(180deg)}
+.sel-btn:disabled{cursor:default;opacity:.55}
+.sel-btn.field{height:var(--ctl);width:100%;border-radius:var(--r-field);padding:0 12px;font-size:var(--fs-body)}
+.sel-btn.field.sm{height:var(--ctl-tool)}
+.sel-btn.tool{height:var(--ctl-tool);border-radius:var(--r-pill);padding:0 12px 0 14px;font-size:var(--fs-sec);gap:6px}
+.sel-btn.tool .sel-v{flex:0 1 auto}
+.sel-btn.head{height:var(--ctl);border-radius:var(--r-pill);padding:0 14px 0 16px;font-size:var(--fs-body)}
+.sel-btn.head .sel-v{flex:0 1 auto}
+.sel-btn.cell{height:var(--ctl-sm);border-color:transparent;background-color:transparent;border-radius:10px;padding:0 6px 0 8px;margin-left:-8px;font-size:var(--fs-body);gap:4px}
+.sel-btn.cell svg{opacity:0;transition:opacity .12s,transform .16s}
+.sel-btn.cell:is(:hover,:focus-visible,[aria-expanded=true]) svg{opacity:1}
+@media (hover:hover){
+  .sel-btn:hover:not(:disabled,[aria-expanded=true]){border-color:var(--tint-line)}
+  .sel-btn:is(.tool,.head,.cell):hover:not(:disabled){background-color:var(--hv)}
+  .sel-btn.cell:hover:not(:disabled,[aria-expanded=true]){border-color:transparent}
+}
+.sel-btn:focus-visible{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
+.sel-list{max-height:320px;overflow:auto;gap:1px;scrollbar-width:thin;scrollbar-color:var(--field) transparent}
+.sel-opt{cursor:pointer;display:flex;align-items:center;gap:10px;min-height:40px;padding:7px 10px 7px 12px;border-radius:10px;font-size:var(--fs-body);color:var(--ink)}
+.sel-opt.off{cursor:default;color:var(--muted)}
+.sel-opt-tx{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.4}
+.sel-opt-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sel-opt-s{font-size:var(--fs-meta);color:var(--muted);white-space:normal}
+.sel-opt-n{flex:none;font-size:var(--fs-meta);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sel-ck{flex:none;width:14px;color:var(--brand);display:grid;place-items:center}
+.sel-ck svg{animation:tick-in .14s cubic-bezier(.2,.8,.2,1)}
+.sel-opt.on .sel-opt-l{color:var(--link);font-weight:500}
+.sel-list:focus-visible>.sel-opt.act,.fval-find+.sel-list>.sel-opt.act{box-shadow:inset 0 0 0 2px var(--brand)}
+@media (hover:none){.sel-opt.act:not(.on){background:transparent}}
+
+/* ---- sheets: bigger rows, list text lined up with the title, one title (the sheet's), footer buttons halves */
+.pop-sheet .hl-list:not(.fdate-pre){margin:0 -12px}
+.pop-sheet .fck{min-height:48px;padding:6px 12px}
+.pop-sheet .fmi{min-height:52px}
+.pop-sheet .sel-opt{min-height:48px}
+.pop-sheet :is(.fval-list,.sel-list){max-height:none;overflow:visible}
+.pop-sheet .fval-t{display:none}
+.pop-sheet .fval-h{padding:0 0 10px;justify-content:flex-end;min-height:40px}
+.pop-sheet .fval-line{padding:0 0 6px}
+.pop-sheet .fval-find{padding:0 0 8px}
+.pop-sheet .fval-find input{height:var(--ctl)}
+.pop-sheet .fval-foot{position:sticky;bottom:calc(-12px - env(safe-area-inset-bottom));z-index:2;background:var(--card);margin:6px -16px 0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 8px}
+.pop-sheet .fval-foot .pop-sum{grid-column:1/-1}
+.pop-sheet .fval-foot .pop-sum:empty{display:none}
+.pop-sheet .fval-foot>button{height:var(--ctl);width:100%;justify-content:center;text-align:center;font-size:var(--fs-body)}
+.pop-sheet .fval-cancel{border:1px solid var(--field);border-radius:var(--r-pill);color:var(--ink);background-color:var(--card)}
+
+/* ---- phones: the row wraps; the count stays for screen readers only */
+@media (max-width:900px){
+  .fb{flex-direction:column;align-items:stretch}
+  .fb>.sl-search{flex:none;max-width:none;width:100%;height:var(--ctl);margin-left:0}
+  .fb-count{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .fchip-v{max-width:170px}
+}
+
+/* ---- motion off; high contrast */
+@media (prefers-reduced-motion:reduce){
+  .pop,.pop-back,.pop-sheet,.fchip,.fbox svg,.sel-ck svg{animation:none}
+  .hl{transition:opacity .12s}
+  .fchip,.fchip-b,.fchip-b svg,.fchip-x,.fb-add,.sel-btn,.sel-btn svg,.fbox,.fradio,.fradio::after,.fval-find input{transition:none}
+}
+@media (forced-colors:active){
+  .fchip,.fb-add,.sel-btn{border:1px solid CanvasText}
+  .fck.on :is(.fbox,.fradio),.sel-opt.on,.fmi.cur{forced-color-adjust:none;outline:2px solid Highlight}
+  .fck.on .fradio::after{background:Highlight}
+}
