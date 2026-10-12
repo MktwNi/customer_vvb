@@ -896,7 +896,7 @@ export function ReLogin({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal title="หมดเวลาการเข้าระบบ" onClose={onClose} width={440}>
-      <form className="auth-form dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
+      <form className="auth-form in-dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
         <p className="auth-sub">{n > 0 ? `งานที่แก้ไว้ ${fmtN(n)} รายการยังอยู่ในเครื่อง จะส่งหลังเข้าสู่ระบบ` : 'กรุณาเข้าสู่ระบบอีกครั้ง'}</p>
         <div className="auth-field">
           <label htmlFor="relogin-u">ชื่อผู้ใช้</label>
@@ -953,14 +953,14 @@ export function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="เปลี่ยนรหัสผ่าน" onClose={onClose} width={460}>
       {done ? (
-        <div className="auth-form dlg">
+        <div className="auth-form in-dlg">
           <Msg kind="ok">เปลี่ยนรหัสผ่านแล้ว</Msg>
           <button ref={doneRef} type="button" className="auth-btn" onClick={onClose}>
             เสร็จ
           </button>
         </div>
       ) : (
-        <form className="auth-form dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
+        <form className="auth-form in-dlg" onSubmit={submit} noValidate aria-busy={busy || undefined}>
           <input type="text" name="username" autoComplete="username" value={u} readOnly hidden />
           <PwField label="รหัสผ่านปัจจุบัน" value={old} onChange={setOld} autoComplete="current-password" hints />
           <PwField label="รหัสผ่านใหม่" value={pw} onChange={setPw} autoComplete="new-password" hints />
@@ -1013,7 +1013,7 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal title="ออกจากระบบ" onClose={busy ? () => {} : onClose} width={480} focus="dialog">
-      <div className="auth-form dlg">
+      <div className="auth-form in-dlg">
         {n === 0 ? (
           <Msg kind="ok">ข้อมูลที่คุณแก้ถึงทีมครบแล้ว</Msg>
         ) : sending ? (

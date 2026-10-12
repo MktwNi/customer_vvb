@@ -1832,8 +1832,9 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .auth-btn.sm{height:36px;padding:0 16px}
 .auth-row{display:flex;gap:10px;flex-wrap:wrap}
 .auth-row>.auth-btn{flex:1 1 auto}
-.auth-form.dlg{gap:14px}
-.auth-form.dlg .auth-btn{height:40px}
+/* an auth form inside a dialog (not `.dlg`, which is the dialog box itself) */
+.auth-form.in-dlg{gap:14px}
+.auth-form.in-dlg .auth-btn{height:40px}
 .auth-spin{display:inline-block;width:18px;height:18px;flex:none;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:auth-spin .8s linear infinite}
 .auth-spin.dark,.auth-msg .auth-spin{border-color:rgba(31,91,216,.22);border-top-color:var(--brand)}
 @keyframes auth-spin{to{transform:rotate(360deg)}}
