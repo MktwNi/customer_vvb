@@ -27,7 +27,7 @@ const lower = (s: string) => s.toLocaleLowerCase('th');
  * `head` (the page-head pill), `cell` (a table cell that reads as text). Never inside a <label> (a click
  * on an option would click the button again): give a visible label an id and pass `labelledBy`.
  */
-export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, placeholder, search = 'auto', width, name, id, disabled, className = '', title }: {
+export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, placeholder, search = 'auto', width, name, id, disabled, className = '', title }: {
   value?: V; defaultValue?: V; onChange?: (v: V) => void;
   options: SelOpt<V>[];
   /** accessible name; the sheet's title */
@@ -39,6 +39,8 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
   prefix?: string;
   /** the button's text in place of the chosen label ("ปี 2569") */
   shown?: ReactNode;
+  /** how the button's accessible name says the value ("ปี (พ.ศ.): 2569"), when not the option's label */
+  valueText?: string;
   /** shown (grey) when the value matches no option */
   placeholder?: string;
   /** a find field over the list: 'auto' = more than 8 options */
@@ -76,7 +78,7 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
         aria-haspopup="listbox"
         aria-expanded={!!open}
         aria-controls={open ? lid : undefined}
-        aria-label={labelledBy ? undefined : `${label}: ${opt?.label ?? placeholder ?? 'ยังไม่ได้เลือก'}`}
+        aria-label={labelledBy ? undefined : `${label}: ${valueText ?? opt?.label ?? placeholder ?? 'ยังไม่ได้เลือก'}`}
         aria-labelledby={labelledBy ? `${labelledBy} ${bid}` : undefined}
         aria-describedby={describedBy}
         onClick={() => setOpen(open ? null : { seed: '' })}
@@ -98,7 +100,7 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
       </button>
       {name && <input type="hidden" name={name} value={cur ?? ''} />}
       {open && (
-        <Pop anchor={btn} onClose={() => setOpen(null)} label={label} kind="list" role="none" className="sel" width={width ?? Math.max(btn.current?.offsetWidth || 0, 220)}>
+        <Pop anchor={btn} onClose={() => setOpen(null)} label={label} kind="list" role="none" className="sel" align={variant === 'head' ? 'end' : 'start'} width={width ?? Math.max(btn.current?.offsetWidth || 0, 220)}>
           <SelList id={lid} value={cur} options={options} label={label} search={find} seed={open.seed} onPick={choose} />
         </Pop>
       )}

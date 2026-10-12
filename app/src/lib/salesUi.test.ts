@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySales, filterDeals, newDeal, planOf, salesStats, type Deal, type PayLine, type SalesState } from './sales';
 import {
-  actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, facetOptions, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, winRateBySource, yearOptions,
+  actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, trackerFields, winRateBySource, yearOptions,
 } from './salesUi';
 
 const deal = (p: Partial<Deal> = {}): Deal => newDeal({ id: p.id || 'd' + Math.random().toString(36).slice(2), client: 'บริษัท ก', year: '2569', ...p }, 'me', '2026-10-01T00:00:00.000Z');
@@ -38,10 +38,11 @@ describe('table filters', () => {
     const S = state([a, b, c], { 'a/CLOSED DEAL': { d: '2026-09-01', n: 'YES' }, 'b/CLOSED DEAL': { d: '2026-09-01', n: 'NO' } });
     const shown = filterDeals(S, { year: '2569', resp: 'สมหญิง', result: 'YES' });
     expect(shown).toEqual([]);
-    // built from the rows shown, the list would lose สมหญิง and the select would read "ทั้งหมด"
-    expect(facetOptions(filterDeals(S, { year: '2569' }), 'resp', 'สมหญิง')).toEqual(['(ไม่ระบุ)', 'สมชาย', 'สมหญิง']);
-    expect(facetOptions(shown, 'resp', 'สมหญิง')).toContain('สมหญิง');
-    expect(facetOptions([], 'referral', '')).toEqual([]);
+    // built from the rows shown, the list would lose สมหญิง: the choices come from the whole year
+    const F = { year: '2569', resp: { v: ['สมหญิง'] }, result: 'YES' as const };
+    const resp = trackerFields(S, F, { yearDeals: filterDeals(S, { year: '2569' }), job: 'open', me: '', today: '2026-10-12' }).find((f) => f.key === 'resp')!;
+    expect(resp.options.map((o) => o.v)).toEqual(['สมชาย', 'สมหญิง', '(ไม่ระบุ)']); // busiest first (one row each with ได้งาน: สมชาย), empty last
+    expect(resp.options.find((o) => o.v === 'สมหญิง')!.n).toBe(0);
   });
 });
 

@@ -113,7 +113,8 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
           left = r.left - G - w;
           side = 'left';
         }
-        top = Math.max(M, Math.min(r.top, H - M - h));
+        // tops lined up with the menu (it never climbs over the filter row); a tall list scrolls inside
+        top = Math.max(M, Math.min(r.top, H - M - 240));
         maxH = H - top - M;
       } else {
         // no room under it: the page's content scrolls up first (rather than the popover covering the anchor)
@@ -129,10 +130,12 @@ export function Pop({ anchor, onClose, place = 'below', align = 'start', width, 
         top = r.bottom + G;
         side = 'below';
         maxH = H - top - M;
-        if (top + h > H - M && r.top - G - h >= M) {
-          top = r.top - G - h;
+        // short below: above when it fits there, or when there is more room above than below
+        const room = r.top - G - M;
+        if (top + h > H - M && (room >= h || room > maxH)) {
+          top = Math.max(M, r.top - G - h);
           side = 'above';
-          maxH = r.top - G - M;
+          maxH = room;
         }
         maxH = Math.max(160, maxH);
         left = align === 'end' ? r.right - w : r.left;

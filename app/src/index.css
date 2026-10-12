@@ -934,10 +934,6 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
    two weights (the band name is the one 600). */
 :is(.sl-card,.sl-mlist,.dp,.sl-toast,.sl-tabbar,.sl-m-hint,.sl-stagebar,.sl-after,.sl-list,.sl-closed-sum,.sl-empty-card) :is(b,strong){font-weight:500}
 .sl-ph-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.sl-yr{position:relative;padding:0 14px 0 16px}
-.sl-yr svg{color:var(--ink-2)}
-.sl-yr select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:var(--fs-body)}
-.sl-yr:focus-within{outline:2px solid var(--brand);outline-offset:2px}
 .sl-menuw{position:relative}
 .sl-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:min(300px,86vw)}
 /* no room below the button in the window: it opens upward (tabs/Sales.tsx useFitMenu) */
@@ -954,7 +950,9 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 /* KPI ค้างรับ: two lines, the late figure a link that filters */
 .sl-kpi-two{display:flex;flex-direction:column;align-items:flex-start}
 .kpi-f .sl-kpi-link,.kpi-f .sl-kpi-link b{font-size:var(--fs-sec);color:var(--bad)}
-/* toolbar: the quick views (one segmented control), search, ตัวกรอง; the filters fold under it */
+/* toolbar: the quick views (one segmented control) and the search; the filter row of chips under them
+   (filters.css: .fb, .fchip, …) */
+.sl-filt{display:flex;flex-direction:column;gap:12px;min-width:0}
 .sl-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .sl-seg{flex-wrap:wrap;border-radius:22px;overflow:visible}
 .sl-search{flex:1 1 160px;max-width:320px;min-width:0;height:var(--ctl);display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:var(--r-pill);background:#fff;border:1px solid var(--field);color:var(--muted);margin-left:auto;transition:border-color .12s}
@@ -962,8 +960,19 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-search:focus-within{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
 .sl-search svg{flex:none}
 .sl-search input{flex:1;min-width:0;height:100%;border:0;outline:0;background:transparent;font-size:var(--fs-body);color:var(--ink)}
-.sl-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.sl-filters .fld{height:var(--ctl-tool);font-size:var(--fs-sec);max-width:100%}
+/* the ปิดงาน tab: the search leads the filter row */
+.fb>.sl-search{flex:0 0 240px;max-width:240px;height:var(--ctl-tool);margin-left:0}
+/* phones: the quick views, then the search across the width, then the filter row */
+@media (max-width:900px){.sl-tools>.sl-search{flex:1 1 100%;max-width:none;margin-left:0}}
+/* a date filter on: the column says which date (link blue); the row's date, what it was and when */
+.sl-table thead th.sl-th-basis{color:var(--link)}
+.sl-bdate{display:flex;flex-direction:column;line-height:1.4;gap:2px;min-width:0}
+.sl-bdate-d{font-size:var(--fs-body);color:var(--ink);white-space:nowrap}
+.sl-bdate-d.none{color:var(--muted)}
+.sl-bdate-w{display:block;font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.sl-bdate-w .st{font-size:var(--fs-meta);gap:4px}
+.sl-bdate-w .st::before{width:6px;height:6px}
+.sl-inrange{font-size:var(--fs-meta);color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .sl-nomatch{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink-2)}
 .sl-empty-card{padding:24px 26px;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 
@@ -1701,7 +1710,12 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
   .sl-table thead th,.sl-sec>*,.sl-msec{position:static!important}
   .sl-card,.sl-mc,.dp-card{box-shadow:none}
   .sl-row.cur>*{background:#fff!important}
-  .sl-tools,.sl-filters,.sl-more,.sl-chev,.sl-addbtn,.sl-kedit,.sl-legend,.sl-foot,.sl-live{display:none!important}
+  .sl-tools,.sl-more,.sl-chev,.sl-addbtn,.sl-kedit,.sl-legend,.sl-foot,.sl-live{display:none!important}
+  /* the filter row: one plain line of the filters in use */
+  .fb-add,.fb-clear,.fb-count,.fchip-x,.fchip-b svg,.fb .fchip:not(.on),.fb>.sl-search{display:none!important}
+  .fb .fchip{border:0;background:none;height:auto;animation:none}
+  .fb .fchip-b,.fb .fchip-t{padding:0}
+  .fb .fchip.on~.fchip.on::before{content:'·';margin-right:8px;color:var(--muted)}
   .sl-group.closed .sl-sec-name::after{content:' (ย่ออยู่)';font-weight:400}
   tr.sl-sec{break-after:avoid;page-break-after:avoid}
 }

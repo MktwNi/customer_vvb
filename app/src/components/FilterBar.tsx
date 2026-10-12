@@ -343,6 +343,8 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
     moveTo(to);
   };
   const name = 'fv-' + f.key;
+  // "ค้นหาชื่อ", "ค้นหาหมวด", "ค้นหา SOURCE" (a space before a Latin name)
+  const findWord = f.find ?? (f.people ? 'ค้นหาชื่อ' : 'ค้นหา' + (/^[A-Za-z]/.test(f.label) ? ' ' : '') + f.label);
   const row = (v: string, label: string, n: number | undefined, sub?: string, i = 0) => {
     const isOn = single ? (v ? sel[0] === v : !sel.length) : sel.includes(v);
     return (
@@ -409,8 +411,8 @@ function ValuePop({ f, init, anchor, place, back, unit, liveCount, onClose, onAp
                   moveTo(0);
                 }
               }}
-              placeholder={f.find ?? (f.people ? 'ค้นหาชื่อ' : 'ค้นหา' + f.label)}
-              aria-label={f.find ?? (f.people ? 'ค้นหาชื่อ' : 'ค้นหา' + f.label)}
+              placeholder={findWord}
+              aria-label={findWord}
               data-autofocus={phone ? undefined : ''}
             />
           </div>
