@@ -76,9 +76,11 @@ export interface DealDoc {
   /** Amount the user confirmed (THB) and what it counts toward. */
   amount: number | null;
   target: DocTarget;
-  /** The document's own figure: what the reader found (or the user corrected it to) at the chosen basis.
-   *  Differs from `amount` when the user kept their own figure ("คงยอดเดิม"): see docMismatch. */
+  /** The document's own figure: what the reader found (or the user corrected it to) at the chosen basis. */
   detected: number | null;
+  /** The user kept their own figure against the document's ("คงยอดเดิม"): `amount` is theirs, `detected`
+   *  the document's (docMismatch). Stored as the user's decision: a typed or corrected amount is not one. */
+  kept?: true;
   /** Which figure was used: total incl. VAT, before VAT, net after withholding, or typed. */
   basis: 'total' | 'subtotal' | 'netPay' | 'manual';
   stage: string;
@@ -132,6 +134,12 @@ export interface PayLine {
   got: number | null;
   /** counted complete although less came in (withholding tax, rounding, an agreed discount) */
   full: boolean;
+  /** what had come in when it was counted complete: `full` holds only while that is still what came in
+   *  (a receipt deleted or changed since must not leave a later, smaller one settling it); null = always */
+  fullAt: number | null;
+  /** the hand receipt counts on top of the documents at its stage: part paid by hand, the rest with a
+   *  receipt ("นับเพิ่ม"). Otherwise a document replaces the hand receipt. */
+  add: boolean;
   at: string; by: string;
 }
 export interface SalesState {
@@ -207,6 +215,7 @@ export function toDoc(v: unknown, deal: string, id: string): DealDoc | null {
     basis: (BASES.includes(o.basis as string) ? o.basis : 'manual') as DealDoc['basis'], stage: str(o.stage, 60), at: iso(o.at), by: str(o.by, 100),
   };
   if (iso(o.cAt)) doc.cAt = iso(o.cAt);
+  if (o.kept === true) doc.kept = true;
   const a = o.auto as Record<string, unknown> | undefined;
   if (a && typeof a === 'object' && typeof a.stage === 'string' && typeof a.n === 'string') doc.auto = { stage: a.stage, n: a.n, ...(iso(a.d) ? { d: iso(a.d).slice(0, 10) } : {}) };
   return doc;
@@ -230,7 +239,7 @@ const HOWS = ['', 'transfer', 'cheque', 'cash', 'other'];
 export function toPay(v: unknown): PayLine | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
-  const amt = num(o.amt), got = num(o.got), pct = num(o.pct), rel = num(o.rel);
+  const amt = num(o.amt), got = num(o.got), pct = num(o.pct), rel = num(o.rel), fullAt = num(o.fullAt);
   return {
     amt: amt != null && amt >= 0 ? amt : null,
     pct: pct != null && pct >= 0 && pct <= 100 ? pct : null,
@@ -242,6 +251,8 @@ export function toPay(v: unknown): PayLine | null {
     rcv: iso(o.rcv).slice(0, 10),
     got: got != null && got >= 0 ? got : null,
     full: o.full === true,
+    fullAt: fullAt != null && fullAt >= 0 ? fullAt : null,
+    add: o.add === true,
     at: iso(o.at),
     by: str(o.by, 100),
   };
@@ -361,8 +372,8 @@ const confirmedAt = (x: DealDoc) => x.cAt || x.at || '';
  *  the deal and to its documents never undo each other. Forecast: the most recently confirmed
  *  quotation (target forecast), unless a forecast was typed after it. Actual: the confirmed invoices
  *  / receipts add up (instalments), plus what was marked received by hand ("รับเงินแล้ว") on plan
- *  installments that have no Actual document (a document always wins: nothing counts twice); without
- *  any, the typed-in actual. */
+ *  installments that have no Actual document (a document wins: nothing counts twice) or whose hand
+ *  receipt was kept on top of it ("นับเพิ่ม", PayLine.add); without any, the typed-in actual. */
 export function dealMoney(s: SalesState, d: Deal) {
   const docs = docsOf(s, d.id);
   const fcs = docs.filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => confirmedAt(a).localeCompare(confirmedAt(b)));
@@ -370,7 +381,7 @@ export function dealMoney(s: SalesState, d: Deal) {
   const typed = d.forecast != null && (!latest || (d.fcAt || '') >= confirmedAt(latest));
   const fcDoc = typed ? undefined : latest;
   const acs = docs.filter((x) => x.target === 'actual' && x.amount != null);
-  const hands = (planLines(s, d) || []).filter((x) => x.line.rcv && !acs.some((a) => a.stage === x.stage));
+  const hands = (planLines(s, d) || []).filter((x) => x.line.rcv && (x.line.add || !acs.some((a) => a.stage === x.stage)));
   const hand = hands.reduce((a, x) => a + (x.line.got ?? x.line.amt ?? 0), 0);
   return {
     forecast: fcDoc ? fcDoc.amount! : d.forecast,
@@ -383,7 +394,7 @@ export function dealMoney(s: SalesState, d: Deal) {
     /** an Actual document exists (a hand receipt alone is not "confirmed by a document") */
     acConfirmed: acs.length > 0,
     acDocs: acs.length,
-    /** received by hand on installments without a document ("บันทึกเอง"), included in `actual` */
+    /** received by hand ("บันทึกเอง"), included in `actual`: on installments without a document, or kept on top of one */
     hand,
   };
 }
@@ -474,7 +485,8 @@ export function lastStage(s: SalesState, d: Deal) {
  * - future: still to come; off: not needed (stages after a lost deal).
  * A won deal with a payment plan follows the plan at its PAY stages: a received installment is done
  * (on the day it came in), one due later is planned (on its due date), one due or late is still to
- * come (never skipped), and a PAY stage the plan does not use is off.
+ * come (never skipped), and a PAY stage the plan does not use is off — unless it was done on its own
+ * (paid the old way by its note, or a document filed there), which it keeps showing.
  */
 export type StageState = 'done' | 'planned' | 'yes' | 'no' | 'wait' | 'skipped' | 'next' | 'future' | 'off';
 export function stageTrack(s: SalesState, d: Deal, today: string) {
@@ -487,7 +499,10 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
   const stepT = (p: string): DealStep & { off?: true; owed?: true } => {
     if (!plan || !pays.includes(p)) return stepOf(s, d.id, p);
     const l = plan.lines.find((x) => x.stage === p);
-    if (!l) return { d: '', n: '', off: true };
+    if (!l) {
+      const own = stepOf(s, d.id, p);
+      return own.d || own.n.trim() ? own : { d: '', n: '', off: true };
+    }
     if (l.status === 'paid') return { d: l.rcvDate || today, n: 'paid' };
     return { d: l.due && l.due > today ? l.due : '', n: '', owed: true };
   };
@@ -541,18 +556,18 @@ export function actStage(s: SalesState, d: Deal, today: string) {
   return [...s.cfg.stages].reverse().find((p) => ['done', 'yes', 'no', 'wait'].includes(t.states[p])) || t.next || s.cfg.stages[0] || '';
 }
 
-/** A document whose counted amount is not the document's own figure: the user kept their figure when
- *  the reader found another ("คงยอดเดิม"), or corrected the amount since. Derived, never stored: `doc` is
- *  the document's figure, `kept` the one counted, `diff` = kept − doc. A figure chosen from the reader
- *  (basis total / subtotal / netPay) is the document's own, so only a typed one ('manual') can differ. */
-export function docMismatch(x: Pick<DealDoc, 'amount' | 'detected' | 'basis'>): { doc: number; kept: number; diff: number } | null {
-  if (x.amount == null || x.detected == null || x.basis !== 'manual') return null;
+/** A document whose counted amount is not the document's own figure because the user kept theirs when
+ *  the reader found another ("คงยอดเดิม", DealDoc.kept): `doc` is the document's figure, `kept` the one
+ *  counted, `diff` = kept − doc. Only that decision counts: a typed amount (a misread corrected, a figure
+ *  before VAT picked, what an older build stored) is the user's reading of the document, not a mismatch. */
+export function docMismatch(x: Pick<DealDoc, 'amount' | 'detected' | 'kept'>): { doc: number; kept: number; diff: number } | null {
+  if (!x.kept || x.amount == null || x.detected == null) return null;
   const diff = Math.round((x.amount - x.detected) * 100) / 100;
   return diff ? { doc: x.detected, kept: x.amount, diff } : null;
 }
 /** "ยอดในเอกสาร 160,500 บาท ไม่ตรงกับแผน 160,000 บาท (ต่าง 500)": `what` names the figure ("แผน",
- *  "Forecast ที่พิมพ์ไว้", "ยอดที่รับ"). */
-export const mismatchText = (doc: number, fig: number, what: string) => `ยอดในเอกสาร ${fmtMoney(doc)} บาท ไม่ตรงกับ${what} ${fmtMoney(fig)} บาท (ต่าง ${fmtMoney(Math.abs(Math.round((doc - fig) * 100) / 100))})`;
+ *  "Forecast ที่พิมพ์ไว้", "ยอดที่รับ"); an English word is set off with a space, as everywhere in the app. */
+export const mismatchText = (doc: number, fig: number, what: string) => `ยอดในเอกสาร ${fmtMoney(doc)} บาท ไม่ตรงกับ${/^[A-Za-z]/.test(what) ? ' ' : ''}${what} ${fmtMoney(fig)} บาท (ต่าง ${fmtMoney(Math.abs(Math.round((doc - fig) * 100) / 100))})`;
 
 /** One line for a deal: its status, and the result when the job is closed ("ปิดงาน" alone doesn't say whether it was won), else the stage reached. */
 export function trackerStatus(S: SalesState, d: Deal, today = todayISO()) {
@@ -582,6 +597,29 @@ export function splitAmounts(total: number, shares: number[]): number[] {
   const out = w.map((x) => Math.floor((total * x) / sum));
   out[out.length - 1] += Math.round((total - out.reduce((a, b) => a + b, 0)) * 100) / 100;
   return out;
+}
+
+/**
+ * What a plan set on a deal without one starts from: the PAY stages already paid, as received
+ * installments — by their documents (`amt` = what they add up to), or the old way, by the stage note
+ * (`old` = the day; `amt` = the typed Actual the documents don't cover, shared among such stages, which
+ * setPlan then marks received by hand). One paid the old way with nothing to say how much (`amt` null)
+ * stays out of the plan, done by its note. `used` = every paid stage: new installments take the others.
+ */
+export function planStart(s: SalesState, d: Deal, today: string): { lines: { stage: string; amt: number | null; old: string }[]; used: string[] } {
+  if (hasPlan(s, d.id)) return { lines: [], used: [] };
+  const paid = payState(s, d, today).paid, acs = docsOf(s, d.id).filter(countsActual);
+  const sum = (xs: DealDoc[]) => xs.reduce((a, x) => a + (x.amount || 0), 0);
+  const byDocs = (p: string) => sum(acs.filter((x) => x.stage === p));
+  const noted = paid.filter((p) => !byDocs(p));
+  const rest = d.actual != null ? Math.max(0, d.actual - sum(acs)) : 0;
+  const shares = rest > 0 && noted.length ? splitAmounts(rest, noted.map(() => 1)) : [];
+  const lines = paid.map((p) => {
+    if (byDocs(p)) return { stage: p, amt: byDocs(p), old: '' };
+    const sd = stepOf(s, d.id, p).d;
+    return { stage: p, amt: shares[noted.indexOf(p)] ?? null, old: sd && sd <= today ? sd : today };
+  });
+  return { lines, used: paid };
 }
 
 /** The plan fields of an installment, as the editor types them (what was received is not among them). */
@@ -627,19 +665,26 @@ export interface LineView extends PlanEntry {
   /** the Actual documents counted at its stage, oldest first; `doc` = the latest */
   docs: DealDoc[];
   doc: DealDoc | null;
-  /** received by hand ("รับเงินแล้ว", no document) */
+  /** received by hand ("รับเงินแล้ว"): with no document, or kept on top of the documents (PayLine.add) */
   hand: boolean;
+  /** what of `got` was received by hand (0 without a hand receipt counted) */
+  handGot: number;
+  /** counted complete while less came in ("ถือว่ารับครบ", still for what came in: PayLine.fullAt) */
+  full: boolean;
 }
-/** One installment, plan against actual. A document always wins over a hand receipt, so a stage is
- *  never counted twice; several documents at one stage add up. */
+/** One installment, plan against actual. A document replaces a hand receipt unless the user kept both
+ *  ("นับเพิ่ม"), so a stage is never counted twice; several documents at one stage add up. */
 export function lineView(s: SalesState, d: Deal, x: PlanEntry, today: string): LineView {
   const docs = docsOf(s, d.id).filter((z) => z.stage === x.stage && z.target === 'actual' && z.amount != null);
-  const l = x.line, hand = !docs.length && !!l.rcv;
-  const got = docs.length ? docs.reduce((a, z) => a + (z.amount || 0), 0) : hand ? (l.got ?? l.amt ?? 0) : 0;
+  const l = x.line, hand = !!l.rcv && (!docs.length || l.add);
+  const handGot = hand ? (l.got ?? l.amt ?? 0) : 0;
+  const got = docs.reduce((a, z) => a + (z.amount || 0), 0) + handGot;
   const amt = l.amt ?? 0, res = dealResult(s, d), due = dueOf(l, wonDate(s, d));
+  // granted for what had come in then: a receipt deleted or changed since opens the installment again
+  const full = l.full && (l.fullAt == null || Math.abs(got - l.fullAt) < 0.005);
   const status: PayStatus =
     res === 'NO' ? 'off'
-    : got > 0 && (got >= amt || l.full) ? 'paid'
+    : got > 0 && (got >= amt || full) ? 'paid'
     : got > 0 ? 'part'
     : res !== 'YES' ? 'draft'
     : due && due < today ? 'late'
@@ -649,7 +694,7 @@ export function lineView(s: SalesState, d: Deal, x: PlanEntry, today: string): L
   const doc = docs[docs.length - 1] || null, st = stepOf(s, d.id, x.stage);
   const rcvDate = doc ? (x.inList && st.d && st.d <= today ? st.d : doc.docDate || localDay(doc.at)) : l.rcv;
   return {
-    ...x, amt, due, got, status, rcvDate, docs, doc, hand,
+    ...x, amt, due, got, status, rcvDate, docs, doc, hand, handGot, full,
     left: owed ? Math.max(0, amt - got) : 0,
     lateDays: owed && due && due < today ? daysBetween(due, today) : 0,
   };
@@ -737,8 +782,12 @@ export function closeReady(s: SalesState, d: Deal, today: string) {
 
 /** What a document attaches as: its kind, amount, what it counts toward, date; `stage` = where the user
  *  attached it (omitted: the generic "แนบเอกสาร…", the stage is chosen); `replace` = a counted Actual
- *  document at that stage the new one replaces ("ใช้ยอดนี้แทน"). */
-export interface AttachInfo { kind: DocKind; amount: number | null; target: DocTarget; docDate: string; stage?: string; replace?: string }
+ *  document at that stage the new one replaces ("ใช้ยอดนี้แทน"); `addHand` = the installment's hand
+ *  receipt keeps counting with it ("นับเพิ่ม": paid partly by hand, the rest with this receipt). */
+export interface AttachInfo { kind: DocKind; amount: number | null; target: DocTarget; docDate: string; stage?: string; replace?: string; addHand?: boolean }
+/** Whether a document counts as money received: Actual with an amount. At a PAY stage only such a
+ *  document completes the stage, replaces another or takes over its note. */
+export const countsActual = (x: Pick<DealDoc, 'target' | 'amount'>) => x.target === 'actual' && x.amount != null;
 /**
  * The stage a document is tied to.
  * - Attached at a stage: that stage when it is in the list or is an installment of the deal's plan
@@ -766,15 +815,18 @@ export function withDoc(s: SalesState, d: Deal, info: AttachInfo, today: string)
       target: info.amount == null ? 'none' : info.target, detected: null, basis: 'manual', stage, at, cAt: at, by: '',
     },
   };
-  const old = info.replace ? s.docs[`${d.id}/${info.replace}`] : undefined;
+  const counts = countsActual(info);
+  const old = info.replace && counts ? s.docs[`${d.id}/${info.replace}`] : undefined;
   if (old) docs[`${d.id}/${old.id}`] = { ...old, target: 'none' };
+  const k = `${d.id}/${stage}`, pl = (s.pays || {})[k];
+  const pays = info.addHand && counts && pl?.rcv ? { ...s.pays, [k]: { ...pl, add: true } } : s.pays;
   const steps = { ...s.steps };
-  if (stage && s.cfg.stages.includes(stage) && (!isPayStage(s.cfg, stage) || (info.target === 'actual' && info.amount != null))) {
+  if (stage && s.cfg.stages.includes(stage) && (!isPayStage(s.cfg, stage) || counts)) {
     const st = stepOf(s, d.id, stage), ad = info.docDate && info.docDate <= today ? info.docDate : today;
     if (!st.n.trim()) steps[`${d.id}/${stage}`] = { d: ad, n: '·' };
     else if (!st.d || st.d > today) steps[`${d.id}/${stage}`] = { d: ad, n: st.n };
   }
-  return { ...s, docs, steps };
+  return { ...s, docs, steps, pays };
 }
 /**
  * DocAttach's "หลังแนบ" line: where the document goes and what it changes. `line`: the installment at
@@ -786,7 +838,7 @@ export function attachPreview(s: SalesState, d: Deal, info: AttachInfo, today: s
   const stage = attachStage(s, d, info, today), after = withDoc(s, d, info, today);
   const line = (stage && planOf(after, d, today)?.lines.find((l) => l.stage === stage)) || null;
   const m = dealMoney(after, d), was = closeReady(s, d, today);
-  const k = `${d.id}/${stage}`, full = line && line.got > 0 && line.got < line.amt ? { ...after, pays: { ...after.pays, [k]: { ...after.pays[k], full: true } } } : after;
+  const k = `${d.id}/${stage}`, full = line && line.got > 0 && line.got < line.amt ? { ...after, pays: { ...after.pays, [k]: { ...after.pays[k], full: true, fullAt: line.got } } } : after;
   return {
     stage, line,
     short: line ? Math.max(0, line.amt - line.got) : 0,
@@ -927,7 +979,8 @@ export function salesStats(s: SalesState, deals: Deal[], today: string): SalesSt
     st.forecast += fc;
     st.actual += ac;
     if (m.fcConfirmed) st.fcConfirmed += fc;
-    if (m.acConfirmed) st.acConfirmed += ac;
+    // only what the documents back: money received by hand on other installments is not confirmed by one
+    if (m.acConfirmed) st.acConfirmed += ac - m.hand;
     d.source.forEach((x) => {
       const b = st.bySource[x] || (st.bySource[x] = { n: 0, forecast: 0, yes: 0, decided: 0 });
       b.n++;

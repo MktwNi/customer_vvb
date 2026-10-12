@@ -163,7 +163,7 @@ describe('a figure kept against its document', () => {
     A.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
     A.quickPlan(d.id, 2);
     // the receipt says 160,500; the plan says 160,000; the user keeps the plan's
-    const kept = await A.attachDoc(d.id, pdf('rc.pdf'), { kind: 'receipt', amount: 160000, target: 'actual', basis: 'manual', detected: 160500, docNo: 'RC-1', docDate: '2026-10-05', stage: 'PAY1' });
+    const kept = await A.attachDoc(d.id, pdf('rc.pdf'), { kind: 'receipt', amount: 160000, target: 'actual', basis: 'manual', detected: 160500, docNo: 'RC-1', docDate: '2026-10-05', stage: 'PAY1', kept: true });
     expect(docMismatch(kept)).toEqual({ doc: 160500, kept: 160000, diff: -500 });
     // the other choice at PAY2: the document's figure, read at its basis
     await A.attachDoc(d.id, pdf('rc2.pdf'), { kind: 'receipt', amount: 160500, target: 'actual', basis: 'total', detected: 160500, docNo: 'RC-2', docDate: '2026-10-05', stage: 'PAY2' });
@@ -173,12 +173,16 @@ describe('a figure kept against its document', () => {
       expect(P.lines.map((l) => [l.stage, l.amt, l.got, l.status])).toEqual([['PAY1', 160000, 160000, 'paid'], ['PAY2', 160000, 160500, 'paid']]);
       expect(acFig(e.sales, e.sales.deals[d.id])).toMatchObject({ kind: 'warn', word: 'ไม่ตรงเอกสาร' });
       const doc = Object.values(e.sales.docs).find((x) => x.docNo === 'RC-1') as DealDoc;
-      expect([doc.amount, doc.detected, doc.basis]).toEqual([160000, 160500, 'manual']);
+      expect([doc.amount, doc.detected, doc.basis, doc.kept]).toEqual([160000, 160500, 'manual', true]);
     }
     // "ใช้ยอดจากเอกสาร" later, from the document's card: the figure becomes the document's
     A.updateDoc(d.id, kept.id, { amount: 160500, basis: 'manual' });
     expect(docMismatch(A.sales.docs[`${d.id}/${kept.id}`])).toBeNull();
     expect(acFig(A.sales, A.sales.deals[d.id])).toMatchObject({ kind: 'ok' });
+    // the teammate's copy drops the decision too
+    await settle(A, B);
+    expect(B.sales.docs[`${d.id}/${kept.id}`]).toMatchObject({ amount: 160500, detected: 160500 });
+    expect(B.sales.docs[`${d.id}/${kept.id}`].kept).toBeUndefined();
     A.dispose();
     B.dispose();
   });

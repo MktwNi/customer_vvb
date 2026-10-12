@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { useApp } from '../state';
 import { dmTh, isoTh, todayISO } from '../lib/format';
 import { ACT_TH, ACT_TYPES, NOTE_MAX, actStage, planLines, type ActType, type Deal, type DealAct, type SalesState } from '../lib/sales';
+import type { GccEngine } from '../lib/engine';
 import { DateChip } from './DateChip';
 
 /**
@@ -109,6 +110,24 @@ export function ActForm({ d, stage, onDone, compact }: { d: Deal; stage?: string
   );
 }
 
+/** "ลบ" on a contact (asked first). Its row goes, so the keyboard stays close: the next contact's "ลบ" in
+ *  the same table, panel or card (else the one before), else the nearest "บันทึกการติดต่อ" — the stage's
+ *  own, the panel's, or the deal's row. */
+export function delActFocus(e: GccEngine, a: DealAct, btn: HTMLElement) {
+  if (!window.confirm(`ลบการติดต่อนี้? (${ACT_TH[a.type]} ${isoTh(a.d)})`)) return;
+  const scope: ParentNode = btn.closest('.dp, .sl-mc, table') || document;
+  const mine = (x: Element) => (x as HTMLElement).dataset.delAct?.startsWith(a.deal + '/');
+  const dels = [...scope.querySelectorAll<HTMLElement>('[data-del-act]')].filter(mine);
+  const i = dels.indexOf(btn);
+  const near = dels.slice(i + 1).concat(dels.slice(0, Math.max(0, i)).reverse()).find((x) => x.dataset.delAct !== btn.dataset.delAct)?.dataset.delAct;
+  e.delAct(a.deal, a.id);
+  requestAnimationFrame(() => {
+    const q = (sel: string) => scope.querySelector<HTMLElement>(sel);
+    const to = (near && q(`[data-del-act="${CSS.escape(near)}"]`)) || q(`[data-act-at="${CSS.escape(a.stage)}"]`) || q('[data-act-at=""]') || document.querySelector<HTMLElement>(`[data-qa="${CSS.escape(a.deal + ':act')}"]`);
+    to?.focus();
+  });
+}
+
 /** One contact as a small entry: the type word, the date, who wrote it, the note; "ลบ" for its author
  *  (or an admin). `stage`: also say which stage it belongs to. */
 export function ActItem({ a, stage, short }: { a: DealAct; stage?: boolean; short?: boolean }) {
@@ -121,7 +140,7 @@ export function ActItem({ a, stage, short }: { a: DealAct; stage?: boolean; shor
         <b>{ACT_TH[a.type]}</b>
         <span>{meta}</span>
         {e.canDelAct(a) && (
-          <button type="button" className="quiet sl-act-x" onClick={() => window.confirm(`ลบการติดต่อนี้? (${ACT_TH[a.type]} ${isoTh(a.d)})`) && e.delAct(a.deal, a.id)} aria-label={`ลบการติดต่อ ${ACT_TH[a.type]} ${isoTh(a.d)}`}>ลบ</button>
+          <button type="button" className="quiet sl-act-x" data-del-act={a.deal + '/' + a.id} onClick={(ev) => delActFocus(e, a, ev.currentTarget)} aria-label={`ลบการติดต่อ ${ACT_TH[a.type]} ${isoTh(a.d)}`}>ลบ</button>
         )}
       </span>
       {a.note && <span className="sl-act-n">{a.note}</span>}

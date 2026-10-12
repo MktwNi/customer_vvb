@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { attachPreview, closeReady, dealMoney, emptySales, payState, planLines, planOf, stageTrack, toDoc, toPay, type Deal, type DealDoc, type PlanInput } from './sales';
+import { attachPreview, closeReady, dealMoney, docMismatch, emptySales, payState, planLines, planOf, receivables, salesStats, stageTrack, toDoc, toPay, type Deal, type DealDoc, type PlanInput } from './sales';
 import type { SyncOp } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -88,14 +88,15 @@ const lineOf = (e: GccEngine, d: Deal, stage: string) => planOf(e.sales, e.sales
 const pays = (e: GccEngine, d: Deal) => Object.fromEntries(Object.entries(e.sales.pays).filter(([k]) => k.startsWith(d.id + '/')));
 
 describe('the payment plan in the engine', () => {
-  it('set, edit and clear: a new line is written whole, an edit by its fields; a received line is never deleted', async () => {
+  it('set, edit and clear: a new line is written by all its plan fields, an edit by its fields; a received line is never deleted', async () => {
     const [A, B] = await team();
     const d = won(A, 107000);
     expect(A.setPlan(d.id, [line('PAY1', 53500, { rel: 0, note: 'มัดจำเมื่อเซ็นสัญญา' }), line('PAY2', 53500, { due: '2026-10-20' })])).toEqual({ kept: [] });
     let q = await queued(A);
     const op1 = q.find((o) => o.k === `dpay/${d.id}/PAY1`)!;
     expect(op1.v).toMatchObject({ amt: 53500, rel: 0, note: 'มัดจำเมื่อเซ็นสัญญา', how: 'transfer', rcv: '', got: null, full: false, by: 'เอ' });
-    expect(op1.f).toBeUndefined();
+    // by its plan fields (a teammate's receipt on a line this browser has not pulled yet stays)
+    expect(op1.f).toEqual(['amt', 'pct', 'due', 'rel', 'how', 'howT', 'note', 'at', 'by']);
     expect(lastLog(A, d.id)).toMatchObject({ action: 'ตั้งแผนชำระ', detail: '2 งวด · 53,500 + 53,500' });
     await settle(A, B);
     expect(pays(B, d)).toEqual(pays(A, d));
@@ -363,5 +364,181 @@ describe('the payment plan in the engine', () => {
     expect(C.sales.pays['zz/PAY2']).toMatchObject({ amt: 2, how: 'cash' });
     A.dispose();
     C.dispose();
+  });
+});
+
+describe('review fixes: money received, and what completes a PAY stage', () => {
+  it('deleting a PAY stage\'s counted document never leaves the stage paid by one that does not count', async () => {
+    const A = mk('เอ');
+    A.setSalesList('stages', ['CALL1', 'QUOTATION', 'CLOSED DEAL', 'PAY1']);
+    // (a) an invoice replaced by a receipt ("ใช้ยอดนี้แทน"), then the receipt deleted (wrong file)
+    const d = won(A, 50000);
+    const inv = await A.attachDoc(d.id, pdf('inv.pdf'), doc('invoice', 50000, { stage: 'PAY1', docNo: 'INV-1' }));
+    vi.setSystemTime(Date.now() + 1000);
+    const rc = await A.attachDoc(d.id, pdf('rc.pdf'), doc('receipt', 50000, { stage: 'PAY1', docNo: 'RC-1', replace: inv.id }));
+    A.deleteDoc(d.id, rc.id);
+    expect(A.sales.docs[`${d.id}/${inv.id}`]).toMatchObject({ target: 'none' });
+    expect(A.sales.docs[`${d.id}/${inv.id}`].auto).toBeUndefined();
+    expect(A.sales.steps[`${d.id}/PAY1`]).toBeUndefined();
+    expect(dealMoney(A.sales, d).actual ?? 0).toBe(0);
+    expect(payState(A.sales, d, TODAY).paid).toEqual([]);
+    expect(closeReady(A.sales, d, TODAY)).toBe(false);
+    // (b) a contract filed at PAY1 (no amount), then the counted invoice deleted
+    const e = won(A, 50000);
+    const inv2 = await A.attachDoc(e.id, pdf('inv.pdf'), doc('invoice', 50000, { stage: 'PAY1', docNo: 'INV-2' }));
+    vi.setSystemTime(Date.now() + 1000);
+    await A.attachDoc(e.id, pdf('contract.pdf'), doc('other', null, { stage: 'PAY1' }));
+    A.deleteDoc(e.id, inv2.id);
+    expect(A.sales.steps[`${e.id}/PAY1`]).toBeUndefined();
+    expect(closeReady(A.sales, e, TODAY)).toBe(false);
+    // (c) the counted invoice set to "ไม่นับยอด": the stage is no longer paid either
+    const f = won(A, 50000);
+    const inv3 = await A.attachDoc(f.id, pdf('inv.pdf'), doc('invoice', 50000, { stage: 'PAY1', docNo: 'INV-3', docDate: '2026-10-03' }));
+    A.updateDoc(f.id, inv3.id, { target: 'none' });
+    expect(A.sales.steps[`${f.id}/PAY1`]).toBeUndefined();
+    expect(A.sales.docs[`${f.id}/${inv3.id}`].auto).toBeUndefined();
+    expect(payState(A.sales, f, TODAY).paid).toEqual([]);
+    // counted again: it is money received, the stage reads paid (the user writes the note if they want one)
+    A.updateDoc(f.id, inv3.id, { target: 'actual' });
+    expect(payState(A.sales, f, TODAY).paid).toEqual(['PAY1']);
+    // a second counted receipt there takes the stage over, as before
+    const g = won(A, 50000);
+    const r1 = await A.attachDoc(g.id, pdf('r1.pdf'), doc('receipt', 30000, { stage: 'PAY1', docNo: 'RC-A' }));
+    vi.setSystemTime(Date.now() + 1000);
+    await A.attachDoc(g.id, pdf('c.pdf'), doc('other', null, { stage: 'PAY1' }));
+    vi.setSystemTime(Date.now() + 1000);
+    await A.attachDoc(g.id, pdf('r2.pdf'), doc('receipt', 20000, { stage: 'PAY1', docNo: 'RC-B' }));
+    A.deleteDoc(g.id, r1.id);
+    expect(A.sales.steps[`${g.id}/PAY1`].n).toBe('ใบเสร็จ / ใบกำกับภาษี RC-B · 20,000 บาท');
+    A.dispose();
+  });
+
+  it('part paid by hand, the rest with a receipt ("นับเพิ่ม"): both count; "ใช้ยอดนี้แทน" keeps the old rule', async () => {
+    const [A, B] = await team();
+    const d = won(A, 100000);
+    A.setPlan(d.id, [line('PAY1', 100000)]);
+    A.markPaid(d.id, 'PAY1', { date: '2026-10-02', amount: 60000, how: 'cash' });
+    const info = { ...doc('receipt', 40000, { stage: 'PAY1', docNo: 'RC-2' }), addHand: true };
+    expect(attachPreview(A.sales, d, info, TODAY)).toMatchObject({ line: { got: 100000, status: 'paid' }, short: 0, actual: 100000, ready: true });
+    await A.attachDoc(d.id, pdf('rc.pdf'), info);
+    expect(lineOf(A, d, 'PAY1')).toMatchObject({ status: 'paid', got: 100000, left: 0, hand: true, handGot: 60000, doc: { docNo: 'RC-2' } });
+    expect(dealMoney(A.sales, d)).toMatchObject({ actual: 100000, hand: 60000, acConfirmed: true });
+    expect(A.sales.pays[`${d.id}/PAY1`]).toMatchObject({ rcv: '2026-10-02', got: 60000, add: true });
+    await settle(A, B);
+    expect(lineOf(B, d, 'PAY1')).toMatchObject({ status: 'paid', got: 100000 });
+    // undoing the hand receipt leaves the document alone
+    A.unmarkPaid(d.id, 'PAY1');
+    expect(lineOf(A, d, 'PAY1')).toMatchObject({ status: 'part', got: 40000, hand: false });
+    expect(A.sales.pays[`${d.id}/PAY1`].add).toBe(false);
+    // the default: the document replaces the hand receipt (a receipt for the same money)
+    const e = won(A, 100000);
+    A.setPlan(e.id, [line('PAY1', 100000)]);
+    A.markPaid(e.id, 'PAY1', { date: '2026-10-02', amount: 60000 });
+    await A.attachDoc(e.id, pdf('rc.pdf'), doc('receipt', 60000, { stage: 'PAY1' }));
+    expect(lineOf(A, e, 'PAY1')).toMatchObject({ status: 'part', got: 60000, hand: false, handGot: 0 });
+    expect(dealMoney(A.sales, e)).toMatchObject({ actual: 60000, hand: 0 });
+    A.dispose();
+    B.dispose();
+  });
+
+  it('the KPI "ยืนยันด้วยเอกสาร: Actual" counts only what documents back', async () => {
+    const A = mk('เอ');
+    const d = won(A, 107000);
+    A.setPlan(d.id, [line('PAY1', 53500), line('PAY2', 53500)]);
+    await A.attachDoc(d.id, pdf('r1.pdf'), doc('receipt', 53500, { stage: 'PAY1', docNo: 'RC-1' }));
+    A.markPaid(d.id, 'PAY2', { date: TODAY, amount: 53500 });
+    const st = salesStats(A.sales, [A.sales.deals[d.id]], TODAY);
+    expect([st.actual, st.acConfirmed]).toEqual([107000, 53500]);
+    A.dispose();
+  });
+
+  it('a figure corrected on the document\'s card is the document\'s own, not one kept against it', async () => {
+    const A = mk('เอ');
+    const d = won(A, 107000);
+    A.setPlan(d.id, [line('PAY1', 107000)]);
+    // OCR misread 101,000; corrected on the card to 107,000
+    const r = await A.attachDoc(d.id, pdf('r.pdf'), { ...doc('receipt', 101000, { stage: 'PAY1', docNo: 'RC-9' }), detected: 101000 });
+    A.updateDoc(d.id, r.id, { amount: 107000, basis: 'manual' });
+    expect(A.sales.docs[`${d.id}/${r.id}`]).toMatchObject({ amount: 107000, detected: 107000 });
+    expect(docMismatch(A.sales.docs[`${d.id}/${r.id}`])).toBeNull();
+    // "คงยอดเดิม" is stored as such and survives an edit of something else
+    const k = await A.attachDoc(d.id, pdf('k.pdf'), { ...doc('receipt', 107000, { stage: 'PAY1', docNo: 'RC-10' }), detected: 107500, basis: 'manual' as const, kept: true });
+    A.updateDoc(d.id, k.id, { docNo: 'RC-10/1' });
+    expect(docMismatch(A.sales.docs[`${d.id}/${k.id}`])).toEqual({ doc: 107500, kept: 107000, diff: -500 });
+    A.dispose();
+  });
+
+  it('"ถือว่ารับครบ" holds for what had come in: the receipt deleted, a later small one does not settle it', async () => {
+    const A = mk('เอ');
+    const d = won(A, 53500);
+    A.setPlan(d.id, [line('PAY1', 53500)]);
+    const rc = await A.attachDoc(d.id, pdf('rc.pdf'), doc('receipt', 52000, { stage: 'PAY1', docNo: 'RC-1' }));
+    expect(A.setPayFull(d.id, 'PAY1', true)).toBe(true);
+    expect(A.sales.pays[`${d.id}/PAY1`]).toMatchObject({ full: true, fullAt: 52000 });
+    expect(lineOf(A, d, 'PAY1')).toMatchObject({ status: 'paid', full: true });
+    A.deleteDoc(d.id, rc.id);
+    expect(lineOf(A, d, 'PAY1')).toMatchObject({ status: 'wait', full: false });
+    await A.attachDoc(d.id, pdf('dep.pdf'), doc('receipt', 10000, { stage: 'PAY1', docNo: 'RC-2' }));
+    expect(lineOf(A, d, 'PAY1')).toMatchObject({ status: 'part', got: 10000, left: 43500 });
+    expect(closeReady(A.sales, d, TODAY)).toBe(false);
+    // counted complete again for what is there now
+    expect(A.setPayFull(d.id, 'PAY1', true)).toBe(true);
+    expect(A.sales.pays[`${d.id}/PAY1`].fullAt).toBe(10000);
+    // a hand receipt short and counted complete: for that amount
+    const e = won(A, 50000);
+    A.setPlan(e.id, [line('PAY1', 50000)]);
+    A.markPaid(e.id, 'PAY1', { date: '2026-10-02', amount: 49000, full: true });
+    expect(A.sales.pays[`${e.id}/PAY1`]).toMatchObject({ full: true, fullAt: 49000 });
+    expect(lineOf(A, e, 'PAY1').status).toBe('paid');
+    A.dispose();
+  });
+
+  it('a stale browser setting a plan keeps the teammate\'s receipt on it', async () => {
+    const [A, B] = await team();
+    const d = won(A, 100000);
+    await settle(A, B); // B knows the deal, no plan yet
+    A.setPlan(d.id, [line('PAY1', 50000), line('PAY2', 50000)]);
+    A.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: 50000, how: 'cash' });
+    await settle(A);
+    // B has not pulled since and clicks "2 งวด 50/50"
+    B.quickPlan(d.id, 2);
+    await settle(B, A);
+    for (const e of [A, B]) {
+      expect(lineOf(e, d, 'PAY1')).toMatchObject({ status: 'paid', got: 50000, line: { rcv: '2026-10-05', how: 'transfer' } });
+      expect(dealMoney(e.sales, e.sales.deals[d.id]).actual).toBe(50000);
+    }
+    A.dispose();
+    B.dispose();
+  });
+
+  it('a PAY stage received the old way (its note, the typed Actual) stays received when a plan is set', async () => {
+    const A = mk('เอ');
+    const fresh = () => {
+      const d = won(A, 250000);
+      A.updateDeal(d.id, { actual: 125000 });
+      A.setStep(d.id, 'PAY1', { d: '2026-10-03', n: 'รับงวดที่ 1 แล้ว' });
+      return A.sales.deals[d.id];
+    };
+    // one click: PAY1 is a received line; what is left is split over the next stages
+    const d = fresh();
+    expect(A.quickPlan(d.id, 2)).toEqual({ stages: ['PAY2', 'PAY3'], amounts: [62500, 62500] });
+    expect(lineOf(A, d, 'PAY1')).toMatchObject({ status: 'paid', got: 125000, rcvDate: '2026-10-03', hand: true });
+    expect(planOf(A.sales, d, TODAY)).toMatchObject({ n: 3, total: 250000, got: 125000, left: 125000 });
+    expect(stageTrack(A.sales, d, TODAY).states.PAY1).toBe('done');
+    expect(A.sales.steps[`${d.id}/PAY1`].n).toBe('รับงวดที่ 1 แล้ว');
+    expect(dealMoney(A.sales, d).actual).toBe(125000);
+    expect(receivables(A.sales, [d], TODAY).receivable).toBe(125000);
+    // the editor's lines (PAY1 as received, PAY2 for the rest): the same
+    const e = fresh();
+    A.setPlan(e.id, [line('PAY1', 125000), line('PAY2', 125000)]);
+    expect(lineOf(A, e, 'PAY1')).toMatchObject({ status: 'paid', got: 125000, line: { rcv: '2026-10-03' } });
+    expect(receivables(A.sales, [e], TODAY)).toMatchObject({ receivable: 125000, late: 0 });
+    // nothing typed to say how much: PAY1 stays out of the plan, done by its note (not "ไม่ใช้")
+    const f = won(A, 250000);
+    A.setStep(f.id, 'PAY1', { d: '2026-10-03', n: 'รับงวดที่ 1 แล้ว' });
+    expect(A.quickPlan(f.id, 1)).toEqual({ stages: ['PAY2'], amounts: [250000] });
+    expect(planLines(A.sales, f)!.map((x) => x.stage)).toEqual(['PAY2']);
+    expect(stageTrack(A.sales, A.sales.deals[f.id], TODAY).states.PAY1).toBe('done');
+    A.dispose();
   });
 });

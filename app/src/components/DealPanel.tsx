@@ -4,10 +4,10 @@ import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
   ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, fmtMoney, isPayStage, kindForStage,
-  lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planOf, splitAmounts, stageActs, stageDocs, stageTh, stageTrack, stepOf, whtRate, wonDate,
+  lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stageActs, stageDocs, stageTh, stageTrack, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState,
 } from '../lib/sales';
-import { CLOSE_TITLE, acFig, closingView, diffText, fcFig, lineFig, lineMeta, lineStatusView, relText, shortName, type FigView } from '../lib/salesUi';
+import { CLOSE_TITLE, acFig, closingView, diffText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, type FigView } from '../lib/salesUi';
 import { DocAttach, SHOWABLE, openDocFile, type AttachMore } from './DocAttach';
 import { ActForm, ActList } from './DealActs';
 import { DateChip } from './DateChip';
@@ -404,7 +404,8 @@ export function DealPanel() {
 
         <div className="dp-body">
           {planFirst && <PlanCard d={d} attach={attach} />}
-          <StepsCard d={d} attach={attach} />
+          {/* its own state (the card held, the quick-add) belongs to this deal */}
+          <StepsCard key={d.id} d={d} attach={attach} />
           {!planFirst && <PlanCard d={d} attach={attach} />}
           <OtherDocs d={d} attach={attach} />
           <ContactCard d={d} ro={ro} />
@@ -438,7 +439,9 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
   const reached = reachedOf(stages, t.states);
   const late = overdueDays(S, d, today) != null;
   const [pick, setPick] = useState('');
-  // the stage being recorded: the one chosen with "แก้ไข", else the next one
+  // the stage being recorded: the one chosen with "แก้ไข", else the next one. Once the user is in its
+  // fields it is held (pick): a teammate's sync that moves "next" on must not swap the card away
+  // under their typing (they are asked about the teammate's change when they save)
   const cardStage = !ro ? pick || t.next : '';
   // contacts beyond the stages, under the stage each belongs to; the quick-add: null = closed, '' = the
   // card's own (under its heading), a stage = under that stage
@@ -504,7 +507,8 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           const card = !extra && p === cardStage;
           const docs = by[p] || [];
           const doc = docs.find((z) => z.amount != null);
-          const unused = !!P && won && isPayStage(S.cfg, p) && !pl;
+          // a PAY stage the plan does not use (one done on its own, paid the old way, reads as its step)
+          const unused = !!P && won && isPayStage(S.cfg, p) && !pl && t.states[p] === 'off';
           const on = !extra && i < reached, dash = on && t.states[stages[i + 1]] === 'planned';
           const fut = (st === 'future' || st === 'off' || unused) && !isNow && !card && !(pl && won);
           let date: ReactNode = s.d ? <span className="sl-tl-d">{st === 'planned' ? 'นัด ' : ''}{isoTh(s.d)}</span> : st === 'off' ? <span className="sl-tl-d">ไม่ต้องทำ</span> : st === 'skipped' ? <span className="sl-tl-d">ข้าม</span> : null;
@@ -524,7 +528,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           if (card) {
             body = (
               <>
-                <StepEdit key={p} d={d} p={p} st={st} line={pl} won={won} doc={!!doc} attach={attach} onDone={() => setPick('')} />
+                <StepEdit key={p} d={d} p={p} st={st} line={pl} won={won} doc={!!doc} attach={attach} onHold={() => setPick((x) => x || p)} onDone={() => setPick('')} />
                 {actsAt(p, unused, st === 'off')}
               </>
             );
@@ -622,7 +626,7 @@ function ResultBig({ d, st, date, onPick }: { d: Deal; st: StageState; date?: st
 
 /** The stage being recorded: its date, its note and, on QUOTATION / a PAY after the win, the place to
  *  drop the document. What was typed is saved also when the panel closes (as the panel's fields always did). */
-function StepEdit({ d, p, st, line, won, doc, attach, onDone }: { d: Deal; p: string; st: StageState; line: LineView | null; won: boolean; doc: boolean; attach: Attach; onDone: () => void }) {
+function StepEdit({ d, p, st, line, won, doc, attach, onHold, onDone }: { d: Deal; p: string; st: StageState; line: LineView | null; won: boolean; doc: boolean; attach: Attach; onHold: () => void; onDone: () => void }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const today = todayISO();
@@ -666,7 +670,7 @@ function StepEdit({ d, p, st, line, won, doc, attach, onDone }: { d: Deal; p: st
       {line && line.status !== 'paid' && (
         <p className="sl-tl-plan">แผน {line.line.amt != null ? fmtMoney(line.amt) + ' บาท' : 'ยังไม่ใส่ยอด'}{lineMeta(line.line) ? ' · ' + lineMeta(line.line) : ''}</p>
       )}
-      <div className="sl-fgrid">
+      <div className="sl-fgrid" onFocus={onHold}>
         <span style={labelCol}>
           วันที่{planned && init.d ? ` (นัดไว้ ${dmTh(init.d)})` : ''}
           <DateChip value={date} onChange={(v) => ((done.current = false), setDate(v))} label={'วันที่ ' + p} text={date === today ? 'วันนี้ ' + isoTh(date) : undefined} />
@@ -744,6 +748,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
       </section>
     );
   const pct = P.total ? Math.min(100, Math.round((P.got / P.total) * 100)) : 0;
+  const over = P.lines.reduce((a, l) => a + overPlan(l), 0);
   const extra = P.lines.filter((l) => !l.inList);
   // a Forecast that changed after the plan was typed as shares: offer to re-split what is not received yet
   const open = P.lines.filter((l) => l.got <= 0);
@@ -766,6 +771,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
           <span className="sl-pb" role="img" aria-label={`รับแล้ว ${pct}% ของแผน`}><i style={{ width: pct + '%' }} /></span>
           <span>
             รับแล้ว <b>{fmtMoney(P.got) || '0'}</b> · {P.left ? <>ค้าง <b>{fmtMoney(P.left)}</b></> : <span className="t-ok">รับครบทุกงวด</span>}
+            {over > 0 && <> · <span className="t-warn">รับเกินแผน {fmtMoney(over)}</span></>}
             {P.late.length > 0 && <> · <span className="t-bad">เลยกำหนด {P.late.length} งวด</span></>}
           </span>
         </div>
@@ -781,11 +787,13 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
           const sv = lineStatusView(l, today), lf = lineFig(l);
           const hand = l.status === 'paid' && l.hand;
           // every installment takes its document: an invoice or receipt for that stage, checked against its plan
-          const att = (label: string) => <button type="button" className="lnk" onClick={() => attach(l.stage, 'receipt', undefined, { target: 'actual' })}>{label}</button>;
+          const att = (label: string, add = false) => <button type="button" className="lnk" onClick={() => attach(l.stage, 'receipt', undefined, { target: 'actual', add })}>{label}</button>;
+          const unmark = <button type="button" className="quiet" onClick={() => window.confirm(`ยกเลิกการรับ ${l.stage}? (${fmtMoney(l.handGot)} บาท ที่บันทึกเอง)`) && e.unmarkPaid(d.id, l.stage)}>ยกเลิกการรับ</button>;
           const lineActs = ro || !won || recv === l.stage ? null : l.status === 'part' ? (
             <>
               <button type="button" className="btn xs" onClick={() => (e.setPayFull(d.id, l.stage, true) ? acts.prompt(d, 'payment') : acts.say(`ถือว่ารับครบ ${l.stage} แล้ว`))}>ถือว่ารับครบ</button>
-              {att('แนบใบเสร็จเพิ่ม')}
+              {att('แนบใบเสร็จเพิ่ม', true)}
+              {l.hand && unmark}
             </>
           ) : l.status !== 'paid' && l.status !== 'off' ? (
             <>
@@ -795,9 +803,9 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
           ) : hand ? (
             <>
               {att('แนบใบเสร็จ')}
-              <button type="button" className="quiet" onClick={() => window.confirm(`ยกเลิกการรับ ${l.stage}? (${fmtMoney(l.got)} บาท ที่บันทึกเอง)`) && e.unmarkPaid(d.id, l.stage)}>ยกเลิกการรับ</button>
+              {unmark}
             </>
-          ) : l.status === 'paid' && l.line.full && l.got < l.amt ? (
+          ) : l.status === 'paid' && l.full && l.got < l.amt ? (
             <button type="button" className="quiet" onClick={() => e.setPayFull(d.id, l.stage, false)}>ยกเลิกถือว่าครบ</button>
           ) : null;
           const note = l.line.note;
@@ -913,15 +921,26 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
   const won = wonDate(S, d);
   const [typedTotal, setTypedTotal] = useState<string | null>(m.forecast == null ? '' : null);
   const total = typedTotal != null ? parseAmount(typedTotal) ?? null : m.forecast;
+  // the first plan: PAY stages paid already (by their documents, or the old way by a note and the typed
+  // Actual) are received lines; new ones take the other stages
+  const [start] = useState(() => planStart(S, d, today));
   const [rows, setRows] = useState<Row[]>(() => {
     const L = planLines(S, d);
     if (L) {
       const got = new Map((P?.lines || []).map((l) => [l.stage, l.got]));
       return L.map((x) => ({ stage: x.stage, amt: x.line.amt != null ? fmtMoney(x.line.amt) : '', pct: x.line.pct != null ? String(x.line.pct) : '', due: x.line.due, rel: x.line.rel, date: !!x.line.due, how: x.line.how, howT: x.line.howT, note: x.line.note, got: got.get(x.stage) || 0 }));
     }
-    const base = m.forecast || 0;
-    const a = base > 0 ? splitAmounts(base, [50, 50]) : [null, null];
-    return [0, 1].map((i) => ({ stage: payStageFor(cfg, i + 1), amt: a[i] != null ? fmtMoney(a[i]) : '', pct: '50', due: '', rel: i * 30, date: false, how: 'transfer' as PayHow, howT: '', note: '', got: 0 }));
+    const kept = start.lines.flatMap((x) => (x.amt != null ? [{ stage: x.stage, amt: fmtMoney(x.amt), pct: '', due: '', rel: null, date: false, how: '' as PayHow, howT: '', note: '', got: x.amt }] : []));
+    const rec0 = kept.reduce((a, r) => a + r.got, 0);
+    // what is left of the Forecast over the PAY stages still to come (two when none is paid yet)
+    const free = payStages(cfg).filter((p) => !start.used.includes(p));
+    const open = start.used.length ? free : [payStageFor(cfg, 1), payStageFor(cfg, 2)];
+    const stages = open.length ? open : [payStageFor(cfg, payStages(cfg).length + 1)];
+    const base = Math.max(0, (m.forecast || 0) - rec0);
+    const a = base > 0 ? splitAmounts(base, stages.map(() => 1)) : stages.map(() => null);
+    const pct = kept.length ? '' : String(Math.round(100 / stages.length));
+    // due when won, then every 30 days; after installments received already, the next 30 days on
+    return [...kept, ...stages.map((stage, i) => ({ stage, amt: a[i] != null ? fmtMoney(a[i]) : '', pct, due: '', rel: (kept.length + i) * 30, date: false, how: 'transfer' as PayHow, howT: '', note: '', got: 0 }))];
   });
   const [err, setErr] = useState('');
   const ref = useRef<HTMLElement>(null);
@@ -937,7 +956,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
   const nextStage = (used: string[]) => {
     for (let i = 1; i <= 99; i++) {
       const p = payStageFor(cfg, i);
-      if (!used.includes(p)) return p;
+      if (!used.includes(p) && !start.used.includes(p)) return p;
     }
     return 'PAY' + (used.length + 1);
   };

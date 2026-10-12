@@ -20,6 +20,14 @@ export function monogram(name: string, set?: string) {
   return Array.from(n).find((ch) => /[ก-ฮA-Za-z0-9]/.test(ch)) || '•';
 }
 
+/** A monogram's font size for an avatar of `size` px with this many letters: on the type scale (§4) and
+ *  never under 12px — the letters stay readable in the smallest bubbles. */
+export function monoSize(size: number, letters: number) {
+  if (letters > 2) return size >= 80 ? 24 : size >= 56 ? 16 : size >= 44 ? 13 : 12;
+  if (letters > 1) return size >= 80 ? 28 : size >= 56 ? 18 : size >= 40 ? 14 : 13;
+  return size >= 80 ? 40 : size >= 64 ? 28 : size >= 56 ? 24 : size >= 44 ? 18 : size >= 40 ? 16 : 14;
+}
+
 /** The Sales dashboard keeps the owner's coloured monograms (`colored`): white text on each is at least 4.5:1. */
 const SWATCH = ['#1F5BD8', '#0B6E66', '#6D4BD8', '#B4570B', '#B03A64', '#2E7D32', '#3949AB', '#0E7490'];
 const hash = (s: string) => {
@@ -52,8 +60,10 @@ function CoAvatarInner({ name, web, set, size = 36, ring, colored, style }: Avat
   const host = hostOf(web);
   const [logo, setLogo] = useState<'wait' | 'ok' | 'none'>(host ? 'wait' : 'none');
   const full = monogram(name, set);
-  const text = size < 28 ? Array.from(full)[0] : full; // small bubbles: one readable letter
-  const fs = Math.round(size * (text.length > 2 ? 0.3 : text.length > 1 ? 0.36 : 0.44));
+  // small bubbles: one readable letter; a four-letter symbol that would not fit at 12px: the name's own
+  // letter (a symbol is never cut: a cut one can be another company's)
+  const text = size < 28 ? Array.from(full)[0] : full.length > 3 && size < 36 ? monogram(name) : full;
+  const fs = monoSize(size, text.length);
   const bg = colored ? SWATCH[hash(coreName(name) || name) % SWATCH.length] : 'var(--info-bg)';
   return (
     <span

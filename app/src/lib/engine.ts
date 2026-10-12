@@ -19,7 +19,7 @@ import {
 } from './teamSync';
 import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
 import {
-  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, isPayStage, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
+  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
@@ -1563,19 +1563,25 @@ export class GccEngine {
   }
 
   // ---- payment plan: one record per installment, dpay/<deal>/<stage> (lib/sales.ts planOf)
-  /** Write one installment's plan fields (`p`; received fields are not among them): a new line as a
-   *  whole record, a changed one by the fields that changed — a teammate's receipt on it (rcv / got /
-   *  full) or edit of another field stays (rebaseOp). Returns whether anything changed. */
+  /** Write one installment's plan fields (`p`; received fields are not among them): a new line by all
+   *  of them, a changed one by the fields that changed — either way a teammate's receipt on it (rcv / got
+   *  / full), also on a line this browser has not pulled yet, or their edit of another field stays
+   *  (rebaseOp). Returns whether anything changed. */
   private putPay(d: Deal, stage: string, p: Partial<PlanInput>, at: string, by: string) {
     const k = `${d.id}/${stage}`, cur = this.sales.pays[k];
-    const was: PayLine = cur || { amt: null, pct: null, due: '', rel: null, how: '', howT: '', note: '', rcv: '', got: null, full: false, at, by };
+    const was: PayLine = cur || { amt: null, pct: null, due: '', rel: null, how: '', howT: '', note: '', rcv: '', got: null, full: false, fullAt: null, add: false, at, by };
     const typed = Object.fromEntries(PLAN_FIELDS.filter((x) => p[x] !== undefined).map((x) => [x, p[x]]));
     const n = toPay({ ...was, ...typed, at, by })!;
     const f = PLAN_FIELDS.filter((x) => n[x] !== was[x]);
     if (cur && !f.length) return false;
     this.sales.pays[k] = n;
-    this.op(keyOf.dpay(d.id, stage), { ...n }, cur ? { f: [...f, 'at', 'by'] } : {});
+    this.op(keyOf.dpay(d.id, stage), { ...n }, { f: [...(cur ? f : PLAN_FIELDS), 'at', 'by'] });
     return true;
+  }
+  /** What an installment would have come to with this line: its documents and its hand receipt. */
+  private gotWith(d: Deal, stage: string, l: PayLine) {
+    const S = { ...this.sales, pays: { ...this.sales.pays, [`${d.id}/${stage}`]: l } };
+    return planOf(S, d, todayISO())?.lines.find((x) => x.stage === stage)?.got ?? 0;
   }
   /** Received already (by hand, or an Actual document at its stage): such a line is never deleted. */
   private payReceived(d: Deal, stage: string) {
@@ -1588,15 +1594,17 @@ export class GccEngine {
   }
   /**
    * Replace a deal's plan ("บันทึกแผน"), at most PLAN_MAX lines, one per stage. A new line is written
-   * whole; a changed line by its changed fields; a line no longer listed is deleted unless it was
-   * received — then it stays, and its stage is in `kept` (the UI says so). An empty list removes the
-   * plan (clearPlan). History: ตั้งแผนชำระ / แก้แผนชำระ / ลบแผนชำระ.
+   * by all its plan fields, a changed line by its changed fields; a line no longer listed is deleted
+   * unless it was received — then it stays, and its stage is in `kept` (the UI says so). The first plan
+   * of a deal takes a PAY stage paid the old way (its note and the typed Actual, planStart) as received
+   * by hand on that day. An empty list removes the plan (clearPlan). History: ตั้งแผนชำระ / แก้แผนชำระ / ลบแผนชำระ.
    */
   setPlan(dealId: string, lines: PlanInput[]): { kept: string[] } {
     const S = this.sales, d = S.deals[dealId], kept: string[] = [];
     if (!this.can('edit')) return this.deny(), { kept };
     if (!d) return { kept };
     const had = planLines(S, d), at = new Date().toISOString(), by = this.me();
+    const old = had ? [] : planStart(S, d, todayISO()).lines.filter((x) => x.old && x.amt != null);
     // a stage name is part of the record key: no "/" (as in setSalesList)
     const want = new Map<string, PlanInput>();
     lines.forEach((x) => {
@@ -1605,7 +1613,14 @@ export class GccEngine {
     });
     let changed = false;
     this.batchOps(() => {
-      want.forEach((x, stage) => this.putPay(d, stage, x, at, by) && (changed = true));
+      want.forEach((x, stage) => {
+        if (this.putPay(d, stage, x, at, by)) changed = true;
+        // paid before there was a plan, by its note: received by hand that day (its note stays as it is)
+        const o = old.find((z) => z.stage === stage), k = `${dealId}/${stage}`, l = S.pays[k];
+        if (!o || !l || l.rcv || !((l.amt || 0) > 0)) return;
+        S.pays[k] = { ...l, rcv: o.old, got: l.amt, at, by };
+        this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['rcv', 'got', 'at', 'by'] });
+      });
       (had || []).forEach(({ stage }) => {
         if (want.has(stage)) return;
         if (this.payReceived(d, stage)) return void kept.push(stage);
@@ -1627,7 +1642,8 @@ export class GccEngine {
   /**
    * The table's one-click plan ("2 งวด 50/50"): n installments of what is left of the Forecast (Forecast −
    * Actual so far), in `shares` (default equal; 50/50 for 2), the first due 30 days after the deal was
-   * won and then every 30 days, by transfer. Installments already received stay; the new ones take the
+   * won and then every 30 days, by transfer. Installments already received stay — also PAY stages paid
+   * before there was a plan, by their documents or the old way (planStart) — and the new ones take the
    * next PAY stages not paid yet (then "PAY<n>"). Returns the new stages and amounts (for the toast), or
    * null when nothing was done.
    */
@@ -1635,16 +1651,14 @@ export class GccEngine {
     if (!this.can('edit')) return this.deny(), null;
     const S = this.sales, d = S.deals[dealId];
     if (!d) return null;
-    const today = todayISO(), m = dealMoney(S, d), ps = payState(S, d, today);
+    const today = todayISO(), m = dealMoney(S, d), ps = payState(S, d, today), start = planStart(S, d, today);
     const keep: PlanInput[] = ps.plan
       ? ps.plan.lines.filter((l) => l.got > 0).map(({ stage, line: l }) => ({ stage, amt: l.amt, pct: l.pct, due: l.due, rel: l.rel, how: l.how, howT: l.howT, note: l.note }))
-      : ps.paid.flatMap((stage) => {
-          // paid by its documents before there was a plan: the line says what came in
-          const got = countedAt(S, d, stage).reduce((a, x) => a + (x.amount || 0), 0);
-          return got > 0 ? [{ stage, amt: got, pct: null, due: '', rel: null, how: '' as PayHow, howT: '', note: '' }] : [];
-        });
+      : // paid before there was a plan: the line says what came in (one paid by its note alone, with no
+        // amount to go on, stays out of the plan with its note)
+        start.lines.flatMap(({ stage, amt }) => (amt != null ? [{ stage, amt, pct: null, due: '', rel: null, how: '' as PayHow, howT: '', note: '' }] : []));
     n = Math.max(1, Math.min(PLAN_MAX - keep.length, Math.floor(n) || 1));
-    const used = new Set([...keep.map((x) => x.stage), ...(ps.plan ? [] : ps.paid)]);
+    const used = new Set([...keep.map((x) => x.stage), ...start.used]);
     const stages: string[] = [];
     for (let i = 1; stages.length < n && i <= 99; i++) {
       const p = payStageFor(S.cfg, i);
@@ -1682,9 +1696,10 @@ export class GccEngine {
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
     if (!d || !cur) return false;
     const today = todayISO(), was = closeReady(S, d, today);
-    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, ...(r.how !== undefined ? { how: r.how } : {}), at: new Date().toISOString(), by: this.me() })!;
+    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, fullAt: null, ...(r.how !== undefined ? { how: r.how } : {}), at: new Date().toISOString(), by: this.me() })!;
     n.rcv = n.rcv || today;
-    const f = (['rcv', 'got', 'full', 'how'] as const).filter((x) => n[x] !== cur[x]);
+    if (n.full) n.fullAt = this.gotWith(d, stage, n); // counted complete for what came in now
+    const f = (['rcv', 'got', 'full', 'fullAt', 'how'] as const).filter((x) => n[x] !== cur[x]);
     this.batchOps(() => {
       S.pays[k] = n;
       this.op(keyOf.dpay(dealId, stage), { ...n }, { f: [...f, 'at', 'by'] });
@@ -1701,23 +1716,26 @@ export class GccEngine {
     if (!d || !cur || (!cur.rcv && cur.got == null && !cur.full)) return;
     const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur);
     this.batchOps(() => {
-      S.pays[k] = { ...cur, rcv: '', got: null, full: false, at: new Date().toISOString(), by: this.me() };
-      this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['rcv', 'got', 'full', 'at', 'by'] });
+      S.pays[k] = { ...cur, rcv: '', got: null, full: false, fullAt: null, add: false, at: new Date().toISOString(), by: this.me() };
+      this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['rcv', 'got', 'full', 'fullAt', 'add', 'at', 'by'] });
       if (auto) this.setStep(dealId, stage, { d: st.d !== cur.rcv ? st.d : '', n: '' }, true, true); // a date the user corrected stays
       this.salesLog(d, 'ยกเลิกการรับ ' + stage);
     });
     this.saveSales();
   }
-  /** Count a short installment as complete (withholding tax, rounding) or open it again. Returns true
-   *  when this made the deal ready to close. */
+  /** Count a short installment as complete (withholding tax, rounding) or open it again. It holds for
+   *  what has come in now (PayLine.fullAt): a receipt deleted or changed later opens it again. Returns
+   *  true when this made the deal ready to close. */
   setPayFull(dealId: string, stage: string, full: boolean): boolean {
     if (!this.can('edit')) return this.deny(), false;
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
-    if (!d || !cur || cur.full === full) return false;
+    if (!d || !cur) return false;
+    const fullAt = full ? this.gotWith(d, stage, cur) : null;
+    if (cur.full === full && cur.fullAt === fullAt) return false;
     const today = todayISO(), was = closeReady(S, d, today);
     this.batchOps(() => {
-      S.pays[k] = { ...cur, full, at: new Date().toISOString(), by: this.me() };
-      this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['full', 'at', 'by'] });
+      S.pays[k] = { ...cur, full, fullAt, at: new Date().toISOString(), by: this.me() };
+      this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['full', 'fullAt', 'at', 'by'] });
       if (full) this.salesLog(d, 'ถือว่ารับครบ ' + stage);
       else this.salesLog(d, 'แก้แผนชำระ', stage + ' ยังค้างรับ');
     });
@@ -1782,9 +1800,12 @@ export class GccEngine {
    * gets the document's note; a stage with the user's note keeps it and only its date moves.
    * `info.replace` = the counted Actual document at that stage the new one replaces ("ใช้ยอดนี้แทน"): it
    * stays as evidence, no longer counted, and its stage note passes to the new one — so an installment
-   * is never counted twice. Without it, both add up ("นับเพิ่ม").
+   * is never counted twice. Without it, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
+   * receipt adds up with the new one too (else the document replaces it). Only a document counted as
+   * money received replaces anything. `info.kept`: the user kept their figure (`amount`) against the
+   * document's own (`detected`, "คงยอดเดิม").
    */
-  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string }) {
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean }) {
     if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
@@ -1802,11 +1823,12 @@ export class GccEngine {
       docNo: info.docNo.slice(0, 60), docDate: info.docDate, amount: info.amount, target: info.amount == null ? 'none' : info.target,
       detected: info.detected, basis: info.basis, stage, at, cAt, by: this.me(),
     };
+    if (info.kept && doc.amount != null) doc.kept = true;
     // fill the stage the document stands for when it is empty, or has only a planned date, and remember
     // the note so it can follow the document (edited amount, deleted document)
     const ad = info.docDate && info.docDate <= today ? info.docDate : today;
     // at a PAY stage only a counted payment completes it: a contract filed there is evidence, not money
-    const st = inList && (!isPayStage(S.cfg, stage) || doc.target === 'actual') ? stepOf(S, dealId, stage) : null;
+    const st = inList && (!isPayStage(S.cfg, stage) || countsActual(doc)) ? stepOf(S, dealId, stage) : null;
     const noted = !!st?.n.trim();
     if (st && !noted) doc.auto = { stage, n: this.autoNote(doc), d: ad };
     // keep the file in this browser first: it is uploaded to the team's Drive in the background
@@ -1822,7 +1844,9 @@ export class GccEngine {
       doc.fileId = r.fileId;
     }
     const k = `${dealId}/${id}`;
-    const old = info.replace ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    // a document that is not money received (no amount, not Actual) replaces nothing
+    const old = info.replace && countsActual(doc) ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    const pk = `${dealId}/${stage}`, pl = S.pays[pk];
     this.batchOps(() => {
       S.docs[k] = doc;
       this.op(keyOf.ddoc(dealId, id), { ...doc });
@@ -1834,6 +1858,11 @@ export class GccEngine {
       if (old && old.id !== id) {
         if (old.stage === stage && this.autoStillThere(old)) this.handOverAuto(old, S.docs[k], true);
         this.updateDoc(dealId, old.id, { target: 'none' });
+      }
+      // paid partly by hand, the rest with this receipt: both count
+      if (info.addHand && countsActual(doc) && pl?.rcv && !pl.add) {
+        S.pays[pk] = { ...pl, add: true, at, by: this.me() };
+        this.op(keyOf.dpay(dealId, stage), { ...S.pays[pk] }, { f: ['add', 'at', 'by'] });
       }
     });
     this.saveSales();
@@ -1868,12 +1897,21 @@ export class GccEngine {
     }
     this.setStep(from.deal, stage, { d: st.d, n: note }, true, true);
   }
+  /** Correct a document: its amount, what it counts toward, kind, number, date. A new amount is the
+   *  document's figure as the user reads it (a misread corrected, or "ใช้ยอดจากเอกสาร"), so it is no
+   *  longer one kept against the document. At a PAY stage a document that stops counting as money
+   *  received gives up the stage it completed (releaseAuto). */
   updateDoc(dealId: string, docId: string, patch: Partial<Pick<DealDoc, 'amount' | 'target' | 'basis' | 'kind' | 'docNo' | 'docDate'>>) {
     const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
     if (!doc || !d) return;
     const n: DealDoc = { ...doc, ...patch };
     if (n.amount == null) n.target = 'none';
-    const f = (Object.keys(n) as (keyof DealDoc)[]).filter((x) => JSON.stringify(n[x]) !== JSON.stringify(doc[x]));
+    if (patch.amount !== undefined && patch.amount !== doc.amount) {
+      n.detected = n.amount;
+      delete n.kept;
+    }
+    // (a field dropped, `kept`, is named too: a teammate's copy loses it as well)
+    const f = [...new Set([...Object.keys(n), ...Object.keys(doc)])].filter((x) => JSON.stringify(n[x as keyof DealDoc]) !== JSON.stringify(doc[x as keyof DealDoc]));
     if (!f.length) return;
     // Changing what it counts toward is a new confirmation (as a quotation it becomes the forecast), and
     // so is a new amount — except on an older quotation a newer one replaced: correcting that record
@@ -1886,7 +1924,12 @@ export class GccEngine {
       f.push('cAt');
     }
     const note = this.autoNote(n);
-    if (doc.auto && note !== doc.auto.n && this.autoStillThere(doc)) {
+    if (doc.auto && this.autoStillThere(doc) && this.payAuto(doc) && countsActual(doc) && !countsActual(n)) {
+      // no longer money received: the PAY stage it completed passes on, or is empty again
+      this.releaseAuto(doc);
+      delete n.auto;
+      f.push('auto');
+    } else if (doc.auto && note !== doc.auto.n && this.autoStillThere(doc)) {
       const st = stepOf(this.sales, dealId, doc.auto.stage);
       n.auto = { ...doc.auto, n: note };
       f.push('auto');
@@ -1897,21 +1940,31 @@ export class GccEngine {
     this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
     this.saveSales();
   }
+  /** Whether the stage note a document filled in is a PAY stage's (an installment, also an extra one). */
+  private payAuto(doc: DealDoc) {
+    return !!doc.auto && (isPayStage(this.sales.cfg, doc.auto.stage) || isExtraPay(this.sales.cfg, doc.auto.stage));
+  }
+  /** `doc` (deleted, or no longer counted) gives up the stage note it filled in, unless someone has
+   *  written in it since: another document for the same stage (a revised quotation, a second invoice)
+   *  takes the stage over — at a PAY stage only one counted as money received, as a contract filed
+   *  there or a replaced invoice never completes it — else the note goes (a date the user corrected
+   *  stays). `doc`'s own record is left to the caller. */
+  private releaseAuto(doc: DealDoc) {
+    if (!doc.auto || !this.autoStillThere(doc)) return;
+    const stage = doc.auto.stage, st = stepOf(this.sales, doc.deal, stage), pay = this.payAuto(doc);
+    const heir = docsOf(this.sales, doc.deal)
+      .filter((x) => x.id !== doc.id && x.stage === stage && (!pay || countsActual(x)))
+      .sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at))
+      .pop();
+    const userDate = doc.auto.d && st.d !== doc.auto.d ? st.d : '';
+    if (heir) this.handOverAuto(doc, heir);
+    else this.setStep(doc.deal, stage, { d: userDate, n: '' }, true, true);
+  }
   deleteDoc(dealId: string, docId: string) {
     const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
     if (!doc) return;
-    // The stage note it filled in goes with it, unless someone has written in it since. Another
-    // document for the same stage (a revised quotation, a second invoice) takes the stage over.
-    if (doc.auto && this.autoStillThere(doc)) {
-      const stage = doc.auto.stage, st = stepOf(this.sales, dealId, stage);
-      const heir = docsOf(this.sales, dealId)
-        .filter((x) => x.id !== doc.id && x.stage === stage)
-        .sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at))
-        .pop();
-      const userDate = doc.auto.d && st.d !== doc.auto.d ? st.d : ''; // a date the user corrected stays
-      if (heir) this.handOverAuto(doc, heir);
-      else this.setStep(dealId, stage, { d: userDate, n: '' }, true, true);
-    }
+    // the stage note it filled in goes with it, or passes to another document of that stage
+    this.releaseAuto(doc);
     delete this.sales.docs[k];
     this.op(keyOf.ddoc(dealId, docId));
     this.dropDocFile(doc);

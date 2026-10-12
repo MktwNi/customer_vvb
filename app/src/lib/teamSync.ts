@@ -9,7 +9,7 @@
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
+import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -489,6 +489,8 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
   if (row.del || row.v == null) {
     // a stage step a teammate cleared: what was written here since is new, kept on the empty step
     if (o.k.startsWith('dstep/')) return { v: withFields({ d: '', n: '' }, o) };
+    // a plan line written here as new (all its plan fields): not an edit of the one a teammate removed
+    if (o.k.startsWith('dpay/') && PLAN_FIELDS.every((x) => o.f!.includes(x))) return { v: withFields({}, o) };
     return { drop: true };
   }
   if (typeof row.v !== 'object') return null;

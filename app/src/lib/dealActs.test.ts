@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { canWriteKey } from './auth';
 import {
-  actStage, actsOf, docMismatch, emptySales, filterDeals, lastContact, lastContactInfo, mismatchText, newDeal, overdueDays, planOf, stageActs, toAct,
+  actStage, actsOf, docMismatch, emptySales, filterDeals, lastContact, lastContactInfo, mismatchText, newDeal, overdueDays, planOf, stageActs, toAct, toDoc,
   type Deal, type DealAct, type DealDoc, type SalesState,
 } from './sales';
 import { acFig, docFig, fcFig, lineFig } from './salesUi';
@@ -107,14 +107,22 @@ describe('a contact record (dact/<deal>/<id>)', () => {
 });
 
 describe('a document against the figure it backs', () => {
-  it('kept figure: the counted amount differs from the document\'s own (typed basis only)', () => {
-    expect(docMismatch(doc({ amount: 160000, detected: 160500, basis: 'manual' }))).toEqual({ doc: 160500, kept: 160000, diff: -500 });
-    expect(docMismatch(doc({ amount: 160500, detected: 160500, basis: 'manual' }))).toBeNull();
+  it('kept figure: the user kept theirs against the document\'s own ("คงยอดเดิม", stored as such)', () => {
+    expect(docMismatch(doc({ amount: 160000, detected: 160500, basis: 'manual', kept: true }))).toEqual({ doc: 160500, kept: 160000, diff: -500 });
+    expect(docMismatch(doc({ amount: 160500, detected: 160500, basis: 'manual', kept: true }))).toBeNull();
     // chosen from what the reader found (before VAT): the document's own figure, whatever `detected` says
     expect(docMismatch(doc({ amount: 150000, detected: 160500, basis: 'subtotal' }))).toBeNull();
-    expect(docMismatch(doc({ amount: 1, detected: null, basis: 'manual' }))).toBeNull();
+    expect(docMismatch(doc({ amount: 1, detected: null, basis: 'manual', kept: true }))).toBeNull();
+    // typed or picked without keeping: a misread corrected, a figure before VAT, what an older build
+    // stored (detected = the total read, basis manual) — the user's reading, not a mismatch
+    expect(docMismatch(doc({ amount: 100000, detected: 107000, basis: 'manual' }))).toBeNull();
+    expect(toDoc({ amount: 100000, detected: 107000, basis: 'manual', kept: true, target: 'forecast' }, 'x', 'q')!.kept).toBe(true);
+    expect(toDoc({ amount: 100000, detected: 107000, basis: 'manual', kept: 'yes', target: 'forecast' }, 'x', 'q')!.kept).toBeUndefined();
     expect(mismatchText(160500, 160000, 'แผน')).toBe('ยอดในเอกสาร 160,500 บาท ไม่ตรงกับแผน 160,000 บาท (ต่าง 500)');
-    expect(docFig(doc({ amount: 160000, detected: 160500, basis: 'manual' }))).toMatchObject({ kind: 'warn', word: 'ไม่ตรงเอกสาร' });
+    // an English word is set off with a space
+    expect(mismatchText(351000, 350000, 'Forecast ที่ใช้')).toBe('ยอดในเอกสาร 351,000 บาท ไม่ตรงกับ Forecast ที่ใช้ 350,000 บาท (ต่าง 1,000)');
+    expect(docFig(doc({ amount: 160000, detected: 160500, basis: 'manual', kept: true }))).toMatchObject({ kind: 'warn', word: 'ไม่ตรงเอกสาร' });
+    expect(docFig(doc({ amount: 160000, detected: 160500, basis: 'manual' }))).toMatchObject({ kind: 'ok', word: 'จากเอกสาร' });
     expect(docFig(doc({}))).toMatchObject({ kind: 'ok', word: 'จากเอกสาร', docNo: 'QT-1' });
   });
 
@@ -125,8 +133,8 @@ describe('a document against the figure it backs', () => {
     S.docs = { 'x/q': doc({ amount: 351000, detected: 351000, cAt: '2026-10-01T00:00:00.000Z' }) };
     expect(fcFig(S, d)).toMatchObject({ kind: 'ok', docNo: 'QT-1' });
     // kept: the quotation confirms the user's figure, the document says another
-    S.docs['x/q'] = doc({ amount: 350000, detected: 351000, basis: 'manual', cAt: '2026-10-01T00:00:00.000Z' });
-    expect(fcFig(S, d)).toMatchObject({ kind: 'warn', title: 'ใบเสนอราคา QT-1: ยอดในเอกสาร 351,000 บาท ไม่ตรงกับForecast ที่ใช้ 350,000 บาท (ต่าง 1,000)' });
+    S.docs['x/q'] = doc({ amount: 350000, detected: 351000, basis: 'manual', kept: true, cAt: '2026-10-01T00:00:00.000Z' });
+    expect(fcFig(S, d)).toMatchObject({ kind: 'warn', title: 'ใบเสนอราคา QT-1: ยอดในเอกสาร 351,000 บาท ไม่ตรงกับ Forecast ที่ใช้ 350,000 บาท (ต่าง 1,000)' });
     // typed after the quotation: the typed figure stands, and says the document disagrees
     S.docs['x/q'] = doc({ amount: 351000, detected: 351000, cAt: '2026-10-01T00:00:00.000Z' });
     S.deals.x = { ...d, fcAt: '2026-10-02T00:00:00.000Z' };
@@ -138,9 +146,9 @@ describe('a document against the figure it backs', () => {
   it('an installment and the Actual: the document at its stage, a kept figure first, a hand receipt, or the plan', () => {
     const d = deal({ id: 'x' });
     const S = state([d], { 'x/CLOSED DEAL': { d: '2026-10-01', n: 'YES' } });
-    const line = { amt: 160000, pct: 50, due: '', rel: 30, how: 'transfer' as const, howT: '', note: '', rcv: '', got: null, full: false, at: '', by: '' };
+    const line = { amt: 160000, pct: 50, due: '', rel: 30, how: 'transfer' as const, howT: '', note: '', rcv: '', got: null, full: false, fullAt: null, add: false, at: '', by: '' };
     S.pays = { 'x/PAY1': line, 'x/PAY2': { ...line, rcv: '2026-10-05' } };
-    S.docs = { 'x/r1': doc({ id: 'r1', kind: 'receipt', target: 'actual', stage: 'PAY1', docNo: 'RC-1', amount: 160000, detected: 160500, basis: 'manual' }) };
+    S.docs = { 'x/r1': doc({ id: 'r1', kind: 'receipt', target: 'actual', stage: 'PAY1', docNo: 'RC-1', amount: 160000, detected: 160500, basis: 'manual', kept: true }) };
     const L = planOf(S, d, TODAY)!.lines;
     expect(L[0]).toMatchObject({ got: 160000, status: 'paid' });
     expect(lineFig(L[0])).toMatchObject({ kind: 'warn' });

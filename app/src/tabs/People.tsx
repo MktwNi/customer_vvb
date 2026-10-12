@@ -6,7 +6,7 @@ import { norm } from '../lib/core';
 import { KIND_TH, docsOf, fmtMoney, dealMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
 import type { Company, LogEntry, Person, Task } from '../lib/types';
-import { CoAvatar } from '../components/CoAvatar';
+import { CoAvatar, monoSize } from '../components/CoAvatar';
 import { Modal } from '../components/Dialog';
 import { DoneBox, taskInfo } from './Plan';
 import { Notice, PageHead, Pager, labelCol } from '../components/ui';
@@ -25,7 +25,7 @@ export const logType = (t: string): [string, string] => {
 /** A person's picture: the first letter of the name (without คุณ / นาย / Dr …) on the light tint. */
 export function PersonAvatar({ p, size = 40, ring }: { p: Pick<Person, 'id' | 'name'>; size?: number; ring?: string }) {
   return (
-    <span className="pe-ava" aria-hidden="true" style={{ width: size, height: size, fontSize: Math.round(size * 0.42), boxShadow: ring ? `0 0 0 ${size >= 64 ? 4 : 2}px ${ring}` : undefined }}>
+    <span className="pe-ava" aria-hidden="true" style={{ width: size, height: size, fontSize: monoSize(size, 1), boxShadow: ring ? `0 0 0 ${size >= 64 ? 4 : 2}px ${ring}` : undefined }}>
       {personInitial(p.name)}
     </span>
   );

@@ -51,8 +51,9 @@ export interface DocCheck { what: string; value: number }
 /** What the attach ended with: the document's own figure, and whether the user kept theirs instead. */
 export interface DocSaved { doc: DealDoc; docFig: number | null; kept: boolean }
 /** Where an attach comes from: the figure it backs presets what it counts toward (`target`) and what it
- *  is checked against (`check`; without it the stage's figure is used, see DocAttach). */
-export interface AttachMore { target?: DocTarget; check?: DocCheck; onSaved?: (r: DocSaved) => void }
+ *  is checked against (`check`; without it the stage's figure is used, see DocAttach); `add`: more for a
+ *  part-paid installment ("แนบใบเสร็จเพิ่ม"), so it adds to what came in unless the user picks "ใช้ยอดนี้แทน". */
+export interface AttachMore { target?: DocTarget; check?: DocCheck; add?: boolean; onSaved?: (r: DocSaved) => void }
 const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
 
 /**
@@ -65,7 +66,7 @@ const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', sub
  * typed Actual): when they differ the user chooses "ใช้ยอดจากเอกสาร" or "คงยอดเดิม" (the document is
  * attached either way, and a kept figure shows "ไม่ตรงเอกสาร"). Nothing changes silently, nothing blocks saving.
  */
-export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, target: target0, check, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
+export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, target: target0, check, add: add0, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const cfg = e.sales.cfg, today = todayISO();
@@ -85,8 +86,9 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
   const [docNo, setDocNo] = useState('');
   const [docDate, setDocDate] = useState('');
   const [saving, setSaving] = useState('');
-  // a document already counted at this stage: the new one replaces it (kept as evidence) or adds to it
-  const [mode, setMode] = useState<'replace' | 'add'>('replace');
+  // a document (or a hand receipt) already counted at this stage: the new one replaces it (kept as
+  // evidence) or adds to it
+  const [mode, setMode] = useState<'replace' | 'add'>(add0 ? 'add' : 'replace');
   // "ถือว่ารับครบงวดนี้" on a short payment: null = as suggested (ticked when it matches withholding tax)
   const [full, setFull] = useState<boolean | null>(null);
   // the document's figure differs from the one it should match: keep the user's ("คงยอดเดิม")
@@ -183,11 +185,15 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
   const badAmt = parsed === undefined;
   const counted = stage && target === 'actual' ? countedAt(e.sales, deal, stage) : [];
   const old = counted[counted.length - 1];
-  const replace = old && mode === 'replace' ? old.id : undefined;
   const tgt: DocTarget = amt == null ? 'none' : target;
+  // only money received (Actual, with an amount) replaces what is counted
+  const replace = old && mode === 'replace' && tgt === 'actual' ? old.id : undefined;
   // the installment planned at this stage, and the stage's circle
   const line = stage ? planOf(e.sales, deal, today)?.lines.find((l) => l.stage === stage) : undefined;
   const st = stage ? stageTrack(e.sales, deal, today).states[stage] : undefined;
+  // part paid by hand with no document yet: this one is the receipt for that money, or for the rest
+  const handPart = !!line && line.hand && !line.docs.length && line.status === 'part' && target === 'actual';
+  const addHand = handPart && mode === 'add' && tgt === 'actual';
   // the figure this document should match: given by the figure it was attached from, else the typed
   // Forecast, the installment's plan (or what was received by hand), or the typed Actual
   const m0 = dealMoney(e.sales, deal);
@@ -195,14 +201,14 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
     check ? check
     : tgt === 'forecast' ? (!m0.fcDoc && m0.forecast != null ? { what: 'Forecast ที่พิมพ์ไว้', value: m0.forecast } : null)
     : tgt !== 'actual' ? null
-    : line ? (line.hand ? { what: 'ยอดที่รับ', value: line.got } : line.amt > 0 ? (old && mode === 'add' ? { what: 'ยอดที่ยังขาดตามแผน', value: Math.max(0, line.amt - line.got) } : { what: 'แผน', value: line.amt }) : null)
+    : line ? (line.hand && !line.docs.length && !addHand ? { what: 'ยอดที่รับ', value: line.got } : line.amt > 0 ? ((old || handPart) && mode === 'add' ? { what: 'ยอดที่ยังขาดตามแผน', value: Math.max(0, line.amt - line.got) } : { what: 'แผน', value: line.amt }) : null)
     : !m0.acDocs && !m0.hand && deal.actual != null ? { what: 'Actual ที่พิมพ์ไว้', value: deal.actual } : null;
   const same = !!chk && amt != null && Math.abs(amt - chk.value) < 0.005;
   const differs = !!chk && amt != null && !same && tgt !== 'none';
   // the figure confirmed: the document's, or the user's own when they keep it (the document is attached either way)
   const fin = differs && keep ? chk!.value : amt;
   // what attaching changes: the installment of the plan, the Actual, and whether the job becomes ready to close
-  const pv = file && fin != null && tgt !== 'none' ? attachPreview(e.sales, deal, { kind, amount: fin, target: tgt, docDate, stage, replace }, today) : null;
+  const pv = file && fin != null && tgt !== 'none' ? attachPreview(e.sales, deal, { kind, amount: fin, target: tgt, docDate, stage, replace, addHand }, today) : null;
   const short = !!pv?.line && pv.short > 0 && pv.line.got > 0;
   const fullOn = short && (full ?? pv?.wht != null);
   const ad = docDate && docDate <= today ? docDate : today;
@@ -210,7 +216,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
     ? ''
     : [
         pv.line
-          ? `หลังแนบ: ${pv.stage} รับแล้ว ${fmtMoney(pv.line.got)} บาท · ${pv.short > 0 ? `ขาด ${fmtMoney(pv.short)} จากแผน ${fmtMoney(pv.line.amt)}` : 'ครบตามแผน'}`
+          ? `หลังแนบ: ${pv.stage} รับแล้ว ${fmtMoney(pv.line.got)} บาท · ${pv.short > 0 ? `ขาด ${fmtMoney(pv.short)} จากแผน ${fmtMoney(pv.line.amt)}` : pv.line.amt > 0 && pv.line.got > pv.line.amt ? `รับเกินแผน ${fmtMoney(pv.line.got - pv.line.amt)}` : 'ครบตามแผน'}`
           : tgt === 'forecast'
             ? `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Forecast จะเป็น ${fmtMoney(fin)}`
             : `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Actual จะเป็น ${fmtMoney(pv.actual)}${pv.fcFull ? ' (ครบตาม Forecast)' : ''}`,
@@ -224,7 +230,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
       const was = closeReady(e.sales, deal, today);
       const kept = differs && keep;
       // `detected` keeps the document's own figure: a kept one differs from it ("ไม่ตรงเอกสาร", docMismatch)
-      const doc = await e.attachDoc(deal.id, file, { kind, amount: fin, target: tgt, basis: amt == null || kept ? 'manual' : basis, detected: amt, docNo, docDate, stage, replace });
+      const doc = await e.attachDoc(deal.id, file, { kind, amount: fin, target: tgt, basis: amt == null || kept ? 'manual' : basis, detected: amt, docNo, docDate, stage, replace, addHand, kept });
       // a short payment counted complete (withholding tax): the installment is received
       if (fullOn && doc.stage) e.setPayFull(deal.id, doc.stage, true);
       onClose();
@@ -357,6 +363,13 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
                 <label className="hv-tx"><input type="radio" name="xchk" checked={keep} onChange={() => setKeep(true)} /> คงยอดเดิม <b>{fmtMoney(chk.value)}</b> <span className="t-meta">แนบไว้ ขึ้นว่าไม่ตรงเอกสาร</span></label>
               </fieldset>
             )
+          )}
+          {handPart && amt != null && tgt === 'actual' && (
+            <fieldset className="sl-repl">
+              <legend>{stage} บันทึกรับเงินเองไว้ {fmtMoney(line!.got)} บาท ยังไม่มีเอกสาร</legend>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'replace'} onChange={() => setMode('replace')} /> ใช้ยอดนี้แทน <span className="t-meta">ใบนี้เป็นใบเสร็จของเงินก้อนนั้น</span></label>
+              <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'add'} onChange={() => setMode('add')} /> นับเพิ่ม <span className="t-meta">ใบนี้คือส่วนที่เหลือ รวมกับยอดที่บันทึกไว้</span></label>
+            </fieldset>
           )}
           {old && amt != null && (
             <fieldset className="sl-repl">

@@ -1,7 +1,7 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
 import { daysBetween, dmTh, localDay } from './format';
 import {
-  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, beYear, closeReady, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
+  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
 } from './sales';
 
@@ -113,18 +113,25 @@ export function lineMeta(l: Pick<PayLine, 'pct' | 'how' | 'howT' | 'note'>) {
   const how = l.how ? HOW_TH[l.how] + (l.howT ? ' ' + l.howT : '') : l.howT;
   return [l.pct != null ? l.pct + '%' : '', how, l.note].filter(Boolean).join(' · ');
 }
+/** What came in beyond an installment's plan (a document's figure used over the plan): 0 when none. */
+export const overPlan = (l: Pick<LineView, 'got' | 'amt'>) => (l.amt > 0 && l.got > l.amt ? Math.round((l.got - l.amt) * 100) / 100 : 0);
 /** The plan total against the Forecast (shown, never enforced). */
 export function diffText(P: Pick<PlanView, 'base' | 'diff'>) {
   if (P.base == null || P.diff == null) return 'ยังไม่มี Forecast';
   return !P.diff ? 'เท่ากับ Forecast' : P.diff < 0 ? `น้อยกว่า Forecast ${fmtMoney(-P.diff)}` : `มากกว่า Forecast ${fmtMoney(P.diff)}`;
 }
 /** An installment's status: the word (a tinted chip for เลยกำหนด / ถึงกำหนด, else a dot + word) and the
- *  line under it ("รับ 19 ต.ค. · RC-2569-118", "78,000 จาก 80,250", "ครบกำหนด 11 ต.ค.", "อีก 12 วัน", …). */
+ *  line under it ("รับ 19 ต.ค. · RC-2569-118", "รับเกินแผน 35,500", "78,000 จาก 80,250", "ครบกำหนด 11 ต.ค.", …). */
 export function lineStatusView(l: LineView, today: string): { kind: StatusKind | 'muted'; word: string; chip: boolean; sub: string } {
   const by = (kind: StatusKind | 'muted', word: string, sub: string, chip = false) => ({ kind, word, chip, sub });
   switch (l.status) {
     case 'paid':
-      return by('ok', PAY_STATUS_TH.paid, [l.rcvDate ? 'รับ ' + dmTh(l.rcvDate) : '', l.doc ? 'จากเอกสาร ' + (l.doc.docNo || KIND_TH[l.doc.kind]) : 'บันทึกเอง', l.got < l.amt ? fmtMoney(l.got) + ' (ถือว่าครบ)' : ''].filter(Boolean).join(' · '));
+      return by('ok', PAY_STATUS_TH.paid, [
+        l.rcvDate ? 'รับ ' + dmTh(l.rcvDate) : '',
+        l.doc ? 'จากเอกสาร ' + (l.doc.docNo || KIND_TH[l.doc.kind]) + (l.hand ? ' และบันทึกเอง' : '') : 'บันทึกเอง',
+        l.got < l.amt ? fmtMoney(l.got) + ' (ถือว่าครบ)' : '',
+        overPlan(l) ? 'รับเกินแผน ' + fmtMoney(overPlan(l)) : '',
+      ].filter(Boolean).join(' · '));
     case 'part':
       return by('warn', PAY_STATUS_TH.part, `${fmtMoney(l.got)} จาก ${fmtMoney(l.amt)}` + (l.lateDays ? ` · เลยกำหนด ${l.lateDays} วัน` : ''));
     case 'late':
@@ -183,6 +190,20 @@ export function lineFig(l: LineView): FigView {
   if (bad || l.doc) return docFig(bad || l.doc!, 'ยอดที่นับ');
   if (l.hand) return fig('hand', 'บันทึกเอง', 'รับเงินแล้วโดยไม่มีเอกสาร แนบใบเสร็จเพื่อตรวจยอด');
   return fig('typed', 'ตามแผน', 'ยอดตามแผน แนบใบแจ้งหนี้หรือใบเสร็จเพื่อตรวจยอด');
+}
+
+/** The figure a money stage's documents give, where the stage sits under Forecast / Actual (table child
+ *  row, phone card): at QUOTATION the quotation the Forecast comes from (else the newest confirmed one);
+ *  at a PAY stage the documents counted there (their sum, named by the latest). Never a revised,
+ *  replaced or uncounted document; null when there is none. */
+export function stageFig(s: SalesState, d: Deal, p: string): { doc: DealDoc; sum: number; n: number } | null {
+  if (p === QUOTE_STAGE) {
+    const m = dealMoney(s, d);
+    const q = m.fcDoc?.stage === p ? m.fcDoc : docsOf(s, d.id).filter((x) => x.stage === p && x.target === 'forecast' && x.amount != null).sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at)).pop();
+    return q ? { doc: q, sum: q.amount!, n: 1 } : null;
+  }
+  const c = countedAt(s, d, p);
+  return c.length ? { doc: c[c.length - 1], sum: c.reduce((a, x) => a + (x.amount || 0), 0), n: c.length } : null;
 }
 
 /** The closing card's title (panel, table closing row, phone card). */

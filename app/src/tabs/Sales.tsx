@@ -6,14 +6,14 @@ import {
   overdueDays, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, salesStats, sectionsFor, stageActs, stageDocs, stageTh, stageTrack, stepOf,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type SalesFilter, type SalesState, type StageState,
 } from '../lib/sales';
-import { acFig, actualSource, beYearInput, closingView, facetOptions, fcFig, lineMeta, lineStatusView, nextStepView, relText, shortName, statusView, yearOptions, type FigView } from '../lib/salesUi';
+import { acFig, actualSource, beYearInput, closingView, facetOptions, fcFig, lineMeta, lineStatusView, nextStepView, overPlan, relText, shortName, stageFig, statusView, yearOptions, type FigView } from '../lib/salesUi';
 import { useMedia } from '../components/Sidebar';
 import { Kpi, Notice, Opts, PageHead, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
 import { Icon } from '../components/icons';
 import { Modal } from '../components/Dialog';
 import { DocAttach, openDocFile, type AttachMore } from '../components/DocAttach';
-import { ActForm, ActList, ActStageSel, ActTypeSeg, useActForm } from '../components/DealActs';
+import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } from '../components/DealActs';
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
@@ -559,6 +559,25 @@ function TableView({ e, S, deals, base, all, facets, today }: { e: Engine; S: Sa
   }, [openSec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const headH = () => parseFloat(getComputedStyle(cardRef.current || document.documentElement).getPropertyValue('--sl-head-h')) || 52;
+  // a row's date popover or ⋯ menu closes once its row scrolls under the stuck headings and band: it
+  // would paint over them (the headings never show a row's content). The keyboard stays on its button.
+  useEffect(() => {
+    if (!menu && !pop) return;
+    const onScroll = () => {
+      const btn = document.querySelector<HTMLElement>(menu ? `.sl-more[aria-expanded="true"]` : `[data-pop="${CSS.escape(pop)}"]`);
+      if (!btn) return;
+      const box = scroller();
+      const line = (box ? box.getBoundingClientRect().top : 0) + stickyTop() + (mobile ? 0 : headH() + 48);
+      if (btn.getBoundingClientRect().bottom > line) return;
+      const inside = !!document.activeElement?.closest('.sl-menu, .sl-pop');
+      setMenu('');
+      setPop('');
+      if (inside) btn.focus({ preventScroll: true });
+    };
+    // capture: the app window's scroller does not bubble its scroll
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', onScroll, { capture: true });
+  }, [menu, pop, mobile]); // eslint-disable-line react-hooks/exhaustive-deps
   const allCol = visible.length > 0 && visible.every((x) => ui.slCollapsed[x]);
   const toggleAll = () => set({ slCollapsed: allCol ? {} : { ...ui.slCollapsed, ...Object.fromEntries(visible.map((x) => [x, 1 as const])) } });
   /** Fold or unfold a section. Folding from a stuck bar first brings the section's start up to where the
@@ -1055,8 +1074,10 @@ function MoneyAc({ d }: { d: Deal }) {
     );
   // what needs a look first: a document that disagrees, then what is still owed, then where it comes from
   const owe = r === 'YES' && m.actual != null && m.forecast != null && m.actual < m.forecast;
+  // still owed on a typed Actual: "ค้าง x", and on hover the attach, as for any typed figure
   const sub =
     v.kind === 'warn' ? <FigSub v={v} />
+    : owe && v.kind === 'typed' && att ? <FigSub v={{ ...v, word: 'ค้าง ' + fmtMoney(m.forecast! - m.actual!), title: `Actual พิมพ์เอง · ค้าง ${fmtMoney(m.forecast! - m.actual!)} บาท แนบใบเสร็จเพื่อตรวจยอด` }} onAttach={att} />
     : owe ? <small>ค้าง {fmtMoney(m.forecast! - m.actual!)}</small>
     : v.kind === 'ok' ? <FigSub v={v} />
     : r === 'YES' && m.actual != null && !ps.left.length ? <small className="ok">รับครบ</small>
@@ -1212,7 +1233,6 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
   const reached = reachedOf(stages, t.states);
   const P = planOf(S, d, today), won = t.result === 'YES';
   const late = overdueDays(S, d, today) != null;
-  const by = stageDocs(S, d).by;
   const cv = closingView(S, d, today);
   const ps = payState(S, d, today);
   return (
@@ -1247,7 +1267,8 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         const on1 = !extra && i <= reached, on2 = !extra && i < reached;
         const dash1 = on1 && st === 'planned', dash2 = on2 && t.states[stages[i + 1]] === 'planned';
         const fut = (st === 'future' || st === 'off') && !isNow && !editing && !line;
-        const unused = !!P && won && isPayStage(S.cfg, p) && !line;
+        // a PAY stage the plan does not use (one done on its own, paid the old way, reads as its step)
+        const unused = !!P && won && isPayStage(S.cfg, p) && !line && t.states[p] === 'off';
         const cls = ['sl-kid og', on1 && 'on1', on2 && 'on2', dash1 && 'dash1', dash2 && 'dash2', (st === 'off' || unused) && 'off', (fut || unused) && 'fut', editing && 'editing', line && 'pk'].filter(Boolean).join(' ');
         const nameCell = (
           <th scope="row" className="k-name">
@@ -1332,9 +1353,9 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         let money: ReactNode = null;
         const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p);
         if (isMoney && st !== 'off') {
-          const doc = (by[p] || []).find((x) => x.amount != null);
-          const slot = !doc && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
-          money = doc ? <DocAmount doc={doc} /> : slot ? (
+          const fig = stageFig(S, d, p);
+          const slot = !fig && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
+          money = fig ? <StageAmount fig={fig} /> : slot ? (
             <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={p === QUOTE_STAGE ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${p}`}>
               แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}
             </button>
@@ -1411,7 +1432,7 @@ function ActRow({ a, under }: { a: DealAct; under?: boolean }) {
       <td className="k-st"><span className="sl-st-m" title={'บันทึกโดย ' + (a.by || 'ไม่ระบุชื่อ')}>{a.by}</span></td>
       <td className="k-act">
         {e.canDelAct(a) && (
-          <button type="button" className="sl-kedit quiet" onClick={() => window.confirm(`ลบการติดต่อนี้? (${ACT_TH[a.type]} ${isoTh(a.d)})`) && e.delAct(a.deal, a.id)} aria-label={`ลบการติดต่อ ${ACT_TH[a.type]} ${isoTh(a.d)}`}>ลบ</button>
+          <button type="button" className="sl-kedit quiet" data-del-act={a.deal + '/' + a.id} onClick={(ev) => delActFocus(e, a, ev.currentTarget)} aria-label={`ลบการติดต่อ ${ACT_TH[a.type]} ${isoTh(a.d)}`}>ลบ</button>
         )}
       </td>
     </tr>
@@ -1433,7 +1454,7 @@ function ActRows({ d }: { d: Deal }) {
       <tr id={`k-${d.id}-acts`} className="sl-kid og sl-kact-h">
         <td className="k-chev" />
         <th scope="row" className="k-name">
-          <span className="sl-kn"><b>การติดต่อ</b><span>{list.length ? `เพิ่ม ${list.length} ครั้ง` : 'ยังไม่มีบันทึกเพิ่ม'}</span></span>
+          <span className="sl-kn"><b>การติดต่อ</b><span>{list.length ? `ติดต่อเพิ่ม ${list.length} ครั้ง` : 'ยังไม่มีบันทึกเพิ่ม'}</span></span>
         </th>
         <td className="sl-knote" colSpan={3}>
           {!ro && !adding && (
@@ -1561,6 +1582,20 @@ function DocAmount({ doc }: { doc: DealDoc }) {
   );
 }
 
+/** A money stage's figure (stageFig): one document as DocAmount, several counted at a PAY stage as their
+ *  sum, named by the latest. */
+function StageAmount({ fig }: { fig: NonNullable<ReturnType<typeof stageFig>> }) {
+  const { e } = useTk();
+  if (fig.n === 1) return <DocAmount doc={fig.doc} />;
+  const name = fig.doc.docNo || KIND_TH[fig.doc.kind];
+  return (
+    <>
+      <button type="button" className="sl-amt hv-tx" onClick={() => openDocFile(e, fig.doc)} title={`${fig.n} ใบรวม ${fmtMoney(fig.sum)} บาท · ล่าสุด ${name} เปิดไฟล์`}>{fmtMoney(fig.sum)}</button>
+      <span className="sl-dno">{name} และอีก {fig.n - 1} ใบ</span>
+    </>
+  );
+}
+
 /** ได้งาน / ไม่ได้งาน / รอผล: saves the result at once (ผลการขาย is not ปิดงาน). */
 function ResultSeg({ d, state, big, date }: { d: Deal; state: StageState; big?: boolean; date?: string }) {
   const { e, today, acts } = useTk();
@@ -1617,7 +1652,7 @@ function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, 
   const acts = !won || ro || !next ? null : x.status === 'part' ? (
     <span className="sl-pk-b">
       <button type="button" className="btn xs" onClick={() => { const r = tk.e.setPayFull(d.id, x.stage, true); if (r) tk.acts.prompt(d, 'payment'); else tk.acts.say(`ถือว่ารับครบ ${x.stage} แล้ว`); }}>ถือว่ารับครบ</button>
-      <button type="button" className="lnk" onClick={() => tk.attach(d, x.stage)}>แนบใบเสร็จเพิ่ม</button>
+      <button type="button" className="lnk" onClick={() => tk.attach(d, x.stage, undefined, { add: true })}>แนบใบเสร็จเพิ่ม</button>
     </span>
   ) : x.status !== 'paid' ? (
     <span className="sl-pk-b">
@@ -1638,9 +1673,14 @@ function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, 
     ) : (
       <span className="sl-kdate mut">ยังไม่กำหนด</span>
     );
+  const over = overPlan(x);
   const money =
     x.status === 'paid' ? (
-      x.doc ? <DocAmount doc={x.doc} /> : <><span className="sl-amt">{fmtMoney(x.got)}</span><span className="sl-dno">รับเอง{x.line.how ? ' · ' + lineMeta({ pct: null, how: x.line.how, howT: '', note: '' }) : ''}</span></>
+      // more than planned (a document's figure used over the plan), or from several sources: the total, and what it is
+      over ? <><span className="sl-amt">{fmtMoney(x.got)}</span><span className="sl-dno warn" title={`แผน ${fmtMoney(x.amt)} บาท`}>เกินแผน {fmtMoney(over)}</span></>
+      : x.doc && (x.hand || x.docs.length > 1) ? <><span className="sl-amt">{fmtMoney(x.got)}</span><span className="sl-dno">{x.hand ? 'เอกสาร + รับเอง' : `${x.docs.length} ใบ`}</span></>
+      : x.doc ? <DocAmount doc={x.doc} />
+      : <><span className="sl-amt">{fmtMoney(x.got)}</span><span className="sl-dno">รับเอง{x.line.how ? ' · ' + lineMeta({ pct: null, how: x.line.how, howT: '', note: '' }) : ''}</span></>
     ) : x.status === 'part' ? (
       <><span className="sl-amt warn">{fmtMoney(x.got)}</span><span className="sl-dno">จาก {fmtMoney(x.amt)}</span></>
     ) : (
@@ -1755,7 +1795,7 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
     <>
       <td className="sl-knote" colSpan={3} ref={(el) => void (ed.box.current = el?.closest('tr') || null)}>
         <span className="sl-qaw">
-          <span className="sl-qa-row">
+          <span className={'sl-qa-row' + (stage === DEAL_STAGE ? ' yn' : '')}>
             {stage === DEAL_STAGE && <ResultButtons state="" label={'ผลการขาย ' + shortName(d.client)} onPick={ed.result} />}
             <input
               ref={input}
@@ -1893,7 +1933,6 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
   const reached = reachedOf(stages, t.states);
   const P = planOf(S, d, today), won = t.result === 'YES';
   const late = overdueDays(S, d, today) != null;
-  const by = stageDocs(S, d).by;
   const cv = closingView(S, d, today);
   const ps = payState(S, d, today);
   return (
@@ -1918,8 +1957,8 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
         const editing = p === editStage && !ro && !extra;
         const on = !extra && i < reached, dash = on && t.states[stages[i + 1]] === 'planned';
         const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p);
-        const doc = (by[p] || []).find((x) => x.amount != null);
-        const unused = !!P && won && isPayStage(S.cfg, p) && !pl;
+        const fig = isMoney ? stageFig(S, d, p) : null;
+        const unused = !!P && won && isPayStage(S.cfg, p) && !pl && t.states[p] === 'off';
         const fut = (st === 'future' || st === 'off' || unused) && !isNow && !(pl && won);
         let right: ReactNode = s.d && !editing && !pl ? <span className="sl-kdate">{st === 'planned' ? 'นัด ' : ''}{dmTh(s.d)}</span> : null;
         if (pl && !editing) {
@@ -1930,11 +1969,11 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
               {sv.kind === 'muted' ? <span className="sl-st-m">{sv.word}</span> : sv.chip ? <span className={'chip ' + sv.kind}>{sv.word}</span> : <Status kind={sv.kind}>{sv.word}</Status>}
             </>
           );
-        } else if (isMoney && st !== 'off' && !editing && !unused && (doc || (p === QUOTE_STAGE && (isNow || st === 'done')) || (won && isNow)))
+        } else if (isMoney && st !== 'off' && !editing && !unused && (fig || (p === QUOTE_STAGE && (isNow || st === 'done')) || (won && isNow)))
           right = (
             <>
               {right}
-              {doc ? <DocAmount doc={doc} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+              {fig ? <StageAmount fig={fig} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
             </>
           );
         let body: ReactNode =
@@ -1948,7 +1987,7 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
             <>
               {body}
               <p className="sl-mk-plan">
-                {pl.status === 'paid' ? `รับ ${dmTh(pl.rcvDate)}${pl.doc ? ' · ' + (pl.doc.docNo || KIND_TH[pl.doc.kind]) : ''}` : pl.status === 'draft' ? (pl.line.due ? dmTh(pl.line.due) : relText(pl.line)) : pl.due ? (pl.lateDays ? <><span className="t-bad">เลยกำหนด {pl.lateDays} วัน</span> · ครบกำหนด {dmTh(pl.due)}</> : `ครบกำหนด ${dmTh(pl.due)}`) : 'ยังไม่กำหนดวัน'}
+                {pl.status === 'paid' ? `รับ ${dmTh(pl.rcvDate)}${pl.doc ? ' · ' + (pl.doc.docNo || KIND_TH[pl.doc.kind]) : ''}${overPlan(pl) ? ' · รับเกินแผน ' + fmtMoney(overPlan(pl)) : ''}` : pl.status === 'draft' ? (pl.line.due ? dmTh(pl.line.due) : relText(pl.line)) : pl.due ? (pl.lateDays ? <><span className="t-bad">เลยกำหนด {pl.lateDays} วัน</span> · ครบกำหนด {dmTh(pl.due)}</> : `ครบกำหนด ${dmTh(pl.due)}`) : 'ยังไม่กำหนดวัน'}
                 {lineMeta({ ...pl.line, pct: null }) ? ' · ' + lineMeta({ ...pl.line, pct: null }) : ''}
               </p>
             </>
@@ -1964,7 +2003,11 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
                 ) : (
                   <button type="button" className="btn xs" onClick={() => tk.openPanel(d.id, `recv:${p}`)}>รับเงินแล้ว</button>
                 )}
-                <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบใบเสร็จ</button>
+                {pl.status === 'part' ? (
+                  <button type="button" className="lnk" onClick={() => tk.attach(d, p, undefined, { add: true })}>แนบใบเสร็จเพิ่ม</button>
+                ) : (
+                  <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบใบเสร็จ</button>
+                )}
               </span>
             </>
           );
@@ -1996,7 +2039,7 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
         <div className={'sl-mk sl-mk-acts' + (adding ? ' editing' : '')} role="listitem">
           <span className="sl-mk-dot" aria-hidden="true" />
           <div className="sl-mk-t">
-            <div><b>การติดต่อ</b><span>{allActs.length ? `เพิ่ม ${allActs.length} ครั้ง` : 'ยังไม่มีบันทึกเพิ่ม'}</span></div>
+            <div><b>การติดต่อ</b><span>{allActs.length ? `ติดต่อเพิ่ม ${allActs.length} ครั้ง` : 'ยังไม่มีบันทึกเพิ่ม'}</span></div>
             <ActList acts={allActs} max={3} stage short label={'การติดต่อของ ' + shortName(d.client)} />
             {adding ? (
               <ActForm d={d} stage={tk.edit!.stage || undefined} onDone={actDone} compact />

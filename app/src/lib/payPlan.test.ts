@@ -4,14 +4,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  attachPreview, attachStage, closeReady, countedAt, dealMoney, dueOf, emptySales, filterDeals, hasPlan, isExtraPay, kindForStage, lastContactInfo, lineView, newDeal, overdueDays,
+  PLAN_FIELDS, attachPreview, attachStage, closeReady, countedAt, dealMoney, dueOf, emptySales, filterDeals, hasPlan, isExtraPay, kindForStage, lastContactInfo, lineView, newDeal, overdueDays,
   payDue, payStageFor, payStages, payState, planCsv, planLines, planOf, quickMatch, receivables, salesStats, splitAmounts, stageDocs, stageTh, stageTrack, targetForStage, toPay,
   trackerStatus, whtRate, wonDate, type DealDoc, type PayLine, type SalesState,
 } from './sales';
 import { applyRow, isLocalOnly, keyOf, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
 const TODAY = '2026-10-08';
-const L = (p: Partial<PayLine> = {}): PayLine => ({ amt: null, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', rcv: '', got: null, full: false, at: '', by: '', ...p });
+const L = (p: Partial<PayLine> = {}): PayLine => ({ amt: null, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', rcv: '', got: null, full: false, fullAt: null, add: false, at: '', by: '', ...p });
 let docN = 0;
 /** A deal "x" with stage steps, documents and plan lines; `stages` replaces the list. */
 function mk(o: { steps?: Record<string, string | [string, string]>; docs?: Partial<DealDoc>[]; pays?: Record<string, Partial<PayLine>>; stages?: string[]; forecast?: number | null } = {}) {
@@ -405,7 +405,13 @@ describe('the dpay record in team sync', () => {
     const theirs = L({ amt: 1000, rcv: '2026-10-01', got: 900 });
     expect(rebaseOp({ seq: 9, k: 'dpay/x/PAY1', v: theirs, del: false, by: 'B', at: '' }, { k: 'dpay/x/PAY1', v: mine, f: ['note'] })).toEqual({ v: { ...theirs, note: 'แก้โน้ต' } });
     expect(rebaseOp({ seq: 9, k: 'dpay/x/PAY1', v: null, del: true, by: 'B', at: '' }, { k: 'dpay/x/PAY1', v: mine, f: ['note'] })).toEqual({ drop: true });
-    // a new line (whole record) stands
+    // a whole record (a backup's) stands
     expect(rebaseOp({ seq: 9, k: 'dpay/x/PAY1', v: theirs, del: false, by: 'B', at: '' }, { k: 'dpay/x/PAY1', v: mine })).toBeNull();
+    // a line written here as new (all its plan fields) lays its terms over the teammate's line, which
+    // keeps what was received on it; over their deletion it is a new line, not an edit, and stays
+    const f = [...PLAN_FIELDS, 'at', 'by'];
+    expect(rebaseOp({ seq: 9, k: 'dpay/x/PAY1', v: theirs, del: false, by: 'B', at: '' }, { k: 'dpay/x/PAY1', v: mine, f })).toEqual({ v: { ...theirs, note: 'แก้โน้ต' } });
+    const kept = rebaseOp({ seq: 9, k: 'dpay/x/PAY1', v: null, del: true, by: 'B', at: '' }, { k: 'dpay/x/PAY1', v: mine, f }) as { v: unknown };
+    expect(toPay(kept.v)).toMatchObject({ amt: 1000, note: 'แก้โน้ต', rcv: '', got: null });
   });
 });

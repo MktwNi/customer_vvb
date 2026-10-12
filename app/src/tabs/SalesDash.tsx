@@ -252,7 +252,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           </div>
           <div className="sd-act-n">
             <b>{fmtN(weekN)}</b>
-            <span>ครั้ง<br />ขั้นตอนที่ลงวันที่ในตาราง (ถึงวันนี้)</span>
+            <span>ครั้ง<br />ขั้นตอนและการติดต่อที่บันทึก (ถึงวันนี้)</span>
           </div>
           <div className="sd-cols" role="list" aria-label="จำนวนครั้งรายวัน" onMouseLeave={() => setHover(null)}>
             {days.map((d, i) => {
@@ -343,8 +343,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             </span>
             <span className="sd-wk-nav">
               <button aria-disabled={wk === 0} className={wk === 0 ? 'off' : ''} onClick={() => { if (wk !== 0) { setWk(0); nextRef.current?.focus(); } }}>สัปดาห์นี้</button>
-              <button aria-label="สัปดาห์ก่อน" onClick={() => setWk(wk - 1)}><span className="sd-arr" aria-hidden="true" /></button>
-              <button ref={nextRef} aria-label="สัปดาห์ถัดไป" onClick={() => setWk(wk + 1)}><span className="sd-arr r" aria-hidden="true" /></button>
+              <button onClick={() => setWk(wk - 1)}>สัปดาห์ก่อน</button>
+              <button ref={nextRef} onClick={() => setWk(wk + 1)}>สัปดาห์ถัดไป</button>
             </span>
           </div>
           <div className="sd-wk" role="table" aria-label="นัดหมายรายวัน">
@@ -435,7 +435,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
                   </span>
-                  {od != null ? <span className="sd-od">{fmtN(od)} วัน</span> : <span className="sd-ok" title="ยังไม่ค้าง" aria-label="ยังไม่ค้าง"><Icon name="check" size={12} /></span>}
+                  {od != null && <span className="sd-od">{fmtN(od)} วัน</span>}
                 </button>
               );
             })}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySales, filterDeals, newDeal, planOf, salesStats, type Deal, type PayLine, type SalesState } from './sales';
 import {
-  actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, facetOptions, lineMeta, lineStatusView, nextStepView, relText, shortName, statusView, winRateBySource, yearOptions,
+  actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, facetOptions, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, winRateBySource, yearOptions,
 } from './salesUi';
 
 const deal = (p: Partial<Deal> = {}): Deal => newDeal({ id: p.id || 'd' + Math.random().toString(36).slice(2), client: 'บริษัท ก', year: '2569', ...p }, 'me', '2026-10-01T00:00:00.000Z');
@@ -61,7 +61,7 @@ describe('dashboard', () => {
 // ------------------------------------------------------------------ the tracker's words
 
 const TODAY = '2026-10-08';
-const pay = (p: Partial<PayLine>): PayLine => ({ amt: null, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', rcv: '', got: null, full: false, at: '', by: '', ...p });
+const pay = (p: Partial<PayLine>): PayLine => ({ amt: null, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', rcv: '', got: null, full: false, fullAt: null, add: false, at: '', by: '', ...p });
 const YES = { 'x/CALL1': { d: '2026-08-01', n: 'โทร' }, 'x/CLOSED DEAL': { d: '2026-08-20', n: 'YES' } };
 /** Deal "x" with these steps and plan lines (and documents: stage → amount). */
 function one(steps: SalesState['steps'], pays: Record<string, Partial<PayLine>> = {}, docs: Record<string, number> = {}, stages?: string[]) {
@@ -156,8 +156,10 @@ describe('installment words', () => {
       {
         PAY1: { amt: 53500 }, PAY2: { amt: 80250 }, PAY3: { amt: 1, due: '2026-10-04' }, PAY4: { amt: 1, due: '2026-10-11' }, PAY5: { amt: 1, due: '2026-10-20' }, PAY6: { amt: 1 },
         PAY7: { amt: 20000, rcv: '2026-10-05', got: 19400, full: true },
+        PAY8: { amt: 125000 },
+        PAY9: { amt: 100000, rcv: '2026-10-02', got: 60000, add: true },
       },
-      { PAY1: 53500, PAY2: 78000 },
+      { PAY1: 53500, PAY2: 78000, PAY8: 160500, PAY9: 40000 },
     );
     S.steps['x/PAY1'] = { d: '2026-09-19', n: 'ใบเสร็จ RC-0' };
     const v = (stage: string) => {
@@ -172,6 +174,10 @@ describe('installment words', () => {
     expect(v('PAY5')).toEqual(['neutral', 'รอชำระ', false, 'อีก 12 วัน']);
     expect(v('PAY6')).toEqual(['neutral', 'รอชำระ', false, 'ยังไม่กำหนดวัน']);
     expect(v('PAY7')).toEqual(['ok', 'รับแล้ว', false, 'รับ 5 ต.ค. · บันทึกเอง · 19,400 (ถือว่าครบ)']);
+    // the document's figure used over the plan: what came in beyond it shows
+    expect(v('PAY8')).toEqual(['ok', 'รับแล้ว', false, 'รับ 1\u00a0ต.ค. · จากเอกสาร RC-2 · รับเกินแผน 35,500']);
+    // part by hand, the rest by receipt
+    expect(v('PAY9')).toEqual(['ok', 'รับแล้ว', false, 'รับ 1\u00a0ต.ค. · จากเอกสาร RC-3 และบันทึกเอง']);
     const draft = one({}, { PAY1: { amt: 1, rel: 45 } });
     expect(lineStatusView(planOf(draft.S, draft.d, TODAY)!.lines[0], TODAY)).toMatchObject({ kind: 'neutral', word: 'แผน', sub: '45 วันหลังได้งาน' });
     const no = one({ 'x/CLOSED DEAL': { d: '2026-10-01', n: 'NO' } }, { PAY1: { amt: 1 } });
@@ -185,6 +191,28 @@ describe('installment words', () => {
     expect([diffText({ base: null, diff: null }), diffText({ base: 1, diff: 0 }), diffText({ base: 1, diff: -7000 }), diffText({ base: 1, diff: 7000 })]).toEqual([
       'ยังไม่มี Forecast', 'เท่ากับ Forecast', 'น้อยกว่า Forecast 7,000', 'มากกว่า Forecast 7,000',
     ]);
+  });
+});
+
+describe('the figure by a money stage', () => {
+  it('QUOTATION: the quotation the Forecast comes from; PAY: the documents counted there, never a replaced one', () => {
+    const d = deal({ id: 'x' });
+    const S = state([d]);
+    const D = (id: string, p: Partial<SalesState['docs'][string]>) =>
+      (S.docs['x/' + id] = { id, deal: 'x', kind: 'quotation', name: id, mime: 'application/pdf', size: 1, fileId: '', docNo: id, docDate: '', amount: 1, target: 'forecast', detected: null, basis: 'total', stage: 'QUOTATION', at: '2026-10-01T00:00:00.000Z', by: '', ...p });
+    expect(stageFig(S, d, 'QUOTATION')).toBeNull();
+    // a revised quotation: the newer one is the Forecast, and the figure by the stage
+    D('QT-1', { amount: 100000, cAt: '2026-10-01T00:00:00.000Z' });
+    D('QT-2', { amount: 120000, at: '2026-10-02T00:00:00.000Z', cAt: '2026-10-02T00:00:00.000Z' });
+    expect(stageFig(S, d, 'QUOTATION')).toMatchObject({ sum: 120000, n: 1, doc: { id: 'QT-2' } });
+    // an invoice replaced by a receipt ("ใช้ยอดนี้แทน"): the receipt's figure, not the invoice's
+    D('INV-1', { kind: 'invoice', amount: 53500, target: 'none', stage: 'PAY1' });
+    D('RC-1', { kind: 'receipt', amount: 52000, target: 'actual', stage: 'PAY1', at: '2026-10-03T00:00:00.000Z' });
+    expect(stageFig(S, d, 'PAY1')).toMatchObject({ sum: 52000, n: 1, doc: { id: 'RC-1' } });
+    // two receipts counted ("นับเพิ่ม"): their sum, named by the latest
+    D('RC-2', { kind: 'receipt', amount: 1500, target: 'actual', stage: 'PAY1', at: '2026-10-04T00:00:00.000Z' });
+    expect(stageFig(S, d, 'PAY1')).toMatchObject({ sum: 53500, n: 2, doc: { id: 'RC-2' } });
+    expect(stageFig(S, d, 'PAY2')).toBeNull();
   });
 });
 
