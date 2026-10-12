@@ -249,7 +249,9 @@
 .pop-sheet .fval-line{padding:0 0 6px}
 .pop-sheet .fval-find{padding:0 0 8px}
 .pop-sheet .fval-find input{height:var(--ctl)}
-.pop-sheet .fval-foot{position:sticky;bottom:calc(-12px - env(safe-area-inset-bottom));z-index:2;background:var(--card);margin:6px -16px 0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 8px}
+/* a sheet with a footer: the footer is its bottom edge (nothing of the list shows under it) */
+.pop-sheet:has(.fval-foot){padding-bottom:0}
+.pop-sheet .fval-foot{position:sticky;bottom:0;z-index:2;background:var(--card);margin:6px -16px 0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 8px}
 .pop-sheet .fval-foot .pop-sum{grid-column:1/-1}
 .pop-sheet .fval-foot .pop-sum:empty{display:none}
 .pop-sheet .fval-foot>button{height:var(--ctl);width:100%;justify-content:center;text-align:center;font-size:var(--fs-body)}
