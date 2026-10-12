@@ -4,7 +4,7 @@
  * storage.ts. React subscribes via `subscribe` / `getVersion` (useSyncExternalStore).
  */
 import type {
-  Built, Cert, Company, ContactEdit, ContactForm, Crm, CustomCo, Person, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
+  Built, Cert, Company, ContactEdit, ContactForm, Crm, CTag, CTypeDef, CustomCo, Person, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
   SetSnap, StageKey, SyncCfg, Task, TaskForm, TaskType,
 } from './types';
 import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
@@ -19,10 +19,14 @@ import {
 } from './teamSync';
 import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
 import {
-  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
+  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, dealResult, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
+import {
+  CT_BULK_MAX, CT_CFG, CT_DESC_MAX, CT_ID_RE, CT_LABEL, CT_SLOTS, CT_SVC_MAX, activeDefs, ckeyOfCompany, ckeyOfDeal, countByType, ctIndex, freeSlot, mergeDefs, nameKey, newTypeId, pickTag, rekeyOps,
+  svcToType, toCTag, toCTypeDef, trackerOnly, typeNameError, typeNames, validCKey, type CtCounts, type CtIndex, type CtSuggestion, type CTypeRec, type Cust, type CustTags,
+} from './ctypes';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
@@ -55,6 +59,9 @@ export interface RoundInfo { key: string; r?: Round; ideal?: string | null; laps
 export interface UploadState { status?: 'busy' | 'error' | 'done' | 'preview'; msg?: string; head?: string; preview?: { k: string; v: string }[] }
 export interface SyncState { status?: 'running' | 'error' | 'done' | 'ready' | ''; msg?: string }
 export interface PendingSync extends TGOSync.TgoResult { nw: (TGOSync.TgoItem & { gid: number | null })[]; at: string }
+/** A customer as the customer-type calls take it: a company (or any of its ids), a deal (its customer),
+ *  or a key from ctIndex() (a company id, 'n:<name key>'). */
+export type CtRef = Company | Deal | number | string;
 
 const emptyCrm = (): Crm => ({ stages: {}, notes: {}, tasks: [], watch: [], owners: {}, team: [], log: {} });
 
@@ -87,6 +94,14 @@ export class GccEngine {
   custom: Record<string, CustomCo> = {};
   /** Contact persons at customer companies (people.ts), shared with the team. */
   people: Record<string, Person> = {};
+  /** Customer types (ctypes.ts): each customer's answers (ckey → type id → CTag) and the admin's changes
+   *  to the list. Stored under their own keys: an older build's tab saves 'crm' and 'sales' whole and
+   *  never knew these, so it cannot overwrite them. */
+  ctags: CustTags = {};
+  ctypes: Record<string, CTypeRec> = {};
+  /** Bumped by every change that can change a customer's types or suggestions (answers, the list,
+   *  deals and their result, companies): typesOf and the rest are memoised on it. */
+  ctagVer = 0;
 
   // ---- derived
   B!: Built;
@@ -287,7 +302,7 @@ export class GccEngine {
       if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, ctags, ctypes] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -301,8 +316,12 @@ export class GccEngine {
         this.store.get<Partial<SalesState>>('sales'),
         this.store.get<Record<string, CustomCo>>('customCos'),
         this.store.get<Record<string, Person>>('people'),
+        this.store.get<CustTags>('ctags'),
+        this.store.get<Record<string, CTypeRec>>('ctypes'),
       ]);
       this.people = people || {};
+      this.ctags = ctags || {};
+      this.ctypes = ctypes || {};
       this.sales = { ...emptySales(), ...(sales || {}), cfg: { ...emptyCfg(), ...((sales && sales.cfg) || {}) } };
       this.custom = custom || {};
       this.base = base;
@@ -458,6 +477,7 @@ export class GccEngine {
         this.persist('setSnap', this.setSnap);
       }
     }
+    this.ctagVer++; // companies regrouped: whose types are whose
     this.recalc();
   }
 
@@ -782,9 +802,13 @@ export class GccEngine {
     if (!this.can('admin')) return this.deny();
     if (v == null) delete this.dec[key];
     else this.dec[key] = v;
-    this.op(keyOf.dedup(key), v ?? undefined);
-    this.persist('dedup', this.dec);
-    this.rebuild();
+    // the decision and the customer types it moves to the primary id go out together
+    this.batchOps(() => {
+      this.op(keyOf.dedup(key), v ?? undefined);
+      this.persist('dedup', this.dec);
+      this.rebuild();
+      if (v === 'merge') this.rekeyMerged(key);
+    });
     this.emit();
   }
 
@@ -969,8 +993,14 @@ export class GccEngine {
   // ---- team backup
   exportCrm() {
     if (!this.can('admin')) return this.deny();
-    const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom, people: this.people };
-    downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), 'GCC_ข้อมูลทีม_' + todayISO() + '.json');
+    downloadBlob(new Blob([JSON.stringify(this.backupData())], { type: 'application/json' }), 'GCC_ข้อมูลทีม_' + todayISO() + '.json');
+  }
+  /** What a team backup file holds (importCrm reads it back). */
+  backupData() {
+    return {
+      kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom, people: this.people,
+      ctags: this.ctags, ctypes: this.ctypes,
+    };
   }
   /** Merge a teammate's backup into local data — never deletes; newer contact edits win. */
   async importCrm(f: File) {
@@ -1088,6 +1118,24 @@ export class GccEngine {
           n++;
         }
       });
+      // customer types: an answer this browser has none of, or an older one; the admin's changes to a type the same way
+      Object.entries((d.ctags && typeof d.ctags === 'object' ? d.ctags : {}) as Record<string, unknown>).forEach(([ck, a]) => {
+        if (!validCKey(ck) || !a || typeof a !== 'object') return;
+        Object.entries(a as Record<string, unknown>).forEach(([t, v]) => {
+          const x = toCTag(v), cur = this.ctags[ck]?.[t];
+          if (!x || !CT_ID_RE.test(t) || pickTag(cur, x) === cur) return;
+          this.putTag(ck, t, x);
+          n++;
+        });
+      });
+      Object.entries((d.ctypes && typeof d.ctypes === 'object' ? d.ctypes : {}) as Record<string, unknown>).forEach(([id, v]) => {
+        const x = toCTypeDef(v), cur = this.ctypes[id];
+        if (!x || !CT_ID_RE.test(id) || (cur && (x.at || '') <= (cur.at || ''))) return;
+        this.ctypes[id] = x;
+        this.op(keyOf.ctype(id), { ...x });
+      });
+      this.persist('ctags', this.ctags);
+      this.persist('ctypes', this.ctypes);
       this.persist('sales', S);
       this.persist('customCos', this.custom);
       this.persist('people', this.people);
@@ -1141,16 +1189,20 @@ export class GccEngine {
       .filter((c) => (j.length >= 10 && c.jur.replace(/\D/g, '') === j) || (k.length >= 3 && (norm(c.name) === k || (k.length >= 6 && norm(c.name).includes(k)))))
       .slice(0, 8);
   }
-  /** Add a customer that is not in the registry; returns its company id. */
-  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>): number {
+  /** Add a customer that is not in the registry; returns its company id. `types`: its customer types
+   *  (ประเภทลูกค้า, ticked in the form), sent with it. */
+  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>, types: string[] = []): number {
     let id: number;
     do id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
     while (this.custom[id] || this.B.byId.has(id));
     const c: CustomCo = { ...p, name: p.name.trim().slice(0, 200), note: cap(p.note || ''), id, at: new Date().toISOString(), by: this.me() };
     this.custom[id] = c;
-    this.op(keyOf.cust(id), { ...c });
-    this.persist('customCos', this.custom);
-    this.rebuild();
+    this.batchOps(() => {
+      this.op(keyOf.cust(id), { ...c });
+      this.persist('customCos', this.custom);
+      this.rebuild();
+      if (types.length && this.can('edit') && this.putTypes(id, types, [], 'new')) this.tagsChanged();
+    });
     this.emit();
     return id;
   }
@@ -1335,8 +1387,319 @@ export class GccEngine {
     if (add.length) prefs.set(PREF.peopleGone, [...g, ...add].slice(-5000));
   }
 
+  // ------------------------------------------------------------------ customer types (ประเภทลูกค้า, ctypes.ts)
+  /** The list and the index of the last ctagVer (rebuilt only when something they depend on changed). */
+  private ctMemo: { ver: number; B: Built; defs: CTypeDef[]; svc: Map<string, string>; ix: CtIndex } | null = null;
+  private localCos: { B: Built; cos: Company[] } | null = null;
+  private ct() {
+    const m = this.ctMemo;
+    if (m && m.ver === this.ctagVer && m.B === this.B) return m;
+    const defs = mergeDefs(this.ctypes);
+    if (!this.localCos || this.localCos.B !== this.B) this.localCos = { B: this.B, cos: this.B.companies.filter((c) => isLocalId(c.id)) };
+    const ix = ctIndex({
+      tags: this.ctags, defs, deals: Object.values(this.sales.deals), result: (d) => dealResult(this.sales, d), company: (id) => this.company(id),
+      locals: this.localCos.cos, custom: Object.values(this.custom).map((c) => c.id),
+    });
+    return (this.ctMemo = { ver: this.ctagVer, B: this.B, defs, svc: svcToType(defs), ix });
+  }
+  /** The customer types in list order: retired ones too (`off`: tags still show them, the Sales Tracker
+   *  filters by them, CSV names them), or only those that can be picked (`active`). */
+  typeDefs(active = false): CTypeDef[] {
+    const d = this.ct().defs;
+    return active ? activeDefs(d) : d;
+  }
+  typeDef(id: string) {
+    return this.ct().defs.find((d) => d.id === id);
+  }
+  /** Everything about customers and their types at once (who is a customer, their types, deals and
+   *  suggestions), built once per change: the search tests a company with one Map lookup (ctMatcher). */
+  ctIndex(): CtIndex {
+    return this.ct().ix;
+  }
+  /** Who a company (any of its ids), a deal or an index key is as a customer. */
+  custOf(x: CtRef): Cust {
+    if (typeof x === 'number' || (typeof x === 'string' && /^\d+$/.test(x))) return this.company(+x)?.id ?? +x;
+    if (typeof x === 'string') return x.startsWith('n:') ? this.ctIndex().custOf(x) : x;
+    if ('ids' in x) return this.company(x.id)?.id ?? x.id;
+    return this.ctIndex().custOfDeal(x);
+  }
+  /** Where this customer's answers are written: its company's primary id, or a name key (a client not
+   *  linked to a company, a company from the TGO website sync). '' = it cannot be tagged (a client name
+   *  under 3 characters, a deal key). */
+  ckeyOf(x: CtRef): string {
+    if (typeof x === 'string' && !/^\d+$/.test(x)) return validCKey(x) ? x : '';
+    if (typeof x === 'object' && !('ids' in x)) return ckeyOfDeal(x, x.gid != null ? this.company(x.gid) : undefined);
+    const id = typeof x === 'object' ? x.id : +x, c = this.company(id);
+    return c ? ckeyOfCompany(c) : isLocalId(id) ? '' : String(id);
+  }
+  /** The customer's types (s 'y'), in list order: what its tags show. */
+  typesOf(x: CtRef): string[] {
+    return this.ctIndex().yes.get(this.custOf(x)) || [];
+  }
+  /** The types of a deal's customer (the company it is linked to, or its client by name). */
+  typesOfDeal(d: Deal): string[] {
+    return this.typesOf(d);
+  }
+  /** The customer's answers that count, type → CTag ('y' and the remembered "no"s), e.g. for
+   *  "ระบุโดย หมิว · 6 ต.ค. 2569". */
+  ctagsOf(x: CtRef): Map<string, CTag> {
+    return this.ctIndex().tags.get(this.custOf(x)) || new Map();
+  }
+  /** Types the customer's deals suggest (a service mapped to a type it has no answer for; not from lost
+   *  deals), with why. Nothing is stored until someone confirms. */
+  suggestionsOf(x: CtRef): CtSuggestion[] {
+    return this.ctIndex().sug.get(this.custOf(x)) || [];
+  }
+  /** The type a service just ticked on a deal points to, when its customer has no answer for it yet
+   *  ("บริการ VVB ตรงกับประเภท ทวนสอบ ซึ่งบริษัทนี้ยังไม่มี"); null otherwise. */
+  typeForService(d: Deal, svc: string): string | null {
+    const t = this.ct().svc.get(svc);
+    return t && this.ckeyOf(d) && !this.ctagsOf(d).has(t) ? t : null;
+  }
+  /** The type a service suggests now ('' = none): picking it for another type moves it (confirm first). */
+  serviceOwner(svc: string) {
+    return this.typeDefs().find((d) => d.svc.includes(svc))?.id || '';
+  }
+  /** Customers, each type's customers and the year's deals and Forecast, those with no type yet, and
+   *  suggestions waiting: the one count every screen shows. */
+  ctCounts(year: string): CtCounts {
+    const { ix, defs } = this.ct();
+    return countByType(ix, defs, year, (d) => dealMoney(this.sales, d).forecast);
+  }
+  /** Customers in the Sales Tracker that are not in the registry (by client name). */
+  ctTrackerOnly() {
+    return trackerOnly(this.ctIndex());
+  }
+
+  /** Give a customer a type ('y'), or say it does not have it ('n', also when it never had it: a
+   *  dismissed suggestion, never suggested again). Returns whether anything changed. */
+  setType(x: CtRef, t: string, s: 'y' | 'n', src: CTag['src'] = 'hand') {
+    if (!this.can('edit')) return this.deny(), false;
+    const n = this.batchOps(() => this.putTypes(x, s === 'y' ? [t] : [], s === 'n' ? [t] : [], src, true));
+    if (n) this.tagsChanged();
+    return n > 0;
+  }
+  /** Add and remove types of one customer at once (the picker): a type removed that the customer has
+   *  becomes a remembered "no"; one it never had stays unanswered (still suggested). Returns how many
+   *  answers changed. */
+  setTypes(x: CtRef, add: string[], rm: string[], src: CTag['src'] = 'hand') {
+    if (!this.can('edit')) return this.deny(), 0;
+    const n = this.batchOps(() => this.putTypes(x, add, rm, src));
+    if (n) this.tagsChanged();
+    return n;
+  }
+  /**
+   * The same types for many customers (search's "ตั้งประเภทลูกค้า"): `add` given to each, `rm` taken from
+   * each, every other type left as each customer has it (a partly ticked box). At most CT_BULK_MAX
+   * customers (`capped`: more were asked); every change is one small record, queued in one write and
+   * sent together. Returns the answers changed and the customers they belong to.
+   */
+  bulkSetTypes(xs: CtRef[], add: string[], rm: string[], src: CTag['src'] = 'bulk') {
+    if (!this.can('edit')) return this.deny(), { n: 0, cos: 0, capped: false };
+    const list = this.ctTargets(xs);
+    let n = 0, cos = 0;
+    this.batchOps(() =>
+      list.slice(0, CT_BULK_MAX).forEach((x) => {
+        const k = this.putTypes(x, add, rm, src);
+        n += k;
+        if (k) cos++;
+      }),
+    );
+    if (n) this.tagsChanged();
+    return { n, cos, capped: list.length > CT_BULK_MAX };
+  }
+  /** "ไม่ใช่" / "ไม่ต้อง" on a suggestion: remembered, never suggested again. */
+  dismissSuggestion(x: CtRef, t: string) {
+    return this.setType(x, t, 'n', 'deal');
+  }
+  /** "เพิ่ม" / "ยืนยันที่แนะนำ": every suggestion of these customers (all customers with one when none are
+   *  given, at most CT_BULK_MAX) becomes a type, from the deals. Returns how many were added. */
+  confirmSuggestions(xs?: CtRef[]) {
+    if (!this.can('edit')) return this.deny(), 0;
+    const ix = this.ctIndex();
+    let n = 0;
+    this.batchOps(() =>
+      this.ctTargets(xs || [...ix.sug.keys()])
+        .slice(0, CT_BULK_MAX)
+        .forEach((x) => (n += this.putTypes(x, (ix.sug.get(this.custOf(x)) || []).map((s) => s.t), [], 'deal'))),
+    );
+    if (n) this.tagsChanged();
+    return n;
+  }
+  /** Each customer once, only those that can be tagged. */
+  private ctTargets(xs: CtRef[]) {
+    const seen = new Set<Cust>(), out: CtRef[] = [];
+    xs.forEach((x) => {
+      const cu = this.custOf(x);
+      if (seen.has(cu) || !this.ckeyOf(x)) return;
+      seen.add(cu);
+      out.push(x);
+    });
+    return out;
+  }
+  /** Write the answers that change (a retired type cannot be added; one not in the list is skipped; `rm`
+   *  only where the customer has the type, unless `no`: a "no" either way), each stamped after the answer
+   *  this browser sees, so a deliberate change wins whatever the clocks. */
+  private putTypes(x: CtRef, add: string[], rm: string[], src: CTag['src'], no = false) {
+    const ck = this.ckeyOf(x);
+    if (!ck) return 0;
+    const cur = this.ctIndex().tags.get(this.custOf(x)), defs = this.typeDefs(), by = this.me();
+    let n = 0;
+    const want: [string, 'y' | 'n'][] = [...new Set(add)].map((t) => [t, 'y']);
+    [...new Set(rm)].forEach((t) => !add.includes(t) && want.push([t, 'n']));
+    want.forEach(([t, s]) => {
+      const d = defs.find((x) => x.id === t), was = cur?.get(t);
+      if (!d || (s === 'y' && d.off) || was?.s === s || (s === 'n' && !no && was?.s !== 'y')) return;
+      this.putTag(ck, t, { s, at: this.stampAfter([was?.at]), by, src });
+      n++;
+    });
+    return n;
+  }
+  /** Set (or remove: null) one record and queue it; `was`: see SyncOp.was. */
+  private putTag(ck: string, t: string, v: CTag | null, was?: string) {
+    const T = this.ctags;
+    if (v) (T[ck] || (T[ck] = {}))[t] = v;
+    else if (T[ck]) {
+      delete T[ck][t];
+      if (!Object.keys(T[ck]).length) delete T[ck];
+    }
+    this.op(keyOf.ctag(ck, t), v ? { ...v } : undefined, was !== undefined ? { was } : {});
+  }
+  private tagsChanged() {
+    this.ctagVer++;
+    this.persist('ctags', this.ctags);
+    this.emit();
+  }
+  /**
+   * Move a customer's tags to another key, queued with the change that moved the customer (ctypes.ts
+   * rekeyOps: per type the later answer wins). `keepFrom`: the old key keeps them (another unlinked deal
+   * still uses the name).
+   */
+  private rekey(from: string, to: string, keepFrom: boolean) {
+    if (!this.can('edit') || !from || !to || from === to || !this.ctags[from] || !validCKey(to)) return;
+    const r = rekeyOps(this.ctags, from, to, keepFrom);
+    r.set.forEach(({ t, v }) => this.putTag(to, t, v));
+    r.del.forEach(({ t, was }) => this.putTag(from, t, null, was));
+    if (r.set.length || r.del.length) {
+      this.ctagVer++;
+      this.persist('ctags', this.ctags);
+    }
+  }
+  /** Whether a deal not linked to a company (other than `except`) has this client name key. */
+  private nameInUse(k: string, except?: string) {
+    return Object.values(this.sales.deals).some((d) => d.id !== except && (d.gid == null || isLocalId(d.gid)) && nameKey(d.client) === k);
+  }
+  /** After a merge decision: the tags of every merged id (a duplicate, a customer added by hand, a
+   *  TGO-sync company by its name) move to the company's primary id. A split moves nothing back: they
+   *  stay with the primary. */
+  private rekeyMerged(key: string) {
+    const g = this.B.groups.find((x) => x.key === key);
+    const c = g && this.company(g.ids[0]);
+    if (!c) return;
+    const to = ckeyOfCompany(c);
+    c.ids.forEach((id) => {
+      if (id === c.id) return;
+      const from = isLocalId(id) ? nameKey(this.B.rawById.get(id)?.name) : String(id);
+      if (from && from !== to) this.rekey(from, to, from.startsWith('n:') && this.nameInUse(from));
+    });
+  }
+
+  // ---- the list (admin only): one record per type, edited field by field (scfg/ct.<id>)
+  private putTypeDef(id: string, patch: CTypeRec, fl?: Record<string, ListEdit>) {
+    const n: CTypeRec = { ...(this.ctypes[id] || {}), ...patch, at: new Date().toISOString(), by: this.me() };
+    this.ctypes[id] = n;
+    this.op(keyOf.ctype(id), { ...n }, { f: [...Object.keys(patch), 'at', 'by'], fl });
+  }
+  private typesChanged() {
+    this.ctagVer++;
+    this.persist('ctypes', this.ctypes);
+    this.emit();
+  }
+  /** Add a type at the end of the list (the next free colour unless `c`); `svc` moves those services to it.
+   *  Returns its id, or '' (not allowed, or the name is empty, too long or taken: typeNameError). */
+  addType(p: { n: string; d?: string; c?: number; svc?: string[] }): string {
+    if (!this.can('admin')) return this.deny(), '';
+    const defs = this.typeDefs();
+    if (typeNameError(p.n, defs)) return '';
+    const id = newTypeId([...defs.map((d) => d.id), ...Object.keys(this.ctypes)]);
+    const c = p.c != null && Number.isInteger(p.c) && p.c >= 0 && p.c < CT_SLOTS.length ? p.c : freeSlot(defs);
+    this.batchOps(() => {
+      this.putTypeDef(id, { n: p.n.trim(), d: (p.d || '').trim().slice(0, CT_DESC_MAX), c, o: Math.max(-1, ...defs.map((d) => d.o)) + 1, svc: [] });
+      this.ctagVer++;
+      if (p.svc?.length) this.setTypeServices(id, p.svc);
+    });
+    this.typesChanged();
+    return id;
+  }
+  /** Rename a type, change its description or colour. Tags keep the id, so every tag stays ("เปลี่ยนชื่อ
+   *  แล้ว ป้ายที่ติดไว้ N บริษัทยังอยู่ครบ"). Returns what is wrong ('' = saved, or nothing to change). */
+  saveType(id: string, patch: { n?: string; d?: string; c?: number }): string {
+    if (!this.can('admin')) return this.deny(), 'บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้';
+    const defs = this.typeDefs(), def = defs.find((d) => d.id === id);
+    if (!def) return 'ไม่พบประเภทลูกค้านี้';
+    const ch: CTypeRec = {};
+    if (patch.n !== undefined) {
+      const e = typeNameError(patch.n, defs, id);
+      if (e) return e;
+      if (patch.n.trim() !== def.n) ch.n = patch.n.trim();
+    }
+    if (patch.d !== undefined && patch.d.trim().slice(0, CT_DESC_MAX) !== (def.d || '')) ch.d = patch.d.trim().slice(0, CT_DESC_MAX);
+    if (patch.c !== undefined && Number.isInteger(patch.c) && patch.c >= 0 && patch.c < CT_SLOTS.length && patch.c !== def.c) ch.c = patch.c;
+    if (!Object.keys(ch).length) return '';
+    this.putTypeDef(id, ch);
+    this.typesChanged();
+    return '';
+  }
+  /** The list in this order (ids not given keep their order after these); only the types that moved are written. */
+  reorderTypes(ids: string[]) {
+    if (!this.can('admin')) return this.deny();
+    const defs = this.typeDefs(), first = ids.filter((id) => defs.some((d) => d.id === id));
+    const order = [...new Set(first), ...defs.map((d) => d.id).filter((id) => !first.includes(id))];
+    let n = 0;
+    this.batchOps(() =>
+      order.forEach((id, o) => {
+        if (defs.find((d) => d.id === id)!.o === o) return;
+        this.putTypeDef(id, { o });
+        n++;
+      }),
+    );
+    if (n) this.typesChanged();
+  }
+  /** Retire a type (or bring it back): it leaves the pickers and the search type row, its tags stay as
+   *  a grey tag, and the Sales Tracker can still filter by it. */
+  retireType(id: string, retired = true) {
+    if (!this.can('admin')) return this.deny();
+    const def = this.typeDef(id);
+    if (!def || !!def.off === retired) return;
+    this.putTypeDef(id, { off: retired ? todayISO() : '' });
+    this.typesChanged();
+  }
+  /** The deal Services that suggest a type. One service suggests one type: a service another type lists
+   *  moves here (the page confirms first, see serviceOwner). Returns what moved from where. */
+  setTypeServices(id: string, svc: string[]): { svc: string; from: string }[] {
+    if (!this.can('admin')) return this.deny(), [];
+    const defs = this.typeDefs(), def = defs.find((d) => d.id === id);
+    if (!def) return [];
+    const want = [...new Set(svc.map((s) => s.trim()).filter(Boolean))].slice(0, CT_SVC_MAX);
+    const moved: { svc: string; from: string }[] = [];
+    const add = want.filter((s) => !def.svc.includes(s)), rm = def.svc.filter((s) => !want.includes(s));
+    this.batchOps(() => {
+      defs.forEach((o) => {
+        const take = o.id === id ? [] : o.svc.filter((s) => want.includes(s));
+        if (!take.length) return;
+        take.forEach((s) => moved.push({ svc: s, from: o.id }));
+        this.putTypeDef(o.id, { svc: o.svc.filter((s) => !want.includes(s)) }, { svc: { add: [], rm: take } });
+      });
+      // the list as written, item by item: a teammate's change to another service of the type stays
+      if (add.length || rm.length) this.putTypeDef(id, { svc: want }, { svc: { add, rm } });
+    });
+    if (moved.length || add.length || rm.length) this.typesChanged();
+    return moved;
+  }
+
   // ------------------------------------------------------------------ Sales Tracker
   saveSales() {
+    this.ctagVer++; // a deal's customer, services or result may have changed
     this.persist('sales', this.sales);
     this.emit();
   }
@@ -1359,6 +1722,7 @@ export class GccEngine {
    *  teammate's concurrent edit, see rebaseOp); without it the whole record is this browser's. */
   private putDeal(d: Deal, f?: (keyof Deal)[], fl?: Record<string, ListEdit>) {
     this.sales.deals[d.id] = d;
+    this.ctagVer++;
     this.op(keyOf.deal(d.id), { ...d }, { f, fl });
   }
   /** Deals linked to a company (any of its merged ids). A company from the TGO website sync exists
@@ -1404,13 +1768,21 @@ export class GccEngine {
     this.saveSales();
     return d;
   }
-  /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped. */
-  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
+  /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped.
+   *  `types`: customer types each of the companies gets (added to what it has; never taken away). */
+  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string; types?: string[] } = {}) {
     if (!this.can('edit')) {
       this.deny();
       return { added: 0, skipped: 0 };
     }
-    return this.batchOps(() => this.addDealsFrom(ids, opts));
+    return this.batchOps(() => {
+      const r = this.addDealsFrom(ids, opts);
+      const types = opts.types || [];
+      let n = 0;
+      if (types.length) this.ctTargets(ids).slice(0, CT_BULK_MAX).forEach((id) => (n += this.putTypes(id, types, [], 'new')));
+      if (n) this.tagsChanged();
+      return r;
+    });
   }
   private addDealsFrom(ids: number[], opts: { section?: string; year?: string }) {
     const year = opts.year || beYear();
@@ -1443,20 +1815,30 @@ export class GccEngine {
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
     const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
     if (!changed.length) return;
-    // SOURCE / Services: the items ticked and unticked, so a teammate ticking another item keeps theirs
-    const fl: Record<string, ListEdit> = {};
-    (['source', 'service'] as const).forEach((k) => {
-      if (!changed.includes(k)) return;
-      const a = d[k] || [], b = n[k] || [];
-      fl[k] = { add: b.filter((x) => !a.includes(x)), rm: a.filter((x) => !b.includes(x)) };
-    });
-    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
-    const TH: Partial<Record<keyof Deal, string>> = {
-      client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
-      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+    // a free-text client's customer types follow it: to the company it is linked to now, or to its new
+    // name; the old name keeps them while another deal not linked to a company (any year) still uses it.
+    // Queued in one write with the deal.
+    const fromK = d.gid == null ? nameKey(d.client) : '';
+    const toK = fromK && (changed.includes('gid') || changed.includes('client')) ? ckeyOfDeal(n, n.gid != null ? this.company(n.gid) : undefined) : '';
+    const write = () => {
+      // SOURCE / Services: the items ticked and unticked, so a teammate ticking another item keeps theirs
+      const fl: Record<string, ListEdit> = {};
+      (['source', 'service'] as const).forEach((k) => {
+        if (!changed.includes(k)) return;
+        const a = d[k] || [], b = n[k] || [];
+        fl[k] = { add: b.filter((x) => !a.includes(x)), rm: a.filter((x) => !b.includes(x)) };
+      });
+      this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
+      if (toK && toK !== fromK) this.rekey(fromK, toK, this.nameInUse(fromK, id));
+      const TH: Partial<Record<keyof Deal, string>> = {
+        client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
+        jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+      };
+      const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
+      if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     };
-    const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
-    if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
+    if (toK && toK !== fromK) this.batchOps(write);
+    else write();
     this.saveSales();
   }
   /** Stage date + note; a note without a date gets today's date. Only the step record is written —
@@ -2268,9 +2650,11 @@ export class GccEngine {
   }
   salesCsv(deals: Deal[]) {
     const S = this.sales, C = S.cfg, today = todayISO();
-    const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
+    // ประเภทลูกค้า right after the client (the design's place; nothing reads this file back by position)
+    const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', CT_LABEL, 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
       .concat(['FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ']);
+    const defs = this.typeDefs();
     const lines = deals.map((d, i) => {
       const m = dealMoney(S, d), st = dealStatus(S, d);
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
@@ -2278,7 +2662,7 @@ export class GccEngine {
       const otherSteps = Object.entries(S.steps)
         .filter(([k]) => k.startsWith(d.id + '/') && !C.stages.includes(k.slice(d.id.length + 1)))
         .map(([k, x]) => `${k.slice(d.id.length + 1)}: ${[x.d, x.n].filter(Boolean).join(' ')}`);
-      return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(d.contactName), csvPhone(d.phone), csvCell(d.email), csvCell(d.resp), csvCell(d.referral),
+      return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(typeNames(this.typesOfDeal(d), defs)), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(d.contactName), csvPhone(d.phone), csvCell(d.email), csvCell(d.resp), csvCell(d.referral),
         csvCell(d.contactDate), csvCell(lastContact(S, d, today)), csvCell(d.jobStatus === 'closed' ? 'ปิดงาน ' + (d.closedDate || '') : 'เปิด'), csvCell(st.overall)]
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(d.service.includes(x) ? '✓' : '')), [csvCell(d.service.filter((x) => !C.services.includes(x)).join(', '))])
@@ -2295,7 +2679,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; was?: string } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     if (!this.canWriteKey(k, v === undefined)) {
@@ -2337,6 +2721,7 @@ export class GccEngine {
     }
     // conditional only while every queued write to this record is a document's own (setStep auto)
     if (opt.base !== undefined && (!prev || prev.base !== undefined)) o.base = prev ? prev.base : opt.base;
+    if (v === undefined && opt.was !== undefined) o.was = opt.was;
     this.pending.set(k, o);
     this.unsaved.delete(k);
     if (this.opBatch) this.opBatch.push(o);
@@ -2485,13 +2870,15 @@ export class GccEngine {
   }
   /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
   private async storedShared(): Promise<SharedState> {
-    const [crm, contacts, dec, sales, custom, people] = await Promise.all([
+    const [crm, contacts, dec, sales, custom, people, ctags, ctypes] = await Promise.all([
       this.store.get<Partial<Crm>>('crm'),
       this.store.get<Record<string, ContactEdit>>('contacts'),
       this.store.get<Record<string, string>>('dedup'),
       this.store.get<SalesState>('sales'),
       this.store.get<Record<string, CustomCo>>('customCos'),
       this.store.get<Record<string, Person>>('people'),
+      this.store.get<CustTags>('ctags'),
+      this.store.get<Record<string, CTypeRec>>('ctypes'),
     ]);
     // where this tab's own last save failed, the stored copy is older than this tab's: use this tab's
     const ok = (k: string, v: unknown) => !!v && !this.unstored.has(k);
@@ -2502,6 +2889,8 @@ export class GccEngine {
       sales: ok('sales', sales) ? sales! : this.sales,
       custom: ok('customCos', custom) ? custom! : this.custom,
       people: ok('people', people) ? people! : this.people,
+      ctags: ok('ctags', ctags) ? ctags! : this.ctags,
+      ctypes: ok('ctypes', ctypes) ? ctypes! : this.ctypes,
     };
   }
   /** The stored queue of a team session: per sheet, and per account when the team signs in (one
@@ -2684,6 +3073,7 @@ export class GccEngine {
       : type === 'contact' ? this.contacts[rest as unknown as number]
       : type === 'task' ? this.crm.tasks.find((t) => t.id === rest)
       : type === 'person' ? this.people[rest]
+      : type === 'scfg' && rest.startsWith(CT_CFG) ? this.ctypes[rest.slice(CT_CFG.length)]
       : undefined;
     return r && { ...(r as Record<string, unknown>) };
   }
@@ -2835,15 +3225,16 @@ export class GccEngine {
         if (this.pending.has(k) || now.has(k)) return;
         const r = last.get(k);
         if (r) back.push(r);
-        else if (k.startsWith('scfg/')) {
+        else if (k.startsWith('scfg/') && !k.startsWith('scfg/' + CT_CFG)) {
           const name = k.slice(5) as keyof SalesCfg;
           if (name in this.sales.cfg) {
             this.sales.cfg[name] = emptyCfg()[name];
             this.saveSales();
           }
         }
-        // a deal made here that the team never got (a viewer's) goes; a refused deletion of one leaves
-        // nothing to put back without a team row (the deal is gone here already)
+        // a deal made here that the team never got (a viewer's) goes, as does a customer type's change
+        // with no team row (back to the default); a refused deletion of a deal leaves nothing to put back
+        // without a team row (the deal is gone here already)
         else if (!k.startsWith('deal/') || this.sales.deals[k.slice(5)]) back.push({ seq: 0, k, v: null, del: true, by: '', at: '' });
       });
       hd.forEach((k) => {
@@ -3104,6 +3495,9 @@ export class GccEngine {
       this.store.update<SalesState>('sales', (cur) => (cur ? merged({ ...none, sales: { ...emptySales(), ...cur, cfg: { ...emptyCfg(), ...cur.cfg } } }).sales : this.sales)).catch(() => {});
     if (fx.custom) this.store.update<Record<string, CustomCo>>('customCos', (cur) => (cur ? merged({ ...none, custom: cur }).custom : this.custom)).catch(() => {});
     if (fx.people) this.store.update<Record<string, Person>>('people', (cur) => (cur ? merged({ ...none, people: cur }).people! : this.people)).catch(() => {});
+    if (fx.ctags) this.store.update<CustTags>('ctags', (cur) => (cur ? merged({ ...none, ctags: cur }).ctags! : this.ctags)).catch(() => {});
+    if (fx.ctypes) this.store.update<Record<string, CTypeRec>>('ctypes', (cur) => (cur ? merged({ ...none, ctypes: cur }).ctypes! : this.ctypes)).catch(() => {});
+    this.ctagVer++; // deals, their results, answers or the list may have changed
     if (fx.dedup || fx.contactDel || fx.custom) {
       this.rebuild(); // regroups companies / restores original contact data
     } else {
@@ -3178,6 +3572,7 @@ export class GccEngine {
           if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
           if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
           if (p.base !== undefined) o.base = p.base; // still only over what was seen there
+          if (p.was !== undefined && o.v === undefined) o.was = p.was; // a moved tag's removal still yields to a newer answer
           return o;
         })
         .concat(acctOps);
@@ -3711,7 +4106,7 @@ export class GccEngine {
     const keep: Crm = { ...emptyCrm(), stages: pick(C.stages), owners: pick(C.owners), log: pick(C.log), watch: C.watch.filter(loc), tasks: C.tasks.filter((t) => loc(t.gid)) };
     await this.store.set('crm', keep).catch(() => {});
     await this.store.set('contacts', pick(this.contacts)).catch(() => {});
-    for (const k of ['dedup', 'sales', 'customCos', 'people']) await this.store.del(k).catch(() => {});
+    for (const k of ['dedup', 'sales', 'customCos', 'people', 'ctags', 'ctypes']) await this.store.del(k).catch(() => {});
     // a file not uploaded yet is an unsent edit too: its only copy, uploaded at the next sign-in (that
     // account's, or this one's unless asked to drop what is unsent)
     const others = (await this.accts(cfg.url)).filter((a) => a.u !== s?.u);
@@ -3899,10 +4294,12 @@ export class GccEngine {
   }
 
   // ---- CSV
-  exportCsv(view: 'co' | 'cert', out: (Company | Cert)[]) {
-    downloadBlob(new Blob([this.registryCsv(view, out)], { type: 'text/csv;charset=utf-8' }), `GCC_${view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}_${out.length}.csv`);
+  exportCsv(view: 'co' | 'cert', out: (Company | Cert)[], trk: { name: string; key: string }[] = []) {
+    downloadBlob(new Blob([this.registryCsv(view, out, trk)], { type: 'text/csv;charset=utf-8' }), `GCC_${view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}_${out.length + trk.length}.csv`);
   }
-  registryCsv(view: 'co' | 'cert', out: (Company | Cert)[]) {
+  /** The search results as CSV. `trk`: Sales Tracker customers not in the registry (ctTrackerOnly, listed
+   *  while a customer-type filter is on): a row each, with only the name and the customer types. */
+  registryCsv(view: 'co' | 'cert', out: (Company | Cert)[], trk: { name: string; key: string }[] = []) {
     const D = this.B.D, CD = this.B.CD;
     // same cells as the tracker export: text can't run as a formula (names typed by teammates), and
     // juristic ids / phone numbers keep their leading 0
@@ -3912,12 +4309,21 @@ export class GccEngine {
       L = (out as Cert[]).map((ct) => [ct.cert, ct.org, ct.act, ct.provTxt || CD.prov[ct.prov], ct.ap, ct.ex, CST[ct.st][0], ct.isLatest ? ct.co!.rnd : '', ct.co!.code, ct.co!.phone]);
       keep0 = [9];
     } else {
-      H = ['รหัส', 'ชื่อบริษัท', 'เลขนิติบุคคล', 'ประเภท', 'จังหวัด', 'ที่อยู่', 'กลุ่มอุตสาหกรรม', 'กิจการ', 'แหล่งข้อมูล', 'กลุ่มเป้าหมาย', 'สถานะ CFO', 'CFO หมดอายุล่าสุด', 'รอบที่ต้องยื่น', 'GI ระดับที่ยังใช้ได้', 'GI ใช้ได้ถึง', 'โรงงานใหม่ เริ่ม', 'เงินลงทุนโรงงานใหม่', 'SET', 'โทรศัพท์', 'อีเมล', 'เว็บไซต์', 'สถานะการขาย', 'รวมจากรหัส'];
+      // ประเภทลูกค้า (customer types) is the last column: the legal-entity type is "ประเภท", and keep0's
+      // positions stay as they were
+      H = ['รหัส', 'ชื่อบริษัท', 'เลขนิติบุคคล', 'ประเภท', 'จังหวัด', 'ที่อยู่', 'กลุ่มอุตสาหกรรม', 'กิจการ', 'แหล่งข้อมูล', 'กลุ่มเป้าหมาย', 'สถานะ CFO', 'CFO หมดอายุล่าสุด', 'รอบที่ต้องยื่น', 'GI ระดับที่ยังใช้ได้', 'GI ใช้ได้ถึง', 'โรงงานใหม่ เริ่ม', 'เงินลงทุนโรงงานใหม่', 'SET', 'โทรศัพท์', 'อีเมล', 'เว็บไซต์', 'สถานะการขาย', 'รวมจากรหัส', CT_LABEL];
+      const defs = this.typeDefs();
       L = (out as Company[]).map((c) => [
         c.code, c.name, c.jur, D.type[c.type], D.prov[c.prov], c.addr, D.ind[c.ind], c.biz, tagsOf(c.src).map((t) => t.t).join(' '),
         c.tgt + 1 + '. ' + TGT[c.tgt], CST[c.cfoSt][0], c.cfoEx, c.rnd, c.giLive, c.giUntil, c.newYm, c.invest, c.set, c.phone, c.email, c.web,
-        (STG.find((x) => x[0] === this.stage(c.id)) || STG[0])[1], c.ids.length > 1 ? c.ids.map(gccCode).join(' ') : '',
+        (STG.find((x) => x[0] === this.stage(c.id)) || STG[0])[1], c.ids.length > 1 ? c.ids.map(gccCode).join(' ') : '', typeNames(this.typesOf(c), defs),
       ]);
+      trk.forEach((x) => {
+        const r: unknown[] = H.map(() => '');
+        r[1] = x.name;
+        r[H.length - 1] = typeNames(this.typesOf(x.key), defs);
+        L.push(r);
+      });
       keep0 = [2, 18];
     }
     return '\ufeff' + [H.map(csvCell).join(',')].concat(L.map((r) => r.map((v, i) => (keep0.includes(i) ? csvPhone(v) : csvCell(v))).join(','))).join('\r\n');

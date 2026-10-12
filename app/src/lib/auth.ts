@@ -14,7 +14,9 @@ export const ROLE_DESC: Record<Role, string> = {
 };
 export const ROLES: Role[] = ['admin', 'sales', 'viewer'];
 
-/** Records a sales account can't write at all, and those it can't delete (same lists as Code.gs). */
+/** Records a sales account can't write at all, and those it can't delete (same lists as Code.gs).
+ *  Customer types (ctypes.ts) need no entry of their own: the list is under scfg/ (scfg/ct.<id>, the
+ *  admin's), and a customer's tags (ctag/) are everyday work, removals included (tags that move). */
 export const SALES_DENY = ['scfg/', 'dedup/', 'team/', 'dundo/'];
 export const ADMIN_DEL = ['deal/', 'cust/', 'person/'];
 
