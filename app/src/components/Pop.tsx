@@ -295,10 +295,11 @@ export function useHL() {
   };
 }
 
-/** A person's initial in a small circle (the first letter after "คุณ"); "(ไม่ระบุ)" an empty dashed one. */
+/** A person's initial in a small circle (the first letter after "คุณ"); no name ("(ไม่ระบุ)", "-") an
+ *  empty dashed one. */
 export function Av({ name }: { name: string }) {
-  const none = name === '(ไม่ระบุ)' || !name;
-  const ch = Array.from(name.replace(/^คุณ\s*/, '')).find((c) => /[ก-ฮA-Za-z0-9]/.test(c)) || '';
+  const ch = name === '(ไม่ระบุ)' ? '' : Array.from(name.replace(/^คุณ\s*/, '')).find((c) => /[ก-ฮA-Za-z0-9]/.test(c)) || '';
+  const none = !ch;
   return <span className={'fav' + (none ? ' none' : '')} aria-hidden="true">{none ? '' : ch.toUpperCase()}</span>;
 }
 

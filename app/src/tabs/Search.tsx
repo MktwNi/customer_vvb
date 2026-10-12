@@ -4,10 +4,11 @@ import { CONFIG, CST, FEEDS, GDESC, SRCC, STG, TGT, stageOf } from '../lib/const
 import { fmtN, isoTh, ymTh } from '../lib/format';
 import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
 import type { CfoStatus, Cert, Company } from '../lib/types';
-import { Opts, Pager, Status, card, srcWords, tabular } from '../components/ui';
+import { Pager, Status, card, srcWords, tabular } from '../components/ui';
 import { Icon } from '../components/icons';
 import { useSlide } from '../components/useSlide';
-import { PREF, prefs } from '../lib/storage';
+import { FilterBar, ReadChip, type FField, type FVal } from '../components/FilterBar';
+import { Select } from '../components/Select';
 
 const empty = (text: string) => <div className="empty" style={{ padding: '24px 20px' }}>{text}</div>;
 /** A CFO status as dot + word; "ใกล้หมดอายุ" is the one that needs action now, so it is a tinted chip. */
@@ -18,14 +19,6 @@ export function Search() {
   const { engine: e, ui, set, setF, open } = useApp();
   const v = useEngineVersion();
   const narrow = useNarrow();
-  // the filter grid starts folded (the chosen filters show as tags) until opened; remembered per browser
-  const [filtersOpen, setFiltersOpen] = useState(() => prefs.getRaw(PREF.searchFilters) === 'open');
-  const toggleFilters = () => {
-    prefs.set(PREF.searchFilters, filtersOpen ? 'closed' : 'open');
-    setFiltersOpen(!filtersOpen);
-  };
-  const ftoggleRef = useRef<HTMLButtonElement>(null);
-  const [moreOpen, setMoreOpen] = useState(false);
   const chipsRef = useRef<HTMLDivElement>(null);
   const s = ui.f;
   // the white pill slides between บริษัท and ใบรับรอง CFO
@@ -60,7 +53,7 @@ export function Search() {
       .filter((o) => o.l && o.n)
       .sort((a, b) => (byName ? a.l.localeCompare(b.l, 'th') : b.n - a.n));
   const rndOpts = e.R.filter((x) => x.docT >= e.T || x.annT >= e.T).map((x) => ({ v: x.no, label: 'รอบ ' + x.no })).concat([{ v: 'later', label: 'หลังรอบในตาราง' }]);
-  // the five filters most used come first; the other seven fold under "ตัวกรองเพิ่มเติม"
+  // the five filters most used come first in the field menu, then a hairline and the other seven
   const MAIN: (keyof Filters)[] = ['prov', 'ind', 'cfo', 'stage', 'owner'];
   const selects: [string, keyof Filters, { v: string; label: string }[]][] = [
     ['พบในแหล่งข้อมูล', 'src', SRCC.map(([t], i) => ({ v: String(i), label: t }))],
@@ -87,10 +80,16 @@ export function Search() {
   if (s.cFy) activeChips.push({ label: 'ปีที่ยื่น ' + s.cFy, p: { cFy: '' } });
   if (s.cProv) activeChips.push({ label: 'จังหวัด (TGO): ' + s.cProv, p: { cProv: '' } });
   const hasFilter = Object.keys(CLEAR_FILTERS).some((k) => s[k as keyof Filters] !== '');
-  const nSel = selects.filter(([, k]) => s[k] !== '').length;
   const mainSel = MAIN.map((k) => selects.find((x) => x[1] === k)!);
   const moreSel = selects.filter(([, k]) => !MAIN.includes(k));
-  const showMore = moreOpen || moreSel.some(([, k]) => s[k] !== '');
+  // the filter row: each field one choice, "ทั้งหมด" first; counts where the lists have them (provinces,
+  // industries, operator types), a find field over a long list
+  const unit = s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท';
+  const fields: FField[] = [...mainSel, ...moreSel].map(([label, k, options], i) => ({
+    key: k, label, kind: 'single', all: 'ทั้งหมด', sep: i === MAIN.length,
+    options: options.map((o) => ({ v: o.v, label: 'l' in o ? String(o.l) : o.label, n: 'n' in o ? Number(o.n) : undefined })),
+  }));
+  const fval: Record<string, FVal | undefined> = Object.fromEntries(fields.map((f) => [f.key, s[f.key as keyof Filters] !== '' ? { v: [String(s[f.key as keyof Filters])] } : undefined]));
   // screen readers hear the count once typing / filtering settles, not on every keystroke
   const [said, setSaid] = useState('');
   const sayNow = `${fmtN(F.out.length)} ${s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}`;
@@ -187,64 +186,26 @@ export function Search() {
             </div>
           </div>
           <div className="sx-filters">
-            <div className="sx-fhead">
-              <button ref={ftoggleRef} className="btn" aria-expanded={filtersOpen} aria-controls={filtersOpen ? 'sx-grid' : undefined} onClick={() => toggleFilters()} title={s.view === 'cert' ? 'ตัวกรองบริษัทใช้กับบริษัทเจ้าของใบรับรอง' : undefined}>
-                ตัวกรอง
-                {nSel > 0 && <span className="sx-fcount">{fmtN(nSel)}</span>}
-              </button>
-              {!filtersOpen && nSel > 0 && (
-                <div className="sx-tags">
-                  {selects.filter(([, k]) => s[k] !== '').map(([label, k, options]) => (
-                    <button key={k} className="ftag" onClick={() => { setF({ [k]: '' } as Partial<Filters>); ftoggleRef.current?.focus(); }}>
-                      {label}: {(options.find((o) => o.v === s[k]) || { label: String(s[k]) }).label.replace(/ \([\d,]+\)$/, '')} ×
-                    </button>
-                  ))}
-                </div>
-              )}
-              {hasFilter && <button className="quiet sx-reset" onClick={() => { setF(CLEAR_FILTERS); ftoggleRef.current?.focus(); }}>ล้างตัวกรอง</button>}
-            </div>
-            {filtersOpen && (
-              <div id="sx-grid" className="sx-fbody">
-                <div className="sx-grid">
-                  {(showMore ? [...mainSel, ...moreSel] : mainSel).map(([label, k, options]) => {
-                    const val = s[k] as string;
-                    return (
-                      <label key={k} className="sx-field">
-                        {label}
-                        <select className={'fld sel sx-sel' + (val !== '' ? ' on' : '')} value={val} onChange={(ev) => setF({ [k]: ev.target.value } as Partial<Filters>)}>
-                          <Opts options={options} all="ทั้งหมด" />
-                        </select>
-                      </label>
-                    );
-                  })}
-                </div>
-                {!moreSel.some(([, k]) => s[k] !== '') && (
-                  <button className="lnk" style={{ alignSelf: 'flex-start', marginLeft: 10 }} aria-expanded={showMore} onClick={() => setMoreOpen(!moreOpen)}>
-                    {showMore ? 'ซ่อนตัวกรองเพิ่มเติม' : `ตัวกรองเพิ่มเติม (${fmtN(moreSel.length)})`}
-                  </button>
-                )}
-              </div>
-            )}
+            <FilterBar
+              fields={fields}
+              value={fval}
+              onChange={(k, x) => setF({ [k]: x?.v[0] ?? '' } as Partial<Filters>)}
+              // a drill-down from another page (ภาพรวม, ติดตาม, แผนที่): × only
+              extra={activeChips.length ? activeChips.map((c) => <ReadChip key={c.label} text={c.label} onClear={() => setF(c.p)} />) : undefined}
+              anySet={hasFilter}
+              // the keyword too, as the help says
+              onClearAll={() => setF(CLEAR_FILTERS)}
+              unit={unit}
+              liveCount={(k, x) => filterAll(e, { ...fs, [k]: x?.v[0] ?? '' } as Filters).out.length}
+            />
           </div>
-          {activeChips.length > 0 && (
-            <div className="sx-tags">
-              {activeChips.map((c) => (
-                <button key={c.label} className="ftag" onClick={() => setF(c.p)}>{c.label} ×</button>
-              ))}
-            </div>
-          )}
           <span className="sr-only" role="status">{said}</span>
           <div className="sx-foot">
             <span className="sx-total">
               <b>{fmtN(F.out.length)}</b> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}
               {s.view !== 'cert' && <span className="sx-sub">มีเบอร์โทร {fmtN(F.ph)}</span>}
             </span>
-            <label className="sx-sort">
-              เรียงตาม
-              <select className="fld sel" value={s.sort} onChange={(ev) => setF({ sort: ev.target.value })}>
-                <Opts options={sortOpts.map(([v, label]) => ({ v, label }))} />
-              </select>
-            </label>
+            <Select variant="tool" prefix="เรียงตาม" label="เรียงตาม" value={s.sort} onChange={(v) => setF({ sort: v })} options={sortOpts.map(([v, label]) => ({ v, label }))} search={false} width={260} align="end" />
           </div>
         </div>
       </section>

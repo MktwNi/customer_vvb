@@ -27,7 +27,7 @@ const lower = (s: string) => s.toLocaleLowerCase('th');
  * `head` (the page-head pill), `cell` (a table cell that reads as text). Never inside a <label> (a click
  * on an option would click the button again): give a visible label an id and pass `labelledBy`.
  */
-export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, placeholder, search = 'auto', width, name, id, disabled, className = '', title }: {
+export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, placeholder, search = 'auto', width, align, name, id, disabled, className = '', title }: {
   value?: V; defaultValue?: V; onChange?: (v: V) => void;
   options: SelOpt<V>[];
   /** accessible name; the sheet's title */
@@ -47,6 +47,8 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
   search?: boolean | 'auto';
   /** popover width (default: the button's, at least 220) */
   width?: number;
+  /** the list under the button's start or end (default: end for the page-head pill) */
+  align?: 'start' | 'end';
   /** a hidden input with this name carries the value (forms read with FormData) */
   name?: string;
   id?: string; disabled?: boolean; className?: string; title?: string;
@@ -100,7 +102,7 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
       </button>
       {name && <input type="hidden" name={name} value={cur ?? ''} />}
       {open && (
-        <Pop anchor={btn} onClose={() => setOpen(null)} label={label} kind="list" role="none" className="sel" align={variant === 'head' ? 'end' : 'start'} width={width ?? Math.max(btn.current?.offsetWidth || 0, 220)}>
+        <Pop anchor={btn} onClose={() => setOpen(null)} label={label} kind="list" role="none" className="sel" align={align ?? (variant === 'head' ? 'end' : 'start')} width={width ?? Math.max(btn.current?.offsetWidth || 0, 220)}>
           <SelList id={lid} value={cur} options={options} label={label} search={find} seed={open.seed} onPick={choose} />
         </Pop>
       )}

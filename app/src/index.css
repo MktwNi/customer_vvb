@@ -631,23 +631,11 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
   .sx-chips{display:flex;overflow-x:auto;margin:0 -6px;padding:4px 6px 6px;scroll-padding:0 6px}
   .sx-chip{flex:none;width:170px}
 }
-.sx-filters{display:flex;flex-direction:column;gap:8px}
-.sx-fhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:40px}
-.sx-fhead>.sx-tags{flex:1 1 0;min-width:0}
-.sx-fcount{min-width:22px;height:22px;padding:0 7px;border-radius:999px;background:var(--tint-2);color:var(--link);font-size:var(--fs-meta);display:flex;align-items:center;justify-content:center}
-.sx-reset{margin-left:auto}
-.sx-fbody{display:flex;flex-direction:column;gap:6px;padding-bottom:4px}
-.sx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 12px;padding:4px 10px 6px}
-.sx-field{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-sec);color:var(--ink-2);min-width:0}
-.sx-sel{width:100%;min-width:0;text-overflow:ellipsis;cursor:pointer}
-.sx-sel.on{background-color:var(--tint);border-color:var(--brand);color:var(--link)}
-.sx-tags{display:flex;gap:6px;flex-wrap:wrap}
+.sx-filters{min-width:0}
 .sx-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:0 4px}
 .sx-total{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink-2)}
 .sx-total b{font-size:var(--fs-title);font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.2}
 .sx-sub{font-size:var(--fs-sec);color:var(--ink-2);padding-left:6px}
-.sx-sort{display:flex;align-items:center;gap:8px;font-size:var(--fs-sec);color:var(--ink-2)}
-.sx-sort .fld{height:var(--ctl-tool);border-radius:999px;width:auto}
 /* results: a light header, flat rows; the row under the pointer (or reached with Tab) is tinted and a click
    anywhere on it opens the company */
 .sx-head{display:grid;gap:14px;padding:12px 20px 10px}
@@ -672,8 +660,6 @@ button.sx-mcard{cursor:pointer}
   .sx-input{flex-basis:100%}
   .sx-row>.btn{flex:1 1 0}
   .sx-body{padding:8px 6px 10px}
-  .sx-grid{padding:4px 4px 6px}
-  .sx-fhead>.sx-tags{flex-basis:100%;order:3}
 }
 @media (max-width:760px){.sx-toggle{width:100%}.sx-toggle button{flex:1}}
 @media (forced-colors:active){
@@ -778,9 +764,12 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sd-stat small{font-size:12px;color:var(--muted)}
 .sd-stat.pri .sd-stat-v b{color:var(--link)}
 .sd-stat.warn .sd-stat-l svg,.sd-stat.warn .sd-stat-v b{color:var(--bad)}
-.sd-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.sd-filters .fld{width:auto;max-width:100%;height:38px;border-radius:999px;font-size:13px;padding:0 12px}
-.sd-filters .fld.on{background-color:var(--tint);border-color:var(--brand);color:var(--link)}
+/* แผนติดต่อ and แผนที่: a view picker, two filter pills and the auto-plan picker in one row */
+.pl-tools,.map-tools{display:flex;gap:8px 10px;flex-wrap:wrap;align-items:center;min-width:0}
+.map-tools{padding:14px 16px}
+.pl-tools>.fb,.map-tools>.fb{flex:0 1 auto}
+/* the filter row (filters.css .fb), in the slot the Dashboard's own selects had */
+.sd-filters{min-width:0}
 .sd-pipe{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;align-items:end}
 .sd-stage{min-width:0;display:flex;flex-direction:column;gap:6px}
 .sd-stage-l{font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2128,9 +2117,9 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 /* hover feedback of the class-based controls above, as the .hv system does it: in high contrast an outline in
    place of the tint, and no fades for reduced motion */
 @media (forced-colors:active) and (hover:hover){
-  :is(.side-item,.side-add,.side-close,.side-acct-btns button,.menu-btn,.tb-btn,.tb-round,.tb-me,.sx-toggle button,.sx-clear,.sx-btn,.sx-chip,.sx-ftoggle,.sx-reset,.sx-tag,.map-zoom button,.pl-nav button,.pl-cell,.sd-col,.sd-win-i,.sd-acc-h,.sd-fi,.sd-wk-nav button,.sd-more,.sl-chev,.sl-owner,.sl-yn button,.sl-toast button,.sl-drop,.sl-search,.sl-datechip,.sl-nm-b,.pe-views button,.pe-tablist button,.pe-res,.pe-edit,.pe-row,.pe-round,.pe-cobox,.pe-other,.pe-deal,.pe-doc,.pe-act,.pe-del,.pe-crumb button,.pe-colink,.pe-more summary,.auth-eye,.auth-btn,.auth-back,.auth-check,.acct-item,.us-btn,.us-more-btn,.us-mi,.us-rc):hover:not(:disabled){outline:2px solid Highlight;outline-offset:-2px}
+  :is(.side-item,.side-add,.side-close,.side-acct-btns button,.menu-btn,.tb-btn,.tb-round,.tb-me,.sx-toggle button,.sx-clear,.sx-btn,.sx-chip,.sx-tag,.map-zoom button,.pl-nav button,.pl-cell,.sd-col,.sd-win-i,.sd-acc-h,.sd-fi,.sd-wk-nav button,.sd-more,.sl-chev,.sl-owner,.sl-yn button,.sl-toast button,.sl-drop,.sl-search,.sl-datechip,.sl-nm-b,.pe-views button,.pe-tablist button,.pe-res,.pe-edit,.pe-row,.pe-round,.pe-cobox,.pe-other,.pe-deal,.pe-doc,.pe-act,.pe-del,.pe-crumb button,.pe-colink,.pe-more summary,.auth-eye,.auth-btn,.auth-back,.auth-check,.acct-item,.us-btn,.us-more-btn,.us-mi,.us-rc):hover:not(:disabled){outline:2px solid Highlight;outline-offset:-2px}
 }
-@media (prefers-reduced-motion:reduce){.map-zoom button,.tb-search,.tb-btn,.sx-chip,.pl-cell,.sx-toggle button,.sx-btn,.sx-sel,.pl-nav button,.pe-views button,.pe-q,.pe-crumb button,.pe-colink,.pe-edit,.pe-del,.pe-act,.pe-tablist button,.pe-res,.pe-more summary,.pe-deal,.pe-cobox,.pe-other,.pe-doc,.auth-check,.dp-name,input[type=file]::file-selector-button{transition:none}}
+@media (prefers-reduced-motion:reduce){.map-zoom button,.tb-search,.tb-btn,.sx-chip,.pl-cell,.sx-toggle button,.sx-btn,.pl-nav button,.pe-views button,.pe-q,.pe-crumb button,.pe-colink,.pe-edit,.pe-del,.pe-act,.pe-tablist button,.pe-res,.pe-more summary,.pe-deal,.pe-cobox,.pe-other,.pe-doc,.auth-check,.dp-name,input[type=file]::file-selector-button{transition:none}}
 
 /* ---- help center (คู่มือการใช้งาน, components/Help.tsx): the contents as group cards, the quick starts,
    the topics and the FAQ as rows that open with a word ("วิธีทำ" / "ซ่อน", no caret). Also full screen over
