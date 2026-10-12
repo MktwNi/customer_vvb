@@ -939,8 +939,8 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
     const base = Math.max(0, (m.forecast || 0) - rec0);
     const a = base > 0 ? splitAmounts(base, stages.map(() => 1)) : stages.map(() => null);
     const pct = kept.length ? '' : String(Math.round(100 / stages.length));
-    // due when won, then every 30 days; after installments received already, the next 30 days on
-    return [...kept, ...stages.map((stage, i) => ({ stage, amt: a[i] != null ? fmtMoney(a[i]) : '', pct, due: '', rel: (kept.length + i) * 30, date: false, how: 'transfer' as PayHow, howT: '', note: '', got: 0 }))];
+    // 30 days after the win, then every 30 days (as the table's quick plan); after installments received, on from there
+    return [...kept, ...stages.map((stage, i) => ({ stage, amt: a[i] != null ? fmtMoney(a[i]) : '', pct, due: '', rel: (kept.length + i + 1) * 30, date: false, how: 'transfer' as PayHow, howT: '', note: '', got: 0 }))];
   });
   const [err, setErr] = useState('');
   const ref = useRef<HTMLElement>(null);
@@ -967,7 +967,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
     let open = rows.filter((r) => !r.got).slice(0, k);
     while (open.length < k) {
       const prev = [...received, ...open].pop();
-      open = [...open, { stage: nextStage([...received, ...open].map((r) => r.stage)), amt: '', pct: '', due: '', rel: prev?.rel != null ? prev.rel + 30 : open.length * 30, date: false, how: prev?.how || 'transfer', howT: '', note: '', got: 0 }];
+      open = [...open, { stage: nextStage([...received, ...open].map((r) => r.stage)), amt: '', pct: '', due: '', rel: prev?.rel != null ? prev.rel + 30 : (open.length + 1) * 30, date: false, how: prev?.how || 'transfer', howT: '', note: '', got: 0 }];
     }
     const s = sh && sh.length === k ? sh : k === 2 ? [50, 50] : open.map(() => 1);
     const ssum = s.reduce((a, b) => a + b, 0) || 1;
