@@ -266,6 +266,9 @@ export interface CtIndex {
   deals: Map<Cust, Deal[]>;
   /** the customers: a deal (any year), added by hand, or a type; every other registry company is a prospect */
   pop: Set<Cust>;
+  /** customers with no company row here: Sales Tracker clients by name, and deals linked to a company
+   *  this device does not know (e.g. one added by hand, since deleted); listed after the search results */
+  outside: Set<Cust>;
   /** customer → the types its deals suggest that it has no answer for, in list order */
   sug: Map<Cust, CtSuggestion[]>;
   /** the customer a record key stands for */
@@ -328,6 +331,8 @@ export function ctIndex(I: CtIndexInput): CtIndex {
   const pop = new Set<Cust>(deals.keys());
   I.custom.forEach((id) => pop.add(I.company(id)?.id ?? id));
   yes.forEach((_, cu) => typeof cu === 'number' && I.company(cu) && pop.add(cu));
+  const outside = new Set<Cust>();
+  pop.forEach((cu) => (typeof cu === 'string' || !I.company(cu)) && outside.add(cu));
 
   const svc = svcToType(I.defs);
   const sug = new Map<Cust, CtSuggestion[]>();
@@ -348,7 +353,7 @@ export function ctIndex(I: CtIndexInput): CtIndex {
         [...by.values()].sort((a, b) => order.get(a.t)! - order.get(b.t)!).map((x) => ({ ...x, why: x.why.sort((a, b) => b.year.localeCompare(a.year)) })),
       );
   });
-  return { tags, yes, deals, pop, sug, custOf, custOfDeal };
+  return { tags, yes, deals, pop, outside, sug, custOf, custOfDeal };
 }
 
 export interface CtCounts {
@@ -410,12 +415,12 @@ export function ctMatcher(ix: CtIndex, sel: string): (cu: Cust) => boolean {
     return (none && !y) || (sug && ix.sug.has(cu)) || (!!y && y.some((t) => types.has(t)));
   };
 }
-/** Customers with no registry row (Sales Tracker clients by name), for the group after the search
- *  results: the client name of their newest deal, and their deals. */
-export function trackerOnly(ix: CtIndex): { key: string; name: string; deals: Deal[] }[] {
-  const out: { key: string; name: string; deals: Deal[] }[] = [];
-  ix.pop.forEach((cu) => {
-    if (typeof cu !== 'string') return;
+/** Customers with no company row here (ix.outside), for the group after the search results ("ลูกค้าใน
+ *  Sales Tracker ที่ยังไม่อยู่ในทะเบียน"): the client name of their newest deal, and their deals. With the
+ *  registry rows they make up every customer, so the search counts equal the overview's. */
+export function trackerOnly(ix: CtIndex): { key: Cust; name: string; deals: Deal[] }[] {
+  const out: { key: Cust; name: string; deals: Deal[] }[] = [];
+  ix.outside.forEach((cu) => {
     const ds = (ix.deals.get(cu) || []).slice().sort((a, b) => b.year.localeCompare(a.year) || (b.at || '').localeCompare(a.at || ''));
     if (ds.length) out.push({ key: cu, name: ds[0].client, deals: ds });
   });

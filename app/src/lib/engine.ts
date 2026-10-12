@@ -4294,12 +4294,12 @@ export class GccEngine {
   }
 
   // ---- CSV
-  exportCsv(view: 'co' | 'cert', out: (Company | Cert)[], trk: { name: string; key: string }[] = []) {
+  exportCsv(view: 'co' | 'cert', out: (Company | Cert)[], trk: { name: string; key: Cust }[] = []) {
     downloadBlob(new Blob([this.registryCsv(view, out, trk)], { type: 'text/csv;charset=utf-8' }), `GCC_${view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}_${out.length + trk.length}.csv`);
   }
   /** The search results as CSV. `trk`: Sales Tracker customers not in the registry (ctTrackerOnly, listed
    *  while a customer-type filter is on): a row each, with only the name and the customer types. */
-  registryCsv(view: 'co' | 'cert', out: (Company | Cert)[], trk: { name: string; key: string }[] = []) {
+  registryCsv(view: 'co' | 'cert', out: (Company | Cert)[], trk: { name: string; key: Cust }[] = []) {
     const D = this.B.D, CD = this.B.CD;
     // same cells as the tracker export: text can't run as a formula (names typed by teammates), and
     // juristic ids / phone numbers keep their leading 0

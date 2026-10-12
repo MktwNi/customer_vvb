@@ -307,6 +307,7 @@ describe('counting (one definition for every screen)', () => {
     deal({ id: 'c', gid: 2, year: '2569' }),
     deal({ id: 'd', client: 'ลูกค้านอกทะเบียน', year: '2569', service: ['CFO'] }),
     deal({ id: 'e', gid: 3, year: '2569' }),
+    deal({ id: 'g', gid: 99, client: 'ลูกค้าที่ลบไปแล้ว', year: '2568' }), // its company is not known here
   ];
   const tags: CustTags = { 1: { cfo: tag('y'), vvb: tag('y') }, 2: { vvb: tag('y'), cfo: tag('n') }, 4: { tvr: tag('y') }, 5: { cfp: tag('n') }, 'n:ลูกค้านอกทะเบียน': { cfp: tag('y') } };
   const fc: Record<string, number> = { a: 100, b: 1000, c: 50, d: 7, e: 3 };
@@ -314,12 +315,12 @@ describe('counting (one definition for every screen)', () => {
 
   it('customers: a deal (any year), added by hand, or a type; types overlap, the only total is the customers', () => {
     const c = countByType(ix, defs, '2569', (d) => fc[d.id]);
-    expect(c.pop).toBe(6); // 1, 2, 3, 4, 6 and the client not in the registry; 5 only has a "no"
+    expect(c.pop).toBe(7); // 1, 2, 3, 4, 6, 99 and the client not in the registry; 5 only has a "no"
     expect(c.by.vvb).toEqual({ cos: 2, deals: 2, forecast: 150 });
     expect(c.by.cfo).toEqual({ cos: 1, deals: 1, forecast: 100 });
     expect(c.by.cfp).toEqual({ cos: 1, deals: 1, forecast: 7 });
     expect(c.by.tvr).toEqual({ cos: 1, deals: 0, forecast: 0 });
-    expect(c.none).toBe(2); // 3 (a deal, no type) and 6 (added by hand)
+    expect(c.none).toBe(3); // 3 (a deal, no type), 6 (added by hand) and 99
     expect(c.noneDeals).toEqual({ deals: 1, forecast: 3 });
     expect(c.sug).toBe(1); // 'd' suggests CFO for the client not in the registry; 1 already has VVB
     expect(countByType(ix, defs, '2568', (d) => fc[d.id]).by.vvb).toEqual({ cos: 2, deals: 1, forecast: 1000 });
@@ -329,6 +330,7 @@ describe('counting (one definition for every screen)', () => {
     const c = countByType(ix, defs, '2569', () => 0);
     const cos = [1, 2, 3, 4, 5, 6, 7, 8]; // the registry, prospects included
     const n = (sel: string) => cos.filter(ctMatcher(ix, sel)).length + trackerOnly(ix).filter((x) => ctMatcher(ix, sel)(x.key)).length;
+    expect(trackerOnly(ix).map((x) => [x.key, x.name])).toEqual([[99, 'ลูกค้าที่ลบไปแล้ว'], ['n:ลูกค้านอกทะเบียน', 'ลูกค้านอกทะเบียน']]);
     for (const d of defs) expect([d.id, n(d.id)]).toEqual([d.id, c.by[d.id].cos]);
     expect(n('all')).toBe(c.pop);
     expect(n('none')).toBe(c.none);
@@ -415,7 +417,9 @@ describe('performance', () => {
     expect(hits).toBe([...ix.pop].filter((cu) => typeof cu === 'number' && (ix.yes.get(cu) || []).some((t) => t === 'cfo' || t === 'vvb')).length);
     expect(hits).toBeGreaterThan(1000);
     expect(c.pop).toBe(ix.pop.size);
-    expect(built).toBeLessThan(10000); // lookups for the tags and deals, never one per registry company
+    // lookups for the tags, the deals and the customers they make, never one per registry company
+    expect(built).toBeLessThan(3 * (Object.keys(tags).length + deals.length));
+    expect(built).toBeLessThan(N / 2);
     expect(t1 - t0).toBeLessThan(500);
     expect(t2 - t1).toBeLessThan(500);
   });

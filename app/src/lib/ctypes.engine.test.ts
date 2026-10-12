@@ -547,6 +547,29 @@ describe('who may, counting, files and storage', () => {
     expect(V.pushes.length).toBe(n0);
   });
 
+  it('made a viewer with tag changes queued: nothing is sent, and dropping them puts back the team\'s answers', async () => {
+    const { L, S } = await team();
+    const [a, b] = cos(S, 2, 70);
+    S.e.setType(a, 'cfo', 'y');
+    await settle(S, L);
+    S.net.offline = true;
+    later(10);
+    S.e.setTypes(a, ['vvb'], ['cfo']);
+    S.e.setType(b, 'tvr', 'y');
+    await L.e.adminUpdate('somchai', { role: 'viewer' });
+    S.net.offline = false;
+    await settle(S);
+    expect(S.e.role()).toBe('viewer');
+    expect(S.e.teamPendingN).toBe(3);
+    expect(last(`ctag/${a.id}/vvb`)).toBeNull();
+    await S.e.teamDropUnsent();
+    await settle(S);
+    expect(S.e.teamPendingN).toBe(0);
+    expect(S.e.typesOf(a)).toEqual(['cfo']);
+    expect(S.e.typesOf(b)).toEqual([]);
+    expect(await S.store.get('ctags')).toEqual({ [String(a.id)]: { cfo: expect.objectContaining({ s: 'y' }) } });
+  });
+
   it('counting: the overview, the search type row and the tracker group agree; the CSVs carry the names', async () => {
     const { L, S } = await team();
     const [a, b, c] = cos(S, 3, 40);
