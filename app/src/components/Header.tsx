@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { addMonths, fmtN, isoTh, todayISO } from '../lib/format';
+import { addMonths, dmTh, fmtN, isoTh, todayISO } from '../lib/format';
 import { ROLE_TH } from '../lib/auth';
 import { TEAM_ST, TeamChip } from './TeamSync';
 import { Icon } from './icons';
@@ -69,7 +69,9 @@ function RefDate() {
     <div style={{ position: 'relative' }}>
       <button ref={btn} className="tb-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" aria-label={`สถานะ ณ ${isoTh(e.ref)} (เปลี่ยนวันที่)`}>
         <span className="tb-muted tb-hide-sm">สถานะ ณ</span>
-        <span>{isoTh(e.ref)}</span>
+        <span className="tb-hide-sm">{isoTh(e.ref)}</span>
+        {/* a phone: the year only when it isn't this one, so the page's name keeps its room */}
+        <span className="tb-show-sm">{e.ref.slice(0, 4) === today.slice(0, 4) ? dmTh(e.ref) : isoTh(e.ref)}</span>
       </button>
       {open && (
         <div ref={pop} role="dialog" aria-label="ดูสถานะ ณ วันที่" className="menu tb-pop">

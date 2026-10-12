@@ -34,7 +34,7 @@ const refocus = (sel: string) => requestAnimationFrame(() => document.querySelec
 
 interface Cred { user: TeamUser; temp: string; reset?: boolean }
 interface Ask { title: string; text: string; yes: string; danger?: boolean; run: () => Promise<void> }
-interface Item { label: string; run: () => void; danger?: boolean; guard?: string }
+interface Item { label: string; run: () => void; danger?: boolean }
 
 export function Users() {
   const { engine: e } = useApp();
@@ -154,11 +154,11 @@ export function Users() {
       },
       lockedNow && { label: 'ปลดล็อก', run: () => void exec(u.u, async () => { replace(await e.adminUnlock(u.u)); setNote(`ปลดล็อก ${u.name} แล้ว`); }) },
       !self && { label: 'ออกจากระบบทุกเครื่อง', run: () => void exec(u.u, async () => { replace(await e.adminKick(u.u)); setNote(`${u.name} ถูกออกจากระบบทุกเครื่องแล้ว`); }) },
+      // (not for your own account or the last admin: the line under the role select says why)
       on(u)
-        ? {
+        ? !guardOf(u) && {
             label: 'ปิดการใช้งาน',
             danger: true,
-            guard: guardOf(u),
             run: () =>
               setAsk({
                 title: 'ปิดการใช้งาน',
@@ -186,6 +186,8 @@ export function Users() {
       danger: true,
       run: async () => {
         e.delTeam(name);
+        setErr('');
+        setNote('');
         refocus('#us-add'); // its chip (or its button) is gone
       },
     });
@@ -197,9 +199,11 @@ export function Users() {
         title="ผู้ใช้และสิทธิ์"
         sub={sub}
         right={
-          <button id="us-add" className="us-btn primary" onClick={() => setAdd({ from: '#us-add' })} disabled={!users || offline}>
-            เพิ่มผู้ใช้
-          </button>
+          users && !offline && (
+            <button id="us-add" className="us-btn primary" onClick={() => setAdd({ from: '#us-add' })}>
+              เพิ่มผู้ใช้
+            </button>
+          )
         }
       />
       {note && <Notice kind="ok" role="status">{note}</Notice>}
@@ -293,7 +297,7 @@ export function Users() {
                     สร้างบัญชี
                   </button>
                   {e.crm.team.includes(x.name) && (
-                    <button className="us-btn sm quiet" onClick={() => unlist(x.name)} aria-label={`ลบ ${x.name} ออกจากรายชื่อ`}>
+                    <button className="us-btn sm bare" onClick={() => unlist(x.name)} aria-label={`ลบ ${x.name} ออกจากรายชื่อ`}>
                       ลบออกจากรายชื่อ
                     </button>
                   )}
@@ -356,7 +360,7 @@ export function Users() {
         </Modal>
       )}
       {ask && <Confirm ask={ask} onClose={() => setAsk(null)} />}
-      {rename && <Rename u={rename} onClose={() => setRename(null)} onDone={replace} lost={lost} />}
+      {rename && <Rename u={rename} onClose={() => setRename(null)} onDone={(nu) => { replace(nu); setErr(''); setNote(''); }} lost={lost} />}
     </>
   );
 }
@@ -407,6 +411,8 @@ function RowMenu({ u, items, busy }: { u: TeamUser; items: Item[]; busy: boolean
   const pop = useRef<HTMLDivElement>(null);
   const id = useId();
   usePopover(open, () => setOpen(false), btn, pop);
+  // nothing to do with this account (your own, once it has signed in): no ⋯ at all
+  if (!items.length && !busy) return null;
   return (
     <div className="us-more">
       <button
@@ -430,17 +436,13 @@ function RowMenu({ u, items, busy }: { u: TeamUser; items: Item[]; busy: boolean
               key={it.label}
               role="menuitem"
               className={'us-mi' + (it.danger ? ' danger' : '')}
-              disabled={!!it.guard}
               onClick={() => {
                 setOpen(false);
                 btn.current?.focus();
                 it.run();
               }}
             >
-              <span className="us-mi-t">
-                {it.label}
-                {it.guard && <small>{it.guard}</small>}
-              </span>
+              <span className="us-mi-t">{it.label}</span>
             </button>
           ))}
         </div>
@@ -482,19 +484,28 @@ function Confirm({ ask, onClose }: { ask: Ask; onClose: () => void }) {
 function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
   const { engine: e } = useApp();
   const [copied, setCopied] = useState('');
+  // the browser refused the clipboard: the text to copy by hand, selected (in place of its own prompt box)
+  const [manual, setManual] = useState('');
   const doneRef = useRef<HTMLButtonElement>(null);
+  const manRef = useRef<HTMLTextAreaElement>(null);
+  const mid = useId();
   useEffect(() => {
     doneRef.current?.closest<HTMLElement>('[role=dialog]')?.focus();
   }, []);
+  useEffect(() => {
+    if (manual) manRef.current?.select();
+  }, [manual]);
   const { user, temp } = cred;
   const invite = `เชิญเข้าใช้ฐานข้อมูลลูกค้า GCC\nลิงก์: ${inviteLink(e.teamCfg?.url || '', e.homeTeam)}\nชื่อผู้ใช้: ${user.u}\nรหัสผ่านชั่วคราว: ${temp}\n(ระบบจะให้ตั้งรหัสผ่านใหม่เมื่อเข้าครั้งแรก)`;
   const copy = async (k: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
+      setManual('');
       setCopied(k);
       setTimeout(() => setCopied((c) => (c === k ? '' : c)), 2500);
     } catch {
-      window.prompt('คัดลอกข้อความนี้', text);
+      setCopied('');
+      setManual(text);
     }
   };
   const rows: [string, string, string][] = [
@@ -523,6 +534,12 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
       <button className="us-btn primary wide" onClick={() => copy('i', invite)}>
         {copied === 'i' ? 'คัดลอกข้อความเชิญแล้ว' : 'คัดลอกข้อความเชิญ'}
       </button>
+      {manual && (
+        <div className="auth-field">
+          <label htmlFor={mid}>คัดลอกให้อัตโนมัติไม่ได้ ข้อความเลือกไว้แล้ว กดคัดลอกเอง (Ctrl+C หรือกดค้าง)</label>
+          <textarea ref={manRef} id={mid} className="fld us-manual" readOnly value={manual} rows={manual.split('\n').length} onFocus={(ev) => ev.currentTarget.select()} />
+        </div>
+      )}
       <span className="us-amber">รหัสผ่านชั่วคราวแสดงครั้งเดียว ส่งให้เจ้าตัวทางแชตส่วนตัว ไม่ใช่ในกลุ่ม</span>
       <span className="sr-only" role="status">{copied ? 'คัดลอกแล้ว' : ''}</span>
       <div className="us-row end">
@@ -576,7 +593,7 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
           <div className="us-2">
             <div className="auth-field">
               <label htmlFor={ids + 'n'}>ชื่อที่แสดง</label>
-              <input id={ids + 'n'} className="auth-input" value={name} onChange={(ev) => setName(ev.target.value)} maxLength={40} placeholder="เช่น มกร" autoFocus={!initName} aria-describedby={ids + 'nh'} />
+              <input id={ids + 'n'} className="auth-input" value={name} onChange={(ev) => { setName(ev.target.value); setErr(''); }} maxLength={40} placeholder="เช่น มกร" autoFocus={!initName} aria-describedby={ids + 'nh'} />
               <span id={ids + 'nh'} className="auth-hint">ชื่อที่ใช้ในข้อมูล (ผู้รับผิดชอบ ผู้บันทึก)</span>
             </div>
             <div className="auth-field">
@@ -585,7 +602,10 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
                 id={ids + 'u'}
                 className="auth-input"
                 value={u}
-                onChange={(ev) => setU(ev.target.value)}
+                onChange={(ev) => {
+                  setU(ev.target.value);
+                  setErr('');
+                }}
                 onBlur={() => setUTouched(true)}
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -640,7 +660,7 @@ function Rename({ u, onClose, onDone, lost }: { u: TeamUser; onClose: () => void
     setBusy(true);
     setErr('');
     try {
-      onDone(await e.adminUpdate(u.u, { name: n }));
+      onDone(await e.adminRename(u, n));
       onClose();
     } catch (x) {
       lost(x);

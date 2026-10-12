@@ -396,7 +396,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
   return (
     <section className="pe-card pe-tabs" aria-label="ประวัติและนัดหมาย">
       <div role="tablist" className="utabs">
-        {([['log', 'ประวัติการติดต่อ', contacts.length], ['tasks', 'นัดหมาย', upcoming.length], ['deals', 'ดีลใน Sales Tracker', deals.length]] as const).map(([k, label, n]) => (
+        {/* (a phone leaves out the .pe-long words, so the three tabs fit across it) */}
+        {([['log', <>ประวัติ<span className="pe-long">การติดต่อ</span></>, contacts.length], ['tasks', 'นัดหมาย', upcoming.length], ['deals', <>ดีล<span className="pe-long">ใน Sales Tracker</span></>, deals.length]] as const).map(([k, label, n]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
             {label} <span className="n">{fmtN(n)}</span>
           </button>
@@ -856,7 +857,7 @@ export function CompanyPeople({ c }: { c: Company }) {
         <h3 className="card-t">ผู้ติดต่อ{list.length ? ` (${fmtN(list.length)})` : ''}</h3>
         {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="lnk">เพิ่มผู้ติดต่อ</button>}
       </div>
-      {!list.length && <span className="empty">ยังไม่มี · บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติ</span>}
+      {!list.length && <span className="empty">{e.can('edit') ? 'ยังไม่มี · บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติ' : 'ยังไม่มีผู้ติดต่อ'}</span>}
       {list.map((p) => (
         <button key={p.id} className="pe-other" onClick={() => openPerson(p.id)}>
           <PersonAvatar p={p} size={32} />

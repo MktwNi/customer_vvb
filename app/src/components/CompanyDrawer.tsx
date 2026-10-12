@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { ReadOnly } from './ReadOnly';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, STG, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
@@ -129,7 +128,13 @@ export function CompanyDrawer() {
     });
   const shown = blocks.filter((b) => (dt === 'cfo' ? b.k === 't' : dt === 'src' ? b.k !== 't' : false));
   const srcN = d ? d.g.length + d.f.length + d.s.length : 0;
-  const dTabs: [DetailTab, string, number][] = [['info', 'ข้อมูลบริษัท', 0], ['cfo', 'CFO · รอบ อบก.', certs.length], ['src', 'GI · โรงงาน · SET', srcN], ['crm', 'การติดต่อ', hist.length + nOpenT]];
+  // (a phone leaves out the .dr-long words, so the four tabs fit across it)
+  const dTabs: [DetailTab, ReactNode, number][] = [
+    ['info', <>ข้อมูล<span className="dr-long">บริษัท</span></>, 0],
+    ['cfo', <>CFO<span className="dr-long"> · รอบ อบก.</span></>, certs.length],
+    ['src', <>GI<span className="dr-long"> · โรงงาน</span> · SET</>, srcN],
+    ['crm', 'การติดต่อ', hist.length + nOpenT],
+  ];
 
   const cvT = CST[c.cfoSt];
   const cvSub = c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '';
@@ -171,7 +176,7 @@ export function CompanyDrawer() {
 
   return (
     <>
-      <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(4,10,60,.38)', zIndex: 40 }} />
+      <div onClick={close} className="dp-back" style={{ zIndex: 40 }} />
       <aside ref={ref} className="panel" tabIndex={-1} role="dialog" aria-modal="true" aria-label={c.name} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(680px,100vw)', background: 'var(--frame)', zIndex: 41, overflowY: 'auto', boxShadow: 'var(--sh-pop)', outline: 'none' }}>
         {/* a white head: what it is, the name, then one line (the sales status lives in the Sales Tracker card) */}
         <div className="dr-head">
@@ -198,14 +203,14 @@ export function CompanyDrawer() {
             const on = dt === k;
             return (
               <button key={k} role="tab" aria-selected={on} onClick={() => set({ dTab: k })}>
-                {label}
+                <span>{label}</span>
                 {n > 0 && <span className="n">{fmtN(n)}</span>}
               </button>
             );
           })}
         </div>
 
-        <div style={{ padding: '18px 28px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="dr-body">
           {dt === 'info' && (
             <>
               <SalesBox c={c} />
@@ -230,12 +235,12 @@ export function CompanyDrawer() {
                   <button onClick={() => go('dedup', { sel: null, ddF: 'pending', ddPage: Math.floor(pendingG.indexOf(myG[0]) / 20) })} className="lnk" style={{ fontSize: 13 }}>ไปที่ตรวจข้อมูลซ้ำ</button>
                 </span>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 10 }}>
+              <div className="dr-kpis">
                 {kpis.map((k) => (
-                  <div key={k.k} style={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-inner)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                    <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{k.k}</span>
-                    <span style={{ fontSize: 18, fontWeight: 500, color: inkOf(k.kind) }}>{k.v}</span>
-                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{k.sub}</span>
+                  <div key={k.k} className="dr-kpi">
+                    <span className="dr-kpi-l">{k.k}</span>
+                    <span className="dr-kpi-v" style={{ color: inkOf(k.kind) }}>{k.v}</span>
+                    <span className="dr-kpi-s">{k.sub}</span>
                   </div>
                 ))}
               </div>
@@ -284,11 +289,11 @@ export function CompanyDrawer() {
               {dt === 'cfo' && r && (
                 <div style={{ ...box, padding: '14px 18px', gap: 8 }}>
                   <H>{`รอบ อบก. ที่ต้องยื่นต่ออายุ · รอบ ${c.rnd}`}</H>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 6 }}>
+                  <div className="dr-rnd">
                     {([['ส่งเอกสารภายใน', isoTh(r.doc)], ['ชำระค่าธรรมเนียม', isoTh(r.fee)], ['ประกาศผล', isoTh(r.ann)]] as const).map(([k, v]) => (
-                      <div key={k} style={{ border: '1px solid var(--divider)', borderRadius: 10, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{k}</span>
-                        <span style={{ fontSize: 14 }}>{v}</span>
+                      <div key={k}>
+                        <span>{k}</span>
+                        <span>{v}</span>
                       </div>
                     ))}
                   </div>
@@ -319,7 +324,12 @@ export function CompanyDrawer() {
 
           {dt === 'crm' && (
             <>
-              <ReadOnly ro={ro}>
+              {ro ? (
+                <div style={{ ...box, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
+                  <span style={field}>สถานะในแผนติดต่อ<span style={{ fontSize: 14, color: 'var(--ink)' }}>{st[1]}</span></span>
+                  <span style={field}>ผู้รับผิดชอบ<span style={{ fontSize: 14, color: 'var(--ink)' }}>{C.owners[c.id] || 'ยังไม่มีผู้รับผิดชอบ'}</span></span>
+                </div>
+              ) : (
               <div style={{ ...box, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
                 <label style={field}>
                   สถานะในแผนติดต่อ
@@ -342,29 +352,29 @@ export function CompanyDrawer() {
                   <span className="t-meta" style={{ gridColumn: '1/-1', fontSize: 13 }}>ยังไม่มีรายชื่อทีม ผู้ดูแลระบบเพิ่มได้เมื่อสร้างบัญชีให้ทีม</span>
                 ))}
               </div>
-              </ReadOnly>
-              <ReadOnly ro={ro}>
+              )}
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <H>นัดหมาย</H>
-                  <button onClick={() => openSched({ ids: [c.id] })} className="btn sm">เพิ่มนัด</button>
+                  {!ro && <button onClick={() => openSched({ ids: [c.id] })} className="btn sm">เพิ่มนัด</button>}
                 </div>
                 {!tasks.length && <span className="empty">ยังไม่มีนัด</span>}
                 {tasks.map((t) => {
                   const ti = taskInfo(e, t);
                   return (
                     <div key={t.id} className="dr-row" style={{ display: 'flex', gap: 10, alignItems: 'center', borderTop: '1px solid var(--divider)', paddingTop: 8 }}>
-                      <DoneBox t={t} onToggle={() => e.toggleTask(t)} />
+                      <DoneBox t={t} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
                       <span style={{ flex: 1, fontSize: 14, textDecoration: t.done ? 'line-through' : 'none' }}>{ti.meta}{t.note ? ' · ' + t.note : ''}</span>
-                      <span className="dr-acts">
-                        <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} className="lnk" style={{ fontSize: 13 }}>เลื่อน</button>
-                        <button onClick={() => e.delTask(t)} className="quiet">ลบ</button>
-                      </span>
+                      {!ro && (
+                        <span className="dr-acts">
+                          <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} className="lnk" style={{ fontSize: 13 }}>เลื่อน</button>
+                          <button onClick={() => e.delTask(t)} className="quiet">ลบ</button>
+                        </span>
+                      )}
                     </div>
                   );
                 })}
               </div>
-              </ReadOnly>
               <div style={{ ...box, gap: 12 }}>
                 <H>บันทึกการติดต่อ</H>
                 {!ro && <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -472,7 +482,7 @@ function SalesBox({ c }: { c: Company }) {
           {!ro && !hasYear && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
         </span>
       </div>
-      {!deals.length && <span className="empty">ยังไม่อยู่ในตารางติดตามการขาย · ส่งเข้าแล้วข้อมูลติดต่อจะถูกกรอกให้</span>}
+      {!deals.length && <span className="empty">ยังไม่อยู่ในตารางติดตามการขาย{ro ? '' : ' · ส่งเข้าแล้วข้อมูลติดต่อจะถูกกรอกให้'}</span>}
       {deals.map((d) => {
         const m = dealMoney(e.sales, d);
         const lc = lastContact(e.sales, d, todayISO());
