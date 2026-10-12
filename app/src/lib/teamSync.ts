@@ -7,8 +7,9 @@
  * tombstone {k, del:true}. The server keeps an append-only log ordered by `seq` — the last op
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
-import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
+import type { ContactEdit, Crm, CTag, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
+import { CT_CFG, CT_ID_RE, parseCTagKey, toCTag, toCTypeDef, type CTypeRec } from './ctypes';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
@@ -29,6 +30,9 @@ export interface SyncOp {
   /** How far the tab that made the change had pulled (its cursor): another tab of the browser that
    *  sends it may have pulled further, and puts those newer rows under the change's fields. */
   seen?: number;
+  /** A customer-type tag removed because it moved to another key (ctypes.ts rekeyOps): the `at` of the
+   *  answer it moved. A newer answer a teammate wrote there meanwhile stays (rebaseOp). */
+  was?: string;
 }
 /** What a queued list change (scfg/…) does: items added and removed (a rename is both). */
 export interface ListEdit { add: string[]; rm: string[] }
@@ -186,7 +190,8 @@ export const LOCAL_ID_MIN = 900000;
 export const CUSTOM_ID_MIN = 1e12;
 export const isLocalId = (id: number) => id >= LOCAL_ID_MIN && id < CUSTOM_ID_MIN;
 export function isLocalOnly(k: string, v?: unknown) {
-  const m = /^(stage|owner|watch|contact|log)\/(\d+)/.exec(k);
+  // a customer-type tag of such a company is written under its name key (ctypes.ts); a numeric one is never shared
+  const m = /^(stage|owner|watch|contact|log|ctag)\/(\d+)/.exec(k);
   if (m) return isLocalId(+m[2]);
   if (k.startsWith('task/') && v && typeof v === 'object') return isLocalId(Number((v as Task).gid));
   return false;
@@ -214,6 +219,11 @@ export const keyOf = {
   person: (id: string) => `person/${id}`,
   /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
   dundo: (id: string) => `dundo/${id}`,
+  /** one customer's answer for one customer type (ctypes.ts): `ckey` = a company id or 'n:<name key>' */
+  ctag: (ckey: string, t: string) => `ctag/${ckey}/${t}`,
+  /** an admin's changes to one customer type: under scfg/, which only admins may write (on the team
+   *  script too), and which older builds skip for a name they don't know */
+  ctype: (id: string) => `scfg/${CT_CFG}${id}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -251,7 +261,12 @@ export function uniqueTaskIds(tasks: Task[]) {
   return renamed;
 }
 
-export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person> }
+/** `ctags`: ckey → type id → answer; `ctypes`: type id → the admin's changes (ctypes.ts). Optional: a
+ *  store saved by an older build has neither. */
+export interface SharedState {
+  crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>;
+  ctags?: Record<string, Record<string, CTag>>; ctypes?: Record<string, CTypeRec>;
+}
 
 /** Every shared record currently held locally, keyed like the server. */
 export function localRecords(s: SharedState): Map<string, unknown> {
@@ -280,12 +295,14 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
+  Object.entries(s.ctags || {}).forEach(([ck, a]) => Object.entries(a || {}).forEach(([t, v]) => v && m.set(keyOf.ctag(ck, t), { ...v })));
+  Object.entries(s.ctypes || {}).forEach(([id, v]) => v && m.set(keyOf.ctype(id), { ...v }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
-export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean }
-export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false });
+export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean; ctags: boolean; ctypes: boolean }
+export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false, ctags: false, ctypes: false });
 
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
@@ -427,6 +444,21 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       break;
     }
     case 'scfg':
+      if (rest.startsWith(CT_CFG)) {
+        // a customer type (an older build returns below: not one of its lists)
+        const id = rest.slice(CT_CFG.length), T = s.ctypes || (s.ctypes = {});
+        if (!CT_ID_RE.test(id)) return;
+        if (del) {
+          if (!(id in T)) return;
+          delete T[id];
+        } else {
+          const v = toCTypeDef(row.v);
+          if (!v) return;
+          T[id] = v;
+        }
+        fx.ctypes = true;
+        break;
+      }
       if (!CFG_KEYS.includes(rest) || del || !Array.isArray(row.v)) return;
       s.sales.cfg[rest as keyof SalesCfg] = (row.v as unknown[]).map(String);
       fx.sales = true;
@@ -455,11 +487,27 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.people = true;
       break;
     }
+    case 'ctag': {
+      // like dpay: a record type older builds skip, never sending or deleting one
+      const p = parseCTagKey(rest), T = s.ctags || (s.ctags = {});
+      if (!p) return;
+      if (del) {
+        if (!T[p.ckey]?.[p.t]) return;
+        delete T[p.ckey][p.t];
+        if (!Object.keys(T[p.ckey]).length) delete T[p.ckey];
+      } else {
+        const v = toCTag(row.v);
+        if (!v) return;
+        (T[p.ckey] || (T[p.ckey] = {}))[p.t] = v;
+      }
+      fx.ctags = true;
+      break;
+    }
   }
 }
 
-/** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\//;
+/** Records whose value is an object of fields that people edit separately (a customer type too). */
+const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\/|^scfg\/ct\./;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.
@@ -469,6 +517,7 @@ const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\//;
  * - a whole-value write (a new record, a deletion here) or another kind of record: ours stands (null).
  */
 export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown } | null {
+  if (o.k.startsWith('ctag/')) return rebaseTag(row, o);
   // an import only fills gaps: whatever the team has for the record (a value or a deletion) wins —
   // except fields a person edited here before it was shared (o.f), put on top of the team's record
   if (o.nx) {
@@ -495,6 +544,19 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
   }
   if (typeof row.v !== 'object') return null;
   return { v: withFields(row.v as Record<string, unknown>, o) };
+}
+
+/**
+ * A customer-type answer: the newer one (by `at`) wins, whichever push reached the sheet first, as
+ * when one customer's keys are read together. A removal that moved the answer to another key (`was`)
+ * yields to a newer answer a teammate wrote there meanwhile; a teammate's removal leaves ours.
+ */
+function rebaseTag(row: SyncRow, o: SyncOp): { drop: true } | null {
+  const theirs = row.del || row.v == null ? null : toCTag(row.v);
+  if (!theirs) return null;
+  if (o.del || o.v == null) return o.was !== undefined && theirs.at > o.was ? { drop: true } : null;
+  const mine = toCTag(o.v);
+  return mine && theirs.at > mine.at ? { drop: true } : null;
 }
 
 /** A teammate's record with the fields a queued change names (`f`) put on top; a list field edited

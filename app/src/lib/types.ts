@@ -97,6 +97,33 @@ export interface Person {
   phone: string; email: string; line: string; owner: string; status: 'active' | 'left'; note: string;
   at: string; by: string; upAt: string; upBy: string;
 }
+/**
+ * A customer type (ประเภทลูกค้า) in the admin's list, as resolved from the defaults and the team's
+ * changes (lib/ctypes.ts mergeDefs). Tags store the id, so a rename keeps every tag.
+ */
+export interface CTypeDef {
+  /** stable: 'cfo' | 'cfp' | 'con' | 'vvb' | 'plt' | 'tvr', or generated for a type an admin adds */
+  id: string;
+  /** display name, at most 40 characters ("ทวนสอบ") */
+  n: string;
+  /** short description ("งานทวนสอบ (VVB)") */
+  d?: string;
+  /** colour slot 0–5 (the six validated hues; no free colour) */
+  c: number;
+  /** order in the list */
+  o: number;
+  /** deal Services that suggest this type (one service suggests at most one type) */
+  svc: string[];
+  /** retired on (ISO date); '' or missing = in use */
+  off?: string;
+  at: string; by: string;
+}
+/**
+ * One customer's answer for one type (record `ctag/<ckey>/<typeId>`): 'y' = has it, 'n' = a remembered
+ * "no" (a suggestion dismissed, or the type removed by hand: never suggested again). Over all the keys
+ * that stand for one customer, the answer with the latest `at` wins.
+ */
+export interface CTag { s: 'y' | 'n'; at: string; by: string; src: 'hand' | 'deal' | 'bulk' | 'new' }
 export interface Crm {
   stages: Record<string, StageKey>;
   notes: Record<string, { at: string; text: string }[]>;

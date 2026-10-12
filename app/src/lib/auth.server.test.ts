@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, derivePk, type GasSim } from '../../../team-sync/sim.mjs';
 import { canWriteKey } from './auth';
-import type { Role } from './teamSync';
+import { keyOf, type Role } from './teamSync';
 
 const KEY = 'test-key-123';
 const TEAM_SYNC = join(__dirname, '..', '..', '..', 'team-sync');
@@ -721,7 +721,7 @@ describe('temporary password (must change)', () => {
 // ------------------------------------------------------------------ 9. role matrix
 
 describe('what each role may write (parity with the web app\'s rule)', () => {
-  const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dpay', 'dact', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'zzz'];
+  const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dpay', 'dact', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'ctag', 'zzz'];
   // a write, and a delete in each of the three forms the web app may send
   const FORMS = [
     { name: 'write', op: (k: string) => ({ k, v: { a: 1 } }), del: false },
@@ -817,6 +817,33 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
     const up = call(s, tok, 'upload', upload);
     expect(up).toMatchObject({ ok: true, size: 4, me: { role: 'sales' } });
     expect(call(s, tok, 'delfile', { fileId: up.fileId })).toMatchObject({ ok: true });
+  });
+
+  it('customer types with the deployed script: sales tag and untag (also moving tags), the list is the admin\'s (scfg/), a viewer neither', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    const vee = member(s, admin, 'vee', 'วี', 'viewer');
+    // the script stores any value (its shape is the web app's, ctypes.ts toCTag); not a tag's own, whose
+    // "s" field the secrets check at the end of this file would take for a salt
+    const tag = { at: '2026-10-08T03:00:00.000Z', by: 'x', src: 'hand' };
+    const def = { n: 'Verification', at: '2026-10-08T03:00:00.000Z', by: 'x' };
+    const tags = [keyOf.ctag('12', 'cfo'), keyOf.ctag('n:set/mai', 'vvb'), keyOf.ctag('1000000000123', 'tab12')];
+    // sales: every tag write and removal is stored; a type's record (write or removal) is refused, uses no seq
+    const r = call(s, tok, 'push', { ops: [...tags.map((k) => ({ k, v: tag })), { k: tags[1], del: true }, { k: keyOf.ctype('vvb'), v: def }, { k: keyOf.ctype('tab12'), v: { ...def, n: 'อบรม' } }, { k: keyOf.ctype('vvb'), del: true }] });
+    expect(r).toMatchObject({ ok: true, n: 4, seq: 4, denied: ['scfg/ct.vvb', 'scfg/ct.tab12', 'scfg/ct.vvb'] });
+    for (const k of [...tags, 'scfg/ct.vvb']) expect([k, canWriteKey('sales', k, false)]).toEqual([k, k.startsWith('ctag/')]);
+    // the viewer: nothing at all
+    expect(call(s, vee, 'push', { ops: [{ k: tags[0], v: tag }] })).toMatchObject({ ok: false, error: 'forbidden' });
+    // the admin: the list too
+    expect(call(s, admin, 'push', { ops: [{ k: keyOf.ctype('vvb'), v: def }, { k: tags[0], del: true }] })).toMatchObject({ ok: true, n: 2, denied: [] });
+    const last = new Map(rows(s, admin).map((x) => [x.k, x]));
+    expect(last.get('scfg/ct.vvb')).toMatchObject({ del: false, v: def, by: 'หัวหน้า' });
+    expect(last.get(tags[2])).toMatchObject({ del: false, v: tag, by: 'สมชาย' });
+    expect(last.get(tags[1])).toMatchObject({ del: true, by: 'สมชาย' });
+    expect(last.get(tags[0])).toMatchObject({ del: true });
+    // the longest key the web app makes is kept (the script drops keys over 500 characters)
+    const long = keyOf.ctag('n:' + 'ก'.repeat(200), 'x'.repeat(24));
+    expect(call(s, tok, 'push', { ops: [{ k: long, v: tag }] })).toMatchObject({ ok: true, n: 1 });
   });
 });
 

@@ -3,7 +3,7 @@
 import { pbkdf2Sync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { can, canWriteKey, derivePk, MIN_IT, passwordChecks, tempPassword } from './auth';
-import { call, hello, TeamSyncError, type Transport } from './teamSync';
+import { call, hello, keyOf, TeamSyncError, type Transport } from './teamSync';
 
 const node = (tid: string, it: number, u: string, pw: string) =>
   pbkdf2Sync(Buffer.from(pw.normalize('NFC'), 'utf8'), Buffer.from(`gcc-team|v1|${tid}|${u}`, 'utf8'), it, 32, 'sha256').toString('base64url');
@@ -50,6 +50,21 @@ describe('the write rule (same as Code.gs)', () => {
     for (const k of keys) {
       expect(canWriteKey('sales', k, false)).toBe(!deny.includes(k));
       expect(canWriteKey('sales', k, true)).toBe(!deny.includes(k) && !noDel.includes(k));
+    }
+  });
+  it('customer types: a tag (ctag/) is everyday work for sales, also its removal when tags move; the list (scfg/ct.) is the admin\'s', () => {
+    const tags = [keyOf.ctag('12', 'cfo'), keyOf.ctag('n:set/mai', 'vvb')], list = keyOf.ctype('vvb');
+    expect(list).toBe('scfg/ct.vvb');
+    for (const del of [false, true]) {
+      for (const k of tags) {
+        expect(canWriteKey('sales', k, del)).toBe(true);
+        expect(canWriteKey('viewer', k, del)).toBe(false);
+        expect(canWriteKey('admin', k, del)).toBe(true);
+      }
+      expect(canWriteKey('sales', list, del)).toBe(false);
+      expect(canWriteKey('viewer', list, del)).toBe(false);
+      expect(canWriteKey('admin', list, del)).toBe(true);
+      expect(canWriteKey(null, list, del)).toBe(true);
     }
   });
   it('can()', () => {
