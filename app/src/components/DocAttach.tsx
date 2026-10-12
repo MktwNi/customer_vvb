@@ -13,6 +13,7 @@ import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { prefs } from '../lib/storage';
 import { DateField, Notice, labelCol } from './ui';
 import { Bead } from './StageTrack';
+import { SelField } from './Select';
 import { useSalesActs } from './SalesToast';
 
 const BASIS_PREF = 'gcc-doc-basis';
@@ -330,20 +331,25 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
               <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} className="fld" style={{ fontWeight: 500, ...(badAmt ? { borderColor: 'var(--bad)' } : {}) }} />
               {badAmt && <span role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>อ่านเป็นจำนวนเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
             </label>
-            <label style={labelCol}>
-              นับยอดนี้เป็น
-              <select value={target} onChange={(ev) => setTarget(ev.target.value as DocTarget)} className="fld sel">
-                <option value="forecast">Forecast (ยอดที่คาดว่าจะได้)</option>
-                <option value="actual">Actual (ยอดที่ได้จริง)</option>
-                <option value="none">ไม่นับยอด (แนบไว้เป็นหลักฐาน)</option>
-              </select>
-            </label>
-            <label style={labelCol}>
-              ประเภทเอกสาร
-              <select value={kind} onChange={(ev) => { const k = ev.target.value as DocKind; setKind(k); setTarget(defaultTarget(k)); }} className="fld sel">
-                {(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}
-              </select>
-            </label>
+            <SelField
+              style={labelCol}
+              text="นับยอดนี้เป็น"
+              value={target}
+              onChange={(v) => setTarget(v as DocTarget)}
+              width={280}
+              options={[{ v: 'forecast', label: 'Forecast', sub: 'ยอดที่คาดว่าจะได้' }, { v: 'actual', label: 'Actual', sub: 'ยอดที่ได้จริง' }, { v: 'none', label: 'ไม่นับยอด', sub: 'แนบไว้เป็นหลักฐาน' }]}
+            />
+            <SelField
+              style={labelCol}
+              text="ประเภทเอกสาร"
+              value={kind}
+              onChange={(v) => {
+                const k = v as DocKind;
+                setKind(k);
+                setTarget(defaultTarget(k));
+              }}
+              options={(Object.keys(KIND_TH) as DocKind[]).map((k) => ({ v: k, label: KIND_TH[k] }))}
+            />
             <label style={labelCol}>
               เลขที่เอกสาร
               <input value={docNo} onChange={(ev) => setDocNo(ev.target.value)} className="fld" />

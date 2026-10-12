@@ -2,7 +2,8 @@ import { type FormEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dtTh, fmtN, isoTh } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
-import { Notice, Opts, PageHead, labelCol } from '../components/ui';
+import { Notice, PageHead, labelCol } from '../components/ui';
+import { SelField } from '../components/Select';
 import { TeamSyncCard } from '../components/TeamSync';
 import { Icon } from '../components/icons';
 
@@ -116,12 +117,13 @@ export function Update() {
         }
       >
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label style={labelCol}>
-            รอบอัปเดตอัตโนมัติ
-            <select value={sc.freq} onChange={(ev) => e.saveSync({ freq: ev.target.value as SyncCfg['freq'] })} className="fld sel">
-              <Opts options={[{ v: 'open', label: 'ทุกครั้งที่เปิดเว็บ' }, { v: 'daily', label: 'วันละครั้ง' }, { v: 'weekly', label: 'สัปดาห์ละครั้ง' }, { v: 'off', label: 'ปิด (กดเองเท่านั้น)' }]} />
-            </select>
-          </label>
+          <SelField
+            style={{ ...labelCol, minWidth: 220 }}
+            text="รอบอัปเดตอัตโนมัติ"
+            value={sc.freq}
+            onChange={(v) => e.saveSync({ freq: v as SyncCfg['freq'] })}
+            options={[{ v: 'open', label: 'ทุกครั้งที่เปิดเว็บ' }, { v: 'daily', label: 'วันละครั้ง' }, { v: 'weekly', label: 'สัปดาห์ละครั้ง' }, { v: 'off', label: 'ปิด (กดเองเท่านั้น)' }]}
+          />
           <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 40, padding: '0 8px', margin: '0 -8px', borderRadius: 10, fontSize: 14, cursor: 'pointer' }}>
             <input type="checkbox" checked={!!sc.autoApply} onChange={(ev) => e.saveSync({ autoApply: ev.target.checked })} style={{ width: 18, height: 18 }} />
             เมื่อถึงรอบ ให้อัปเดตทันทีโดยไม่ต้องยืนยัน
@@ -164,12 +166,7 @@ export function Update() {
             : 'ติดตาม สถานะการขาย ผู้รับผิดชอบ นัด บันทึกการติดต่อ ข้อมูลติดต่อที่แก้ และผลตรวจข้อมูลซ้ำ เก็บในเบราว์เซอร์เครื่องนี้ ส่งออกเป็นไฟล์สำรองเพื่อเก็บไว้หรือส่งให้เพื่อนร่วมทีมนำเข้า (รวมกับข้อมูลเดิม ไม่ลบของใคร) หรือเชื่อม Google Sheet ด้านบนเพื่อให้ทุกเครื่องเห็นเหมือนกัน'}
         >
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <label style={labelCol}>
-              ฉันคือ
-              <select value={me} onChange={(ev) => e.setMe(ev.target.value)} className="fld sel" style={{ minWidth: 200 }}>
-                <Opts all="ยังไม่เลือก" options={C.team.map((v) => ({ v, label: v }))} />
-              </select>
-            </label>
+            <SelField style={{ ...labelCol, minWidth: 200 }} text="ฉันคือ" value={me} onChange={(v) => e.setMe(v)} options={[{ v: '', label: 'ยังไม่เลือก' }, ...C.team.map((v) => ({ v, label: v }))]} />
             <form onSubmit={addTeam} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
               <label style={labelCol}>เพิ่มชื่อในทีม<input name="name" placeholder="เช่น คุณเอ" className="fld" /></label>
               <button type="submit" className="btn">เพิ่ม</button>

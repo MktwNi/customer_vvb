@@ -204,6 +204,8 @@
 .sel-btn[aria-expanded=true]{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.12)}
 .sel-btn[aria-expanded=true] svg{transform:rotate(180deg)}
 .sel-btn:disabled{cursor:default;opacity:.55}
+.sel-btn.cell:disabled{opacity:1}
+.sel-btn.cell:disabled svg{display:none}
 .sel-btn.field{height:var(--ctl);width:100%;border-radius:var(--r-field);padding:0 12px;font-size:var(--fs-body)}
 .sel-btn.field.sm{height:var(--ctl-tool)}
 .sel-btn.tool{height:var(--ctl-tool);border-radius:var(--r-pill);padding:0 12px 0 14px;font-size:var(--fs-sec);gap:6px}

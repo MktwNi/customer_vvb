@@ -29,7 +29,7 @@ a{color:var(--link);text-decoration:none}@media (hover:hover){a:hover{text-decor
    .hv-tx  a text or link button with no padding: the tint, reaching a little past the text (also .auth-link
            and .pe-link)
    .btn    pill buttons: .pri solid blue turns a deeper blue, the others (.out outline) take the tint; .sm/.xs smaller
-   .fld    text fields and selects (.sel): a darker border, also while the pointer is on the field's label
+   .fld    text fields: a darker border, also while the pointer is on the field's label (dropdowns: Select.tsx)
    A resting background is never inline (an inline style beats :hover): it comes from the element's class or
    from --bg; one odd control can set its own --hv. A control resting on the page colour (--frame) or on a
    tinted row takes .hv2 or gets --hv:var(--hv2), so the tint still shows. Touch screens get none (a tap
@@ -52,7 +52,6 @@ a{color:var(--link);text-decoration:none}@media (hover:hover){a:hover{text-decor
 .lnk{cursor:pointer;border:0;padding:0;font:inherit;font-size:var(--fs-body);color:var(--link);text-align:left;text-decoration:none}
 .quiet{cursor:pointer;border:0;padding:0 4px;font:inherit;font-size:var(--fs-sec);color:var(--muted);text-align:left}
 :where(.fld){height:var(--ctl);border:1px solid var(--bd,var(--field));border-radius:var(--r-field);padding:0 12px;font-size:var(--fs-body);color:var(--ink)}
-:where(.fld.sel){padding:0 10px;background-color:var(--card);color:var(--ink)}
 .fld:focus-visible{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
 :where(.hv,.hv2,.hv-w,.hv-n,.hv-tx,.auth-link,.pe-link,.hv-dk,.btn,.fld,.lnk,.quiet){transition:background-color .12s,border-color .12s,box-shadow .12s}
 @media (hover:hover){
@@ -730,8 +729,8 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .pl-task-act{display:flex;gap:6px;flex:none;align-items:center}
 .pl-up-h{font-size:var(--fs-card);font-weight:500;padding-top:8px;color:var(--ink)}
 .pl-up{align-items:center}
-/* the stage in the list: a select that reads as plain text until the pointer is on it */
-.fld.pl-stage{height:32px;border-color:transparent;background-color:transparent;padding:0 6px;font-size:var(--fs-sec);color:var(--ink-2)}
+/* the stage in the list: a cell picker that reads as plain text until the pointer is on it */
+.sel-btn.cell.pl-stage{font-size:var(--fs-sec);color:var(--ink-2);margin-left:0;max-width:100%}
 @media (max-width:760px){
   .pl-sum{gap:12px 0}
   .pl-segs{flex-wrap:wrap;flex-basis:100%}
@@ -1094,12 +1093,13 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-tg.bad{color:var(--bad)}
 .sl-tg::after{content:' ·';color:var(--muted)}
 @media (pointer:coarse){.sl-nm-b{min-height:24px}.sl-kedit,.sl-closeb,.sl-mlist :is(.lnk,.quiet),.sl-tools :is(.lnk,.quiet){display:inline-flex;align-items:center;min-height:28px}}
-/* ผู้รับผิดชอบ: the name over a real <select> */
+/* ผู้รับผิดชอบ: the name; read-only as text */
 .sl-owner{position:relative;display:inline-flex;align-items:center;max-width:calc(100% + 6px);padding:4px 6px;margin-left:-6px;border-radius:8px;font-size:var(--fs-body);color:var(--ink);cursor:pointer;transition:background-color .12s,box-shadow .12s}
 @media (hover:hover){.sl-owner:not(.ro):hover{background:#fff;box-shadow:inset 0 0 0 1px var(--field)}}
-.sl-owner:focus-within{outline:2px solid var(--brand);outline-offset:1px}
 .sl-owner.ro{cursor:default}
-.sl-owner select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:var(--fs-body)}
+/* … a cell picker (Select.tsx) for editors */
+.sel-btn.cell.sl-owner-sel{max-width:calc(100% + 8px)}
+.sl-owner-sel.none .sel-v{color:var(--muted)}
 .sl-owner-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .sl-owner-name.none{color:var(--muted)}
 /* ขั้นตอน · ถัดไป: "ถัดไป CALL2 โทรครั้งที่ 2" over the circles and their n/N */
@@ -1242,7 +1242,7 @@ button.sl-amt{cursor:pointer}
      label over its select, which takes the cell's width (it never runs under บันทึก) */
   .sl-kact-ed .seg.sl-af-ty>button{padding:0 9px}
   .sl-kact-ed .k-m2 .sl-af-l{flex-direction:column;align-items:stretch;gap:2px;padding:0}
-  .sl-kact-ed .k-m2 .sl-af-l .fld{width:100%}
+  .sl-kact-ed .k-m2 .sl-af-l :is(.fld,.sel-btn.field){width:100%}
   /* CLOSED DEAL: the result buttons on their own line over the note (as on phones), so the note keeps
      the cell's width */
   .sl-qa-row.yn{flex-wrap:wrap;row-gap:6px}
@@ -1536,6 +1536,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .sl-af>.fld{height:40px;width:100%}
 .sl-af-l{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sec);color:var(--ink-2);min-width:0}
 .sl-af-l .fld{height:34px;min-width:0;max-width:100%;font-size:var(--fs-sec)}
+.sl-af-l .sel-btn.field{width:auto;height:34px;font-size:var(--fs-sec)}
 .sl-af-a{margin-left:auto;display:flex;gap:12px;align-items:center}
 .sl-tl-i.fut .sl-tl-h b{color:var(--muted);font-weight:400}
 .sl-tl-i.fut .sl-tl-c{padding:2px 0}
@@ -1637,7 +1638,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .sl-pq-v .lnk{font-size:var(--fs-sec)}
 .sl-pq-tot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sl-pq-tot .fld{height:36px;max-width:200px}
-.sl-pq>.fld{max-width:340px;height:36px}
+.sl-pq>:is(.fld,.sel-btn){max-width:340px;height:36px}
 .seg.sl-seg2{flex-wrap:wrap;justify-self:start;overflow:visible}
 .seg.sl-seg2>button{height:30px;padding:0 12px;font-size:var(--fs-sec)}
 .sl-seg2-x{align-self:center;padding:0 8px;font-size:var(--fs-meta);color:var(--muted)}
@@ -2027,11 +2028,9 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .us-you{flex:none;font-size:12px;font-weight:400;padding:1px 8px;border-radius:999px;background:var(--info-bg);color:var(--info)}
 .us-u{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .us-role{display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-width:0}
-.us-sel{appearance:none;-webkit-appearance:none;height:36px;min-width:150px;max-width:100%;border-radius:999px;border:1px solid var(--field);padding:0 34px 0 14px;font:inherit;font-size:14px;color:var(--ink);background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23475069' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 13px center;cursor:pointer}
-@media (hover:hover){.us-sel:hover:not(:disabled){border-color:var(--tint-line)}}
-.us-sel:focus-visible{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
-.us-sel:disabled{cursor:default;background-color:var(--frame);background-image:none;padding-right:14px;color:var(--ink-2)}
-.us-sel[aria-busy=true]{opacity:.6}
+/* บทบาท: the styled picker (Select.tsx), wide enough for the longest role; faded while saving */
+.sel-btn.us-rsel{min-width:150px;font-size:var(--fs-body)}
+.sel-btn.us-rsel.busy{opacity:.6}
 .us-guard{font-size:12px;color:var(--muted);line-height:1.4}
 /* status: dot + word */
 .us-st{display:inline-flex;align-items:center;gap:8px;font-size:13px;white-space:nowrap;color:var(--ok)}
@@ -2065,8 +2064,8 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .us-c-grid>div{display:flex;flex-direction:column;gap:4px;min-width:0}
 .us-c-grid>.wide{grid-column:1/-1}
 .us-k{font-size:12px;color:var(--muted)}
-.us-c .us-sel{min-width:0;width:100%}
 .us-c .us-ll{white-space:normal}
+.us-c .sel-btn.us-rsel{min-width:0;width:100%}
 .us-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:16px;align-items:start}
 .us-names,.us-honest,.us-backup{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
 .us-h{margin:0;font-size:16px;font-weight:500;color:var(--ink)}

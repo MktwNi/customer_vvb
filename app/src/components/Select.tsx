@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Chevron } from './StageTrack';
 import { Pop, Tick, useHL } from './Pop';
 
@@ -15,19 +15,8 @@ export interface SelOpt<V extends string = string> {
 
 const lower = (s: string) => s.toLocaleLowerCase('th');
 
-/**
- * The app's dropdown in place of a native <select> (whose grey system menu does not match the app): a
- * button with the value and a caret, opening a white listbox popover; the chosen option is in link blue
- * with a brand tick, the active one under the sliding tint. Keys as a select: ↓ / ↑ / Enter / Space open,
- * ↑ ↓ Home End PgUp PgDn move, typing jumps, Enter / Space choose, Escape closes, Tab closes and moves
- * on. A closed button never changes its value (a printable key opens the list at the match): the deal
- * panel's หมวด moves the deal when it changes. Phones get a bottom sheet.
- *
- * Variants: `field` (a 40px form field), `tool` (a 36px toolbar pill; `prefix` in grey before the value),
- * `head` (the page-head pill), `cell` (a table cell that reads as text). Never inside a <label> (a click
- * on an option would click the button again): give a visible label an id and pass `labelledBy`.
- */
-export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, placeholder, search = 'auto', width, align, name, id, disabled, className = '', title }: {
+/** What a Select takes (see Select). */
+export interface SelectProps<V extends string> {
   value?: V; defaultValue?: V; onChange?: (v: V) => void;
   options: SelOpt<V>[];
   /** accessible name; the sheet's title */
@@ -52,7 +41,21 @@ export function Select<V extends string>({ value, defaultValue, onChange, option
   /** a hidden input with this name carries the value (forms read with FormData) */
   name?: string;
   id?: string; disabled?: boolean; className?: string; title?: string;
-}) {
+}
+
+/**
+ * The app's dropdown in place of a native <select> (whose grey system menu does not match the app): a
+ * button with the value and a caret, opening a white listbox popover; the chosen option is in link blue
+ * with a brand tick, the active one under the sliding tint. Keys as a select: ↓ / ↑ / Enter / Space open,
+ * ↑ ↓ Home End PgUp PgDn move, typing jumps, Enter / Space choose, Escape closes, Tab closes and moves
+ * on. A closed button never changes its value (a printable key opens the list at the match): the deal
+ * panel's หมวด moves the deal when it changes. Phones get a bottom sheet.
+ *
+ * Variants: `field` (a 40px form field), `tool` (a 36px toolbar pill; `prefix` in grey before the value),
+ * `head` (the page-head pill), `cell` (a table cell that reads as text). Never inside a <label> (a click
+ * on an option would click the button again): give a visible label an id and pass `labelledBy`.
+ */
+export function Select<V extends string>({ value, defaultValue, onChange, options, label, labelledBy, describedBy, variant = 'field', prefix, shown, valueText, placeholder, search = 'auto', width, align, name, id, disabled, className = '', title }: SelectProps<V>) {
   const [own, setOwn] = useState<V | undefined>(defaultValue);
   const cur = value !== undefined ? value : own;
   const [open, setOpen] = useState<{ seed: string } | null>(null);
@@ -220,5 +223,17 @@ function SelList<V extends string>({ id, value, options, label, search, seed, on
         {!list.length && <div className="pop-empty">ไม่พบ “{q.trim()}”</div>}
       </div>
     </>
+  );
+}
+
+/** A form field: its label over a Select. A <div>, not a <label> (choosing an option would click the
+ *  button again); the label's id names the button. */
+export function SelField<V extends string>({ text, style, className, ...p }: Omit<SelectProps<V>, 'label' | 'labelledBy'> & { text: string; style?: CSSProperties; className?: string }) {
+  const id = useId();
+  return (
+    <div style={style} className={className}>
+      <span id={id}>{text}</span>
+      <Select {...p} label={text} labelledBy={id} />
+    </div>
   );
 }

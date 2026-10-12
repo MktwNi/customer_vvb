@@ -18,7 +18,7 @@ import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } fr
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
-import { insidePop } from '../components/Pop';
+import { Av, insidePop } from '../components/Pop';
 import { Select } from '../components/Select';
 import { FilterBar, ReadChip, type FVal } from '../components/FilterBar';
 import { DateFilter, dateWords } from '../components/DateFilter';
@@ -963,20 +963,28 @@ function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Tr
   );
 }
 
-/** ผู้รับผิดชอบ: the name as text over a real <select> (one avatar per row: the company's). */
+/** ผู้รับผิดชอบ: the name as text, a styled picker under the pointer (one avatar per row: the company's;
+ *  the people's initials are in the list). Its list renders only while open, so a long table costs nothing. */
 function Owner({ d }: { d: Deal }) {
   const { e, ro, team } = useTk();
   const name = d.resp || 'มอบหมาย';
   if (ro) return <span className="sl-owner ro" title={'ผู้รับผิดชอบ ' + (d.resp || 'ยังไม่ระบุ')}><span className="sl-owner-name">{d.resp || '—'}</span></span>;
   const resps = [...new Set([...team, d.resp].filter(Boolean))];
   return (
-    <label className="sl-owner" title={`ผู้รับผิดชอบ: ${name} กดเพื่อเปลี่ยน`}>
-      <span className={'sl-owner-name' + (d.resp ? '' : ' none')}>{name}</span>
-      <select value={d.resp} data-owner={d.id} onChange={(ev) => e.updateDeal(d.id, { resp: ev.target.value })} aria-label={`ผู้รับผิดชอบ ${shortName(d.client)}`}>
-        {resps.map((x) => <option key={x} value={x}>{x}</option>)}
-        <option value="">ไม่ระบุ</option>
-      </select>
-    </label>
+    <Select
+      variant="cell"
+      id={'sl-owner-' + d.id}
+      className={'sl-owner-sel' + (d.resp ? '' : ' none')}
+      value={d.resp}
+      shown={name}
+      title={`ผู้รับผิดชอบ: ${name} กดเพื่อเปลี่ยน`}
+      label={`ผู้รับผิดชอบ ${shortName(d.client)}`}
+      valueText={d.resp || 'ไม่ระบุ'}
+      width={220}
+      search={false}
+      onChange={(v) => e.updateDeal(d.id, { resp: v })}
+      options={[...resps.map((x) => ({ v: x, label: x, lead: <Av name={x} /> })), { v: '', label: 'ไม่ระบุ', lead: <Av name="" /> }]}
+    />
   );
 }
 
@@ -1311,13 +1319,10 @@ function RowMenu({ d }: { d: Deal }) {
                 role="menuitem"
                 className="menu-i"
                 onClick={pick(() => {
-                  const sel = document.querySelector<HTMLSelectElement>(`select[data-owner="${d.id}"]`);
-                  sel?.focus();
-                  try {
-                    sel?.showPicker();
-                  } catch {
-                    /* the focused select still opens with the keyboard */
-                  }
+                  // the row's ผู้รับผิดชอบ picker opens (its list takes the keyboard)
+                  const b = document.getElementById('sl-owner-' + d.id);
+                  b?.focus();
+                  b?.click();
                 })}
               >
                 เปลี่ยนผู้รับผิดชอบ

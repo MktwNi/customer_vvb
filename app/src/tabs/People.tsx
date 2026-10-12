@@ -10,6 +10,7 @@ import { CoAvatar, monoSize } from '../components/CoAvatar';
 import { Modal } from '../components/Dialog';
 import { DoneBox, taskInfo } from './Plan';
 import { Notice, PageHead, Pager, labelCol } from '../components/ui';
+import { SelField, Select } from '../components/Select';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 const PER_PAGE = 30;
@@ -574,13 +575,8 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
   return (
     <form onSubmit={save} className="pe-logform">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
-        <select value={type} onChange={(ev) => setType(ev.target.value)} aria-label="ประเภท" className="fld sel">
-          {CONTACT.map((k) => <option key={k} value={k}>{LOG_TYPES[k][0]}</option>)}
-        </select>
-        <select value={result} onChange={(ev) => setResult(ev.target.value)} aria-label="ผลการติดต่อ" className="fld sel">
-          <option value="">ผลการติดต่อ</option>
-          {LOG_RESULTS.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <Select label="ประเภท" value={type} onChange={setType} options={CONTACT.map((k) => ({ v: k, label: LOG_TYPES[k][0] }))} />
+        <Select label="ผลการติดต่อ" value={result} onChange={setResult} options={[{ v: '', label: 'ผลการติดต่อ' }, ...LOG_RESULTS.map((r) => ({ v: r, label: r }))]} />
       </div>
       <textarea ref={taRef} value={text} onChange={(ev) => setText(ev.target.value)} rows={2} placeholder="คุยเรื่องอะไร ผลเป็นอย่างไร" aria-label="รายละเอียดการติดต่อ" className="pe-ta" />
       {/* the primary shows once there is something to save */}
@@ -680,27 +676,12 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
       <label style={labelCol}>ชื่อเล่น<input value={f.nick} onChange={up('nick')} maxLength={100} className="fld" /></label>
       <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} className="fld" /></label>
       <label style={labelCol}>ฝ่าย / แผนก<input value={f.dept} onChange={up('dept')} maxLength={200} className="fld" /></label>
-      <label style={labelCol}>
-        บทบาทในการซื้อ
-        <select value={f.role} onChange={up('role')} className="fld sel">{ROLES.map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}</select>
-      </label>
+      <SelField style={labelCol} text="บทบาทในการซื้อ" value={f.role} onChange={(v) => up('role')({ target: { value: v } })} options={ROLES.map((r) => ({ v: r, label: ROLE_TH[r] }))} />
       <label style={labelCol}>โทรศัพท์ (หลายเบอร์คั่นด้วย |)<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} className="fld" /></label>
       <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
       <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
-      <label style={labelCol}>
-        ผู้ดูแล
-        <select value={f.owner} onChange={up('owner')} className="fld sel">
-          <option value="">ไม่ระบุ</option>
-          {team.map((x) => <option key={x} value={x}>{x}</option>)}
-        </select>
-      </label>
-      <label style={labelCol}>
-        สถานะ
-        <select value={f.status} onChange={up('status')} className="fld sel">
-          <option value="active">ยังติดต่อได้</option>
-          <option value="left">ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว</option>
-        </select>
-      </label>
+      <SelField style={labelCol} text="ผู้ดูแล" value={f.owner} onChange={(v) => up('owner')({ target: { value: v } })} options={[{ v: '', label: 'ไม่ระบุ' }, ...team.map((x) => ({ v: x, label: x }))]} />
+      <SelField style={labelCol} text="สถานะ" value={f.status} onChange={(v) => up('status')({ target: { value: v } })} options={[{ v: 'active', label: 'ยังติดต่อได้' }, { v: 'left', label: 'ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว' }]} />
       <div style={{ gridColumn: '1 / -1' }}>
         <CompanyPicker gid={f.gid} company={f.company} onChange={(gid, company) => setF({ ...f, gid, company })} />
       </div>
@@ -821,10 +802,7 @@ export function AddPerson() {
           <CompanyPicker gid={f.gid} company={f.company} onChange={(gid, company) => setF({ ...f, gid, company })} />
         </div>
         <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} placeholder="เช่น ผู้จัดการฝ่ายจัดซื้อ" className="fld" /></label>
-        <label style={labelCol}>
-          บทบาทในการซื้อ
-          <select value={f.role} onChange={up('role')} className="fld sel">{ROLES.map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}</select>
-        </label>
+        <SelField style={labelCol} text="บทบาทในการซื้อ" value={f.role} onChange={(v) => up('role')({ target: { value: v } })} options={ROLES.map((r) => ({ v: r, label: ROLE_TH[r] }))} />
         <label style={labelCol}>โทรศัพท์<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} className="fld" /></label>
         <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
         <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>

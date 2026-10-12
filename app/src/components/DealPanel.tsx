@@ -15,6 +15,7 @@ import { Icon } from './icons';
 import { ReadOnly } from './ReadOnly';
 import { useSalesActs } from './SalesToast';
 import { Bead, reachedOf } from './StageTrack';
+import { SelField, Select } from './Select';
 import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 
@@ -289,8 +290,8 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           className="sl-docc-form"
         >
           <label style={labelCol}>ยอด (บาท)<input name="amount" defaultValue={doc.amount ?? ''} inputMode="decimal" className="fld" /></label>
-          <label style={labelCol}>นับเป็น<select name="target" defaultValue={doc.target} className="fld sel"><option value="forecast">Forecast</option><option value="actual">Actual</option><option value="none">ไม่นับยอด</option></select></label>
-          <label style={labelCol}>ประเภท<select name="kind" defaultValue={doc.kind} className="fld sel">{(Object.keys(KIND_TH) as DocKind[]).map((k) => <option key={k} value={k}>{KIND_TH[k]}</option>)}</select></label>
+          <SelField style={labelCol} text="นับเป็น" name="target" defaultValue={doc.target} options={[{ v: 'forecast', label: 'Forecast' }, { v: 'actual', label: 'Actual' }, { v: 'none', label: 'ไม่นับยอด' }]} />
+          <SelField style={labelCol} text="ประเภท" name="kind" defaultValue={doc.kind} options={(Object.keys(KIND_TH) as DocKind[]).map((k) => ({ v: k, label: KIND_TH[k] }))} />
           <label style={labelCol}>เลขที่เอกสาร<input name="docNo" defaultValue={doc.docNo} className="fld" /></label>
           <button type="submit" className="btn pri sm">บันทึก</button>
           <span className="t-meta" style={{ gridColumn: '1/-1' }}>ลบเอกสารที่มาแทนใบเดิม ใบเดิมยังไม่นับยอด ตั้งกลับได้ที่ “นับเป็น” ของใบนั้น</span>
@@ -889,7 +890,7 @@ function RecvForm({ d, l, attach }: { d: Deal; l: LineView; attach: Attach }) {
       <div className="sl-rf-g">
         <span style={labelCol}>วันที่รับ<DateChip value={date} onChange={setDate} label="วันที่รับ" /></span>
         <label style={labelCol}>ยอดที่รับ (บาท)<input className="fld num" value={amt} inputMode="decimal" onChange={(ev) => setAmt(ev.target.value)} aria-invalid={!ok} /></label>
-        <label style={labelCol}>วิธีชำระ<select className="fld sel" value={how} onChange={(ev) => setHow(ev.target.value as PayHow)}>{HOWS.map((k) => <option key={k} value={k}>{HOW_TH[k]}</option>)}</select></label>
+        <SelField style={labelCol} text="วิธีชำระ" value={how} onChange={(v) => setHow(v as PayHow)} options={HOWS.map((k) => ({ v: k, label: HOW_TH[k] }))} />
       </div>
       {got === undefined && <span className="t-bad" role="alert" style={{ fontSize: 12 }}>อ่านยอดไม่ได้ พิมพ์ตัวเลขเดียว เช่น 53,500</span>}
       {short > 0 && (
@@ -1057,12 +1058,15 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
           )}
         </span>
         <span className="sl-pq-l">ครบกำหนด</span>
-        <select className="fld sel" defaultValue="" aria-label="ครบกำหนดทุกงวด" onChange={(ev) => { const v = ev.target.value; if (v) dueRule(v === 'date' ? null : +v); ev.target.value = ''; }}>
-          <option value="">ตามที่ตั้งในแต่ละงวด</option>
-          <option value="30">งวดแรกเมื่อได้งาน แล้วทุก 30 วัน</option>
-          <option value="45">งวดแรกเมื่อได้งาน แล้วทุก 45 วัน</option>
-          <option value="date">กำหนดวันเองทุกงวด</option>
-        </select>
+        {/* an action, not a value: it sets every installment's due date, then reads "ตามที่ตั้งในแต่ละงวด" again */}
+        <Select
+          className="sm"
+          label="ครบกำหนดทุกงวด"
+          value=""
+          onChange={(v) => v && dueRule(v === 'date' ? null : +v)}
+          width={300}
+          options={[{ v: '', label: 'ตามที่ตั้งในแต่ละงวด' }, { v: '30', label: 'งวดแรกเมื่อได้งาน แล้วทุก 30 วัน' }, { v: '45', label: 'งวดแรกเมื่อได้งาน แล้วทุก 45 วัน' }, { v: 'date', label: 'กำหนดวันเองทุกงวด' }]}
+        />
       </div>
       <div className="sl-pe">
         <div className="sl-pe-r ph"><span>งวด</span><span className="r">ยอด (บาท)</span><span className="r">%</span><span>ครบกำหนด</span><span>วิธีชำระ</span><span>หมายเหตุ / เงื่อนไข</span><span /></div>
@@ -1083,27 +1087,23 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
               }}
             />
             <span className="sl-pe-due">
-              <select
-                className="fld sel"
-                aria-label={'ครบกำหนด ' + r.stage}
+              <Select
+                className="sm"
+                label={'ครบกำหนด ' + r.stage}
                 value={r.date ? 'date' : r.rel == null ? 'none' : String(r.rel)}
-                onChange={(ev) => {
-                  const v = ev.target.value;
-                  upRow(i, v === 'date' ? { date: true, due: r.due || (won && r.rel != null ? dueOf(r, won) : '') || today } : v === 'none' ? { date: false, due: '', rel: null } : { date: false, due: '', rel: +v });
-                }}
-              >
-                {REL.map((x) => <option key={x} value={x}>{relText({ rel: x })}</option>)}
-                {r.rel != null && !REL.includes(r.rel) && <option value={r.rel}>{relText(r)}</option>}
-                <option value="date">เลือกวันที่…</option>
-                <option value="none">ยังไม่กำหนด</option>
-              </select>
+                width={240}
+                onChange={(v) => upRow(i, v === 'date' ? { date: true, due: r.due || (won && r.rel != null ? dueOf(r, won) : '') || today } : v === 'none' ? { date: false, due: '', rel: null } : { date: false, due: '', rel: +v })}
+                options={[
+                  ...REL.map((x) => ({ v: String(x), label: relText({ rel: x }) })),
+                  ...(r.rel != null && !REL.includes(r.rel) ? [{ v: String(r.rel), label: relText(r) }] : []),
+                  { v: 'date', label: 'เลือกวันที่…' },
+                  { v: 'none', label: 'ยังไม่กำหนด' },
+                ]}
+              />
               {r.date ? <DateChip value={r.due} onChange={(v) => upRow(i, { due: v })} label={'วันครบกำหนด ' + r.stage} /> : won && r.rel != null && <small>{isoTh(dueOf(r, won))}</small>}
             </span>
             <span className="sl-pe-how">
-              <select className="fld sel" aria-label={'วิธีชำระ ' + r.stage} value={r.how} onChange={(ev) => upRow(i, { how: ev.target.value as PayHow })}>
-                <option value="">ไม่ระบุ</option>
-                {HOWS.map((k) => <option key={k} value={k}>{HOW_TH[k]}</option>)}
-              </select>
+              <Select className="sm" label={'วิธีชำระ ' + r.stage} value={r.how} onChange={(v) => upRow(i, { how: v as PayHow })} options={[{ v: '', label: 'ไม่ระบุ' }, ...HOWS.map((k) => ({ v: k, label: HOW_TH[k] }))]} />
               {r.how === 'other' && <input className="fld" value={r.howT} placeholder="เช่น บัตรเครดิต" aria-label={'วิธีชำระอื่น ' + r.stage} onChange={(ev) => upRow(i, { howT: ev.target.value })} />}
             </span>
             <input className="fld" value={r.note} maxLength={300} placeholder="เงื่อนไข เช่น เมื่อส่งรายงาน" aria-label={'หมายเหตุ ' + r.stage} onChange={(ev) => upRow(i, { note: ev.target.value })} />
@@ -1189,18 +1189,9 @@ function ContactCard({ d, ro }: { d: Deal; ro: boolean }) {
                 <DateField value={d.contactDate} onChange={(v) => up({ contactDate: v })} label="วันที่ติดต่อ" placeholder="ยังไม่ระบุ" />
                 {lc.date && lc.from !== 'typed' && <span className="t-meta">ติดต่อล่าสุด {isoTh(lc.date)} {lc.from === 'act' ? 'จากบันทึกการติดต่อ' : 'จากขั้น ' + lc.from}</span>}
               </span>
-              <label style={labelCol}>
-                หมวด
-                <select value={d.section} onChange={(ev) => e.moveDeal(d.id, ev.target.value, null)} className="fld sel">
-                  {[...new Set([...C.sections, d.section])].map((x) => <option key={x} value={x}>{x || 'ไม่ระบุหมวด'}</option>)}
-                </select>
-              </label>
-              <label style={labelCol}>
-                ปี (พ.ศ.)
-                <select value={d.year} onChange={(ev) => up({ year: ev.target.value })} className="fld sel">
-                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </label>
+              {/* หมวด moves the deal: it changes only on a choice in the list, never on a key over the closed button */}
+              <SelField style={labelCol} text="หมวด" value={d.section} onChange={(v) => e.moveDeal(d.id, v, null)} options={[...new Set([...C.sections, d.section])].map((x) => ({ v: x, label: x || 'ไม่ระบุหมวด' }))} />
+              <SelField style={labelCol} text="ปี (พ.ศ.)" value={d.year} onChange={(v) => up({ year: v })} options={years.map((y) => ({ v: y, label: y }))} />
             </div>
             <datalist id="sl-team">{e.crm.team.map((x) => <option key={x} value={x} />)}</datalist>
             <datalist id="sl-ref">{referrals.map((x) => <option key={x} value={x} />)}</datalist>

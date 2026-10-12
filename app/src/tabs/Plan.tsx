@@ -6,7 +6,7 @@ import { fmtMoney, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import type { Company, FeedKey, StageKey, Task } from '../lib/types';
 import { feedLine } from './Track';
-import { Opts, PageHead } from '../components/ui';
+import { PageHead } from '../components/ui';
 import { FilterBar } from '../components/FilterBar';
 import { Select } from '../components/Select';
 import { Icon } from '../components/icons';
@@ -272,10 +272,8 @@ export function Plan() {
                   </span>
                 </button>
                 <span style={{ fontSize: 13, color: 'var(--ink-2)', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
-                {/* the stage reads as plain text; it is still a select (a border shows under the pointer) */}
-                <select value={st[0]} disabled={ro} onChange={(ev) => e.setStage(c.id, ev.target.value as StageKey)} aria-label="สถานะการขาย" className="fld sel pl-stage">
-                  <Opts options={STG.map(([v, label]) => ({ v, label }))} />
-                </select>
+                {/* the stage reads as plain text; a picker under the pointer (plain text for viewers) */}
+                <Select variant="cell" className="pl-stage" value={st[0]} disabled={ro} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>

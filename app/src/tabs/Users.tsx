@@ -10,6 +10,7 @@ import { inviteLink } from '../components/TeamSync';
 import { RoleChip, authError, hhmm, nameLetter } from '../components/Login';
 import { menuKeys, usePopover } from '../components/usePopover';
 import { Modal } from '../components/Dialog';
+import { Select } from '../components/Select';
 
 /**
  * ผู้ใช้และสิทธิ์ (admins of a team that signs in): everyone's account, role and status; new accounts
@@ -384,11 +385,17 @@ function RoleSelect({ u, guard, busy, onPick }: { u: TeamUser; guard: string; bu
   const id = useId();
   return (
     <span className="us-role">
-      <select className={'us-sel r-' + u.role} value={u.role} onChange={(ev) => onPick(ev.target.value as Role)} disabled={!!guard} aria-label={`บทบาทของ ${u.name}`} aria-describedby={guard ? id : undefined} aria-busy={busy || undefined}>
-        {ROLES.map((r) => (
-          <option key={r} value={r}>{ROLE_TH[r]}</option>
-        ))}
-      </select>
+      <Select
+        variant="tool"
+        className={'us-rsel' + (busy ? ' busy' : '')}
+        value={u.role}
+        onChange={(v) => onPick(v as Role)}
+        disabled={!!guard}
+        label={`บทบาทของ ${u.name}`}
+        describedBy={guard ? id : undefined}
+        search={false}
+        options={ROLES.map((r) => ({ v: r, label: ROLE_TH[r] }))}
+      />
       {guard && <span id={id} className="us-guard">{guard}</span>}
     </span>
   );

@@ -3,8 +3,9 @@ import { useApp } from '../state';
 import { TT } from '../lib/constants';
 import { addDays, fmtN, nextWork, todayISO } from '../lib/format';
 import type { TaskForm, TaskType } from '../lib/types';
-import { DateField, Opts } from './ui';
+import { DateField } from './ui';
 import { Modal } from './Dialog';
+import { SelField } from './Select';
 
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
 
@@ -42,24 +43,19 @@ function ScheduleForm() {
     <Modal title={o.taskId ? 'เลื่อน / แก้ไขนัด' : o.ids.length > 1 ? `นัดติดต่อ ${fmtN(o.ids.length)} บริษัท` : 'นัดติดต่อ'} onClose={cancel} width={480}>
       <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <span className="t-sec">{c ? c.name + (o.pid && e.people[o.pid] ? ' · กับ ' + e.people[o.pid].name : '') : o.ids.length > 1 ? 'กระจายนัดเฉพาะวันทำการตามจำนวนต่อวันที่เลือก' : ''}</span>
-        <label style={field}>
-          ประเภท
-          <select name="type" defaultValue={init ? init.type : 'call'} className="fld sel"><Opts options={TT.map(([v, label]) => ({ v, label }))} /></select>
-        </label>
+        <SelField style={field} text="ประเภท" name="type" defaultValue={init ? init.type : 'call'} options={TT.map(([v, label]) => ({ v, label }))} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <label style={field}>วันที่<DateField name="date" value={date} onChange={(v) => v && setDate(v)} /></label>
           <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} className="fld" /></label>
         </div>
         {isMulti && (
-          <label style={field}>
-            กระจายนัด
-            <select name="spread" defaultValue="5" className="fld sel">
-              <option value="0">ทั้งหมดในวันเดียว</option>
-              <option value="3">วันละ 3 ราย (วันทำการ)</option>
-              <option value="5">วันละ 5 ราย (วันทำการ)</option>
-              <option value="10">วันละ 10 ราย (วันทำการ)</option>
-            </select>
-          </label>
+          <SelField
+            style={field}
+            text="กระจายนัด"
+            name="spread"
+            defaultValue="5"
+            options={[{ v: '0', label: 'ทั้งหมดในวันเดียว' }, { v: '3', label: 'วันละ 3 ราย (วันทำการ)' }, { v: '5', label: 'วันละ 5 ราย (วันทำการ)' }, { v: '10', label: 'วันละ 10 ราย (วันทำการ)' }]}
+          />
         )}
         <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} className="fld" /></label>
         {gone && <span role="alert" className="note err">คนในทีมลบนัดนี้ไปแล้วระหว่างที่เปิดอยู่ จึงบันทึกไม่ได้ กดยกเลิก แล้วเพิ่มนัดใหม่ถ้ายังต้องการ</span>}
