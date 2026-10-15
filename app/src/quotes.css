@@ -55,6 +55,7 @@
 .qt-cmp td{padding:6px 0 6px 8px;border-top:1px solid var(--divider);text-align:right;color:var(--ink)}
 .qt-cmp thead td{border-top:0;padding:0}
 .qt-cmp td.old{color:var(--ink-2)}
+.qt-cmp .qt-nw{white-space:nowrap}
 .qt-cmp tr.sum td{font-weight:500}
 .qt-cmp tr.sum td.old{font-weight:400}
 .qt-diff{font-size:var(--fs-sec);color:var(--ink-2)}

@@ -277,7 +277,8 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
 
   // the revision against the version it follows: number and date, the figure counted, and the difference
   const qtNo = rev?.doc.docNo || '';
-  const noDate = (no: string, date: string) => [no || 'ไม่ระบุเลขที่', date ? isoTh(date) : 'ไม่ระบุวันที่'].join(' · ');
+  // the number and the date each kept whole, so a narrow (phone) column breaks between them, not inside a date
+  const noDate = (no: string, date: string) => <><span className="qt-nw">{no || 'ไม่ระบุเลขที่'}</span> · <span className="qt-nw">{date ? isoTh(date) : 'ไม่ระบุวันที่'}</span></>;
   const qtStep = stepOf(e.sales, deal.id, QUOTE_STAGE);
 
   return (
@@ -434,7 +435,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
                   <tr><td /><th scope="col">ฉบับที่ {rev.n} · ฉบับเดิม</th><th scope="col">ฉบับที่ {revN} · ฉบับแก้ไข</th></tr>
                 </thead>
                 <tbody>
-                  <tr><th scope="row">เลขที่ · ลงวันที่</th><td className="old">{noDate(rev.doc.docNo, rev.doc.docDate)}</td><td>{noDate(docNo, docDate)}</td></tr>
+                  <tr><th scope="row"><span className="qt-nw">เลขที่</span> · <span className="qt-nw">ลงวันที่</span></th><td className="old">{noDate(rev.doc.docNo, rev.doc.docDate)}</td><td>{noDate(docNo, docDate)}</td></tr>
                   <tr className="sum"><th scope="row">ยอดที่นับ{basis !== 'manual' && fin === amt ? ` (${BASIS_TH[basis]})` : ''}</th><td className="old">{rev.doc.amount != null ? fmtMoney(rev.doc.amount) : '—'}</td><td>{fin != null ? fmtMoney(fin) : '—'}</td></tr>
                 </tbody>
               </table>
