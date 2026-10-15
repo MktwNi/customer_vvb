@@ -7,6 +7,7 @@ import {
   type Deal, type DealDoc, type DocKind, type DocTarget,
 } from '../lib/sales';
 import { attachCheck, attachKind0, attachRevision, qtDiffText, qtFacts, qtView } from '../lib/quotes';
+import { jointHeadOf, jointRole } from '../lib/sales';
 import type { DocFacts } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { Modal } from './Dialog';
@@ -272,7 +273,9 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
     : [];
   const others = facts ? facts.candidates.filter((c) => !opts.some((o) => o[2] === c.value)).slice(0, 5) : [];
   const wordsOk = facts && facts.words != null && facts.total != null && Math.abs(facts.words - facts.total) < 0.01;
-  const partyWarn = facts && facts.party && !sameParty(facts.party, deal.client);
+  // a joint quotation's member: the quotation may name its payer (the header's client) instead
+  const payer = jointRole(e.sales, deal) === 'member' ? e.sales.deals[jointHeadOf(e.sales, deal.id)]?.client : undefined;
+  const partyWarn = facts && facts.party && !sameParty(facts.party, deal.client) && !(payer && sameParty(facts.party, payer));
   const isImg = file && docMime(file).startsWith('image/') && !/hei[cf]/.test(docMime(file)); // browsers can't show HEIC
 
   // the revision against the version it follows: number and date, the figure counted, and the difference

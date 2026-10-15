@@ -27,6 +27,7 @@ import { MyPerms } from './components/MyPerms';
 import { RequestDialog } from './components/RequestDialog';
 import { NotifySettings } from './components/NotifySettings';
 import { QtCheckSheet } from './components/QtCheckSheet';
+import { JointDialogs } from './components/JointQt';
 import { commitFocus } from './components/useDialog';
 import { docById, parseGo } from './lib/notify';
 
@@ -280,6 +281,12 @@ export default function App() {
       {ready && ui.qtCheck && (
         <ErrorBoundary resetKey={'qt' + ui.qtCheck}>
           <QtCheckSheet />
+        </ErrorBoundary>
+      )}
+      {/* a joint quotation's dialogs: make one, change its companies, close it (over the table and the panel) */}
+      {ready && ui.jqDlg && (
+        <ErrorBoundary resetKey="jq">
+          <JointDialogs />
         </ErrorBoundary>
       )}
       {/* the session ended: sign in again over the app (open panels and typed text stay) */}

@@ -15,6 +15,7 @@ import { DateField, Notice } from './ui';
 import { Icon } from './icons';
 import { useSalesActs } from './SalesToast';
 import { QtBack, QtCheckLine } from './QtCheckSheet';
+import { countsActual, docsOf, jointRole } from '../lib/sales';
 
 const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
 const BASIS_LONG: [DealDoc['basis'], string][] = [['total', 'รวมทั้งสิ้น (รวม VAT)'], ['subtotal', 'ก่อน VAT'], ['netPay', 'หลังหัก ณ ที่จ่าย']];
@@ -121,7 +122,10 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
             label={'เพิ่มเติม ใบเสนอราคา' + (doc.docNo ? ' ' + doc.docNo : '')}
             items={[
               { label: 'ดาวน์โหลดไฟล์', sub: doc.name, act: download },
-              // (item 7 adds "รวมเป็นใบเสนอราคาร่วม" here)
+              // item 7: this quotation is for several companies (a deal with money received of its own stays as it is)
+              ...(e.canJoint() && jointRole(e.sales, d) === 'plain' && !docsOf(e.sales, d.id).some(countsActual)
+                ? [{ label: 'รวมเป็นใบเสนอราคาร่วม', sub: 'ใบนี้ทำให้หลายบริษัท ยอดนับครั้งเดียว', act: () => set({ jqDlg: { k: 'new', from: d.id } }) }]
+                : []),
               { label: `ลบฉบับที่ ${h.n}`, sub: qtDelText(v, d), act: () => void deleteQt(e, d, v, acts.say), sep: true },
             ]}
           />

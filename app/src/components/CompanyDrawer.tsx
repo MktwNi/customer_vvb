@@ -13,6 +13,9 @@ import { Icon } from './icons';
 import { CoAvatar } from './CoAvatar';
 import { CompanyPeople, logType } from '../tabs/People';
 import { useDialog } from './useDialog';
+// joint quotations (package quotes, item 7): the payer's header and a member's line
+import { jointOf, jointRole } from '../lib/sales';
+import { jointTitle } from '../lib/joint';
 
 const box: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10 };
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
@@ -467,7 +470,8 @@ function SalesBox({ c }: { c: Company }) {
   const deals = newestFirst(e.dealsOf(c.id));
   const custom = e.custom[c.id];
   const year = ui.slYear || beYear();
-  const hasYear = deals.some((d) => d.year === year);
+  // a joint quotation's header is the payer's row for that quotation, not the company's own row of the year
+  const hasYear = deals.some((d) => d.year === year && jointRole(e.sales, d) !== 'header');
   return (
     <div style={{ ...box, gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -482,7 +486,12 @@ function SalesBox({ c }: { c: Company }) {
         const m = dealMoney(e.sales, d);
         const lc = lastContact(e.sales, d, todayISO());
         const fv = fcFig(e.sales, d);
-        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc), money && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : '')].filter(Boolean);
+        const jr = jointRole(e.sales, d), jg = jr === 'plain' ? null : jointOf(e.sales, d);
+        const more = [
+          jg && (jr === 'header' ? `ผู้จ่ายใบเสนอราคาร่วม ${jointTitle(e.sales, jg)} · ${jg.members.length} บริษัท` : `อยู่ในใบเสนอราคาร่วม ${jointTitle(e.sales, jg)}`),
+          d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc),
+          money && jr !== 'member' && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : ''),
+        ].filter(Boolean);
         return (
           <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="hv dr-deal">
             <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>

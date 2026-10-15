@@ -16,6 +16,8 @@ import './custcolor.css';
 import './roles.css';
 // notifications and the quotation check: the bell, the check sheet, การแจ้งเตือนของฉัน and the admin section
 import './notify.css';
+// joint quotations: the table's band and member rows, the panel, the dialogs, the phone card (components/JointQt)
+import './joint.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

@@ -9,7 +9,7 @@
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
+import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
 
@@ -292,6 +292,9 @@ export const keyOf = {
   person: (id: string) => `person/${id}`,
   /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
   dundo: (id: string) => `dundo/${id}`,
+  /** a joint quotation's mark on its header deal, and one member company of it (lib/sales.ts jointOf) */
+  jqt: (hid: string) => `jqt/${hid}`,
+  jqm: (hid: string, dealId: string) => `jqm/${hid}/${dealId}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -353,6 +356,8 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.values(S.acts || {}).forEach(({ deal, id, ...v }) => m.set(keyOf.dact(deal, id), v));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
+    Object.entries(S.jqt || {}).forEach(([id, v]) => m.set(keyOf.jqt(id), { ...v }));
+    Object.entries(S.jqm || {}).forEach(([k, v]) => m.set('jqm/' + k, { ...v }));
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
   }
@@ -504,6 +509,24 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.sales = true;
       break;
     }
+    case 'jqt':
+    case 'jqm': {
+      // a joint quotation (package quotes): older builds skip both prefixes, so they never send or delete one
+      const jm = type === 'jqm';
+      const B = (jm ? s.sales.jqm || (s.sales.jqm = {}) : s.sales.jqt || (s.sales.jqt = {})) as Record<string, unknown>;
+      const j = rest.indexOf('/');
+      if (!rest || (jm ? j <= 0 || j === rest.length - 1 : j >= 0)) return;
+      if (del) {
+        if (!(rest in B)) return;
+        delete B[rest];
+      } else {
+        const v = jm ? toJqm(row.v) : toJqt(row.v);
+        if (!v) return;
+        B[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
     case 'qchk': {
       // the check of a quotation (written by the script's qt_check only): older builds skip the prefix
       const Q = s.sales.qchk || (s.sales.qchk = {});
@@ -559,7 +582,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\//;
+const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person|jqt|jqm)\//;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.

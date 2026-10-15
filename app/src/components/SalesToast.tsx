@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { todayISO } from '../lib/format';
-import { closeReady, dealResult, hasPlan, planOf, type Deal } from '../lib/sales';
+import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
 import { DialogActions, Modal } from './Dialog';
@@ -31,15 +31,19 @@ export function useSalesActs() {
     const today = todayISO();
     if (!wasReady && closeReady(e.sales, d, today)) return prompt(d, 'result');
     if (dealResult(e.sales, d) !== 'YES') return;
+    // a company in a joint quotation has no plan of its own: the payer pays the whole quotation
+    if (jointRole(e.sales, d) === 'member') return say('ได้งานแล้ว · การชำระเงินอยู่ที่ใบเสนอราคาร่วม (ผู้จ่ายชำระทั้งใบ)');
     if (!hasPlan(e.sales, d.id)) {
       if (!e.canDeal('edit.pay', d)) return;
       say('ได้งานแล้ว ตั้งแผนชำระเลยไหม? (ผลการขายยังไม่ใช่การปิดงาน)', { ms: 0, acts: [{ label: 'ตั้งแผนชำระ', act: 'plan', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     } else say(`ได้งานแล้ว · แผนชำระ ${planOf(e.sales, d, today)?.n} งวดเริ่มนับวันครบกำหนดจากวันนี้`);
   };
-  /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. */
+  /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. A joint quotation
+   *  always asks: it closes its companies too (components/JointQt.tsx JointClose). */
   const close = (id: string) => {
     const d = e.sales.deals[id];
     if (!d || !e.canDeal('edit.deal', d)) return;
+    if (jointRole(e.sales, d) === 'header') return set({ jqDlg: { k: 'close', hid: id }, slPrompt: null, slToast: null });
     if (closeReady(e.sales, d, todayISO())) closeNow(id);
     else set({ slConfirm: id });
   };
@@ -93,6 +97,10 @@ export function SalesMessages() {
           (x) => acts.say('เลิกทำไม่สำเร็จ: ' + errText(x, 'connect'), { ms: 6000 }),
         );
       return;
+    }
+    if (a.act === 'jqUndo' && a.deal) {
+      e.reopenJoint(a.deal);
+      return acts.say('เปิดใบเสนอราคาร่วมและบริษัทที่ปิดพร้อมกันอีกครั้งแล้ว', { ms: 3000 });
     }
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });

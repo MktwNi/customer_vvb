@@ -18,6 +18,9 @@ import { CashStat, QuarterCard, payField } from '../components/DashCash';
 import { beOf, cashLines, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
 import { thisQuarter } from '../lib/dateRange';
 import { payIn, payMonthCounts } from '../lib/cashUi';
+// joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
+import { jointRole } from '../lib/sales';
+import { shareOf } from '../lib/joint';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -154,7 +157,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
 
   // top sellers: actual first, then forecast; closed deals per person
   const yesBy: Record<string, number> = {};
-  list.forEach((d) => dealResult(S, d) === 'YES' && (yesBy[d.resp || '(ไม่ระบุ)'] = (yesBy[d.resp || '(ไม่ระบุ)'] || 0) + 1));
+  list.forEach((d) => dealResult(S, d) === 'YES' && jointRole(S, d) !== 'header' && (yesBy[d.resp || '(ไม่ระบุ)'] = (yesBy[d.resp || '(ไม่ระบุ)'] || 0) + 1));
   const sellers = Object.entries(st.byResp)
     .filter(([k]) => k !== '(ไม่ระบุ)')
     .sort((a, b) => b[1].actual - a[1].actual || b[1].forecast - a[1].forecast || b[1].n - a[1].n);
@@ -181,7 +184,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   // follow-ups: open jobs not decided yet, and any open job overdue (the headline count);
   // overdue first, then the longest without contact
   const follow = list
-    .filter((d) => d.jobStatus === 'open' && (!['YES', 'NO'].includes(dealResult(S, d)) || overdueDays(S, d, today) != null))
+    .filter((d) => d.jobStatus === 'open' && jointRole(S, d) !== 'header' && (!['YES', 'NO'].includes(dealResult(S, d)) || overdueDays(S, d, today) != null))
     .sort((a, b) => (overdueDays(S, b, today) ?? -1) - (overdueDays(S, a, today) ?? -1) || (lastContact(S, a, today) || '0').localeCompare(lastContact(S, b, today) || '0'));
   const overdueN = follow.filter((d) => overdueDays(S, d, today) != null).length;
 
@@ -190,7 +193,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const wDays = Array.from({ length: 7 }, (_, i) => addDays(wMon, i));
   // with a filter set, only the filtered customers' appointments (and, for an owner, the companies they own)
   const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.pay);
-  const gids = new Set(list.filter((d) => d.gid != null).map((d) => e.canonical(d.gid as number)));
+  // (a joint quotation's header is the payer's row, not a customer of the filter)
+  const gids = new Set(list.filter((d) => d.gid != null && jointRole(S, d) !== 'header').map((d) => e.canonical(d.gid as number)));
   const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section;
   const inScope = (t: Task) => !filtered || gids.has(e.canonical(t.gid)) || (onlyResp && F.resp!.v.includes(e.crm.owners[e.canonical(t.gid)]));
   const tasks = e.crm.tasks.filter((t) => t.date >= wDays[0] && t.date <= wDays[6] && inScope(t));
@@ -214,9 +218,11 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const srcRows = Object.entries(st.bySource);
   // the latest wins: deals marked YES, newest result date first
   const wins = list
-    .filter((d) => dealResult(S, d) === 'YES')
+    .filter((d) => dealResult(S, d) === 'YES' && jointRole(S, d) !== 'header')
     .map((d) => {
-      const m = dealMoney(S, d);
+      // a joint quotation's member: its part of the quotation (the money itself counts once, on the header)
+      const sh = jointRole(S, d) === 'member' ? shareOf(S, d) : null;
+      const m = sh ? { actual: null, forecast: sh.amt } : dealMoney(S, d);
       return { d, at: stepOf(S, d.id, DEAL_STAGE).d || d.closedDate || '', amt: m.actual || m.forecast || 0, fc: !m.actual };
     })
     .sort((a, b) => b.at.localeCompare(a.at))

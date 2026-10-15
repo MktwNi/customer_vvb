@@ -75,11 +75,14 @@ export interface UIState {
    *  e-mail link it was opened from (passed on to the script, '' = opened in the app). */
   qtCheck: string | null;
   qtSig: string;
+  /** A joint quotation's dialog (components/JointQt.tsx): make one (`from`: "รวมเป็นใบเสนอราคาร่วม" from that
+   *  deal's quotation; `section`: the หมวด it starts in), change its companies, or close it. */
+  jqDlg: { k: 'new'; from?: string; section?: string } | { k: 'members'; hid: string } | { k: 'close'; hid: string } | null;
 }
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
  *  (components/SalesToast.tsx). */
-export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
+export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
@@ -100,7 +103,7 @@ const initial = (): UIState => {
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false,
     deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
-    bell: false, qtCheck: null, qtSig: '',
+    bell: false, qtCheck: null, qtSig: '', jqDlg: null,
   };
 };
 

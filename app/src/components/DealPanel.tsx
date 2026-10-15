@@ -23,6 +23,9 @@ import { SelField, Select } from './Select';
 import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
+// joint quotations (package quotes, item 7): the header's own panel, a member's line and stages
+import { jointRole } from '../lib/sales';
+import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -320,6 +323,16 @@ export function DealPanel() {
   const c = d.gid != null ? e.company(d.gid) : undefined;
   const attach: Attach = (stage, kind, file, more) => setAtt({ stage, kind, file, more });
   const planFirst = won || ui.dpPlan !== '';
+  // a joint quotation's header has its own panel (this one hosts it: keyboard, Escape, the attach dialog);
+  // a member has no money or plan of its own
+  const jr = jointRole(S, d);
+  if (jr === 'header')
+    return (
+      <>
+        <JointPanel d={d} panelRef={ref} close={close} attach={attach} plan={<PlanCard d={d} attach={attach} />} info={<ContactCard d={d} ro={ro} title="ข้อมูลใบเสนอราคา" />} history={<HistoryCard d={d} />} />
+        {att && <DocAttach deal={d} stage={att.stage} kind={att.kind} file={att.file} {...att.more} onClose={() => setAtt(null)} />}
+      </>
+    );
 
   // the summary strip: สถานะ · Forecast · Actual · ค้างรับ
   const stWord =
@@ -354,13 +367,19 @@ export function DealPanel() {
           </div>
           {ro ? <h3 className="dp-name ro">{d.client}</h3> : <ClientName value={d.client} onSave={(v) => up({ client: v })} />}
           <span className="dp-meta">{[d.contactName, d.phone, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : 'ยังไม่มอบหมายผู้รับผิดชอบ'].filter(Boolean).join(' · ')}</span>
+          {jr === 'member' && <MemberBanner d={d} />}
           <div className="dp-strip">
             <div>
               <span>สถานะ</span>
               <Status kind={stKind}>{stWord}</Status>
               {d.jobStatus === 'closed' ? <small>ปิดงานแล้ว{d.closedDate ? ' ' + isoTh(d.closedDate) : ''}</small> : od != null ? <small className="bad">ไม่ได้ติดต่อ {od} วัน</small> : <small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small>}
             </div>
-            {money && <>
+            {money && jr === 'member' && <>
+            <div><span>Forecast</span><MemberStrip d={d} /></div>
+            <div><span>Actual</span><b className="none">—</b><small>ชำระผ่านใบเสนอราคาร่วม</small></div>
+            <div><span>ค้างรับ</span><b className="none">—</b><small>ดูที่ใบเสนอราคาร่วม</small></div>
+            </>}
+            {money && jr !== 'member' && <>
             <div>
               <span>Forecast</span>
               {ro ? <b className={m.forecast == null ? 'none' : ''}>{m.forecast == null ? '—' : fmtMoney(m.forecast)}</b> : <StripMoney label="Forecast" value={m.forecast} onSave={(v) => up({ forecast: v })} />}
@@ -384,10 +403,10 @@ export function DealPanel() {
 
         <div className="dp-body">
           {/* the plan is amounts: an account without ดูยอดเงิน follows payments by the PAY stages below */}
-          {money && planFirst && <PlanCard d={d} attach={attach} />}
+          {money && planFirst && jr !== 'member' && <PlanCard d={d} attach={attach} />}
           {/* its own state (the card held, the quick-add) belongs to this deal */}
           <StepsCard key={d.id} d={d} attach={attach} />
-          {money && !planFirst && <PlanCard d={d} attach={attach} />}
+          {money && !planFirst && jr !== 'member' && <PlanCard d={d} attach={attach} />}
           <OtherDocs d={d} attach={attach} />
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />
@@ -455,6 +474,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
   const futs = items.filter(emptyFuture);
   const cv = closingView(S, d, today, ro);
   const asking = ui.slPrompt === d.id && cv.ready && d.jobStatus === 'open';
+  const jm = jointRole(S, d) === 'member';
   let futDone = false;
   return (
     <section ref={sec} className="dp-card" aria-labelledby="dp-steps">
@@ -494,7 +514,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           const unused = !!P && won && isPayStage(S.cfg, p) && !pl && t.states[p] === 'off';
           const on = !extra && i < reached, dash = on && t.states[stages[i + 1]] === 'planned';
           const fut = (st === 'future' || st === 'off' || unused) && !isNow && !card && !(pl && won);
-          let date: ReactNode = s.d ? <span className="sl-tl-d">{st === 'planned' ? 'นัด ' : ''}{isoTh(s.d)}</span> : st === 'off' ? <span className="sl-tl-d">ไม่ต้องทำ</span> : st === 'skipped' ? <span className="sl-tl-d">ข้าม</span> : null;
+          let date: ReactNode = s.d ? <span className="sl-tl-d">{st === 'planned' ? 'นัด ' : ''}{isoTh(s.d)}</span> : st === 'off' ? <span className="sl-tl-d">{jm && isPayStage(S.cfg, p) ? 'ชำระผ่านใบเสนอราคาร่วม' : 'ไม่ต้องทำ'}</span> : st === 'skipped' ? <span className="sl-tl-d">ข้าม</span> : null;
           if (pl && won) date = pl.status === 'paid' ? <span className="sl-tl-d">รับ {isoTh(pl.rcvDate)}</span> : pl.due ? <span className={'sl-tl-d' + (pl.lateDays ? ' bad' : '')}>ครบกำหนด {isoTh(pl.due)}{pl.lateDays ? ` · เลยมา ${pl.lateDays} วัน` : ''}</span> : null;
           if (unused) date = <span className="sl-tl-d">ไม่มีงวดนี้ในแผน</span>;
           const planLine = pl && pl.status !== 'paid' && (
@@ -526,9 +546,10 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
                   <p className="sl-tl-n t-muted">ยังไม่ได้บันทึก</p>
                 ) : null}
                 {planLine}
+                {jm && <MemberStage d={d} stage={p} pay={false} />}
                 {qts.length > 0 && <QtCard d={d} onRevise={(id) => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast', revise: id })} />}
                 {docs.filter((z) => !qts.includes(z)).map((z) => <DocCard key={z.id} d={d} doc={z} inUse={z.target === 'forecast' ? m.fcDoc?.id === z.id : z.target === 'actual' && z.amount != null} />)}
-                {!ro && !doc && !qts.length && st !== 'off' && !unused && !(pl && won) && ((p === QUOTE_STAGE && st === 'done') || (isPayStage(S.cfg, p) && won && !P)) && (
+                {!ro && !jm && !doc && !qts.length && st !== 'off' && !unused && !(pl && won) && ((p === QUOTE_STAGE && st === 'done') || (isPayStage(S.cfg, p) && won && !P)) && (
                   <button type="button" className="btn xs sl-tl-att" onClick={() => attach(p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ / ใบเสร็จ'}</button>
                 )}
                 {actsAt(p, unused, st === 'off')}
@@ -655,7 +676,8 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
     if (latest.current.dirty && !done.current) latest.current.save(true);
   }, []);
   const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p) || !!line;
-  const drop = isMoney && (p === QUOTE_STAGE || won) && (!doc || !!qt);
+  // a joint quotation's member: its quotation and payments are the joint quotation's (nothing to attach here)
+  const drop = isMoney && (p === QUOTE_STAGE || won) && (!doc || !!qt) && jointRole(S, d) !== 'member';
   const kind = kindForStage(S.cfg, p);
   // a file attached from here: the card's work is done, it closes (the step shows the document and the
   // note it wrote); with something typed it stays open, and saving that does not ask about the document's note
@@ -1148,7 +1170,7 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
 }
 
 /** Contact details, the linked company, SOURCE / services, the หมวด and the year: folded by default. */
-function ContactCard({ d, ro }: { d: Deal; ro: boolean }) {
+function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · SOURCE / บริการ' }: { d: Deal; ro: boolean; title?: string }) {
   const { engine: e } = useApp();
   const [open, setOpen] = useState(false);
   const [opts, setOpts] = useState(false);
@@ -1172,7 +1194,7 @@ function ContactCard({ d, ro }: { d: Deal; ro: boolean }) {
   return (
     <section className="dp-card" aria-labelledby="dp-contact">
       <div className="sl-acc">
-        <h3 id="dp-contact">ข้อมูลติดต่อ · SOURCE / บริการ</h3>
+        <h3 id="dp-contact">{title}</h3>
         <small>{sum}</small>
         <button type="button" className="lnk" aria-expanded={open} aria-controls="dp-contact-b" onClick={() => setOpen(!open)}>{open ? 'ซ่อน' : 'แสดง'}</button>
       </div>

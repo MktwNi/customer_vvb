@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
 import {
   ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
-  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, sectionsFor, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex,
+  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex,
   type BasisDate, type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState,
 } from '../lib/sales';
 import { BASIS_TH, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, trackerFields, yearOptions, type FigView } from '../lib/salesUi';
@@ -30,6 +30,10 @@ import { SalesDash } from './SalesDash';
 import { CashKpiRow, CashView, LensChip, LensMoney, LensNote } from './SalesCash';
 import { cashLines, cashYear, cashYears } from '../lib/sales';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
+// joint quotations (package quotes, item 7): bands and member rows, counted once
+import { countsActual, customersOf, docsOf, jointHeadOf, jointRole } from '../lib/sales';
+import { jointRows, rowDeals, rowMoneyDeals, type JRow } from '../lib/joint';
+import { JointBand, JointCard, JointClosedRows, JointShare } from '../components/JointQt';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
 export { Modal } from '../components/Dialog';
@@ -98,8 +102,8 @@ export function Sales() {
   // the table's count and its filters' choices follow the lens: in "เงินเข้าตามปี" they hold the other years'
   // jobs with money in this one
   const tableYear = lens ? filterDeals(S, { year, money: 'cash' }, today) : yearDeals;
-  const openN = tableYear.filter((d) => d.jobStatus === 'open').length;
-  const closedN = yearDeals.filter((d) => d.jobStatus === 'closed').length;
+  const openN = customersOf(S, tableYear).filter((d) => d.jobStatus === 'open').length;
+  const closedN = customersOf(S, yearDeals).filter((d) => d.jobStatus === 'closed').length;
   const [said, setSaid] = useState('');
   const tabs: [typeof v, ReactNode, number | null, string?][] = [
     // five tabs fit a phone's row: the first reads "ตาราง" there
@@ -246,7 +250,7 @@ function AddMenu() {
   const { engine: e, ui, set, go } = useApp();
   const { open, setOpen, close, btn, wrap, cls } = useMenu();
   // companies being followed that are not in this year's table yet
-  const starred = e.crm.watch.map((id) => e.company(id)).filter((c) => c && !e.dealsOf(c.id).some((d) => d.year === ui.slYear));
+  const starred = e.crm.watch.map((id) => e.company(id)).filter((c) => c && !e.dealsOf(c.id).some((d) => d.year === ui.slYear && jointRole(e.sales, d) !== 'header'));
   return (
     <div {...wrap} className="sl-menuw">
       <button ref={btn} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} className="btn pri">เพิ่มลูกค้า</button>
@@ -263,6 +267,14 @@ function AddMenu() {
           <button role="menuitem" className="menu-i" onClick={() => { close(); set({ addCust: { deal: true } }); }}>
             ลูกค้าใหม่ (ไม่มีในทะเบียน)<small>กรอกข้อมูลเอง</small>
           </button>
+          {e.canJoint() && (
+            <>
+              <hr />
+              <button role="menuitem" className="menu-i" onClick={() => { close(); set({ jqDlg: { k: 'new' } }); }}>
+                สร้างใบเสนอราคาร่วม<small>ใบเดียว หลายบริษัท เช่น CFP ของ มจพ</small>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -428,7 +440,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   const views: [QuickView, string][] = [['', 'ทั้งหมด'], ['overdue', 'ค้างติดตาม'], ['notstarted', 'ยังไม่เริ่ม'], ['active', 'กำลังติดตาม'], ['payment', 'รอชำระเงิน'], ['ready', 'พร้อมปิดงาน']];
   const pick = (q: QuickView) => up({ quick: q }, { slCollapsed: {} });
   // the quick views' counts: one pass each over the rows, the contact records indexed once (ค้างติดตาม reads them)
-  const viewN = base ? withActIndex(S, () => views.map(([k]) => (k ? base.filter((d) => quickMatch(S, d, k, today)).length : base.length))) : [];
+  const cust = base ? customersOf(S, base) : [];
+  const viewN = base ? withActIndex(S, () => views.map(([k]) => (k ? cust.filter((d) => quickMatch(S, d, k, today)).length : cust.length))) : [];
   const anyLate = !!base && withActIndex(S, () => base.some((d) => quickMatch(S, d, 'paylate', today)));
   // the counts in the field menu follow the search too, a little behind the typing (six passes over the year)
   const key = useDeferredValue(JSON.stringify(ui.slF));
@@ -460,7 +473,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
             {/* the jobs of whoever is using this browser: ผู้รับผิดชอบ คือ (me), on top of any view */}
             {me && (
               <button type="button" aria-pressed={mine} onClick={() => up({ resp: mine ? undefined : { v: [me] } }, { slCollapsed: {} })} title={mine ? 'แสดงงานของทุกคน' : `เฉพาะงานที่ ${me} รับผิดชอบ`}>
-                ของฉัน<span className="n">{fmtN(base.filter((d) => d.resp === me).length)}</span>
+                ของฉัน<span className="n">{fmtN(cust.filter((d) => d.resp === me).length)}</span>
               </button>
             )}
             {views.map(([k, label], i) => {
@@ -528,7 +541,7 @@ function Kpis({ S, open, all, today, year, date }: { S: SalesState; open: Deal[]
   const rc = receivables(S, open, today);
   let fcOpen = 0, fcClosed = 0;
   all.forEach((d) => {
-    const fc = dealMoney(S, d).forecast || 0;
+    const fc = jointRole(S, d) === 'member' ? 0 : dealMoney(S, d).forecast || 0;
     if (d.jobStatus === 'closed') fcClosed += fc;
     else fcOpen += fc;
   });
@@ -630,14 +643,16 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const [att, setAtt] = useState<{ deal: Deal; stage?: string; kind?: DocKind; more?: AttachMore } | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const editSeq = useRef(0);
-  const secs = sectionsFor(S, deals);
-  const bySec = new Map<string, Deal[]>(secs.map((s) => [s, []]));
-  deals.forEach((d) => bySec.get(d.section)!.push(d));
-  const visible = secs.filter((s) => bySec.get(s)!.length);
+  // each section's rows: a joint quotation as a band at the top of its header's section with its members
+  // under it (lib/joint jointRows), then the other rows
+  const { secs: visible, rows: bySec } = jointRows(S, deals);
+  const [jqFold, setJqFold] = useState<Record<string, 1>>({});
+  const foldJq = (id: string) => setJqFold((x) => (x[id] ? Object.fromEntries(Object.entries(x).filter(([k]) => k !== id)) : { ...x, [id]: 1 }));
   // one company twice in the year (two people sent it at the same moment): marked, to delete one (the lens's
-  // jobs of other years are not the year's rows)
+  // jobs of other years are not the year's rows; a joint quotation's header, the payer's row for it, and its
+  // members are rows of their own on purpose)
   const perCo = new Map<number, number>();
-  facets.forEach((d) => d.gid != null && d.year === ui.slYear && perCo.set(e.canonical(d.gid), (perCo.get(e.canonical(d.gid)) || 0) + 1));
+  facets.forEach((d) => d.gid != null && d.year === ui.slYear && jointRole(S, d) === 'plain' && perCo.set(e.canonical(d.gid), (perCo.get(e.canonical(d.gid)) || 0) + 1));
   const cur = ui.deal || ui.last.deal;
 
   const toggle = (id: string, focusChev = false) => {
@@ -681,7 +696,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       setMenu('');
       set({ deal: id, dpPlan: plan, slToast: null });
     },
-    dup: (d) => d.gid != null && d.year === ui.slYear && (perCo.get(e.canonical(d.gid)) || 0) > 1,
+    dup: (d) => d.gid != null && d.year === ui.slYear && jointRole(S, d) === 'plain' && (perCo.get(e.canonical(d.gid)) || 0) > 1,
   };
 
   // the section bars stick right under the column headings: their height (fonts, zoom) sets the offset
@@ -777,17 +792,22 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
     if (id) toggle(id, !mobile);
   };
 
-  const secSum = (list: Deal[]) => {
+  /** A section's counts (its customers: plain rows and joint quotations' members) and money (plain rows and
+   *  the joint quotations' headers, once; members carry none). */
+  const secSum = (rows: JRow[]) => {
+    const list = rowDeals(rows), paid = rowMoneyDeals(rows);
     let od = 0, rd = 0, fc = 0, ac = 0;
     for (const d of list) {
       if (overdueDays(S, d, today) != null) od++;
       if (closeReady(S, d, today)) rd++;
+    }
+    for (const d of paid) {
       const m = dealMoney(S, d);
       fc += m.forecast || 0;
       ac += m.actual || 0;
     }
     // the lens: the section's money in the year, and what of it came in
-    if (cash) ({ fc, ac } = lensSum(cash, list));
+    if (cash) ({ fc, ac } = lensSum(cash, paid));
     return { n: list.length, od, rd, fc, ac };
   };
 
@@ -817,7 +837,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       ) : (
         <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} />
       )}
-      <Toolbar S={S} F={F} yearDeals={facets} base={base} today={today} job="open" shown={deals.length} total={openN} />
+      <Toolbar S={S} F={F} yearDeals={facets} base={base} today={today} job="open" shown={customersOf(S, deals).length} total={openN} />
       {cash && <LensNote year={ui.slYear} range={cash.range} onBack={() => set({ slLens: 'deal' })} />}
       {!deals.length ? (
         <div className="card sl-empty-card">
@@ -858,7 +878,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                     {money && <span className="sl-s-tot">{cash ? (cash.range ? 'ในช่วงนี้' : `ปี ${ui.slYear}`) : 'Forecast'} <b>{fmtMoney(sum.fc) || '0'}</b></span>}
                   </div>
                 </div>
-                {!col && list.map((d) => <ForDeal key={d.id} d={d}><DealCard d={d} /></ForDeal>)}
+                {!col && list.map((r) => (r.k === 'deal' ? <ForDeal key={r.d.id} d={r.d}><DealCard d={r.d} /></ForDeal> : <JointCard key={'jq' + r.g.head.id} b={r} onOpen={(id) => tk.openPanel(id)} />))}
                 {!col && !ro && <button type="button" className="lnk sl-m-add" onClick={() => addIn(e, set, sec, ui.slYear)}>เพิ่มลูกค้าในหมวด {name}</button>}
               </section>
             );
@@ -933,12 +953,15 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                     </td>
                   </tr>
                   {!col &&
-                    list.map((d) => {
-                      const open = !!ui.slOpen[d.id];
-                      return (
-                        <DealRows key={d.id} d={d} open={open} stages={stages} />
-                      );
-                    })}
+                    list.map((r) =>
+                      r.k === 'deal' ? (
+                        <DealRows key={r.d.id} d={r.d} open={!!ui.slOpen[r.d.id]} stages={stages} />
+                      ) : (
+                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} onOpen={(id, plan) => tk.openPanel(id, plan)}>
+                          {!jqFold[r.g.head.id] && r.shown.map((d, i) => <DealRows key={d.id} d={d} open={!!ui.slOpen[d.id]} stages={stages} jm={i === r.shown.length - 1 ? 'last' : 'mid'} />)}
+                        </JointBand>
+                      ),
+                    )}
                 </tbody>
               );
             })}
@@ -993,21 +1016,21 @@ function ForDeal({ d, children }: { d: Deal; children: ReactNode }) {
   return <TkCtx.Provider value={ro === tk.ro ? tk : { ...tk, ro }}>{children}</TkCtx.Provider>;
 }
 
-function DealRows(p: { d: Deal; open: boolean; stages: string[] }) {
+function DealRows(p: { d: Deal; open: boolean; stages: string[]; jm?: 'mid' | 'last' }) {
   return (
     <ForDeal d={p.d}>
       <DealRowsIn {...p} />
     </ForDeal>
   );
 }
-function DealRowsIn({ d, open, stages }: { d: Deal; open: boolean; stages: string[] }) {
+function DealRowsIn({ d, open, stages, jm }: { d: Deal; open: boolean; stages: string[]; jm?: 'mid' | 'last' }) {
   const { S, today } = useTk();
   const t = stageTrack(S, d, today);
   const kids = open ? kidList(S, d, today) : [];
   return (
     <>
       {open && <tr className="sl-gap" aria-hidden="true"><td colSpan={10} /></tr>}
-      <DealRow d={d} open={open} t={t} kidIds={kids.map((_, i) => `k-${d.id}-${i}`).concat(`k-${d.id}-end`)} stages={stages} />
+      <DealRow d={d} open={open} t={t} kidIds={kids.map((_, i) => `k-${d.id}-${i}`).concat(`k-${d.id}-end`)} stages={stages} jm={jm} />
       {open && <KidRows d={d} t={t} list={kids} />}
       {open && <tr className="sl-gap" aria-hidden="true"><td colSpan={10} /></tr>}
     </>
@@ -1016,7 +1039,7 @@ function DealRowsIn({ d, open, stages }: { d: Deal; open: boolean; stages: strin
 
 type Track = ReturnType<typeof stageTrack>;
 
-function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Track; kidIds: string[]; stages: string[] }) {
+function DealRow({ d, open, t, kidIds, stages, jm }: { d: Deal; open: boolean; t: Track; kidIds: string[]; stages: string[]; jm?: 'mid' | 'last' }) {
   const tk = useTk();
   const { e, S, today } = tk;
   const c = d.gid != null ? e.company(d.gid) : undefined;
@@ -1027,7 +1050,7 @@ function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Tr
   const late = overdueDays(S, d, today) != null || nextStepView(S, d, today).tone === 'late';
   const reached = reachedOf(stages, t.states);
   return (
-    <tr className={'sl-row' + (cur ? ' cur' : '') + (open ? ' og ogf' : '')} aria-current={cur ? 'true' : undefined} data-id={d.id} style={open && reached >= 0 ? { '--line-c': 'var(--brand)' } : undefined}>
+    <tr className={'sl-row' + (cur ? ' cur' : '') + (open ? ' og ogf' : '') + (jm ? ' jq-m' + (jm === 'last' && !open ? ' last' : '') : '')} aria-current={cur ? 'true' : undefined} data-id={d.id} style={open && reached >= 0 ? { '--line-c': 'var(--brand)' } : undefined}>
       <td className="k-chev">
         <button type="button" className="sl-chev" data-chev={d.id} aria-expanded={open} aria-controls={kidIds.join(' ')} aria-label={`${open ? 'ซ่อน' : 'แสดง'}ขั้นตอนของ ${name}`} onClick={() => tk.toggle(d.id, true)}>
           <Chevron />
@@ -1098,6 +1121,7 @@ function NextPill({ d, card }: { d: Deal; card?: boolean }) {
   const v = nextStepView(tk.S, d, tk.today);
   if (v.kind === 'no') return <span className="sl-nx txt">ไม่ต้องติดตามต่อ</span>;
   if (v.kind === 'done') return <span className="sl-nx txt ok">ครบทุกขั้น</span>;
+  if (v.kind === 'joint') return <span className="sl-nx txt">{v.hint}</span>;
   const inner = (
     <>
       <span className="nx-l">ถัดไป</span>
@@ -1285,6 +1309,7 @@ function MoneyFc({ d }: { d: Deal }) {
   const tk = useTk();
   const { e, S, ro } = tk;
   if (tk.cash) return <LensMoney L={tk.cash} d={d} col="fc" won={dealResult(S, d) === 'YES'} />;
+  if (jointRole(S, d) === 'member') return <JointShare S={S} d={d} col="fc" />;
   const m = dealMoney(S, d);
   const att = ro ? undefined : () => tk.attach(d, S.cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', { target: 'forecast' });
   const sub = <FigSub v={fcFig(S, d)} onAttach={att} />;
@@ -1312,6 +1337,7 @@ function MoneyAc({ d }: { d: Deal }) {
   const tk = useTk();
   const { e, S, today, ro } = tk;
   if (tk.cash) return <LensMoney L={tk.cash} d={d} col="ac" won={dealResult(S, d) === 'YES'} />;
+  if (jointRole(S, d) === 'member') return <JointShare S={S} d={d} col="ac" />;
   const m = dealMoney(S, d), r = dealResult(S, d), ps = payState(S, d, today), P = ps.plan, v = acFig(S, d);
   // an invoice or receipt for the installment due next (or the first PAY stage not paid)
   const att = ro ? undefined : () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' });
@@ -1382,6 +1408,7 @@ function StatusCell({ d, compact }: { d: Deal; compact?: boolean }) {
  *  upward when there is no room below it in the window. */
 function RowMenu({ d }: { d: Deal }) {
   const tk = useTk();
+  const { set: setUi } = useApp();
   const open = tk.menu === d.id;
   const ref = useRef<HTMLSpanElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -1400,6 +1427,7 @@ function RowMenu({ d }: { d: Deal }) {
   const ready = closeReady(tk.S, d, tk.today);
   // a quotation there already: its revision is one click from the row
   const qv = open && !tk.ro ? qtView(tk.S, d) : null, qh = qv?.head;
+  const jr = open ? jointRole(tk.S, d) : 'plain', hid = jr === 'member' ? jointHeadOf(tk.S, d.id) : '';
   return (
     <span
       ref={ref}
@@ -1424,12 +1452,18 @@ function RowMenu({ d }: { d: Deal }) {
       {open && (
         <span role="menu" className={'menu sl-menu sl-rowmenu' + (up ? ' up' : '')}>
           <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id))}>เปิดรายละเอียด</button>
+          {hid && <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(hid))}>เปิดใบเสนอราคาร่วม<small>{qtView(tk.S, tk.S.deals[hid]).head?.doc.docNo || 'ใบเดียว หลายบริษัท'}</small></button>}
           {!tk.ro && (
             <>
               <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d))}>แนบเอกสาร<small>ระบบเลือกขั้นให้</small></button>
               {qh && (
                 <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qh.doc.id }))}>
                   แนบใบเสนอราคาฉบับแก้ไข<small>{qh.doc.docNo || 'ใบเสนอราคา'} · {qv!.cur ? `ตอนนี้ใช้ฉบับที่ ${qv!.cur.n}` : `ล่าสุดฉบับที่ ${qh.n}`}</small>
+                </button>
+              )}
+              {qh && jr === 'plain' && tk.e.canJoint() && !docsOf(tk.S, d.id).some(countsActual) && (
+                <button role="menuitem" className="menu-i" onClick={pick(() => setUi({ jqDlg: { k: 'new', from: d.id } }))}>
+                  รวมเป็นใบเสนอราคาร่วม<small>ใบนี้ทำให้หลายบริษัท</small>
                 </button>
               )}
               <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id, 'edit'))}>แผนการชำระเงิน<small>{planOf(tk.S, d, tk.today) ? 'แก้ไขแผน' : 'ตั้งแผน งวดละเท่าไร เมื่อไร'}</small></button>
@@ -1504,6 +1538,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
   const late = overdueDays(S, d, today) != null;
   const cv = closingView(S, d, today);
   const ps = payState(S, d, today);
+  const hid = jointRole(S, d) === 'member' ? jointHeadOf(S, d.id) : '';
   return (
     <>
       {list.map((r, ri) => {
@@ -1614,6 +1649,8 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
           note = <QuickPlan d={d} />;
         } else if (s.n) {
           note = <span className={'sl-clamp' + (isAutoNote(S, d, p) ? ' auto' : '')} title={s.n}>{s.n}</span>;
+          // a joint quotation's member: its quotation is the joint one's
+          if (hid && p === QUOTE_STAGE) note = <span className="qt-kn">{note}<button type="button" className="lnk" onClick={() => tk.openPanel(hid)}>เปิดใบเสนอราคาร่วม</button></span>;
         } else if (isNow && !ro) {
           note = <button type="button" className="lnk" data-qa={d.id + ':' + p + ':add'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)}>บันทึกวันที่และโน้ต</button>;
         }
@@ -1635,7 +1672,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p);
         if (isMoney && st !== 'off') {
           const fig = stageFig(S, d, p);
-          const slot = !fig && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
+          const slot = !fig && !hid && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
           money = fig ? <StageAmount fig={fig} ver={qv ? qtFigWords(qv, fig.doc.id) : null} /> : slot ? (
             <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={p === QUOTE_STAGE ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${p}`}>
               แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}
@@ -1845,6 +1882,8 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
         return <b>ได้งานแล้ว · รับชำระ {ps.paid.length} จาก {ps.pays.length} งวด</b>;
       case 'nopay':
         return <b>ได้งานแล้ว</b>;
+      case 'joint':
+        return <b>ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม</b>;
       case 'done':
         return <b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b>;
       default:
@@ -1860,6 +1899,8 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
       return <><b>ได้งานแล้ว · รับชำระ {ps.paid.length} จาก {ps.pays.length} งวด</b> แนบเอกสาร {ps.left.join(', ')} แล้วปุ่มปิดงานจะขึ้น</>;
     case 'nopay':
       return <><b>ได้งานแล้ว</b> ตารางนี้ไม่มีขั้นชำระเงิน (PAY) กดปิดงานเมื่องานจบ</>;
+    case 'joint':
+      return <><b>ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม</b> ปิดได้เมื่อผู้จ่ายชำระครบ หรือปิดทั้งกลุ่มที่ใบเสนอราคาร่วม</>;
     case 'done':
       return <><b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b> กดปิดงานเพื่อย้ายไปแท็บปิดงาน</>;
     default:
@@ -2118,6 +2159,7 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
   const hasDoc = (stageDocs(S, d).by[stage] || []).some((x) => x.amount != null);
   // a quotation there already: a revised one (compared with it, which stays as "ฉบับเดิม")
   const qh = stage === QUOTE_STAGE ? qtView(S, d).head : null;
+  const jm = jointRole(S, d) === 'member';
   return (
     <>
       <td className="sl-knote" colSpan={3} ref={(el) => void (ed.box.current = el?.closest('tr') || null)}>
@@ -2150,7 +2192,7 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
       <td className="k-m2" colSpan={2}>
         <span className="sl-m2">
           <span className="k2-fc">
-            {stage === QUOTE_STAGE && !tk.ro && (qh ? (
+            {stage === QUOTE_STAGE && !tk.ro && !jm && (qh ? (
               <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage, 'quotation', { target: 'forecast', revise: qh.doc.id }); }}>แนบฉบับแก้ไข</button>
             ) : !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสนอราคา</button>)}
           </span>
@@ -2439,6 +2481,7 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
             {cv.state === 'no' ? (ro ? 'ผลเป็น NO' : 'ผลเป็น NO กดปิดงานเพื่อย้ายไปแท็บปิดงาน')
               : cv.state === 'plan' || cv.state === 'pays' ? `ได้งานแล้ว · รับ ${ps.paid.length}/${ps.pays.length} งวด${P ? 'ตามแผน' : ''} · ${cv.hint}`
               : cv.state === 'done' || cv.state === 'nopay' ? (ro ? 'ได้งานและรับชำระครบ' : 'ได้งานและรับชำระครบ ปิดงานได้')
+              : cv.state === 'joint' ? 'ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม'
               : 'ผล YES / NO ยังไม่ใช่การปิดงาน'}
           </p>
         </div>
@@ -2498,18 +2541,23 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
   const extra = date && date.basis !== 'contact' && date.basis !== 'closed' ? date : null;
   let fc = 0, ac = 0;
   deals.forEach((d) => {
+    if (jointRole(S, d) === 'member') return; // its joint quotation's money counts once, on the header
     const m = dealMoney(S, d);
     fc += m.forecast || 0;
     ac += m.actual || 0;
   });
+  // a joint quotation is one group (its band, then its closed companies), at the top of its หมวด's rows
+  const jr = jointRows(S, deals);
+  const flat = jr.secs.flatMap((x) => jr.rows.get(x) || []);
+  const nCust = customersOf(S, deals).length;
   const which = date ? `ตามตัวกรอง · ${dateWords(date.f, date.r).field} ${dateWords(date.f, date.r).op} ${rangeTh(date.r)}` : 'ตามตัวกรอง';
   return (
     <>
       <p className="sl-closed-sum">
-        <span>ปิดแล้ว <b>{fmtN(deals.length)}</b> งาน{on ? ` จาก ${fmtN(total)} (${which})` : ''}{e.can('view.money') && <> · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></>}</span>
+        <span>ปิดแล้ว <b>{fmtN(nCust)}</b> งาน{on ? ` จาก ${fmtN(total)} (${which})` : ''}{e.can('view.money') && <> · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></>}</span>
         <span className="t-meta">งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี</span>
       </p>
-      <Toolbar S={S} F={F} yearDeals={facets} today={today} job="closed" shown={deals.length} total={total} />
+      <Toolbar S={S} F={F} yearDeals={facets} today={today} job="closed" shown={nCust} total={total} />
       <div className="card sl-list">
         {!deals.length ? (
           <div className="sl-list-empty">
@@ -2526,7 +2574,9 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
               <tr><th>ลูกค้า</th><th className="c-opt">หมวด</th><th className="c-opt">ผู้รับผิดชอบ</th><th>ผล</th><th className="r">Forecast</th><th className="r c-opt">Actual</th><th className="c-opt">ปิดเมื่อ</th><th><span className="sr-only">เปิดงานอีกครั้ง</span></th></tr>
             </thead>
             <tbody>
-              {deals.map((d) => {
+              {flat.map((row) => {
+                if (row.k === 'band') return <JointClosedRows key={'jq' + row.g.head.id} b={row} onReopen={e.canDeal('edit.deal', row.g.head) ? () => e.reopenJoint(row.g.head.id) : undefined} />;
+                const d = row.d;
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (
                   <tr key={d.id}>

@@ -31,6 +31,9 @@ import { cashYear, setMoneyHidden, type CashLine } from './sales';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
+// joint quotations (package quotes, item 7)
+import { QUOTE_STAGE, jointOf, jointRole, type JointGroup } from './sales';
+import { isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
 import {
   QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
@@ -1475,8 +1478,9 @@ export class GccEngine {
     const S = this.sales.cfg.sections;
     return S.includes('อื่นๆ') ? 'อื่นๆ' : S[0] || '';
   }
-  /** New deal; `gid` links it to a company whose contact details fill in what is not given. */
-  addDeal(p: Partial<Deal>): Deal {
+  /** New deal; `gid` links it to a company whose contact details fill in what is not given. `why`: the
+   *  history entry (a joint quotation's header says what it is). */
+  addDeal(p: Partial<Deal>, why = 'เพิ่มลูกค้า'): Deal {
     const c = p.gid != null ? this.company(p.gid) : undefined;
     const gid = c && !isLocalId(c.id) ? c.id : null; // TGO-sync companies exist on this device only
     const cc = c ? this.custom[c.id] : undefined;
@@ -1493,7 +1497,7 @@ export class GccEngine {
     // an account that may edit only its own deals adds deals of its own (else the team would refuse it)
     if (this.myCaps()?.['edit.deal'] === 'own') d.resp = this.me();
     this.putDeal(d);
-    this.salesLog(d, 'เพิ่มลูกค้า', d.section);
+    this.salesLog(d, why, d.section);
     this.saveSales();
     return d;
   }
@@ -1513,7 +1517,8 @@ export class GccEngine {
       const c = this.company(id);
       if (!c || seen.has(c.id)) return;
       seen.add(c.id);
-      if (this.dealsOf(c.id).some((d) => d.year === year)) {
+      // a joint quotation's header is the payer's row for that quotation, not the company's own row of the year
+      if (this.dealsOf(c.id).some((d) => d.year === year && jointRole(this.sales, d) !== 'header')) {
         skipped++;
         return;
       }
@@ -1607,9 +1612,20 @@ export class GccEngine {
     this.dropDealRecords(id);
     this.salesLog(d, why, d.section);
   }
-  /** A deleted deal's stage notes, documents (and their files), payment plan and contact records go with it. */
+  /** A deleted deal's stage notes, documents (and their files), payment plan and contact records go with it;
+   *  a joint quotation's header takes its mark and memberships along, a member its membership. */
   private dropDealRecords(id: string) {
     const S = this.sales;
+    if (S.jqt?.[id]) {
+      delete S.jqt[id];
+      this.op(keyOf.jqt(id));
+    }
+    Object.keys(S.jqm || {}).forEach((k) => {
+      const i = k.indexOf('/');
+      if (k.slice(0, i) !== id && k.slice(i + 1) !== id) return;
+      delete S.jqm![k];
+      this.op('jqm/' + k);
+    });
     const bags = { steps: 'dstep/', pays: 'dpay/', acts: 'dact/' } as const;
     (Object.keys(bags) as (keyof typeof bags)[]).forEach((bag) =>
       Object.keys(S[bag] || {}).forEach((k) => {
@@ -1879,6 +1895,214 @@ export class GccEngine {
       if (deal) this.salesLog(deal, 'ลบการติดต่อ', [ACT_TH[a.type], isoTh(a.d), a.note.slice(0, 80)].filter(Boolean).join(' · '));
     });
     delete S.acts![k];
+    this.saveSales();
+  }
+
+  // ---- joint quotations (package quotes, item 7): the header is an ordinary deal (the payer's row) marked by
+  // jqt/<hid>; each member company keeps its own row, joined by jqm/<hid>/<dealId> (lib/sales.ts jointOf)
+
+  /** May this account make or change joint quotations ("สร้างใบเสนอราคาร่วม")? */
+  canJoint() {
+    return this.can('edit.jqt');
+  }
+  /**
+   * "สร้างใบเสนอราคาร่วม" (and, with `p.from`, "รวมเป็นใบเสนอราคาร่วม"): the header, the payer's row of the year
+   * (its client the payer; its documents and plan are the quotation's money); its mark; the member rows
+   * (reused, or new: lib/joint rowFate) with one membership each; then the quotation as the header's
+   * Forecast: attached from the file, or moved there with every version from the deal it was attached to
+   * (same document ids, so its Drive file, this browser's copy and its check stay, and no two live records
+   * ever share a file), or, with neither, the total as the header's typed Forecast. Each member's empty
+   * QUOTATION stage is noted "ใบเสนอราคาร่วม QT-…". Returns the header's id, and why the file could not be
+   * attached (the joint quotation stands; the file can be attached from its card).
+   */
+  async createJoint(p: JointNew): Promise<{ hid: string; attachErr: string }> {
+    if (!this.can('edit.jqt')) throw new Error('บัญชีของคุณสร้างใบเสนอราคาร่วมไม่ได้');
+    if ((p.file || p.from) && !this.can('docs.up')) throw new Error('บัญชีของคุณแนบเอกสารไม่ได้');
+    const payer = p.payer.trim().slice(0, 200);
+    if (!payer) throw new Error('ใส่ชื่อผู้จ่าย');
+    if (!p.members.length) throw new Error('เพิ่มบริษัทอย่างน้อย 1 บริษัท');
+    if (p.file) {
+      if (p.file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
+      if (!docMime({ name: p.file.name || '', type: p.file.type || '' })) throw new Error('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
+    }
+    const S = this.sales, from = p.from ? S.deals[p.from] : undefined;
+    if (p.from && (!from || jointRole(S, from) !== 'plain')) throw new Error('ไม่พบรายการนี้แล้ว หรืออยู่ในใบเสนอราคาร่วมอื่นแล้ว');
+    const title = (p.title.trim() || payer).slice(0, 200);
+    let hid = '';
+    this.batchOps(() => {
+      const h = this.addDeal({ client: payer, gid: p.payerGid, year: p.year, section: p.section, resp: p.resp, service: p.service.slice() }, 'สร้างใบเสนอราคาร่วม');
+      hid = h.id;
+      const jq = { title, at: new Date().toISOString(), by: this.me() };
+      (S.jqt || (S.jqt = {}))[hid] = jq;
+      this.op(keyOf.jqt(hid), { ...jq });
+      let no = p.docNo;
+      if (from) no = this.moveQt(from.id, hid) || no;
+      else if (!p.file && p.total != null) this.updateDeal(hid, { forecast: p.total });
+      this.joinMembers(S.deals[hid], p.members, no, p.docDate, title);
+    });
+    let attachErr = '';
+    if (p.file)
+      try {
+        await this.attachDoc(hid, p.file, { kind: 'quotation', amount: p.total, target: 'forecast', basis: p.basis || 'manual', detected: p.detected ?? p.total, docNo: p.docNo, docDate: p.docDate, stage: QUOTE_STAGE });
+      } catch (err) {
+        attachErr = (err as Error)?.message || String(err);
+      }
+    this.saveSales();
+    return { hid, attachErr };
+  }
+  /** Members join header `h` (a pick's row, or a new row when it has a quotation or money of its own, or
+   *  is not in the table): a membership each, in the order picked; an empty QUOTATION stage noted. */
+  private joinMembers(h: Deal, picks: JointPick[], docNo: string, docDate: string, title: string) {
+    const S = this.sales, today = todayISO(), t0 = Date.now(), by = this.me();
+    const J = S.jqm || (S.jqm = {});
+    picks.forEach((x, i) => {
+      let d = x.deal ? S.deals[x.deal] : undefined;
+      if (x.deal && (!d || d.id === h.id || rowFate(S, d, h.id) === 'taken')) return; // gone, or in another joint quotation
+      if (!d || rowFate(S, d, h.id) === 'new') {
+        // a new row of the year: the registry company's details, or those of the company's own row
+        const like = d || (x.like ? S.deals[x.like] : undefined);
+        const gid = x.gid != null ? x.gid : like?.gid ?? null;
+        d = this.addDeal({
+          year: h.year, section: h.section,
+          ...(gid != null ? { gid } : { client: (x.name || like?.client || '').trim() }),
+          ...(like ? { contactName: like.contactName, phone: like.phone, email: like.email, resp: like.resp } : {}),
+        });
+      }
+      const m = { share: x.share, pct: x.pct, at: new Date(t0 + i).toISOString(), by };
+      J[`${h.id}/${d.id}`] = m;
+      this.op(keyOf.jqm(h.id, d.id), { ...m });
+      // QUOTATION is done for every member by the joint quotation (a note of the row's own stays)
+      const st = stepOf(S, d.id, QUOTE_STAGE);
+      if (S.cfg.stages.includes(QUOTE_STAGE) && !st.d && !st.n.trim()) this.setStep(d.id, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
+      this.salesLog(d, 'เข้าร่วมใบเสนอราคาร่วม', [title, docNo].filter(Boolean).join(' · '));
+    });
+  }
+  /**
+   * "รวมเป็นใบเสนอราคาร่วม": a deal's quotation (every version) moves to the header under the same document
+   * ids: the header's record is written whole and the deal's deleted without its file (a move, never a copy:
+   * a later delete of either would trash the other's file). The header's QUOTATION is the quotation's note,
+   * following the version in use; the deal's own QUOTATION note, when the quotation wrote it, now names the
+   * joint quotation. Returns the quotation's number.
+   */
+  private moveQt(fromId: string, toId: string): string {
+    const S = this.sales, from = S.deals[fromId], vs = qtVersions(S, { id: fromId });
+    if (!from || !vs.length) return '';
+    const cur = dealMoney(S, from).fcDoc?.id || vs[vs.length - 1].id;
+    const st = stepOf(S, fromId, QUOTE_STAGE), today = todayISO();
+    const wrote = vs.some((x) => !!x.auto && x.auto.stage === QUOTE_STAGE && this.autoStillThere(x));
+    let head: DealDoc | undefined;
+    vs.forEach((x) => {
+      const { auto: _a, ...vals } = x;
+      const n: DealDoc = { ...vals, deal: toId };
+      if (x.id === cur) {
+        n.auto = { stage: QUOTE_STAGE, n: this.autoNote(n), d: st.d || (x.docDate && x.docDate <= today ? x.docDate : today) };
+        head = n;
+      }
+      S.docs[`${toId}/${x.id}`] = n;
+      this.op(keyOf.ddoc(toId, x.id), { ...n });
+      delete S.docs[`${fromId}/${x.id}`];
+      this.op(keyOf.ddoc(fromId, x.id));
+    });
+    if (head?.auto) this.setStep(toId, QUOTE_STAGE, { d: head.auto.d!, n: head.auto.n }, true, true);
+    if (wrote) this.setStep(fromId, QUOTE_STAGE, { d: st.d, n: jointNote(head?.docNo || '') }, true, true);
+    this.salesLog(from, 'รวมเป็นใบเสนอราคาร่วม', `${head?.docNo || 'ใบเสนอราคา'} ย้ายไปใบเสนอราคาร่วม`);
+    return head?.docNo || '';
+  }
+  /**
+   * "แก้ไขรายชื่อ": the joint quotation's companies become `picks` (in that order): those no longer listed
+   * leave (their rows stay, the QUOTATION note it wrote goes), new ones join (lib/joint rowFate), and parts
+   * typed differently are written (field by field, so a teammate's edit of another member never collides).
+   */
+  setJointMembers(hid: string, picks: JointPick[]) {
+    if (!this.can('edit.jqt')) return this.deny();
+    const S = this.sales, g = jointOf(S, { id: hid });
+    if (!g) return;
+    const keep = new Set(picks.map((x) => x.deal).filter(Boolean));
+    const no = jointNo(S, g), day = stepOf(S, hid, QUOTE_STAGE).d;
+    this.batchOps(() => {
+      g.members.forEach((x) => !keep.has(x.deal.id) && this.leaveJoint(g, x.deal));
+      const fresh: JointPick[] = [];
+      picks.forEach((x) => {
+        const k = `${hid}/${x.deal}`, cur = x.deal ? S.jqm?.[k] : undefined;
+        if (!cur) return void fresh.push(x);
+        if (cur.share === x.share && cur.pct === x.pct) return;
+        S.jqm![k] = { ...cur, share: x.share, pct: x.pct, at: cur.at, by: this.me() };
+        this.op('jqm/' + k, { ...S.jqm![k] }, { f: ['share', 'pct', 'by'] });
+      });
+      this.joinMembers(g.head, fresh, no, day, g.qt.title);
+      this.salesLog(g.head, 'แก้ไขใบเสนอราคาร่วม', `${picks.length} บริษัท`);
+    });
+    this.saveSales();
+  }
+  /** A member leaves (its row stays): its membership goes, and the QUOTATION note the joint quotation wrote. */
+  private leaveJoint(g: JointGroup, d: Deal) {
+    const S = this.sales, k = `${g.head.id}/${d.id}`;
+    if (S.jqm?.[k]) {
+      delete S.jqm[k];
+      this.op('jqm/' + k);
+    }
+    const st = stepOf(S, d.id, QUOTE_STAGE);
+    if (isJointNote(st.n)) this.setStep(d.id, QUOTE_STAGE, { d: '', n: '' }, true, true);
+    this.salesLog(d, 'ออกจากใบเสนอราคาร่วม', g.qt.title);
+  }
+  /** The joint quotation's name (jqt.title), field by field. */
+  setJointTitle(hid: string, title: string) {
+    const S = this.sales, cur = S.jqt?.[hid], h = S.deals[hid];
+    const t = title.trim().slice(0, 200);
+    if (!cur || !h || !t || t === cur.title) return;
+    if (!this.can('edit.jqt')) return this.deny();
+    S.jqt![hid] = { ...cur, title: t, by: this.me() };
+    this.batchOps(() => {
+      this.op(keyOf.jqt(hid), { ...S.jqt![hid] }, { f: ['title', 'by'] });
+      this.salesLog(h, 'แก้ไข', 'ชื่องาน');
+    });
+    this.saveSales();
+  }
+  /** "ปิดงานทั้ง N บริษัท": the header and every member still open move to ปิดงาน in one batch (a row this
+   *  account may not edit stays). Returns how many closed. */
+  closeJoint(hid: string): number {
+    const g = jointOf(this.sales, { id: hid });
+    if (!g) return 0;
+    let n = 0;
+    this.batchOps(() =>
+      [g.head, ...g.members.map((x) => x.deal)].forEach((d) => {
+        if (d.jobStatus !== 'open' || !this.canDeal('edit.deal', d)) return;
+        this.updateDeal(d.id, { jobStatus: 'closed' });
+        if (this.sales.deals[d.id]?.jobStatus === 'closed') n++;
+      }),
+    );
+    return n;
+  }
+  /** Back from ปิดงาน: the header and the members closed with it (on its day; one closed alone earlier, such
+   *  as a company that withdrew, stays closed). */
+  reopenJoint(hid: string): number {
+    const g = jointOf(this.sales, { id: hid });
+    if (!g) return 0;
+    const day = g.head.closedDate;
+    const back = [g.head, ...g.members.map((x) => x.deal).filter((d) => d.jobStatus === 'closed' && (!day || d.closedDate === day))];
+    let n = 0;
+    this.batchOps(() =>
+      back.forEach((d) => {
+        if (d.jobStatus !== 'closed' || !this.canDeal('edit.deal', d)) return;
+        this.updateDeal(d.id, { jobStatus: 'open' });
+        n++;
+      }),
+    );
+    return n;
+  }
+  /** "ยกเลิกใบเสนอราคาร่วม": the header goes with its documents (the quotation's file to the team Drive's
+   *  trash), plan and memberships; the member rows stay, without the QUOTATION note it wrote. */
+  cancelJoint(hid: string) {
+    if (!this.can('del.rec')) return this.deny();
+    const S = this.sales, g = jointOf(S, { id: hid });
+    if (!g) return;
+    this.batchOps(() => {
+      g.members.forEach((x) => {
+        const st = stepOf(S, x.deal.id, QUOTE_STAGE);
+        if (isJointNote(st.n)) this.setStep(x.deal.id, QUOTE_STAGE, { d: '', n: '' }, true, true);
+      });
+      this.deleteDealNow(g.head, 'ยกเลิกใบเสนอราคาร่วม');
+    });
     this.saveSales();
   }
 
@@ -2447,9 +2671,13 @@ export class GccEngine {
     const S = this.sales, C = S.cfg, today = todayISO();
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
-      .concat(['FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ']);
+      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ']);
     const lines = deals.map((d, i) => {
-      const m = dealMoney(S, d), st = dealStatus(S, d);
+      const st = dealStatus(S, d), jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
+      // a joint quotation counts once: its header carries the money, a member's cells stay empty (its share said)
+      const m = jr === 'member' ? { forecast: null, actual: null, fcConfirmed: false, acConfirmed: false } : dealMoney(S, d);
+      const sh = jr === 'member' ? shareOf(S, d) : null;
+      const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
       // ticks and notes no longer in the lists are kept (removing a list item keeps them on the deals)
       const otherSteps = Object.entries(S.steps)
@@ -2463,7 +2691,7 @@ export class GccEngine {
           const x = stepOf(S, d.id, p);
           return [csvCell(x.d), csvCell(x.n)];
         }), [csvCell(otherSteps.join(' | '))])
-        .concat([m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
+        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
         .join(',');
     });
     return [head.map(csvCell).join(','), ...lines].join('\r\n');
@@ -2862,6 +3090,8 @@ export class GccEngine {
       : type === 'contact' ? this.contacts[rest as unknown as number]
       : type === 'task' ? this.crm.tasks.find((t) => t.id === rest)
       : type === 'person' ? this.people[rest]
+      : type === 'jqt' ? S.jqt?.[rest]
+      : type === 'jqm' ? S.jqm?.[rest]
       : undefined;
     return r && { ...(r as Record<string, unknown>) };
   }
@@ -3013,7 +3243,8 @@ export class GccEngine {
         const [type, id] = o.k.split('/');
         const v = o.v as Partial<DealLog> | undefined;
         if (
-          (del(o) && (type === 'dstep' || type === 'ddoc' || type === 'dpay' || type === 'dact') && deals.has(id)) ||
+          (del(o) && (type === 'dstep' || type === 'ddoc' || type === 'dpay' || type === 'dact' || type === 'jqt') && deals.has(id)) ||
+          (del(o) && type === 'jqm' && (deals.has(id) || deals.has(o.k.split('/')[2]))) ||
           (type === 'dundo' && deals.has(id)) ||
           (type === 'dlog' && !!v && deals.has(v.deal || '') && (v.action === 'ลบลูกค้า' || v.action === 'ยกเลิกการนำเข้า')) ||
           (del(o) && type === 'log' && id.startsWith('p-') && people.has(id.slice(2)))
