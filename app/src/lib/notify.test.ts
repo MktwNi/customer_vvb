@@ -121,6 +121,11 @@ describe('what the script and the team say', () => {
     expect(parseNotifyStatus({ notify: { on: 1, since: '2026-10-02' }, quotaLeft: 5 })).toMatchObject({ on: true, since: '2026-10-02', left: 5 });
   });
 
+  it('parseNotifyStatus: before the trigger first runs (last: {}) there is no last run, not a failed one', () => {
+    expect(parseNotifyStatus({ on: 1, since: '2026-10-15', last: {}, quotaLeft: 99 }).last).toBeNull();
+    expect(parseNotifyStatus({ on: 1, last: { at: '2026-10-15T11:53:14Z', ok: 0, err: 'x' } }).last).toMatchObject({ ok: false, err: 'x' });
+  });
+
   it('a pulled qchk/ row and scfg/notify.cfg land in the sales state (and are never uploaded from here); me.notify in the session', () => {
     const s: SharedState = { crm: { stages: {}, notes: {}, tasks: [], watch: [], owners: {}, team: [], log: {} }, contacts: {}, dec: {}, sales: emptySales(), custom: {} };
     const fx = noEffects();

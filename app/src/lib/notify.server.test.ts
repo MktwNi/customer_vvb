@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasMail, type GasSim } from '../../../team-sync/sim.mjs';
 import { applyRow, noEffects, type SharedState, type SyncRow } from './teamSync';
 import { DEFAULT_STAGES, emptySales, lineView, payDue, planLines, type Deal } from './sales';
+import { parseNotifyStatus } from './notify';
 import type { Crm } from './types';
 
 type Caps = Record<string, 1 | 'own'>;
@@ -302,6 +303,10 @@ describe('notify_test / notify_status', () => {
   it('the status card: on with its trigger, the quota left, mails sent today, the last run; admins only', () => {
     const t = crew();
     expect(call(t.s, t.ek, 'notify_status')).toMatchObject({ ok: false, error: 'forbidden' });
+    // before the trigger's first run: the card says it works (no failed run is made up from last: {})
+    const r0 = call(t.s, t.lead, 'notify_status');
+    expect(r0).toMatchObject({ ok: true, on: 1, last: {} });
+    expect(parseNotifyStatus(r0)).toMatchObject({ on: true, last: null });
     call(t.s, t.lead, 'notify_test');
     tick(t.s);
     const r = call(t.s, t.lead, 'notify_status');

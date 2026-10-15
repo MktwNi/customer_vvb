@@ -170,7 +170,9 @@ export interface NotifyStatus {
 }
 export function parseNotifyStatus(r: Record<string, unknown>): NotifyStatus {
   const f = parseNotifyFlag(r.notify ?? (typeof r.on !== 'object' ? { on: r.on ?? 0, since: r.since } : null)) || { on: false, since: '' };
-  const l = (r.last && typeof r.last === 'object' ? r.last : null) as Record<string, unknown> | null;
+  // the script sends last: {} until the trigger's first run (up to 10 minutes after setupNotify): no run yet,
+  // not a failed one
+  const l = (r.last && typeof r.last === 'object' && (r.last as Record<string, unknown>).at ? r.last : null) as Record<string, unknown> | null;
   const q = (r.quota && typeof r.quota === 'object' ? r.quota : {}) as Record<string, unknown>;
   const users: Record<string, MyNotify> = {};
   if (r.users && typeof r.users === 'object')
