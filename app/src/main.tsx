@@ -8,6 +8,8 @@ import './index.css';
 import './filters.css';
 // money by year: the Cashflow tab, the table's lens, the Dashboard's การรับเงิน and quarter card
 import './cashflow.css';
+// the quotation card, its versions and the revision dialog (components/QtCard, DocAttach)
+import './quotes.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

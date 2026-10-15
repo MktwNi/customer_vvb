@@ -1,0 +1,113 @@
+/* ---------- the quotation and its versions (item 3: components/QtCard, DocAttach's revision, the table's
+   QUOTATION row, the phone editor). New parts only, on the app's tokens and the document card (.sl-docc). */
+
+/* the quotation card: its actions always in view, its versions under it */
+.sl-docc.qt{display:flex;flex-direction:column}
+.sl-docc.qt .sl-docc-r{align-items:flex-start;padding:12px 14px 10px 12px;gap:12px}
+.qt-h{flex:1;min-width:0;display:flex;gap:12px;align-items:flex-start}
+.qt-h .sl-docc-t{gap:3px}
+.qt-h .sl-docc-t small{white-space:normal;line-height:1.45}
+.qt-h .sl-docc-a{padding-top:1px}
+.qt-tl{display:flex;align-items:center;gap:0 8px;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink);line-height:1.45}
+.qt-tl .qt-v{color:var(--ink-2)}
+.qt-acts{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--divider)}
+.qt-acts .lnk{font-size:var(--fs-sec)}
+.qt-ro,.qt-busy{font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.qt-acts .qt-mw{margin-left:auto;position:relative}
+.qt-mw{display:inline-block}
+.qt-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;width:min(280px,80vw)}
+.qt-mi{display:flex;flex-direction:column}
+.qt-menu hr{border:0;border-top:1px solid var(--divider);margin:4px 6px}
+.qt-vers{border-top:1px solid var(--divider);padding:8px 14px 10px;display:flex;flex-direction:column}
+.qt-vers-h{font-size:var(--fs-meta);color:var(--muted);line-height:1.4;padding:0 0 4px}
+.qt-ver{display:grid;grid-template-columns:168px minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;padding:5px 0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.qt-ver+.qt-ver{border-top:1px dashed var(--divider)}
+.qt-ver .qt-vn{color:var(--ink)}
+.qt-ver .qt-vw{color:var(--muted)}
+.qt-ver .lnk{font-size:var(--fs-sec)}
+.qt-ver .r{text-align:right}
+
+/* "แก้ไขข้อมูล": the form in the card */
+.qt-form{border-top:1px solid var(--divider);padding:12px 14px 14px;display:flex;flex-direction:column;gap:12px;background:#FBFCFF;border-radius:0 0 var(--r-inner) var(--r-inner)}
+.qt-form-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.qt-form-h b{font-size:var(--fs-body);font-weight:500}
+.qt-form-h .lnk{font-size:var(--fs-sec)}
+.qt-form-h .lnk:disabled{color:var(--muted);cursor:default}
+.qt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.qt-lab{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:var(--fs-sec);color:var(--ink-2)}
+.qt-lab .fld{width:100%;min-width:0}
+.qt-amt{font-weight:500}
+.qt-basis{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:var(--r-inner);padding:8px 12px;background:#fff}
+.qt-basis-h{font-size:var(--fs-sec);color:var(--ink-2);padding-bottom:2px}
+.qt-basis label{display:flex;gap:10px;align-items:center;font-size:var(--fs-body);cursor:pointer;padding:3px 0;color:var(--ink)}
+.qt-basis label span{flex:1}
+.qt-basis label b{font-weight:400;font-variant-numeric:tabular-nums}
+.qt-basis input{accent-color:var(--brand);margin:0}
+.qt-form-n{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.qt-form-f{display:flex;align-items:center;justify-content:flex-end;gap:12px}
+
+/* "แนบฉบับแก้ไข": the old and the new version side by side, and what attaching does */
+.qt-cmp{border:1px solid var(--line);border-radius:var(--r-inner);padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.qt-cmp-h{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
+.qt-cmp table{width:100%;border-collapse:collapse;font-size:var(--fs-body);font-variant-numeric:tabular-nums}
+.qt-cmp thead th{font-weight:400;font-size:var(--fs-meta);color:var(--muted);text-align:right;padding:0 0 6px 8px}
+.qt-cmp tbody th{font-weight:400;font-size:var(--fs-sec);color:var(--ink-2);text-align:left;padding:6px 8px 6px 0;border-top:1px solid var(--divider)}
+.qt-cmp td{padding:6px 0 6px 8px;border-top:1px solid var(--divider);text-align:right;color:var(--ink)}
+.qt-cmp thead td{border-top:0;padding:0}
+.qt-cmp td.old{color:var(--ink-2)}
+.qt-cmp tr.sum td{font-weight:500}
+.qt-cmp tr.sum td.old{font-weight:400}
+.qt-diff{font-size:var(--fs-sec);color:var(--ink-2)}
+.qt-next{border-radius:var(--r-inner);padding:10px 14px;background:var(--tint);color:var(--ink-2);font-size:var(--fs-sec);line-height:1.6}
+.qt-next b{color:var(--ink);font-weight:500}
+
+/* "เปลี่ยนไฟล์" */
+.qt-swap{display:flex;flex-direction:column;gap:12px}
+.qt-swap-p{margin:0;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
+.qt-swap-r{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;font-size:var(--fs-body);color:var(--ink)}
+.qt-swap-l{font-size:var(--fs-sec);color:var(--ink-2)}
+.qt-swap-v{min-width:0;overflow-wrap:anywhere}
+.qt-swap-f{display:flex;gap:10px;align-items:center;min-width:0}
+.qt-swap-f .btn{flex:none}
+.qt-swap-f .t-sec{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qt-swap-w{gap:4px}
+.qt-swap-w span{color:var(--ink);font-size:var(--fs-sec);line-height:1.6}
+.qt-swap-w .lnk{font-size:var(--fs-sec)}
+
+/* the table's QUOTATION row: its note, then "แนบฉบับแก้ไข" */
+.qt-kn{display:flex;align-items:center;gap:10px;min-width:0}
+.qt-kn .sl-clamp{min-width:0}
+.qt-kn .lnk{font-size:var(--fs-sec);flex:none}
+
+/* the phone card's QUOTATION editor */
+.sl-mk-r .sl-mk-e{font-size:var(--fs-sec)}
+.qt-mc{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 12px;background:#fff;width:100%;box-sizing:border-box}
+.qt-mc .sl-thumb{width:40px;height:50px}
+.qt-mc-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:var(--fs-body);color:var(--ink);line-height:1.45}
+.qt-mc-m{font-size:var(--fs-sec);color:var(--ink-2)}
+.qt-mc-m b{color:var(--ink);font-weight:500}
+.qt-mc-g{font-size:var(--fs-meta);color:var(--muted)}
+.qt-mc-g.ok{color:var(--ok)}
+.qt-m2{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+.qt-mv{display:flex;flex-direction:column;width:100%;font-size:var(--fs-sec);color:var(--ink-2);padding:2px;line-height:1.5}
+.qt-mv-n{color:var(--ink)}
+.qt-mv-r{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.qt-mv .lnk{font-size:var(--fs-sec);flex:none}
+.sl-mk-ed .qt-form{border:1px solid var(--line);border-radius:var(--r-inner);background:#fff}
+.qt-mdel{align-self:flex-start;margin-top:2px}
+
+/* narrow panels (phones): the versions and the form stack */
+@media (max-width:640px){
+  .qt-ver{grid-template-columns:minmax(0,1fr) auto}
+  .qt-ver .qt-vn{grid-column:1}
+  .qt-ver>span:nth-child(2){grid-column:1/-1;grid-row:2}
+  .qt-ver .r{grid-column:2;grid-row:1}
+  .qt-grid{grid-template-columns:minmax(0,1fr)}
+  .qt-h{flex-wrap:wrap;gap:6px 12px}
+  .qt-h .sl-docc-t{flex:1 1 180px}
+  .qt-h .sl-docc-a{align-items:flex-start;text-align:left}
+  .qt-acts{gap:8px 16px}
+  .qt-acts>.btn{flex:1 0 100%}
+  .qt-cmp thead th,.qt-cmp td{padding-left:6px}
+  .qt-swap-r{grid-template-columns:minmax(0,1fr)}
+}
