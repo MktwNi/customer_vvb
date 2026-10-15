@@ -12,6 +12,7 @@ import { toPerson } from './people';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
+import { applyUnitRow, unitRecords } from './contrib';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -295,6 +296,10 @@ export const keyOf = {
   /** a joint quotation's mark on its header deal, and one member company of it (lib/sales.ts jointOf) */
   jqt: (hid: string) => `jqt/${hid}`,
   jqm: (hid: string, dealId: string) => `jqm/${hid}/${dealId}`,
+  /** a unit, who is in which (by staffKey), a deal's revenue split (package dash, lib/contrib.ts) */
+  unit: (id: string) => `scfg/unit.${id}`,
+  unitm: (k: string) => `scfg/unitm.${k}`,
+  dshare: (id: string) => `dshare/${id}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -360,6 +365,8 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.entries(S.jqm || {}).forEach(([k, v]) => m.set('jqm/' + k, { ...v }));
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
+    // units, their members and the revenue splits (set up before connecting: uploaded like the lists)
+    unitRecords(S).forEach(([k, v]) => m.set(k, v));
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
@@ -542,7 +549,17 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.sales = true;
       break;
     }
+    case 'dshare':
+      // a deal's revenue split (package dash): older builds skip the prefix; without ดูค่าคอมมิชชั่น the
+      // script sends it as a deletion
+      if (applyUnitRow(s.sales, rest, del, row.v, true)) fx.sales = true;
+      break;
     case 'scfg':
+      // units and who is in which (package dash): older builds skip these names
+      if (/^unitm?\./.test(rest)) {
+        if (applyUnitRow(s.sales, rest, del, row.v)) fx.sales = true;
+        return;
+      }
       // the team's notification rules (an admin's, one record; older builds skip it)
       if (rest === 'notify.cfg') {
         if (del) delete s.sales.ncfg;
@@ -582,7 +599,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person|jqt|jqm)\//;
+const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|person|jqt|jqm)\/|scfg\/unit\.)/;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.

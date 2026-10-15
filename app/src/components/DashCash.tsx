@@ -71,14 +71,17 @@ export function CashStat({ lines, pay, r, ranged, when }: { lines: CashLine[]; p
 
 const PLOT = 200, ROOM = 44; // the plot's height, and the room over the tallest column for its labels
 
+/** The received money of each quarter by unit (package dash, with ดูค่าคอมมิชชั่น): the units with money in
+ *  the year, in their order, with their colour class (units.css), and each quarter's and the year's figures. */
+export interface QSplit { units: { id: string; n: string; cls: string }[]; q: Record<string, number>[]; year: Record<string, number> }
 /**
- * "เงินเข้ารายไตรมาส · ปี 2569" (totals only: the unit split comes with units and commission): the four
+ * "เงินเข้ารายไตรมาส · ปี 2569" (with `split`, for ดูค่าคอมมิชชั่น: received stacked by unit, a row per unit): the four
  * calendar quarters of the whole year, received as a solid column and what is still owed (late included,
  * "ค้างรับ") as the light outlined part over it; the received total over each, "ค้างรับ x" under it; this
  * quarter named "ตอนนี้", a quarter picked in ช่วงเวลา tinted. A table with every figure (late in red) and
  * the undated money with "ตั้งแผนชำระ".
  */
-export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: { Y: CashYear; year: string; now: number; pick: number; onCashTab?: () => void; onPlan: (dealId: string | null) => void; canPlan: boolean }) {
+export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan, split }: { Y: CashYear; year: string; now: number; pick: number; onCashTab?: () => void; onPlan: (dealId: string | null) => void; canPlan: boolean; split?: QSplit | null }) {
   const [tip, setTip] = useState<number | null>(null);
   const qs = Y.quarters, owedOf = (i: number) => qs[i].late + qs[i].wait;
   const { ticks, top } = moneyTicks(Math.max(0, ...qs.map(cashTotal)));
@@ -95,7 +98,7 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: 
       </div>
       <p className="sd-sub">รับแล้วนับตามวันที่รับเงิน · ค้างรับนับตามวันครบกำหนด</p>
       <div className="qk" aria-hidden="true">
-        <span><i className="ud got" />รับแล้ว</span>
+        {split ? split.units.map((u) => <span key={u.id || '-'}><i className={'ud ' + u.cls} />{u.n}</span>) : <span><i className="ud got" />รับแล้ว</span>}
         <span><i className="ud wait" />ค้างรับ (ตามวันครบกำหนด)</span>
       </div>
       <div className="qc">
@@ -116,7 +119,8 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: 
                   {tip === i && (q.got > 0 || owed > 0) && (
                     <div className="qc-tip" role="tooltip" style={{ bottom: px(q.got + owed) + ROOM, ...(i === 0 ? { left: 0, transform: 'none' } : i === 3 ? { left: 'auto', right: 0, transform: 'none' } : {}) }}>
                       <span className="qc-tip-t">ไตรมาส {i + 1} · {Q_TH[i]} {year}</span>
-                      <span><i className="ud got" />รับแล้ว<b>{m0(q.got)}</b></span>
+                      {split && split.units.filter((u) => split.q[i][u.id]).map((u) => <span key={u.id || '-'}><i className={'ud ' + u.cls} />{u.n}<b>{m0(split.q[i][u.id])}</b></span>)}
+                      <span className={split ? 'qc-tip-s' : undefined}>{!split && <i className="ud got" />}รับแล้ว<b>{m0(q.got)}</b></span>
                       {owed > 0 && <span><i className="ud wait" />ค้างรับ<b>{m0(owed)}</b></span>}
                       {q.late > 0 && <span className="bad">เลยกำหนด<b>{m0(q.late)}</b></span>}
                     </div>
@@ -126,7 +130,8 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: 
                     {owed > 0 && <small>ค้างรับ {m0(owed)}</small>}
                   </div>
                   <div className="qc-col" aria-hidden="true">
-                    {q.got > 0 && <i className="rcv" style={{ height: Math.max(3, px(q.got) - 2) }} />}
+                    {q.got > 0 && !split && <i className="rcv" style={{ height: Math.max(3, px(q.got) - 2) }} />}
+                    {split && split.units.map((u) => (split.q[i][u.id] > 0 ? <i key={u.id || '-'} className={u.cls} style={{ height: Math.max(2, px(split.q[i][u.id]) - 2) }} /> : null))}
                     {owed > 0 && <i className="wait" style={{ height: Math.max(3, px(owed) - 2) }} />}
                   </div>
                 </div>
@@ -140,9 +145,16 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: 
           ))}
         </div>
       </div>
-      <table className="qt qt-wide">
-        <thead><tr><th /><th>ไตรมาส 1</th><th>ไตรมาส 2</th><th>ไตรมาส 3</th><th>ไตรมาส 4</th><th>ทั้งปี</th></tr></thead>
+      <table className={'qt qt-wide' + (split ? ' split' : '')}>
+        <thead><tr><th>{split ? 'หน่วยงาน' : ''}</th><th>ไตรมาส 1</th><th>ไตรมาส 2</th><th>ไตรมาส 3</th><th>ไตรมาส 4</th><th>ทั้งปี</th></tr></thead>
         <tbody>
+          {split && split.units.map((u) => (
+            <tr key={u.id || '-'}>
+              <td><span className="un"><i className={'ud ' + u.cls} aria-hidden="true" /><span className="un-n" title={u.n}>{u.n}</span></span></td>
+              {qs.map((_, i) => <td key={i}>{z(split.q[i][u.id] || 0)}</td>)}
+              <td>{z(split.year[u.id] || 0)}</td>
+            </tr>
+          ))}
           <tr className="sum"><td>รับแล้ว</td>{qs.map((q, i) => <td key={i}>{z(q.got)}</td>)}<td>{m0(tot.got)}</td></tr>
           <tr className="wait">
             <td>ค้างรับ</td>

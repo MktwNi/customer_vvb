@@ -18,6 +18,8 @@ import { Roles } from './users/Roles';
 import { Requests } from './users/Requests';
 import { NA_FORM, NotifyAdmin } from './users/NotifyAdmin';
 import { EMAIL_RE, effRole, extrasOf, isOn as on, roleOf, roleRank } from './users/shared';
+import { unitOfName } from '../lib/contrib';
+import { UnitName } from '../components/UnitBits';
 
 /**
  * ผู้ใช้และสิทธิ์ (accounts that manage users, set.users): four sections — บัญชีผู้ใช้ (everyone's account,
@@ -238,7 +240,12 @@ export function Users() {
     }
     return null;
   };
-  const unitCell = <span className="rl-none">ยังไม่ระบุ</span>;
+  // หน่วยงาน (package dash): by the account's display name; the names of units are not private
+  const uctx = e.unitCtx();
+  const unitCell = (u: TeamUser) => {
+    const id = unitOfName(uctx, u.name);
+    return id ? <UnitName ctx={uctx} id={id} /> : <span className="rl-none">ยังไม่ระบุ</span>;
+  };
   const mailCell = (u: TeamUser) =>
     u.em ? (
       <>
@@ -333,7 +340,7 @@ export function Users() {
                   </div>
                   <div>
                     <span className="us-k">หน่วยงาน</span>
-                    {unitCell}
+                    {unitCell(u)}
                   </div>
                   <div>
                     <span className="us-k">สถานะ</span>
@@ -369,7 +376,7 @@ export function Users() {
                 <tr key={u.u} className={on(u) ? undefined : 'off'}>
                   <td><Who u={u} self={u.u === me} admin={u.role === 'admin'} /></td>
                   <td><RoleSelect u={u} roles={roles} guard={guardOf(u)} under={under(u)} busy={busyU === u.u} onPick={(r) => setRole(u, r)} /></td>
-                  <td>{unitCell}</td>
+                  <td>{unitCell(u)}</td>
                   <td>{mailCell(u)}</td>
                   <td><Status u={u} at={at} /></td>
                   <td className="us-ll">{u.ll ? <DateTime iso={u.ll} /> : <span className="us-muted">ยังไม่เคยเข้าสู่ระบบ</span>}</td>

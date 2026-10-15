@@ -16,6 +16,8 @@ import { addDays, daysBetween, localDay, pad, todayISO } from './format';
 import { ceOf, inRange, isDay, monthEnd, normDateF, resolveDate, type DateBasis, type DateF, type Range } from './dateRange';
 import type { NotifyCfg, QtCheck } from './notify';
 import type { CustomCo } from './types';
+// units and the revenue split (package dash): only plain helpers, which import nothing from here at run time
+import { dealUnits, unitCtx, type ShareRec, type UnitMember, type UnitRec } from './contrib';
 
 /** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
 export const DEFAULT_SECTIONS = ['Retention', 'EnWaste Expo', 'SET/mai', 'IEAT (กนอ).', 'Event Organizer', 'Partner', 'Event Exhibition', 'Course Training', 'สสว.', 'Depa', 'TGO', 'VB SAVE+', 'Social', 'อื่นๆ'];
@@ -173,6 +175,11 @@ export interface SalesState {
    *  `${hid}/${dealId}` → a member company (`jqm/<hid>/<dealId>`). Missing in what an older build stored. */
   jqt?: Record<string, JointQt>;
   jqm?: Record<string, JointMember>;
+  /** Units (`scfg/unit.<id>`), who is in which (`scfg/unitm.<staffKey>`) and the deals' revenue splits
+   *  (`dshare/<dealId>`): lib/contrib.ts. */
+  units?: Record<string, UnitRec>;
+  unitm?: Record<string, UnitMember>;
+  shares?: Record<string, ShareRec>;
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });
@@ -963,14 +970,16 @@ export function quickMatch(s: SalesState, d: Deal, q: QuickView, today: string) 
 export type { DateBasis, DateF } from './dateRange';
 /** A list filter: any of these values (OR inside the field); `not` = none of them. */
 export interface ListF { v: string[]; not?: true }
-export type ListKey = 'resp' | 'source' | 'service' | 'referral' | 'section';
-export const LIST_KEYS: ListKey[] = ['resp', 'source', 'service', 'referral', 'section'];
+export type ListKey = 'resp' | 'source' | 'service' | 'referral' | 'section' | 'unit';
+export const LIST_KEYS: ListKey[] = ['resp', 'source', 'service', 'referral', 'section', 'unit'];
 export type ResultF = '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY';
 /** The table's filters (AND across fields). `quick`: a quick view; `job`: open or closed jobs only;
  *  `date`: a date range on one of a deal's dates (null = the whole year). */
 export interface SalesFilter {
   year: string; q?: string; quick?: QuickView; job?: '' | 'open' | 'closed';
   resp?: ListF; source?: ListF; service?: ListF; referral?: ListF; section?: ListF;
+  /** หน่วยงาน (package dash): the units a deal's money goes to (lib/contrib.ts dealUnits; NONE = ยังไม่ระบุหน่วยงาน) */
+  unit?: ListF;
   result?: ResultF; date?: DateF | null;
   /** 'cash' (the table's lens "เงินเข้าตามปี", the Cashflow tab): a deal of another year counts in this one
    *  when one of its installments is received or due in it. Unset: the deal's own year only (as always). */
@@ -1018,13 +1027,14 @@ export function normSalesFilter(f: SalesFilterIn): SalesFilter {
 }
 
 /** A deal's values of a list field: ผู้รับผิดชอบ / แหล่งที่มา / หมวด one each, SOURCE / Services a list;
- *  empty is NONE. */
-export function listValues(d: Deal, k: ListKey): string[] {
+ *  empty is NONE. หน่วยงาน (`s` needed): the ids of the units its money goes to, NONE for ยังไม่ระบุหน่วยงาน. */
+export function listValues(d: Deal, k: ListKey, s?: SalesState): string[] {
+  if (k === 'unit') return s ? dealUnits(unitCtx(s), d).map((u) => u || NONE) : [NONE];
   if (k === 'source' || k === 'service') return d[k].length ? d[k] : [NONE];
   return [d[k] || NONE];
 }
-export function listMatch(d: Deal, k: ListKey, f: ListF): boolean {
-  const vs = listValues(d, k), hit = f.v.some((x) => vs.includes(x));
+export function listMatch(d: Deal, k: ListKey, f: ListF, s?: SalesState): boolean {
+  const vs = listValues(d, k, s), hit = f.v.some((x) => vs.includes(x));
   return f.not ? !hit : hit;
 }
 
@@ -1123,8 +1133,9 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
       if (d.year !== f.year && !(cash && linesOf(d).some((l) => l.date.startsWith(ce)))) return false;
       if (f.pay && !linesOf(d).some((l) => payMatch(l, f.pay!) && inRange(l.date, payR!))) return false;
       if (f.job && d.jobStatus !== f.job) return false;
-      // (a member is drawn under its joint quotation's band, in the header's หมวด: it is filtered there too)
-      if (!lists.every((k) => listMatch(k === 'section' ? payer(d) : d, k, f[k]!))) return false;
+      // (a member is drawn under its joint quotation's band, in the header's หมวด: it is filtered there too;
+      // under หน่วยงาน it is its own part of the header's money, by its own split)
+      if (!lists.every((k) => listMatch(k === 'section' ? payer(d) : d, k, f[k]!, s))) return false;
       if (f.result) {
         const r = dealResult(s, d);
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;

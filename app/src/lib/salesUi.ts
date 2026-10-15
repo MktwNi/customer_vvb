@@ -83,27 +83,31 @@ export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceY
 }
 
 const thCmp = (a: string, b: string) => a.localeCompare(b, 'th');
+/** What trackerFields reads besides the filters; `units`: the หน่วยงาน field's units (id, name, retired) when the
+ *  account sees the revenue split (package dash), else no such field. */
+export interface FieldsCtx { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean; units?: { id: string; n: string; off?: boolean }[] }
 /**
  * The tracker's filter fields with their choices and counts (filters spec §6.3). A count is how many rows
  * of the view pass every other filter and have that value (a deal counts once under each of its SOURCE
  * and Services). Choices come from all of the year's deals, not the rows left (a chosen value never drops
  * out of its own list), and always include the chosen ones. ผู้รับผิดชอบ: you first ("ฉัน"), then the
  * busiest; SOURCE / Services: the configured order; หมวด: the table's order; empty values last.
- * `dash`: the Dashboard's row (no ผลการขาย: it reports results).
+ * `dash`: the Dashboard's row (no ผลการขาย: it reports results). หน่วยงาน (with `units`): the units in their
+ * order, a deal under every unit its money goes to.
  */
-export function trackerFields(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean }): FField[] {
+export function trackerFields(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
   // six passes over the year's deals: the contact records indexed once for all of them
   return withActIndex(S, () => fieldsOf(S, F, ctx));
 }
-function fieldsOf(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean }): FField[] {
+function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
   const { yearDeals, job, me, today } = ctx;
   const counts = (k: ListKey) => {
     const m = new Map<string, number>();
     // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today)).forEach((d) => listValues(k === 'section' ? payerDeal(S, d) : d, k).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
+    customersOf(S, filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today)).forEach((d) => listValues(k === 'section' ? payerDeal(S, d) : d, k, S).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
     return m;
   };
-  const used = (k: ListKey) => new Set(yearDeals.flatMap((d) => listValues(d, k)));
+  const used = (k: ListKey) => new Set(yearDeals.flatMap((d) => listValues(d, k, S)));
   const opt = (v: string, n: Map<string, number>, sub?: string): FOpt => ({ v, label: v === NONE ? 'ไม่ระบุ' : v, n: n.get(v) || 0, sub });
   const chosen = (k: ListKey) => F[k]?.v || [];
   /** configured values first (in their order), then any other value the deals use or the filter holds; empty last */
@@ -133,6 +137,17 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: 
       })(),
     },
   ];
+  // หน่วยงาน (package dash): the units in their order, then ยังไม่ระบุหน่วยงาน; a deal counts under every unit
+  // its money goes to (its split, else its ผู้รับผิดชอบ's unit)
+  if (ctx.units?.some((u) => !u.off)) {
+    const n = counts('unit'), seen = used('unit'), names = new Map(ctx.units.map((u) => [u.id, u.n]));
+    // a retired unit only while a deal still counts for it (or it is chosen)
+    const vs = [...ctx.units.filter((u) => !u.off || seen.has(u.id) || chosen('unit').includes(u.id)).map((u) => u.id), ...chosen('unit').filter((v) => !names.has(v) && v !== NONE)];
+    fields.push({
+      key: 'unit', label: 'หน่วยงาน', hint: 'หน่วยงานที่ได้ส่วนแบ่งรายได้', kind: 'multi', ops: true,
+      options: [...vs.map((v) => ({ v, label: names.get(v) || 'หน่วยงานที่ลบแล้ว', n: n.get(v) || 0 })), ...(seen.has(NONE) || chosen('unit').includes(NONE) ? [{ v: NONE, label: 'ยังไม่ระบุหน่วยงาน', chip: 'ยังไม่ระบุหน่วยงาน', n: n.get(NONE) || 0 }] : [])],
+    });
+  }
   if (!ctx.dash) {
     const n = new Map<string, number>();
     customersOf(S, filterDeals(S, { ...viewOf(F, job), result: '' }, today)).forEach((d) => {

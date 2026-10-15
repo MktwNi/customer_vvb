@@ -21,6 +21,11 @@ import { payIn, payMonthCounts } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
 import { customersOf, jointAttr, jointCashLines, jointRole } from '../lib/sales';
 import { shareOf } from '../lib/joint';
+// units, % contribution and commission (package dash, items 8 and 9b)
+import { commPeriod0, unitQuarters, unitsOf, type CommPeriod } from '../lib/contrib';
+import { CommCard } from '../components/CommCard';
+import { UnitsDialog } from '../components/UnitsDialog';
+import { unitCls } from '../components/UnitBits';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -122,8 +127,13 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const [hover, setHover] = useState<number | null>(null);
   const [wk, setWk] = useState(0); // weeks from this one, for the appointments
   const [evTip, setEvTip] = useState<string | null>(null);
+  const [unitsDlg, setUnitsDlg] = useState(false);
   const nextRef = useRef<HTMLButtonElement>(null);
-  const F = normSalesFilter({ year, ...f });
+  // the revenue split and commission: for ดูค่าคอมมิชชั่น / สัดส่วนรายได้ only (the script sends the splits and
+  // rates to those alone); the หน่วยงาน filter, the quarter card's unit split and the commission card. A
+  // หน่วยงาน filter left from before the capability went no longer applies (its field is gone too).
+  const comm = e.seesComm();
+  const F = normSalesFilter({ year, ...f, ...(comm ? {} : { unit: undefined }) });
   const list = filterDeals(S, F, today);
   // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts a joint quotation by the parts of its companies listed
   const attr = jointAttr(F);
@@ -131,8 +141,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const me = e.me();
   const ver = useEngineVersion();
   const key = JSON.stringify(f);
+  const uctx = e.unitCtx(), uAll = unitsOf(uctx, true);
   // the Dashboard reports results: no ผลการขาย; the rest in the table's order (one menu on both tabs)
-  const fields0 = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fields0 = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true, units: comm && uAll.length ? uAll.map((u) => ({ id: u.id, n: u.n, off: u.off })) : undefined }), [ver, key, year, me, today, comm]); // eslint-disable-line react-hooks/exhaustive-deps
   const up = (p: Partial<SalesFilter>) => {
     const { year: _y, ...rest } = normSalesFilter({ ...F, ...p });
     // การรับเงิน reads a range on the money's own dates: the date filter says so (รับเงิน / ครบกำหนด)
@@ -148,6 +159,15 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const yr = { from: `${+year - 543}-01-01`, to: `${+year - 543}-12-31` };
   const moneyR = date ? date.r : yr;
   const qPick = F.date && /^q[1-4]$/.test(F.date.preset) ? +F.date.preset.slice(1) : F.date?.preset === 'quarter' ? thisQuarter(year, today) : 0;
+  // the commission card's period: the latest ended quarter (the whole year for another year); a quarter
+  // picked in ช่วงเวลา moves it there
+  const cqKey = `${year}|${qPick}`;
+  const [cqAt, setCqAt] = useState(cqKey);
+  const [cq, setCq] = useState<CommPeriod>(() => (qPick ? qPick - 1 : commPeriod0(year, today)));
+  if (cqAt !== cqKey) {
+    setCqAt(cqKey);
+    setCq(qPick ? qPick - 1 : commPeriod0(year, today));
+  }
   const payCount = (p: PayF) => customersOf(S, filterDeals(S, { ...F, quick: '', pay: p || undefined }, today)).length;
   // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
   const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
@@ -194,10 +214,10 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const wMon = addDays(mon, wk * 7);
   const wDays = Array.from({ length: 7 }, (_, i) => addDays(wMon, i));
   // with a filter set, only the filtered customers' appointments (and, for an owner, the companies they own)
-  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.pay);
+  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.pay || F.unit);
   // (a joint quotation's header is the payer's row, not a customer of the filter)
   const gids = new Set(list.filter((d) => d.gid != null && jointRole(S, d) !== 'header').map((d) => e.canonical(d.gid as number)));
-  const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section;
+  const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section && !F.unit;
   const inScope = (t: Task) => !filtered || gids.has(e.canonical(t.gid)) || (onlyResp && F.resp!.v.includes(e.crm.owners[e.canonical(t.gid)]));
   const tasks = e.crm.tasks.filter((t) => t.date >= wDays[0] && t.date <= wDays[6] && inScope(t));
   const m0 = +wDays[0].slice(5, 7), m6 = +wDays[6].slice(5, 7), y0 = +wDays[0].slice(0, 4) + 543, y6 = +wDays[6].slice(0, 4) + 543;
@@ -256,7 +276,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
       <div className="sd-filters">
         <FilterBar
           fields={fields}
-          value={{ resp: F.resp, pay: F.pay ? { v: [F.pay] } : undefined, source: F.source, service: F.service, referral: F.referral, section: F.section } as Record<string, FVal | undefined>}
+          value={{ resp: F.resp, pay: F.pay ? { v: [F.pay] } : undefined, source: F.source, service: F.service, referral: F.referral, section: F.section, unit: F.unit } as Record<string, FVal | undefined>}
           onChange={(k, v) => up(k === 'pay' ? { pay: (v?.v[0] || '') as PayF } : { [k]: v || undefined })}
           lead={
             <DateFilter
@@ -548,9 +568,16 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </section>
       </div>
 
-      {/* added under the original grid: the year's money by quarter (totals; units come with commission) */}
-      {money && <div className="sd-grid2 one">
+      {/* added under the original grid: the year's money by quarter (by unit with ดูค่าคอมมิชชั่น) and, beside
+          it, % Contribution and commission */}
+      {money && <div className={'sd-grid2' + (comm ? '' : ' one')}>
         <QuarterCard
+          split={(() => {
+            if (!comm || !uAll.length) return null;
+            const uq = unitQuarters(uctx, lines, year);
+            const live = [...uAll.map((u) => u.id), ''].filter((id) => (uq.year[id] || 0) > 0);
+            return { units: live.map((id) => ({ id, n: uctx.units[id]?.n || 'ยังไม่ระบุหน่วยงาน', cls: unitCls(uctx, id) })), q: uq.q, year: uq.year };
+          })()}
           Y={Y}
           year={year}
           now={beOf(today) === year ? quarterOf(today) : -1}
@@ -560,7 +587,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           onCashTab={e.can('view.cash') ? () => set({ slView: 'cash', slCashShow: '', slCashPick: null }) : undefined}
           onPlan={(id) => (id ? set({ deal: id, dpPlan: 'edit' }) : set({ slView: 'cash', slCashShow: 'undated', slCashPick: null }))}
         />
+        {comm && <CommCard ctx={uctx} lines={lines} year={year} cq={cq} onCq={setCq} onSetup={e.can('set.units') ? () => setUnitsDlg(true) : undefined} />}
       </div>}
+      {unitsDlg && <UnitsDialog onClose={() => setUnitsDlg(false)} />}
     </div>
   );
 }

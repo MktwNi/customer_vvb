@@ -28,6 +28,7 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
+import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
@@ -1168,6 +1169,27 @@ export class GccEngine {
         const l = toLog(v, k);
         if (l && !(k in S.log)) S.log[k] = l;
       });
+      // units, who is in which and the revenue splits (package dash), for those who may set them; rates and
+      // splits only for those who may see commission (as the script would send them)
+      if (this.can('set.units')) {
+        const comm = this.can('view.comm');
+        Object.entries((IS.units || {}) as Record<string, unknown>).forEach(([id, v]) => {
+          const u = isUnitId(id) ? toUnit(v) : null;
+          const U = S.units || (S.units = {});
+          if (u && !(id in U)) U[id] = comm ? u : { ...u, rates: [] };
+        });
+        Object.entries((IS.unitm || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const m = staffKey(k) === k ? toUnitMember(v) : null;
+          const M = S.unitm || (S.unitm = {});
+          if (m && !(k in M)) M[k] = m;
+        });
+      }
+      if (this.can('edit.share') && this.can('view.comm'))
+        Object.entries((IS.shares || {}) as Record<string, unknown>).forEach(([id, v]) => {
+          const x = toShare(v);
+          const D = S.shares || (S.shares = {});
+          if (x && S.deals[id] && !(id in D)) D[id] = x;
+        });
       Object.entries((d.custom || {}) as Record<string, unknown>).forEach(([k, v]) => {
         const c = toCust(v, +k);
         if (c && !this.custom[c.id]) {
@@ -1642,6 +1664,12 @@ export class GccEngine {
       this.op('ddoc/' + k);
       this.dropDocFile(doc);
     });
+    // its revenue split: the script removes it with the deal for an account (one that may not change splits
+    // leaves it to the script); with the team code it goes here
+    if (S.shares?.[id]) {
+      delete S.shares[id];
+      if (this.canWriteKey(keyOf.dshare(id), true)) this.op(keyOf.dshare(id));
+    }
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
   setSalesList(name: keyof SalesCfg, items: string[]) {
@@ -2796,6 +2824,117 @@ export class GccEngine {
     return [head.map(csvCell).join(','), ...lines].join('\r\n');
   }
 
+  // ------------------------------------------------------------------ units, revenue split, commission (package dash)
+  /** The units, who is in which and the deals' revenue splits (lib/contrib.ts), read in place. */
+  unitCtx(): UnitCtx {
+    return unitCtx(this.sales);
+  }
+  /**
+   * Whether this account sees the revenue split and the commission: ดูค่าคอมมิชชั่น / สัดส่วนรายได้ (with
+   * accounts the script sends splits and rates to those only), or this browser alone. With the team code
+   * there is no identity and every browser would download the rates: the cards stay hidden.
+   */
+  seesComm(): boolean {
+    if (this.teamCfg && this.teamCfg.mode !== 'accounts') return false;
+    return this.can('view.money') && this.can('view.comm');
+  }
+  /**
+   * Add (`id` null) or change a unit: its name, commission rate (null = none) and rates by service, and with
+   * `members` the names in it (as written: each one moves here from any other unit, and those left out leave
+   * it). Rates are effective-dated (contrib withRate): a change prices the money received from today. A new
+   * unit that pays commission takes the first free colour. Returns the unit's id.
+   */
+  saveUnit(id: string | null, p: { n: string; r: number | null; svc: Record<string, number>; members?: string[] }): string | undefined {
+    if (!this.can('set.units')) return void this.deny();
+    const S = this.sales, U = S.units || (S.units = {}), M = S.unitm || (S.unitm = {});
+    const n = p.n.trim().replace(/\s+/g, ' ').slice(0, NAME_MAX);
+    if (!n) return;
+    const at = new Date().toISOString(), by = this.me();
+    const cur = id ? U[id] : undefined;
+    const uid2 = cur ? id! : newUnitId(Object.keys(U));
+    const rates = withRate(cur?.rates || [], p.r, p.svc, todayISO());
+    const ctx = unitCtx(S);
+    const c = cur?.c || (paysComm({ rates }) ? freeSlot(ctx) : 0);
+    const o = cur ? cur.o : Math.max(0, ...Object.values(U).map((u) => u.o + 1));
+    const rec: UnitRec = { n, c, o, rates, ...(cur?.off ? { off: true } : {}), ...(cur?.offs ? { offs: cur.offs } : {}), at, by };
+    this.batchOps(() => {
+      const f = cur ? (['n', 'c', 'rates'] as const).filter((k) => JSON.stringify(cur[k]) !== JSON.stringify(rec[k])) : [];
+      if (!cur || f.length) {
+        U[uid2] = rec;
+        this.op(keyOf.unit(uid2), unitWire(rec), cur ? { f: [...f, 'at', 'by'] } : {});
+      }
+      if (p.members) {
+        const want = new Map(p.members.map((x) => [staffKey(x), x.trim().replace(/\s+/g, ' ')] as const).filter(([k]) => !!k));
+        Object.entries(M).forEach(([k, m]) => {
+          if (m.unit !== uid2 || want.has(k)) return;
+          delete M[k];
+          this.op(keyOf.unitm(k));
+        });
+        want.forEach((name, k) => {
+          if (M[k]?.unit === uid2) return;
+          M[k] = { unit: uid2, n: name, at, by };
+          this.op(keyOf.unitm(k), { ...M[k] });
+        });
+      }
+    });
+    this.saveSales();
+    return uid2;
+  }
+  /** Retire a unit (`off`) or bring it back. A retired one keeps the money received before today (its
+   *  members and the splits that name it stay); the money that comes in from today on is
+   *  ยังไม่ระบุหน่วยงาน's (contrib lineParts: the span is kept in `offs`, so using it again later does not
+   *  give it the money of the days it was retired). It is no longer offered for new splits or people. */
+  retireUnit(id: string, off: boolean) {
+    if (!this.can('set.units')) return this.deny();
+    const cur = this.sales.units?.[id];
+    if (!cur || !!cur.off === off) return;
+    const { off: _o, offs: _s, ...rest } = cur;
+    const offs = withOff(cur.offs, off, todayISO());
+    const rec: UnitRec = { ...rest, ...(off ? { off: true } : {}), ...(offs.length ? { offs } : {}), at: new Date().toISOString(), by: this.me() };
+    this.sales.units![id] = rec;
+    this.op(keyOf.unit(id), unitWire(rec), { f: ['off', 'offs', 'at', 'by'] });
+    this.saveSales();
+  }
+  /** Put a person (a name as written: an account's display name or a free-text ผู้รับผิดชอบ) in a unit;
+   *  '' takes them out of any. */
+  setUnitMember(name: string, unit: string) {
+    if (!this.can('set.units')) return this.deny();
+    const k = staffKey(name);
+    if (!k || (unit && !this.sales.units?.[unit])) return;
+    const M = this.sales.unitm || (this.sales.unitm = {});
+    if ((M[k]?.unit || '') === unit) return;
+    if (!unit) {
+      delete M[k];
+      this.op(keyOf.unitm(k));
+    } else {
+      M[k] = { unit, n: name.trim().replace(/\s+/g, ' '), at: new Date().toISOString(), by: this.me() };
+      this.op(keyOf.unitm(k), { ...M[k] });
+    }
+    this.saveSales();
+  }
+  /** A deal's revenue split: units and % adding up to 100 (anything else is refused); null = back to the
+   *  default (100% to the ผู้รับผิดชอบ's unit). The deal's history says only that it changed (the split is
+   *  for those who may see commission). */
+  setShare(id: string, lines: ShareLine[] | null) {
+    if (!this.can('edit.share')) return this.deny();
+    const d = this.sales.deals[id];
+    if (!d) return;
+    const D = this.sales.shares || (this.sales.shares = {});
+    if (!lines) {
+      if (!D[id]) return;
+      delete D[id];
+      this.op(keyOf.dshare(id));
+    } else {
+      const clean = lines.map((l) => ({ u: l.u, p: Math.round(l.p * 10) / 10 }));
+      if (!shareValid(clean)) return;
+      if (D[id] && JSON.stringify(D[id].lines) === JSON.stringify(clean)) return;
+      D[id] = { lines: clean, at: new Date().toISOString(), by: this.me() };
+      this.op(keyOf.dshare(id), { ...D[id], lines: clean.map((l) => ({ ...l })) });
+    }
+    this.salesLog(d, lines ? 'แก้สัดส่วนรายได้' : 'ล้างสัดส่วนรายได้');
+    this.saveSales();
+  }
+
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
@@ -3191,6 +3330,7 @@ export class GccEngine {
       : type === 'person' ? this.people[rest]
       : type === 'jqt' ? S.jqt?.[rest]
       : type === 'jqm' ? S.jqm?.[rest]
+      : type === 'scfg' && rest.startsWith('unit.') ? S.units?.[rest.slice(5)]
       : undefined;
     return r && { ...(r as Record<string, unknown>) };
   }

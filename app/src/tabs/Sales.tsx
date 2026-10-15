@@ -34,6 +34,8 @@ import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '.
 import { customersOf, jointAttr, jointHeadOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
 import { canMergeFrom, jointRows, rowDeals, type JRow } from '../lib/joint';
 import { JointBand, JointCard, JointClosedRows, JointShare } from '../components/JointQt';
+// units (package dash): the หน่วยงาน filter's set-up link
+import { UnitsDialog } from '../components/UnitsDialog';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
 export { Modal } from '../components/Dialog';
@@ -286,6 +288,7 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
   const yearTotal = Object.values(e.sales.deals).filter((d) => d.year === year).length;
   const { open, setOpen, close, btn, wrap, cls } = useMenu();
   const [lists, setLists] = useState(false);
+  const [units, setUnits] = useState(false);
   const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[]; batch?: string; n?: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** The Buddhist-era year a JSON backup belongs to (it doesn't say): 25xx, or a 20xx year converted after a confirm. */
@@ -348,6 +351,8 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
           </button>
           {e.can('set.data') && <button role="menuitem" className="menu-i" onClick={() => { close(); fileRef.current?.click(); }}>นำเข้าจาก Sales Tracker เดิม<small>ไฟล์สำรอง JSON หรือ CSV / Excel</small></button>}
           {e.can('set.lists') && <button role="menuitem" className="menu-i" onClick={() => { close(); setLists(true); }}>จัดการหมวด / SOURCE / Services</button>}
+          {/* units and commission rates (package dash): for ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น, where commission is private */}
+          {e.can('set.units') && e.seesComm() && <button role="menuitem" className="menu-i" onClick={() => { close(); setUnits(true); }}>หน่วยงานและค่าคอมมิชชั่น<small>สัดส่วนรายได้และอัตรา %</small></button>}
         </div>
       )}
       <input ref={fileRef} type="file" accept=".json,.csv,.xlsx" style={{ display: 'none' }} onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) doImport(f); }} />
@@ -380,6 +385,7 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
         </Modal>
       )}
       {lists && <ListsModal onClose={() => setLists(false)} />}
+      {units && <UnitsDialog onClose={() => setUnits(false)} />}
     </div>
   );
 }

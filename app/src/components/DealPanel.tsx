@@ -27,6 +27,8 @@ import { PlanYears, YearChip } from './PlanYears';
 import { jointOf, jointRole } from '../lib/sales';
 import { jointNo, strayDocs } from '../lib/joint';
 import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
+// สัดส่วนรายได้ (package dash, items 8 and 9b)
+import { ShareCard } from './ShareCard';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -345,7 +347,7 @@ export function DealPanel() {
   if (jr === 'header')
     return (
       <>
-        <JointPanel d={d} panelRef={ref} close={close} attach={attach} plan={<PlanCard d={d} attach={attach} />} info={<ContactCard d={d} ro={ro} title="ข้อมูลใบเสนอราคา" />} history={<HistoryCard d={d} />} />
+        <JointPanel d={d} panelRef={ref} close={close} attach={attach} plan={<><PlanCard d={d} attach={attach} /><ShareCard key={'sh' + d.id} d={d} /></>} info={<ContactCard d={d} ro={ro} title="ข้อมูลใบเสนอราคา" />} history={<HistoryCard d={d} />} />
         {att && <DocAttach deal={d} stage={att.stage} kind={att.kind} file={att.file} {...att.more} onClose={() => setAtt(null)} />}
       </>
     );
@@ -420,9 +422,13 @@ export function DealPanel() {
         <div className="dp-body">
           {/* the plan is amounts: an account without ดูยอดเงิน follows payments by the PAY stages below */}
           {money && planFirst && jr !== 'member' && <PlanCard d={d} attach={attach} />}
+          {/* สัดส่วนรายได้ under the plan, wherever it is (package dash; only with ดูค่าคอมมิชชั่น); a joint
+              quotation's member splits its part of the header's money */}
+          {money && planFirst && <ShareCard key={'sh' + d.id} d={d} />}
           {/* its own state (the card held, the quick-add) belongs to this deal */}
           <StepsCard key={d.id} d={d} attach={attach} />
           {money && !planFirst && jr !== 'member' && <PlanCard d={d} attach={attach} />}
+          {money && !planFirst && <ShareCard key={'sh' + d.id} d={d} />}
           <OtherDocs d={d} attach={attach} />
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />
