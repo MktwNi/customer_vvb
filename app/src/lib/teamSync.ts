@@ -10,6 +10,7 @@
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
+import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -37,11 +38,39 @@ export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by:
 /** `mode: 'accounts'`: the team signs in with personal accounts (then `key` is unused and `u` is the
  *  signed-in username, kept in memory only); otherwise the shared team code in `key`. */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean; mode?: 'accounts'; u?: string }
-export type Role = 'admin' | 'sales' | 'viewer';
+/** A role id: the built-in admin / sales / viewer, or one an admin made (lib/caps.ts). */
+export type Role = string;
 /** What a request is signed with: the team code (legacy), a session token, or nothing (hello / login). */
 export type Cred = string | { tok: string } | null;
-/** A signed-in account on this browser (PREF.session). */
-export interface Session { url: string; u: string; name: string; role: Role; tok: string; exp: number; rm: boolean; mc?: boolean }
+/**
+ * A signed-in account on this browser (PREF.session). `role` is what the script reports as me.role (the
+ * built-in word: admin / sales / viewer, which a script with configurable roles maps from the account's
+ * capabilities). From a script with configurable roles (Code.gs v4) also: `rid` the role's id, `rn` its
+ * name, `caps` what the account may do, `rq` requests waiting (admins), `req` the account's own pending
+ * request or unread result, and (optional) `g` its extras and temporary role with their dates. A script
+ * without them leaves them out (lib/caps.ts capsOf falls back).
+ */
+export interface Session { url: string; u: string; name: string; role: Role; tok: string; exp: number; rm: boolean; mc?: boolean; rid?: string; rn?: string; caps?: CapSet; rq?: number; req?: MyReq | null; g?: Grants }
+/** The account fields of a script's `me` (login, claim, and every reply with a token). Only the fields
+ *  the script sent: an older script's me (u, name, role) leaves the rest undefined. */
+export function parseMe(me: unknown): Partial<Pick<Session, 'name' | 'role' | 'rid' | 'rn' | 'caps' | 'rq' | 'req' | 'g'>> & { u?: string } {
+  if (!me || typeof me !== 'object') return {};
+  const m = me as Record<string, unknown>;
+  const out: ReturnType<typeof parseMe> = {};
+  if (typeof m.u === 'string') out.u = m.u;
+  if (typeof m.name === 'string' && m.name) out.name = m.name;
+  if (typeof m.role === 'string' && m.role) out.role = m.role;
+  if (typeof m.rid === 'string' && m.rid) out.rid = m.rid;
+  if (typeof m.rn === 'string' && m.rn) out.rn = m.rn;
+  if ('caps' in m) {
+    const c = parseCaps(m.caps);
+    if (c) out.caps = c;
+  }
+  if ('rq' in m) out.rq = Math.max(0, Number(m.rq) || 0);
+  if ('req' in m) out.req = parseMyReq(m.req);
+  if ('grants' in m) out.g = parseGrants({ me: m.grants }).me || {};
+  return out;
+}
 /** What the team script supports (from `hello`): v2 = the team code only; v3 = accounts possible. */
 export interface Caps { v: 2 | 3; mode?: 'legacy' | 'setup' | 'accounts'; tid?: string; it?: number; files?: boolean }
 export type TeamStatus = 'off' | 'connecting' | 'syncing' | 'ok' | 'error' | 'offline';
@@ -95,8 +124,24 @@ const ERR_TH: Record<string, string> = {
   not_self: 'เปลี่ยนบทบาทหรือปิดบัญชีของตัวเองไม่ได้',
   last_admin: 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน',
   name_locked: 'แก้ชื่อที่แสดงได้เฉพาะก่อนเข้าสู่ระบบครั้งแรก',
-  bad_role: 'เลือกบทบาทของบัญชี (ผู้ดูแลระบบ / พนักงานขาย / ดูอย่างเดียว)',
+  bad_role: 'บทบาทนี้ไม่มีแล้ว',
+  // configurable roles and permission requests (Code.gs v4)
+  role_in_use: 'บทบาทนี้ยังมีผู้ใช้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อนลบ',
+  role_locked: 'บทบาทนี้แก้หรือลบไม่ได้',
+  bad_cap: 'มีสิทธิ์ที่ระบบไม่รู้จัก ลองรีเฟรชหน้าเว็บ (F5)',
+  cap_held: 'คุณมีสิทธิ์นี้อยู่แล้ว',
+  too_many_roles: 'มีบทบาทครบ 10 บทบาทแล้ว ลบบทบาทที่ไม่ใช้ก่อน',
+  req_note: 'ใส่เหตุผลของคำขอ (ไม่เกิน 300 ตัวอักษร)',
+  retry: 'เซิร์ฟเวอร์ยังตรวจสิทธิ์ไม่ได้ตอนนี้ จะลองใหม่อัตโนมัติ',
+  name_dup: 'มีบทบาทชื่อนี้แล้ว',
+  bad_until: 'วันที่สิ้นสุดต้องเป็นวันหลังจากวันนี้',
+  no_request: 'ไม่มีคำขอนี้แล้ว (อาจถูกยกเลิกหรือตัดสินไปแล้ว)',
+  // a build older than the script (the version gate: cv below 4); the script sends this sentence itself
+  'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)': 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)',
 };
+/** The client version every request says it is: 4 = configurable roles (the script refuses writes from
+ *  an older build with "มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)"; pulls stay open to it). */
+export const CV = 4;
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
  * a network error usually means a deployment setting); `home` = the same with the site's built-in
@@ -151,11 +196,12 @@ export const fetchTransport: Transport = async (url, body) => {
 };
 
 /** Call the server and unwrap {ok:false,error} into a TeamSyncError. Every request says it comes
- *  from this client version (`cv: 3`), so an accounts-mode script answers `login_required` to a
- *  team-code request instead of the message meant for old app builds. */
+ *  from this client version (`cv`, CV), so an accounts-mode script answers `login_required` to a
+ *  team-code request instead of the message meant for old app builds, and a script with configurable
+ *  roles knows this build sends no stale fields. */
 export async function call<T extends Record<string, unknown>>(t: Transport, url: string, cred: Cred, body: Record<string, unknown>): Promise<T> {
   const auth = cred == null ? {} : typeof cred === 'string' ? { key: cred } : { tok: cred.tok };
-  const r = await t(url, { ...body, cv: 3, ...auth });
+  const r = await t(url, { ...body, cv: CV, ...auth });
   if (!r || r.ok !== true) {
     const code = String((r && r.error) || 'unknown');
     throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code, code, r || {});
@@ -167,7 +213,7 @@ export async function call<T extends Record<string, unknown>>(t: Transport, url:
  *  `unauthorized` / `no_team_key` (or `unknown_action`); a v3 one says its mode and the public
  *  values the browser needs to hash a password (`tid`, `it`). */
 export async function hello(t: Transport, url: string): Promise<Caps> {
-  const r = await t(url, { action: 'hello', cv: 3 });
+  const r = await t(url, { action: 'hello', cv: CV });
   if (r && r.ok === true && Number(r.v) >= 3) {
     const mode = r.mode === 'accounts' || r.mode === 'setup' ? r.mode : 'legacy';
     return { v: 3, mode, tid: String(r.tid || ''), it: Number(r.it) || 0, files: !!r.files };

@@ -2,26 +2,30 @@
  * Team accounts (Code.gs v3): roles, what each may change, and the password key the browser sends.
  * The plain password never leaves the browser: it is stretched here with PBKDF2 (salted with the
  * team's public id and the username) and only that key goes to the team script, which keeps an HMAC
- * of it. The same write rule as here is enforced by the script (SALES_DENY / ADMIN_DEL in Code.gs).
+ * of it.
+ *
+ * What an account may do is its capabilities (lib/caps.ts: the engine and the pages use those). The
+ * role words and the write rule below are the built-in roles of the script deployed before roles became
+ * configurable (Code.gs v3: SALES_DENY / ADMIN_DEL), kept as that script's rule (its parity test) and as
+ * the fallback names of the built-in roles.
  */
 import type { Role } from './teamSync';
+import { BUILTIN, BUILTIN_IDS, type BuiltinId } from './caps';
 
-export const ROLE_TH: Record<Role, string> = { admin: 'ผู้ดูแลระบบ', sales: 'พนักงานขาย', viewer: 'ดูอย่างเดียว' };
-export const ROLE_DESC: Record<Role, string> = {
-  admin: 'ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้ ตั้งค่ารายการ ตรวจข้อมูลซ้ำ และลบข้อมูล',
-  sales: 'เพิ่มและแก้ลูกค้า ดีล ผู้ติดต่อ นัด บันทึกการติดต่อ และแนบเอกสาร (ลบดีล/ลูกค้า/ผู้ติดต่อไม่ได้)',
-  viewer: 'ดูได้ทุกหน้า และเปิดเอกสาร แต่แก้ไขไม่ได้',
-};
-export const ROLES: Role[] = ['admin', 'sales', 'viewer'];
+/** The built-in roles' names; a role an admin made has its own (Session.rn, the users reply's roles). */
+export const ROLE_TH: Record<string, string> = Object.fromEntries(BUILTIN_IDS.map((r) => [r, BUILTIN[r].n]));
+export const ROLE_DESC: Record<string, string> = Object.fromEntries(BUILTIN_IDS.map((r) => [r, BUILTIN[r].d]));
+export const ROLES: BuiltinId[] = BUILTIN_IDS;
 
-/** Records a sales account can't write at all, and those it can't delete (same lists as Code.gs). */
+/** Records a sales account can't write at all, and those it can't delete (same lists as Code.gs v3). */
 export const SALES_DENY = ['scfg/', 'dedup/', 'team/', 'dundo/'];
 export const ADMIN_DEL = ['deal/', 'cust/', 'person/'];
 
 /** A change counts as a delete when it removes the record (an empty value is applied as one). */
 export const isDel = (v: unknown, del?: boolean) => !!del || v === undefined || v === null;
 
-/** May this role write record `k`? `null` = no accounts (team code or this browser only): anything. */
+/** May this role write record `k` (Code.gs v3's rule)? `null` = no accounts (team code or this browser
+ *  only): anything. The engine asks lib/caps.ts canWriteKey instead. */
 export function canWriteKey(role: Role | null, k: string, del: boolean) {
   if (role == null || role === 'admin') return true;
   if (role === 'viewer') return false;

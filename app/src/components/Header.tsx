@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { addMonths, dmTh, fmtN, isoTh, todayISO } from '../lib/format';
-import { ROLE_TH } from '../lib/auth';
+import { addMonths, dmTh, dtTh, fmtN, isoTh, todayISO } from '../lib/format';
+import { reqWords, resultNotice } from '../lib/reqText';
 import { TEAM_ST, TeamChip } from './TeamSync';
 import { Icon } from './icons';
 import { RoleChip, hhmm, nameLetter, sessionLine } from './Login';
@@ -144,6 +144,10 @@ function AccountMenu() {
   usePopover(open, () => setOpen(false), btn, pop);
   const s = e.session;
   if (!s) return null;
+  const admin = e.can('set.users');
+  // a request waiting: its status takes the place of "ขอเปลี่ยนสิทธิ์" (a script without requests: neither)
+  const pend = s.req?.st === 'p' ? s.req : null;
+  const mayAsk = e.rolesLive && !admin;
   const t = e.team;
   const [label, dot] = TEAM_ST[t.status];
   const sync = `${e.auth === 'expired' ? 'ต้องเข้าสู่ระบบ' : label}${t.status === 'ok' && t.last ? ' ' + hhmm(Date.parse(t.last)) : ''} · รอส่ง ${fmtN(e.teamPendingN)}`;
@@ -161,11 +165,11 @@ function AccountMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? 'acct-menu' : undefined}
-        aria-label={`บัญชีของฉัน: ${s.name} · ${ROLE_TH[s.role]}`}
-        title={`${s.name} (@${s.u}) · ${ROLE_TH[s.role]}`}
+        aria-label={`บัญชีของฉัน: ${s.name} · ${e.roleName()}`}
+        title={`${s.name} (@${s.u}) · ${e.roleName()}`}
       >
         <span className="tb-me-name">{s.name}</span>
-        <RoleChip role={s.role} className="tb-me-role" />
+        <RoleChip name={e.roleName()} admin={admin} className="tb-me-role" />
         <span className="tb-ava" aria-hidden="true">{nameLetter(s.name)}</span>
       </button>
       {open && (
@@ -176,7 +180,7 @@ function AccountMenu() {
               <b>{s.name}</b>
               <small>@{s.u}</small>
             </span>
-            <RoleChip role={s.role} />
+            <RoleChip name={e.roleName()} admin={admin} />
           </div>
           <div className="acct-meta">
             <span>
@@ -185,11 +189,32 @@ function AccountMenu() {
             </span>
             {sessionLine(s) && <span>{sessionLine(s)}</span>}
           </div>
+          {pend && (
+            <div className="rl-acct-req">
+              <div className="rl-acct-req-h">
+                <span>คำขอเปลี่ยนสิทธิ์</span>
+                <span className="chip">รออนุมัติ</span>
+              </div>
+              <span>{reqWords(pend, e.roleNameOf)} · ส่งเมื่อ {dtTh(pend.at)}</span>
+              <span className="rl-acct-req-l">
+                <button type="button" className="lnk" onClick={() => pick(() => set({ acctDlg: 'request', reqInit: { k: pend.k } }))}>ดูคำขอ</button>
+                <CancelReq onDone={() => setOpen(false)} />
+              </span>
+            </div>
+          )}
           <div id="acct-menu" role="menu" aria-label="บัญชีของฉัน" className="acct-items" onKeyDown={menuKeys}>
             <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'passwd' }))}>
               เปลี่ยนรหัสผ่าน
             </button>
-            {s.role === 'admin' && (
+            <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'perms' }))}>
+              สิทธิ์ของฉัน
+            </button>
+            {mayAsk && !pend && (
+              <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'request', reqInit: null }))}>
+                ขอเปลี่ยนสิทธิ์
+              </button>
+            )}
+            {admin && (
               <button role="menuitem" className="acct-item" onClick={() => pick(() => go('users'))}>
                   ผู้ใช้และสิทธิ์
               </button>
@@ -204,6 +229,68 @@ function AccountMenu() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "ยกเลิกคำขอ" in the account menu: withdraws the pending request (online only). */
+function CancelReq({ onDone }: { onDone: () => void }) {
+  const { engine: e } = useApp();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="quiet"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await e.reqCancel();
+          onDone();
+        } catch (x) {
+          window.alert('ยกเลิกคำขอไม่สำเร็จ: ' + ((x as Error)?.message || x));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      ยกเลิกคำขอ
+    </button>
+  );
+}
+
+/** The decision on this account's request (approved or not), until "ซ่อน" says it was read. */
+function ReqResult() {
+  const { engine: e, set } = useApp();
+  const [busy, setBusy] = useState(false);
+  const r = e.session?.req;
+  if (!r || r.st !== 'r') return null;
+  const n = resultNotice(r, e.roleNameOf, e.roleName());
+  return (
+    <div className="note rl-res" role="status">
+      <span>
+        {n.lead}
+        {n.role && <b>{n.role}</b>}
+        {n.tail}
+        {r.note && <> · “{r.note}”</>}
+      </span>
+      {r.ok ? (
+        <button type="button" className="lnk" onClick={() => set({ acctDlg: 'perms' })}>ดูสิทธิ์ของฉัน</button>
+      ) : (
+        <button type="button" className="lnk" onClick={() => set({ acctDlg: 'request', reqInit: { k: r.caps?.length ? 'caps' : 'role' } })}>ส่งคำขอใหม่</button>
+      )}
+      <button
+        type="button"
+        className="quiet"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await e.reqAck().catch(() => {});
+          setBusy(false);
+        }}
+      >
+        ซ่อน
+      </button>
     </div>
   );
 }
@@ -226,6 +313,11 @@ export function Banners() {
   // one quiet line each (design §7.11): what is different, and the one thing to do about it
   return (
     <>
+      {e.session?.req?.st === 'r' && (
+        <div style={wrap}>
+          <ReqResult />
+        </div>
+      )}
       {e.ref !== today && (
         <div style={wrap}>
           <div className="note" role="status">

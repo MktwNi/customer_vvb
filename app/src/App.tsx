@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion } from './state';
 import { isTeamUrl } from './lib/teamSync';
 import { Banners, TopBar } from './components/Header';
-import { MOBILE_NAV, Sidebar, WIDE_NAV, useMedia } from './components/Sidebar';
+import { MOBILE_NAV, Sidebar, WIDE_NAV, pageOk, useMedia } from './components/Sidebar';
 import { PREF, prefs } from './lib/storage';
 import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
@@ -23,6 +23,8 @@ import { AddPerson, People } from './tabs/People';
 import { Users } from './tabs/Users';
 import { HelpPage } from './tabs/Help';
 import { AuthScreen, ChangePasswordDialog, LogoutDialog, ReLogin } from './components/Login';
+import { MyPerms } from './components/MyPerms';
+import { RequestDialog } from './components/RequestDialog';
 import { commitFocus } from './components/useDialog';
 
 function Loading({ msg }: { msg: string }) {
@@ -125,11 +127,12 @@ export default function App() {
   useEffect(() => {
     if (ready && !gate && !mobile && document.activeElement === document.body) document.getElementById('scroller')?.focus({ preventScroll: true });
   }, [ready, mobile, gate]);
-  // ผู้ใช้และสิทธิ์ is for admins of a team that signs in; anyone else gets the overview
-  const admin = e.role() === 'admin';
+  // a page this account may not open (ผู้ใช้และสิทธิ์ without managing users, Sales Tracker without ดู Sales
+  // Tracker, …: lib/caps.ts) gives way to the overview, which every account has
+  const allowed = pageOk(e, ui.tab);
   useEffect(() => {
-    if (ready && !auth && ui.tab === 'users' && !admin) set({ tab: 'overview' });
-  }, [ready, auth, ui.tab, admin, set]);
+    if (ready && !auth && !allowed) set({ tab: 'overview' });
+  }, [ready, auth, allowed, set]);
   // account dialogs belong to the session they were opened in; the expired sign-in comes back for a new expiry
   useEffect(() => {
     if (auth && auth !== 'expired' && ui.acctDlg) set({ acctDlg: '' });
@@ -152,24 +155,24 @@ export default function App() {
             <main className="main page-in" key={ready || ui.tab === 'help' ? ui.tab : 'loading'}>
               {!ready && ui.tab !== 'help' && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
-                {ready && ui.tab === 'overview' && <Overview />}
-                {ready && ui.tab === 'sales' && <Sales />}
-                {ready && ui.tab === 'people' && <People />}
+                {ready && (ui.tab === 'overview' || !allowed) && <Overview />}
+                {ready && allowed && ui.tab === 'sales' && <Sales />}
+                {ready && allowed && ui.tab === 'people' && <People />}
                 {ready && ui.tab === 'search' && <Search />}
                 {ready && ui.tab === 'track' && <Track />}
-                {ready && ui.tab === 'plan' && <Plan />}
+                {ready && allowed && ui.tab === 'plan' && <Plan />}
                 {ready && ui.tab === 'map' && <MapTab />}
                 {ready && ui.tab === 'dedup' && <Dedup />}
                 {ready && ui.tab === 'update' && <Update />}
                 {ready && ui.tab === 'notes' && <Notes />}
-                {ready && ui.tab === 'users' && (admin ? <Users /> : <Overview />)}
+                {ready && allowed && ui.tab === 'users' && <Users />}
                 {ui.tab === 'help' && <HelpPage />}
               </ErrorBoundary>
             </main>
           </div>
         </div>
       </div>
-      {ready && ui.deal && (
+      {ready && ui.deal && e.can('view.sales') && (
         <ErrorBoundary resetKey={ui.deal}>
           <DealPanel />
         </ErrorBoundary>
@@ -203,6 +206,8 @@ export default function App() {
       )}
       {e.session && ui.acctDlg === 'passwd' && <ChangePasswordDialog onClose={() => set({ acctDlg: '' })} />}
       {e.session && ui.acctDlg === 'logout' && <LogoutDialog onClose={() => set({ acctDlg: '' })} />}
+      {e.session && ui.acctDlg === 'perms' && <MyPerms onClose={() => set({ acctDlg: '' })} />}
+      {e.session && ui.acctDlg === 'request' && <RequestDialog key={ui.reqInit?.k || ''} onClose={() => set({ acctDlg: '', reqInit: null })} />}
       {/* the session ended: sign in again over the app (open panels and typed text stay) */}
       {auth === 'expired' && !ui.hideRelogin && <ReLogin onClose={() => set({ hideRelogin: true })} />}
     </div>

@@ -260,7 +260,7 @@ function UndatedAct({ l }: { l: CashLine }) {
   const { engine: e, set } = useApp();
   if (l.kind === 'got') return <span className="cf-cell"><Status kind="ok">รับแล้ว</Status><small>ไม่มีวันที่รับ</small></span>;
   const plan = l.src === 'plan';
-  if (!e.can('edit')) return <span className="cf-mute">{plan ? 'ยังไม่กำหนดวันครบกำหนด' : 'ยังไม่มีแผนชำระ'}</span>;
+  if (!e.canDeal('edit.pay', l.deal)) return <span className="cf-mute">{plan ? 'ยังไม่กำหนดวันครบกำหนด' : 'ยังไม่มีแผนชำระ'}</span>;
   return <button type="button" className="lnk" onClick={(ev) => { ev.stopPropagation(); set({ deal: l.deal.id, dpPlan: 'edit' }); }}>{plan ? 'กำหนดวันครบกำหนด' : 'ตั้งแผนชำระ'}</button>;
 }
 /** Under an undated amount: what it comes from ("Forecast 250,000 · รับแล้ว 125,000"). */

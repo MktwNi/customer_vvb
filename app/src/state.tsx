@@ -61,8 +61,12 @@ export interface UIState {
   addPerson: { gid?: number } | null;
   /** The record being worked on: open, or opened last (marked in its list so you keep your place). */
   last: { deal?: string; person?: string };
-  /** Account dialog open over the app (team accounts): change password or sign out. */
-  acctDlg: '' | 'passwd' | 'logout';
+  /** Account dialog open over the app (team accounts): change password, sign out, สิทธิ์ของฉัน, or
+   *  ขอเปลี่ยนสิทธิ์ (`reqInit`: what it opens with — the pending request to look at, or a new one). */
+  acctDlg: '' | 'passwd' | 'logout' | 'perms' | 'request';
+  reqInit: { k: 'role' | 'caps' } | null;
+  /** ผู้ใช้และสิทธิ์: the section open (บัญชีผู้ใช้, บทบาทและสิทธิ์, คำขอสิทธิ์, การแจ้งเตือน). */
+  usersSec: 'acc' | 'roles' | 'req' | 'notify';
   /** The "session expired" sign-in was put aside (the team chip brings it back). */
   hideRelogin: boolean;
 }
@@ -89,7 +93,7 @@ const initial = (): UIState => {
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false,
     deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
-    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', hideRelogin: false,
+    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
   };
 };
 

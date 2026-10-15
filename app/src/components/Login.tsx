@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import type { GccEngine } from '../lib/engine';
-import { ROLE_TH, USER_RE, normUser, passwordChecks } from '../lib/auth';
-import { TeamSyncError, deploymentId, errText, type Role } from '../lib/teamSync';
+import { USER_RE, normUser, passwordChecks } from '../lib/auth';
+import { TeamSyncError, deploymentId, errText } from '../lib/teamSync';
 import { PREF, prefs } from '../lib/storage';
 import { CONFIG } from '../lib/constants';
 import { fmtN, isoTh, localDay, pad } from '../lib/format';
@@ -32,8 +32,10 @@ export const hhmm = (t: number) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-export function RoleChip({ role, className = '' }: { role: Role; className?: string }) {
-  return <span className={`acct-role acct-${role} ${className}`.trim()}>{ROLE_TH[role]}</span>;
+/** A role's name as a chip: brand ink for the admin role, neutral for every other (roles can be made by
+ *  an admin, so no colour per role). */
+export function RoleChip({ name, admin, className = '' }: { name: string; admin?: boolean; className?: string }) {
+  return <span className={`acct-role ${admin ? 'acct-admin' : 'acct-sales'} ${className}`.trim()}>{name}</span>;
 }
 
 /** What went wrong signing in, in Thai; `until` (ms) = locked out until then. */

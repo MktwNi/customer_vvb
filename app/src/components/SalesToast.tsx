@@ -31,14 +31,14 @@ export function useSalesActs() {
     if (!wasReady && closeReady(e.sales, d, today)) return prompt(d, 'result');
     if (dealResult(e.sales, d) !== 'YES') return;
     if (!hasPlan(e.sales, d.id)) {
-      if (!e.can('edit')) return;
+      if (!e.canDeal('edit.pay', d)) return;
       say('ได้งานแล้ว ตั้งแผนชำระเลยไหม? (ผลการขายยังไม่ใช่การปิดงาน)', { ms: 0, acts: [{ label: 'ตั้งแผนชำระ', act: 'plan', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     } else say(`ได้งานแล้ว · แผนชำระ ${planOf(e.sales, d, today)?.n} งวดเริ่มนับวันครบกำหนดจากวันนี้`);
   };
   /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. */
   const close = (id: string) => {
     const d = e.sales.deals[id];
-    if (!d || !e.can('edit')) return;
+    if (!d || !e.canDeal('edit.deal', d)) return;
     if (closeReady(e.sales, d, todayISO())) closeNow(id);
     else set({ slConfirm: id });
   };

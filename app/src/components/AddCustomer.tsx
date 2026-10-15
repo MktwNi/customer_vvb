@@ -37,8 +37,8 @@ export function AddCustomer() {
   const [moreOpen, setMoreOpen] = useState(() => !!edit && (['jur', 'prov', 'ind', 'biz', 'web', 'addr', 'note'] as const).some((k) => !!f[k]));
   const [similar, setSimilar] = useState<Company[]>([]);
   const D = e.B.D;
-  // an account that can only read has no way here; should it get here anyway, nothing can be saved
-  const ro = !e.can('edit');
+  // an account that may not add customers has no way here; should it get here anyway, nothing can be saved
+  const ro = !e.can('edit.cust');
   const provs = useMemo(() => D.prov.filter(Boolean).slice().sort((x, y) => x.localeCompare(y, 'th')), [D]);
   const close = () => set({ addCust: null });
   // teammates' latest first: a customer one of them added a moment ago is then suggested below
@@ -129,7 +129,7 @@ export function AddCustomer() {
         {err && <Notice kind="error" role="alert">{err}</Notice>}
         <span className="t-meta">ค้นหา ติดตาม นัด และบันทึกการติดต่อได้เหมือนบริษัทในทะเบียน ทั้งทีมเห็นด้วย</span>
         <div className="dlg-act">
-          {edit && e.can('delete') && (
+          {edit && e.can('del.rec') && (
             <button type="button" onClick={() => { if (window.confirm(`ลบ "${edit.name}" ออกจากรายชื่อลูกค้า?`)) { e.deleteCustomer(edit.id); set({ addCust: null, sel: null }); } }} className="quiet" style={{ marginRight: 'auto' }}>
               ลบลูกค้านี้
             </button>
@@ -148,7 +148,7 @@ export function SendToTracker() {
   useEngineVersion();
   // teammates' latest first: a company one of them sent a moment ago shows as already in the table
   useEffect(() => void e.teamSyncNow(), [e]);
-  const ro = !e.can('edit');
+  const ro = !e.can('edit.deal');
   const ids = ui.sendIds || [];
   const cos = ids.map((id) => e.company(id)).filter(Boolean) as Company[];
   const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));

@@ -1,25 +1,32 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { useApp, useEngineVersion, useNarrow } from '../state';
-import type { TeamUser } from '../lib/engine';
-import { ROLES, ROLE_DESC, ROLE_TH, USER_RE, normUser } from '../lib/auth';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useApp, useEngineVersion, useNarrow, type UIState } from '../state';
+import type { TeamDir, TeamUser } from '../lib/engine';
+import { USER_RE, normUser } from '../lib/auth';
 import { TeamSyncError, type Role } from '../lib/teamSync';
-import { dtTh, fmtN } from '../lib/format';
-import { Notice, PageHead } from '../components/ui';
+import { hasWrite, roleLine, type RoleDef } from '../lib/caps';
+import { reqWords } from '../lib/reqText';
+import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
+import { Notice } from '../components/ui';
 import { Icon } from '../components/icons';
 import { inviteLink } from '../components/TeamSync';
 import { RoleChip, authError, hhmm, nameLetter } from '../components/Login';
 import { menuKeys, usePopover } from '../components/usePopover';
 import { Modal } from '../components/Dialog';
 import { Select } from '../components/Select';
+import { AccountDialog } from './users/AccountDialog';
+import { Roles } from './users/Roles';
+import { Requests } from './users/Requests';
+import { NotifyAdmin } from './users/NotifyAdmin';
+import { EMAIL_RE, effRole, extrasOf, isOn as on, roleOf, roleRank } from './users/shared';
 
 /**
- * ผู้ใช้และสิทธิ์ (admins of a team that signs in): everyone's account, role and status; new accounts
- * with a temporary password shown once; names used in the team's data that have no account yet.
- * Everything here is read from and saved to the team script directly (online only, never queued).
+ * ผู้ใช้และสิทธิ์ (accounts that manage users, set.users): four sections — บัญชีผู้ใช้ (everyone's account,
+ * role, unit, notification e-mail and status; new accounts with a temporary password shown once; names
+ * used in the team's data that have no account yet), บทบาทและสิทธิ์ (the roles and what each may do),
+ * คำขอสิทธิ์ (requests to approve, and the history of permission changes) and การแจ้งเตือน (notify).
+ * Everything here is read from and saved to the team script directly (online only, never queued). A script
+ * deployed before configurable roles sends only the accounts: the built-in roles stand in, read-only.
  */
-
-const on = (u: TeamUser) => u.on === 1 || u.on === true;
-const ROLE_ORDER: Record<Role, number> = { admin: 0, sales: 1, viewer: 2 };
 const LOST = ['session_expired', 'login_required', 'account_disabled', 'must_change_password', 'forbidden'];
 const SELF_GUARD = 'เปลี่ยนบทบาทหรือปิดบัญชีของตัวเองไม่ได้';
 const ADMIN_GUARD = 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน';
@@ -37,12 +44,16 @@ interface Cred { user: TeamUser; temp: string; reset?: boolean }
 interface Ask { title: string; text: string; yes: string; danger?: boolean; run: () => Promise<void> }
 interface Item { label: string; run: () => void; danger?: boolean }
 
+type Sec = UIState['usersSec'];
+
 export function Users() {
-  const { engine: e } = useApp();
+  const { engine: e, ui, set } = useApp();
   useEngineVersion();
   const narrow = useNarrow(760);
   const me = e.session?.u || '';
-  const [users, setUsers] = useState<TeamUser[] | null>(null);
+  const [dir, setDir] = useState<TeamDir | null>(null);
+  const users = dir?.users || null;
+  const setUsers = (f: (l: TeamUser[] | null) => TeamUser[] | null) => setDir((d) => (d ? { ...d, users: f(d.users) || [] } : d));
   const [at, setAt] = useState(0); // when the list was read (lock times count from then)
   const [load, setLoad] = useState<'loading' | 'ok' | 'error' | 'offline'>('loading');
   const [loadErr, setLoadErr] = useState('');
@@ -52,7 +63,7 @@ export function Users() {
   const [add, setAdd] = useState<{ name?: string; from: string } | null>(null);
   const [cred, setCred] = useState<Cred | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
-  const [rename, setRename] = useState<TeamUser | null>(null);
+  const [acct, setAcct] = useState<TeamUser | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
   useEffect(() => {
@@ -73,9 +84,9 @@ export function Users() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return setLoad('offline');
     setLoad('loading');
     try {
-      const us = await e.adminUsers();
+      const d = await e.adminDir();
       if (!alive.current) return;
-      setUsers(us);
+      setDir(d);
       setAt(Date.now());
       setLoad('ok');
     } catch (x) {
@@ -102,8 +113,13 @@ export function Users() {
     };
   }, [fetchUsers]);
 
-  const list = [...(users || [])].sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.name.localeCompare(b.name, 'th'));
-  const count = (r: Role) => list.filter((u) => u.role === r).length;
+  const roles = dir?.roles || e.knownRoles;
+  const rank = roleRank(roles);
+  const list = [...(users || [])].sort((a, b) => (rank.get(a.role) ?? 99) - (rank.get(b.role) ?? 99) || a.name.localeCompare(b.name, 'th'));
+  const today = todayISO();
+  const reqN = dir ? Object.keys(dir.reqs).length : e.session?.rq || 0;
+  const sec: Sec = ui.usersSec;
+  const goSec = (s: Sec) => set({ usersSec: s });
   const activeAdmins = list.filter((u) => u.role === 'admin' && on(u)).length;
   const guardOf = (u: TeamUser) => (u.u === me ? SELF_GUARD : u.role === 'admin' && on(u) && activeAdmins <= 1 ? ADMIN_GUARD : '');
   const offline = load === 'offline';
@@ -126,14 +142,17 @@ export function Users() {
   };
   const setRole = (u: TeamUser, role: Role) => {
     if (role === u.role) return;
-    const go = () => exec(u.u, async () => replace(await e.adminUpdate(u.u, { role })), role === 'viewer');
-    if (role !== 'viewer') return void go();
-    setAsk({ title: 'เปลี่ยนบทบาท', text: `เปลี่ยน ${u.name} เป็น ดูอย่างเดียว? รายการที่ ${u.name} แก้ไว้แต่ยังไม่ถึงทีมจะส่งไม่ได้`, yes: 'เปลี่ยนเป็น ดูอย่างเดียว', run: go });
+    const go = () => exec(u.u, async () => { replace(await e.adminUpdate(u.u, { role })); fetchUsers(); }, true);
+    const r = roleOf(roles, role);
+    // a role that sends nothing (view only): what this person has typed and not sent stays unsent
+    if (hasWrite(r.c)) return void go().catch(() => {});
+    setAsk({ title: 'เปลี่ยนบทบาท', text: `เปลี่ยน ${u.name} เป็น ${r.n}? รายการที่ ${u.name} แก้ไว้แต่ยังไม่ถึงทีมจะส่งไม่ได้`, yes: `เปลี่ยนเป็น ${r.n}`, run: go });
   };
   const itemsOf = (u: TeamUser): Item[] => {
     const self = u.u === me;
     const lockedNow = !!u.locked && at + u.locked * 1000 > Date.now();
     const out: (Item | false)[] = [
+      { label: 'แก้ไขบัญชี', run: () => setAcct(u) },
       !self && {
         label: 'ตั้งรหัสผ่านชั่วคราวใหม่',
         run: () =>
@@ -170,7 +189,6 @@ export function Users() {
               }),
           }
         : { label: 'เปิดใช้งานอีกครั้ง', run: () => void exec(u.u, async () => replace(await e.adminUpdate(u.u, { on: 1 }))) },
-      !u.ll && { label: 'แก้ชื่อที่แสดง', run: () => setRename(u) },
     ];
     return out.filter((x): x is Item => !!x);
   };
@@ -193,22 +211,82 @@ export function Users() {
       },
     });
 
-  const sub = users ? `${fmtN(list.length)} บัญชี · ผู้ดูแลระบบ ${fmtN(count('admin'))} · พนักงานขาย ${fmtN(count('sales'))} · ดูอย่างเดียว ${fmtN(count('viewer'))}` : undefined;
+  const sub = users ? `${fmtN(list.length)} บัญชี · ${fmtN(roles.length)} บทบาท · ${reqN ? `คำขอรออนุมัติ ${fmtN(reqN)}` : 'ไม่มีคำขอรออนุมัติ'}` : undefined;
+  const tabs: [Sec, string, number | null][] = [
+    ['acc', 'บัญชีผู้ใช้', users ? list.length : null],
+    ['roles', 'บทบาทและสิทธิ์', roles.length],
+    ['req', 'คำขอสิทธิ์', dir ? reqN : null],
+    ['notify', 'การแจ้งเตือน', null],
+  ];
+  /** Under the role: why it can't change, a request waiting, or the extras that hold. */
+  const under = (u: TeamUser): ReactNode => {
+    const g = guardOf(u);
+    if (g) return null;
+    const q = dir?.reqs[u.u];
+    if (q)
+      return (
+        <span className="rl-sub">
+          {reqWords(q, (id) => roleOf(roles, id).n)} · <button type="button" className="lnk" onClick={() => goSec('req')}>รออนุมัติ</button>
+        </span>
+      );
+    const x = dir ? extrasOf(dir, u.u, today) : [];
+    const tr = dir?.grants[u.u]?.r;
+    if (tr && effRole(dir!, u, today) !== u.role) return <span className="rl-sub">บทบาทชั่วคราว {roleOf(roles, tr.id).n}{tr.until ? ` ถึง ${isoTh(tr.until)}` : ''}</span>;
+    if (x.length) {
+      const last = x.map((y) => y.until || '').sort().pop();
+      return <span className="rl-sub">สิทธิ์เพิ่ม {x.length} รายการ{last ? ` ถึง ${isoTh(last)}` : ''}</span>;
+    }
+    return null;
+  };
+  const unitCell = <span className="rl-none">ยังไม่ระบุ</span>;
+  const mailCell = (u: TeamUser) =>
+    u.em ? (
+      <>
+        <span className="rl-mail">{u.em}</span>
+        {!(u.ok === 1 || u.ok === true) && <span className="rl-sub" style={{ display: 'block' }}>รอยืนยันอีเมล</span>}
+      </>
+    ) : (
+      <span className="rl-none">ยังไม่ใส่อีเมล</span>
+    );
   return (
     <>
-      <PageHead
-        title="ผู้ใช้และสิทธิ์"
-        sub={sub}
-        right={
-          users && !offline && (
+      <div className="rl-top">
+        <div className="pg-row rl-pgrow">
+          <div className="pg-h">
+            <h2>ผู้ใช้และสิทธิ์</h2>
+            {sub && <span className="pg-h-sub">{sub}</span>}
+          </div>
+          {sec === 'acc' && users && !offline && (
             <button id="us-add" className="us-btn primary" onClick={() => setAdd({ from: '#us-add' })}>
               เพิ่มผู้ใช้
             </button>
-          )
-        }
-      />
+          )}
+        </div>
+        {/* the page's sections: the page-tab style the Sales Tracker uses; counts are plain muted numbers */}
+        <div className="utabs rl-tabs" role="tablist" aria-label="ผู้ใช้และสิทธิ์">
+          {tabs.map(([k, label, n]) => (
+            <button key={k} role="tab" aria-selected={sec === k} onClick={() => goSec(k)}>
+              <span>{label}</span>
+              {n != null && <span className="n">{fmtN(n)}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
       {note && <Notice kind="ok" role="status">{note}</Notice>}
       {err && <Notice kind="error" role="alert">{err}</Notice>}
+      {sec !== 'acc' && sec !== 'notify' && (offline || load === 'error') && (
+        <section className="us-card">
+          <div className={'us-state' + (offline ? '' : ' bad')} role={offline ? undefined : 'alert'}>
+            <span>{offline ? 'ต้องออนไลน์เพื่อจัดการผู้ใช้และสิทธิ์' : loadErr}</span>
+            <button className="lnk" onClick={fetchUsers}>ลองอีกครั้ง</button>
+          </div>
+        </section>
+      )}
+      {sec === 'roles' && dir && !offline && load !== 'error' && <Roles dir={dir} reload={fetchUsers} lost={lost} />}
+      {sec === 'req' && dir && !offline && load !== 'error' && <Requests dir={dir} reload={fetchUsers} lost={lost} />}
+      {sec === 'notify' && <NotifyAdmin dir={dir} />}
+      {sec === 'acc' && (
+      <>
       <section className="us-card" aria-labelledby="us-list-h" aria-busy={load === 'loading' || undefined}>
         <h3 id="us-list-h" className="sr-only">บัญชีผู้ใช้ของทีม</h3>
         {offline && (
@@ -239,17 +317,25 @@ export function Users() {
             {list.map((u) => (
               <li key={u.u} className={'us-c' + (on(u) ? '' : ' off')}>
                 <div className="us-c-top">
-                  <Who u={u} self={u.u === me} />
+                  <Who u={u} self={u.u === me} admin={u.role === 'admin'} />
                   <RowMenu u={u} items={itemsOf(u)} busy={busyU === u.u} />
                 </div>
                 <div className="us-c-grid">
-                  <div>
+                  <div className="wide">
                     <span className="us-k">บทบาท</span>
-                    <RoleSelect u={u} guard={guardOf(u)} busy={busyU === u.u} onPick={(r) => setRole(u, r)} />
+                    <RoleSelect u={u} roles={roles} guard={guardOf(u)} under={under(u)} busy={busyU === u.u} onPick={(r) => setRole(u, r)} />
+                  </div>
+                  <div>
+                    <span className="us-k">หน่วยงาน</span>
+                    {unitCell}
                   </div>
                   <div>
                     <span className="us-k">สถานะ</span>
                     <Status u={u} at={at} />
+                  </div>
+                  <div className="wide">
+                    <span className="us-k">อีเมลแจ้งเตือน</span>
+                    <span>{mailCell(u)}</span>
                   </div>
                   <div className="wide">
                     <span className="us-k">เข้าสู่ระบบล่าสุด</span>
@@ -260,11 +346,13 @@ export function Users() {
             ))}
           </ul>
         ) : (
-          <table className="us-table">
+          <table className="us-table rl-acc">
             <thead>
               <tr>
                 <th scope="col">ผู้ใช้</th>
                 <th scope="col">บทบาท</th>
+                <th scope="col">หน่วยงาน</th>
+                <th scope="col">อีเมลแจ้งเตือน</th>
                 <th scope="col">สถานะ</th>
                 <th scope="col">เข้าสู่ระบบล่าสุด</th>
                 <th scope="col"><span className="sr-only">จัดการ</span></th>
@@ -273,10 +361,12 @@ export function Users() {
             <tbody>
               {list.map((u) => (
                 <tr key={u.u} className={on(u) ? undefined : 'off'}>
-                  <td><Who u={u} self={u.u === me} /></td>
-                  <td><RoleSelect u={u} guard={guardOf(u)} busy={busyU === u.u} onPick={(r) => setRole(u, r)} /></td>
+                  <td><Who u={u} self={u.u === me} admin={u.role === 'admin'} /></td>
+                  <td><RoleSelect u={u} roles={roles} guard={guardOf(u)} under={under(u)} busy={busyU === u.u} onPick={(r) => setRole(u, r)} /></td>
+                  <td>{unitCell}</td>
+                  <td>{mailCell(u)}</td>
                   <td><Status u={u} at={at} /></td>
-                  <td className="us-ll">{u.ll ? dtTh(u.ll) : <span className="us-muted">ยังไม่เคยเข้าสู่ระบบ</span>}</td>
+                  <td className="us-ll">{u.ll ? <DateTime iso={u.ll} /> : <span className="us-muted">ยังไม่เคยเข้าสู่ระบบ</span>}</td>
                   <td className="us-act"><RowMenu u={u} items={itemsOf(u)} busy={busyU === u.u} /></td>
                 </tr>
               ))}
@@ -318,6 +408,7 @@ export function Users() {
       </div>
 
       {/* (was on the update page, which a team that signs in no longer has) */}
+      {e.can('set.data') && (
       <section className="us-card us-backup" aria-labelledby="us-backup-h">
         <h3 id="us-backup-h" className="us-h">ไฟล์สำรองข้อมูลทีม</h3>
         <div className="us-row">
@@ -338,11 +429,16 @@ export function Users() {
         <span className="us-muted us-small">ไฟล์สำรองมีข้อมูลทั้งทีม</span>
         {e.tmMsg && <span className="us-tm" role="status">{e.tmMsg}</span>}
       </section>
+      )}
+      </>
+      )}
 
       {add && (
         <AddUser
           initName={add.name || ''}
           users={list}
+          roles={roles}
+          v4={!!dir?.v4}
           onClose={() => {
             const from = add.from;
             setAdd(null);
@@ -351,25 +447,44 @@ export function Users() {
           onDone={(r) => {
             replace(r.user);
             setNote('');
+            fetchUsers();
           }}
           lost={lost}
         />
       )}
       {cred && (
         <Modal title="ตั้งรหัสผ่านชั่วคราวใหม่" onClose={() => { setCred(null); refocus(`[data-more="${cred.user.u}"]`); }} width={520} focus="dialog">
-          <CredCard cred={cred} onDone={() => { setCred(null); refocus(`[data-more="${cred.user.u}"]`); }} />
+          <CredCard cred={cred} roles={roles} onDone={() => { setCred(null); refocus(`[data-more="${cred.user.u}"]`); }} />
         </Modal>
       )}
       {ask && <Confirm ask={ask} onClose={() => setAsk(null)} />}
-      {rename && <Rename u={rename} onClose={() => setRename(null)} onDone={(nu) => { replace(nu); setErr(''); setNote(''); }} lost={lost} />}
+      {acct && dir && (
+        <AccountDialog
+          u={acct}
+          dir={dir}
+          self={acct.u === me}
+          guard={guardOf(acct)}
+          onClose={() => { const u = acct.u; setAcct(null); refocus(`[data-more="${u}"]`); }}
+          onSaved={(msg) => { setErr(''); setNote(msg); fetchUsers(); }}
+          onRoles={(rid) => { setAcct(null); set({ usersSec: 'roles' }); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-role="${rid}"]`)?.click()); }}
+          lost={lost}
+        />
+      )}
     </>
   );
 }
 
-function Who({ u, self }: { u: TeamUser; self: boolean }) {
+/** "15 ต.ค. 2569" over "08:53 น." */
+function DateTime({ iso }: { iso: string }) {
+  const s = dtTh(iso);
+  const m = /^(.*\S)\s+(\d{1,2}:\d{2}.*)$/.exec(s);
+  return m ? <>{m[1]}<span className="t">{m[2]}</span></> : <>{s}</>;
+}
+
+function Who({ u, self, admin }: { u: TeamUser; self: boolean; admin: boolean }) {
   return (
     <span className="us-who">
-      <span className={'us-ava r-' + u.role} aria-hidden="true">{nameLetter(u.name)}</span>
+      <span className={'us-ava r-' + (admin ? 'admin' : 'sales')} aria-hidden="true">{nameLetter(u.name)}</span>
       <span className="us-who-t">
         <span className="us-name">
           {u.name}
@@ -381,8 +496,10 @@ function Who({ u, self }: { u: TeamUser; self: boolean }) {
   );
 }
 
-function RoleSelect({ u, guard, busy, onPick }: { u: TeamUser; guard: string; busy: boolean; onPick: (r: Role) => void }) {
+function RoleSelect({ u, roles, guard, under, busy, onPick }: { u: TeamUser; roles: RoleDef[]; guard: string; under: ReactNode; busy: boolean; onPick: (r: Role) => void }) {
   const id = useId();
+  // a role id the list doesn't have (deleted meanwhile): shown as it is until changed
+  const opts = roles.some((r) => r.id === u.role) ? roles : [...roles, roleOf(roles, u.role)];
   return (
     <span className="us-role">
       <Select
@@ -394,9 +511,10 @@ function RoleSelect({ u, guard, busy, onPick }: { u: TeamUser; guard: string; bu
         label={`บทบาทของ ${u.name}`}
         describedBy={guard ? id : undefined}
         search={false}
-        options={ROLES.map((r) => ({ v: r, label: ROLE_TH[r] }))}
+        options={opts.map((r) => ({ v: r.id, label: r.n }))}
       />
       {guard && <span id={id} className="us-guard">{guard}</span>}
+      {!guard && under}
     </span>
   );
 }
@@ -488,7 +606,7 @@ function Confirm({ ask, onClose }: { ask: Ask; onClose: () => void }) {
 }
 
 /** The temporary password, shown once, with the invitation to send privately. */
-function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
+function CredCard({ cred, roles, onDone }: { cred: Cred; roles: RoleDef[]; onDone: () => void }) {
   const { engine: e } = useApp();
   const [copied, setCopied] = useState('');
   // the browser refused the clipboard: the text to copy by hand, selected (in place of its own prompt box)
@@ -523,7 +641,7 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
     <div className="us-cred">
       <div className="us-cred-h">
         <b>{cred.reset ? `ตั้งรหัสผ่านชั่วคราวใหม่ให้ ${user.name} แล้ว` : `สร้างบัญชี ${user.name} แล้ว`}</b>
-        <RoleChip role={user.role} />
+        <RoleChip name={roleOf(roles, user.role).n} admin={user.role === 'admin'} />
       </div>
       <dl className="us-cred-rows">
         {rows.map(([k, label, v]) => (
@@ -556,12 +674,13 @@ function CredCard({ cred, onDone }: { cred: Cred; onDone: () => void }) {
   );
 }
 
-function AddUser({ initName, users, onClose, onDone, lost }: { initName: string; users: TeamUser[]; onClose: () => void; onDone: (r: Cred) => void; lost: (x: unknown) => void }) {
+function AddUser({ initName, users, roles, v4, onClose, onDone, lost }: { initName: string; users: TeamUser[]; roles: RoleDef[]; v4: boolean; onClose: () => void; onDone: (r: Cred) => void; lost: (x: unknown) => void }) {
   const { engine: e } = useApp();
   const [name, setName] = useState(initName);
   const [u, setU] = useState('');
   const [uTouched, setUTouched] = useState(false);
   const [role, setRole] = useState<Role>('sales');
+  const [em, setEm] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [cred, setCred] = useState<Cred | null>(null);
@@ -578,10 +697,12 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
       setUTouched(true);
       return setErr(exists ? 'มีชื่อผู้ใช้นี้แล้ว' : 'ชื่อผู้ใช้ใช้ได้เฉพาะ' + USER_HINT);
     }
+    const mail = em.trim();
+    if (mail && !EMAIL_RE.test(mail)) return setErr('อีเมลไม่ถูกต้อง');
     setBusy(true);
     setErr('');
     try {
-      const r = await e.adminCreate({ u: user, name: n, role });
+      const r = await e.adminCreate({ u: user, name: n, role, ...(v4 && mail ? { em: mail } : {}) });
       setCred(r);
       onDone(r);
     } catch (x) {
@@ -594,7 +715,7 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
   return (
     <Modal title="เพิ่มผู้ใช้" onClose={busy ? () => {} : onClose} width={560}>
       {cred ? (
-        <CredCard cred={cred} onDone={onClose} />
+        <CredCard cred={cred} roles={roles} onDone={onClose} />
       ) : (
         <form className="us-form" onSubmit={submit} noValidate aria-busy={busy || undefined}>
           <div className="us-2">
@@ -626,18 +747,18 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
               <span id={ids + 'uh'} className={uErr ? 'auth-field-err' : 'auth-hint'} aria-live="polite">{uErr || USER_HINT}</span>
             </div>
           </div>
-          <fieldset className="us-roles fs-reset">
-            <legend>บทบาท</legend>
-            {ROLES.map((r) => (
-              <label key={r} className={'us-rc' + (role === r ? ' on' : '')}>
-                <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} />
-                <span className="us-rc-t">
-                  <b>{ROLE_TH[r]}</b>
-                  <span>{ROLE_DESC[r]}</span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
+          {v4 && (
+            <div className="auth-field">
+              <label htmlFor={ids + 'e'}>อีเมลแจ้งเตือน <span className="rl-sub">(ไม่บังคับ)</span></label>
+              <input id={ids + 'e'} className="auth-input" type="email" value={em} onChange={(ev) => { setEm(ev.target.value); setErr(''); }} autoComplete="off" placeholder="name@example.com" aria-describedby={ids + 'eh'} />
+              <span id={ids + 'eh'} className="auth-hint">ระบบส่งรหัสยืนยันไปที่อีเมลนี้ก่อนเริ่มส่งการแจ้งเตือน</span>
+            </div>
+          )}
+          <div className="auth-field">
+            <span className="rl-lbl" id={ids + 'r'} style={{ margin: 0 }}>บทบาท</span>
+            <Select label="บทบาท" labelledBy={ids + 'r'} value={role} onChange={(v) => setRole(v as Role)} search={false} options={roles.map((r) => ({ v: r.id, label: r.n }))} />
+            <span className="auth-hint">{roleLine(roleOf(roles, role))}</span>
+          </div>
           {err && <Notice kind="error" role="alert">{err}</Notice>}
           <div className="dlg-act">
             <button type="button" className="quiet" onClick={onClose} disabled={busy}>ยกเลิก</button>
@@ -648,50 +769,6 @@ function AddUser({ initName, users, onClose, onDone, lost }: { initName: string;
           </div>
         </form>
       )}
-    </Modal>
-  );
-}
-
-/** แก้ชื่อที่แสดง (only before the account's first sign-in: afterwards the name is in the data). */
-function Rename({ u, onClose, onDone, lost }: { u: TeamUser; onClose: () => void; onDone: (u: TeamUser) => void; lost: (x: unknown) => void }) {
-  const { engine: e } = useApp();
-  const [name, setName] = useState(u.name);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const id = useId();
-  const submit = async (ev: FormEvent) => {
-    ev.preventDefault();
-    const n = name.trim().replace(/\s+/g, ' ');
-    if (!n) return setErr('ใส่ชื่อที่แสดง');
-    if (n === u.name) return onClose();
-    setBusy(true);
-    setErr('');
-    try {
-      onDone(await e.adminRename(u, n));
-      onClose();
-    } catch (x) {
-      lost(x);
-      setErr(authError(x).msg);
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal title="แก้ชื่อที่แสดง" onClose={busy ? () => {} : onClose} width={440}>
-      <form className="us-form" onSubmit={submit} noValidate>
-        <div className="auth-field">
-          <label htmlFor={id}>ชื่อที่แสดง</label>
-          <input id={id} className="auth-input" value={name} onChange={(ev) => setName(ev.target.value)} maxLength={40} />
-          <span className="auth-hint">@{u.u} · แก้ได้เฉพาะก่อนเข้าสู่ระบบครั้งแรก</span>
-        </div>
-        {err && <Notice kind="error" role="alert">{err}</Notice>}
-        <div className="dlg-act">
-          <button type="button" className="quiet" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button type="submit" className="us-btn primary" disabled={busy}>
-            {busy && <span className="auth-spin" aria-hidden="true" />}
-            บันทึก
-          </button>
-        </div>
-      </form>
     </Modal>
   );
 }
