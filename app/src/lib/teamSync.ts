@@ -151,11 +151,11 @@ export const fetchTransport: Transport = async (url, body) => {
 };
 
 /** Call the server and unwrap {ok:false,error} into a TeamSyncError. Every request says it comes
- *  from this client version (`cv: 3`), so an accounts-mode script answers `login_required` to a
+ *  from this client version (`cv: 4`), so an accounts-mode script answers `login_required` to a
  *  team-code request instead of the message meant for old app builds. */
 export async function call<T extends Record<string, unknown>>(t: Transport, url: string, cred: Cred, body: Record<string, unknown>): Promise<T> {
   const auth = cred == null ? {} : typeof cred === 'string' ? { key: cred } : { tok: cred.tok };
-  const r = await t(url, { ...body, cv: 3, ...auth });
+  const r = await t(url, { ...body, cv: 4, ...auth });
   if (!r || r.ok !== true) {
     const code = String((r && r.error) || 'unknown');
     throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code, code, r || {});
@@ -167,7 +167,7 @@ export async function call<T extends Record<string, unknown>>(t: Transport, url:
  *  `unauthorized` / `no_team_key` (or `unknown_action`); a v3 one says its mode and the public
  *  values the browser needs to hash a password (`tid`, `it`). */
 export async function hello(t: Transport, url: string): Promise<Caps> {
-  const r = await t(url, { action: 'hello', cv: 3 });
+  const r = await t(url, { action: 'hello', cv: 4 });
   if (r && r.ok === true && Number(r.v) >= 3) {
     const mode = r.mode === 'accounts' || r.mode === 'setup' ? r.mode : 'legacy';
     return { v: 3, mode, tid: String(r.tid || ''), it: Number(r.it) || 0, files: !!r.files };

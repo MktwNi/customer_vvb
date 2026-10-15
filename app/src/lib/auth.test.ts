@@ -109,16 +109,16 @@ describe('protocol helpers', () => {
     await expect(hello(reply({ ok: false, error: 'busy' }), URL)).rejects.toBeInstanceOf(TeamSyncError);
     await expect(hello(async () => { throw new TypeError('Failed to fetch'); }, URL)).rejects.toBeInstanceOf(TypeError);
   });
-  it('call: the team code as key, a session as tok, neither for sign-in; always cv 3', async () => {
+  it('call: the team code as key, a session as tok, neither for sign-in; always cv 4', async () => {
     const sent: Record<string, unknown>[] = [];
     const t: Transport = async (_u, b) => (sent.push(b), { ok: true });
     await call(t, URL, 'team-code-1', { action: 'ping' });
     await call(t, URL, { tok: 'g1.a.b' }, { action: 'pull', since: 0 });
     await call(t, URL, null, { action: 'login', u: 'mod', pk: 'x' });
     expect(sent).toEqual([
-      { action: 'ping', cv: 3, key: 'team-code-1' },
-      { action: 'pull', since: 0, cv: 3, tok: 'g1.a.b' },
-      { action: 'login', u: 'mod', pk: 'x', cv: 3 },
+      { action: 'ping', cv: 4, key: 'team-code-1' },
+      { action: 'pull', since: 0, cv: 4, tok: 'g1.a.b' },
+      { action: 'login', u: 'mod', pk: 'x', cv: 4 },
     ]);
   });
   it('call: a refusal is a TeamSyncError with its code, a Thai message and the reply', async () => {
