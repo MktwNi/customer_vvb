@@ -55,7 +55,9 @@ export function RequestDialog({ onClose }: { onClose: () => void }) {
       }
       return n;
     });
-  const picked = (Object.keys(pick) as CapId[]).filter((x) => !have[x]);
+  // asked for: not held, or held for own work only and asked for everyone's work (s 'all')
+  const wider = (id: CapId) => have[id] === 'own' && !!CAP[id].scope;
+  const picked = (Object.keys(pick) as CapId[]).filter((x) => !have[x] || (wider(x) && pick[x] === 'all'));
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     if (busy) return;
@@ -115,7 +117,7 @@ export function RequestDialog({ onClose }: { onClose: () => void }) {
             <p className="rl-lbl">เลือกสิทธิ์ที่ขอเพิ่ม{picked.length ? ` · เลือกแล้ว ${picked.length} รายการ` : ''}</p>
             <div className="rl-capl">
               {GROUPS.map((g) => {
-                const items = CAPS.filter((c) => c.g === g.id && !have[c.id] && c.id !== LOCKED_CAP);
+                const items = CAPS.filter((c) => c.g === g.id && (!have[c.id] || wider(c.id)) && c.id !== LOCKED_CAP);
                 if (!items.length) return null;
                 return (
                   <div key={g.id} role="group" aria-label={g.title} style={{ display: 'contents' }}>
@@ -123,7 +125,7 @@ export function RequestDialog({ onClose }: { onClose: () => void }) {
                     {items.map((c) => {
                       const on = !!pick[c.id];
                       const need = needsChain(c.id, { ...have, ...pick });
-                      const hint = !on && need.length ? `ติ๊กแล้วจะขอ “${need.map((x) => CAP[x].label).join('” และ “')}” ให้ด้วย` : c.desc;
+                      const hint = !on && need.length ? `ติ๊กแล้วจะขอ “${need.map((x) => CAP[x].label).join('” และ “')}” ให้ด้วย` : wider(c.id) ? 'ตอนนี้ได้เฉพาะงานของตัวเอง ขอให้ได้กับงานของทุกคน' : c.desc;
                       return (
                         <label key={c.id} className={'rl-rc' + (on ? ' on' : '') + (!on && need.length ? ' need' : '')}>
                           <span className={'fck' + (on ? ' on' : '')}>
@@ -131,7 +133,7 @@ export function RequestDialog({ onClose }: { onClose: () => void }) {
                             <Check on={on} />
                           </span>
                           <span className="rl-rc-t">
-                            <b>{c.label}</b>
+                            <b>{c.label}{wider(c.id) ? ' ของทุกคน' : ''}</b>
                             <span>{hint}</span>
                           </span>
                         </label>

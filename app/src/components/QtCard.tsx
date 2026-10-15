@@ -3,7 +3,7 @@ import { useApp } from '../state';
 import { dmTh, downloadBlob, isoTh, localDay } from '../lib/format';
 import { KIND_TH, QUOTE_STAGE, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, type Deal, type DealDoc, type DocKind } from '../lib/sales';
 import { fcFig } from '../lib/salesUi';
-import { qtDelText, qtFacts, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, thList, type QtVersion, type QtView } from '../lib/quotes';
+import { qtDelText, qtFacts, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, thList, type QtVersion, type QtView } from '../lib/quotes';
 import type { DocFacts } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
@@ -44,7 +44,9 @@ export function deleteQt(e: GccEngine, d: Deal, v: QtView, say: (t: string) => v
 export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => void }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
-  const ro = !e.can('docs.up');
+  const ro = !e.canQuote(d);
+  // without ดูยอดเงิน the card names the quotation and nothing it counts toward (its amount never came)
+  const money = e.can('view.money'), opens = e.can('docs.open');
   const [form, setForm] = useState(false);
   const [swap, setSwap] = useState(false);
   const [tick, setTick] = useState(0);
@@ -87,14 +89,16 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
             <small>{meta}</small>
             {cv && <QtCheckLine doc={doc} v={cv} onCheck={check} />}
           </span>
-          <span className="sl-docc-a">
-            <b>{doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '—'}</b>
-            {warn ? <small className="warn">ไม่ตรงเอกสาร</small> : <small className={h.state === 'cur' ? 'ok' : ''}>{goes}</small>}
-          </span>
+          {money && (
+            <span className="sl-docc-a">
+              <b>{doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '—'}</b>
+              {warn ? <small className="warn">ไม่ตรงเอกสาร</small> : <small className={h.state === 'cur' ? 'ok' : ''}>{goes}</small>}
+            </span>
+          )}
         </div>
       </div>
       <QtBack v={cv} />
-      {warn && (
+      {money && warn && (
         <p className="sl-docc-w">
           {warn}
           {!ro && <> · <button type="button" className="lnk" onClick={useDoc}>ใช้ยอดจากเอกสาร {fmtMoney(mm ? mm.doc : doc.amount)}</button></>}
@@ -102,8 +106,8 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
       )}
       {ro ? (
         <div className="qt-acts">
-          <button type="button" className="btn xs" onClick={() => open(doc)}>{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>
-          <span className="qt-ro">บัญชีดูอย่างเดียว แก้ไขหรือแนบฉบับใหม่ไม่ได้</span>
+          {opens && <button type="button" className="btn xs" onClick={() => open(doc)}>{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>}
+          <span className="qt-ro">{qtRoText(e.can('docs.up'), d.resp)}</span>
         </div>
       ) : form ? (
         <QtForm d={d} doc={doc} n={h.n} onDone={(said) => (setForm(false), said && acts.say(said))} />
@@ -421,6 +425,7 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
   const olds: QtVersion[] = v.versions.filter((x) => x !== h).reverse();
   const goes = h.state === 'cur' ? TARGET_TH.forecast : v.typed && doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : TARGET_TH[doc.target];
   const cv = e.qtCheckFor(doc);
+  const ro = !e.canQuote(d);
   return (
     <>
       <div className="qt-mc">
@@ -438,7 +443,9 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
       {cv?.status === 'wait' && !e.checkBlock(doc) && (
         <button type="button" className="lnk qt-go" onClick={() => set({ qtCheck: doc.id, qtSig: '' })}>ตรวจใบนี้</button>
       )}
-      {form ? (
+      {ro ? (
+        <span className="qt-ro">{qtRoText(e.can('docs.up'), d.resp)}</span>
+      ) : form ? (
         <QtForm d={d} doc={doc} n={h.n} onDone={(said) => (setForm(false), said && (acts.say(said), onChange?.()))} />
       ) : (
         <>

@@ -108,6 +108,8 @@ describe('needs, scopes and resolving', () => {
     const t = { r: { id: 'head', until: '2027-01-31' } };
     expect(sameCaps(resolveCaps('sales', roles, t, '2027-01-31'), HEAD)).toBe(true);
     expect(sameCaps(resolveCaps('sales', roles, t, '2027-02-01'), BUILTIN.sales.c)).toBe(true);
+    // never narrows an admin (a request left over from before the account was made one)
+    expect(resolveCaps('admin', roles, { r: { id: 'viewer', until: '2027-01-31' } }, '2026-10-15')).toEqual(ALL_CAPS);
     // an extra whose prerequisite is missing does nothing
     expect(resolveCaps('viewer', roles, { c: [{ k: 'edit.share' }] }, '2026-10-15')['edit.share']).toBeUndefined();
     // an own extra on a role holding it for all stays all
@@ -203,6 +205,10 @@ describe('words', () => {
   it('what a role adds over another (request cards, role mode of the request dialog)', () => {
     expect(gained(BUILTIN.sales.c, HEAD)).toEqual(['ดูค่าคอมมิชชั่น / สัดส่วนรายได้', 'แก้สัดส่วน % ของงาน', 'ลบดีล ลูกค้า และผู้ติดต่อ', 'ลบบันทึกการติดต่อของทุกคน', 'ตรวจ/อนุมัติใบเสนอราคา']);
     expect(lost(BUILTIN.sales.c, ACCT)).toEqual(['แก้ไขลูกค้าและผู้ติดต่อ', 'แก้ไขดีลและขั้นตอน', 'แก้ไขนัดหมาย', 'ติดประเภทลูกค้า', 'สร้างใบเสนอราคาร่วม', 'ลบบันทึกการติดต่อ']);
+    // a scope narrowed to own work is lost too: other people's deals and payment plans
+    const ownOnly: CapSet = { ...BUILTIN.sales.c, 'edit.deal': 'own', 'edit.pay': 'own' };
+    expect(lost(BUILTIN.sales.c, ownOnly)).toEqual(['แก้ไขดีลและขั้นตอนของคนอื่น', 'แก้ไขแผนชำระเงินและการรับเงินของคนอื่น']);
+    expect(gained(ownOnly, BUILTIN.sales.c)).toEqual(['แก้ไขดีลและขั้นตอนของทุกคน', 'แก้ไขแผนชำระเงินและการรับเงินของทุกคน']);
     expect(gained(BUILTIN.viewer.c, { ...BUILTIN.viewer.c, 'edit.deal': 'own' })).toEqual(['แก้ไขดีลและขั้นตอน (เฉพาะงานของตัวเอง)']);
     expect(listWords(['a', 'b', 'c', 'd', 'e'])).toBe('a · b · c และอีก 2 รายการ');
     expect(listWords(['a', 'b'])).toBe('a · b');

@@ -239,7 +239,8 @@ function Matrix({ dir }: { dir: TeamDir }) {
           <p>กดชื่อบทบาททางซ้ายเพื่อแก้ไข · ผู้ดูแลระบบทำได้ทุกอย่างเสมอ</p>
         </div>
       </div>
-      <div className="rl-mx-w">
+      {/* a wide table (many roles) scrolls inside the card: reachable by keyboard too */}
+      <div className="rl-mx-w" tabIndex={0} role="region" aria-label="ตารางเทียบสิทธิ์ทุกบทบาท">
         <table className="rl-mx-tb">
           <thead>
             <tr>

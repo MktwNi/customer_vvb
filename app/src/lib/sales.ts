@@ -658,18 +658,39 @@ export type PlanInput = { stage: string } & Pick<PayLine, (typeof PLAN_FIELDS)[n
 /** The stage note "รับเงินแล้ว" fills in (an empty one), so builds without the plan see the stage done too. */
 export const paidNote = (l: Pick<PayLine, 'amt' | 'got' | 'how'>) => `รับชำระแล้ว ${fmtMoney(l.got ?? l.amt ?? 0)} บาท${l.how ? ' · ' + HOW_TH[l.how] : ''}`;
 
+/**
+ * The tracker of a session that may not see money (no ดูยอดเงิน): the team script sent its amounts as
+ * null, so nothing is worked out from them. Its deals have no payment plan here (no amounts, no part
+ * paid, late or due from figures it never got); payState still says which installments came in, from
+ * what carries no amount: a receipt recorded (its date), the stage done, a receipt attached there. The
+ * engine marks its state (setMoneyHidden).
+ */
+const blind = new WeakSet<object>();
+export function setMoneyHidden(s: SalesState, on: boolean) {
+  if (on) blind.add(s);
+  else blind.delete(s);
+}
+export const moneyHidden = (s: SalesState) => blind.has(s);
+
 /** One installment in plan order: `n` is its number (1-based); `inList` = its stage is a PAY stage of the list. */
 export interface PlanEntry { stage: string; n: number; inList: boolean; line: PayLine }
 /** The plan's installments in order — the PAY stages of the list first (list order), then extra ones
- *  (and lines whose stage an admin renamed or removed) by the number in their name — or null without a plan. */
+ *  (and lines whose stage an admin renamed or removed) by the number in their name — or null without a
+ *  plan (and for a session that may not see money: see setMoneyHidden). */
 export function planLines(s: SalesState, d: Deal): PlanEntry[] | null {
+  if (blind.has(s)) return null;
+  const names = planStages(s, d);
+  if (!names.length) return null;
+  const pays = payStages(s.cfg), P = s.pays || {};
+  return names.map((stage, i) => ({ stage, n: i + 1, inList: pays.includes(stage), line: P[d.id + '/' + stage] }));
+}
+/** The stages of a deal's plan in plan order (see planLines); [] without one. */
+function planStages(s: SalesState, d: Deal): string[] {
   const pre = d.id + '/', P = s.pays || {};
   const names = Object.keys(P).filter((k) => k.startsWith(pre)).map((k) => k.slice(pre.length));
-  if (!names.length) return null;
+  if (!names.length) return [];
   const pays = payStages(s.cfg), no = (p: string) => +p.replace(/\D/g, '') || 99;
-  return [...pays.filter((p) => names.includes(p)), ...names.filter((p) => !pays.includes(p)).sort((a, b) => no(a) - no(b) || a.localeCompare(b))].map((stage, i) => ({
-    stage, n: i + 1, inList: pays.includes(stage), line: P[pre + stage],
-  }));
+  return [...pays.filter((p) => names.includes(p)), ...names.filter((p) => !pays.includes(p)).sort((a, b) => no(a) - no(b) || a.localeCompare(b))];
 }
 
 /** paid รับแล้ว · part รับบางส่วน · late เลยกำหนด · due ถึงกำหนด (within 7 days) · wait รอชำระ · draft แผน (typed
@@ -800,8 +821,16 @@ export function payState(s: SalesState, d: Deal, today: string): { pays: string[
     const pays = plan.lines.map((l) => l.stage), paid = plan.lines.filter((l) => l.status === 'paid').map((l) => l.stage);
     return { pays, paid, left: pays.filter((p) => !paid.includes(p)), plan };
   }
-  const pays = payStages(s.cfg), t = stageTrack(s, d, today), by = stageDocs(s, d).by;
-  const paid = pays.filter((p) => t.states[p] === 'done' || (by[p] || []).some((x) => x.target === 'actual' && x.amount != null));
+  // without ดูยอดเงิน (no amounts here): the plan's installments when there is one, and what came in by
+  // what carries no amount: a receipt recorded (its date), the stage done, a receipt attached there
+  const hide = blind.has(s), P = s.pays || {}, planned = hide ? planStages(s, d) : [];
+  const pays = planned.length ? planned : payStages(s.cfg), t = stageTrack(s, d, today), by = stageDocs(s, d).by;
+  const paid = pays.filter(
+    (p) =>
+      t.states[p] === 'done' ||
+      (by[p] || []).some((x) => (x.target === 'actual' && x.amount != null) || (hide && x.kind === 'receipt')) ||
+      (hide && !!(P[d.id + '/' + p]?.rcv || P[d.id + '/' + p]?.full)),
+  );
   return { pays, paid, left: pays.filter((p) => !paid.includes(p)), plan: null };
 }
 /** When to offer "ปิดงาน": the result is NO; or it is YES and every installment of the plan is received

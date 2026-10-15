@@ -66,6 +66,8 @@ describe('the Users page helpers', () => {
     expect(peopleLine(dir, 'head')).toBe('ยังไม่มีผู้ใช้');
     expect(effRole(dir, dir.users[1], '2026-10-15')).toBe('head');
     expect(effRole(dir, dir.users[1], '2027-02-01')).toBe('sales');
+    // never narrows an admin (as the script decides)
+    expect(effRole({ grants: { mew: { r: { id: 'head', until: '2027-01-31' } } } }, dir.users[0], '2026-10-15')).toBe('admin');
     expect(extrasOf(dir, 'mk', '2026-10-15').map((x) => x.k)).toEqual(['view.comm']);
     expect(roleOf(dir.roles, 'head').n).toBe('หัวหน้าฝ่ายขาย');
     expect(roleOf(dir.roles, 'gone')).toMatchObject({ id: 'gone', n: 'gone', c: {} });

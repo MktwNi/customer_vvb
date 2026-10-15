@@ -45,7 +45,8 @@
  *     it is unverified) is stored unverified and gets a 6-digit code by mail (sent = 1, or 0 + mail = the reason);
  *     em: '' removes the address. At most 3 codes an hour.
  *   { action: 'notify_verify', tok, code }       -> { ok }   (the code from the mail, within 15 minutes, 5 tries)
- *   { action: 'notify_test', tok }               -> { ok }   (notify.mail: one mail to one's own verified address)
+ *   { action: 'notify_test', tok }               -> { ok }   (notify.mail: one mail to one's own verified address,
+ *     at most 3 an hour and 6 a day: 'too_many_tests')
  *   { action: 'qt_check', tok, k, st, note?, fp, s? } -> { ok, seq, chk }   (qt.check: see "quotation check" below)
  * Token, set.users (an admin):
  *   { action: 'users', tok }                     -> { ok, users: [{ u, name, role, on, mc, ll, c, locked, em, ok, notify }],
@@ -56,7 +57,8 @@
  *   { action: 'role_save', tok, id?, n, d?, c?, from?, o? }  -> { ok, id, roles, grants, reqs }
  *   { action: 'role_del', tok, id, to? }         -> { ok, roles, grants, reqs }   (members and grants move to `to`)
  *   { action: 'grant_save', tok, u, c: [{ k, s?, until? }] } / { action: 'grant_del', tok, u, k } -> { ok, roles, grants, reqs }
- *   { action: 'req_decide', tok, u, ok, note?, id? } -> { ok, roles, grants, reqs }
+ *   { action: 'req_decide', tok, u, ok, note?, id } -> { ok, roles, grants, reqs }   id = the request shown (REQS[u].id):
+ *     another one ('changed', the requester sent a new one meanwhile) or none ('bad_req') decides nothing
  *     roles  = { <id>: { n, d, c, o, at?, by?, bi?: 1 } } every role, built-ins (bi) included; admin's c is everything
  *     grants = GRANTS, reqs = REQS (see "Script Properties" below); audit = the last 50 rows, newest first:
  *              [{ at, actor, u, action, detail, note }]
@@ -91,8 +93,9 @@
  * Capabilities (CAPS_, the same catalogue as the web app's lib/caps.ts): what a key needs is in KEY_CAP
  * (default deny: an unknown prefix needs set.users, qchk/ is never pushed). A refused op is listed in
  * `denied` and never stored. push needs a write capability, upload and delfile docs.up, file docs.open.
- * Accounts without set.users get by = their name in log/, dlog/, dact/ values, and by + at = their name
- * and the time in dchk/ and mclose/. pull strips money without view.money and commission without view.comm.
+ * Accounts without set.users get by = their name in log/, dlog/, dact/ values, by + at = their name
+ * and the time in dchk/ and mclose/, and in a ddoc/ value by = whoever attached the document (the
+ * account for a new one, else the attacher stored with it). pull strips money without view.money and commission without view.comm.
  * A token request from an older build (cv < 4) may still read, but push, upload and delfile answer
  * 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)', which those builds show as is (their queue is kept).
  *   Errors: { ok: false, error: 'unauthorized' | 'no_team_key' | 'busy' | 'bad_json' | 'unknown_action'
@@ -103,7 +106,7 @@
  *            | 'user_exists' | 'unknown_user' | 'too_many_users' | 'not_self' | 'last_admin' | 'name_locked'
  *            | 'role_in_use' | 'role_locked' | 'bad_cap' | 'cap_held' | 'too_many_roles' | 'req_note' | 'bad_until'
  *            | 'bad_req' | 'no_request' | 'changed' | 'too_many_grants' | 'too_many_reqs' | 'self_check' | 'too_late'
- *            | 'bad_email' | 'bad_notify' | 'too_many_codes' | 'code_wrong' | 'code_expired' | 'no_email' | 'no_quota'
+ *            | 'bad_email' | 'bad_notify' | 'too_many_codes' | 'too_many_tests' | 'code_wrong' | 'code_expired' | 'no_email' | 'no_quota'
  *            | 'mail_failed' | ... }
  *   A team-code request in accounts mode answers 'login_required' (or, without cv, a Thai sentence that
  *   older web apps show as is).
@@ -171,7 +174,10 @@ const NOTIFY_HEADER = ['at', 'kind', 'u', 'key', 'fp', 'result'];
 const NOTIFY_KEEP_MS = 90 * 86400000; // the send log is also what stops a mail going out twice
 const NOTIFY_EVERY_MIN = 10; // notifyTick runs about this often
 const NOTIFY_TIMES = ['06:30', '07:00', '07:30', '08:00', '08:30', '09:00']; // when a digest may go out
-const NOTIFY_RESERVE = 5; // mails kept for new quotations: digests, reminders and tests wait when fewer are left
+const NOTIFY_RESERVE = 5; // mails kept for new quotations: digests, reminders and codes wait when fewer are left
+const TEST_RESERVE = 10; // a test mail (pressed by hand, any number of accounts) waits sooner still
+const TEST_PER_HOUR = 3; // test mails per account (each one counts against the day's quota)
+const TEST_PER_DAY = 6;
 const NOTIFY_BULK = 20; // more new quotations than this in one run is an import or a first upload: not mailed
 const NOTIFY_OLD_MS = 48 * 3600000; // a quotation confirmed longer ago than this is not news
 const FILE_WAIT_MS = 30 * 60000; // a new quotation waits this long for its file to reach Drive
@@ -215,7 +221,7 @@ const CAPS_ = [
   { id: 'set.lists', g: 'a', th: 'ตั้งค่ารายการ', d: [1, 0, 0] },
   { id: 'set.units', g: 'a', th: 'ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น', needs: 'view.comm', d: [1, 0, 0] },
   { id: 'set.dedup', g: 'a', th: 'ตรวจข้อมูลซ้ำ', d: [1, 0, 0] },
-  { id: 'set.data', g: 'a', th: 'นำเข้า ส่งออก และไฟล์สำรอง', d: [1, 0, 0] },
+  { id: 'set.data', g: 'a', th: 'นำเข้าข้อมูลและไฟล์สำรอง', d: [1, 0, 0] },
   { id: 'set.users', g: 'a', th: 'จัดการผู้ใช้และสิทธิ์', d: [1, 0, 0] },
 ];
 /** The built-in roles: their ids are what USERS has always stored. admin is locked to everything. */
@@ -362,6 +368,73 @@ function installNotify_() {
     else Object.keys(vals).forEach((k) => props.setProperty(k, vals[k]));
   });
   return { quota: quota };
+}
+
+/**
+ * ก่อนย้อนกลับไปใช้สคริปต์เวอร์ชันก่อน (ดู README หัวข้อ "ย้อนกลับ"): กด Run ฟังก์ชันนี้ก่อนวางโค้ดเก่า สคริปต์เก่ารู้จักแค่
+ * ผู้ดูแลระบบ / พนักงานขาย / ดูอย่างเดียว บัญชีในบทบาทที่สร้างเอง ย้ายเป็นพนักงานขายถ้าบทบาทนั้นให้ครบอย่างพนักงานขายแบบเดิม
+ * ไม่อย่างนั้นเป็นดูอย่างเดียว (รวมบัญชีที่บทบาทชั่วคราวหรือบทบาทพนักงานขายที่ถูกแก้ ให้น้อยกว่านั้น) ไม่อย่างนั้นสคริปต์เก่าจะให้
+ * บัญชีเหล่านั้นแก้ได้ทุกอย่าง และหยุดการแจ้งเตือนทางอีเมล
+ * Execution log บอกว่าย้ายใครบ้าง (แก้กลับได้ที่ ผู้ใช้และสิทธิ์ ในเว็บ)
+ *
+ * The scripts before capabilities apply their rules to role 'sales' and block only 'viewer': any other
+ * role id would write everything there. Every account but an admin keeps 'sales' only when its own role,
+ * and its temporary role while that lasts, give all the original พนักงานขาย gives; anything else becomes
+ * 'viewer'. The notifyTick trigger goes too (the old script has no such function). Each move is an audit
+ * row; ROLES, GRANTS and REQS stay for when this version is pasted back.
+ */
+function prepareRollback() {
+  const moved = withLock_(() => {
+    const props = PropertiesService.getScriptProperties();
+    const p = props.getProperties();
+    const db = usersOf_(p);
+    const out = rollbackRoles_(dirOf_(db, p), db);
+    const vals = {};
+    if (out.length) vals.USERS = prepUsers_(db);
+    if (p.NOTIFY_ON === '1') vals.NOTIFY_ON = '0'; // setupNotify turns it on again
+    if (!Object.keys(vals).length) return out;
+    if (hasUsers_(db)) commit_(vals);
+    else Object.keys(vals).forEach((k) => props.setProperty(k, vals[k]));
+    audit_(out.map((x) => ['', x.u, 'user_role', { from: x.from, to: x.to }, 'ย้อนกลับเวอร์ชันสคริปต์']));
+    return out;
+  });
+  let triggers = 0;
+  try {
+    ScriptApp.getProjectTriggers().forEach((t) => {
+      if (t.getHandlerFunction() !== 'notifyTick') return;
+      ScriptApp.deleteTrigger(t);
+      triggers++;
+    });
+  } catch (err) {
+    // never installed (the trigger permission was not granted)
+  }
+  Logger.log('พร้อมย้อนกลับ: ' + (moved.length ? 'ย้ายบทบาท ' + moved.length + ' บัญชี: ' + moved.map((x) => x.n + ' (' + x.u + ') เป็น' + roleName_({}, x.to)).join(', ') : 'ไม่มีบัญชีที่ต้องย้าย') +
+    (triggers ? ' · หยุดการแจ้งเตือนทางอีเมลแล้ว' : '') + ' — วางโค้ดเวอร์ชันก่อนได้เลย ยอดเงินจะไม่ถูกซ่อนจากบัญชีใดอีก');
+  return moved;
+}
+
+/** The accounts prepareRollback moves to 'viewer' (USERS changed in place): [{ u, n, from, to }]. */
+function rollbackRoles_(A, db) {
+  if (A.m !== 'accounts') return [];
+  const full = roleCaps_({}, 'sales'); // the original พนักงานขาย
+  const covers = (rid) => {
+    const c = roleCaps_(A.roles || {}, rid);
+    return Object.keys(full).every((k) => c[k] === 1 || c[k] === full[k]);
+  };
+  const today = today_();
+  const out = [];
+  Object.keys(db.users).forEach((u) => {
+    const x = db.users[u];
+    if (x.r === 'admin') return;
+    const g = own_(A.grants || {}, u) || {};
+    const rids = [String(x.r)];
+    if (g.r && live_(g.r.until, today)) rids.push(String(g.r.id));
+    const to = x.r === 'viewer' || !rids.every(covers) ? 'viewer' : 'sales';
+    if (to === x.r) return;
+    out.push({ u: u, n: x.n, from: x.r, to: to });
+    x.r = to;
+  });
+  return out;
 }
 
 function keyOk_() {
@@ -592,7 +665,7 @@ function push_(ops, actor) {
       // the web app applies a row without a value as a deletion
       return { op: op, k: String(op.k || ''), del: del, delR: del || op.v === undefined || op.v === null };
     });
-    const allowed = caps ? opGate_(list, caps, actor.name) : null;
+    const allowed = caps ? opGate_(list, caps, actor.name, stamp) : null;
     const rows = [];
     const rejected = [];
     const denied = [];
@@ -612,6 +685,9 @@ function push_(ops, actor) {
         // writer's own name (key order kept); a payment check or a month close also the server's time
         if (/^(d?log|dact)\//.test(k) && Object.prototype.hasOwnProperty.call(val, 'by')) val = Object.assign({}, val, { by: actor.name });
         else if (/^(dchk|mclose)\//.test(k)) val = Object.assign({}, val, { by: actor.name, at: now });
+        // a document's by is whoever attached it (the quotation check and its mails rely on it): the
+        // account for a new document, else the attacher stored with it, whatever the op says
+        else if (docIdOf_(k)) val = Object.assign({}, val, { by: allowed.attacher(k) || actor.name });
       }
       const v = del || val === undefined ? '' : JSON.stringify(val);
       if (v.length > MAX_CELL) {
@@ -1032,8 +1108,18 @@ function userSave_(req, actor) {
       setGrant_(grants, u, g);
       vals.GRANTS = JSON.stringify(grants); // only smaller
     }
+    // an admin has everything: a request it sent before is withdrawn (approved later, a temporary role
+    // would have narrowed the new admin)
+    const rqs = objProp_(p.REQS);
+    const old = role === 'admin' ? own_(rqs, u) : null;
+    if (old) {
+      delete rqs[u];
+      vals.REQS = JSON.stringify(rqs); // only smaller
+    }
     const q = commit_(vals);
-    audit_([[actor.name, u, 'user_role', { from: from, to: role }, '']]);
+    const rows = [[actor.name, u, 'user_role', { from: from, to: role }, '']];
+    if (old) rows.push([actor.name, u, 'req_cancel', reqDetail_(old), 'เป็นผู้ดูแลระบบแล้ว']);
+    audit_(rows);
     return { x: x, bumped: bumped, clear: !!pk || !!req.unlock, p: q, mail: e.mail };
   });
   if (r.err) return { out: { ok: false, error: r.err } };
@@ -1512,14 +1598,15 @@ function live_(until, today) {
 /**
  * What account `u` may do: { rid, caps }. rid = a temporary role while it lasts, else its own role;
  * caps = that role's capabilities plus the account's extras still in force (an extra limited to own
- * work does not narrow what the role gives for all work), less any whose `needs` is missing.
+ * work does not narrow what the role gives for all work), less any whose `needs` is missing. An admin
+ * is an admin whatever GRANTS says (a temporary role never narrows one), as activeAdmins_ counts them.
  */
 function capsOf_(A, u) {
   const x = own_(A.u, u);
   if (!x) return { rid: '', caps: {} };
   const g = own_(A.grants || {}, u) || {};
   const today = today_();
-  const tmp = g.r && g.r.id !== 'admin' && live_(g.r.until, today) && roleExists_(A.roles || {}, g.r.id) ? String(g.r.id) : '';
+  const tmp = x.r !== 'admin' && g.r && g.r.id !== 'admin' && live_(g.r.until, today) && roleExists_(A.roles || {}, g.r.id) ? String(g.r.id) : '';
   const rid = tmp || String(x.r);
   const caps = roleCaps_(A.roles || {}, rid);
   if (rid !== 'admin') {
@@ -1616,17 +1703,19 @@ function keyAccess_(caps, k, del) {
  * allowed.done(x, value) is called for each op stored, so later ops of the same push see it (a new deal,
  * then its steps). "Own work" is decided on the sheet: a deal record is the account's when its resp
  * (ผู้รับผิดชอบ) is the account's display name, a deal's steps, contacts and payments when that deal's
- * is, and a log entry or contact when the account wrote its latest row. The sheet is read once, and only
- * for a push that has such an op.
+ * is, and a log entry or contact when the account wrote its latest row. With `docs` (an account whose
+ * writes are stamped) allowed.attacher(k) is who attached the document of ddoc/ key k ('' for a new one).
+ * The sheet is read once, and only for a push that has such an op.
  */
-function opGate_(list, caps, name) {
-  const deals = {}, keys = {};
+function opGate_(list, caps, name, docs) {
+  const deals = {}, keys = {}, ids = {};
   list.forEach((x) => {
     x.r = x.k && x.k.length <= 500 ? keyAccess_(caps, x.k, x.delR) : 0;
     if (x.r === 'deal' || x.r === 'resp') deals[dealOf_(x.k)] = 1;
     else if (x.r === 'by') keys[x.k] = 1;
+    if (docs && x.r && !x.delR && docIdOf_(x.k)) ids[docIdOf_(x.k)] = 1;
   });
-  const cur = latest_(deals, keys);
+  const cur = latest_(deals, keys, ids);
   const allowed = (x) => {
     if (x.r === 1 || !x.r) return x.r === 1;
     if (x.r === 'by') return !has_(cur.by, x.k) || sameName_(cur.by[x.k], name);
@@ -1640,8 +1729,20 @@ function opGate_(list, caps, name) {
   allowed.done = (x, val) => {
     if (x.k.indexOf('deal/') === 0) cur.resp[x.k.slice(5)] = x.delR ? null : String((val && val.resp) || '');
     if (has_(keys, x.k)) cur.by[x.k] = name;
+    const id = docIdOf_(x.k);
+    if (id && has_(ids, id) && !x.delR && val && typeof val === 'object') cur.doc[id] = String(val.by || '');
+  };
+  allowed.attacher = (k) => {
+    const id = docIdOf_(k);
+    return id && has_(cur.doc, id) ? cur.doc[id] : '';
   };
   return allowed;
+}
+
+/** The document id in ddoc/<deal>/<docId>, else ''. */
+function docIdOf_(k) {
+  const m = /^ddoc\/[^/]+\/([^/]+)$/.exec(k);
+  return m ? m[1] : '';
 }
 
 /** The deal id in a deal record's key: deal/<id>, dstep/<id>/<stage>, dpay/<id>/<stage>, dact/<id>/<act>. */
@@ -1651,11 +1752,14 @@ function dealOf_(k) {
 
 /**
  * From the latest row of each key: the resp of each deal id in `deals` (null when deleted) and the author
- * of each key in `keys`. Reads the key, value, deleted and author columns once (caller holds the lock).
+ * of each key in `keys`; from the latest live ddoc/<any deal>/<id> row of each document id in `docs`, who
+ * attached it (its value's by, else that row's author). Reads the key, value, deleted and author columns
+ * once (caller holds the lock).
  */
-function latest_(deals, keys) {
-  const out = { resp: {}, by: {} };
-  let left = Object.keys(deals).length + Object.keys(keys).length;
+function latest_(deals, keys, docs) {
+  docs = docs || {};
+  const out = { resp: {}, by: {}, doc: {} };
+  let left = Object.keys(deals).length + Object.keys(keys).length + Object.keys(docs).length;
   if (!left) return out;
   const sh = sheet_();
   const last = sh.getLastRow();
@@ -1678,6 +1782,19 @@ function latest_(deals, keys) {
     if (has_(keys, k) && !has_(out.by, k)) {
       out.by[k] = String(vals[i][3] || '');
       left--;
+    }
+    const id = docIdOf_(k);
+    if (id && has_(docs, id) && !has_(out.doc, id) && !(vals[i][2] === 1 || vals[i][2] === true || vals[i][2] === '1') && vals[i][1] !== '') {
+      let v = null;
+      try {
+        v = JSON.parse(vals[i][1]);
+      } catch (err) {
+        v = null;
+      }
+      if (v && typeof v === 'object') {
+        out.doc[id] = typeof v.by === 'string' && v.by.trim() ? v.by : String(vals[i][3] || '');
+        left--;
+      }
     }
   }
   return out;
@@ -1708,6 +1825,20 @@ function unmoney_(s) {
 }
 
 /**
+ * The deal-history detail of the web app's own money entries, which may hold amounts with no separators
+ * and no บาท: a plan ("2 งวด · 500 + 750": after the count every number) and the amounts an import kept as
+ * typed ('Forecast เดิม "350000"': whatever is quoted).
+ */
+function unmoneyLog_(action, detail) {
+  const a = String(action == null ? '' : action);
+  let d = unmoney_(detail);
+  if (typeof d !== 'string') return d;
+  if (/^(ตั้ง|แก้)แผนชำระ$/.test(a)) d = d.replace(/^(\d+ งวด · )(.*)$/, (m, head, rest) => head + rest.replace(/\d[\d,]*(?:\.\d+)?/g, '…'));
+  if (a === 'จำนวนเงินจากไฟล์เดิม') d = d.replace(/"[^"]*"/g, '"…"');
+  return d;
+}
+
+/**
  * A pulled row as an account without view.money / view.comm may see it. Without view.money the money
  * fields are null (a quotation check's fp.a too) and amounts in the app's own notes and in a check's
  * note are "…"; without view.comm a revenue split
@@ -1725,7 +1856,7 @@ function redact_(row, caps) {
   if (!caps['view.money']) {
     const p = k.slice(0, k.indexOf('/') + 1);
     (MONEY_FIELDS[p] || []).forEach((f) => has_(v, f) && v[f] != null && (edit()[f] = null));
-    (MONEY_NOTES[p] || []).forEach((f) => typeof v[f] === 'string' && (edit()[f] = unmoney_(v[f])));
+    (MONEY_NOTES[p] || []).forEach((f) => typeof v[f] === 'string' && (edit()[f] = p === 'dlog/' && f === 'detail' ? unmoneyLog_(v.action, v[f]) : unmoney_(v[f])));
     if (p === 'ddoc/' && v.auto && typeof v.auto === 'object' && typeof v.auto.n === 'string') edit().auto = Object.assign({}, v.auto, { n: unmoney_(v.auto.n) });
     // a quotation check holds the amount it checked (its fingerprint): hidden like the document's own
     if (p === 'qchk/' && v.fp && typeof v.fp === 'object' && v.fp.a != null) edit().fp = Object.assign({}, v.fp, { a: null });
@@ -1861,11 +1992,15 @@ function reqDrop_(actor, name) {
 /**
  * set.users: approve or refuse account u's request (never one's own). A role without an end date becomes
  * the account's role; with one, a temporary role. Capabilities become extras of that account. The
- * account sees the result in me.req until it hides it. `id` (optional) must still be the request shown.
+ * account sees the result in me.req until it hides it. `id` must still be the request shown: a request
+ * replaced after the admin opened it is 'changed' (the admin looks again), never approved unseen. An
+ * account that is an admin now (set.users) has nothing to ask for: its old request is refused (role_locked).
  */
 function reqDecide_(req, actor) {
   const u = normUser_(req.u);
   if (u === actor.u) return { ok: false, error: 'not_self' };
+  const id = req.id == null ? '' : String(req.id);
+  if (!id) return { ok: false, error: 'bad_req' };
   const yes = req.ok === true || req.ok === 1;
   const note = noteOf_(req.note);
   if (note === null) return { ok: false, error: 'req_note' };
@@ -1875,9 +2010,10 @@ function reqDecide_(req, actor) {
     const A = dirOf_(db, p);
     const rec = own_(A.rqs, u);
     if (!rec) return { ok: false, error: 'no_request' };
-    if (req.id != null && req.id !== rec.id) return { ok: false, error: 'changed' };
+    if (id !== String(rec.id)) return { ok: false, error: 'changed' };
     const x = own_(db.users, u);
     if (!x) return { ok: false, error: 'unknown_user' };
+    if (yes && capsOf_(A, u).caps['set.users']) return { ok: false, error: 'role_locked' };
     const now = new Date().toISOString();
     const out = Object.assign({ ok: yes, by: actor.name, note: note, at: now }, reqDetail_(rec));
     // the history says which role a role request came from
@@ -2335,21 +2471,53 @@ function notifyVerify_(req, actor) {
   });
 }
 
-/** notify_test: one mail to one's own verified address (it counts against the day's quota). */
+/**
+ * notify_test: one mail to one's own verified address. It counts against the day's quota, so an account
+ * gets TEST_PER_HOUR an hour and TEST_PER_DAY a day ('too_many_tests'), and a test waits while no more
+ * than TEST_RESERVE mails are left: tests can never use up what digests and new quotations need.
+ */
 function notifyTest_(actor) {
   if (!actor.caps['notify.mail']) return { ok: false, error: 'forbidden' };
   const n = actor.notify || {};
   if (!n.ok || !n.em) return { ok: false, error: 'no_email' };
-  const err = sendMail_(testMail_(liveCfg_(), actor.name, n.em), NOTIFY_RESERVE);
-  logNotify_([['test', actor.u, 'test:' + actor.u + ':' + Date.now(), '', err || 'sent']]);
+  const ok = withLock_(() => {
+    const props = PropertiesService.getScriptProperties();
+    const now = Date.now();
+    const T = objProp_(props.getProperty('NTEST'));
+    // each account's tests of the last 24 hours (the others' older ones are dropped on the way)
+    Object.keys(T).forEach((k) => {
+      const l = (Array.isArray(T[k]) ? T[k] : []).filter((t) => now - Number(t) < 86400000);
+      if (l.length) T[k] = l;
+      else delete T[k];
+    });
+    const mine = own_(T, actor.u) || [];
+    if (mine.length >= TEST_PER_DAY || mine.filter((t) => now - Number(t) < 3600000).length >= TEST_PER_HOUR) return false;
+    T[actor.u] = mine.concat([now]);
+    props.setProperty('NTEST', JSON.stringify(T));
+    return true;
+  });
+  if (!ok) return { ok: false, error: 'too_many_tests' };
+  const err = sendMail_(testMail_(liveCfg_(), actor.name, n.em), TEST_RESERVE);
+  logQuiet_([['test', actor.u, 'test:' + actor.u + ':' + Date.now(), '', err || 'sent']]);
   return err ? { ok: false, error: err } : { ok: true };
 }
 
-/** The verification code to a new address; '' when sent, else why not. */
+/** The verification code to a new address; '' when sent, else why not (it waits like a digest when the
+ *  day's mails run low: at most CODE6_PER_HOUR an account, they could otherwise use the quotations' share). */
 function sendCode_(u, name, mail) {
-  const err = sendMail_(codeMail_(liveCfg_(), name, mail.to, mail.code), 0);
-  logNotify_([['code', u, 'code:' + u + ':' + Date.now(), '', err || 'sent']]);
+  const err = sendMail_(codeMail_(liveCfg_(), name, mail.to, mail.code), NOTIFY_RESERVE);
+  logQuiet_([['code', u, 'code:' + u + ':' + Date.now(), '', err || 'sent']]);
   return err;
+}
+
+/** The log rows of a mail sent from a request: the mail went out, so a busy lock must not turn the reply
+ *  into an error (a code the user then asks for again); those rows only feed the day's count. */
+function logQuiet_(list) {
+  try {
+    logNotify_(list);
+  } catch (err) {
+    if (!(err && err.busy)) throw err;
+  }
 }
 
 /** notify_status (set.users): what the admin page's status card shows. */
@@ -2681,17 +2849,33 @@ function notifyRun_(now) {
   const ck = clockOf_(now);
   const people = peopleOf_(A);
   const mailable = people.filter((x) => x.mail);
+  // what an earlier run sent but could not write to the notify tab (see below): written now, and in any
+  // case never sent again
+  let pend = pendOf_(p);
+  if (pend.length) {
+    try {
+      logNotify_(pend);
+      clearPend_(props);
+      pend = [];
+    } catch (err) {
+      if (!(err && err.busy)) throw err;
+    }
+  }
   const logged = notifyRows_();
   const seen = {};
   logged.forEach((r) => (seen[r.key] = r.result));
+  pend.forEach((x) => (seen[String(x[2])] = String(x[4])));
   if (logged.length && logged[0].at < new Date(now - NOTIFY_KEEP_MS).toISOString()) trimNotify_(now);
   const cursor = p.NOTIFY_SEQ == null || p.NOTIFY_SEQ === '' ? null : Number(p.NOTIFY_SEQ);
   const digests = mailable.filter((x) => x.nf.on.dg && ck.wd <= 5 && x.nf.t <= ck.hm && !has_(seen, 'dg:' + x.u + ':' + ck.today));
   const pres = mailable.filter((x) => x.nf.on.pre && x.caps['view.plan']);
+  const preWho = pres.map((x) => x.u).sort().join(',');
+  // the whole sheet is read for a reminder only when an appointment of today is about an hour away
+  const preDue = pres.length > 0 && preSoon_(ck, preWho);
   const reqs = reqsDue_(A, mailable, seen, now);
-  if (cursor !== null && curSeq_() <= cursor && !digests.length && !pres.length && !reqs.length) return saveLast_(props, last);
+  if (cursor !== null && curSeq_() <= cursor && !digests.length && !preDue && !reqs.length) return saveLast_(props, last);
   // read under the lock (only new rows, unless something needs the whole picture), then let go of it
-  const snap = withLock_(() => readNew_(cursor === null ? Infinity : cursor, digests.length + pres.length + reqs.length > 0));
+  const snap = withLock_(() => readNew_(cursor === null ? Infinity : cursor, digests.length + reqs.length > 0 || preDue, pres.length > 0));
   const c = { A: A, ck: ck, people: people, seen: seen, out: [], logs: [], hold: Infinity, L: null, S: null, cfg: notifyCfg_(null) };
   if (snap.all) {
     c.L = latestMap_(snap.all);
@@ -2703,6 +2887,7 @@ function notifyRun_(now) {
     c.waiting = waitingQts_(c);
     c.dealList = Object.keys(c.S.deals).sort().map((id) => c.S.deals[id]);
     c.tasks = tasksOf_(c.L);
+    savePre_(ck, preWho, c.tasks);
     c.steps = stepsDue_(c);
     reqs.forEach((x) => c.out.push({ kind: 'req', u: x.a.u, key: x.key, fp: '', keep: 0, m: reqMail_(c, x) }));
     digests.forEach((x) => {
@@ -2728,16 +2913,112 @@ function notifyRun_(now) {
     c.logs.push([x.kind, x.u, x.key, x.fp, err ? 'error' : 'sent']);
   });
   if (last.deferred && !has_(seen, 'quota:' + ck.today)) c.logs.push(['quota', '', 'quota:' + ck.today, '', 'deferred ' + last.deferred]);
-  logNotify_(c.logs);
+  // the mails are out: the log is what keeps them from going out again, so a busy lock must not end the
+  // run here. Tried a few times; if the lock stays busy, the rows wait in Script Properties (and the
+  // cache) for the next run, which reads them as sent. The log position and NOTIFY_LAST still move on.
+  const rows = pend.concat(c.logs);
+  if (rows.length) {
+    let tries = 3;
+    for (;;) {
+      try {
+        logNotify_(rows);
+        if (pend.length) clearPend_(props);
+        break;
+      } catch (err) {
+        if (!(err && err.busy)) throw err;
+        if (--tries > 0) continue;
+        savePend_(props, rows);
+        if (!last.err) last.err = 'busy';
+        break;
+      }
+    }
+  }
   const next = c.hold < Infinity ? c.hold - 1 : snap.seq;
   if (next !== cursor) props.setProperty('NOTIFY_SEQ', String(next));
-  if (last.err && last.err !== 'quota') last.ok = 0;
+  if (last.err && last.err !== 'quota' && last.err !== 'busy') last.ok = 0;
   return saveLast_(props, last);
 }
 
 function saveLast_(props, last) {
   props.setProperty('NOTIFY_LAST', JSON.stringify(last));
   return last;
+}
+
+/** Log rows [kind, u, key, fp, result] a run sent but could not write yet (NOTIFY_PEND and the cache). */
+function pendOf_(p) {
+  const out = [], keys = {};
+  const add = (s) => {
+    let l = [];
+    try {
+      l = JSON.parse(s || '[]');
+    } catch (err) {
+      l = [];
+    }
+    (Array.isArray(l) ? l : []).forEach((x) => {
+      if (!Array.isArray(x) || has_(keys, String(x[2]))) return;
+      keys[String(x[2])] = 1;
+      out.push(x);
+    });
+  };
+  add(p.NOTIFY_PEND);
+  try {
+    add(CacheService.getScriptCache().get('NPEND'));
+  } catch (err) {
+    // the property alone
+  }
+  return out;
+}
+
+/** Keep log rows for the next run: all of them in the cache, and in Script Properties as many as fit
+ *  (the mails sent first: they are what must not go out twice). */
+function savePend_(props, rows) {
+  putCache_('NPEND', JSON.stringify(rows.slice(-1000)), 21600);
+  let keep = rows;
+  if (bytes_(JSON.stringify(keep)) > PROP_MAX_BYTES) keep = rows.filter((x) => x[4] === 'sent');
+  while (keep.length && bytes_(JSON.stringify(keep)) > PROP_MAX_BYTES) keep = keep.slice(1);
+  props.setProperty('NOTIFY_PEND', JSON.stringify(keep));
+}
+
+function clearPend_(props) {
+  props.deleteProperty('NOTIFY_PEND');
+  try {
+    CacheService.getScriptCache().remove('NPEND');
+  } catch (err) {
+    // expires by itself
+  }
+}
+
+/** Minutes since midnight of 'HH:mm'. */
+function minOf_(hm) {
+  return Number(String(hm).slice(0, 2)) * 60 + Number(String(hm).slice(3, 5));
+}
+
+/** A timed appointment `m` (minutes) gets its reminder in the run that falls 46-70 minutes before it
+ *  (runs are about 10 minutes apart: one of them falls in this window). */
+function preWindow_(m, nowMin) {
+  return m - nowMin > 45 && m - nowMin <= 70;
+}
+
+/**
+ * Whether a reminder before an appointment may be due now, from the times of today's open appointments
+ * the last whole read saw (cache NPRE; new task/ rows make the run read again, and so does a change in
+ * who has reminders on). Unknown (no cache, another day, other people): true.
+ */
+function preSoon_(ck, who) {
+  let o = null;
+  try {
+    o = JSON.parse(CacheService.getScriptCache().get('NPRE') || 'null');
+  } catch (err) {
+    o = null;
+  }
+  if (!o || o.d !== ck.today || o.w !== who || !Array.isArray(o.m)) return true;
+  const nowMin = minOf_(ck.hm);
+  return o.m.some((m) => preWindow_(Number(m), nowMin));
+}
+
+function savePre_(ck, who, tasks) {
+  const m = tasks.filter((t) => !t.done && t.date === ck.today && t.time).map((t) => minOf_(t.time));
+  putCache_('NPRE', JSON.stringify({ d: ck.today, w: who, m: m }), 21600);
 }
 
 /** The team's calendar at `now`: today, tomorrow, the time (HH:mm), the weekday (1 Monday … 7 Sunday) and
@@ -2761,10 +3042,10 @@ function peopleOf_(A) {
 }
 
 /**
- * The sync rows after `since` and, when `full` or when those include a document or a check, every row
- * (caller holds the lock). { rows, all (null when not read), seq }.
+ * The sync rows after `since` and, when `full` or when those include a document or a check (or, with
+ * `tasks`, an appointment), every row (caller holds the lock). { rows, all (null when not read), seq }.
  */
-function readNew_(since, full) {
+function readNew_(since, full, tasks) {
   const sh = sheet_();
   const seq = lockedSeq_();
   const last = sh.getLastRow();
@@ -2772,7 +3053,8 @@ function readNew_(since, full) {
   const ks = sh.getRange(2, 1, last - 1, 2).getValues();
   let lo = 0;
   while (lo < ks.length && !(Number(ks[lo][0]) > since)) lo++;
-  const hot = full || ks.slice(lo).some((r) => /^(ddoc|qchk)\//.test(String(r[1])));
+  const re = tasks ? /^(ddoc|qchk|task)\// : /^(ddoc|qchk)\//;
+  const hot = full || ks.slice(lo).some((r) => re.test(String(r[1])));
   if (!hot) return { rows: [], all: null, seq: seq };
   const all = sh.getRange(2, 1, ks.length, HEADER.length).getValues().filter((r) => r[1] !== '').map(rowOut_);
   return { rows: all.filter((r) => r.seq > since), all: all, seq: seq };
@@ -3000,12 +3282,8 @@ function digestCount_(D) {
 /** A reminder about 1 hour before each timed appointment today, to whoever chose it. */
 function preMails_(c, pres) {
   if (!pres.length) return;
-  const nowMin = Number(c.ck.hm.slice(0, 2)) * 60 + Number(c.ck.hm.slice(3, 5));
-  const soon = c.tasks.filter((t) => {
-    if (t.done || t.date !== c.ck.today || !t.time) return false;
-    const m = Number(t.time.slice(0, 2)) * 60 + Number(t.time.slice(3, 5)) - nowMin;
-    return m > 45 && m <= 70; // runs are about 10 minutes apart: one of them falls in this window
-  });
+  const nowMin = minOf_(c.ck.hm);
+  const soon = c.tasks.filter((t) => !t.done && t.date === c.ck.today && t.time && preWindow_(minOf_(t.time), nowMin));
   pres.forEach((x) => {
     soon.forEach((t) => {
       if (x.nf.sc === 'mine' && !sameName_(t.resp, x.n)) return;
@@ -3383,16 +3661,19 @@ function resultMail_(c, v, d, x) {
   const client = deal ? deal.client : 'ลูกค้า', no = doc.docNo || doc.name;
   const href = go_(cfg, 'go=deal&id=' + encodeURIComponent(doc.deal));
   const checker = personOf_(c, v.by);
+  // the amount, and amounts in the checker's note, only to an attacher who may still see money
+  const money = !!x.caps['view.money'];
+  const note = v.note ? (money ? String(v.note) : unmoney_(String(v.note))) : '';
   const body =
-    mHead_(ok ? 'ใบเสนอราคาตรวจแล้ว' : 'ใบเสนอราคาถูกส่งกลับแก้ไข', client, [esc_(no + (doc.amount != null ? ' · ' + baht_(doc.amount) + ' บาท' : '')), esc_(v.by + (ok ? ' ตรวจแล้วเมื่อ ' : ' ส่งกลับเมื่อ ') + thAt_(v.at))]) +
-    (v.note ? mPanel_('ข้อความจาก ' + v.by, '<div style="font-size:14px;line-height:22px;color:' + MC.ink + '">' + esc_(v.note) + '</div>') : '') +
+    mHead_(ok ? 'ใบเสนอราคาตรวจแล้ว' : 'ใบเสนอราคาถูกส่งกลับแก้ไข', client, [esc_(no + (money && doc.amount != null ? ' · ' + baht_(doc.amount) + ' บาท' : '')), esc_(v.by + (ok ? ' ตรวจแล้วเมื่อ ' : ' ส่งกลับเมื่อ ') + thAt_(v.at))]) +
+    (note ? mPanel_('ข้อความจาก ' + v.by, '<div style="font-size:14px;line-height:22px;color:' + MC.ink + '">' + esc_(note) + '</div>') : '') +
     (ok ? '' : mPara_(esc_('แก้แล้วแนบฉบับแก้ไขที่ใบเสนอราคาของงานนี้ ใบใหม่จะส่งให้ผู้ตรวจอีกครั้ง'))) +
     mBtnRow_('เปิดงานนี้', href) +
     '<tr><td style="padding:0 0 22px"></td></tr>';
   const foot = esc_('ส่งถึง ' + x.n + ' เพราะเป็นคนแนบใบเสนอราคานี้') + (checker && checker.nf.ok ? esc_(' · ตอบกลับอีเมลนี้จะถึง ' + checker.n) : '') + '<br>' + mSettings_(cfg);
   const subj = (ok ? 'ใบเสนอราคาตรวจแล้ว: ' : 'ใบเสนอราคาถูกส่งกลับแก้ไข: ') + client + ' · ' + no;
   const html = mShell_(cfg, subj, 'Sales Tracker · ผลตรวจใบเสนอราคา', body, foot);
-  const text = [subj, v.by + ' · ' + thAt_(v.at), v.note ? 'ข้อความ: ' + v.note : '', href ? 'เปิดงานนี้: ' + href : ''].filter(Boolean).join('\n');
+  const text = [subj, v.by + ' · ' + thAt_(v.at), note ? 'ข้อความ: ' + note : '', href ? 'เปิดงานนี้: ' + href : ''].filter(Boolean).join('\n');
   return msg_(cfg, x.nf.em, subj, html, text, checker && checker.nf.ok ? checker.nf.em : '');
 }
 

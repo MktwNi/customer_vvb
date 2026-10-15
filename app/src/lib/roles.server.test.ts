@@ -4,6 +4,8 @@
  * The tables here restate plan.md §1 and roles/impl-note.md independently of the script, so a change
  * on either side shows up; every secret is generated while the tests run.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 
@@ -112,6 +114,8 @@ function role(s: GasSim, admin: string, n: string, c: Caps) {
   return String(r.id);
 }
 const props = (s: GasSim, k: string) => JSON.parse(s.props[k] || '{}');
+/** req_decide as the web app sends it: with the id of the request the admin was shown. */
+const decide = (s: GasSim, tok: string, u: string, extra: Record<string, unknown>) => call(s, tok, 'req_decide', { u, id: props(s, 'REQS')[u]?.id, ...extra });
 const usersOf = (s: GasSim) => JSON.parse(s.props.USERS).users as Record<string, { r: string; on: number }>;
 const rowsOf = (r: Reply) => r.rows!;
 /** `me` of a reply, and the roles of an admin reply. */
@@ -361,6 +365,31 @@ describe('names, times and cascades the script writes itself', () => {
     expect(rowsOf(call(s, admin, 'pull', { since: 0 })).find((x) => x.k === 'dchk/d2/PAY1')!.v).toEqual(v);
   });
 
+  it('a document carries whoever attached it: the account for a new one, the stored attacher on later edits; an admin\'s push is kept', () => {
+    const { s, admin } = team();
+    const ek = member(s, admin, 'aek', 'เอก', 'sales');
+    const mint = member(s, admin, 'mint', 'มินท์', role(s, admin, 'หัวหน้าฝ่ายขาย', HEAD));
+    const doc = (o: Record<string, unknown> = {}) => ({ kind: 'quotation', name: 'QT.pdf', amount: 100, ...o });
+    const v = (k: string) => [...rowsOf(call(s, admin, 'pull', { since: 0 }))].reverse().find((x) => x.k === k)!.v;
+    // a new document in someone else's name: the account that attached it
+    expect(call(s, ek, 'push', { ops: [{ k: 'ddoc/d1/q1', v: doc({ by: 'มินท์' }) }, { k: 'ddoc/d1/q2', v: doc() }] })).toMatchObject({ n: 2, denied: [] });
+    expect([v('ddoc/d1/q1'), v('ddoc/d1/q2')]).toMatchObject([{ by: 'เอก' }, { by: 'เอก' }]);
+    // edited by someone else: the attacher stays, whatever the op says
+    call(s, mint, 'push', { ops: [{ k: 'ddoc/d1/q1', v: doc({ amount: 200, by: 'มินท์' }) }] });
+    expect(v('ddoc/d1/q1')).toEqual(doc({ amount: 200, by: 'เอก' }));
+    // moved to another deal (a joint quotation): still its attacher
+    call(s, mint, 'push', { ops: [{ k: 'ddoc/d2/q1', v: doc({ by: 'มินท์' }) }, { k: 'ddoc/d1/q1', del: true }] });
+    expect(v('ddoc/d2/q1')).toMatchObject({ by: 'เอก' });
+    // new and edited again in one push
+    call(s, mint, 'push', { ops: [{ k: 'ddoc/d1/q3', v: doc({ by: 'เอก' }) }, { k: 'ddoc/d1/q3', v: doc({ amount: 5, by: 'เอก' }) }] });
+    expect(v('ddoc/d1/q3')).toMatchObject({ amount: 5, by: 'มินท์' });
+    // an admin restoring records keeps what it sends; a stored one without by: the author of its row
+    call(s, admin, 'push', { ops: [{ k: 'ddoc/d1/q4', v: doc({ by: 'เอก' }) }, { k: 'ddoc/d1/q5', v: doc() }] });
+    expect(v('ddoc/d1/q4')).toMatchObject({ by: 'เอก' });
+    call(s, ek, 'push', { ops: [{ k: 'ddoc/d1/q5', v: doc({ amount: 7, by: 'เอก' }) }] });
+    expect(v('ddoc/d1/q5')).toMatchObject({ amount: 7, by: 'หัวหน้า' });
+  });
+
   it('deleting a deal also deletes its revenue split (dshare/), once', () => {
     const { s, admin } = team();
     const head = member(s, admin, 'mint', 'มินท์', role(s, admin, 'หัวหน้าฝ่ายขาย', HEAD));
@@ -386,6 +415,10 @@ describe('pull without view.money / view.comm', () => {
     { k: 'dlog/l1', v: { action: 'รับชำระ PAY1', detail: '187,250 บาท · โอน', deal: 'd1' } },
     { k: 'dlog/l2', v: { action: 'ตั้งแผนชำระ', detail: '2 งวด · 187,250 + 187,250' } },
     { k: 'dlog/l3', v: { action: 'จำนวนเงินจากไฟล์เดิม', detail: 'Forecast เดิม "350,000-561,750" — ตรวจตัวเลขอีกครั้ง' } },
+    { k: 'dlog/l4', v: { action: 'แก้แผนชำระ', detail: '2 งวด · 500 + 750.5' } },
+    { k: 'dlog/l5', v: { action: 'จำนวนเงินจากไฟล์เดิม', detail: 'Forecast เดิม "374500" · Actual เดิม "ประมาณ 3 แสน" — ตรวจตัวเลขอีกครั้ง' } },
+    { k: 'dlog/l6', v: { action: 'แก้แผนชำระ', detail: 'PAY1 ยังค้างรับ' } },
+    { k: 'dlog/l7', v: { action: 'แนบใบเสนอราคา', detail: 'QT-2026-07.pdf · 950 บาท · ฉบับที่ 2' } },
     { k: 'jqm/h1/d1', v: { share: 120000, pct: 32 } },
     { k: 'dchk/d1/PAY1', v: { s: 'back', amt: 187250, d: '2026-10-05', f: [], note: 'ยอดไม่ตรง 187,250 บาท' } },
     { k: 'mclose/2026-10', v: { n: 3, amt: 561750 } },
@@ -418,7 +451,12 @@ describe('pull without view.money / view.comm', () => {
     expect(g['dstep/d1/QUOTATION'].v).toEqual({ d: '2026-10-01', n: 'ใบเสนอราคา QT-1 · …' });
     expect(g['dlog/l1'].v).toMatchObject({ action: 'รับชำระ PAY1', detail: '… · โอน' });
     expect(g['dlog/l2'].v).toMatchObject({ detail: '2 งวด · … + …' });
-    expect(g['dlog/l3'].v).toMatchObject({ detail: 'Forecast เดิม "…-…" — ตรวจตัวเลขอีกครั้ง' });
+    expect(g['dlog/l3'].v).toMatchObject({ detail: 'Forecast เดิม "…" — ตรวจตัวเลขอีกครั้ง' });
+    // amounts with no separators and no บาท the web app writes itself: a small plan, an import's raw cells
+    expect(g['dlog/l4'].v).toMatchObject({ action: 'แก้แผนชำระ', detail: '2 งวด · … + …' });
+    expect(g['dlog/l5'].v).toMatchObject({ detail: 'Forecast เดิม "…" · Actual เดิม "…" — ตรวจตัวเลขอีกครั้ง' });
+    expect(g['dlog/l6'].v).toMatchObject({ action: 'แก้แผนชำระ', detail: 'PAY1 ยังค้างรับ' });
+    expect(g['dlog/l7'].v).toMatchObject({ action: 'แนบใบเสนอราคา', detail: 'QT-2026-07.pdf · … · ฉบับที่ 2' });
     expect(g['jqm/h1/d1'].v).toEqual({ share: null, pct: null });
     expect(g['dchk/d1/PAY1'].v).toEqual({ s: 'back', amt: null, d: '2026-10-05', f: [], note: 'ยอดไม่ตรง …' });
     expect(g['mclose/2026-10'].v).toEqual({ n: 3, amt: null });
@@ -570,7 +608,7 @@ describe('roles (set.users)', () => {
     member(s, admin, 'aaa', 'เอ', id);
     const bb = member(s, admin, 'bbb', 'บี', 'viewer');
     call(s, bb, 'req_send', { k: 'role', role: id, note: 'ขอชั่วคราว', until: '2026-12-31' });
-    expect(call(s, admin, 'req_decide', { u: 'bbb', ok: true })).toMatchObject({ ok: true });
+    expect(decide(s, admin, 'bbb', { ok: true })).toMatchObject({ ok: true });
     for (const b of ['admin', 'sales', 'viewer']) expect(call(s, admin, 'role_del', { id: b, to: keep }).error).toBe('role_locked');
     expect(call(s, admin, 'role_del', { id }).error).toBe('role_in_use');
     expect(call(s, admin, 'role_del', { id, to: 'admin' }).error).toBe('bad_role');
@@ -600,7 +638,7 @@ describe('roles (set.users)', () => {
     // a temporary role ends when an admin sets the account's role
     const tok = member(s, boss, 'nid', 'นิด', 'viewer');
     call(s, tok, 'req_send', { k: 'role', role: 'sales', note: 'ช่วยงานขาย', until: '2026-12-31' });
-    call(s, boss, 'req_decide', { u: 'nid', ok: true });
+    decide(s, boss, 'nid', { ok: true });
     expect(call(s, tok, 'me').me).toMatchObject({ rid: 'sales', role: 'sales' });
     expect(call(s, boss, 'user_save', { u: 'nid', role: id })).toMatchObject({ ok: true });
     expect(props(s, 'GRANTS')).not.toHaveProperty('nid');
@@ -634,7 +672,7 @@ describe('permission requests', () => {
     const reqs = call(s, admin, 'users').reqs as Record<string, { id: string }>;
     expect(Object.keys(reqs)).toEqual(['pla']);
     at(2 * H);
-    const r = call(s, admin, 'req_decide', { u: 'pla', ok: true, note: 'อนุมัติ', id: reqs.pla.id });
+    const r = decide(s, admin, 'pla', { ok: true, note: 'อนุมัติ', id: reqs.pla.id });
     expect(r).toMatchObject({ ok: true, reqs: {}, me: { rq: 0 } });
     expect(usersOf(s).pla.r).toBe(id);
     const me = call(s, tok, 'ping').me!;
@@ -659,7 +697,7 @@ describe('permission requests', () => {
     expect(rolesOf(r).admin.c).toEqual(BUILT.admin);
     expect(meOf(r)).not.toHaveProperty('grants'); // none yet
     call(s, tok, 'req_send', { k: 'role', role: id, note: 'ช่วงปิดงบ', until: '2026-10-31' });
-    call(s, admin, 'req_decide', { u: 'pla', ok: true });
+    decide(s, admin, 'pla', { ok: true });
     expect(call(s, admin, 'grant_save', { u: 'pla', c: [{ k: 'del.rec', until: '2026-10-20' }] })).toMatchObject({ ok: true });
     expect(meOf(call(s, tok, 'ping'))).toMatchObject({ rid: id, grants: { r: { id, until: '2026-10-31', by: 'หัวหน้า' }, c: [{ k: 'del.rec', s: 'all', until: '2026-10-20', by: 'หัวหน้า' }] } });
     // only one's own: another account's reply carries none of it
@@ -673,7 +711,7 @@ describe('permission requests', () => {
     const other = member(s, admin, 'makorn', 'มกร', 'sales');
     const r = call(s, tok, 'req_send', { k: 'caps', caps: [{ k: 'edit.share' }, { k: 'del.log', s: 'all' }], note: 'แบ่งสัดส่วนงานร่วม', until: '2026-11-30' });
     expect(r.me).toMatchObject({ req: { st: 'p', k: 'caps', caps: [{ k: 'view.comm', s: 'all' }, { k: 'edit.share', s: 'all' }, { k: 'del.log', s: 'all' }], until: '2026-11-30' } });
-    call(s, admin, 'req_decide', { u: 'somchai', ok: true });
+    decide(s, admin, 'somchai', { ok: true });
     expect(call(s, tok, 'me').me).toMatchObject({ rid: 'sales', caps: { ...BUILT.sales, 'view.comm': 1, 'edit.share': 1, 'del.log': 1 } });
     expect(call(s, other, 'me').me).toMatchObject({ caps: BUILT.sales });
     expect(props(s, 'GRANTS').somchai.c.map((e: { k: string; s: string; until?: string; by: string }) => [e.k, e.s, e.until, e.by])).toEqual([
@@ -708,7 +746,7 @@ describe('permission requests', () => {
     const { s, admin } = team();
     const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
     call(s, tok, 'req_send', { k: 'caps', caps: [{ k: 'view.comm' }], note: 'ครั้งแรก' });
-    call(s, admin, 'req_decide', { u: 'somchai', ok: false, note: 'ยังไม่จำเป็น' });
+    decide(s, admin, 'somchai', { ok: false, note: 'ยังไม่จำเป็น' });
     expect(call(s, tok, 'me').me).toMatchObject({ req: { st: 'r', ok: false, note: 'ยังไม่จำเป็น', k: 'caps' } });
     call(s, tok, 'req_send', { k: 'caps', caps: [{ k: 'view.comm' }], note: 'ครั้งที่สอง' });
     const first = (props(s, 'REQS').somchai as { id: string }).id;
@@ -716,13 +754,13 @@ describe('permission requests', () => {
     expect(props(s, 'RESULTS')).toEqual({});
     call(s, tok, 'req_send', { k: 'role', role: 'viewer', note: 'ครั้งที่สาม' });
     expect(Object.keys(props(s, 'REQS'))).toEqual(['somchai']);
-    expect(call(s, admin, 'req_decide', { u: 'somchai', ok: true, id: first }).error).toBe('changed');
+    expect(decide(s, admin, 'somchai', { ok: true, id: first }).error).toBe('changed');
     const cancelled = call(s, tok, 'req_cancel');
     expect(cancelled).toMatchObject({ ok: true, me: { u: 'somchai' } });
     expect(cancelled.me).not.toHaveProperty('req'); // the reply itself says it is gone
     expect(call(s, tok, 'me').me).not.toHaveProperty('req');
     expect(call(s, tok, 'req_cancel')).toMatchObject({ ok: true });
-    expect(call(s, admin, 'req_decide', { u: 'somchai', ok: true }).error).toBe('no_request');
+    expect(decide(s, admin, 'somchai', { ok: true, id: first }).error).toBe('no_request');
     expect(audit(s).map((a) => a.action).filter((a) => a.startsWith('req_'))).toEqual(['req_send', 'req_no', 'req_send', 'req_send', 'req_cancel']);
   });
 
@@ -733,8 +771,8 @@ describe('permission requests', () => {
     expect(call(s, boss, 'req_decide', { u: 'BOSS2', ok: true }).error).toBe('not_self');
     const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
     call(s, tok, 'req_send', { k: 'role', role: 'viewer', note: 'x' });
-    expect(call(s, boss, 'req_decide', { u: 'somchai', ok: false, note: 'ก'.repeat(301) }).error).toBe('req_note');
-    expect(call(s, boss, 'req_decide', { u: 'somchai', ok: 'yes', note: 'ไม่' })).toMatchObject({ ok: true }); // only true or 1 approves
+    expect(decide(s, boss, 'somchai', { ok: false, note: 'ก'.repeat(301) }).error).toBe('req_note');
+    expect(decide(s, boss, 'somchai', { ok: 'yes', note: 'ไม่' })).toMatchObject({ ok: true }); // only true or 1 approves
     expect(usersOf(s).somchai.r).toBe('sales');
     expect(props(s, 'GRANTS')).toEqual({});
     call(s, admin, 'user_save', { create: true, u: 'newbie', name: 'มือใหม่', role: 'viewer', pk: s.pk('newbie', 'temp-1') });
@@ -746,7 +784,7 @@ describe('permission requests', () => {
     const { s, admin } = team();
     const tok = member(s, admin, 'pla', 'ปลา', 'viewer');
     call(s, tok, 'req_send', { k: 'role', role: 'sales', note: 'ช่วงงานเยอะ', until: '2026-10-09' });
-    call(s, admin, 'req_decide', { u: 'pla', ok: true });
+    decide(s, admin, 'pla', { ok: true });
     call(s, admin, 'grant_save', { u: 'pla', c: [{ k: 'view.comm', until: '2026-10-08' }] });
     expect(call(s, tok, 'me').me).toMatchObject({ rid: 'sales', role: 'sales', caps: { 'view.comm': 1 } });
     vi.setSystemTime(Date.parse('2026-10-08T16:59:59.000Z')); // 23:59:59 on the 8th in Bangkok
@@ -768,6 +806,54 @@ describe('permission requests', () => {
     ]);
   });
 
+  it('req_decide needs the id of the request shown: one replaced after the admin opened it is never approved unseen', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'aek', 'เอก', 'viewer');
+    call(s, tok, 'req_send', { k: 'caps', caps: [{ k: 'view.comm' }], note: 'ขอดูค่าคอมของตัวเอง' });
+    const shown = (call(s, admin, 'users').reqs as Record<string, { id: string; caps: { k: string }[] }>).aek;
+    expect(shown.caps.map((c) => c.k)).toEqual(['view.comm']);
+    // the requester swaps it while the admin reads the card
+    call(s, tok, 'req_send', { k: 'caps', caps: [{ k: 'del.rec' }, { k: 'set.data' }, { k: 'set.dedup' }, { k: 'edit.deal' }, { k: 'set.lists' }], note: 'ขอดูค่าคอมของตัวเอง' });
+    for (const id of [undefined, null, '']) expect(call(s, admin, 'req_decide', { u: 'aek', ok: true, note: '', id }).error).toBe('bad_req');
+    expect(call(s, admin, 'req_decide', { u: 'aek', ok: true, note: '', id: shown.id }).error).toBe('changed');
+    expect(meOf(call(s, tok, 'me')).caps).toEqual(BUILT.viewer);
+    expect(props(s, 'GRANTS')).toEqual({});
+    expect(audit(s).map((a) => a.action)).not.toContain('req_ok');
+    // looked at again: what is shown now is what gets decided
+    const now = (call(s, admin, 'users').reqs as Record<string, { id: string }>).aek.id;
+    expect(now).not.toBe(shown.id);
+    expect(call(s, admin, 'req_decide', { u: 'aek', ok: false, note: 'ขอทีละเรื่อง', id: now })).toMatchObject({ ok: true, reqs: {} });
+    expect(meOf(call(s, tok, 'me')).caps).toEqual(BUILT.viewer);
+  });
+
+  it('an account made admin: its pending request is withdrawn; one left over is never approved; a temporary role never narrows an admin', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'aek', 'เอก', 'sales');
+    call(s, tok, 'req_send', { k: 'role', role: 'viewer', note: 'ลาพักร้อน', until: '2026-12-31' });
+    expect(call(s, admin, 'ping').me).toMatchObject({ rq: 1 });
+    const id = props(s, 'REQS').aek.id as string;
+    expect(call(s, admin, 'user_save', { u: 'aek', role: 'admin' })).toMatchObject({ ok: true });
+    expect(props(s, 'REQS')).toEqual({});
+    expect(call(s, admin, 'ping').me).toMatchObject({ rq: 0 });
+    expect(call(s, tok, 'me').me).not.toHaveProperty('req');
+    expect(audit(s).slice(-2).map((a) => [a.actor, a.u, a.action, a.detail, a.note])).toEqual([
+      ['หัวหน้า', 'aek', 'user_role', { from: 'sales', to: 'admin' }, ''],
+      ['หัวหน้า', 'aek', 'req_cancel', { k: 'role', role: 'viewer', until: '2026-12-31' }, 'เป็นผู้ดูแลระบบแล้ว'],
+    ]);
+    expect(call(s, admin, 'req_decide', { u: 'aek', ok: true, id }).error).toBe('no_request');
+    // left over from before (an admin recovered with the setup code, or Script Properties edited by hand)
+    const t = new Date().toISOString();
+    s.props.REQS = JSON.stringify({ aek: { id, k: 'role', role: 'viewer', note: 'ลาพักร้อน', until: '2026-12-31', at: t } });
+    s.props.GRANTS = JSON.stringify({ aek: { r: { id: 'viewer', until: '2026-12-31', by: 'หัวหน้า', at: t } } });
+    s.evictCache();
+    expect(call(s, tok, 'me').me).toMatchObject({ rid: 'admin', role: 'admin', caps: { 'set.users': 1 } });
+    expect(call(s, admin, 'req_decide', { u: 'aek', ok: true, id }).error).toBe('role_locked');
+    expect(call(s, admin, 'req_decide', { u: 'aek', ok: false, id, note: 'เป็นผู้ดูแลระบบแล้ว' })).toMatchObject({ ok: true, reqs: {} });
+    expect(call(s, tok, 'me').me).toMatchObject({ rid: 'admin', caps: { 'set.users': 1 } });
+    // still counted as an admin: the lead may step down
+    expect(call(s, tok, 'user_save', { u: 'lead', role: 'sales' })).toMatchObject({ ok: true });
+  });
+
   it('REQS keeps within the Properties limit (too_many_reqs); RESULTS drops the oldest results instead', () => {
     const { s, admin } = team();
     const note = 'ข'.repeat(300); // 900 bytes in UTF-8
@@ -780,7 +866,7 @@ describe('permission requests', () => {
     const decideAll = () =>
       Object.keys(props(s, 'REQS')).forEach((u) => {
         at(decided.length * MIN);
-        expect(call(s, admin, 'req_decide', { u, ok: false, note }).ok).toBe(true);
+        expect(decide(s, admin, u, { ok: false, note }).ok).toBe(true);
         decided.push(u);
       });
     decideAll();
@@ -794,6 +880,67 @@ describe('permission requests', () => {
     expect(kept.length).toBeLessThan(12);
     expect(kept).toEqual(expect.arrayContaining(decided.slice(-4))); // the newest stay
     expect(kept).not.toContain(decided[0]);
+  });
+});
+
+// ------------------------------------------------------------------ going back to the previous script
+
+describe('going back to the script before capabilities (prepareRollback, README "ย้อนกลับ")', () => {
+  const V3 = readFileSync(join(__dirname, '../../../team-sync/fixtures/Code.v3.gs'), 'utf8');
+
+  it('moves to viewer every account the old script would let write more than its role; stops the mails; the old script then refuses those writes', () => {
+    const { s, admin } = team();
+    s.run('setupNotify');
+    const ro = role(s, admin, 'ดูเฉพาะลูกค้า', ones(['view.sales']));
+    const head = role(s, admin, 'หัวหน้าฝ่ายขาย', HEAD);
+    member(s, admin, 'pla', 'ปลา', ro);
+    member(s, admin, 'mint', 'มินท์', head);
+    member(s, admin, 'somchai', 'สมชาย', 'sales');
+    const nid = member(s, admin, 'nid', 'นิด', 'viewer'); // a viewer with a temporary sales role: the old script ignores it
+    call(s, nid, 'req_send', { k: 'role', role: 'sales', note: 'ช่วยงานขาย', until: '2026-12-31' });
+    decide(s, admin, 'nid', { ok: true });
+    const kai = member(s, admin, 'kai', 'ไก่', 'sales'); // sales with a narrower temporary role
+    call(s, kai, 'req_send', { k: 'role', role: ro, note: 'ช่วงฝึกงาน', until: '2026-12-31' });
+    decide(s, admin, 'kai', { ok: true });
+    member(s, admin, 'boss2', 'รองหัวหน้า', 'admin');
+    const moved = s.run<{ u: string; from: string; to: string }[]>('prepareRollback');
+    expect(moved.map((x) => [x.u, x.from, x.to])).toEqual([['pla', ro, 'viewer'], ['mint', head, 'sales'], ['kai', 'sales', 'viewer']]);
+    expect(Object.fromEntries(Object.entries(usersOf(s)).map(([u, x]) => [u, x.r]))).toEqual({ lead: 'admin', pla: 'viewer', mint: 'sales', somchai: 'sales', nid: 'viewer', kai: 'viewer', boss2: 'admin' });
+    expect(s.triggers).toEqual([]);
+    expect(s.props.NOTIFY_ON).toBe('0');
+    expect(s.logs.at(-1)).toMatch(/^พร้อมย้อนกลับ: ย้ายบทบาท 3 บัญชี: ปลา \(pla\) เป็นดูอย่างเดียว, มินท์ \(mint\) เป็นพนักงานขาย, ไก่ \(kai\) เป็นดูอย่างเดียว · หยุดการแจ้งเตือนทางอีเมลแล้ว/);
+    expect(audit(s).filter((a) => a.note === 'ย้อนกลับเวอร์ชันสคริปต์').map((a) => [a.u, a.action, a.detail])).toEqual([
+      ['pla', 'user_role', { from: ro, to: 'viewer' }],
+      ['mint', 'user_role', { from: head, to: 'sales' }],
+      ['kai', 'user_role', { from: 'sales', to: 'viewer' }],
+    ]);
+    // the roles, extras and requests stay for when this version comes back; running it again moves nobody
+    expect(Object.keys(props(s, 'ROLES').roles)).toEqual([ro, head]);
+    expect(s.run('prepareRollback')).toEqual([]);
+    // the previous script on the same Script Properties
+    const v3 = createGasSim({ kdfIter: 1000, code: V3 });
+    Object.assign(v3.props, s.props);
+    v3.evictCache();
+    const v3tok = (u: string) => {
+      const t = v3.post({ action: 'login', cv: 3, u, pk: v3.pk(u, 'own-' + u), rm: true });
+      expect(t).toMatchObject({ ok: true });
+      return String(t.tok);
+    };
+    const bad = [{ k: 'scfg/stages', v: ['X'] }, { k: 'team/x', v: { n: 1 } }, { k: 'deal/d9', del: true }];
+    for (const u of ['pla', 'kai', 'nid']) {
+      const r = v3.post({ action: 'push', cv: 3, tok: v3tok(u), ops: bad });
+      expect([u, r.ok, r.n ?? 0]).toEqual([u, false, 0]);
+    }
+    expect(v3.sheet()?.rows.filter((r) => r[1] === 'scfg/stages') ?? []).toEqual([]);
+  });
+
+  it('a built-in พนักงานขาย narrowed by an admin moves its accounts too; admins never move', () => {
+    const { s, admin } = team();
+    member(s, admin, 'somchai', 'สมชาย', 'sales');
+    member(s, admin, 'boss2', 'รองหัวหน้า', 'admin');
+    expect(call(s, admin, 'role_save', { id: 'sales', c: { ...BUILT.sales, 'edit.pay': 0 } })).toMatchObject({ ok: true });
+    expect(s.run<{ u: string }[]>('prepareRollback').map((x) => x.u)).toEqual(['somchai']);
+    expect(usersOf(s)).toMatchObject({ lead: { r: 'admin' }, boss2: { r: 'admin' }, somchai: { r: 'viewer' } });
   });
 });
 

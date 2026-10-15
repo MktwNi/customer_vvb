@@ -78,7 +78,7 @@ const PLOT = 200, ROOM = 44; // the plot's height, and the room over the tallest
  * quarter named "ตอนนี้", a quarter picked in ช่วงเวลา tinted. A table with every figure (late in red) and
  * the undated money with "ตั้งแผนชำระ".
  */
-export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: { Y: CashYear; year: string; now: number; pick: number; onCashTab: () => void; onPlan: (dealId: string | null) => void; canPlan: boolean }) {
+export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: { Y: CashYear; year: string; now: number; pick: number; onCashTab?: () => void; onPlan: (dealId: string | null) => void; canPlan: boolean }) {
   const [tip, setTip] = useState<number | null>(null);
   const qs = Y.quarters, owedOf = (i: number) => qs[i].late + qs[i].wait;
   const { ticks, top } = moneyTicks(Math.max(0, ...qs.map(cashTotal)));
@@ -91,7 +91,7 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: 
     <section className="sd-card sd-cash" aria-labelledby="sd-cash-t">
       <div className="sd-card-h">
         <h3 className="sd-card-t" id="sd-cash-t">เงินเข้ารายไตรมาส · ปี {year}</h3>
-        <button type="button" className="lnk sd-h-lnk" onClick={onCashTab}>ดูรายงวดใน Cashflow</button>
+        {onCashTab && <button type="button" className="lnk sd-h-lnk" onClick={onCashTab}>ดูรายงวดใน Cashflow</button>}
       </div>
       <p className="sd-sub">รับแล้วนับตามวันที่รับเงิน · ค้างรับนับตามวันครบกำหนด</p>
       <div className="qk" aria-hidden="true">
@@ -169,7 +169,7 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan }: 
           <span>ยังไม่กำหนดวันรับ</span>
           <b>{m0(undAmt)}</b>
           <span className="qc-und-s">{undDeals.length === 1 ? shortName(und[0].deal.client) : `${fmtN(undDeals.length)} งาน`} · ได้งานแล้ว {und.every((l) => l.src === 'rest') ? 'ยังไม่ตั้งแผนชำระ' : 'ยังไม่กำหนดวันรับ'}</span>
-          {canPlan && <button type="button" className="lnk" onClick={() => onPlan(undDeals.length === 1 ? undDeals[0] : null)}>ตั้งแผนชำระ</button>}
+          {canPlan && <button type="button" className="lnk" onClick={() => onPlan(undDeals.length === 1 || !onCashTab ? undDeals[0] : null)}>ตั้งแผนชำระ</button>}
         </div>
       )}
     </section>

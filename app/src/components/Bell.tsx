@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import { useApp, useEngineVersion, useNarrow } from '../state';
 import { todayISO } from '../lib/format';
-import { bellItems, dayTh, type BellRow } from '../lib/notify';
+import { bellEmpty, bellItems, dayTh, type BellRow } from '../lib/notify';
 import type { GccEngine } from '../lib/engine';
 import { Icon } from './icons';
 import { usePopover } from './usePopover';
@@ -106,7 +106,7 @@ export function Bell() {
           ) : (
             <div className="nf-empty">
               ไม่มีเรื่องที่ต้องทำตอนนี้
-              <small>{e.qtLive ? 'งวดเงินที่ใกล้ถึงกำหนด นัดของวันนี้ และผลตรวจใบเสนอราคาของคุณจะขึ้นที่นี่' : 'งวดเงินที่ใกล้ถึงกำหนด และนัดของวันนี้จะขึ้นที่นี่'}</small>
+              <small>{bellEmpty((c) => e.can(c), e.qtLive)}</small>
             </div>
           )}
           <div className="nf-foot">

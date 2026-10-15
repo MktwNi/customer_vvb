@@ -465,7 +465,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
           {c && !deals.length && (
             <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="empty">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
-              {!ro && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
+              {/* a new deal is ดีลและขั้นตอน's, not the person record's (as CompanyDrawer's SalesBox) */}
+              {e.can('edit.deal') && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
             </span>
           )}
           {deals.map((d) => (

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySales, newDeal, toPay, type Deal, type DealDoc, type SalesState } from './sales';
 import {
-  bellItems, checkedLine, dayTh, docById, fpOf, needsCheck, parseGo, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, sameFp,
+  bellEmpty, bellItems, checkedLine, dayTh, docById, fpOf, needsCheck, parseGo, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, sameFp,
   toQtCheck, unmatchedNames, waitingChecks, wantsLine, whenTh, NOTIFY_CFG0, type BellIn, type QtCheck,
 } from './notify';
 import { applyRow, localRecords, noEffects, parseMe, type SharedState } from './teamSync';
@@ -257,6 +257,18 @@ describe('the bell', () => {
     expect(whenTh(now, TODAY)).toBe('วันนี้ 09:40');
     expect(whenTh(new Date(2026, 9, 10, 9, 40).toISOString(), TODAY)).toBe(dmTh('2026-10-10'));
     expect(dayTh('2026-10-12')).toBe('จันทร์ ' + dmTh('2026-10-12'));
+  });
+});
+
+describe('the empty bell', () => {
+  it('says what would show, by what the account may see', () => {
+    const of = (caps: CapSet) => (c: keyof CapSet) => !!caps[c];
+    expect(bellEmpty(of(BUILTIN.sales.c), true)).toBe('งวดเงินที่ใกล้ถึงกำหนด นัดของวันนี้ และผลตรวจใบเสนอราคาของคุณจะขึ้นที่นี่');
+    expect(bellEmpty(of(BUILTIN.sales.c), false)).toBe('งวดเงินที่ใกล้ถึงกำหนด และนัดของวันนี้จะขึ้นที่นี่');
+    expect(bellEmpty(of(BUILTIN.admin.c), true)).toBe('งวดเงินที่ใกล้ถึงกำหนด นัดของวันนี้ ใบเสนอราคาที่รอตรวจ และผลตรวจใบเสนอราคาของคุณจะขึ้นที่นี่');
+    // without ดูยอดเงิน there are no instalments in the bell: it does not promise them
+    expect(bellEmpty(of({ 'view.sales': 'all', 'view.plan': 'all' }), true)).toBe('นัดของวันนี้จะขึ้นที่นี่');
+    expect(bellEmpty(of({}), true)).toBe('เรื่องที่ต้องทำจะขึ้นที่นี่');
   });
 });
 

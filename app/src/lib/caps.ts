@@ -49,7 +49,7 @@ export const CAPS: CapDef[] = [
   { id: 'set.lists', g: 'a', label: 'ตั้งค่ารายการ', desc: 'หมวด SOURCE Services และประเภทลูกค้า' },
   { id: 'set.units', g: 'a', label: 'ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น', desc: 'รายชื่อหน่วยงาน คนในหน่วยงาน และอัตรา %', needs: 'view.comm' },
   { id: 'set.dedup', g: 'a', label: 'ตรวจข้อมูลซ้ำ', desc: 'ตัดสินว่าบริษัทซ้ำกันหรือไม่' },
-  { id: 'set.data', g: 'a', label: 'นำเข้า ส่งออก และไฟล์สำรอง', desc: 'นำเข้า Sales Tracker เดิม ส่งออก ไฟล์สำรองทีม' },
+  { id: 'set.data', g: 'a', label: 'นำเข้าข้อมูลและไฟล์สำรอง', desc: 'นำเข้า Sales Tracker เดิม ไฟล์สำรองทีม (ส่งออก CSV ทำได้ทุกคนที่เห็นหน้านั้น)' },
   { id: 'set.users', g: 'a', label: 'จัดการผู้ใช้และสิทธิ์', desc: 'บัญชี บทบาท และอนุมัติคำขอ · เฉพาะผู้ดูแลระบบ' },
 ];
 export const CAP = Object.fromEntries(CAPS.map((c) => [c.id, c])) as Record<CapId, CapDef>;
@@ -148,8 +148,9 @@ export const live = (until: string | undefined, today: string) => !until || unti
  * gives nothing (default deny); admin is always everything.
  */
 export function resolveCaps(baseRole: string, roles: Record<string, CapSet>, g: Grants | undefined, today: string): CapSet {
-  // a temporary role holds while it lasts and exists; never admin (the script decides the same, capsOf_)
-  const rid = g?.r && g.r.id !== 'admin' && live(g.r.until, today) && (g.r.id in roles || isBuiltin(g.r.id)) ? g.r.id : baseRole;
+  // a temporary role holds while it lasts and exists; never admin, and never narrows an admin (the script
+  // decides the same, capsOf_)
+  const rid = baseRole !== 'admin' && g?.r && g.r.id !== 'admin' && live(g.r.until, today) && (g.r.id in roles || isBuiltin(g.r.id)) ? g.r.id : baseRole;
   if (rid === 'admin') return { ...ALL_CAPS };
   let c: CapSet = { ...(roles[rid] || {}) };
   delete c[LOCKED_CAP];
@@ -294,8 +295,9 @@ export function gained(from: CapSet, to: CapSet): string[] {
   });
   return out;
 }
-/** What `to` no longer has of `from`. */
-export const lost = (from: CapSet, to: CapSet) => CAPS.filter((c) => from[c.id] && !to[c.id]).map((c) => capPhrase(c.id));
+/** What `to` no longer has of `from` (a narrower scope counts too: "แก้ไขดีลและขั้นตอนของคนอื่น"). */
+export const lost = (from: CapSet, to: CapSet) =>
+  CAPS.flatMap((c) => (from[c.id] && !to[c.id] ? [capPhrase(c.id)] : from[c.id] === 'all' && to[c.id] === 'own' ? [capPhrase(c.id) + 'ของคนอื่น'] : []));
 /** "a · b · c และอีก n รายการ" */
 export const listWords = (xs: string[], max = 3) => xs.slice(0, max).join(' · ') + (xs.length > max ? ` และอีก ${xs.length - max} รายการ` : '');
 
@@ -319,7 +321,7 @@ export function summarize(c: CapSet): string {
   else if (c['del.log']) parts.push('ลบบันทึกการติดต่อได้');
   if (!c['view.money']) parts.push('ไม่เห็นยอดเงิน');
   else if (c['view.comm']) parts.push(c['edit.share'] ? 'เห็นค่าคอมมิชชั่นและแบ่งสัดส่วนงาน' : 'เห็นค่าคอมมิชชั่น');
-  const jobs = ([['qt.check', 'ตรวจใบเสนอราคา'], ['pay.check', 'ตรวจยืนยันรับเงิน'], ['set.lists', 'ตั้งค่ารายการ'], ['set.units', 'ตั้งค่าหน่วยงาน'], ['set.dedup', 'ตรวจข้อมูลซ้ำ'], ['set.data', 'นำเข้าและส่งออก']] as [CapId, string][])
+  const jobs = ([['qt.check', 'ตรวจใบเสนอราคา'], ['pay.check', 'ตรวจยืนยันรับเงิน'], ['set.lists', 'ตั้งค่ารายการ'], ['set.units', 'ตั้งค่าหน่วยงาน'], ['set.dedup', 'ตรวจข้อมูลซ้ำ'], ['set.data', 'นำเข้าข้อมูลและไฟล์สำรอง']] as [CapId, string][])
     .filter(([k]) => c[k])
     .map(([, w]) => w);
   if (jobs.length) parts.push(jobs.join(' '));

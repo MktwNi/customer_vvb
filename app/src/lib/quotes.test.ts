@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dealMoney, emptySales, newDeal, salesStats, type DealDoc, type SalesState } from './sales';
-import { attachCheck, attachKind0, attachRevision, isQtVersion, qtDelText, qtDiffText, qtFigWords, qtPrev, qtVerLabel, qtVerShort, qtVerText, qtVersions, qtView, swapCheck, thList } from './quotes';
+import { attachCheck, attachKind0, attachRevision, isQtVersion, qtDelText, qtDiffText, qtFigWords, qtPrev, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtVersions, qtView, swapCheck, thList } from './quotes';
 import type { DocFacts } from './docExtract';
 import { dmTh } from './format';
 import { HELP_TOPICS, searchHelp } from './helpContent';
@@ -129,6 +129,14 @@ describe('quotation versions', () => {
     expect(qtDiffText(0, 5000)).toBe('ฉบับแก้ไขมากกว่าเดิม 5,000 บาท');
     expect(qtDiffText(null, 5000)).toBe('');
     expect(qtDiffText(5000, null)).toBe('');
+  });
+});
+
+describe('a quotation this account can\'t change', () => {
+  it('says why: no แนบเอกสาร, or another person\'s deal under own-work-only', () => {
+    expect(qtRoText(false, 'เอก')).toBe('บัญชีของคุณแนบหรือแก้ใบเสนอราคาไม่ได้');
+    expect(qtRoText(true, 'หมิว')).toBe('งานของ หมิว · บัญชีของคุณแก้ได้เฉพาะงานของตัวเอง');
+    expect(qtRoText(true, '')).toBe('งานของคนอื่น · บัญชีของคุณแก้ได้เฉพาะงานของตัวเอง');
   });
 });
 

@@ -27,7 +27,7 @@ import {
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
-import { cashYear, type CashLine } from './sales';
+import { cashYear, setMoneyHidden, type CashLine } from './sales';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
@@ -233,6 +233,8 @@ export class GccEngine {
   };
   getVersion = () => this.version;
   emit() {
+    // a session without ดูยอดเงิน works nothing out from the amounts it never received (lib/sales.ts)
+    setMoneyHidden(this.sales, !this.can('view.money'));
     this.version++;
     this.listeners.forEach((f) => f());
   }
@@ -866,6 +868,12 @@ export class GccEngine {
   /** `can` for a deal: its ผู้รับผิดชอบ decides an `own` scope. */
   canDeal(cap: CapId, d: Pick<Deal, 'resp'> | null | undefined) {
     return this.can(cap, d ? d.resp || '' : undefined);
+  }
+  /** May this account attach or change a deal's quotation (แนบเอกสาร)? A quotation moves the deal's
+   *  Forecast: an account whose ดีลและขั้นตอน covers its own work only does it on its own deals only (one
+   *  without ดีลและขั้นตอน at all, e.g. บัญชี, by แนบเอกสาร alone). */
+  canQuote(d: Pick<Deal, 'resp'>) {
+    return this.can('docs.up') && (this.myCaps()?.['edit.deal'] !== 'own' || this.canDeal('edit.deal', d));
   }
   /** The account can send changes at all (a view-only one sends nothing). */
   canWrite() {
@@ -4101,9 +4109,12 @@ export class GccEngine {
   async grantDel(u: string, k: CapId | 'role') {
     await this.adminCall({ action: 'grant_del', u, k });
   }
-  /** Approve or refuse an account's request, with a note to them. */
-  async reqDecide(u: string, ok: boolean, note: string) {
-    await this.adminCall({ action: 'req_decide', u, ok, note: note.trim() });
+  /** Approve or refuse an account's request, with a note to them. `id`: the request the admin is looking
+   *  at; one the requester replaced since is refused ('req_changed': look at it again), never decided unseen. */
+  async reqDecide(u: string, ok: boolean, note: string, id: string) {
+    await this.adminCall({ action: 'req_decide', u, ok, note: note.trim(), id }).catch((e) => {
+      throw e instanceof TeamSyncError && e.code === 'changed' ? codeError('req_changed', e.extra) : e;
+    });
   }
   /** Ask the admins for another role or more capabilities (online only; replaces a pending request). */
   async reqSend(q: ReqInput) {
@@ -4171,7 +4182,8 @@ export class GccEngine {
    *  (no notifications yet, or a document outside the check with nothing recorded). */
   qtCheckFor(doc: DealDoc): QtCheckView | null {
     const live = this.notifyLive;
-    if (!live?.on || this.teamCfg?.mode !== 'accounts') return null;
+    // the check is of the amounts: an account that may not see money sees no check either
+    if (!live?.on || this.teamCfg?.mode !== 'accounts' || !this.can('view.money')) return null;
     const v = qtCheckOf(this.checks()[doc.id], doc);
     if (v.status === 'wait' && !needsCheck(this.sales, doc, live.since)) return null;
     return v;

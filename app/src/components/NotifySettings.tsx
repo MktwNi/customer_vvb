@@ -110,7 +110,7 @@ export function NotifySettings({ onClose }: { onClose: () => void }) {
     run('save', async () => {
       await e.saveNotifyMe({ on, t, sc, ...(isNew && mailCap ? { em: mail } : {}) });
       // a new address waits for its code here; otherwise done
-      if (isNew && mailCap && mail) setMsg(`ส่งรหัส 6 หลักไปที่ ${mail} แล้ว ใส่รหัสด้านล่างเพื่อเริ่มรับอีเมล`);
+      if (isNew && mailCap && mail) setMsg(`ส่งรหัส 6 หลักไปที่ ${mail} แล้ว ใส่รหัสในช่อง “รหัส 6 หลักจากอีเมล” ใต้อีเมลด้านบน เพื่อเริ่มรับอีเมล`);
       else onClose();
     });
   };

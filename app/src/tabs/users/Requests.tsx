@@ -38,7 +38,8 @@ export function Requests({ dir, reload, lost }: { dir: TeamDir; reload: () => Pr
         <div className="rl-reqs">
           {list.map(([u, q]) => {
             const acc = dir.users.find((x) => x.u === u);
-            return <ReqCard key={u + q.at} u={u} acc={acc} q={q} dir={dir} self={u === me} reload={reload} lost={lost} />;
+            // keyed by the account: a request replaced meanwhile shows in the same card, with the note why
+            return <ReqCard key={u} u={u} acc={acc} q={q} dir={dir} self={u === me} reload={reload} lost={lost} />;
           })}
         </div>
       )}
@@ -93,12 +94,15 @@ function ReqCard({ u, acc, q, dir, self, reload, lost }: { u: string; acc?: Team
     setBusy(ok ? 'ok' : 'no');
     setErr('');
     try {
-      await e.reqDecide(u, ok, note);
+      // the id of the request on screen: one the requester replaced since is refused, not decided unseen
+      await e.reqDecide(u, ok, note, q.id);
       await reload();
     } catch (x) {
       lost(x);
       setErr(authError(x).msg);
       setBusy('');
+      // the request was replaced (or withdrawn): show what is there now
+      if (authError(x).code === 'req_changed' || authError(x).code === 'no_request') await Promise.resolve(reload()).catch(() => {});
     }
   };
   const want = q.k === 'role' && q.role ? roleOf(dir.roles, q.role) : null;

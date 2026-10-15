@@ -14,6 +14,8 @@ import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { BUILTIN, type CapSet } from './caps';
 import { histLine } from './reqText';
+import { payState, planOf, quickMatch, trackerStatus } from './sales';
+import { nextStepView, statusView } from './salesUi';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -53,6 +55,10 @@ afterAll(() => {
 
 /** Bodies every engine sent. */
 const sent: Record<string, unknown>[] = [];
+/** An admin decides account u's request as the Requests page does: the one its card shows. */
+async function decide(L: { e: GccEngine }, u: string, ok: boolean, note: string) {
+  await L.e.reqDecide(u, ok, note, (await L.e.adminDir()).reqs[u].id);
+}
 interface Tab { e: GccEngine; store: ReturnType<typeof memoryStore>; browser: string }
 const tabs: Tab[] = [];
 afterEach(() => {
@@ -218,6 +224,52 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     expect(A.e.teamNote).toBe('ผู้ดูแลระบบเปลี่ยนบทบาทของคุณเป็น บัญชี/การเงิน');
   });
 
+  it('without ดูยอดเงิน nothing is worked out from amounts it never got: received reads received, nothing is late, no plan, no instalments', async () => {
+    const L = await lead();
+    const { id: blind } = await L.e.roleSave({ n: 'ไม่เห็นเงิน', d: '', c: { 'view.sales': 'all', 'view.plan': 'all', 'edit.cust': 'all', 'edit.task': 'all' } });
+    const N = await member(L, 'nid', 'นิด', blind);
+    // the review's demo3: won 1 Oct, PAY1 received by hand on 14 Oct, PAY2 due 18 Oct (today is the 15th)
+    const d = L.e.addDeal({ client: 'บริษัท คงธนา เซอร์วิส จำกัด', forecast: 107000 });
+    L.e.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    L.e.setPlan(d.id, [
+      { stage: 'PAY1', amt: 53500, pct: null, due: '2026-10-10', rel: null, how: 'transfer', howT: '', note: '' },
+      { stage: 'PAY2', amt: 53500, pct: null, due: '2026-10-18', rel: null, how: 'transfer', howT: '', note: '' },
+    ]);
+    L.e.markPaid(d.id, 'PAY1', { date: '2026-10-14', amount: 53500 });
+    // a second deal: its receipt recorded by someone whose stage note was not written (only the date came)
+    const d2 = L.e.addDeal({ client: 'บริษัท รับโดยบัญชี จำกัด', forecast: 1000 });
+    L.e.setStep(d2.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    L.e.setPlan(d2.id, [{ stage: 'PAY1', amt: 1000, pct: null, due: '2026-10-05', rel: null, how: 'transfer', howT: '', note: '' }]);
+    await settle(L);
+    sim.post({ action: 'push', cv: 4, tok: L.e.session!.tok, ops: [{ k: `dpay/${d2.id}/PAY1`, v: { ...stored(L, `dpay/${d2.id}/PAY1`)!.v as object, rcv: '2026-10-12', got: 1000 } }] });
+    await settle(N);
+    const S = N.e.sales, today = '2026-10-15';
+    expect(N.e.can('view.money')).toBe(false);
+    // the data came, without its amounts
+    expect(S.pays[`${d.id}/PAY1`]).toMatchObject({ amt: null, got: null, rcv: '2026-10-14' });
+    expect(S.deals[d.id].forecast).toBeNull();
+    // no plan is worked out; what came in still reads so, from what carries no amount
+    expect(planOf(S, S.deals[d.id], today)).toBeNull();
+    expect(payState(S, S.deals[d.id], today)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1'], left: ['PAY2'], plan: null });
+    expect(payState(S, S.deals[d2.id], today)).toMatchObject({ paid: ['PAY1'], left: [] });
+    expect(statusView(S, S.deals[d.id], today)).toMatchObject({ word: 'ได้งาน', sub: 'รอชำระงวด 2' });
+    expect(trackerStatus(S, S.deals[d.id], today)).toBe('ได้งาน');
+    expect(nextStepView(S, S.deals[d.id], today)).toMatchObject({ tone: '' });
+    expect(quickMatch(S, S.deals[d.id], 'paylate', today)).toBe(false);
+    expect(quickMatch(S, S.deals[d2.id], 'ready', today)).toBe(true);
+    expect(N.e.payDue('', '9999-12-31')).toEqual([]);
+    const words = [statusView(S, S.deals[d.id], today).sub, trackerStatus(S, S.deals[d.id], today), nextStepView(S, S.deals[d.id], today).hint].join(' ');
+    expect(words).not.toMatch(/เลยกำหนด|รับแล้ว 0|0 บาท/);
+    // the admin's own tracker (another state) still works the plan out
+    expect(planOf(L.e.sales, L.e.sales.deals[d.id], today)).toMatchObject({ paidN: 1, n: 2, left: 53500 });
+    expect(payState(L.e.sales, L.e.sales.deals[d.id], today)).toMatchObject({ paid: ['PAY1'], left: ['PAY2'] });
+    // given ดูยอดเงิน back: the plan returns
+    await L.e.roleSave({ id: blind, n: 'ไม่เห็นเงิน', d: '', c: { 'view.sales': 'all', 'view.plan': 'all', 'edit.cust': 'all', 'edit.task': 'all', 'view.money': 'all' } });
+    await settle(N);
+    expect(N.e.can('view.money')).toBe(true);
+    expect(planOf(N.e.sales, N.e.sales.deals[d.id], today)).toMatchObject({ paidN: 1, n: 2 });
+  });
+
   it('losing ดูยอดเงิน: everything is pulled again without the amounts and document copies go; given back, the amounts return', async () => {
     const L = await lead();
     const S = await member(L, 'makorn', 'มกร', 'sales');
@@ -254,7 +306,7 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     const S = await member(L, 'aek', 'เอก', 'sales');
     const { id } = await L.e.roleSave({ n: 'หัวหน้าฝ่ายขาย', d: '', c: { ...SALES, 'view.comm': 'all', 'qt.check': 'all' } });
     await S.e.reqSend({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2026-10-20' });
-    await L.e.reqDecide('aek', true, '');
+    await decide(L, 'aek', true, '');
     await settle(S);
     expect(S.e.roleName()).toBe('หัวหน้าฝ่ายขาย');
     expect(S.e.session!.g?.r).toMatchObject({ id, until: '2026-10-20' });
@@ -288,7 +340,7 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     const dir = await L.e.adminDir();
     expect(dir.v4).toBe(true);
     expect(dir.reqs.aek).toMatchObject({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา' });
-    await L.e.reqDecide('aek', true, 'ตามที่ขอ');
+    await decide(L, 'aek', true, 'ตามที่ขอ');
     expect(L.e.session!.rq).toBe(0);
     await settle(S);
     expect(S.e.session!.req).toMatchObject({ st: 'r', ok: true, by: 'หมิว', note: 'ตามที่ขอ', role: id, until: '2027-01-31' });
@@ -303,18 +355,35 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     expect(lines[0]).toMatchObject({ who: 'เอก', by: 'หมิว', what: 'ขอเปลี่ยนบทบาท จาก พนักงานขาย เป็น หัวหน้าฝ่ายขาย ถึง 31 ม.ค. 2570', result: 'อนุมัติ', sub: '“ตามที่ขอ”' });
   });
 
+  it('the admin decides the request on screen: one the requester replaced since is refused and shown again, never granted unseen', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'viewer');
+    await S.e.reqSend({ k: 'caps', caps: [{ k: 'edit.task', s: 'all' }], note: 'ช่วยลงนัดให้ทีม' });
+    const shown = (await L.e.adminDir()).reqs.aek;
+    await S.e.reqSend({ k: 'caps', caps: [{ k: 'del.rec', s: 'all' }, { k: 'set.data', s: 'all' }, { k: 'set.lists', s: 'all' }], note: 'ช่วยลงนัดให้ทีม' });
+    await expect(L.e.reqDecide('aek', true, '', shown.id)).rejects.toMatchObject({ code: 'req_changed', message: 'ผู้ขอเพิ่งแก้คำขอนี้ ระบบโหลดคำขอล่าสุดแล้ว ตรวจอีกครั้งก่อนตัดสิน' });
+    expect(sent.find((b) => b.action === 'req_decide')).toMatchObject({ u: 'aek', ok: true, id: shown.id });
+    await settle(S);
+    expect(['del.rec', 'set.data', 'set.lists', 'edit.task'].map((c) => S.e.can(c as never))).toEqual([false, false, false, false]);
+    const now = (await L.e.adminDir()).reqs.aek;
+    expect(now.caps!.map((c) => c.k)).toEqual(['del.rec', 'set.lists', 'set.data']);
+    await L.e.reqDecide('aek', false, 'ขอทีละเรื่อง', now.id);
+    await settle(S);
+    expect(S.e.session!.req).toMatchObject({ st: 'r', ok: false, note: 'ขอทีละเรื่อง' });
+  });
+
   it('a capability request and an extra given directly: the account gets them, with their dates; nobody decides their own', async () => {
     const L = await lead();
     const S = await member(L, 'aek', 'เอก', 'sales');
     await S.e.reqSend({ k: 'caps', caps: [{ k: 'edit.share', s: 'all' }], note: 'แบ่งสัดส่วนงานร่วม', until: '2026-11-30' });
     // what it needs is asked for too
     expect(S.e.session!.req).toMatchObject({ st: 'p', k: 'caps', caps: [{ k: 'view.comm', s: 'all' }, { k: 'edit.share', s: 'all' }] });
-    await L.e.reqDecide('aek', false, 'ยังไม่จำเป็น');
+    await decide(L, 'aek', false, 'ยังไม่จำเป็น');
     await settle(S);
     expect(S.e.session!.req).toMatchObject({ st: 'r', ok: false, note: 'ยังไม่จำเป็น' });
     expect(S.e.can('edit.share')).toBe(false);
     await S.e.reqSend({ k: 'caps', caps: [{ k: 'edit.share', s: 'all' }], note: 'งานร่วมกับฝ่ายที่ปรึกษา', until: '2026-11-30' });
-    await L.e.reqDecide('aek', true, '');
+    await decide(L, 'aek', true, '');
     await settle(S);
     expect(S.e.can('edit.share')).toBe(true);
     expect(S.e.session!.g?.c?.map((x) => [x.k, x.until])).toEqual([['view.comm', '2026-11-30'], ['edit.share', '2026-11-30']]);

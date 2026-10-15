@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   PLAN_FIELDS, attachPreview, attachStage, closeReady, countedAt, dealMoney, dueOf, emptySales, filterDeals, hasPlan, isExtraPay, kindForStage, lastContactInfo, lineView, newDeal, overdueDays,
-  payDue, payStageFor, payStages, payState, planCsv, planLines, planOf, quickMatch, receivables, salesStats, splitAmounts, stageDocs, stageTh, stageTrack, targetForStage, toPay,
-  trackerStatus, whtRate, wonDate, type DealDoc, type PayLine, type SalesState,
+  moneyHidden, payDue, payStageFor, payStages, payState, planCsv, planLines, planOf, quickMatch, receivables, salesStats, setMoneyHidden, splitAmounts, stageDocs, stageTh, stageTrack,
+  targetForStage, toPay, trackerStatus, whtRate, wonDate, type DealDoc, type PayLine, type SalesState,
 } from './sales';
 import { applyRow, isLocalOnly, keyOf, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
@@ -207,6 +207,35 @@ describe('paid stages and ready to close', () => {
     // a note (whatever its date) on a past or undated stage is done
     const n = mk({ steps: { ...YES, PAY1: ['', 'โอนแล้ว'], PAY2: ['2026-10-01', 'โอนแล้ว'] } });
     expect(closeReady(n.s, n.d, TODAY)).toBe(true);
+  });
+
+  it('a tracker without ดูยอดเงิน (amounts came as null): no plan; received from the receipt date, the stage or a receipt; nothing late', () => {
+    // as pulled without view.money: amounts null, the documents' targets dropped with their amounts
+    const a = mk({
+      steps: YES,
+      pays: { PAY1: { amt: null, due: '2026-09-01', rcv: '2026-09-02' }, PAY2: { amt: null, due: '2026-09-15' }, PAY3: { amt: null, due: '2026-10-30' } },
+      docs: [{ stage: 'PAY2', kind: 'receipt', amount: null, target: 'none' }],
+    });
+    // with the amounts unknown the plan would read every line as late
+    expect(planOf(a.s, a.d, TODAY)!.late.map((l) => l.stage)).toEqual(['PAY1', 'PAY2']);
+    expect(moneyHidden(a.s)).toBe(false);
+    setMoneyHidden(a.s, true);
+    expect(moneyHidden(a.s)).toBe(true);
+    expect(planLines(a.s, a.d)).toBeNull();
+    expect(planOf(a.s, a.d, TODAY)).toBeNull();
+    expect(payState(a.s, a.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2', 'PAY3'], paid: ['PAY1', 'PAY2'], left: ['PAY3'], plan: null });
+    expect(quickMatch(a.s, a.d, 'paylate', TODAY)).toBe(false);
+    expect(payDue(a.s, [a.d], '', '9999-12-31', TODAY)).toEqual([]);
+    expect(trackerStatus(a.s, a.d, TODAY)).toBe('ได้งาน');
+    // "ถือว่ารับครบ" counts as received too; without a plan the list's PAY stages and their steps, as before
+    a.s.pays['x/PAY3'] = L({ full: true });
+    expect(closeReady(a.s, a.d, TODAY)).toBe(true);
+    const b = mk({ steps: { ...YES, PAY1: '2026-09-01' } });
+    setMoneyHidden(b.s, true);
+    expect(payState(b.s, b.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1'], left: ['PAY2'] });
+    // marked per state: another tracker, and this one unmarked, work the plan out again
+    setMoneyHidden(a.s, false);
+    expect(planOf(a.s, a.d, TODAY)).not.toBeNull();
   });
 
   it('NO is ready; WAIT and no result are not; YES with no PAY stage is', () => {

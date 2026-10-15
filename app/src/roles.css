@@ -91,6 +91,12 @@
 .rl-mx-y svg{width:14px;height:14px}
 .rl-mx-own{font-size:12px;color:var(--ink-2)}
 .rl-mx-no{font-size:13px;color:var(--muted)}
+/* up to 10 roles: each column keeps room for its name (no word broken per line), the card scrolls sideways
+   inside itself and the capability names stay in view; the page itself never scrolls sideways */
+.rl-mx-tb thead th:not(.rl-mx-cap) .rl-mx-r{min-width:96px}
+.rl-mx-tb tbody th[scope=row] .rl-mx-t{min-width:196px}
+.rl-mx-tb thead th.rl-mx-cap,.rl-mx-tb tbody tr:not(.rl-mx-g)>th[scope=row]{position:sticky;left:0;z-index:1;background:#fff}
+.rl-mx-w:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 @media (hover:hover){.rl-mx-tb tbody tr:not(.rl-mx-g):hover>*{background:var(--hv)}}
 
 /* requests */
@@ -204,7 +210,7 @@ textarea.fld.rl-ta{height:auto;min-height:76px;padding:9px 12px;line-height:1.55
 .rl-top .pg-row{min-height:40px}
 /* the Sales Tracker table without ดูยอดเงิน: the money columns fold to nothing (their <col> at 0px) */
 .sl-table.sl-nomoney{--w-fc:0px;--w-ac:0px}
-.sl-table.sl-nomoney :is(.k-fc,.k-ac){padding:0;visibility:hidden;overflow:hidden}
+.sl-table.sl-nomoney :is(.k-fc,.k-ac,.k-m2){padding:0;visibility:hidden;overflow:hidden}
 /* the result notice of a request */
 .rl-res b{font-weight:500;color:var(--ink)}
 /* states of a section that needs the script's update, and small helpers */
@@ -238,3 +244,8 @@ textarea.fld.rl-ta{height:auto;min-height:76px;padding:9px 12px;line-height:1.55
 /* the hidden checkbox and radio inputs sit inside their label: an absolutely positioned input whose
    containing block were the app frame would make focusing it scroll the frame (which hides overflow) */
 .rl-ck,.rl-rc .fck,.rl-tmp .fck{position:relative}
+
+/* the dashboard of an account without ดูยอดเงิน: no money card, ผลการขาย takes its place */
+.sd-grid.sd-nomoney{grid-template-areas:"top act win win" "week week follow acc"}
+@container (max-width:1099px){.sd-grid.sd-nomoney{grid-template-areas:"top act" "win win" "week week" "follow acc"}}
+@container (max-width:640px){.sd-grid.sd-nomoney{grid-template-areas:"top" "act" "win" "week" "follow" "acc"}}

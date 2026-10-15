@@ -13,7 +13,8 @@ export const membersOf = (dir: Pick<TeamDir, 'users'>, rid: string) => dir.users
 /** The role an account works under today: a temporary role while it lasts, else its own. */
 export const effRole = (dir: Pick<TeamDir, 'grants'>, u: Pick<TeamUser, 'u' | 'role'>, today: string) => {
   const r = dir.grants[u.u]?.r;
-  return r && live(r.until, today) ? r.id : u.role;
+  // an admin stays one whatever GRANTS says (the script's capsOf_)
+  return u.role !== 'admin' && r && r.id !== 'admin' && live(r.until, today) ? r.id : u.role;
 };
 /** The account's extras that still hold. */
 export const extrasOf = (dir: Pick<TeamDir, 'grants'>, u: string, today: string) => (dir.grants[u]?.c || []).filter((x) => live(x.until, today));

@@ -289,7 +289,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         })}
       </div>
 
-      <div className="sd-grid">
+      <div className={'sd-grid' + (money ? '' : ' sd-nomoney')}>
         <section className="sd-card sd-top hero" style={{ background: heroGrad }} aria-label="ผู้ทำยอดสูงสุด">
           <span className="sd-card-t">ผู้ทำยอดสูงสุด</span>
           {top ? (
@@ -303,7 +303,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               {sellers.length > 1 && (
                 <div className="sd-runners">
                   {sellers.slice(1, 4).map(([k, v], i) => (
-                    <span key={k} title={`${k}: Actual ${fmtMoney(v.actual) || 0} · Forecast ${fmtMoney(v.forecast) || 0}`}>
+                    <span key={k} title={money ? `${k}: Actual ${fmtMoney(v.actual) || 0} · Forecast ${fmtMoney(v.forecast) || 0}` : k}>
                       <i>{i + 2}</i>
                       {k}
                     </span>
@@ -340,7 +340,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           </div>
         </section>
 
-        <section className="sd-card sd-ring" aria-label="ยอดขายเทียบ Forecast">
+        {/* without ดูยอดเงิน there is nothing to compare: ผลการขาย takes this place (roles.css) */}
+        {money && <section className="sd-card sd-ring" aria-label="ยอดขายเทียบ Forecast">
           <div className="sd-card-h">
             <span className="sd-card-t">ยอดขายเทียบ Forecast</span>
           </div>
@@ -359,7 +360,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             <span><i className="fc" />Forecast <b>{fmtMoney(st.forecast) || 0} บาท</b></span>
             <small>{`ยืนยันด้วยเอกสาร: Actual ${fmtMoney(st.acConfirmed) || 0} · Forecast ${fmtMoney(st.fcConfirmed) || 0} บาท`}</small>
           </div>
-        </section>
+        </section>}
 
         <section className="sd-card sd-win" aria-label="ผลการขาย">
           <div className="sd-card-h">
@@ -547,7 +548,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           now={beOf(today) === year ? quarterOf(today) : -1}
           pick={qPick - 1}
           canPlan={e.can('edit.pay')}
-          onCashTab={() => set({ slView: 'cash', slCashShow: '', slCashPick: null })}
+          // the Cashflow tab is there only with ดู Cashflow: without it no link to it, and the plan to set opens on its deal
+          onCashTab={e.can('view.cash') ? () => set({ slView: 'cash', slCashShow: '', slCashPick: null }) : undefined}
           onPlan={(id) => (id ? set({ deal: id, dpPlan: 'edit' }) : set({ slView: 'cash', slCashShow: 'undated', slCashPick: null }))}
         />
       </div>}

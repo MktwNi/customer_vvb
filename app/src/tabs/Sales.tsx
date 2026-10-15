@@ -855,7 +855,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                       <span className="sl-sec-name">{name}</span>
                       <SecMeta sum={sum} />
                     </span>
-                    <span className="sl-s-tot">{cash ? (cash.range ? 'ในช่วงนี้' : `ปี ${ui.slYear}`) : 'Forecast'} <b>{fmtMoney(sum.fc) || '0'}</b></span>
+                    {money && <span className="sl-s-tot">{cash ? (cash.range ? 'ในช่วงนี้' : `ปี ${ui.slYear}`) : 'Forecast'} <b>{fmtMoney(sum.fc) || '0'}</b></span>}
                   </div>
                 </div>
                 {!col && list.map((d) => <ForDeal key={d.id} d={d}><DealCard d={d} /></ForDeal>)}
@@ -2179,6 +2179,7 @@ function DealCard({ d }: { d: Deal }) {
   const sv = statusView(S, d, today);
   const P = planOf(S, d, today), won = t.result === 'YES';
   const name = shortName(d.client);
+  const money = e.can('view.money'); // without ดูยอดเงิน the card has no figures at all
   // the figures' words: from a document, against one ("ไม่ตรงเอกสาร"), or typed with "แนบเอกสาร"
   const fv = fcFig(S, d), av = acFig(S, d);
   const word = (v: FigView, none: string) => (v.kind === 'ok' ? 'จากเอกสาร ' + v.docNo : v.kind === 'warn' ? 'ไม่ตรงเอกสาร' : v.word || none);
@@ -2222,7 +2223,7 @@ function DealCard({ d }: { d: Deal }) {
         <div className="sl-mc-st"><Status kind={sv.kind}>{sv.word}</Status></div>
       </div>
       <MiniTrack stages={S.cfg.stages} states={t.states} next={t.next} done={t.done} late={od != null || nextStepView(S, d, today).tone === 'late'} />
-      {tk.cash ? (
+      {!money ? null : tk.cash ? (
         <div className="sl-mc-money">
           <div className="sl-mc-m"><span>{tk.cash.range ? 'เงินเข้าในช่วงนี้' : `เงินเข้าปี ${tk.year}`}</span><LensMoney L={tk.cash} d={d} col="fc" won={won} /></div>
           <div className="sl-mc-m"><span>{tk.cash.range ? 'รับแล้วในช่วงนี้' : `รับแล้วในปี ${tk.year}`}</span><LensMoney L={tk.cash} d={d} col="ac" won={won} /></div>

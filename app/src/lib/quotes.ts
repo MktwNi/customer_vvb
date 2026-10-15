@@ -156,3 +156,10 @@ export function attachRevision(s: SalesState, d: Deal, a: { kind: DocKind; targe
 export function attachCheck<C>(check: C | null | undefined, rev: QtVersion | null, own: () => C | null): C | null {
   return check ?? (rev ? null : own());
 }
+
+/** Why a quotation can't be changed by this account (its card says it instead of the actions): no แนบเอกสาร,
+ *  or ดีลและขั้นตอน for its own work only and the deal is `resp`'s. */
+export function qtRoText(canUp: boolean, resp: string) {
+  if (!canUp) return 'บัญชีของคุณแนบหรือแก้ใบเสนอราคาไม่ได้';
+  return `งานของ${resp ? ' ' + resp : 'คนอื่น'} · บัญชีของคุณแก้ได้เฉพาะงานของตัวเอง`;
+}

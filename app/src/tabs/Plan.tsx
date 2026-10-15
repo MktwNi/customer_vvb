@@ -68,7 +68,9 @@ export function Plan() {
     return { t, ck: custKey(e, t.gid, t.title), full, name: shortName(full), date: t.date };
   });
   // installments of won deals still to be received (the payment plan): read-only entries, never stored
-  const pays = e.payDue('', '9999-12-31');
+  // (amounts the account may not see: no installments at all, as the bell)
+  const money = e.can('view.money');
+  const pays = money ? e.payDue('', '9999-12-31') : [];
   const paysK: PayK[] = pays.map((x) => ({ ...x, ck: dealKey(e, x.deal) }));
   // the customer pressed in the legend (this session only), while it still has an entry
   const only = activeCust(ui.plCust, [...tasksK, ...paysK].map((x) => x.ck));
@@ -107,7 +109,7 @@ export function Plan() {
     ['7 วันข้างหน้า', open_.filter((t) => t.date > today && t.date <= wk).length, ''],
     ['หลังจากนั้น', open_.filter((t) => t.date > wk).length, ''],
     // installments late or due within 7 days
-    ['รับเงิน', pays.filter((x) => x.line.due <= wk).length, 't-warn'],
+    ...(money ? [['รับเงิน', pays.filter((x) => x.line.due <= wk).length, 't-warn'] as [string, number, string]] : []),
   ];
   const avOf = (key: string, gid: number, title: string, size = 28) => {
     const c = e.company(gid);
@@ -222,10 +224,12 @@ export function Plan() {
                     </button>
                   ))}
                 </div>
-                <span className="pl-lg-key">
-                  <span className="pl-ev pay"><span className="pl-ev-k">รับเงิน</span></span>
-                  งวดที่ต้องรับเงิน · กรอบแดงหนาคือเลยกำหนด
-                </span>
+                {money && (
+                  <span className="pl-lg-key">
+                    <span className="pl-ev pay"><span className="pl-ev-k">รับเงิน</span></span>
+                    งวดที่ต้องรับเงิน · กรอบแดงหนาคือเลยกำหนด
+                  </span>
+                )}
               </>
             )}
           </div>

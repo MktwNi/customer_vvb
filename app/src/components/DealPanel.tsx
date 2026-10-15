@@ -383,10 +383,11 @@ export function DealPanel() {
         </div>
 
         <div className="dp-body">
-          {planFirst && <PlanCard d={d} attach={attach} />}
+          {/* the plan is amounts: an account without ดูยอดเงิน follows payments by the PAY stages below */}
+          {money && planFirst && <PlanCard d={d} attach={attach} />}
           {/* its own state (the card held, the quick-add) belongs to this deal */}
           <StepsCard key={d.id} d={d} attach={attach} />
-          {!planFirst && <PlanCard d={d} attach={attach} />}
+          {money && !planFirst && <PlanCard d={d} attach={attach} />}
           <OtherDocs d={d} attach={attach} />
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />

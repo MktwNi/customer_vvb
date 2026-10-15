@@ -18,7 +18,7 @@
 import { DUE_SOON, QUOTE_STAGE, fmtMoney, payDue, type Deal, type DealDoc, type SalesState } from './sales';
 import { TT } from './constants';
 import { addDays, daysBetween, dmTh, localDay, pad } from './format';
-import { can, sameName, type CapSet } from './caps';
+import { can, sameName, type CapId, type CapSet } from './caps';
 import type { Task } from './types';
 
 // ------------------------------------------------------------------ the check record
@@ -255,6 +255,19 @@ export function waitingChecks(s: SalesState, checks: Record<string, QtCheck>, me
 }
 
 /** The bell's groups (only those with something in them) and its number. */
+/** The empty bell's line, by what the account may see: "งวดเงินที่ใกล้ถึงกำหนด และนัดของวันนี้จะขึ้นที่นี่"
+ *  (no งวดเงิน without ดูยอดเงิน: the bell lists none then). */
+export function bellEmpty(may: (c: CapId) => boolean, qtLive: boolean) {
+  const w = [
+    may('view.money') && 'งวดเงินที่ใกล้ถึงกำหนด',
+    may('view.plan') && 'นัดของวันนี้',
+    qtLive && may('qt.check') && 'ใบเสนอราคาที่รอตรวจ',
+    qtLive && may('docs.up') && 'ผลตรวจใบเสนอราคาของคุณ',
+  ].filter((x): x is string => !!x);
+  if (!w.length) return 'เรื่องที่ต้องทำจะขึ้นที่นี่';
+  return (w.length === 1 ? w[0] : w.slice(0, -1).join(' ') + ' และ' + w[w.length - 1]) + 'จะขึ้นที่นี่';
+}
+
 export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
   const { S, me, caps, live, cfg, today } = x;
   const all = caps == null;
