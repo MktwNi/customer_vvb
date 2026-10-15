@@ -14,7 +14,7 @@ import { Modal } from '../components/Dialog';
 import { FilterBar, sentence, type FVal } from '../components/FilterBar';
 import { CashChart, CashKey } from '../components/CashChart';
 import { MonthCheck, YearCheck, useOpenMonth } from '../components/MonthCheck';
-import { chkRows, sumRows, ymOf } from '../lib/payCheck';
+import { cashCheckRows, chkRows, pageKeep, sumRows, ymOf } from '../lib/payCheck';
 import { Check, Pop, Radio } from '../components/Pop';
 import { Chevron } from '../components/StageTrack';
 
@@ -154,12 +154,12 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
   const goYear = (y: string) => set({ slYear: y, slCashShow: '' });
 
   // the month check under the chart (lib/payCheck.ts): every deal's lines (a check whose line is gone is an
-  // orphan only when no deal holds it), then this page's filters; the month open is the picked bar
+  // orphan only when no deal holds it); the card and the table show the year through this page's filters,
+  // late money carried and lines waiting elsewhere reach into other years, closing a month counts the
+  // whole month (`team`); the month open is the picked bar
   const allLines = cashLines(S, Object.values(S.deals), today);
-  const allow = new Set(deals.map((d) => d.id));
   const ce = +year - 543;
-  const passes = (d: Deal) => !filtered || filterDeals(S, { ...F, year: d.year, money: undefined }, today).some((x) => x.id === d.id);
-  const rows = chkRows(S, allLines, e.payChecks(), e.payChkCfg().since).filter((r) => r.ym.startsWith(ce + '-') && (r.kind === 'orphan' ? (r.deal ? passes(r.deal) : !filtered) : allow.has(r.dealId)));
+  const { rows, wide, team } = cashCheckRows(chkRows(S, allLines, e.payChecks(), e.payChkCfg().since), ce, pageKeep(S, F, today));
   // a deal whose money falls in more than one year says where the rest is ("ข้ามปี: งวด 3 อยู่ปี 2570")
   const byDeal = new Map<string, CashLine[]>();
   allLines.forEach((l) => byDeal.set(l.deal.id, [...(byDeal.get(l.deal.id) || []), l]));
@@ -210,8 +210,8 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
           {phone ? 'นับเฉพาะงานที่ได้งานแล้ว · ยอดรวม VAT · แตะเดือนเพื่อเปิดส่วนตรวจรับเงิน' : 'นับเฉพาะงานที่ได้งานแล้ว (YES) รวมงานที่ปิดแล้ว · ยอดตามเอกสาร รวม VAT · กดแท่งเพื่อเปิดเดือนนั้นในส่วนตรวจรับเงินด้านล่าง'}
         </div>
       </section>
-      <MonthCheck S={S} rows={rows} undated={Y.undated} year={year} scope={scope} show={show} today={today} phone={phone} tags={tags} />
-      <YearCheck S={S} rows={rows} year={year} scope={show ? 'y' : scope} today={today} phone={phone} />
+      <MonthCheck S={S} rows={rows} wide={wide} team={team} filter={filtered ? filterWords : ''} undated={Y.undated} year={year} scope={scope} show={show} today={today} phone={phone} tags={tags} />
+      <YearCheck S={S} rows={rows} team={team} filter={filtered ? filterWords : ''} year={year} scope={show ? 'y' : scope} today={today} phone={phone} />
       {ui.slCashCsv && <CashExport S={S} year={year} lines={lines} Y={Y} filterWords={filterWords} onClose={() => set({ slCashCsv: false })} />}
     </>
   );

@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, countsActual, dealMoney, dealResult, docMismatch, dueOf, fmtMoney, isPayStage, kindForStage,
+  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, fmtMoney, isPayStage, kindForStage,
   lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stageActs, stageDocs, stageTh, stageTrack, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState,
 } from '../lib/sales';
@@ -23,8 +23,8 @@ import { SelField, Select } from './Select';
 import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
-import { PayChip, PayNoPlan, PayNote, PayStripChip, useDealChecks, usePayGuard } from './PayChk';
-import { docLineId, planCheckWords } from '../lib/payCheck';
+import { PayChip, PayNoPlan, PayNote, PayStripChip, askPay, useDealChecks, usePayGuard } from './PayChk';
+import { attachLines, planCheckWords, previewOf } from '../lib/payCheck';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -186,9 +186,9 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
  *  document says so with both numbers, and offers the document's. */
 function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
   const { engine: e } = useApp();
-  // a received line accounting checked (or of a closed month): asked before it changes (PayChk.tsx)
+  // a received line accounting checked (or of a closed month): asked before it changes (PayChk.tsx), the
+  // document's money compared before and after (one that starts to count is asked about too)
   const guard = usePayGuard();
-  const counted = countsActual(doc) ? [docLineId(e.sales, doc)] : [];
   const ro = !e.can('docs.up');
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(false);
@@ -253,7 +253,7 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           {link && SHOWABLE.test(doc.mime) && <a href={link} target="_blank" rel="noopener noreferrer" className="lnk">เปิดในแท็บใหม่</a>}
           {link && <a href={link} download={doc.name} className="lnk">ดาวน์โหลด</a>}
           {!ro && <button type="button" onClick={() => setEdit(!edit)} className="btn xs">{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>}
-          {!ro && <button type="button" onClick={() => guard.ask({ d, lines: counted, kind: 'delete', title: `ลบเอกสาร ${doc.docNo || doc.name}`, verb: 'ลบ', plain: `ลบเอกสาร "${doc.name}"?`, run: () => e.deleteDoc(d.id, doc.id) })} className="quiet">ลบ</button>}
+          {!ro && <button type="button" onClick={() => guard.ask({ d, after: previewOf.doc(e.sales, d.id, doc.id, null), kind: 'delete', title: `ลบเอกสาร ${doc.docNo || doc.name}`, verb: 'ลบ', plain: `ลบเอกสาร "${doc.name}"?`, run: () => e.deleteDoc(d.id, doc.id) })} className="quiet">ลบ</button>}
           {busy && <span className="t-sec">{busy}</span>}
         </div>
       )}
@@ -265,12 +265,8 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
             const amount = parseAmount(String(fd.get('amount') ?? ''));
             if (amount === undefined) return void window.alert('อ่านยอดเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000');
             const target = amount == null ? 'none' : (String(fd.get('target')) as DealDoc['target']);
-            const run = () => {
-              e.updateDoc(d.id, doc.id, { amount, target, kind: String(fd.get('kind')) as DocKind, docNo: String(fd.get('docNo') || ''), basis: amount === doc.amount ? doc.basis : 'manual' });
-              setEdit(false);
-            };
-            if (amount !== doc.amount || target !== doc.target) guard.ask({ d, lines: counted, kind: 'edit', title: `แก้ยอด ${doc.docNo || doc.name}`, verb: 'บันทึก', run });
-            else run();
+            const patch = { amount, target, kind: String(fd.get('kind')) as DocKind, docNo: String(fd.get('docNo') || ''), basis: amount === doc.amount ? doc.basis : 'manual' } as const;
+            guard.ask({ d, after: previewOf.doc(e.sales, d.id, doc.id, patch), kind: 'edit', title: `แก้ยอด ${doc.docNo || doc.name}`, verb: 'บันทึก', run: () => (e.updateDoc(d.id, doc.id, patch), setEdit(false)) });
           }}
           className="sl-docc-form"
         >
@@ -282,7 +278,6 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           <span className="t-meta" style={{ gridColumn: '1/-1' }}>ลบเอกสารที่มาแทนใบเดิม ใบเดิมยังไม่นับยอด ตั้งกลับได้ที่ “นับเป็น” ของใบนั้น</span>
         </form>
       )}
-      {guard.node}
     </div>
   );
 }
@@ -330,7 +325,9 @@ export function DealPanel() {
   const od = overdueDays(S, d, today);
   const ready = d.jobStatus === 'open' && closeReady(S, d, today);
   const c = d.gid != null ? e.company(d.gid) : undefined;
-  const attach: Attach = (stage, kind, file, more) => setAtt({ stage, kind, file, more });
+  // a document for the Actual at a stage accounting checked (or of a closed month): asked first
+  const attach: Attach = (stage, kind, file, more) =>
+    guard.ask({ d, lines: attachLines(S, d.id, stage, kind, more?.target), kind: 'attach', title: 'แนบเอกสาร' + (stage ? ' ' + stage : ''), verb: 'แนบเอกสาร', run: () => setAtt({ stage, kind, file, more }) });
   const planFirst = won || ui.dpPlan !== '';
 
   // the summary strip: สถานะ · Forecast · Actual · ค้างรับ
@@ -380,7 +377,7 @@ export function DealPanel() {
             </div>
             <div>
               <span>Actual</span>
-              {ro || !typedAc ? <b className={m.actual == null ? 'none' : ''}>{m.actual == null ? '—' : fmtMoney(m.actual)}</b> : <StripMoney label="Actual" value={m.actual} onSave={(v) => guard.ask({ d, lines: ['typed'], kind: 'edit', title: 'แก้ Actual ที่พิมพ์ไว้', verb: 'แก้ยอด', run: () => up({ actual: v }) })} />}
+              {ro || !typedAc ? <b className={m.actual == null ? 'none' : ''}>{m.actual == null ? '—' : fmtMoney(m.actual)}</b> : <StripMoney label="Actual" value={m.actual} onSave={(v) => guard.ask({ d, after: previewOf.deal(S, d.id, { actual: v }), kind: 'edit', title: 'แก้ Actual ที่พิมพ์ไว้', verb: 'แก้ยอด', run: () => up({ actual: v }) })} />}
               <FigLine v={av} ro={ro || (!!P && !won)} onAttach={attachAc} none={'จาก ' + (payStages(C).join(' + ') || 'ใบเสร็จ')} extra={av.doc && m.hand ? 'บันทึกเอง' : ''} />
               <PayStripChip d={d} />
             </div>
@@ -405,14 +402,13 @@ export function DealPanel() {
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />
           {e.can('del.rec') && (
-            <button type="button" onClick={() => window.confirm(`ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ ทุกเครื่องในทีม)`) && (e.deleteDeal(d.id), close())} className="quiet dp-del">
+            <button type="button" onClick={() => guard.ask({ d, after: previewOf.noDeal(S, d.id), kind: 'delete', title: `ลบ ${shortName(d.client)}`, verb: 'ลบรายการ', plain: `ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ ทุกเครื่องในทีม)`, run: () => (e.deleteDeal(d.id), close()) })} className="quiet dp-del">
               ลบรายการนี้
             </button>
           )}
         </div>
       </aside>
       {att && <DocAttach deal={d} stage={att.stage} kind={att.kind} file={att.file} {...att.more} onClose={() => setAtt(null)} />}
-      {guard.node}
     </>
   );
 }
@@ -604,11 +600,15 @@ function ResultBig({ d, st, date, onPick }: { d: Deal; st: StageState; date?: st
   const pick = (r: 'YES' | 'NO' | 'WAIT') => {
     const today = todayISO(), cur = stepOf(e.sales, d.id, DEAL_STAGE);
     if (dealResult(e.sales, d) === r) return;
-    const was = closeReady(e.sales, d, today);
-    e.setStep(d.id, DEAL_STAGE, { d: date || cur.d || today, n: r === 'WAIT' ? (cur.n.trim() && !/^(yes|no)$/i.test(cur.n.trim()) ? cur.n : 'รอผล') : r });
-    onPick?.();
-    if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
-    else acts.afterResult(d, was);
+    const v = { d: date || cur.d || today, n: r === 'WAIT' ? (cur.n.trim() && !/^(yes|no)$/i.test(cur.n.trim()) ? cur.n : 'รอผล') : r };
+    // money received stops counting once the result is not YES: asked when accounting checked it
+    askPay(e, { d, after: previewOf.step(e.sales, d.id, DEAL_STAGE, v), kind: 'edit', title: 'ผลการขาย ' + (r === 'WAIT' ? 'รอผล' : r), verb: 'บันทึกผล', run: () => {
+      const was = closeReady(e.sales, d, today);
+      e.setStep(d.id, DEAL_STAGE, v);
+      onPick?.();
+      if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
+      else acts.afterResult(d, was);
+    } });
   };
   return (
     <>
@@ -654,13 +654,17 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
     const now = stepOf(e.sales, d.id, p);
     if (stepMoved(init, now) && !window.confirm(`มีคนแก้ขั้นนี้ระหว่างที่เปิดอยู่:\n"${now.n || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`)) return;
     done.current = true;
-    const was = closeReady(e.sales, d, today);
-    e.setStep(d.id, p, { d: date, n: p === DEAL_STAGE && !note.trim() && /^(yes|no)$/i.test(init.n.trim()) ? init.n : note });
-    if (quiet) return;
-    const r = dealResult(e.sales, d);
-    if (p === DEAL_STAGE && (r === 'YES' || r === 'NO')) acts.afterResult(d, was);
-    else acts.after(d, was, 'payment', `บันทึก ${p} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
-    onDone();
+    const v = { d: date, n: p === DEAL_STAGE && !note.trim() && /^(yes|no)$/i.test(init.n.trim()) ? init.n : note };
+    // a PAY stage's date is the received date of its documents: a checked line is asked about first
+    askPay(e, { d, after: previewOf.step(e.sales, d.id, p, v), kind: 'edit', title: `บันทึก ${p}`, verb: 'บันทึก', run: () => {
+      const was = closeReady(e.sales, d, today);
+      e.setStep(d.id, p, v);
+      if (quiet) return;
+      const r = dealResult(e.sales, d);
+      if (p === DEAL_STAGE && (r === 'YES' || r === 'NO')) acts.afterResult(d, was);
+      else acts.after(d, was, 'payment', `บันทึก ${p} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
+      onDone();
+    } });
   };
   // closing the panel (×, Escape, the backdrop) keeps what was typed
   const latest = useRef({ dirty, save, follow });
@@ -724,7 +728,7 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
       )}
       <div className="sl-tl-acts">
         {(init.d || init.n) && (
-          <button type="button" className="quiet" onClick={() => window.confirm(`ล้าง ${p}? วันที่และโน้ตของขั้นนี้จะหายไป`) && ((done.current = true), e.setStep(d.id, p, { d: '', n: '' }), onDone())}>ล้างขั้นนี้</button>
+          <button type="button" className="quiet" onClick={() => askPay(e, { d, after: previewOf.step(e.sales, d.id, p, { d: '', n: '' }), kind: 'edit', title: 'ล้าง ' + p, verb: 'ล้างขั้นนี้', plain: `ล้าง ${p}? วันที่และโน้ตของขั้นนี้จะหายไป`, run: () => ((done.current = true), e.setStep(d.id, p, { d: '', n: '' }), onDone()) })}>ล้างขั้นนี้</button>
         )}
         <button type="button" className="btn pri xs" onClick={() => save()}>บันทึก</button>
       </div>
@@ -862,7 +866,6 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
           );
         })}
       </div>
-      {guard.node}
       <div className="sl-pc-f">
         {!ro && <button type="button" className="lnk" onClick={edit}>เพิ่มงวด</button>}
         <span>{extra.length ? `${extra.map((l) => l.stage).join(', ')} ยังไม่มีในรายการขั้นตอน ตารางแสดงเป็นแถว “งวดเพิ่ม” ต่อจาก ${pays[pays.length - 1] || 'ขั้นสุดท้าย'}` : `งวดที่เกิน ${pays[pays.length - 1] || 'PAY'} แสดงเป็นแถว “งวดเพิ่ม” ต่อท้าย`}</span>
@@ -903,10 +906,13 @@ function RecvForm({ d, l, attach }: { d: Deal; l: LineView; attach: Attach }) {
   };
   const save = () => {
     if (!ok) return;
-    const ready = e.markPaid(d.id, l.stage, { date, amount: got ?? null, how, full: fullOn });
-    set({ dpPlan: '' });
-    if (ready) acts.prompt(d, 'payment');
-    else acts.say(`บันทึกรับเงิน ${l.stage} ${fmtMoney(got ?? l.amt)} บาทแล้ว`);
+    // a part-paid line accounting checked, or money landing in a closed month: asked first
+    askPay(e, { d, after: previewOf.pay(e.sales, d.id, l.stage, { rcv: date || today, got: got ?? null, full: fullOn }), kind: 'edit', title: 'บันทึกรับเงิน ' + l.stage, verb: 'บันทึกรับเงิน', run: () => {
+      const ready = e.markPaid(d.id, l.stage, { date, amount: got ?? null, how, full: fullOn });
+      set({ dpPlan: '' });
+      if (ready) acts.prompt(d, 'payment');
+      else acts.say(`บันทึกรับเงิน ${l.stage} ${fmtMoney(got ?? l.amt)} บาทแล้ว`);
+    } });
   };
   return (
     <div className="sl-rf" role="group" aria-label={'บันทึกรับเงิน ' + l.stage} ref={box} onKeyDown={(ev) => ev.key === 'Escape' && (ev.stopPropagation(), set({ dpPlan: '' }))}>
@@ -1157,7 +1163,6 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
         <button type="button" className="quiet" onClick={() => set({ dpPlan: '' })}>ยกเลิก</button>
         <button type="button" className="btn pri" onClick={save} disabled={!rows.length}>บันทึกแผน</button>
       </div>
-      {guard.node}
     </section>
   );
 }

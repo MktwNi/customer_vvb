@@ -151,7 +151,7 @@ describe('the month check against the team script', () => {
     // September has ended and every received line in it is checked: it can be closed, then opened again
     const sep = sumRows(rowsOf(F).filter((x) => x.ym === '2026-09'));
     expect(canClose(sep, '2026-09', TODAY)).toBe(true);
-    F.e.closeMonth('2026-09', sep);
+    expect(F.e.closeMonth('2026-09')).toMatchObject({ by: 'ฝน', n: 1, amt: 107000 });
     await settle(F, L);
     expect(stored(L, 'mclose/2026-09')!.v).toMatchObject({ by: 'ฝน', n: 1, amt: 107000 });
     expect(L.e.monthCloses()['2026-09']).toMatchObject({ by: 'ฝน', n: 1 });
@@ -166,6 +166,38 @@ describe('the month check against the team script', () => {
     await settle(F, L);
     expect(stored(L, 'dchk/' + key)!.del).toBe(true);
     expect(rowOf(L, key).state).toBe('wait');
+  });
+
+  it('closing a month counts every deal\'s lines, not what a screen passed: refused while another person\'s line waits', async () => {
+    const L = await lead();
+    const { id: acct } = await L.e.roleSave({ n: 'บัญชี/การเงิน', d: '', c: ACCT });
+    const F = await member(L, 'fon', 'ฝน', acct);
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    // two deals with money received in September: หมิว's and เอก's
+    const a = L.e.addDeal({ client: 'บริษัท หมิวกันยา จำกัด', year: '2569' });
+    L.e.setStep(a.id, 'CLOSED DEAL', { d: '2026-09-01', n: 'YES' });
+    L.e.setPlan(a.id, [line('PAY1', 107000, { due: '2026-09-20' })]);
+    L.e.markPaid(a.id, 'PAY1', { date: '2026-09-19', amount: null });
+    const b = S.e.addDeal({ client: 'บริษัท เอกกันยา จำกัด', year: '2569' });
+    S.e.setStep(b.id, 'CLOSED DEAL', { d: '2026-09-01', n: 'YES' });
+    S.e.setPlan(b.id, [line('PAY1', 80250, { due: '2026-10-08' })]);
+    S.e.markPaid(b.id, 'PAY1', { date: '2026-09-28', amount: null });
+    await settle(L, S, F);
+    // ฝน checks หมิว's line only (as a screen filtered to หมิว would show it)
+    expect(F.e.checkPays([rowOf(F, a.id + '/PAY1')])).toEqual([a.id + '/PAY1']);
+    expect(F.e.closeMonth('2026-09')).toBeNull();
+    await settle(F, L);
+    expect(stored(L, 'mclose/2026-09')).toBeUndefined();
+    expect(F.e.monthCloses()['2026-09']).toBeUndefined();
+    // the month is not over yet: October can't be closed either
+    expect(F.e.closeMonth('2026-10')).toBeNull();
+    // both checked: the close holds the whole month
+    expect(F.e.checkPays([rowOf(F, b.id + '/PAY1')])).toEqual([b.id + '/PAY1']);
+    expect(F.e.closeMonth('2026-09')).toMatchObject({ by: 'ฝน', n: 2, amt: 187250 });
+    await settle(F, L);
+    expect(stored(L, 'mclose/2026-09')!.v).toMatchObject({ by: 'ฝน', n: 2, amt: 187250 });
+    // a salesperson can't close a month
+    expect(S.e.closeMonth('2026-09')).toBeNull();
   });
 
   it('a line sent back reaches its recorder with the note; a change after it waits again; a cancelled receipt is an orphan until acknowledged', async () => {

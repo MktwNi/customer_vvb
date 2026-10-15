@@ -17,11 +17,14 @@
  * - The recorder of a line (who recorded the money) may not check it; the team script forces who and when
  *   on every record, the rest is this client's rule (plan.md §6).
  */
-import { HOW_TH, cashLines, countsActual, dealMoney, fmtMoney, hasPlan, type CashLine, type CashSum, type Deal, type DealDoc, type DealLog, type DocKind, type SalesState } from './sales';
+import {
+  HOW_TH, cashLines, countsActual, dealMoney, filterDeals, fmtMoney, hasPlan, kindForStage, targetForStage,
+  type CashLine, type CashSum, type Deal, type DealDoc, type DealLog, type DocKind, type PayLine, type SalesFilter, type SalesState,
+} from './sales';
 import { sameName } from './caps';
 import { TH_M, dmTh, isoTh, localDay } from './format';
 import { MONTHS_TH, instSub, instText } from './cashUi';
-import { QT_CHIP, QT_WORD, checkedLine } from './notify';
+import { QT_CHIP, QT_WORD, checkedLine, type BellRow } from './notify';
 import type { XCell, XSheet } from './xlsx';
 
 // ------------------------------------------------------------------ the records
@@ -284,17 +287,27 @@ export const ymOf = (ceYear: number | string, m: number) => `${ceYear}-${String(
 /** "ตุลาคม 2569" / "ต.ค. 2569" for 'YYYY-MM'. */
 export const ymTh = (ym: string, short = false) => `${(short ? TH_M : MONTHS_TH)[+ym.slice(5, 7) - 1]} ${+ym.slice(0, 4) + 543}`;
 
-/** Late money of earlier months of the same year (still owed): the month figure's "ค้างจากเดือนก่อน". */
+/** How many of some rows fall in each Buddhist-era year, oldest first (the links of the month figure). */
+const perYear = (ms: { ym: string; n: number }[]) => {
+  const m = new Map<string, number>();
+  ms.forEach((x) => m.set(String(+x.ym.slice(0, 4) + 543), (m.get(String(+x.ym.slice(0, 4) + 543)) || 0) + x.n));
+  return [...m].sort(([a], [b]) => a.localeCompare(b)).map(([be, n]) => ({ be, n }));
+};
+/** Late money of earlier months still owed, the year before included (December's in January): the month
+ *  figure's "ค้างจากเดือนก่อน", with the years it falls in. `rows` must reach back before the shown year
+ *  (CashView passes every year's, through the page's filter). */
 export function carriedLate(rows: ChkRow[], ym: string) {
-  const ls = rows.filter((r) => r.kind === 'late' && r.ym < ym && r.ym.slice(0, 4) === ym.slice(0, 4));
-  return { n: ls.length, amt: ls.reduce((a, r) => a + r.amt, 0) };
+  const ls = rows.filter((r) => r.kind === 'late' && r.ym < ym);
+  return { n: ls.length, amt: ls.reduce((a, r) => a + r.amt, 0), years: perYear(ls.map((r) => ({ ym: r.ym, n: 1 }))) };
 }
-/** Lines waiting for a check in the year's other months: how many, and by month ("ส.ค. 1 · ก.ย. 1"). */
+/** Lines waiting for a check in other months, other years' too: how many, by month ("ส.ค. 1 · ก.ย. 1";
+ *  a month of another year carries its year, "ธ.ค. 2569 1"), and by year. */
 export function waitingElsewhere(rows: ChkRow[], ym: string) {
   const by = new Map<string, number>();
-  rows.forEach((r) => r.kind === 'got' && (r.state === 'wait' || r.state === 'changed') && r.ym !== ym && r.ym.slice(0, 4) === ym.slice(0, 4) && by.set(r.ym, (by.get(r.ym) || 0) + 1));
+  rows.forEach((r) => isWaiting(r) && r.ym !== ym && by.set(r.ym, (by.get(r.ym) || 0) + 1));
   const months = [...by].sort(([a], [b]) => a.localeCompare(b)).map(([m, n]) => ({ ym: m, n }));
-  return { n: months.reduce((a, x) => a + x.n, 0), months, words: months.length === 1 ? ymTh(months[0].ym, true).split(' ')[0] : months.map((x) => `${ymTh(x.ym, true).split(' ')[0]} ${x.n}`).join(' · ') };
+  const word = (m: string) => (m.slice(0, 4) === ym.slice(0, 4) ? ymTh(m, true).split(' ')[0] : ymTh(m, true));
+  return { n: months.reduce((a, x) => a + x.n, 0), months, years: perYear(months), words: months.length === 1 ? word(months[0].ym) : months.map((x) => `${word(x.ym)} ${x.n}`).join(' · ') };
 }
 
 // ------------------------------------------------------------------ closing a month, the year table
@@ -318,16 +331,53 @@ export const afterClose = (c: ChkSum) => c.n - c.ok + c.orphans;
 /** The close record of a month as it stands now: the lines and the sum checked. */
 export const closeRecord = (c: ChkSum, by: string, at: string): MonthClose => ({ by, at, n: c.ok, amt: c.okAmt });
 
-export interface MonthRow { ym: string; sum: ChkSum; close: MonthClose | null; state: CloseState }
-/** The year table "สรุปรายเดือน": 12 months of a CE year, and the year's sums (they equal the Cashflow cards). */
-export function yearCheck(rows: ChkRow[], ceYear: number, closes: Record<string, MonthClose>, today: string) {
+/** A month of the year table. `sum` is the lines shown (the page's filter); `team` the whole month's, every
+ *  deal's: a close covers the whole month, so `state` (may it be closed), the close record and the closed
+ *  month's banner come from `team`, never from a filtered view. */
+export interface MonthRow { ym: string; sum: ChkSum; close: MonthClose | null; state: CloseState; team: ChkSum }
+/** The year table "สรุปรายเดือน": 12 months of a CE year, and the year's sums of the lines shown (they equal
+ *  the Cashflow cards). `team`: every deal's lines (CashView's, without the page's filter); left out, the
+ *  rows are the whole team's. */
+export function yearCheck(rows: ChkRow[], ceYear: number, closes: Record<string, MonthClose>, today: string, team?: ChkRow[]) {
   const y = String(ceYear);
   const mine = rows.filter((r) => r.ym.startsWith(y + '-'));
+  const all = team ? team.filter((r) => r.ym.startsWith(y + '-')) : null;
   const months: MonthRow[] = Array.from({ length: 12 }, (_, i) => {
     const ym = ymOf(ceYear, i), sum = sumRows(mine.filter((r) => r.ym === ym));
-    return { ym, sum, close: closes[ym] || null, state: closeStateOf(sum, ym, closes[ym], today) };
+    const t = all ? sumRows(all.filter((r) => r.ym === ym)) : sum;
+    return { ym, sum, close: closes[ym] || null, state: closeStateOf(t, ym, closes[ym], today), team: t };
   });
   return { months, total: sumRows(mine), closed: months.filter((m) => m.close).length };
+}
+/** One month of every deal's received lines, as closing it counts them (engine.closeMonth checks this
+ *  itself rather than trusting what a screen passed). */
+export function teamMonth(s: SalesState, checks: Record<string, PayCheck>, since: string, today: string, ym: string): ChkSum {
+  return sumRows(chkRows(s, cashLines(s, Object.values(s.deals), today), checks, since).filter((r) => r.ym === ym));
+}
+
+// ------------------------------------------------------------------ the Cashflow page's rows
+
+/**
+ * The Cashflow page's filter (ผู้รับผิดชอบ, แหล่งที่มา, บริการ, referral, หมวด) as a test on the month check's
+ * rows, whatever year their deal is of (a line of December carried into January); null when none is set.
+ * A check whose deal was deleted passes no filter.
+ */
+export function pageKeep(s: SalesState, f: SalesFilter, today: string): ((r: ChkRow) => boolean) | null {
+  if (!(f.resp || f.source || f.service || f.referral || f.section)) return null;
+  const ids = new Set<string>();
+  new Set(Object.values(s.deals).map((d) => d.year)).forEach((y) => filterDeals(s, { ...f, year: y, money: undefined }, today).forEach((d) => ids.add(d.id)));
+  return (r) => !!r.deal && ids.has(r.dealId);
+}
+/**
+ * The month check's three sets of rows from every deal's (`all`, chkRows of cashLines of every deal):
+ * `rows` the shown year through the page's filter (the month card, the year table's figures, the file),
+ * `wide` the filter over every year (late money carried from an earlier year, lines waiting in other
+ * months), `team` the shown year without the filter (closing a month: it covers the whole month).
+ */
+export function cashCheckRows(all: ChkRow[], ceYear: number, keep: ((r: ChkRow) => boolean) | null) {
+  const inYear = (r: ChkRow) => r.ym.startsWith(ceYear + '-');
+  const wide = keep ? all.filter(keep) : all;
+  return { rows: wide.filter(inYear), wide, team: all.filter(inYear) };
 }
 
 // ------------------------------------------------------------------ who may do what, the filter
@@ -478,6 +528,100 @@ export function planCheckWords(rows: ChkRow[]): string {
 /** The line a document counts under: its stage on a deal with a plan, else the document's own. */
 export const docLineId = (s: SalesState, doc: Pick<DealDoc, 'id' | 'deal' | 'stage'>) => (hasPlan(s, doc.deal) ? doc.stage : 'doc.' + doc.id);
 
+// ------------------------------------------------------------------ the question before a change (PayChk usePayGuard)
+
+/** A received line a change touches, as the question shows it: `ym` the month it is in (or lands in, a
+ *  closed one), `close` that month's close, `gone` it stops counting as money received ("ยกเลิกหลังตรวจ"
+ *  once checked), `added` new money landing in a closed month. */
+export interface GuardHit { r: ChkRow; ym: string; close: MonthClose | null; gone: boolean; added: boolean }
+/**
+ * What to ask about before a change to a deal's money: its received lines the change touches that accounting
+ * checked or sent back, or that are in (or land in) a closed month. `before`: the deal's rows now
+ * (dealChecks). The change is either `after`, the deal's rows as they will be (compared by fingerprint, so
+ * only a real change asks), or `lines`, the line ids it may touch when the result can't be worked out first
+ * (a document still to be chosen in the attach dialog).
+ */
+export function guardHits(before: ChkRow[], closes: Record<string, MonthClose>, by: { lines: string[] } | { after: ChkRow[] }): GuardHit[] {
+  const out: GuardHit[] = [];
+  const got = before.filter((r) => r.kind === 'got' && r.state !== 'none');
+  const after = 'after' in by ? by.after.filter((x) => x.kind === 'got' && x.state !== 'none') : null;
+  for (const r of got) {
+    let ym = r.ym, gone = false;
+    if (after) {
+      const a = after.find((x) => x.key === r.key);
+      if (a && sameFp(r.fp!, a.fp!)) continue;
+      if (!a) gone = true;
+      else if (!closes[ym] && closes[a.ym]) ym = a.ym;
+    } else if (!(by as { lines: string[] }).lines.includes(r.lineId)) continue;
+    const close = closes[ym] || null;
+    if (r.state === 'ok' || r.state === 'back' || close) out.push({ r, ym, close, gone, added: false });
+  }
+  (after || []).forEach((a) => !got.some((r) => r.key === a.key) && closes[a.ym] && out.push({ r: a, ym: a.ym, close: closes[a.ym], gone: false, added: true }));
+  return out;
+}
+/** The received lines a document attached at a stage may change, asked about before the attach dialog
+ *  opens (the document is not chosen yet): none for a quotation or a document that counts toward nothing;
+ *  on a deal with a plan the stage's installment; without one a typed Actual (a document takes its place). */
+export function attachLines(s: SalesState, dealId: string, stage: string | undefined, kind?: DocKind, target?: DealDoc['target']): string[] {
+  const k = kind ?? (stage ? kindForStage(s.cfg, stage) : 'other');
+  if ((target ?? targetForStage(s.cfg, stage || '', k)) !== 'actual') return [];
+  return hasPlan(s, dealId) ? (stage ? [stage] : []) : ['typed'];
+}
+/** The sales state with one change made, for the question's before / after (shallow copies: the engine's
+ *  state is not touched). */
+export const previewOf = {
+  deal: (s: SalesState, id: string, p: Partial<Deal>): SalesState => ({ ...s, deals: { ...s.deals, [id]: { ...s.deals[id], ...p } } }),
+  /** a deal deleted */
+  noDeal: (s: SalesState, id: string): SalesState => {
+    const deals = { ...s.deals };
+    delete deals[id];
+    return { ...s, deals };
+  },
+  step: (s: SalesState, id: string, stage: string, v: { d: string; n: string }): SalesState => ({ ...s, steps: { ...s.steps, [`${id}/${stage}`]: v } }),
+  /** a document changed (null: deleted) */
+  doc: (s: SalesState, deal: string, docId: string, p: Partial<DealDoc> | null): SalesState => {
+    const k = `${deal}/${docId}`, docs = { ...s.docs };
+    if (p && docs[k]) {
+      docs[k] = { ...docs[k], ...p };
+      if (docs[k].amount == null) docs[k].target = 'none';
+    } else delete docs[k];
+    return { ...s, docs };
+  },
+  /** money received by hand at an installment (engine.markPaid) */
+  pay: (s: SalesState, id: string, stage: string, p: Partial<PayLine>): SalesState => {
+    const k = `${id}/${stage}`;
+    return s.pays[k] ? { ...s, pays: { ...s.pays, [k]: { ...s.pays[k], ...p } } } : s;
+  },
+};
+
+// ------------------------------------------------------------------ the bell
+
+/** Received lines accounting sent back that are this person's to fix (they recorded the money, or the deal
+ *  is theirs), newest first: the bell's group. A line changed since waits for accounting again and drops
+ *  out. Only the deals with a returned line are worked out. */
+export function returnedTo(s: SalesState, checks: Record<string, PayCheck>, since: string, me: string, today: string): ChkRow[] {
+  if (!me.trim()) return [];
+  const ids = new Set(Object.entries(checks).filter(([, c]) => c.s === 'back').map(([k]) => splitKey(k).dealId));
+  const deals = [...ids].map((id) => s.deals[id]).filter(Boolean);
+  if (!deals.length) return [];
+  const mine = Object.fromEntries(Object.entries(checks).filter(([k]) => ids.has(splitKey(k).dealId)));
+  return chkRows(s, cashLines(s, deals, today), mine, since)
+    .filter((r) => r.kind === 'got' && r.state === 'back' && (isSelf(r, me) || sameName(r.deal?.resp, me)))
+    .sort((a, b) => (b.rec?.at || '').localeCompare(a.rec?.at || ''));
+}
+/** Those lines as the bell lists them: the client, the line, the amount, who sent it back and why. */
+export function payBackBell(rows: ChkRow[]): BellRow[] {
+  return rows.map((r) => ({
+    key: 'b:' + r.key,
+    kind: 'pchk',
+    title: r.deal?.client || '',
+    sub: [lineLabel(r), fmtMoney(r.amt) + ' บาท', `${r.rec?.by || 'บัญชี'} ส่งกลับให้แก้${r.rec?.note ? ': ' + (r.rec.note.length > 60 ? r.rec.note.slice(0, 59) + '…' : r.rec.note) : ''}`].join(' · '),
+    right: { text: QT_WORD.back, chip: '' },
+    count: true,
+    go: { deal: r.dealId },
+  }));
+}
+
 // ------------------------------------------------------------------ the Excel file
 
 /** The money status of a line in the file: รับแล้ว · เลยกำหนด · รอรับ. */
@@ -493,9 +637,11 @@ const dateCell = (iso: string): XCell => (iso ? { date: iso } : null);
 /**
  * The file "ตรวจรับเงิน_2569-10.xlsx": sheet รายการ, one row per line (received ones, and with `owed` the
  * money still to come and late), with its check; sheet สรุป, the months' figures and checks (the year's
- * total row too when there is more than one month). Amounts are numbers, dates real dates.
+ * total row too when there is more than one month). Amounts are numbers, dates real dates. `filter`: the
+ * page's filter in words when one is set; the summary then says so under its rows (a month's file that
+ * leaves out other people's money says it does).
  */
-export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owed: boolean): XSheet[] {
+export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owed: boolean, filter = ''): XSheet[] {
   const ls = rows.filter((r) => r.kind === 'got' || (owed && (r.kind === 'late' || r.kind === 'owed')));
   const head = ['เดือน', 'ลูกค้า', 'เลขใบเสนอราคา', 'งวด', 'ยอด (บาท)', 'ฐานยอด', 'วันที่รับ', 'ครบกำหนด', 'สถานะเงิน', 'วิธีชำระ', 'หลักฐาน', 'บันทึกโดย', 'บัญชีตรวจ', 'ผู้ตรวจ', 'วันที่ตรวจ', 'ข้อความส่งกลับแก้ไข'];
   const line = (r: ChkRow): XCell[] => {
@@ -519,6 +665,8 @@ export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owe
     const all = sumRows(rows.filter((r) => months.some((m) => m.ym === r.ym)));
     sums.push(sumLine('รวมปี ' + (+months[0].ym.slice(0, 4) + 543), all, null, ''));
   }
+  // the close columns are the whole month's; the figures are the filter's
+  if (filter) sums.push([], ['ตัวกรอง', `เฉพาะ ${filter} · คอลัมน์ปิดเดือนเป็นของทั้งเดือน`]);
   return [
     { name: 'รายการ', head, rows: ls.map(line), widths: [11, 34, 16, 14, 14, 16, 12, 12, 11, 10, 24, 14, 22, 10, 12, 40] },
     { name: 'สรุป', head: sumHead, rows: sums, widths: [16, 14, 14, 14, 14, 12, 18, 18, 14, 16, 10, 10, 12] },

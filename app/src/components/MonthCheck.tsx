@@ -45,6 +45,28 @@ export function useOpenMonth() {
   };
 }
 
+/** Open another year's whole-year scope with a filter (late money or lines waiting there). */
+function useOpenYear() {
+  const { set } = useApp();
+  return (be: string, f: ChkF) => {
+    set({ slYear: be, slChkM: 'y', slChkF: f, slCashShow: '' });
+    requestAnimationFrame(() => document.getElementById('mc-card')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  };
+}
+
+/** "ปิดเดือน": the engine works out the whole month itself (every deal's lines, not the page's filter) and
+ *  refuses while any of it is not checked; the message says what was closed. */
+function useCloseMonth() {
+  const { engine: e } = useApp();
+  const acts = useSalesActs();
+  return (ym: string) => {
+    const v = e.closeMonth(ym);
+    acts.say(v ? `ปิดเดือน ${ymTh(ym)} แล้ว · ตรวจแล้ว ${fmtN(v.n)} รายการ${v.amt != null ? ' ' + m0(v.amt) + ' บาท' : ''}` : `ปิด ${ymTh(ym)} ไม่ได้ ยังมีรายการในเดือนนี้ที่ยังไม่ได้ตรวจ`, { ms: 5000 });
+  };
+}
+/** The filter's words on the close: it covers the whole month. */
+const CLOSE_ALL = 'ปิดทั้งเดือน รวมรายการที่ไม่อยู่ในตัวกรอง';
+
 /** Whose line it is, for "เปิดงานเพื่อแก้ไข": the recorder (or, unknown, the deal's ผู้รับผิดชอบ). */
 const mineToFix = (r: ChkRow, me: string) => !!me && (r.by.some((b) => sameName(b, me)) || sameName(r.deal?.resp, me));
 
@@ -97,10 +119,24 @@ const nameOf = (r: ChkRow) => (r.line ? payerName(r.line, shortName) : r.deal ? 
 
 // ------------------------------------------------------------------ the card
 
-export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, tags }: { S: SalesState; rows: ChkRow[]; undated: CashLine[]; year: string; scope: number | 'y'; show: Show; today: string; phone: boolean; /** deal id → its cross-year tag ('' none) */ tags?: Map<string, string> }) {
+export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, scope, show, today, phone, tags }: {
+  S: SalesState;
+  /** the year's lines through the page's filter */
+  rows: ChkRow[];
+  /** the same filter over every year: late money carried from December, lines waiting in another year */
+  wide: ChkRow[];
+  /** the year's lines of every deal: a month is closed (and its banner compared) as a whole */
+  team: ChkRow[];
+  /** the page's filter in words ('' none) */
+  filter: string;
+  undated: CashLine[]; year: string; scope: number | 'y'; show: Show; today: string; phone: boolean;
+  /** deal id → its cross-year tag ('' none) */ tags?: Map<string, string>;
+}) {
   const { engine: e, ui, set } = useApp();
   const acts = useSalesActs();
   const open = useOpenMonth();
+  const openYear = useOpenYear();
+  const closeMonth = useCloseMonth();
   const me = e.me();
   const checker = e.can('pay.check');
   const block = e.payCheckBlock();
@@ -140,9 +176,11 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
     const n = e.undoPayChecks([r.key]);
     acts.say(n ? `เลิกทำแล้ว ${r.deal ? shortName(r.deal.client) : ''} กลับเป็น “รอตรวจ”` : 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะรายการที่คุณตรวจเอง', { ms: 4000 });
   };
-  const yearMonths = yearCheck(rows, ce, closes, today).months;
+  const yearMonths = yearCheck(rows, ce, closes, today, team).months;
   const monthRow = ym ? yearMonths.find((m) => m.ym === ym)! : null;
+  // closing is the whole month's (every deal's lines), whatever the page's filter shows
   const canCloseNow = !!monthRow && monthRow.state === 'can' && checker && !block;
+  const whole = monthRow ? monthRow.team : sum;
 
   const title = ym ? `ตรวจรับเงิน · ${ymTh(ym)}` : `ตรวจรับเงิน · ทั้งปี ${year}`;
   const n = sum.gotN + sum.lateN + sum.owedN;
@@ -171,13 +209,20 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
   );
   const xlBtn = <button type="button" className={'btn ' + (phone ? 'sm mc-ph-x' : 'sm')} onClick={() => setXl(true)}>{ym ? 'ดาวน์โหลด Excel เดือนนี้' : 'ดาวน์โหลด Excel ทั้งปี'}</button>;
   const closeBtn = canCloseNow && (
-    <button type="button" className="btn sm" onClick={() => (e.closeMonth(ym, monthRow!.sum), acts.say(`ปิดเดือน ${ymTh(ym)} แล้ว`))}>ปิดเดือน</button>
+    <button type="button" className="btn sm" title={fw ? CLOSE_ALL : undefined} onClick={() => closeMonth(ym)}>ปิดเดือน</button>
   );
 
   // the three figures (they add up to the bar)
-  const carried = ym ? carriedLate(rows, ym) : { n: 0, amt: 0 };
+  // other years' links ("ดูปี 2568"): this year's lines open in the year scope, an earlier year's in its own
+  const yearLinks = (ys: { be: string; n: number }[], f: ChkF) =>
+    ys.filter((x) => x.be !== year).map((x) => <Fragment key={x.be}> · <button type="button" className="lnk" onClick={() => openYear(x.be, f)}>ดูปี {x.be}</button></Fragment>);
+  const carried = ym ? carriedLate(wide, ym) : { n: 0, amt: 0, years: [] };
+  const carriedWords = `ค้างจากเดือนก่อน ${fmtN(carried.n)} รายการ · ${m0(carried.amt)} บาท`;
   const carriedTxt = carried.n ? (
-    <button type="button" className="lnk" onClick={() => open('y', 'late')}>ค้างจากเดือนก่อน {fmtN(carried.n)} รายการ · {m0(carried.amt)} บาท</button>
+    <>
+      {carried.years.some((x) => x.be === year) ? <button type="button" className="lnk" onClick={() => open('y', 'late')}>{carriedWords}</button> : carriedWords}
+      {yearLinks(carried.years, 'late')}
+    </>
   ) : 'ไม่มียอดค้างจากเดือนก่อน';
   const nm = ym ? 'เดือนนี้' : 'ทั้งปี';
   const dues = ym && sum.dues.length ? ' · ครบกำหนด ' + sum.dues.map((d) => String(+d.slice(8, 10))).join(' และ ') + ' ' + ymTh(ym, true).split(' ')[0] : '';
@@ -204,8 +249,8 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
     </div>
   );
 
-  // the closed month's banner
-  const changed = close ? afterClose(sum) : 0;
+  // the closed month's banner: the whole month against the close record (not the filter's share of it)
+  const changed = close ? afterClose(whole) : 0;
   const banner = close && (
     <div className="mc-closed">
       <span className="mc-closed-1">
@@ -216,9 +261,9 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
       {changed > 0 && (
         <span>
           มีรายการเปลี่ยนหลังปิดเดือน <b>{fmtN(changed)} รายการ</b>
-          {sum.n > sum.ok && ' กลับเป็น “รอตรวจ” ต้องตรวจใหม่'}
-          {sum.orphans > 0 && `${sum.n > sum.ok ? ' ·' : ''} ยกเลิกหลังตรวจ ${fmtN(sum.orphans)} รายการ รอรับทราบ`}
-          {' '}· ยอดเข้าเดือนนี้ตอนนี้ {m0(sum.got)} บาท {close.amt == null ? '' : Math.abs(close.amt - sum.got) < 0.005 ? 'เท่ากับตอนปิด' : `ตอนปิด ${m0(close.amt)} บาท`}
+          {whole.n > whole.ok && ' กลับเป็น “รอตรวจ” ต้องตรวจใหม่'}
+          {whole.orphans > 0 && `${whole.n > whole.ok ? ' ·' : ''} ยกเลิกหลังตรวจ ${fmtN(whole.orphans)} รายการ รอรับทราบ`}
+          {' '}· ยอดเข้าเดือนนี้{fw ? 'ทั้งเดือน' : ''}ตอนนี้ {m0(whole.got)} บาท {close.amt == null ? '' : Math.abs(close.amt - whole.got) < 0.005 ? 'เท่ากับตอนปิด' : `ตอนปิด ${m0(close.amt)} บาท`}
         </span>
       )}
     </div>
@@ -226,7 +271,10 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
 
   // how far accounting has got
   const pct = sum.amt ? Math.min(100, Math.round((sum.okAmt / sum.amt) * 100)) : 0;
-  const elsewhere = ym ? waitingElsewhere(rows, ym) : { n: 0, months: [], words: '' };
+  const elsewhere = ym ? waitingElsewhere(wide, ym) : { n: 0, months: [], years: [], words: '' };
+  const elseWords = `รอตรวจในเดือนอื่น ${fmtN(elsewhere.n)} รายการ · ${elsewhere.words}`;
+  // with a filter: what of the month outside it still stops the close
+  const outside = fw && ym && !close ? whole.n - whole.ok + whole.orphans - (sum.n - sum.ok + sum.orphans) : 0;
   const none = inScope.some((r) => r.kind === 'got' && r.state === 'none');
   const roNote = !checker ? 'ฝ่ายบัญชีเป็นผู้ตรวจ · คุณดูสถานะได้อย่างเดียว' : block === 'name' ? 'ใส่ชื่อของคุณที่แท็บอัปเดตข้อมูลก่อน จึงจะตรวจได้' : '';
   const prog = (
@@ -243,7 +291,13 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
         {sum.wait + sum.changed > 0 && <span>รอตรวจ {fmtN(sum.wait + sum.changed)} รายการ</span>}
         {sum.back > 0 && <span>ส่งกลับแก้ไข {fmtN(sum.back)} รายการ</span>}
         {sum.orphans > 0 && <span>ยกเลิกหลังตรวจ {fmtN(sum.orphans)} รายการ</span>}
-        {elsewhere.n > 0 && <button type="button" className="lnk" onClick={() => open('y', 'wait')}>รอตรวจในเดือนอื่น {fmtN(elsewhere.n)} รายการ · {elsewhere.words}</button>}
+        {elsewhere.n > 0 && (
+          <span>
+            {elsewhere.years.some((x) => x.be === year) ? <button type="button" className="lnk" onClick={() => open('y', 'wait')}>{elseWords}</button> : elseWords}
+            {yearLinks(elsewhere.years, 'wait')}
+          </span>
+        )}
+        {outside > 0 && <span>นอกตัวกรองยังไม่ได้ตรวจ {fmtN(outside)} รายการ · ปิดเดือนได้เมื่อตรวจครบทั้งเดือน</span>}
         {roNote && <span className="mc-ro">{roNote}</span>}
       </span>
       <span className="mc-prog-n">
@@ -362,7 +416,7 @@ export function MonthCheck({ S, rows, undated, year, scope, show, today, phone, 
       {empty && <div className="cf-empty">{base.length ? 'ไม่มีรายการตามที่เลือก' : ym ? `${ymTh(ym)} ไม่มีเงินเข้าและไม่มีงวดที่ครบกำหนด` : `ยังไม่มีงวดเงินในปี ${year} · งานที่ได้งานแล้วและมีแผนชำระจะแสดงที่นี่`}</div>}
       {phone && <div className="mc-ph-row">{closeBtn}{xlBtn}</div>}
       {ret && <ReturnDialog S={S} r={ret} onClose={() => setRet(null)} />}
-      {xl && <ExcelDialog S={S} rows={inScope} months={ym ? [monthRow!] : yearMonths} ym={ym || null} ce={ce} year={year} onClose={() => setXl(false)} />}
+      {xl && <ExcelDialog S={S} rows={inScope} months={ym ? [monthRow!] : yearMonths} ym={ym || null} ce={ce} year={year} filter={fw} onClose={() => setXl(false)} />}
     </section>
   );
 }
@@ -618,10 +672,10 @@ function ReturnDialog({ S, r, onClose }: { S: SalesState; r: ChkRow; onClose: ()
 }
 
 /** "ดาวน์โหลด Excel": two sheets (รายการ, สรุป), the money still to come optional, a preview. */
-function ExcelDialog({ S, rows, months, ym, ce, year, onClose }: { S: SalesState; rows: ChkRow[]; months: MonthRow[]; ym: string | null; ce: number; year: string; onClose: () => void }) {
+function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: SalesState; rows: ChkRow[]; months: MonthRow[]; ym: string | null; ce: number; year: string; /** the page's filter in words ('' none) */ filter: string; onClose: () => void }) {
   const [owed, setOwed] = useState(true);
   const [busy, setBusy] = useState('');
-  const sheets = chkSheets(S, rows, months, owed);
+  const sheets = chkSheets(S, rows, months, owed, filter);
   const ls = sheets[0];
   const got = rows.filter((r) => r.kind === 'got');
   const toCome = rows.filter((r) => r.kind === 'late' || r.kind === 'owed');
@@ -645,6 +699,12 @@ function ExcelDialog({ S, rows, months, ym, ce, year, onClose }: { S: SalesState
           <div className="cf-fl">ในไฟล์มี 2 ชีต</div>
           <div className="mc-xl-t"><b>รายการ</b> หนึ่งแถวต่อหนึ่งรายการ {fmtN(ls.rows.length)} แถว · <b>สรุป</b> ยอดเข้าแล้ว รอรับ เลยกำหนด และบัญชีตรวจแล้ว {fmtN(c.ok)} จาก {fmtN(c.n)} รายการ</div>
         </div>
+        {filter && (
+          <div>
+            <div className="cf-fl">ตัวกรอง</div>
+            <div>เฉพาะ {filter} <span className="cf-mute">(ตามที่กรองอยู่ในหน้านี้ · ไฟล์บอกตัวกรองไว้ในชีต “สรุป” · สถานะปิดเดือนเป็นของทั้งเดือน)</span></div>
+          </div>
+        )}
         {toCome.length > 0 && (
           <label className={'cf-ck' + (owed ? ' on' : '')}>
             <input type="checkbox" className="sr-only" checked={owed} onChange={(ev) => setOwed(ev.target.checked)} />
@@ -683,13 +743,14 @@ function ExcelDialog({ S, rows, months, ym, ce, year, onClose }: { S: SalesState
 
 /** "สรุปรายเดือน · ปี 2569": each month's money and check, closing a month; a row opens its month above.
  *  The totals equal the Cashflow cards. */
-export function YearCheck({ S, rows, year, scope, today, phone }: { S: SalesState; rows: ChkRow[]; year: string; scope: number | 'y'; today: string; phone: boolean }) {
+export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: { S: SalesState; rows: ChkRow[]; /** the year's lines of every deal (closing a month) */ team: ChkRow[]; /** the page's filter in words ('' none) */ filter: string; year: string; scope: number | 'y'; today: string; phone: boolean }) {
   const { engine: e } = useApp();
-  const acts = useSalesActs();
   const open = useOpenMonth();
+  const closeMonth = useCloseMonth();
   const [xl, setXl] = useState(false);
   const ce = +year - 543;
-  const Y = yearCheck(rows, ce, e.monthCloses(), today);
+  // the figures are the filter's; whether a month may be closed is the whole month's
+  const Y = yearCheck(rows, ce, e.monthCloses(), today, team);
   const may = e.can('pay.check') && !e.payCheckBlock();
   const pick = scope === 'y' ? '' : ymOf(ce, scope);
   const chk = (m: MonthRow) => {
@@ -707,11 +768,12 @@ export function YearCheck({ S, rows, year, scope, today, phone }: { S: SalesStat
     if (m.state === 'current') return <span className="cf-mute">เดือนปัจจุบัน</span>;
     if (m.state === 'can')
       return may ? (
-        <button type="button" className="btn xs" onClick={(ev) => (ev.stopPropagation(), e.closeMonth(m.ym, m.sum), acts.say(`ปิดเดือน ${ymTh(m.ym)} แล้ว`))}>ปิดเดือน</button>
+        <button type="button" className="btn xs" title={filter ? CLOSE_ALL : undefined} onClick={(ev) => (ev.stopPropagation(), closeMonth(m.ym))}>ปิดเดือน</button>
       ) : (
         <span className="cf-mute">ยังไม่ปิด</span>
       );
-    if (m.state === 'open') return <span className="cf-mute">ตรวจยังไม่ครบ</span>;
+    if (m.state === 'open')
+      return filter ? <span className="cf-cell"><span className="cf-mute">ตรวจยังไม่ครบ</span><small>ทั้งเดือน ตรวจแล้ว {fmtN(m.team.ok)} จาก {fmtN(m.team.n)}</small></span> : <span className="cf-mute">ตรวจยังไม่ครบ</span>;
     return null;
   };
   const money = (v: number, bad = false) => (v ? (bad ? <span className="bad">{m0(v)}</span> : m0(v)) : <span className="cf-mute">—</span>);
@@ -722,7 +784,7 @@ export function YearCheck({ S, rows, year, scope, today, phone }: { S: SalesStat
       <div className="cf-h">
         <div>
           <h3 className="cf-t" id="mc-yt-t">สรุปรายเดือน · ปี {year}</h3>
-          <span className="cf-s">{phone ? 'แตะ' : 'กด'}เดือนเพื่อเปิดรายการในส่วนตรวจรับเงินด้านบน · ยอดตรงกับกราฟและการ์ดด้านบน</span>
+          <span className="cf-s">{phone ? 'แตะ' : 'กด'}เดือนเพื่อเปิดรายการในส่วนตรวจรับเงินด้านบน · ยอดตรงกับกราฟและการ์ดด้านบน{filter ? ' · ปิดเดือนนับทุกรายการของเดือน ไม่ขึ้นกับตัวกรอง' : ''}</span>
         </div>
         {!phone && xlBtn}
       </div>
@@ -736,7 +798,7 @@ export function YearCheck({ S, rows, year, scope, today, phone }: { S: SalesStat
                   <span className="mc-yl-1"><b>{ymTh(m.ym).split(' ')[0]}</b><span>{c.got ? m0(c.got) : '—'}</span></span>
                   {any > 0 && <span className="mc-yl-2">{[c.owed ? `รอรับ ${m0(c.owed)}` : '', c.late ? `เลยกำหนด ${m0(c.late)}` : ''].filter(Boolean).join(' · ') || 'ไม่มียอดค้าง'}</span>}
                 </button>
-                {any > 0 && <span className="mc-yl-3">{chk(m)}{closeCell(m)}</span>}
+                {(any > 0 || m.close) && <span className="mc-yl-3">{chk(m)}{closeCell(m)}</span>}
               </div>
             );
           })}
@@ -787,7 +849,7 @@ export function YearCheck({ S, rows, year, scope, today, phone }: { S: SalesStat
           </tfoot>
         </table>
       )}
-      {xl && <ExcelDialog S={S} rows={rows} months={Y.months} ym={null} ce={ce} year={year} onClose={() => setXl(false)} />}
+      {xl && <ExcelDialog S={S} rows={rows} months={Y.months} ym={null} ce={ce} year={year} filter={filter} onClose={() => setXl(false)} />}
     </section>
   );
 }

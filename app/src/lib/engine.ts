@@ -35,7 +35,7 @@ import {
   QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
 } from './notify';
-import { PAY_NOTE_MAX, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, toMonthClose, toPayCheck, ymTh, type ChkRow, type ChkSum, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
+import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, teamMonth, toMonthClose, toPayCheck, ymTh, type ChkRow, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -4398,10 +4398,15 @@ export class GccEngine {
     });
     this.saveSales();
   }
-  /** "ปิดเดือน": the month's lines and sum checked are kept with it (the banner and the file show them). */
-  closeMonth(ym: string, c: ChkSum) {
-    if (this.payCheckBlock()) return this.deny();
-    if (!/^\d{4}-\d\d$/.test(ym)) return;
+  /** "ปิดเดือน": the whole month, every deal's received lines, worked out here (never a screen's filtered
+   *  view): only once it has ended and every line in it is checked. Its lines and sum checked are kept
+   *  with it (the banner and the file show them). Returns the record, or null when it may not be closed. */
+  closeMonth(ym: string): MonthClose | null {
+    if (this.payCheckBlock()) return this.deny(), null;
+    if (!/^\d{4}-\d\d$/.test(ym)) return null;
+    const today = todayISO();
+    const c = teamMonth(this.sales, this.payChecks(), this.payChkCfg().since, today, ym);
+    if (!canClose(c, ym, today)) return null;
     const v = closeRecord(c, this.me(), new Date().toISOString());
     const M = this.sales.mclose || (this.sales.mclose = {});
     M[ym] = v;
@@ -4410,6 +4415,7 @@ export class GccEngine {
       this.salesLog({ id: '', client: '' }, 'ปิดเดือนตรวจรับเงิน', `${ymTh(ym)} · ${v.n} รายการ · ${fmtMoney(v.amt ?? 0)} บาท`);
     });
     this.saveSales();
+    return v;
   }
   /** "เปิดเดือนอีกครั้ง". */
   reopenMonth(ym: string) {
