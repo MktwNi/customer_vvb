@@ -14,6 +14,7 @@
 import { norm } from './core';
 import { addDays, daysBetween, localDay, pad, todayISO } from './format';
 import { ceOf, inRange, isDay, monthEnd, normDateF, resolveDate, type DateBasis, type DateF, type Range } from './dateRange';
+import type { NotifyCfg, QtCheck } from './notify';
 import type { CustomCo } from './types';
 
 /** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
@@ -164,6 +165,10 @@ export interface SalesState {
   /** List items added in this browser while not connected to a team (this browser only): merged into
    *  the team's lists when it connects — and only these, so items the team removed don't come back. */
   offAdds?: Partial<Record<keyof SalesCfg, string[]>>;
+  /** docId → the check of that quotation (`qchk/<docId>`, written by the team script only; lib/notify.ts). */
+  qchk?: Record<string, QtCheck>;
+  /** The team's notification rules (`scfg/notify.cfg`; lib/notify.ts). */
+  ncfg?: NotifyCfg;
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });

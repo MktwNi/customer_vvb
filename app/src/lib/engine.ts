@@ -30,7 +30,11 @@ import {
 import { cashYear, type CashLine } from './sales';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
-import { isQtVersion, qtPrev, qtVersions } from './quotes';
+import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
+import {
+  fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
+  type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
+} from './notify';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -65,6 +69,8 @@ export interface TeamDir { users: TeamUser[]; roles: RoleDef[]; grants: Record<s
 export interface ReqInput { k: 'role' | 'caps'; role?: string; caps?: CapAsk[]; note: string; until?: string }
 /** A script that does not know an action yet (deployed before configurable roles). */
 const OLD_SCRIPT = 'สคริปต์ของทีมยังไม่รองรับบทบาทและคำขอสิทธิ์ — ให้ผู้ดูแลระบบอัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่';
+/** The same for the notification actions (qt_check, notify_*). */
+const OLD_NOTIFY = 'สคริปต์ของทีมยังไม่รองรับการแจ้งเตือนและการตรวจใบเสนอราคา — ให้ผู้ดูแลระบบอัปเดต Code.gs ตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน';
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -2800,8 +2806,9 @@ export class GccEngine {
         this.teamNeedKey = false;
         this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
         this.uploadDocs();
-        // say if the script can do accounts; asked again now and then, as the lead may update it
-        if (cfg.mode !== 'accounts' && (!this.caps || this.caps.url !== cfg.url || Date.now() - this.capsAt > 10 * 60000)) this.probeCaps(cfg.url);
+        // say if the script can do accounts (and, with accounts, whether it sends notifications); asked
+        // again now and then, as the lead may update it
+        if (!this.caps || this.caps.url !== cfg.url || Date.now() - this.capsAt > 10 * 60000) this.probeCaps(cfg.url);
       }
     } catch (e) {
       if (gen === this.teamGen && e instanceof TeamSyncError) {
@@ -2870,6 +2877,11 @@ export class GccEngine {
   }
   /** A reply for this account: a renewed token, or a new name or role set by an admin. */
   private meta(cfg: TeamCfg, r: Record<string, unknown>) {
+    // the script's notification state, when a reply says it (hello does too, see setCaps)
+    if (r && 'notify' in r) {
+      const f = parseNotifyFlag(r.notify);
+      if (f) this.heardNotify(cfg.url, f);
+    }
     const s = this.session;
     if (cfg.mode !== 'accounts' || !s || s.u !== cfg.u) return;
     let changed = false;
@@ -2898,7 +2910,7 @@ export class GccEngine {
    */
   private adoptMe(s: Session, me: ReturnType<typeof parseMe>) {
     const before = capsOf(s) || {};
-    const was = { name: s.name, role: s.role, rid: s.rid, rn: s.rn, caps: JSON.stringify(s.caps ?? null), rq: s.rq, req: JSON.stringify(s.req ?? null), g: JSON.stringify(s.g ?? null) };
+    const was = { name: s.name, role: s.role, rid: s.rid, rn: s.rn, caps: JSON.stringify(s.caps ?? null), rq: s.rq, req: JSON.stringify(s.req ?? null), g: JSON.stringify(s.g ?? null), nf: JSON.stringify(s.nf ?? null) };
     if (me.name) s.name = me.name;
     if (me.role) s.role = me.role;
     if (me.rid !== undefined) s.rid = me.rid;
@@ -2907,8 +2919,10 @@ export class GccEngine {
     if (me.rq !== undefined) s.rq = me.rq;
     if (me.req !== undefined) s.req = me.req;
     if (me.g !== undefined) s.g = me.g;
+    if (me.nf !== undefined) s.nf = me.nf;
+    const nfOnly = was.nf !== JSON.stringify(s.nf ?? null);
     const changed = was.name !== s.name || was.role !== s.role || was.rid !== s.rid || was.rn !== s.rn || was.caps !== JSON.stringify(s.caps ?? null) || was.rq !== s.rq || was.req !== JSON.stringify(s.req ?? null) || was.g !== JSON.stringify(s.g ?? null);
-    if (!changed) return false;
+    if (!changed) return nfOnly;
     const after = capsOf(s) || {};
     const roleNow = s.rid || s.role, roleWas = was.rid || was.role;
     const res = s.req?.st === 'r' ? s.req : null;
@@ -2946,6 +2960,7 @@ export class GccEngine {
   private purgeDocCopies() {
     const ids = Object.values(this.sales.docs).filter((d) => d.fileId).map((d) => d.id);
     ids.forEach((id) => this.store.del(this.docBlobKey(id)).catch(() => {}));
+    qtFacts.clear(); // what was read from them (figures) goes too
   }
 
   private async syncRound(cfg: TeamCfg, gen: number, first: boolean) {
@@ -3458,6 +3473,7 @@ export class GccEngine {
   private setCaps(c: Caps, url: string) {
     this.caps = { ...c, url };
     this.capsAt = Date.now();
+    if (c.v === 3) this.heardNotify(url, c.nf ?? null);
   }
   /** The script's public values for hashing a password (team id, rounds); they never change. */
   private async capsFor(url: string) {
@@ -4008,7 +4024,7 @@ export class GccEngine {
   }
 
   // ---- account admin (online only, never queued)
-  private async adminCall<T>(body: Record<string, unknown>): Promise<T> {
+  private async adminCall<T>(body: Record<string, unknown>, old = OLD_SCRIPT): Promise<T> {
     const s = this.session, cfg = this.teamCfg;
     if (!s || !cfg || cfg.mode !== 'accounts') throw new Error('ยังไม่ได้เข้าสู่ระบบ');
     let r: Record<string, unknown>;
@@ -4016,7 +4032,7 @@ export class GccEngine {
       r = await call<Record<string, unknown>>(this.transport, cfg.url, { tok: s.tok }, body);
     } catch (x) {
       // an action the deployed script does not know yet: say which update it needs
-      if (x instanceof TeamSyncError && x.code === 'unknown_action') throw new TeamSyncError(OLD_SCRIPT, 'unknown_action', x.extra);
+      if (x instanceof TeamSyncError && x.code === 'unknown_action') throw new TeamSyncError(old, 'unknown_action', x.extra);
       throw x;
     }
     this.meta(cfg, r);
@@ -4098,6 +4114,156 @@ export class GccEngine {
     if (me) return; // meta() took the script's word
     s.req = v;
     this.saveSession(s);
+    this.emit();
+  }
+  // ---- notifications and the quotation check (package notify; lib/notify.ts)
+  /** The team script's notification state as last heard (hello, or a reply that says `notify`) for the
+   *  connected team; null = a script without notifications: its setup steps show, the bell has payments
+   *  and appointments only, quotations show no check. Kept in this browser, so it holds from the first frame. */
+  get notifyLive(): NotifyLive | null {
+    const url = this.teamCfg?.url;
+    return url ? this.nfFor(url) : null;
+  }
+  private nfHeard: { url: string; f: NotifyLive | null } | null = null;
+  /** As heard by this tab, else as this browser last heard it (read once). */
+  private nfFor(url: string): NotifyLive | null {
+    if (!this.nfHeard || this.nfHeard.url !== url) {
+      const p = prefs.get<{ url?: string; f?: NotifyLive | null } | null>(PREF.notify, null);
+      const f = p && p.url === url && p.f ? { on: !!p.f.on, since: String(p.f.since || '') } : null;
+      this.nfHeard = { url, f };
+    }
+    return this.nfHeard.f;
+  }
+  private heardNotify(url: string, f: NotifyLive | null) {
+    const was = this.nfFor(url);
+    this.nfHeard = { url, f };
+    if (JSON.stringify(was) === JSON.stringify(f)) return;
+    prefs.set(PREF.notify, this.nfHeard);
+    this.emit();
+  }
+  /** Quotations are checked here: a team with accounts whose script has notifications switched on. */
+  get qtLive() {
+    return !!this.notifyLive?.on && this.teamCfg?.mode === 'accounts' && !!this.session;
+  }
+  /** The team's notification rules (scfg/notify.cfg, defaults until an admin saves them). */
+  notifyCfg(): NotifyCfg {
+    return parseNotifyCfg(this.sales.ncfg);
+  }
+  /** Every quotation check this browser holds (docId → record). */
+  checks(): Record<string, QtCheck> {
+    return this.sales.qchk || {};
+  }
+  /** The check status a quotation shows ("รอตรวจ" / "ตรวจแล้ว" / "ส่งกลับแก้ไข"), or null: no check here
+   *  (no notifications yet, or a document outside the check with nothing recorded). */
+  qtCheckFor(doc: DealDoc): QtCheckView | null {
+    const live = this.notifyLive;
+    if (!live?.on || this.teamCfg?.mode !== 'accounts') return null;
+    const v = qtCheckOf(this.checks()[doc.id], doc);
+    if (v.status === 'wait' && !needsCheck(this.sales, doc, live.since)) return null;
+    return v;
+  }
+  /** Why this account can't check `doc` ('' = it can): no check here, no สิทธิ์ ตรวจ/อนุมัติใบเสนอราคา, or
+   *  its own quotation (unless the team allows that). The script decides again (also the row's last writer). */
+  checkBlock(doc: Pick<DealDoc, 'by'>): '' | 'off' | 'cap' | 'self' {
+    if (!this.qtLive) return 'off';
+    if (!this.can('qt.check')) return 'cap';
+    if (!this.notifyCfg().self && sameName(doc.by, this.me())) return 'self';
+    return '';
+  }
+  /**
+   * Check a quotation (online only; the script writes `qchk/<docId>` and a history line): `ok` approves the
+   * figures, `back` sends it back with a note, `undo` takes back this account's latest check (within 10
+   * minutes). `s`: the e-mail link's signature, passed on (the script records whether it came from a mail).
+   * The record shows at once; the script's own row replaces it with the next pull.
+   */
+  async qtCheck(doc: DealDoc, st: 'ok' | 'back' | 'undo', note = '', s = '') {
+    const fp = fpOf(doc), n = note.trim().slice(0, 500);
+    let r: Record<string, unknown>;
+    try {
+      r = await this.adminCall<Record<string, unknown>>({ action: 'qt_check', k: keyOf.ddoc(doc.deal, doc.id), st, fp, ...(n ? { note: n } : {}), ...(s ? { s } : {}) }, OLD_NOTIFY);
+    } catch (x) {
+      // changed meanwhile: the next round brings the document as it is now
+      if (x instanceof TeamSyncError && x.code === 'changed') this.flushSoon();
+      throw x;
+    }
+    const Q = this.sales.qchk || (this.sales.qchk = {});
+    if (st === 'undo') delete Q[doc.id];
+    else Q[doc.id] = toQtCheck(r.rec ?? r.v) || { st, by: this.me(), at: new Date().toISOString(), fp, ...(n ? { note: n } : {}), ...(this.session ? { u: this.session.u } : {}) };
+    this.saveSales();
+    this.emit();
+    this.flushSoon();
+  }
+  /** This account's notification settings as the script last sent them (me.notify), else the defaults. */
+  myNotify(): MyNotify {
+    return this.session?.nf || myNotify0(this.can('set.users'));
+  }
+  /** Whether the script has sent this account's settings (a script with notifications). */
+  get myNotifyLive() {
+    return !!this.session?.nf;
+  }
+  /** Read this account's settings again (online). */
+  async notifyMe(): Promise<MyNotify> {
+    return this.nfLocal(await this.adminCall<Record<string, unknown>>({ action: 'notify_me', get: 1 }, OLD_NOTIFY));
+  }
+  /** Save them; a new address (`em`) is stored unconfirmed and the script mails it a 6-digit code. */
+  async saveNotifyMe(p: Pick<MyNotify, 'on' | 't' | 'sc'> & { em?: string }) {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_me', on: p.on, t: p.t, sc: p.sc, ...(p.em !== undefined ? { em: p.em } : {}) }, OLD_NOTIFY);
+    const cur = this.myNotify();
+    const mailNew = p.em !== undefined && p.em !== cur.em;
+    return this.nfLocal(r, { ...cur, on: p.on, t: p.t, sc: p.sc, ...(mailNew ? { em: p.em!, ok: false } : {}) });
+  }
+  /** Confirm the address with the code from the mail. */
+  async verifyEmail(code: string) {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_verify', code: code.replace(/\D/g, '').slice(0, 6) }, OLD_NOTIFY);
+    return this.nfLocal(r, { ...this.myNotify(), ok: true });
+  }
+  /** One test mail to this account's confirmed address (counts against the day's quota). */
+  async notifyTest() {
+    await this.adminCall({ action: 'notify_test' }, OLD_NOTIFY);
+  }
+  /** The admin page's status card: last run, today's sending and the quota, each account's choices. */
+  async notifyStatus(): Promise<NotifyStatus> {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_status' }, OLD_NOTIFY);
+    const st = parseNotifyStatus(r);
+    if (this.teamCfg && ('on' in r || 'notify' in r)) this.heardNotify(this.teamCfg.url, { on: st.on, since: st.since || this.notifyLive?.since || '' });
+    return st;
+  }
+  /** After notify_me / notify_verify: the script's me.notify when it sent one (meta took it), else a
+   *  settings object in the reply, else what was saved. */
+  private nfLocal(r: Record<string, unknown>, saved?: MyNotify): MyNotify {
+    const s = this.session;
+    const meSent = !!r.me && typeof r.me === 'object' && 'notify' in (r.me as object);
+    if (s && !meSent) {
+      const own = [r.prefs, r.notify].find((x) => !!x && typeof x === 'object' && typeof (x as { on?: unknown }).on === 'object');
+      const nf = parseMyNotify(own, this.can('set.users')) || saved;
+      if (nf) {
+        s.nf = nf;
+        this.saveSession(s);
+        this.emit();
+      }
+    }
+    return this.myNotify();
+  }
+  /** The scope of the bell (and the digest): งานที่ฉันรับผิดชอบ or ทั้งทีม — the account's setting, else
+   *  what was chosen in this browser, else the whole team for whoever manages users (or no accounts). */
+  bellScope(): Scope {
+    const nf = this.session?.nf;
+    if (nf) return nf.sc;
+    const p = prefs.getRaw(PREF.bellScope);
+    return p === 'mine' || p === 'team' ? p : this.role() == null || this.can('set.users') ? 'team' : 'mine';
+  }
+  setBellScope(sc: Scope) {
+    prefs.set(PREF.bellScope, sc);
+    this.emit();
+  }
+  /** An admin saves the team's rules (a shared record; `site` is this page's address, which the e-mails link to). */
+  saveNotifyCfg(c: NotifyCfg) {
+    if (!this.can('set.users')) return this.deny();
+    const site = typeof location !== 'undefined' && /^https?:/.test(location.protocol) ? location.origin + location.pathname : c.site;
+    const v: NotifyCfg = { ...c, site };
+    this.sales.ncfg = v;
+    this.op('scfg/notify.cfg', { ...v });
+    this.saveSales();
     this.emit();
   }
   /** แก้ชื่อที่แสดง (before the account's first sign-in): the team list takes the new name in place of the

@@ -15,6 +15,7 @@ import { Icon } from '../components/icons';
 import { Modal } from '../components/Dialog';
 import { DocAttach, openDocFile, type AttachMore } from '../components/DocAttach';
 import { QtPhone, deleteQt } from '../components/QtCard';
+import { QtCheckLine } from '../components/QtCheckSheet';
 import { qtFigWords, qtView } from '../lib/quotes';
 import { followStep, stepMoved, type StepEd, type StepFields } from '../lib/stepEditor';
 import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } from '../components/DealActs';
@@ -1479,7 +1480,7 @@ function kidList(S: SalesState, d: Deal, today: string, showAll = false, editSta
 }
 
 function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
-  const { ui, set } = useApp();
+  const { engine: e, ui, set } = useApp();
   const tk = useTk();
   const { S, today, ro } = tk;
   const stages = S.cfg.stages;
@@ -1616,13 +1617,16 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         } else if (isNow && !ro) {
           note = <button type="button" className="lnk" data-qa={d.id + ':' + p + ':add'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)}>บันทึกวันที่และโน้ต</button>;
         }
-        // QUOTATION with a quotation: "แนบฉบับแก้ไข" always in view by its note, the version under its figure
+        // QUOTATION with a quotation: its check status (package notify) and "แนบฉบับแก้ไข" always in view by
+        // its note, the version under its figure
         const qv = p === QUOTE_STAGE ? qtView(S, d) : null;
-        if (qv?.head && !ro)
+        const qcv = qv?.head ? e.qtCheckFor(qv.head.doc) : null;
+        if (qv?.head && (!ro || qcv))
           note = (
             <span className="qt-kn">
               {note}
-              <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>
+              {qcv && <QtCheckLine doc={qv.head.doc} v={qcv} bare />}
+              {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>}
             </span>
           );
         const date = s.d ? (st === 'planned' ? <span className="sl-kdate">นัด {dmTh(s.d)}<small>{agoTh(s.d, today)}</small></span> : <span className="sl-kdate">{isoTh(s.d)}</span>) : null;
@@ -2274,7 +2278,7 @@ function CardWhen({ d, lc }: { d: Deal; lc: string }) {
 
 /** The open card: the stages as a short vertical timeline, then the closing step. */
 function CardKids({ d, t }: { d: Deal; t: Track }) {
-  const { ui, set } = useApp();
+  const { engine: e, ui, set } = useApp();
   const tk = useTk();
   const { S, today, ro } = tk;
   const stages = S.cfg.stages;
@@ -2333,6 +2337,16 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
             <>
               {right}
               {fig ? <StageAmount fig={fig} ver={p === QUOTE_STAGE ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+            </>
+          );
+        // the quotation's check status (package notify), by its figure
+        const qh = p === QUOTE_STAGE && !editing ? qtView(S, d).head : null;
+        const qcv = qh ? e.qtCheckFor(qh.doc) : null;
+        if (qh && qcv)
+          right = (
+            <>
+              {right}
+              <QtCheckLine doc={qh.doc} v={qcv} bare />
             </>
           );
         // a QUOTATION done (its quotation attached) is edited here too: a revision, its figures, its file

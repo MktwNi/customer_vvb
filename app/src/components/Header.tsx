@@ -8,6 +8,7 @@ import { RoleChip, hhmm, nameLetter, sessionLine } from './Login';
 import { menuKeys, usePopover } from './usePopover';
 import { TABS, useDataLine } from './Sidebar';
 import { DateField } from './ui';
+import { Bell } from './Bell';
 import { SelField } from './Select';
 import { EMPTY_FILTERS } from '../lib/search';
 import mark from '../assets/gcc-mark.png';
@@ -48,6 +49,7 @@ export function TopBar({ navOpen, docked, onMenu, onToggle }: { navOpen: boolean
       <div className="tb-actions">
         {ready && <TeamChip onClick={() => go('update')} />}
         {dateHere && <RefDate />}
+        {ready && <Bell />}
         {ready && (e.role() ? <AccountMenu /> : <MeButton />)}
       </div>
     </header>
@@ -208,6 +210,9 @@ function AccountMenu() {
             </button>
             <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'perms' }))}>
               สิทธิ์ของฉัน
+            </button>
+            <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'notify' }))}>
+              การแจ้งเตือนของฉัน
             </button>
             {mayAsk && !pend && (
               <button role="menuitem" className="acct-item" onClick={() => pick(() => set({ acctDlg: 'request', reqInit: null }))}>

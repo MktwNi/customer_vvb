@@ -3,6 +3,7 @@ import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { todayISO } from '../lib/format';
 import { closeReady, dealResult, hasPlan, planOf, type Deal } from '../lib/sales';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
+import { errText } from '../lib/teamSync';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -82,6 +83,17 @@ export function SalesMessages() {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });
+    // a quotation check taken back (the script allows it for 10 minutes, for the checker's own latest)
+    if (a.act === 'qtUndo' && a.k) {
+      const doc = e.sales.docs[a.k];
+      set({ slToast: null });
+      if (doc)
+        e.qtCheck(doc, 'undo').then(
+          () => acts.say(`เลิกทำแล้ว ${doc.docNo || 'ใบเสนอราคา'} กลับเป็น “รอตรวจ”`, { ms: 4000 }),
+          (x) => acts.say('เลิกทำไม่สำเร็จ: ' + errText(x, 'connect'), { ms: 6000 }),
+        );
+      return;
+    }
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });
       const d = e.sales.deals[a.deal];

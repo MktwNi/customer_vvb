@@ -14,6 +14,8 @@ import './quotes.css';
 import './custcolor.css';
 // configurable roles and permission requests: the Users page's sections, the request dialog, สิทธิ์ของฉัน
 import './roles.css';
+// notifications and the quotation check: the bell, the check sheet, การแจ้งเตือนของฉัน and the admin section
+import './notify.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

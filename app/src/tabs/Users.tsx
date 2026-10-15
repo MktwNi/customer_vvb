@@ -16,7 +16,7 @@ import { Select } from '../components/Select';
 import { AccountDialog } from './users/AccountDialog';
 import { Roles } from './users/Roles';
 import { Requests } from './users/Requests';
-import { NotifyAdmin } from './users/NotifyAdmin';
+import { NA_FORM, NotifyAdmin } from './users/NotifyAdmin';
 import { EMAIL_RE, effRole, extrasOf, isOn as on, roleOf, roleRank } from './users/shared';
 
 /**
@@ -261,6 +261,12 @@ export function Users() {
               เพิ่มผู้ใช้
             </button>
           )}
+          {/* the notification rules are one team record: saved from here (the section's form) */}
+          {sec === 'notify' && e.notifyLive?.on && (
+            <button type="submit" form={NA_FORM} className="us-btn primary">
+              บันทึก
+            </button>
+          )}
         </div>
         {/* the page's sections: the page-tab style the Sales Tracker uses; counts are plain muted numbers */}
         <div className="utabs rl-tabs" role="tablist" aria-label="ผู้ใช้และสิทธิ์">
@@ -284,7 +290,7 @@ export function Users() {
       )}
       {sec === 'roles' && dir && !offline && load !== 'error' && <Roles dir={dir} reload={fetchUsers} lost={lost} />}
       {sec === 'req' && dir && !offline && load !== 'error' && <Requests dir={dir} reload={fetchUsers} lost={lost} />}
-      {sec === 'notify' && <NotifyAdmin dir={dir} />}
+      {sec === 'notify' && <NotifyAdmin dir={dir} onEditUser={(u) => setAcct(u)} onRoles={() => goSec('roles')} />}
       {sec === 'acc' && (
       <>
       <section className="us-card" aria-labelledby="us-list-h" aria-busy={load === 'loading' || undefined}>

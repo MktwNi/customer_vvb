@@ -42,7 +42,7 @@ export async function openDocFile(e: GccEngine, doc: DealDoc) {
 }
 
 /** Two names refer to the same company? (ignores company-type words and punctuation) */
-function sameParty(a: string, b: string) {
+export function sameParty(a: string, b: string) {
   const strip = (s: string) => norm(s).replace(/บริษัท|จำกัด|มหาชน|ห้างหุ้นส่วน|co|ltd|plc|company|limited/gi, '');
   const x = strip(a), y = strip(b);
   return !x || !y || x.includes(y) || y.includes(x);

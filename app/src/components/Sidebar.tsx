@@ -209,6 +209,16 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                 สิทธิ์ของฉัน
               </button>
               <button
+                className="rl-side-my"
+                onClick={() => {
+                  onClose();
+                  document.getElementById('menu-btn')?.focus();
+                  set({ acctDlg: 'notify' });
+                }}
+              >
+                การแจ้งเตือนของฉัน
+              </button>
+              <button
                 onClick={() => {
                   onClose();
                   document.getElementById('menu-btn')?.focus();
