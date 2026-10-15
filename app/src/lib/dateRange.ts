@@ -44,14 +44,17 @@ export interface PresetItem { k: DatePreset; label: string; r: Range | null }
 /**
  * The ready-made ranges of the year `be`. When today is in that year: วันนี้, สัปดาห์นี้, 7 วันล่าสุด (or
  * 7 วันข้างหน้า when `forward`, for due dates), เดือนนี้, เดือนที่แล้ว (or เดือนหน้า; neither across the year
- * end), ไตรมาสนี้. Another year: its four quarters. Then ทั้งปี (no filter) and กำหนดเอง. Every range is
+ * end). Every year: its four calendar quarters (this year they show as one row, ไตรมาสนี้ ringed; a stored
+ * 'quarter' still means this one: presetKey). Then ทั้งปี (no filter) and กำหนดเอง. Every range is
  * clamped to the year (7 วันล่าสุด on 3 Jan is 1–3 ม.ค.). A 7-day range the same as one before it is not
  * offered twice (7 วันข้างหน้า on a Monday is สัปดาห์นี้, 7 วันล่าสุด on a Sunday too, and on 31 Dec it is วันนี้).
  */
 export function presetList(be: string, today: string, forward = false): PresetItem[] {
   const all = allPresets(be, today, forward);
-  return all.filter((p, i) => !(p.k === 'last7' || p.k === 'next7') || !all.slice(0, i).some((q) => sameRange(q.r, p.r)));
+  return all.filter((p, i) => p.k !== 'quarter' && (!(p.k === 'last7' || p.k === 'next7') || !all.slice(0, i).some((q) => sameRange(q.r, p.r))));
 }
+/** The quarter (1–4) today is in when it is in the year `be`, else 0. */
+export const thisQuarter = (be: string, today: string) => (today.slice(0, 4) === String(ceOf(be)) ? Math.ceil(+today.slice(5, 7) / 3) : 0);
 const sameRange = (a: Range | null, b: Range | null) => !!a && !!b && a.from === b.from && a.to === b.to;
 /** The offered preset for `k` (presetList): itself, or for a 7-day range not offered today the one with
  *  the same days; undefined when the year has no such range (เดือนนี้ in another year). */
@@ -74,8 +77,10 @@ function allPresets(be: string, today: string, forward: boolean): PresetItem[] {
     out.push({ k: 'month', label: 'เดือนนี้', r: { from: monthStart(t), to: monthEnd(t) } });
     if (!forward && m > 1) out.push({ k: 'prevMonth', label: 'เดือนที่แล้ว', r: { from: monthStart(t, -1), to: monthEnd(monthStart(t, -1)) } });
     if (forward && m < 12) out.push({ k: 'nextMonth', label: 'เดือนหน้า', r: { from: monthStart(t, 1), to: monthEnd(monthStart(t, 1)) } });
+    // the one stored before the quarters had a row of their own: worked out from today, never listed
     out.push({ k: 'quarter', label: 'ไตรมาสนี้', r: quarter(Math.ceil(m / 3)) });
-  } else for (let n = 1; n <= 4; n++) out.push({ k: ('q' + n) as DatePreset, label: `ไตรมาส ${n}`, r: quarter(n) });
+  }
+  for (let n = 1; n <= 4; n++) out.push({ k: ('q' + n) as DatePreset, label: `ไตรมาส ${n}`, r: quarter(n) });
   out.push({ k: 'year', label: `ทั้งปี ${be}`, r: null });
   out.push({ k: 'custom', label: 'กำหนดเอง', r: null });
   return out;

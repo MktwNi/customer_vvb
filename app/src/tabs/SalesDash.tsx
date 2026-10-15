@@ -11,6 +11,10 @@ import type { Task } from '../lib/types';
 import { CoAvatar, coreName } from '../components/CoAvatar';
 import { Icon } from '../components/icons';
 import { heroGrad } from '../components/ui';
+import { CashStat, QuarterCard, payField } from '../components/DashCash';
+import { beOf, cashLines, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
+import { thisQuarter } from '../lib/dateRange';
+import { payIn } from '../lib/cashUi';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -120,12 +124,27 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const ver = useEngineVersion();
   const key = JSON.stringify(f);
   // the Dashboard reports results: no ผลการขาย; the rest in the table's order (one menu on both tabs)
-  const fields = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fields0 = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
   const up = (p: Partial<SalesFilter>) => {
     const { year: _y, ...rest } = normSalesFilter({ ...F, ...p });
+    // การรับเงิน reads a range on the money's own dates: the date filter says so (รับเงิน / ครบกำหนด)
+    if (rest.pay && rest.date) rest.date = { ...rest.date, basis: payBasis(rest.pay) };
     setF(rest);
   };
   const date = F.date ? { f: F.date, r: resolveDate(F.date, year, today) } : null;
+  // the money of the period (dash impl-note §4): every deal passing the other filters whose money falls in
+  // the year, any deal year; the range is the date filter's, else the whole year
+  const moneyDeals = filterDeals(S, { ...F, date: null, pay: undefined, money: 'cash' }, today);
+  const lines = cashLines(S, moneyDeals, today);
+  const Y = cashYear(lines, year);
+  const yr = { from: `${+year - 543}-01-01`, to: `${+year - 543}-12-31` };
+  const moneyR = date ? date.r : yr;
+  const qPick = F.date && /^q[1-4]$/.test(F.date.preset) ? +F.date.preset.slice(1) : F.date?.preset === 'quarter' ? thisQuarter(year, today) : 0;
+  const payCount = (p: PayF) => filterDeals(S, { ...F, quick: '', pay: p || undefined }, today).length;
+  // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
+  const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
+  // การรับเงิน, pinned after ผู้รับผิดชอบ: its choices count the money of the range
+  const fields = [...fields0.filter((x) => x.pinned), payField(lines, moneyR, date ? rangeTh(moneyR) : `ทั้งปี ${year}`, undated, payCount), ...fields0.filter((x) => !x.pinned)];
 
   // top sellers: actual first, then forecast; closed deals per person
   const yesBy: Record<string, number> = {};
@@ -164,7 +183,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const wMon = addDays(mon, wk * 7);
   const wDays = Array.from({ length: 7 }, (_, i) => addDays(wMon, i));
   // with a filter set, only the filtered customers' appointments (and, for an owner, the companies they own)
-  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section);
+  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.pay);
   const gids = new Set(list.filter((d) => d.gid != null).map((d) => e.canonical(d.gid as number)));
   const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section;
   const inScope = (t: Task) => !filtered || gids.has(e.canonical(t.gid)) || (onlyResp && F.resp!.v.includes(e.crm.owners[e.canonical(t.gid)]));
@@ -216,14 +235,15 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               <small>{sub2}</small>
             </div>
           ))}
+          <CashStat lines={lines} pay={F.pay || ''} r={moneyR} ranged={!!date} when={qPick ? ` · ไตรมาส ${qPick}` : date ? ' · ในช่วงนี้' : ''} />
         </div>
       </div>
 
       <div className="sd-filters">
         <FilterBar
           fields={fields}
-          value={{ resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section } as Record<string, FVal | undefined>}
-          onChange={(k, v) => up({ [k]: v || undefined })}
+          value={{ resp: F.resp, pay: F.pay ? { v: [F.pay] } : undefined, source: F.source, service: F.service, referral: F.referral, section: F.section } as Record<string, FVal | undefined>}
+          onChange={(k, v) => up(k === 'pay' ? { pay: (v?.v[0] || '') as PayF } : { [k]: v || undefined })}
           lead={
             <DateFilter
               value={F.date}
@@ -233,12 +253,18 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               count={(draft) => liveCount(S, F, 'date', draft, '', today)}
               monthCounts={(basis, y) => monthCounts(S, F, basis, y, '', today)}
               unit="ราย"
+              lock={F.pay ? { basis: payBasis(F.pay), hint: F.pay === 'got' ? 'นับงวดที่รับเงินแล้วตามวันที่รับ การ์ดเงินจะนับเฉพาะเงินที่รับในช่วงนี้' : 'นับงวดที่ยังไม่ได้รับตามวันครบกำหนด การ์ดเงินจะนับเฉพาะงวดที่ครบกำหนดในช่วงนี้' } : undefined}
+              // on the money's own dates the footer adds the money of the draft range (the stat will show it)
+              money={(draft) => {
+                const p = draft.basis === 'paid' ? 'got' : draft.basis === 'due' ? (F.pay === 'late' ? 'late' : 'owed') : null;
+                return p && `${p === 'got' ? 'รับในช่วงนี้' : p === 'late' ? 'เลยกำหนดในช่วงนี้' : 'ค้างรับในช่วงนี้'} ${fmtMoney(payIn(lines, p, resolveDate(draft, year, today)).amt) || '0'} บาท`;
+              }}
             />
           }
           anySet={filtered}
           onClearAll={() => setF({})}
           count={filtered ? { shown: list.length, total: deals.length } : null}
-          liveCount={(k, d) => liveCount(S, F, k, d, '', today)}
+          liveCount={(k, d) => (k === 'pay' ? payCount((d?.v[0] || '') as PayF) : liveCount(S, F, k, d, '', today))}
           // the cards count customers in ราย ("ลูกค้า 25 ราย"): the row says it the same way
           unit="ราย"
         />
@@ -504,6 +530,19 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             <Bars items={st.stages.map((x) => [STAGE_TH[x.name] ? `${x.name} · ${STAGE_TH[x.name]}` : x.name, x.n])} keepZero />
           </Acc>
         </section>
+      </div>
+
+      {/* added under the original grid: the year's money by quarter (totals; units come with commission) */}
+      <div className="sd-grid2 one">
+        <QuarterCard
+          Y={Y}
+          year={year}
+          now={beOf(today) === year ? quarterOf(today) : -1}
+          pick={qPick - 1}
+          canPlan={e.can('edit')}
+          onCashTab={() => set({ slView: 'cash', slCashShow: '', slCashPick: null })}
+          onPlan={(id) => (id ? set({ deal: id, dpPlan: 'edit' }) : set({ slView: 'cash', slCashShow: 'undated', slCashPick: null }))}
+        />
       </div>
     </div>
   );

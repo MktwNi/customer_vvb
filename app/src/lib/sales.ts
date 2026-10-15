@@ -757,12 +757,14 @@ export function whtRate(planned: number, got: number): number | null {
   if (!(short > 0) || !(planned > 0)) return null;
   return [1, 2, 3, 5].find((r) => Math.abs(Math.round(((planned / 1.07) * r) / 100) - short) <= 1) ?? null;
 }
-/** Installments still to be received of won, open deals, due from `from` to `to` (inclusive; `from` ''
- *  = also every late one), soonest first: the calendar's "รับชำระ" entries (derived, never stored). */
+/** Installments still to be received of won deals, due from `from` to `to` (inclusive; `from` '' = also
+ *  every late one), soonest first: the calendar's "รับชำระ" entries (derived, never stored). A closed job
+ *  with an installment still unpaid is listed too: money owed is followed until it comes in (as Cashflow
+ *  counts it); a joint quotation's member pays nothing of its own (the header does). */
 export function payDue(s: SalesState, deals: Deal[], from: string, to: string, today: string): { deal: Deal; line: LineView }[] {
   const out: { deal: Deal; line: LineView }[] = [];
   deals.forEach((d) => {
-    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES') return;
+    if (dealResult(s, d) !== 'YES' || jointRole(s, d) === 'member') return;
     planOf(s, d, today)?.lines.forEach((l) => l.status !== 'paid' && l.status !== 'off' && l.due && l.due >= from && l.due <= to && out.push({ deal: d, line: l }));
   });
   return out.sort((a, b) => a.line.due.localeCompare(b.line.due) || a.deal.client.localeCompare(b.deal.client));
@@ -903,7 +905,18 @@ export interface SalesFilter {
   year: string; q?: string; quick?: QuickView; job?: '' | 'open' | 'closed';
   resp?: ListF; source?: ListF; service?: ListF; referral?: ListF; section?: ListF;
   result?: ResultF; date?: DateF | null;
+  /** 'cash' (the table's lens "เงินเข้าตามปี", the Cashflow tab): a deal of another year counts in this one
+   *  when one of its installments is received or due in it. Unset: the deal's own year only (as always). */
+  money?: 'cash';
+  /** the Dashboard's การรับเงิน: deals with money of that kind (cashLines) inside the date range, else the
+   *  year; it reads the range on its own dates (received / due), never basisDates. Implies money 'cash'. */
+  pay?: PayF;
 }
+/** การรับเงิน: received (รับแล้ว), still owed (ค้างรับ, late included) or late (เลยกำหนด). */
+export type PayF = '' | 'got' | 'owed' | 'late';
+const PAYS: PayF[] = ['', 'got', 'owed', 'late'];
+/** The date a pay filter reads a range on: received money on the day it came in, owed money on its due date. */
+export const payBasis = (p: PayF): DateBasis => (p === 'got' ? 'paid' : 'due');
 /** What callers may pass: a list as one string (older callers and tests), and the retired month / day of
  *  the last contact (read as a contact range). */
 export type SalesFilterIn = Omit<SalesFilter, ListKey> & Partial<Record<ListKey, ListF | string>> & { month?: string; day?: string };
@@ -925,6 +938,8 @@ export function normSalesFilter(f: SalesFilterIn): SalesFilter {
     if (list.length) out[k] = typeof v === 'object' && v.not ? { v: list, not: true } : { v: list };
   }
   if (f.result && RESULTS.includes(f.result)) out.result = f.result;
+  if (f.money === 'cash') out.money = 'cash';
+  if (f.pay && PAYS.includes(f.pay)) out.pay = f.pay;
   let date = normDateF(f.date, f.year);
   if (!f.date && f.month && /^(0[1-9]|1[0-2])$/.test(f.month)) {
     const from = `${ceOf(f.year)}-${f.month}-01`;
@@ -1017,10 +1032,17 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
   const terms = q ? q.split(/\s+/) : [];
   const secIx = new Map(s.cfg.sections.map((x, i) => [x, i]));
   const lists = LIST_KEYS.filter((k) => f[k]);
-  const range = f.date ? resolveDate(f.date, f.year, today) : null;
+  // การรับเงิน reads the range on the money's own dates: received ones on paid, owed ones on due
+  const range = f.date ? resolveDate(f.pay ? { ...f.date, basis: payBasis(f.pay) } : f.date, f.year, today) : null;
+  // the money lens: a deal of another year with an installment in this one; its lines once per pass
+  const cash = f.money === 'cash' || !!f.pay, ce = ceOf(f.year) + '-';
+  const lines = new Map<string, CashLine[]>();
+  const linesOf = (d: Deal) => lines.get(d.id) || lines.set(d.id, cashLines(s, [d], today)).get(d.id)!;
+  const payR = f.pay ? range || { from: ce + '01-01', to: ce + '12-31' } : null;
   return Object.values(s.deals)
     .filter((d) => {
-      if (d.year !== f.year) return false;
+      if (d.year !== f.year && !(cash && linesOf(d).some((l) => l.date.startsWith(ce)))) return false;
+      if (f.pay && !linesOf(d).some((l) => payMatch(l, f.pay!) && inRange(l.date, payR!))) return false;
       if (f.job && d.jobStatus !== f.job) return false;
       if (!lists.every((k) => listMatch(d, k, f[k]!))) return false;
       if (f.result) {
@@ -1028,7 +1050,7 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;
       }
       if (f.quick && !quickMatch(s, d, f.quick, today)) return false;
-      if (range && !dateMatch(s, d, range, f.date!.basis, today)) return false;
+      if (range && !f.pay && !dateMatch(s, d, range, f.date!.basis, today)) return false;
       if (terms.length) {
         const plan = (planLines(s, d) || []).map((x) => `${x.line.note} ${x.line.howT}`);
         const notes = [...s.cfg.stages.map((p) => stepOf(s, d.id, p).n), ...plan, ...actsOf(s, d.id).map((a) => a.note)].join(' ');
@@ -1041,34 +1063,30 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
 }
 
 /**
- * Money received inside a range (the KPI footer "รับในช่วงนี้"): with a plan, what each installment got
- * when it came in; without one, the Actual documents (on their stage's date, else the document date,
- * else the day attached); and a deal with neither but a typed Actual counts it once, on its latest paid
- * PAY stage's date.
+ * The money a deal received and the day each amount came in ('' when nothing dates it), the one rule
+ * receivedIn and cashLines share: with a plan, what each installment got, on its received date; without
+ * one, the Actual documents (on their stage's date, else the document date, else the day attached); a
+ * deal with neither but a typed Actual counts it once, on its latest paid PAY stage's date.
  */
+export interface Received { amt: number; date: string; stage: string; src: 'plan' | 'doc' | 'typed'; doc: DealDoc | null; line: LineView | null }
+export function receivedOf(s: SalesState, d: Deal, today: string, plan = planOf(s, d, today)): Received[] {
+  if (plan) return plan.lines.filter((l) => l.got > 0).map((l) => ({ amt: l.got, date: l.rcvDate, stage: l.stage, src: 'plan', doc: l.doc, line: l }));
+  const acs = docsOf(s, d.id).filter(countsActual);
+  if (acs.length)
+    return acs.map((x) => {
+      const st = x.stage && s.cfg.stages.includes(x.stage) ? stepOf(s, d.id, x.stage).d : '';
+      return { amt: x.amount || 0, date: st && st <= today ? st : x.docDate || localDay(x.at), stage: x.stage, src: 'doc', doc: x, line: null };
+    });
+  const typed = dealMoney(s, d).actual;
+  if (!typed || typed <= 0) return [];
+  const paid = payState(s, d, today).paid.filter((p) => stepOf(s, d.id, p).d && stepOf(s, d.id, p).d <= today);
+  const last = paid.sort((a, b) => stepOf(s, d.id, a).d.localeCompare(stepOf(s, d.id, b).d)).pop() || '';
+  return [{ amt: typed, date: last ? stepOf(s, d.id, last).d : '', stage: last, src: 'typed', doc: null, line: null }];
+}
+/** Money received inside a range (the KPI footer "รับในช่วงนี้"), by receivedOf. */
 export function receivedIn(s: SalesState, deals: Deal[], r: Range, today: string): number {
   let sum = 0;
-  for (const d of deals) {
-    const plan = planOf(s, d, today);
-    if (plan) {
-      plan.lines.forEach((l) => l.got > 0 && inRange(l.rcvDate, r) && (sum += l.got));
-      continue;
-    }
-    const acs = docsOf(s, d.id).filter(countsActual);
-    if (acs.length) {
-      acs.forEach((x) => {
-        const st = x.stage && s.cfg.stages.includes(x.stage) ? stepOf(s, d.id, x.stage).d : '';
-        const day = st && st <= today ? st : x.docDate || localDay(x.at);
-        if (inRange(day, r)) sum += x.amount || 0;
-      });
-      continue;
-    }
-    const typed = dealMoney(s, d).actual;
-    if (typed && typed > 0) {
-      const last = payState(s, d, today).paid.map((p) => stepOf(s, d.id, p).d).filter((x) => x && x <= today).sort().pop();
-      if (last && inRange(last, r)) sum += typed;
-    }
-  }
+  for (const d of deals) for (const x of receivedOf(s, d, today)) if (inRange(x.date, r)) sum += x.amt;
   return sum;
 }
 /** Still owed on installments due inside a range (open, won deals): the KPI footer "ค้างในช่วงนี้". */
@@ -1080,6 +1098,177 @@ export function owedIn(s: SalesState, deals: Deal[], r: Range, today: string): n
   }
   return sum;
 }
+
+// ------------------------------------------------------------------ cashflow by year (derived, never stored)
+
+/** A deal's part in a joint quotation (one header deal pays for several member companies, package quotes).
+ *  Joint quotations come in a later release: until then every deal is 'plain'. Money loops skip 'member'
+ *  so that a joint quotation's money counts once, on its header. */
+export type JointRole = 'plain' | 'header' | 'member';
+export const jointRole = (_s: SalesState, _d: Deal): JointRole => 'plain';
+
+/**
+ * One amount of money in Cashflow: received (`got`, on the day it came in) or still owed (`owed`, on its
+ * due date); `date` '' = it has no date yet ("ยังไม่กำหนดวันรับ": never in a month or a year total).
+ * `n`/`of`: "งวด n/of" of the plan (0 without a plan). `src`: an installment of the plan; without a plan an
+ * Actual document, the typed Actual, or what is left of the Forecast (`rest`). Amounts as on the documents.
+ */
+export interface CashLine {
+  /** unique among the lines (React keys, tests) */
+  id: string;
+  deal: Deal;
+  /** a joint quotation's header: how many member companies, and its title (package quotes) */
+  joint?: { members: number; title: string };
+  stage: string; n: number; of: number;
+  amt: number;
+  kind: 'got' | 'owed';
+  date: string;
+  /** the due date ('' none) and the day it came in (got lines) */
+  due: string; rcv: string;
+  /** paid · late (past its due date) · due (within DUE_SOON days) · wait */
+  status: 'paid' | 'late' | 'due' | 'wait';
+  lateDays: number;
+  /** the deal's own Buddhist-era year */
+  dealYear: string;
+  src: 'plan' | 'doc' | 'typed' | 'rest';
+  doc: DealDoc | null;
+  /** an installment beyond the stage list ("งวดเพิ่ม") */
+  extra: boolean;
+}
+
+/**
+ * Every amount of money of won (YES) deals, open and closed, of any year: the plan's installments (a part
+ * paid one gives a received line and an owed one for what is left); without a plan what was received
+ * (receivedOf) and Forecast − Actual while a PAY stage is left, undated (as the KPI ค้างรับ counts it).
+ * Not counted: deals not won, cancelled installments, a joint quotation's members. Soonest first, undated last.
+ */
+export function cashLines(s: SalesState, deals: Iterable<Deal>, today: string): CashLine[] {
+  const out: CashLine[] = [];
+  for (const d of deals) {
+    if (dealResult(s, d) !== 'YES' || jointRole(s, d) === 'member') continue;
+    const plan = planOf(s, d, today);
+    const base = { deal: d, dealYear: d.year, of: plan?.n ?? 0, lateDays: 0, extra: false };
+    if (plan) {
+      for (const l of plan.lines) {
+        if (l.status === 'off') continue;
+        const at = { ...base, stage: l.stage, n: l.n, due: l.due, extra: !l.inList };
+        if (l.got > 0) out.push({ ...at, id: `${d.id}/${l.stage}/got`, amt: l.got, kind: 'got', date: l.rcvDate, rcv: l.rcvDate, status: 'paid', src: 'plan', doc: l.doc });
+        if (l.left > 0) out.push({ ...at, id: `${d.id}/${l.stage}/owed`, amt: l.left, kind: 'owed', date: l.due, rcv: '', status: owedStatus(l.due, l.lateDays, today), lateDays: l.lateDays, src: 'plan', doc: null });
+      }
+      continue;
+    }
+    receivedOf(s, d, today, null).forEach((x, i) =>
+      out.push({ ...base, id: `${d.id}/${x.doc?.id || x.src}/${i}`, stage: x.stage, n: 0, amt: x.amt, kind: 'got', date: x.date, due: '', rcv: x.date, status: 'paid', src: x.src as 'doc' | 'typed', doc: x.doc }),
+    );
+    const m = dealMoney(s, d), left = payState(s, d, today).left;
+    if (m.forecast != null && (m.actual || 0) < m.forecast && left.length)
+      out.push({ ...base, id: `${d.id}/rest`, stage: left[0], n: 0, amt: m.forecast - (m.actual || 0), kind: 'owed', date: '', due: '', rcv: '', status: 'wait', src: 'rest', doc: null });
+  }
+  return out.sort((a, b) => (!a.date ? 1 : 0) - (!b.date ? 1 : 0) || a.date.localeCompare(b.date) || a.deal.client.localeCompare(b.deal.client, 'th') || a.n - b.n);
+}
+/** An owed amount's status by its due date: late once past it, due within DUE_SOON days, else wait. */
+const owedStatus = (due: string, lateDays: number, today: string): CashLine['status'] =>
+  lateDays > 0 ? 'late' : due && due >= today && daysBetween(today, due) <= DUE_SOON ? 'due' : 'wait';
+
+/** Money of one month, quarter or year: received, late, still to come (รอรับ: owed, not late) and how
+ *  many amounts. ค้างรับ = late + wait. */
+export interface CashSum { got: number; late: number; wait: number; n: number }
+const sum0 = (): CashSum => ({ got: 0, late: 0, wait: 0, n: 0 });
+export const cashTotal = (c: CashSum) => c.got + c.late + c.wait;
+const addLine = (c: CashSum, l: CashLine) => {
+  if (l.kind === 'got') c.got += l.amt;
+  else if (l.status === 'late') c.late += l.amt;
+  else c.wait += l.amt;
+  c.n++;
+};
+/** The Buddhist-era year a date falls in ('' for no date). */
+export const beOf = (iso: string) => (iso ? String(+iso.slice(0, 4) + 543) : '');
+/** The calendar quarter (0–3) of a date. */
+export const quarterOf = (iso: string) => Math.floor((+iso.slice(5, 7) - 1) / 3);
+
+/**
+ * One Buddhist-era year of Cashflow (a calendar year, calendar quarters): its dated lines (soonest first),
+ * by month and by quarter, its totals, and the undated money of the deals of that year ("ยังไม่กำหนดวันรับ",
+ * never in a month or the totals).
+ */
+export function cashYear(lines: CashLine[], be: string) {
+  const months = Array.from({ length: 12 }, sum0), totals = sum0();
+  const dated = lines.filter((l) => l.date && beOf(l.date) === be);
+  dated.forEach((l) => {
+    addLine(months[+l.date.slice(5, 7) - 1], l);
+    addLine(totals, l);
+  });
+  const quarters = [0, 1, 2, 3].map((q) => months.slice(q * 3, q * 3 + 3).reduce((a, m) => ({ got: a.got + m.got, late: a.late + m.late, wait: a.wait + m.wait, n: a.n + m.n }), sum0()));
+  return { months, quarters, totals, lines: dated, undated: lines.filter((l) => !l.date && l.dealYear === be) };
+}
+export type CashYear = ReturnType<typeof cashYear>;
+
+/** The Cashflow cards of a year: the year's total, received (how many, the latest day), owed in the year
+ *  (late, and due from today to the end of this month while today is in it), the undated money of the
+ *  year's deals; `from` = the other deal years its money comes from (year → deals). */
+export interface CashKpis {
+  total: number; n: number;
+  got: number; gotN: number; lastGot: string;
+  owed: number; owedN: number; late: number; lateN: number; dueMonth: number; dueMonthN: number; firstDue: string;
+  undated: number; undatedDeals: number;
+  from: Record<string, number>; ownN: number;
+}
+export function cashKpis(Y: CashYear, be: string, today: string): CashKpis {
+  const monthEnd = today.slice(0, 8) + '31', thisYear = beOf(today) === be;
+  const k: CashKpis = { total: cashTotal(Y.totals), n: Y.totals.n, got: Y.totals.got, gotN: 0, lastGot: '', owed: Y.totals.late + Y.totals.wait, owedN: 0, late: Y.totals.late, lateN: 0, dueMonth: 0, dueMonthN: 0, firstDue: '', undated: 0, undatedDeals: 0, from: {}, ownN: 0 };
+  const from: Record<string, Set<string>> = {};
+  Y.lines.forEach((l) => {
+    if (l.kind === 'got') {
+      k.gotN++;
+      if (l.date > k.lastGot) k.lastGot = l.date;
+    } else {
+      k.owedN++;
+      if (!k.firstDue || l.date < k.firstDue) k.firstDue = l.date;
+      if (l.status === 'late') k.lateN++;
+      else if (thisYear && l.date >= today && l.date <= monthEnd) {
+        k.dueMonth += l.amt;
+        k.dueMonthN++;
+      }
+    }
+    if (l.dealYear === be) k.ownN++;
+    else (from[l.dealYear] || (from[l.dealYear] = new Set())).add(l.deal.id);
+  });
+  k.from = Object.fromEntries(Object.entries(from).map(([y, s]) => [y, s.size]));
+  k.undated = Y.undated.reduce((a, l) => a + l.amt, 0);
+  k.undatedDeals = new Set(Y.undated.map((l) => l.deal.id)).size;
+  return k;
+}
+
+/**
+ * The line under the Cashflow cards that ties them to today's KPI ค้างรับ: the money still owed on the
+ * open jobs of deal year `be` (= receivables of those jobs) split by where it falls: in this year, in
+ * other years (by year), and undated. The card ค้างรับในปีนี้ also holds what closed jobs still owe in the
+ * year and the open jobs of other deal years owe in it (`closedIn`, `otherIn`, shown only when not 0), so
+ * the line adds up to both figures: open = inYear + Σ byYear + undated, and the card = inYear + closedIn + otherIn.
+ */
+export interface CashRecon { open: number; inYear: number; byYear: { year: string; amt: number }[]; undated: number; closedIn: number; otherIn: number }
+export function cashRecon(lines: CashLine[], be: string): CashRecon {
+  const r: CashRecon = { open: 0, inYear: 0, byYear: [], undated: 0, closedIn: 0, otherIn: 0 };
+  const by: Record<string, number> = {};
+  for (const l of lines) {
+    if (l.kind !== 'owed') continue;
+    const y = beOf(l.date), open = l.deal.jobStatus === 'open';
+    if (y === be && !open) r.closedIn += l.amt;
+    else if (y === be && l.dealYear !== be) r.otherIn += l.amt;
+    if (!open || l.dealYear !== be) continue;
+    r.open += l.amt;
+    if (!y) r.undated += l.amt;
+    else if (y === be) r.inYear += l.amt;
+    else by[y] = (by[y] || 0) + l.amt;
+  }
+  r.byYear = Object.keys(by).sort().map((year) => ({ year, amt: by[year] }));
+  return r;
+}
+
+/** Whether an amount is the kind การรับเงิน asks for: received, owed (late included), or late. */
+export const payMatch = (l: CashLine, p: PayF) => (p === 'got' ? l.kind === 'got' : p === 'owed' ? l.kind === 'owed' : p === 'late' ? l.kind === 'owed' && l.status === 'late' : true);
+/** Every Buddhist-era year a line of money is dated in (the year picker on the money views). */
+export const cashYears = (lines: CashLine[]) => [...new Set(lines.filter((l) => l.date).map((l) => beOf(l.date)))].sort();
 
 /** Sections to show for a year: configured order first, then any extra ones used by deals. */
 export function sectionsFor(s: SalesState, deals: Deal[]) {

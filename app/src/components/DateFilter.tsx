@@ -1,6 +1,6 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { TH_M, addDays, dow, fmtN, isoTh } from '../lib/format';
-import { BASES, ceOf, monthEnd, monthStart, navBounds, presetKey, presetList, rangeTh, resolveDate, twinOf, weekStart, type DateBasis, type DateF, type DatePreset, type Range } from '../lib/dateRange';
+import { BASES, ceOf, monthEnd, monthStart, navBounds, presetKey, presetList, rangeTh, resolveDate, thisQuarter, twinOf, weekStart, type DateBasis, type DateF, type DatePreset, type Range } from '../lib/dateRange';
 import { BASIS_TH } from '../lib/salesUi';
 import { Chevron } from './StageTrack';
 import { Pop, XMark, useHL } from './Pop';
@@ -28,7 +28,7 @@ export function dateWords(f: DateF, r: Range) {
  * one click away, which date of a deal counts (นับจากวันที่), จาก – ถึง, a Monday-first month (or the 12
  * months with their counts), and the rows the draft would leave. Nothing applies before "ใช้ตัวกรอง".
  */
-export function DateFilter({ value, onChange, year, today, count, monthCounts, bases = BASES, unit = 'งาน', elsewhere }: {
+export function DateFilter({ value, onChange, year, today, count, monthCounts, bases = BASES, unit = 'งาน', elsewhere, lock, money }: {
   value: DateF | null | undefined;
   onChange: (v: DateF | null) => void;
   /** the Buddhist-era year of the table */
@@ -42,6 +42,10 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
   unit?: string;
   /** a draft whose rows are not in this view: where they are, in place of "· 0 งาน" (null: they are here) */
   elsewhere?: (draft: DateF) => string | null;
+  /** the date basis set by another filter (the Dashboard's การรับเงิน): shown, not chosen, with its hint */
+  lock?: { basis: DateBasis; hint: string };
+  /** the money of a draft range, after the count in the footer ("รับในช่วงนี้ 227,000 บาท"; null: none) */
+  money?: (draft: DateF) => string | null;
 }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
@@ -104,6 +108,8 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
           count={count}
           monthCounts={monthCounts}
           elsewhere={elsewhere}
+          lock={lock}
+          money={money}
           id={popId}
           anchor={btn}
           onClose={() => setOpen(false)}
@@ -118,11 +124,16 @@ export function DateFilter({ value, onChange, year, today, count, monthCounts, b
   );
 }
 
-function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere, id, anchor, onClose, onApply }: {
+/** What a locked basis reads (the Dashboard's การรับเงิน counts money on its own dates). */
+const LOCK_TH: Partial<Record<DateBasis, string>> = { paid: 'วันที่รับเงิน', due: 'วันครบกำหนด' };
+
+function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere, lock, money, id, anchor, onClose, onApply }: {
   init: DateF | null; year: string; today: string; bases: DateBasis[]; unit: string;
   count: (draft: DateF | null) => number;
   monthCounts: (basis: DateBasis, ceYear: number) => number[];
   elsewhere?: (draft: DateF) => string | null;
+  lock?: { basis: DateBasis; hint: string };
+  money?: (draft: DateF) => string | null;
   id: string;
   anchor: { current: HTMLElement | null };
   onClose: () => void;
@@ -130,7 +141,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere
 }) {
   const Y = ceOf(year), nb = navBounds(year);
   const thisYear = today.slice(0, 4) === String(Y);
-  const [basis, setBasis] = useState<DateBasis>(init?.basis || 'contact');
+  const [basis, setBasis] = useState<DateBasis>(lock?.basis || init?.basis || 'contact');
   const P = presetList(year, today, basis === 'due');
   const r0 = init ? resolveDate(init, year, today) : null;
   // a 7-day range not offered today opens as the one with the same days (สัปดาห์นี้ on a Monday)
@@ -153,6 +164,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere
   const draft: DateF | null = on ? { basis, preset: preset as DateF['preset'], from, to: to || from } : null;
   const n = useMemo(() => count(draft), [basis, preset, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
   const away = useMemo(() => (draft && elsewhere ? elsewhere(draft) : null), [basis, preset, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cash = useMemo(() => (draft && money ? money(draft) : null), [basis, preset, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
   const mc = useMemo(() => (months ? monthCounts(basis, gy) : []), [months, basis, gy]); // eslint-disable-line react-hooks/exhaustive-deps
   /** where กำหนดเอง starts with nothing picked: today (when the calendar may show it), else the month shown */
   const startDay = () => (today >= nb.from && today <= nb.to ? today : ym);
@@ -295,6 +307,40 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere
           <i className="hl" aria-hidden="true" />
           {P.map((p) => {
             const ch = preset === p.k;
+            // this year: the four quarters in one row, ไตรมาสนี้ ringed, the chosen one filled
+            const qn = thisYear && /^q[1-4]$/.test(p.k) ? +p.k.slice(1) : 0;
+            if (qn > 1) return null;
+            if (qn === 1) {
+              const qs = P.filter((x) => /^q[1-4]$/.test(x.k)), cur = thisQuarter(year, today), chosen = qs.find((x) => x.k === preset);
+              return (
+                <div key="q" className={'fq' + (chosen ? ' on' : '')} data-hl="" role="group" aria-label={`ไตรมาส ปี ${year}`}>
+                  <span className="fq-t">ไตรมาส</span>
+                  <span className="fq-b">
+                    {qs.map((q, i) => {
+                      const on = preset === q.k, words = `${rangeTh(q.r!)}${i + 1 === cur ? ' · ไตรมาสนี้' : ''}`;
+                      return (
+                        <button
+                          key={q.k}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          aria-label={`ไตรมาส ${i + 1} ${words}`}
+                          title={words}
+                          tabIndex={on ? 0 : -1}
+                          data-k={q.k}
+                          data-autofocus={on ? '' : undefined}
+                          className={(on ? 'on' : '') + (i + 1 === cur ? ' now' : '')}
+                          onClick={() => pick(q.k)}
+                        >
+                          {i + 1}
+                        </button>
+                      );
+                    })}
+                  </span>
+                  <small>{chosen ? rangeTh(chosen.r!) : `ไตรมาสนี้ ${rangeTh(qs[cur - 1].r!, { dropYear: year })}`}</small>
+                </div>
+              );
+            }
             return (
               <button
                 key={p.k}
@@ -317,18 +363,22 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere
         <div className="fdate-main">
           <div className="fdate-basis">
             <span className="fdate-lab" id="fdate-basis-l">นับจากวันที่</span>
-            <Select
-              variant="tool"
-              value={basis}
-              options={bases.map((b) => ({ v: b, label: BASIS_TH[b].label, sub: BASIS_TH[b].sub }))}
-              onChange={changeBasis}
-              label="นับจากวันที่"
-              labelledBy="fdate-basis-l"
-              width={300}
-              search={false}
-            />
+            {lock ? (
+              <span className="fdate-lock" aria-describedby="fdate-basis-l">{LOCK_TH[lock.basis] || BASIS_TH[lock.basis].label}</span>
+            ) : (
+              <Select
+                variant="tool"
+                value={basis}
+                options={bases.map((b) => ({ v: b, label: BASIS_TH[b].label, sub: BASIS_TH[b].sub }))}
+                onChange={changeBasis}
+                label="นับจากวันที่"
+                labelledBy="fdate-basis-l"
+                width={300}
+                search={false}
+              />
+            )}
           </div>
-          <p className="fdate-hint">{BASIS_TH[basis].hint}</p>
+          <p className="fdate-hint">{lock ? lock.hint : BASIS_TH[basis].hint}</p>
           <div className="fdate-slots" role="group" aria-label="จาก – ถึง">
             <button type="button" className={'fslot' + (on && end === 'from' ? ' on' : '')} aria-pressed={on && end === 'from'} onClick={() => slot('from')}>
               <small>จาก</small>
@@ -449,6 +499,7 @@ function DatePop({ init, year, today, bases, unit, count, monthCounts, elsewhere
           {draft ? (
             <>
               {BASIS_TH[basis].sent} <b>{rangeTh({ from: draft.from, to: draft.to })}</b> · {away ?? `${fmtN(n)} ${unit}`}
+              {cash && <> · {cash}</>}
             </>
           ) : (
             <>ทั้งปี {year} · ไม่กรองวันที่ · {fmtN(n)} {unit}</>

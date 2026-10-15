@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isDay, monthEnd, normDateF, presetKey, presetList, rangeTh, resolveDate, twinOf, weekStart, type DatePreset, type Range } from './dateRange';
+import { isDay, monthEnd, normDateF, presetKey, presetList, rangeTh, resolveDate, thisQuarter, twinOf, weekStart, type DatePreset, type Range } from './dateRange';
 import { localDay, todayISO } from './format';
 
 // 2026-10-12 is a Monday; the tracker's year 2569
@@ -22,9 +22,11 @@ describe('ready-made ranges', () => {
     expect(r.last7).toEqual({ from: '2026-10-06', to: '2026-10-12' });
     expect(r.month).toEqual({ from: '2026-10-01', to: '2026-10-31' });
     expect(r.prevMonth).toEqual({ from: '2026-09-01', to: '2026-09-30' });
-    expect(r.quarter).toEqual({ from: '2026-10-01', to: '2026-12-31' });
+    // the four quarters of this year, in one row (ไตรมาสนี้ = ไตรมาส 4 is ringed there)
+    expect(r.q1).toEqual({ from: '2026-01-01', to: '2026-03-31' });
+    expect(r.q4).toEqual({ from: '2026-10-01', to: '2026-12-31' });
     expect(r.year).toBeNull(); // ทั้งปี = no date filter
-    expect(presetList('2569', T).map((p) => p.k)).toEqual(['today', 'week', 'last7', 'month', 'prevMonth', 'quarter', 'year', 'custom']);
+    expect(presetList('2569', T).map((p) => p.k)).toEqual(['today', 'week', 'last7', 'month', 'prevMonth', 'q1', 'q2', 'q3', 'q4', 'year', 'custom']);
   });
   it('due dates look forward', () => {
     const r = ranges('2569', '2026-10-13', true); // a Tuesday
@@ -34,11 +36,11 @@ describe('ready-made ranges', () => {
   });
   it('a 7-day range the same as one before it is offered once (a Monday, a Sunday, 31 Dec)', () => {
     // Monday: 7 วันข้างหน้า is สัปดาห์นี้
-    expect(presetList('2569', T, true).map((p) => p.k)).toEqual(['today', 'week', 'month', 'nextMonth', 'quarter', 'year', 'custom']);
+    expect(presetList('2569', T, true).map((p) => p.k)).toEqual(['today', 'week', 'month', 'nextMonth', 'q1', 'q2', 'q3', 'q4', 'year', 'custom']);
     // Sunday: 7 วันล่าสุด is สัปดาห์นี้
-    expect(presetList('2569', '2026-10-18').map((p) => p.k)).toEqual(['today', 'week', 'month', 'prevMonth', 'quarter', 'year', 'custom']);
+    expect(presetList('2569', '2026-10-18').map((p) => p.k)).toEqual(['today', 'week', 'month', 'prevMonth', 'q1', 'q2', 'q3', 'q4', 'year', 'custom']);
     // 31 Dec (a Thursday): 7 วันข้างหน้า clamped to the year is วันนี้
-    expect(presetList('2569', '2026-12-31', true).map((p) => p.k)).toEqual(['today', 'week', 'month', 'quarter', 'year', 'custom']);
+    expect(presetList('2569', '2026-12-31', true).map((p) => p.k)).toEqual(['today', 'week', 'month', 'q1', 'q2', 'q3', 'q4', 'year', 'custom']);
     // a stored 7 วันข้างหน้า is still worked out from today, and opens as the range it equals
     expect(resolveDate({ basis: 'due', preset: 'next7', from: '2026-10-11', to: '2026-10-17' }, '2569', T)).toEqual({ from: T, to: '2026-10-18' });
     expect(presetKey('2569', T, true, 'next7')?.k).toBe('week');
@@ -53,6 +55,14 @@ describe('ready-made ranges', () => {
     const dec = ranges('2569', '2026-12-29', true);
     expect('nextMonth' in dec).toBe(false);
     expect(dec.next7).toEqual({ from: '2026-12-29', to: '2026-12-31' });
+  });
+  it('a stored ไตรมาสนี้ is still this quarter, worked out from today, and opens on its row', () => {
+    expect(resolveDate({ basis: 'paid', preset: 'quarter', from: '2026-07-01', to: '2026-09-30' }, '2569', T)).toEqual({ from: '2026-10-01', to: '2026-12-31' });
+    expect(presetKey('2569', T, false, 'quarter')?.k).toBe('q4');
+    expect(presetKey('2569', '2026-04-01', false, 'quarter')?.k).toBe('q2');
+    expect(thisQuarter('2569', T)).toBe(4);
+    expect(thisQuarter('2569', '2026-03-31')).toBe(1);
+    expect(thisQuarter('2570', T)).toBe(0);
   });
   it('another year: its quarters', () => {
     const P = presetList('2570', T);

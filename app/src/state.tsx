@@ -25,7 +25,14 @@ export interface UIState {
   // Dedup tab
   ddF: 'pending' | 'auto' | 'decided' | 'all'; ddPage: number;
   // Sales Tracker
-  slView: 'table' | 'dash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
+  slView: 'table' | 'dash' | 'cash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
+  /** How the table counts money ("นับยอด"): by the deal's year (as always) or "เงินเข้าตามปี" (each
+   *  installment in the year it is received or due). The Cashflow tab: months or quarters, the bar picked
+   *  (its month or quarter; null = the whole year), the card picked (the list shows only that money), and
+   *  its own filter row. This browser only, never synced. */
+  slLens: 'deal' | 'cash'; slCashMode: 'm' | 'q'; slCashPick: number | null; slCashShow: '' | 'got' | 'owed' | 'late' | 'undated'; slCashF: Omit<SalesFilter, 'year'>;
+  /** The Cashflow CSV dialog is open (from its list or the ⋯ menu). */
+  slCashCsv: boolean;
   /** Deals whose stages are open under their row; deals whose done stages are unfolded ("แสดง"); the
    *  one stage editor open in the table. This browser only, never synced. */
   slOpen: Record<string, 1>; slShowAll: Record<string, 1>;
@@ -78,6 +85,7 @@ const initial = (): UIState => {
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
+    slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false,
     deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', hideRelogin: false,
   };
@@ -127,6 +135,8 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
         // another year of the tracker (the year picker, ส่งเข้า Sales Tracker, an import's "ดูตารางปี"): a date
         // range goes back to the whole year, the other filters stay (filters spec §7.6)
         if (n.slYear !== s.slYear) n.slF = withoutDate(n.slF);
+        // a picked month or quarter of Cashflow is about the old year
+        if (n.slYear !== s.slYear && !('slCashPick' in patch)) n.slCashPick = null;
         return n;
       }),
     [engine],

@@ -1,0 +1,274 @@
+/* ---- money by year (cash and dash packages, phase 1): the Sales Tracker's Cashflow tab, the table's lens
+   "นับยอด", the deal panel's year line, and the Dashboard's การรับเงิน, quarter presets and quarter card.
+   The app's own tokens only (index.css :root); sizes on the scale, weights 400 / 500 (a month band name is
+   an .sl-sec-name band, 600 there). Money not received yet is one look on both tabs: a light fill with a
+   brand outline; late money is the reserved late colour, always with its word. */
+:root{--cash-wait:#C9D7F6}
+.cf-sw,.cf-stack i,.cf-hr .trk i,.ud{display:inline-block;flex:none}
+.cf-sw.got,.cf-stack i.got,.cf-hr .trk i.got,.ud.got{background:var(--bar)}
+.cf-sw.late,.cf-stack i.late,.cf-hr .trk i.late{background:var(--mark-no)}
+.cf-sw.wait,.cf-stack i.wait,.cf-hr .trk i.wait,.ud.wait,.qc-col i.wait{background:var(--cash-wait);box-shadow:inset 0 0 0 1.5px var(--brand)}
+
+/* ---- the Cashflow tab */
+.cf-hint b{font-weight:500;color:var(--ink)}
+.cf-recon{margin:-4px 2px 0;font-size:var(--fs-sec);color:var(--muted);line-height:1.6}
+.cf-recon b{font-weight:500;color:var(--ink-2)}
+.cf-recon .lnk{font-size:var(--fs-sec)}
+.cf-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.cf-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-card);padding:20px 24px 18px;min-width:0}
+.cf-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px 16px;flex-wrap:wrap}
+.cf-h>div:first-child{min-width:0}
+.cf-t{margin:0;font-size:var(--fs-card);font-weight:500;line-height:1.4;color:var(--ink)}
+.cf-s{display:block;margin-top:2px;font-size:var(--fs-sec);color:var(--muted);line-height:1.5}
+.cf-key{display:flex;gap:6px 18px;flex-wrap:wrap;margin-top:12px;font-size:var(--fs-sec);color:var(--ink-2)}
+.cf-key span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.cf-sw{width:10px;height:10px;border-radius:3px}
+
+/* the chart (desktop): one y axis, hairlines, stacked columns with the total on each */
+.cf-plot{position:relative;height:250px;margin-top:6px}
+.cf-grid{position:absolute;left:56px;right:0;height:0;border-top:1px solid var(--divider)}
+.cf-grid.base{border-top-color:var(--line)}
+.cf-yl{position:absolute;left:0;width:46px;text-align:right;transform:translateY(-50%);font-size:var(--fs-meta);color:var(--muted);font-variant-numeric:tabular-nums}
+.cf-cols{position:absolute;left:56px;right:0;top:0;height:206px;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr))}
+.cf-colw{position:relative;display:flex;min-width:0}
+.cf-col{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;border-radius:12px;min-width:0}
+.cf-col::before{content:'';position:absolute;inset:0 4px -42px;border-radius:12px;background:transparent;transition:background-color .12s}
+@media (hover:hover){.cf-col:hover::before{background:var(--tint)}}
+.cf-col.now::before{background:var(--tint)}
+.cf-col.pick::before{background:var(--tint-2)}
+.cf-col:focus-visible{outline:none}
+.cf-col:focus-visible::before{box-shadow:inset 0 0 0 2px var(--brand)}
+.cf-col>*{position:relative}
+.cf-val{font-size:var(--fs-meta);color:var(--ink-2);margin-bottom:6px;white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.2}
+.cf-stack{width:24px;display:flex;flex-direction:column-reverse;gap:2px}
+.cf-stack i{display:block;width:100%}
+.cf-stack i:last-child{border-radius:4px 4px 0 0}
+.cf-xl{position:absolute;left:56px;right:0;top:214px;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));font-size:var(--fs-meta);color:var(--muted);text-align:center;line-height:1.4;pointer-events:none}
+.cf-xl span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cf-xl b{font-weight:500;color:var(--ink)}
+.cf-xl small{display:block;font-size:var(--fs-meta);color:var(--muted)}
+.cf-foot{margin-top:14px;padding-top:12px;border-top:1px solid var(--divider);font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.cf-tip{position:absolute;z-index:6;top:0;width:200px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);box-shadow:var(--sh-pop);padding:10px 12px;font-size:var(--fs-sec);color:var(--ink);display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.cf-tip.r{left:calc(100% - 2px)}
+.cf-tip.l{right:calc(100% - 2px)}
+.cf-tip-t{font-weight:500;font-size:var(--fs-body)}
+.cf-tip-r{display:flex;align-items:center;gap:8px;color:var(--ink-2)}
+.cf-tip-r b{margin-left:auto;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+.cf-tip-r.sum{padding-top:6px;border-top:1px solid var(--divider);color:var(--ink)}
+.cf-tip small{font-size:var(--fs-meta);color:var(--muted);line-height:1.45}
+
+/* the chart on a phone: one row per month (or quarter), a horizontal bar and the total */
+.cf-hb{display:flex;flex-direction:column;gap:4px;margin-top:14px}
+.cf-hr{display:grid;grid-template-columns:52px minmax(0,1fr) 84px;align-items:center;gap:10px;min-height:36px;padding:0 6px;border:0;border-radius:10px;background:transparent;font:inherit;font-size:var(--fs-sec);color:var(--ink-2);text-align:left;cursor:pointer}
+.cf-hr.pick{background:var(--tint-2)}
+.cf-hr>span:first-child{color:var(--muted)}
+.cf-hr.now>span:first-child{color:var(--ink);font-weight:500}
+.cf-hr .trk{display:flex;gap:2px;height:14px;align-items:stretch;min-width:0}
+.cf-hr .trk i{display:block;height:100%}
+.cf-hr .trk i:last-child{border-radius:0 4px 4px 0}
+.cf-hr>span:last-child{text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.cf-hr.zero>span:last-child{color:var(--muted)}
+
+/* what the list shows: a card or a bar picked */
+.cf-show{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+
+/* the instalment list (desktop) */
+.cf-list{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;margin-top:12px;font-size:var(--fs-body);color:var(--ink)}
+.cf-list col.c-inst{width:136px}.cf-list col.c-amt{width:112px}.cf-list col.c-due{width:146px}.cf-list col.c-rcv{width:128px}.cf-list col.c-st{width:150px}
+.cf-list th,.cf-list td{padding:0 10px;text-align:left;font-weight:400;vertical-align:middle}
+.cf-list thead th{height:40px;font-size:var(--fs-meta);color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap}
+.cf-list .r{text-align:right}
+.cf-list td.c-due,.cf-list th.c-due{padding-left:26px}
+.cf-list tr.cf-row>*{height:62px;border-top:1px solid var(--divider)}
+.cf-list tr.cf-band+tr.cf-row>*{border-top-color:transparent}
+.cf-list tr.cf-row{cursor:pointer}
+@media (hover:hover){.cf-list tr.cf-row:hover>*{background:var(--tint)}}
+.cf-list tr.cf-gap td{height:14px;padding:0;border:0}
+.cf-list tr.cf-band>*{height:48px;background:var(--band)}
+.cf-list tr.cf-band>:first-child{border-radius:var(--r-band) 0 0 var(--r-band);box-shadow:inset 4px 0 0 var(--brand);padding-left:18px}
+.cf-list tr.cf-band>:last-child{border-radius:0 var(--r-band) var(--r-band) 0;padding-right:14px}
+.cf-bnw{display:flex;align-items:baseline;min-width:0}
+.cf-bc{margin-left:10px;font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap;font-weight:400}
+.cf-bs{font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.cf-bs .bad{color:var(--bad)}
+.cf-bsum{font-size:var(--fs-body);font-weight:500;color:var(--ink);white-space:nowrap;margin-left:14px;font-variant-numeric:tabular-nums}
+.cf-bwrap{display:flex;justify-content:flex-end;align-items:center;min-width:0}
+.cf-nmw{display:flex;align-items:center;gap:12px;min-width:0}
+.cf-nm{display:flex;flex-direction:column;min-width:0}
+.cf-nm-l{display:flex;align-items:center;gap:8px;min-width:0}
+.cf-nm-b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;border:0;background:none;padding:0;font:inherit;font-weight:500;color:var(--ink);text-align:left;cursor:pointer}
+.cf-nm-s{font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.cf-cell{display:flex;flex-direction:column;align-items:flex-start;line-height:1.45;min-width:0}
+.cf-cell small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.cf-amt{font-weight:500;font-variant-numeric:tabular-nums}
+.cf-mute{color:var(--muted)}
+.chip.cf-tag{flex:none}
+.cf-row .lnk{font-size:var(--fs-sec)}
+.cf-empty{margin-top:12px;border:1px dashed var(--field);border-radius:var(--r-inner);padding:16px 18px;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
+.cf-empty b{font-weight:500;color:var(--ink)}
+
+/* the instalment list on a phone: month bands, one short card per amount */
+.cf-mband{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:6px 14px 6px 16px;background:var(--band);border-radius:var(--r-band);box-shadow:inset 4px 0 0 var(--brand);margin-top:16px}
+.cf-mband .cf-bsum{margin:0}
+.cf-mi{display:flex;flex-direction:column;gap:3px;padding:12px 4px;border-bottom:1px solid var(--divider);cursor:pointer}
+.cf-mi:last-child{border-bottom:0}
+.cf-mi-1{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.cf-mi-1 .cf-nm-b{flex:1}
+.cf-mi-1 .cf-amt{flex:none}
+.cf-mi-2{font-size:var(--fs-sec);color:var(--ink-2);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+
+/* the CSV dialog */
+.cf-dlg .cf-fl{font-size:var(--fs-sec);color:var(--ink-2);margin-bottom:6px}
+.cf-dlg .seg{align-self:flex-start}
+.cf-ck{cursor:pointer;display:flex;align-items:flex-start;gap:10px;font-size:var(--fs-body);color:var(--ink)}
+.cf-ck .fbox{margin-top:3px}
+.cf-ck.on .fbox{background:var(--brand);border-color:var(--brand)}
+.cf-ck input:focus-visible+.fbox{outline:2px solid var(--brand);outline-offset:2px}
+.cf-ck small{display:block;font-size:var(--fs-meta);color:var(--muted)}
+.cf-prev{border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+.cf-prev table{width:100%;border-collapse:collapse;font-size:var(--fs-meta);color:var(--ink-2)}
+.cf-prev th{background:var(--frame);font-weight:400;color:var(--muted);text-align:left;padding:7px 8px;white-space:nowrap;border-bottom:1px solid var(--line)}
+.cf-prev td{padding:7px 8px;white-space:nowrap;border-top:1px solid var(--divider);color:var(--ink)}
+.cf-prev .r{text-align:right}
+.cf-dnote{margin:0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+
+/* the table's lens "นับยอด" and its popover */
+.fchip.cf-lensc.on .fchip-b{padding-right:12px}
+.cf-opts{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.fval-rich .fck{align-items:flex-start;min-height:52px;padding:8px}
+.fval-rich .fradio,.fval-rich .fbox{margin-top:2px}
+.fval-rich .fck-l{white-space:normal;line-height:1.45}
+.fck-d{display:block;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.fck-m{flex:none;display:flex;flex-direction:column;align-items:flex-end;font-size:var(--fs-body);color:var(--ink);line-height:1.45;font-variant-numeric:tabular-nums}
+.fck-m b{font-weight:500}
+.fck-m b.bad{color:var(--bad)}
+.fck-m small{font-size:var(--fs-meta);color:var(--muted)}
+.fval-rich .fck.on{background:var(--tint)}
+.fval-note{margin:6px 8px 0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.fval-lead{margin:-4px 8px 8px;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.cf-ex{margin:8px 4px 2px;padding:12px 14px;border-radius:12px;background:var(--frame);border:1px solid var(--line);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.6}
+.cf-ex b{font-weight:500;color:var(--ink)}
+/* a sheet has its own title row: the popover's header would only leave a gap there */
+.pop-sheet .cf-lens-h{display:none}
+.cf-elsewhere .lnk{font-size:var(--fs-sec)}
+.cf-lnote{margin:0 2px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.cf-lnote b{font-weight:500;color:var(--ink)}
+.cf-lnote .lnk{font-size:var(--fs-sec)}
+.sl-kid.cf-off>*{color:var(--muted)}
+.sl-kid.cf-off .sl-kn b,.sl-kid.cf-off .sl-amt{color:var(--muted);font-weight:400}
+.sl-kid.cf-off :is(.sl-kdate,.sl-kdate small,.sl-pk-m,.st){color:var(--muted)}
+.sl-kid.cf-off .st::before{opacity:.5}
+.sl-dno.cf-cnt{color:var(--ink-2)}
+
+/* the deal panel: the plan by year */
+.cf-ysplit{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:var(--fs-sec);color:var(--ink-2)}
+.cf-ysplit b{font-weight:500;color:var(--ink)}
+.cf-ysplit .lnk{font-size:var(--fs-sec)}
+.sl-pr .c-due .chip,.sl-pe-due .chip{margin-left:6px;vertical-align:1px}
+
+/* phones: all five tabs fit the row */
+@media (max-width:760px){
+  .sl-tabbar .utabs>button{padding:10px 6px 9px}
+  .cf-card{padding:18px 16px}
+  .cf-h .btn{flex:none}
+}
+
+/* ---- the Dashboard (its layout untouched: a 4th stat, a filter, presets, one new row of cards) */
+.sd-stat.cash .sd-stat-l svg{color:var(--brand)}
+.sd-stat.cash small em{font-style:normal;color:var(--bad)}
+.sd-stat.cash.bad .sd-stat-v b{color:var(--bad)}
+.sd-grid2{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:16px;align-items:stretch}
+.sd-grid2.one{grid-template-columns:minmax(0,1fr)}
+.sd-cash h3{margin:0;line-height:1.4}
+.sd-h-lnk{font-size:13px;white-space:nowrap}
+.sd-sub{margin:-8px 0 0;font-size:13px;color:var(--ink-2);line-height:1.5}
+.qk{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--ink-2);line-height:1.4}
+.qk>span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.ud{width:10px;height:10px;border-radius:3px}
+.qc{display:flex;flex-direction:column;gap:6px;padding-left:40px}
+.qc-plot{position:relative;height:200px}
+.qc-gl{position:absolute;left:0;right:0;border-top:1px solid var(--divider)}
+.qc-gl.base{border-top-color:#C3C9D9}
+.qc-yl{position:absolute;left:-40px;width:32px;text-align:right;transform:translateY(50%);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.qc-cols{position:absolute;inset:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.qc-g{position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;border-radius:12px 12px 0 0;outline:none}
+@media (hover:hover){.qc-g:hover{background:var(--tint)}}
+.qc-g:focus-visible{background:var(--tint);box-shadow:inset 0 0 0 2px var(--brand)}
+.qc-g.pick{background:var(--tint)}
+.qc-pick{position:absolute;top:4px;left:0;right:0;text-align:center;font-size:12px;color:var(--link)}
+.qc-tip{position:absolute;left:50%;transform:translateX(-50%);z-index:5;width:184px;display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:12px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh-pop);font-size:12px;color:var(--ink-2);line-height:1.45;pointer-events:none}
+.qc-tip span{display:flex;align-items:center;gap:6px}
+.qc-tip b{margin-left:auto;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+.qc-tip-t{font-size:13px;color:var(--ink)!important;margin-bottom:2px}
+.qc-tip-s{border-top:1px solid var(--divider);padding-top:4px;margin-top:2px}
+.qc-tip .bad,.qc-tip .bad b{color:var(--bad)}
+.qc-col{width:24px;display:flex;flex-direction:column-reverse;gap:2px}
+.qc-col i{display:block;width:100%;flex:none}
+.qc-col i.rcv{background:var(--brand)}
+.qc-col i:last-child{border-radius:4px 4px 0 0}
+.qc-lab{display:flex;flex-direction:column;align-items:center;font-size:13px;line-height:1.35;text-align:center}
+.qc-lab b{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+.qc-lab b.z{color:var(--muted);font-weight:400}
+.qc-lab small{font-size:12px;color:var(--muted);white-space:nowrap}
+.qc-x{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));text-align:center;font-size:13px;color:var(--ink-2);line-height:1.35}
+.qc-x small{display:block;font-size:12px;color:var(--muted)}
+.qc-x .now,.qc-x .now small{color:var(--link)}
+.qt{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;table-layout:fixed}
+.qt th{font-size:12px;font-weight:400;color:var(--muted);text-align:right;padding:6px;border-bottom:1px solid var(--line);line-height:1.35;vertical-align:bottom}
+.qt td{padding:8px 6px;text-align:right;border-top:1px solid var(--divider);color:var(--ink);vertical-align:top;line-height:1.45}
+.qt tr:first-child td{border-top:0}
+.qt th:first-child,.qt td:first-child{text-align:left;padding-left:0}
+.qt th:last-child,.qt td:last-child{padding-right:0}
+.qt-wide th:first-child{width:72px}
+.qt tr.sum td{font-weight:500;border-top:1px solid var(--line)}
+.qt tr.wait td{color:var(--ink-2)}
+.qt td small{display:block;font-size:12px;color:var(--bad);white-space:nowrap}
+/* a narrow column wraps the late line rather than running into the next one */
+.qt-wide td small{white-space:normal}
+.qt .z{color:var(--muted);font-weight:400}
+.qt-narrow{display:none}
+.qt-narrow td small.qn{color:var(--muted)}
+.qt-narrow tr.now td:first-child,.qt-narrow tr.now td small.qn{color:var(--link)}
+.qc-und{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-top:auto;padding:10px 14px;border-radius:var(--r-inner);background:var(--frame);font-size:13px;color:var(--ink-2)}
+.qc-und b{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+.qc-und-s{color:var(--muted);font-size:12px}
+.qc-und .lnk{margin-left:auto;font-size:13px}
+@container (min-width:1100px){
+  .sd-grid2.one .sd-cash{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);column-gap:40px;row-gap:12px;align-items:start}
+  .sd-grid2.one .sd-cash>:is(.sd-card-h,.sd-sub,.qc-und){grid-column:1/-1}
+  .sd-grid2.one .sd-cash>.qk{grid-column:1;grid-row:3}
+  .sd-grid2.one .sd-cash>.qc{grid-column:1;grid-row:4}
+  .sd-grid2.one .sd-cash>.qt-wide{grid-column:2;grid-row:3/5;align-self:center}
+}
+@container (max-width:640px){
+  .sd-heroes .sd-stat.cash{grid-column:1/-1;border-left:0;border-top:1px solid #DCE2EE;margin-top:12px;padding:12px 0 0}
+  .sd-heroes .sd-stat.cash small{display:block}
+  .qc{padding-left:34px}
+  .qc-yl{left:-34px;width:28px}
+  .qc-x{font-size:12px}
+  .qc-x small{display:none}
+  .qc-lab{font-size:12px}
+  .qt-wide{display:none}
+  .qt-narrow{display:table}
+  .qc-und .lnk{margin-left:0}
+}
+
+/* the date popover: this year's four quarters in one row (ไตรมาสนี้ ringed, the chosen one filled) */
+.fq{display:flex;flex-direction:column;gap:6px;padding:7px 12px;border-radius:10px}
+.fq.on{background:var(--tint-2)}
+.fq-t{font-size:var(--fs-body);color:var(--ink);line-height:1.4}
+.fq.on .fq-t{color:var(--link);font-weight:500}
+.fq-b{display:flex;gap:4px}
+.fq-b button{cursor:pointer;width:32px;height:32px;border-radius:var(--r-pill);border:1px solid var(--field);background:var(--card);font:inherit;font-size:var(--fs-sec);color:var(--ink);padding:0;transition:background-color .12s,border-color .12s}
+@media (hover:hover){.fq-b button:hover{border-color:var(--brand)}}
+.fq-b button.now{box-shadow:inset 0 0 0 1.5px var(--brand);color:var(--link)}
+.fq-b button.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:500}
+.fq-b button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.fq small{font-size:var(--fs-meta);color:var(--muted)}
+.fq.on small{color:var(--link)}
+.fdate-lock{display:inline-flex;align-items:center;height:var(--ctl-tool);padding:0 14px;border-radius:var(--r-pill);background:var(--band);font-size:var(--fs-sec);color:var(--ink)}
+@media (max-width:900px){
+  .fq{flex-direction:row;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:4px 10px;border:1px solid var(--field);border-radius:var(--r-pill)}
+  .fq.on{border-color:var(--tint-line)}
+  .fq small{display:none}
+}
