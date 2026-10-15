@@ -29,6 +29,8 @@ import { DateFilter, dateWords } from '../components/DateFilter';
 import { SalesDash } from './SalesDash';
 import { CashKpiRow, CashView, LensChip, LensMoney, LensNote } from './SalesCash';
 import { cashLines, cashYear, cashYears } from '../lib/sales';
+import { askPay } from '../components/PayChk';
+import { attachLines, previewOf } from '../lib/payCheck';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
 import { customersOf, jointAttr, jointHeadOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
@@ -694,7 +696,8 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
     attach: (deal, stage, kind, more) => {
       setMenu('');
       if (ui.slEdit) set({ slEdit: null });
-      setAtt({ deal, stage, kind, more });
+      // a document for the Actual at a stage accounting checked (or of a closed month): asked first
+      askPay(e, { d: deal, lines: attachLines(S, deal.id, stage, kind, more?.target), kind: 'attach', title: 'แนบเอกสาร' + (stage ? ' ' + stage : ''), verb: 'แนบเอกสาร', run: () => setAtt({ deal, stage, kind, more }) });
     },
     openPanel: (id, plan = '') => {
       setMenu('');
@@ -1382,7 +1385,7 @@ function MoneyAc({ d }: { d: Deal }) {
     );
   return (
     <span className="sl-mn">
-      <TypedMoney value={m.actual} label="Actual (บาท)" onSave={(v) => e.updateDeal(d.id, { actual: v })} />
+      <TypedMoney value={m.actual} label="Actual (บาท)" onSave={(v) => askPay(e, { d, after: previewOf.deal(S, d.id, { actual: v }), kind: 'edit', title: 'แก้ Actual ที่พิมพ์ไว้', verb: 'แก้ยอด', run: () => e.updateDeal(d.id, { actual: v }) })} />
       {sub}
     </span>
   );
@@ -1956,10 +1959,13 @@ function ResultSeg({ d, state, big, date }: { d: Deal; state: StageState; big?: 
   const save = (r: 'YES' | 'NO' | 'WAIT') => {
     const cur = stepOf(e.sales, d.id, DEAL_STAGE);
     if (dealResult(e.sales, d) === r) return;
-    const was = closeReady(e.sales, d, today);
-    e.setStep(d.id, DEAL_STAGE, { d: date || cur.d || today, n: r === 'WAIT' ? 'รอผล' : r });
-    if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
-    else acts.afterResult(d, was);
+    const v = { d: date || cur.d || today, n: r === 'WAIT' ? 'รอผล' : r };
+    askPay(e, { d, after: previewOf.step(e.sales, d.id, DEAL_STAGE, v), kind: 'edit', title: 'ผลการขาย ' + (r === 'WAIT' ? 'รอผล' : r), verb: 'บันทึกผล', run: () => {
+      const was = closeReady(e.sales, d, today);
+      e.setStep(d.id, DEAL_STAGE, v);
+      if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
+      else acts.afterResult(d, was);
+    } });
   };
   return <ResultButtons state={state} big={big} label={'ผลการขาย ' + shortName(d.client)} onPick={save} />;
 }
@@ -2105,13 +2111,16 @@ function useStepEditor(d: Deal, stage: string) {
   };
   const save = () => {
     if (changed()) return tk.closeEditor();
-    const was = closeReady(e.sales, d, today);
-    e.setStep(d.id, stage, { d: date, n: note });
-    drafts.delete(key);
-    tk.closeEditor();
-    const r = dealResult(e.sales, d);
-    if (stage === DEAL_STAGE && (r === 'YES' || r === 'NO')) tk.acts.afterResult(d, was);
-    else tk.acts.after(d, was, 'payment', `บันทึก ${stage} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
+    // a PAY stage's date is the received date of its documents: a checked line is asked about first
+    askPay(e, { d, after: previewOf.step(e.sales, d.id, stage, { d: date, n: note }), kind: 'edit', title: `บันทึก ${stage}`, verb: 'บันทึก', run: () => {
+      const was = closeReady(e.sales, d, today);
+      e.setStep(d.id, stage, { d: date, n: note });
+      drafts.delete(key);
+      tk.closeEditor();
+      const r = dealResult(e.sales, d);
+      if (stage === DEAL_STAGE && (r === 'YES' || r === 'NO')) tk.acts.afterResult(d, was);
+      else tk.acts.after(d, was, 'payment', `บันทึก ${stage} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
+    } });
   };
   const cancel = () => {
     if (note.trim() && note !== init.n) drafts.set(key, note);
@@ -2120,13 +2129,16 @@ function useStepEditor(d: Deal, stage: string) {
   };
   const result = (r: 'YES' | 'NO' | 'WAIT') => {
     if (changed()) return tk.closeEditor();
-    const was = closeReady(e.sales, d, today);
     const typed = note.trim();
-    e.setStep(d.id, DEAL_STAGE, { d: date, n: r === 'WAIT' ? (typed && !/^(yes|no)$/i.test(typed) ? typed : 'รอผล') : r });
-    drafts.delete(key);
-    tk.closeEditor();
-    if (r === 'WAIT') tk.acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
-    else tk.acts.afterResult(d, was);
+    const v = { d: date, n: r === 'WAIT' ? (typed && !/^(yes|no)$/i.test(typed) ? typed : 'รอผล') : r };
+    askPay(e, { d, after: previewOf.step(e.sales, d.id, DEAL_STAGE, v), kind: 'edit', title: 'ผลการขาย ' + (r === 'WAIT' ? 'รอผล' : r), verb: 'บันทึกผล', run: () => {
+      const was = closeReady(e.sales, d, today);
+      e.setStep(d.id, DEAL_STAGE, v);
+      drafts.delete(key);
+      tk.closeEditor();
+      if (r === 'WAIT') tk.acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
+      else tk.acts.afterResult(d, was);
+    } });
   };
   // a click outside the editor (not in a dialog it opened) leaves it, keeping the draft
   const box = useRef<HTMLElement | null>(null);

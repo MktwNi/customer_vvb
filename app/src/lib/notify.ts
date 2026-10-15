@@ -202,8 +202,8 @@ export function wantsLine(p: MyNotify, checker: boolean) {
 
 // ------------------------------------------------------------------ the bell
 
-export type BellKind = 'chk' | 'mine' | 'pay' | 'appt';
-export const BELL_TITLE: Record<BellKind, string> = { chk: 'รอตรวจ', mine: 'ใบเสนอราคาของฉัน', pay: 'งวดเงิน', appt: 'นัดหมาย' };
+export type BellKind = 'chk' | 'mine' | 'pchk' | 'pay' | 'appt';
+export const BELL_TITLE: Record<BellKind, string> = { chk: 'รอตรวจ', mine: 'ใบเสนอราคาของฉัน', pchk: 'รับเงินที่บัญชีส่งกลับ', pay: 'งวดเงิน', appt: 'นัดหมาย' };
 /** The right-hand cell: a time ("วันนี้ 09:40", "10 ต.ค.") or a status chip. */
 export interface BellRight { text: string; chip?: '' | 'info' | 'bad' | 'warn' }
 export interface BellRow {
@@ -230,6 +230,8 @@ export interface BellIn {
   caps: CapSet | null;
   live: NotifyLive | null;
   checks: Record<string, QtCheck>;
+  /** money accounting sent back to this person to fix (lib/payCheck.ts returnedTo / payBackBell) */
+  back?: BellRow[];
   cfg: NotifyCfg;
   scope: Scope;
   today: string;
@@ -311,6 +313,9 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
       } as BellRow;
     }));
   }
+
+  // money this person recorded (or whose deal is theirs) that accounting sent back
+  if (x.back?.length && may('view.sales') && may('view.money')) add('pchk', x.back);
 
   // instalments late or due within the team's window (the deal's ผู้รับผิดชอบ, or everyone's)
   if (may('view.sales') && may('view.money')) {

@@ -21,6 +21,8 @@ import './joint.css';
 // units, % contribution and commission: the Dashboard's commission card and unit split, the deal panel's
 // สัดส่วนรายได้, the units dialog (lib/contrib.ts)
 import './units.css';
+// the month check for accounting: the month card and year table under the Cashflow chart, the deal panel's chip
+import './paycheck.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

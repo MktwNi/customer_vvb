@@ -15,6 +15,7 @@ import { norm } from './core';
 import { addDays, daysBetween, localDay, pad, todayISO } from './format';
 import { ceOf, inRange, isDay, monthEnd, normDateF, resolveDate, type DateBasis, type DateF, type Range } from './dateRange';
 import type { NotifyCfg, QtCheck } from './notify';
+import type { MonthClose, PayCheck, PayChkCfg } from './payCheck';
 import type { CustomCo } from './types';
 // units and the revenue split (package dash): only plain helpers, which import nothing from here at run time
 import { dealUnits, unitCtx, type ShareRec, type UnitMember, type UnitRec } from './contrib';
@@ -180,6 +181,11 @@ export interface SalesState {
   units?: Record<string, UnitRec>;
   unitm?: Record<string, UnitMember>;
   shares?: Record<string, ShareRec>;
+  /** The month check for accounting (lib/payCheck.ts): `<dealId>/<lineId>` → the check of a received line
+   *  (`dchk/`), 'YYYY-MM' → a month closed (`mclose/`), and the first day checked (`scfg/paychk.cfg`). */
+  pchk?: Record<string, PayCheck>;
+  mclose?: Record<string, MonthClose>;
+  pcfg?: PayChkCfg;
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });

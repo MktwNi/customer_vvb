@@ -18,6 +18,7 @@ import { Notes } from './tabs/Notes';
 import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
 import { SalesMessages } from './components/SalesToast';
+import { PayGuardHost } from './components/PayChk';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
 import { AddPerson, People } from './tabs/People';
 import { Users } from './tabs/Users';
@@ -29,6 +30,7 @@ import { NotifySettings } from './components/NotifySettings';
 import { QtCheckSheet } from './components/QtCheckSheet';
 import { JointDialogs } from './components/JointQt';
 import { commitFocus } from './components/useDialog';
+import { isChkF } from './lib/payCheck';
 import { docById, parseGo } from './lib/notify';
 
 /** A link from an e-mail (#go=…) waiting to be opened: kept through signing in, in this tab only. */
@@ -161,7 +163,8 @@ export default function App() {
     if (g.go === 'plan') go('plan', g.d ? { calDay: g.d, calM: g.d.slice(0, 7) } : {});
     else if (g.go === 'notify') e.session && set({ acctDlg: 'notify' });
     else if (g.go === 'reqs') e.can('set.users') && go('users', { usersSec: 'req' });
-    else if (g.go === 'cash') go('sales', { slView: 'cash' });
+    // a month of the accounting check (#go=cash&m=2026-10&f=wait): its year, the month open, the filter
+    else if (g.go === 'cash') go('sales', { slView: 'cash', ...(g.m ? { slYear: String(+g.m.slice(0, 4) + 543), slChkM: +g.m.slice(5, 7) - 1, slCashShow: '' } : {}), ...(isChkF(g.f) ? { slChkF: g.f } : {}) });
   }, [e, version, goN, set, go]);
 
   // Escape closes the top layer only. The field being typed in is blurred first: the deal panel's
@@ -247,6 +250,8 @@ export default function App() {
       )}
       {/* the Sales Tracker's messages and its closing question, over the table and the deal panel alike */}
       {ready && <SalesMessages />}
+      {/* the question before money accounting checked is changed (the panel, the table, the editors) */}
+      {ready && <PayGuardHost />}
       {ready && ui.sel != null && (
         <ErrorBoundary resetKey={String(ui.sel)}>
           <CompanyDrawer />

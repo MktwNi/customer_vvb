@@ -3,6 +3,7 @@ import { useApp, useEngineVersion, useNarrow } from '../state';
 import { todayISO } from '../lib/format';
 import { bellEmpty, bellItems, dayTh, type BellRow } from '../lib/notify';
 import type { GccEngine } from '../lib/engine';
+import { payBackBell, returnedTo } from '../lib/payCheck';
 import { Icon } from './icons';
 import { usePopover } from './usePopover';
 
@@ -19,6 +20,7 @@ export function mailLine(e: GccEngine) {
 /**
  * The bell in the top bar (package notify): how many things need doing now, and a list of them in groups
  * — quotations waiting for this checker (รอตรวจ) or this person's own sent back (ใบเสนอราคาของฉัน),
+ * money this person recorded that accounting sent back (รับเงินที่บัญชีส่งกลับ, lib/payCheck.ts returnedTo),
  * instalments late or due soon (งวดเงิน), appointments due today or late (นัดหมาย). Worked out from what
  * this browser holds (lib/notify.ts bellItems), so it works offline and before the team script has
  * notifications (then quotations are left out). A row opens what it is about; "ตั้งค่า" opens
@@ -40,6 +42,7 @@ export function Bell() {
       bellItems({
         S: e.sales, tasks: e.crm.tasks, owners: e.crm.owners, coName: (gid) => e.company(gid)?.name || '',
         me: e.me(), caps: e.myCaps(), live: e.notifyLive, checks: e.checks(), cfg: e.notifyCfg(), scope, today,
+        back: payBackBell(returnedTo(e.sales, e.payChecks(), e.payChkCfg().since, e.me(), today)),
       }),
     [v, today, scope], // eslint-disable-line react-hooks/exhaustive-deps
   );

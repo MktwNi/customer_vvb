@@ -102,6 +102,11 @@ export function SalesMessages() {
       e.reopenJoint(a.deal);
       return acts.say('เปิดใบเสนอราคาร่วมและบริษัทที่ปิดพร้อมกันอีกครั้งแล้ว', { ms: 3000 });
     }
+    // the month check: this account's checks just made (engine.lastPayChecks), for 10 minutes
+    if (a.act === 'payUndo') {
+      const n = e.lastPayChecks ? e.undoPayChecks(e.lastPayChecks.keys) : 0;
+      return acts.say(n ? `เลิกทำแล้ว ${n} รายการกลับเป็น “รอตรวจ”` : 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะรายการที่คุณตรวจเอง', { ms: 4000 });
+    }
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });
       const d = e.sales.deals[a.deal];

@@ -13,6 +13,7 @@ import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, 
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
 import { applyUnitRow, unitRecords } from './contrib';
+import { parsePayChkCfg, toMonthClose, toPayCheck } from './payCheck';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -363,6 +364,10 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
     Object.entries(S.jqt || {}).forEach(([id, v]) => m.set(keyOf.jqt(id), { ...v }));
     Object.entries(S.jqm || {}).forEach(([k, v]) => m.set('jqm/' + k, { ...v }));
+    // the month check (lib/payCheck.ts): whole records, sent only by an account that may check
+    Object.entries(S.pchk || {}).forEach(([k, v]) => m.set('dchk/' + k, { ...v }));
+    Object.entries(S.mclose || {}).forEach(([k, v]) => m.set('mclose/' + k, { ...v }));
+    if (S.pcfg) m.set('scfg/paychk.cfg', { ...S.pcfg });
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
     // units, their members and the revenue splits (set up before connecting: uploaded like the lists)
@@ -554,6 +559,23 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       // script sends it as a deletion
       if (applyUnitRow(s.sales, rest, del, row.v, true)) fx.sales = true;
       break;
+    case 'dchk':
+    case 'mclose': {
+      // the month check (lib/payCheck.ts): a received line checked, a month closed; whole records, last
+      // write wins (not MERGED); older builds skip both prefixes
+      const bag = (type === 'dchk' ? s.sales.pchk || (s.sales.pchk = {}) : s.sales.mclose || (s.sales.mclose = {})) as Record<string, unknown>;
+      if (!rest || (type === 'dchk' ? rest.indexOf('/') <= 0 : !/^\d{4}-\d\d$/.test(rest))) return;
+      if (del) {
+        if (!(rest in bag)) return;
+        delete bag[rest];
+      } else {
+        const v = type === 'dchk' ? toPayCheck(row.v) : toMonthClose(row.v);
+        if (!v) return;
+        bag[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
     case 'scfg':
       // units and who is in which (package dash): older builds skip these names
       if (/^unitm?\./.test(rest)) {
@@ -564,6 +586,13 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       if (rest === 'notify.cfg') {
         if (del) delete s.sales.ncfg;
         else s.sales.ncfg = parseNotifyCfg(row.v);
+        fx.sales = true;
+        return;
+      }
+      // the first month the accounting check covers (an admin's)
+      if (rest === 'paychk.cfg') {
+        if (del) delete s.sales.pcfg;
+        else s.sales.pcfg = parsePayChkCfg(row.v);
         fx.sales = true;
         return;
       }
