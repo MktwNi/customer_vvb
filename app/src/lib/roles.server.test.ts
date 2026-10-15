@@ -858,7 +858,8 @@ describe('the audit tab and the cached directory', () => {
     call(s, admin, 'grant_del', { u: 'somchai', k: 'view.comm' });
     expect(meOf(call(s, tok, 'ping')).caps).not.toHaveProperty('view.comm');
     const c = JSON.parse(s.cache.AUTHC);
-    expect(Object.keys(c)).toEqual(['m', 'sec', 'tid', 'it', 'u', 'roles', 'grants', 'rqs', 'res']);
+    // ntf / nf: the e-mail settings and the notification state (notify.server.test.ts)
+    expect(Object.keys(c)).toEqual(['m', 'sec', 'tid', 'it', 'u', 'roles', 'grants', 'rqs', 'res', 'ntf', 'nf']);
     // lost: rebuilt from Properties on the next request
     s.evictCache();
     expect(call(s, tok, 'ping').me).toMatchObject({ req: { st: 'p' } });

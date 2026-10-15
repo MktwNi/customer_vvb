@@ -4,7 +4,9 @@
 //   node team-sync/dev-server.mjs [port] [teamKey] [--kdf N]
 //     port 0 = any free port; teamKey defaults to test-key-123 (legacy mode), '' starts in setup mode;
 //     --kdf = PBKDF2 iterations for passwords (default 1000, so signing in is quick while developing).
-// setup() runs at start, so the one-time code for claiming the first admin is printed here.
+// setup() runs at start, so the one-time code for claiming the first admin is printed here. The e-mail
+// notifications run too: notifyTick every minute (the real trigger: every 10), and every mail the script
+// "sends" is printed instead (e.g. the 6-digit code that verifies an address). Nothing leaves the machine.
 import { createServer } from 'node:http';
 import { createGasSim } from './sim.mjs';
 
@@ -20,6 +22,14 @@ const port = +(pos[0] || 8787);
 const key = pos[1] ?? 'test-key-123';
 const sim = createGasSim({ teamKey: key, kdfIter });
 sim.setup();
+sim.mail.log = (m) => console.log(`mail to ${m.to}: ${m.subject}`);
+setInterval(() => {
+  try {
+    sim.run('notifyTick');
+  } catch (e) {
+    console.log('notifyTick: ' + String(e.message || e));
+  }
+}, 60000).unref();
 
 const server = createServer((req, res) => {
   const headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };

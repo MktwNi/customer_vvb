@@ -294,17 +294,24 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     return lock;
   };
   // MailApp: every message sent (one recipient each, as the script sends them), and the daily quota left
-  // (100 recipients a day on a consumer Gmail account; Workspace accounts have more)
-  const mail = { sent: [], quota: 100, calls: [] };
+  // (100 recipients a day on a consumer Gmail account; Workspace accounts have more). `fail` = a message
+  // every send throws (e.g. the permission was never granted); `log` = called with each message sent.
+  const mail = { sent: [], quota: 100, calls: [], fail: '', log: null };
   const MailApp = {
     sendEmail: (a, subject, body, opts) => {
       const m = typeof a === 'object' && a !== null ? { ...a } : { to: a, subject, body, ...(opts || {}) };
-      mail.calls.push({ at: Date.now(), locked: locks.script.held });
+      mail.calls.push({ at: Date.now(), locked: locks.script.held || locks.user.held });
+      if (mail.fail) throw gasError(mail.fail);
       if (!(mail.quota > 0)) throw gasError('Service invoked too many times for one day: email.');
+      if (!m.to || /[,;\s]/.test(String(m.to))) throw gasError('Invalid email: ' + m.to);
       mail.quota--;
       mail.sent.push(m);
+      if (mail.log) mail.log(m);
     },
-    getRemainingDailyQuota: () => mail.quota,
+    getRemainingDailyQuota: () => {
+      if (mail.fail) throw gasError(mail.fail);
+      return mail.quota;
+    },
   };
   // ScriptApp: the project's triggers (time-driven only)
   const triggers = [];
@@ -429,6 +436,17 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     addSheet: (n) => (sheets[n] = fakeSheet(n)),
     /** The script's capability catalogue, key table and built-in roles (undefined in older scripts). */
     consts: { CAPS_: api.CAPS_, KEY_CAP: api.KEY_CAP, BUILTIN_ROLES: api.BUILTIN_ROLES },
+    /**
+     * Call a top-level function of the script by name, as the editor's Run button or a trigger does
+     * (e.g. 'setupNotify', 'notifyTick'), or one of its helpers for a parity test. Values come back
+     * through JSON, so they compare like plain data.
+     */
+    run: (name, ...args) => {
+      const f = sandbox[name];
+      if (typeof f !== 'function') throw new Error('Code.gs has no function ' + name);
+      const out = f(...args);
+      return out === undefined ? undefined : JSON.parse(JSON.stringify(out));
+    },
     /** Mail the script sent (sent), the quota left (assignable) and whether the script lock was held at each send (calls). */
     mail,
     /** The project's time-driven triggers. */

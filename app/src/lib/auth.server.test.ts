@@ -34,8 +34,12 @@ const BUILTIN: Record<Role, { rn: string; caps: Record<string, 1 | 'own'> }> = {
   sales: { rn: 'พนักงานขาย', caps: { ...ones(SALES_CAPS), 'del.log': 'own' } },
   viewer: { rn: 'ดูอย่างเดียว', caps: ones(VIEW_CAPS) },
 };
+/** The e-mail settings of an account that never set any (notify.server.test.ts): the whole team for admins. */
+const NF = (role: Role) => ({ em: '', ok: 0, on: { qt: 1, res: 1, dg: 1, pre: 0 }, t: '07:30', sc: role === 'admin' ? 'team' : 'mine' });
 /** `me` in a reply for an account with a built-in role and no request (admins also get the request count). */
-const ME = (u: string, name: string, role: Role, rq = 0) => ({ u, name, role, rid: role, rn: BUILTIN[role].rn, caps: BUILTIN[role].caps, ...(role === 'admin' ? { rq } : {}) });
+const ME = (u: string, name: string, role: Role, rq = 0) => ({ u, name, role, rid: role, rn: BUILTIN[role].rn, caps: BUILTIN[role].caps, ...(role === 'admin' ? { rq } : {}), notify: NF(role) });
+/** An account in the users / user_save replies, with its (unset) notification address and settings. */
+const ACCT = (o: Record<string, unknown> & { role: Role }) => ({ ...o, em: '', ok: 0, notify: NF(o.role) });
 
 // ------------------------------------------------------------------ helpers
 
@@ -207,7 +211,8 @@ describe('hello', () => {
   it('needs no key and tells the mode, the team id and the iteration count', () => {
     const fresh = mk({ teamKey: '' });
     const h = fresh.post({ action: 'hello', cv: 3 });
-    expect(h).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'setup', tid: expect.stringMatching(/^[0-9a-f]{16}$/), it: 1000 });
+    // notify: the e-mail trigger is not installed yet (setupNotify, see notify.server.test.ts)
+    expect(h).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'setup', tid: expect.stringMatching(/^[0-9a-f]{16}$/), it: 1000, notify: { on: 0, since: '' } });
     // created on first use, then permanent
     expect(fresh.props.TEAM_ID).toBe(h.tid);
     expect(fresh.props.AUTH_SECRET).toMatch(/^[0-9a-f-]{72}$/);
@@ -215,7 +220,7 @@ describe('hello', () => {
     expect(mk({ teamKey: KEY }).post({ action: 'hello', cv: 3 })).toMatchObject({ ok: true, v: 4, files: true, mode: 'legacy', it: 1000 });
     const { s } = team();
     const a = s.post({ action: 'hello', cv: 3 });
-    expect(a).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'accounts', tid: s.props.TEAM_ID, it: 1000 });
+    expect(a).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'accounts', tid: s.props.TEAM_ID, it: 1000, notify: { on: 1, since: '2026-10-08' } });
     expect(JSON.stringify(a)).not.toMatch(/lead|หัวหน้า/);
     // a real script starts at 200000 iterations
     const real = mk({ teamKey: '' });
@@ -934,8 +939,8 @@ describe('managing users (admin only)', () => {
     expect(r).toEqual({
       ok: true,
       users: [
-        { u: 'lead', name: 'หัวหน้า', role: 'admin', on: 1, mc: false, ll: new Date(T0).toISOString(), c: new Date(T0).toISOString(), locked: 0 },
-        { u: 'somchai', name: 'สมชาย', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0 + H).toISOString(), locked: 600 },
+        ACCT({ u: 'lead', name: 'หัวหน้า', role: 'admin', on: 1, mc: false, ll: new Date(T0).toISOString(), c: new Date(T0).toISOString(), locked: 0 }),
+        ACCT({ u: 'somchai', name: 'สมชาย', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0 + H).toISOString(), locked: 600 }),
       ],
       // roles, extras, requests and the audit tab: see roles.server.test.ts
       roles: expect.objectContaining({ admin: expect.objectContaining({ n: 'ผู้ดูแลระบบ', bi: 1 }), sales: expect.any(Object), viewer: expect.any(Object) }),
@@ -958,7 +963,7 @@ describe('managing users (admin only)', () => {
     for (const pk of ['', 'short', undefined]) expect(make({ pk })).toMatchObject({ ok: false, error: 'bad_password_data' });
     expect(Object.keys(users(s))).toEqual(['lead']);
     const r = make({ u: 'NewBie', name: '  คุณ   มือใหม่ ' });
-    expect(r).toEqual({ ok: true, user: { u: 'newbie', name: 'คุณ มือใหม่', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0).toISOString(), locked: 0 }, me: ME('lead', 'หัวหน้า', 'admin') });
+    expect(r).toEqual({ ok: true, user: ACCT({ u: 'newbie', name: 'คุณ มือใหม่', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0).toISOString(), locked: 0 }), me: ME('lead', 'หัวหน้า', 'admin') });
     // display names are compared without case
     expect(make({ u: 'anna1', name: 'Anna' }).ok).toBe(true);
     expect(make({ u: 'anna2', name: 'ANNA' })).toMatchObject({ ok: false, error: 'name_taken' });

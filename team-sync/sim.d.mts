@@ -44,8 +44,13 @@ export interface GasSim {
   sheetOf(name: string): GasSheet | undefined;
   /** The script's capability catalogue, key table and built-in roles (undefined in scripts before capabilities). */
   consts: { CAPS_?: GasCap[]; KEY_CAP?: GasKeyRule[]; BUILTIN_ROLES?: { id: string; n: string; d: string }[] };
-  /** Mail the script sent (one recipient each), the daily quota left (assignable), and whether the script lock was held at each send. */
-  mail: { sent: GasMail[]; quota: number; calls: { at: number; locked: boolean }[] };
+  /**
+   * Mail the script sent (one recipient each), the daily quota left (assignable), whether a lock was held at
+   * each send, `fail` = an error every send throws (e.g. no mail permission), `log` = called with each mail sent.
+   */
+  mail: { sent: GasMail[]; quota: number; calls: { at: number; locked: boolean }[]; fail: string; log: ((m: GasMail) => void) | null };
+  /** Call a top-level function of the script by name (as Run or a trigger does, or a helper in a parity test); the result comes back through JSON. */
+  run<T = unknown>(name: string, ...args: unknown[]): T;
   /** The project's time-driven triggers. */
   triggers: { getHandlerFunction(): string; getUniqueId(): string; getEventType(): string; every: number }[];
   props: Record<string, string>;
