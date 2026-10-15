@@ -12,6 +12,7 @@ import { toPerson } from './people';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
+import { parsePayChkCfg, toMonthClose, toPayCheck } from './payCheck';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -353,6 +354,10 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.values(S.acts || {}).forEach(({ deal, id, ...v }) => m.set(keyOf.dact(deal, id), v));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
+    // the month check (lib/payCheck.ts): whole records, sent only by an account that may check
+    Object.entries(S.pchk || {}).forEach(([k, v]) => m.set('dchk/' + k, { ...v }));
+    Object.entries(S.mclose || {}).forEach(([k, v]) => m.set('mclose/' + k, { ...v }));
+    if (S.pcfg) m.set('scfg/paychk.cfg', { ...S.pcfg });
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
   }
@@ -519,11 +524,35 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.sales = true;
       break;
     }
+    case 'dchk':
+    case 'mclose': {
+      // the month check (lib/payCheck.ts): a received line checked, a month closed; whole records, last
+      // write wins (not MERGED); older builds skip both prefixes
+      const bag = (type === 'dchk' ? s.sales.pchk || (s.sales.pchk = {}) : s.sales.mclose || (s.sales.mclose = {})) as Record<string, unknown>;
+      if (!rest || (type === 'dchk' ? rest.indexOf('/') <= 0 : !/^\d{4}-\d\d$/.test(rest))) return;
+      if (del) {
+        if (!(rest in bag)) return;
+        delete bag[rest];
+      } else {
+        const v = type === 'dchk' ? toPayCheck(row.v) : toMonthClose(row.v);
+        if (!v) return;
+        bag[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
     case 'scfg':
       // the team's notification rules (an admin's, one record; older builds skip it)
       if (rest === 'notify.cfg') {
         if (del) delete s.sales.ncfg;
         else s.sales.ncfg = parseNotifyCfg(row.v);
+        fx.sales = true;
+        return;
+      }
+      // the first month the accounting check covers (an admin's)
+      if (rest === 'paychk.cfg') {
+        if (del) delete s.sales.pcfg;
+        else s.sales.pcfg = parsePayChkCfg(row.v);
         fx.sales = true;
         return;
       }

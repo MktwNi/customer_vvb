@@ -35,6 +35,7 @@ import {
   QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
 } from './notify';
+import { PAY_NOTE_MAX, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, toMonthClose, toPayCheck, ymTh, type ChkRow, type ChkSum, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1164,6 +1165,15 @@ export class GccEngine {
       Object.entries(IS.log || {}).forEach(([k, v]) => {
         const l = toLog(v, k);
         if (l && !(k in S.log)) S.log[k] = l;
+      });
+      // the month check's records (lib/payCheck.ts), checked like the rest
+      Object.entries(IS.pchk || {}).forEach(([k, v]) => {
+        const c = toPayCheck(v), P = S.pchk || (S.pchk = {});
+        if (c && k.indexOf('/') > 0 && !(k in P)) P[k] = c;
+      });
+      Object.entries(IS.mclose || {}).forEach(([k, v]) => {
+        const c = toMonthClose(v), M = S.mclose || (S.mclose = {});
+        if (c && /^\d{4}-\d\d$/.test(k) && !(k in M)) M[k] = c;
       });
       Object.entries((d.custom || {}) as Record<string, unknown>).forEach(([k, v]) => {
         const c = toCust(v, +k);
@@ -4297,6 +4307,121 @@ export class GccEngine {
     this.op('scfg/notify.cfg', { ...v });
     this.saveSales();
     this.emit();
+  }
+  // ---- the month check for accounting ("ตรวจรับเงินรายเดือน", package cash; lib/payCheck.ts)
+  /** Every payment check this browser holds (`<dealId>/<lineId>` → record). */
+  payChecks(): Record<string, PayCheck> {
+    return this.sales.pchk || {};
+  }
+  /** The months closed ('YYYY-MM' → record). */
+  monthCloses(): Record<string, MonthClose> {
+    return this.sales.mclose || {};
+  }
+  /** The first day whose money is checked (scfg/paychk.cfg; ม.ค. 2569 until an admin sets another). */
+  payChkCfg(): PayChkCfg {
+    return parsePayChkCfg(this.sales.pcfg);
+  }
+  /** Why this account can't check (a line) — '' = it can: no สิทธิ์ ตรวจยืนยันรับเงิน, no name to sign the
+   *  check with (this browser only, before "ฉันคือ"), or money it recorded itself. The team script forces
+   *  who and when; the self-check is this client's rule. */
+  payCheckBlock(r?: Pick<ChkRow, 'by'>): '' | 'cap' | 'name' | 'self' {
+    if (!this.can('pay.check')) return 'cap';
+    const me = this.me();
+    if (!me.trim()) return 'name';
+    return r && r.by.some((b) => sameName(b, me)) ? 'self' : '';
+  }
+  /** The checks made last ("ตรวจแล้ว", "ตรวจทั้งหมดที่เลือก"): the toast's เลิกทำ takes them back. */
+  lastPayChecks: { keys: string[]; at: number } | null = null;
+  private putPayCheck(key: string, v: PayCheck | null) {
+    const P = this.sales.pchk || (this.sales.pchk = {});
+    if (v) P[key] = v;
+    else delete P[key];
+    this.op('dchk/' + key, v ? { ...v } : undefined);
+  }
+  /** "ตรวจแล้ว" on received lines, in one sync round, each with a deal-history row ("ตรวจรับเงิน PAY1").
+   *  Lines this account may not check (its own, already checked, before the first month checked) are left
+   *  out. Returns the keys written. */
+  checkPays(rows: ChkRow[]): string[] {
+    if (this.payCheckBlock()) return this.deny(), [];
+    const ok = rows.filter((r) => r.kind === 'got' && r.fp && r.deal && r.state !== 'none' && r.state !== 'ok' && !this.payCheckBlock(r));
+    if (!ok.length) return [];
+    const at = new Date().toISOString(), by = this.me();
+    this.batchOps(() =>
+      ok.forEach((r) => {
+        const fp = r.fp!;
+        this.putPayCheck(r.key, { s: 'ok', by, at, amt: fp.amt, d: fp.d, f: fp.f });
+        this.salesLog(r.deal!, 'ตรวจรับเงิน ' + lineLabel(r), `${fmtMoney(fp.amt)} บาท · รับ ${isoTh(fp.d)}`);
+      }),
+    );
+    this.lastPayChecks = { keys: ok.map((r) => r.key), at: Date.now() };
+    this.saveSales();
+    return this.lastPayChecks.keys;
+  }
+  /** "ส่งกลับแก้ไข": the line goes back to whoever recorded it with what to fix; it still counts as money
+   *  received until they change it (then it waits for a check again). */
+  returnPay(r: ChkRow, note: string): boolean {
+    const n = note.trim().slice(0, PAY_NOTE_MAX);
+    if (this.payCheckBlock()) return this.deny(), false;
+    if (!n || r.kind !== 'got' || !r.fp || !r.deal || r.state === 'none' || this.payCheckBlock(r)) return false;
+    const fp = r.fp;
+    this.batchOps(() => {
+      this.putPayCheck(r.key, { s: 'back', by: this.me(), at: new Date().toISOString(), amt: fp.amt, d: fp.d, f: fp.f, note: n });
+      this.salesLog(r.deal!, 'ส่งรับเงินกลับแก้ไข ' + lineLabel(r), `${fmtMoney(fp.amt)} บาท · ${n}`);
+    });
+    this.lastPayChecks = null;
+    this.saveSales();
+    return true;
+  }
+  /** "เลิกทำ": this account's own checks of the last 10 minutes are taken back (the lines wait again). */
+  undoPayChecks(keys: string[]): number {
+    if (this.payCheckBlock()) return this.deny(), 0;
+    const P = this.payChecks(), me = this.me(), now = Date.now();
+    const ks = keys.filter((k) => canUndo(P[k], me, now));
+    this.batchOps(() =>
+      ks.forEach((k) => {
+        const { dealId, lineId } = splitKey(k);
+        this.putPayCheck(k, null);
+        this.salesLog(this.sales.deals[dealId] || { id: dealId, client: '' }, 'เลิกตรวจรับเงิน ' + lineLabel({ line: null, lineId }, this.sales));
+      }),
+    );
+    this.lastPayChecks = null;
+    if (ks.length) this.saveSales();
+    return ks.length;
+  }
+  /** "รับทราบ" on a line cancelled after its check: the record goes. */
+  ackPayOrphan(r: ChkRow) {
+    if (!this.can('pay.check')) return this.deny();
+    if (r.kind !== 'orphan' || !this.payChecks()[r.key]) return;
+    this.batchOps(() => {
+      this.putPayCheck(r.key, null);
+      this.salesLog(r.deal || { id: r.dealId, client: '' }, 'รับทราบยกเลิกหลังตรวจ ' + lineLabel(r, this.sales), r.rec?.amt != null ? fmtMoney(r.rec.amt) + ' บาท' : '');
+    });
+    this.saveSales();
+  }
+  /** "ปิดเดือน": the month's lines and sum checked are kept with it (the banner and the file show them). */
+  closeMonth(ym: string, c: ChkSum) {
+    if (this.payCheckBlock()) return this.deny();
+    if (!/^\d{4}-\d\d$/.test(ym)) return;
+    const v = closeRecord(c, this.me(), new Date().toISOString());
+    const M = this.sales.mclose || (this.sales.mclose = {});
+    M[ym] = v;
+    this.batchOps(() => {
+      this.op('mclose/' + ym, { ...v });
+      this.salesLog({ id: '', client: '' }, 'ปิดเดือนตรวจรับเงิน', `${ymTh(ym)} · ${v.n} รายการ · ${fmtMoney(v.amt ?? 0)} บาท`);
+    });
+    this.saveSales();
+  }
+  /** "เปิดเดือนอีกครั้ง". */
+  reopenMonth(ym: string) {
+    if (this.payCheckBlock()) return this.deny();
+    const M = this.sales.mclose || {};
+    if (!M[ym]) return;
+    delete M[ym];
+    this.batchOps(() => {
+      this.op('mclose/' + ym);
+      this.salesLog({ id: '', client: '' }, 'เปิดเดือนตรวจรับเงินอีกครั้ง', ymTh(ym));
+    });
+    this.saveSales();
   }
   /** แก้ชื่อที่แสดง (before the account's first sign-in): the team list takes the new name in place of the
    *  old one, which would otherwise stay behind as a name with no account. */

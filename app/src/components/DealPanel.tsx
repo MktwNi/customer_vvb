@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, fmtMoney, isPayStage, kindForStage,
+  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, countsActual, dealMoney, dealResult, docMismatch, dueOf, fmtMoney, isPayStage, kindForStage,
   lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stageActs, stageDocs, stageTh, stageTrack, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState,
 } from '../lib/sales';
@@ -23,6 +23,8 @@ import { SelField, Select } from './Select';
 import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
+import { PayChip, PayNoPlan, PayNote, PayStripChip, useDealChecks, usePayGuard } from './PayChk';
+import { docLineId, planCheckWords } from '../lib/payCheck';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -184,6 +186,9 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
  *  document says so with both numbers, and offers the document's. */
 function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
   const { engine: e } = useApp();
+  // a received line accounting checked (or of a closed month): asked before it changes (PayChk.tsx)
+  const guard = usePayGuard();
+  const counted = countsActual(doc) ? [docLineId(e.sales, doc)] : [];
   const ro = !e.can('docs.up');
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(false);
@@ -248,7 +253,7 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           {link && SHOWABLE.test(doc.mime) && <a href={link} target="_blank" rel="noopener noreferrer" className="lnk">เปิดในแท็บใหม่</a>}
           {link && <a href={link} download={doc.name} className="lnk">ดาวน์โหลด</a>}
           {!ro && <button type="button" onClick={() => setEdit(!edit)} className="btn xs">{edit ? 'ปิด' : 'แก้ยอด / ประเภท'}</button>}
-          {!ro && <button type="button" onClick={() => window.confirm(`ลบเอกสาร "${doc.name}"?`) && e.deleteDoc(d.id, doc.id)} className="quiet">ลบ</button>}
+          {!ro && <button type="button" onClick={() => guard.ask({ d, lines: counted, kind: 'delete', title: `ลบเอกสาร ${doc.docNo || doc.name}`, verb: 'ลบ', plain: `ลบเอกสาร "${doc.name}"?`, run: () => e.deleteDoc(d.id, doc.id) })} className="quiet">ลบ</button>}
           {busy && <span className="t-sec">{busy}</span>}
         </div>
       )}
@@ -259,8 +264,13 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
             const fd = new FormData(ev.currentTarget);
             const amount = parseAmount(String(fd.get('amount') ?? ''));
             if (amount === undefined) return void window.alert('อ่านยอดเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000');
-            e.updateDoc(d.id, doc.id, { amount, target: amount == null ? 'none' : (String(fd.get('target')) as DealDoc['target']), kind: String(fd.get('kind')) as DocKind, docNo: String(fd.get('docNo') || ''), basis: amount === doc.amount ? doc.basis : 'manual' });
-            setEdit(false);
+            const target = amount == null ? 'none' : (String(fd.get('target')) as DealDoc['target']);
+            const run = () => {
+              e.updateDoc(d.id, doc.id, { amount, target, kind: String(fd.get('kind')) as DocKind, docNo: String(fd.get('docNo') || ''), basis: amount === doc.amount ? doc.basis : 'manual' });
+              setEdit(false);
+            };
+            if (amount !== doc.amount || target !== doc.target) guard.ask({ d, lines: counted, kind: 'edit', title: `แก้ยอด ${doc.docNo || doc.name}`, verb: 'บันทึก', run });
+            else run();
           }}
           className="sl-docc-form"
         >
@@ -272,6 +282,7 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
           <span className="t-meta" style={{ gridColumn: '1/-1' }}>ลบเอกสารที่มาแทนใบเดิม ใบเดิมยังไม่นับยอด ตั้งกลับได้ที่ “นับเป็น” ของใบนั้น</span>
         </form>
       )}
+      {guard.node}
     </div>
   );
 }
@@ -291,6 +302,7 @@ export function DealPanel() {
   useEffect(() => setAtt(null), [ui.deal]);
   const ref = useRef<HTMLElement>(null);
   const acts = useSalesActs();
+  const guard = usePayGuard();
   // focus the panel itself (its first field is the client name: a stray key would rename it)
   useDialog(ref, { focus: 'dialog', on: !!d });
   // opened at the plan (editor or a receipt): it is brought into view
@@ -368,8 +380,9 @@ export function DealPanel() {
             </div>
             <div>
               <span>Actual</span>
-              {ro || !typedAc ? <b className={m.actual == null ? 'none' : ''}>{m.actual == null ? '—' : fmtMoney(m.actual)}</b> : <StripMoney label="Actual" value={m.actual} onSave={(v) => up({ actual: v })} />}
+              {ro || !typedAc ? <b className={m.actual == null ? 'none' : ''}>{m.actual == null ? '—' : fmtMoney(m.actual)}</b> : <StripMoney label="Actual" value={m.actual} onSave={(v) => guard.ask({ d, lines: ['typed'], kind: 'edit', title: 'แก้ Actual ที่พิมพ์ไว้', verb: 'แก้ยอด', run: () => up({ actual: v }) })} />}
               <FigLine v={av} ro={ro || (!!P && !won)} onAttach={attachAc} none={'จาก ' + (payStages(C).join(' + ') || 'ใบเสร็จ')} extra={av.doc && m.hand ? 'บันทึกเอง' : ''} />
+              <PayStripChip d={d} />
             </div>
             <div>
               <span>ค้างรับ</span>
@@ -399,6 +412,7 @@ export function DealPanel() {
         </div>
       </aside>
       {att && <DocAttach deal={d} stage={att.stage} kind={att.kind} file={att.file} {...att.more} onClose={() => setAtt(null)} />}
+      {guard.node}
     </>
   );
 }
@@ -730,6 +744,9 @@ function PlanCard({ d, attach }: { d: Deal; attach: Attach }) {
 function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
+  // the month check: each received line's check, and the question before a checked one changes
+  const chk = useDealChecks(d);
+  const guard = usePayGuard();
   const S = e.sales, today = todayISO();
   const ro = !e.canDeal('edit.pay', d);
   const P = planOf(S, d, today), won = dealResult(S, d) === 'YES';
@@ -747,6 +764,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
             <button type="button" className="btn xs" onClick={edit}>ตั้งแผนชำระ</button>
           </div>
         )}
+        <PayNoPlan d={d} />
       </section>
     );
   const pct = P.total ? Math.min(100, Math.round((P.got / P.total) * 100)) : 0;
@@ -775,6 +793,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
             รับแล้ว <b>{fmtMoney(P.got) || '0'}</b> · {P.left ? <>ค้าง <b>{fmtMoney(P.left)}</b></> : <span className="t-ok">รับครบทุกงวด</span>}
             {over > 0 && <> · <span className="t-warn">รับเกินแผน {fmtMoney(over)}</span></>}
             {P.late.length > 0 && <> · <span className="t-bad">เลยกำหนด {P.late.length} งวด</span></>}
+            {planCheckWords(chk) && <span className="mc-pc-n">{planCheckWords(chk)}</span>}
           </span>
         </div>
       ) : (
@@ -791,7 +810,8 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
           const hand = l.status === 'paid' && l.hand;
           // every installment takes its document: an invoice or receipt for that stage, checked against its plan
           const att = (label: string, add = false) => <button type="button" className="lnk" onClick={() => attach(l.stage, 'receipt', undefined, { target: 'actual', add })}>{label}</button>;
-          const unmark = <button type="button" className="quiet" onClick={() => window.confirm(`ยกเลิกการรับ ${l.stage}? (${fmtMoney(l.handGot)} บาท ที่บันทึกเอง)`) && e.unmarkPaid(d.id, l.stage)}>ยกเลิกการรับ</button>;
+          const unmark = <button type="button" className="quiet" onClick={() => guard.ask({ d, lines: [l.stage], kind: 'cancel', title: 'ยกเลิกการรับเงิน ' + l.stage, verb: 'ยกเลิกการรับ', plain: `ยกเลิกการรับ ${l.stage}? (${fmtMoney(l.handGot)} บาท ที่บันทึกเอง)`, run: () => e.unmarkPaid(d.id, l.stage) })}>ยกเลิกการรับ</button>;
+          const row = chk.find((r) => r.kind === 'got' && r.lineId === l.stage);
           const lineActs = ro || !won || recv === l.stage ? null : l.status === 'part' ? (
             <>
               <button type="button" className="btn xs" onClick={() => (e.setPayFull(d.id, l.stage, true) ? acts.prompt(d, 'payment') : acts.say(`ถือว่ารับครบ ${l.stage} แล้ว`))}>ถือว่ารับครบ</button>
@@ -828,6 +848,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
                 {sv.kind === 'muted' ? <span className="sl-st-m">{sv.word}</span> : sv.chip ? <span className={'chip ' + sv.kind}>{sv.word}</span> : <Status kind={sv.kind}>{sv.word}</Status>}
                 {sv.sub && <small>{sv.sub}</small>}
                 {lf.kind === 'warn' && <small className="t-warn" title={lf.title}>ไม่ตรงเอกสาร</small>}
+                <PayChip r={row} />
               </span>
               {(note || lineActs) && (
                 <span className="c-note" role="cell">
@@ -835,11 +856,13 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
                   {lineActs && <span className="sl-pk-b">{lineActs}</span>}
                 </span>
               )}
+              <PayNote r={row} />
               {recv === l.stage && !ro && <RecvForm d={d} l={l} attach={attach} />}
             </div>
           );
         })}
       </div>
+      {guard.node}
       <div className="sl-pc-f">
         {!ro && <button type="button" className="lnk" onClick={edit}>เพิ่มงวด</button>}
         <span>{extra.length ? `${extra.map((l) => l.stage).join(', ')} ยังไม่มีในรายการขั้นตอน ตารางแสดงเป็นแถว “งวดเพิ่ม” ต่อจาก ${pays[pays.length - 1] || 'ขั้นสุดท้าย'}` : `งวดที่เกิน ${pays[pays.length - 1] || 'PAY'} แสดงเป็นแถว “งวดเพิ่ม” ต่อท้าย`}</span>
@@ -921,6 +944,7 @@ const PRESETS: Record<number, number[][]> = { 2: [[50, 50], [30, 70], [40, 60]],
 function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
+  const guard = usePayGuard();
   const S = e.sales, cfg = S.cfg, today = todayISO();
   const m = dealMoney(S, d);
   const P = planOf(S, d, today);
@@ -993,9 +1017,18 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
     const bad = rows.find((r) => amtOf(r) === undefined);
     if (bad) return setErr(`ยอดของ ${bad.stage} อ่านไม่ได้ พิมพ์ตัวเลขเดียว เช่น 53,500`);
     const lines: PlanInput[] = rows.map((r) => ({ stage: r.stage, amt: amtOf(r) ?? null, pct: r.pct.trim() === '' ? null : +r.pct, due: r.date ? r.due : '', rel: r.date ? null : r.rel, how: r.how, howT: r.howT, note: r.note }));
-    const { kept } = e.setPlan(d.id, lines);
-    set({ dpPlan: '' });
-    acts.say(`บันทึกแผนชำระแล้ว · ${lines.length} งวด · รวม ${fmtMoney(sum)} บาท${kept.length ? ' · เก็บงวดที่รับแล้ว ' + kept.join(', ') + ' ไว้' : ''}`);
+    const run = () => {
+      const { kept } = e.setPlan(d.id, lines);
+      set({ dpPlan: '' });
+      acts.say(`บันทึกแผนชำระแล้ว · ${lines.length} งวด · รวม ${fmtMoney(sum)} บาท${kept.length ? ' · เก็บงวดที่รับแล้ว ' + kept.join(', ') + ' ไว้' : ''}`);
+    };
+    // money received by hand at the planned amount moves with it: a checked line is asked about first
+    const moved = rows.filter((r) => {
+      const l = P?.lines.find((x) => x.stage === r.stage);
+      return !!l && l.hand && l.line.got == null && (amtOf(r) ?? null) !== l.line.amt;
+    });
+    if (moved.length) guard.ask({ d, lines: moved.map((r) => r.stage), kind: 'edit', title: 'แก้ยอดงวดที่รับเงินแล้ว', verb: 'บันทึกแผน', run });
+    else run();
   };
   const clear = () => {
     if (!window.confirm('ลบแผนชำระนี้? งวดที่รับเงินแล้วยังเก็บไว้')) return;
@@ -1124,6 +1157,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
         <button type="button" className="quiet" onClick={() => set({ dpPlan: '' })}>ยกเลิก</button>
         <button type="button" className="btn pri" onClick={save} disabled={!rows.length}>บันทึกแผน</button>
       </div>
+      {guard.node}
     </section>
   );
 }
