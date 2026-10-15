@@ -184,7 +184,7 @@ export function Plan() {
               const entries: CellEntry[] = [...ps.map((p) => ({ p })), ...ts.map((x) => ({ x }))];
               const lines = cellLines(entries), dots = cellDots(entries);
               return (
-                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => x.name), ps.length)}>
+                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => x.name), ps.map((x) => ({ name: shortName(x.deal.client), late: x.line.lateDays > 0 })))}>
                   <span className="pl-dn">{+d.slice(8)}</span>
                   {entries.length > 0 && (
                     <>
@@ -224,7 +224,7 @@ export function Plan() {
                 </div>
                 <span className="pl-lg-key">
                   <span className="pl-ev pay"><span className="pl-ev-k">รับเงิน</span></span>
-                  งวดที่ต้องรับเงิน · กรอบแดงคือเลยกำหนด
+                  งวดที่ต้องรับเงิน · กรอบแดงหนาคือเลยกำหนด
                 </span>
               </>
             )}

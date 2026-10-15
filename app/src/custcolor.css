@@ -21,7 +21,8 @@
 .pl-ev.pay{background:#fff;box-shadow:inset 0 0 0 1px var(--mark-wait);padding-left:6px}
 .pl-ev.pay::before{display:none}
 .pl-ev.pay .pl-ev-k{flex:none;color:var(--warn)}
-.pl-ev.pay.late{box-shadow:inset 0 0 0 1px var(--mark-no)}
+/* late: red and a frame twice as heavy (the colour is never the only cue; the cell's label says เลยกำหนด) */
+.pl-ev.pay.late{box-shadow:inset 0 0 0 2px var(--mark-no)}
 .pl-ev.pay.late .pl-ev-k{color:var(--bad)}
 .pl-more{font-size:12px;line-height:18px;color:var(--link);padding-left:8px}
 
@@ -30,7 +31,8 @@
 .pl-dot{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
 .pl-dot.done{opacity:.4}
 .pl-dot.pay{background:#fff;box-shadow:inset 0 0 0 1.5px var(--mark-wait)}
-.pl-dot.pay.late{box-shadow:inset 0 0 0 1.5px var(--mark-no)}
+/* late: a red ring with a dot in its middle (a shape of its own, not only another colour) */
+.pl-dot.pay.late{background:radial-gradient(circle,var(--mark-no) 0 1.1px,#fff 1.5px);box-shadow:inset 0 0 0 1.5px var(--mark-no)}
 .pl-dmore{flex-basis:100%;font-size:12px;line-height:1.2;color:var(--link)}
 @media (max-width:760px){
   .pl-evs{display:none}
@@ -76,5 +78,6 @@
 @media (forced-colors:active){
   .pl-ev{border:1px solid CanvasText}
   .pl-ev::before{background:CanvasText}
+  .pl-ev.pay.late{border-width:2px}
   .pl-dot,.pl-lg i,.pl-filt i,.pl-bar,.pl-task.cc::before{forced-color-adjust:none}
 }

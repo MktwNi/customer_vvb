@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from './planCal';
+import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust, planDayLink } from './planCal';
 
 describe('plan calendar: a day cell', () => {
   it('names a customer on a chip without the legal and country words', () => {
@@ -13,6 +13,23 @@ describe('plan calendar: a day cell', () => {
     // never empty
     expect(chipName('ประเทศไทย')).toBe('ประเทศไทย');
   });
+  it('keeps "ประเทศไทย" inside a word and after "แห่ง" (state enterprises keep their whole name)', () => {
+    expect(chipName('ธนาคารแห่งประเทศไทย')).toBe('ธนาคารแห่งประเทศไทย');
+    expect(chipName('การไฟฟ้าฝ่ายผลิตแห่งประเทศไทย')).toBe('การไฟฟ้าฝ่ายผลิตแห่งประเทศไทย');
+    expect(chipName('การท่าเรือแห่งประเทศไทย')).toBe('การท่าเรือแห่งประเทศไทย');
+    expect(chipName('โรงไฟฟ้าแม่เมาะ การไฟฟ้าฝ่ายผลิตแห่งประเทศไทย')).toBe('โรงไฟฟ้าแม่เมาะ การไฟฟ้าฝ่ายผลิตแห่งประเทศไทย');
+    expect(chipName('บริษัท เชลล์แห่งประเทศไทย จำกัด')).toBe('เชลล์แห่งประเทศไทย');
+    // "แห่ง" typed apart: still kept
+    expect(chipName('สมาคมการค้าแห่ง ประเทศไทย')).toBe('สมาคมการค้าแห่ง ประเทศไทย');
+    // in the middle or at the end of a word
+    expect(chipName('บริษัท เชฟรอนประเทศไทยสำรวจและผลิต จำกัด')).toBe('เชฟรอนประเทศไทยสำรวจและผลิต');
+    expect(chipName('บริษัท ซิงเกอร์ประเทศไทย จำกัด (มหาชน)')).toBe('ซิงเกอร์ประเทศไทย');
+    // a word of its own in the middle goes, the rest stays
+    expect(chipName('บริษัท ไพโอเนียร์ ประเทศไทย อีลาสติค จำกัด')).toBe('ไพโอเนียร์ อีลาสติค');
+    // brackets glued to the name or typed with a space inside
+    expect(chipName('บริษัท คิวพี(ประเทศไทย) จำกัด')).toBe('คิวพี');
+    expect(chipName('บริษัท ลินเด้ (ประเทศไทย ) จำกัด (มหาชน)')).toBe('ลินเด้');
+  });
   it('shows up to 3 lines: all of 3, else 2 and "อีก N"', () => {
     expect(cellLines([])).toEqual({ shown: [], more: 0 });
     expect(cellLines(['a', 'b', 'c'])).toEqual({ shown: ['a', 'b', 'c'], more: 0 });
@@ -25,8 +42,20 @@ describe('plan calendar: a day cell', () => {
     expect(cellDots(['a', 'b', 'c', 'd'])).toEqual({ shown: ['a', 'b', 'c'], more: 1 });
   });
   it('names the companies for screen readers, each once', () => {
-    expect(cellLabel('12 ต.ค. 2569', true, ['ซากิโนมิยะ ประเทศไทย', 'ดีไวน์สตาร์ช', 'ซากิโนมิยะ ประเทศไทย'], 1)).toBe('12 ต.ค. 2569 (วันนี้) · 3 งาน: ซากิโนมิยะ ประเทศไทย, ดีไวน์สตาร์ช · รับเงิน 1 งวด');
-    expect(cellLabel('13 ต.ค. 2569', false, [], 0)).toBe('13 ต.ค. 2569 · 0 งาน');
+    expect(cellLabel('12 ต.ค. 2569', true, ['ซากิโนมิยะ ประเทศไทย', 'ดีไวน์สตาร์ช', 'ซากิโนมิยะ ประเทศไทย'], [{ name: 'กรีนวัลเลย์ ฟู้ดส์', late: false }])).toBe('12 ต.ค. 2569 (วันนี้) · 3 งาน: ซากิโนมิยะ ประเทศไทย, ดีไวน์สตาร์ช · รับเงิน 1 งวด: กรีนวัลเลย์ ฟู้ดส์');
+    expect(cellLabel('13 ต.ค. 2569', false, [], [])).toBe('13 ต.ค. 2569 · 0 งาน');
+  });
+  it('says in words which installments are late and whose (the red frame is not seen)', () => {
+    // a late installment and a due one read differently, not only in colour
+    const late = cellLabel('8 ต.ค. 2569', false, ['ฝาจีบ', 'พริมา มารีน'], [{ name: 'ไทยออยล์ เอนเนอร์ยี่', late: true }]);
+    const due = cellLabel('15 ต.ค. 2569', false, ['ฝาจีบ', 'พริมา มารีน'], [{ name: 'ไทยออยล์ เอนเนอร์ยี่', late: false }]);
+    expect(late).toBe('8 ต.ค. 2569 · 2 งาน: ฝาจีบ, พริมา มารีน · รับเงิน 1 งวด เลยกำหนด: ไทยออยล์ เอนเนอร์ยี่');
+    expect(due).toBe('15 ต.ค. 2569 · 2 งาน: ฝาจีบ, พริมา มารีน · รับเงิน 1 งวด: ไทยออยล์ เอนเนอร์ยี่');
+    expect(due).not.toContain('เลยกำหนด');
+    // two installments of one client on the day: counted twice, named once
+    expect(cellLabel('1 ต.ค. 2569', false, [], [{ name: 'บ้านปู', late: true }, { name: 'บ้านปู', late: true }])).toBe('1 ต.ค. 2569 · 0 งาน · รับเงิน 2 งวด เลยกำหนด: บ้านปู');
+    // only some late: each late one is marked
+    expect(cellLabel('1 ต.ค. 2569', false, [], [{ name: 'บ้านปู', late: true }, { name: 'ฝาจีบ', late: false }])).toBe('1 ต.ค. 2569 · 0 งาน · รับเงิน 2 งวด: บ้านปู (เลยกำหนด), ฝาจีบ');
   });
 });
 
@@ -57,5 +86,13 @@ describe('plan calendar: the legend and its filter', () => {
     // a customer with nothing left (its appointments deleted): everyone again
     expect(activeCust('999', keys)).toBe('');
     expect(activeCust('', keys)).toBe('');
+  });
+  it('a link to a day from another page shows every customer (the legend filter is cleared)', () => {
+    expect(planDayLink('2026-10-19')).toEqual({ tab: 'plan', calM: '2026-10', calDay: '2026-10-19', plCust: '' });
+    // what the day then shows: all of its entries, not the customer pressed earlier
+    const before: { plCust: string } = { plCust: '26' };
+    const ui = { ...before, ...planDayLink('2026-10-12') };
+    const only = activeCust(ui.plCust, T.map((x) => x.ck));
+    expect(onlyCust(T, only).filter((x) => x.date === ui.calDay).map((x) => x.ck)).toEqual(['26', '301']);
   });
 });

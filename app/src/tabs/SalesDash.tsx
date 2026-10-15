@@ -11,6 +11,7 @@ import type { Task } from '../lib/types';
 import { CoAvatar, coreName } from '../components/CoAvatar';
 // a customer's avatar takes its colour on แผนติดต่อ (the top seller, a person, keeps the name swatch)
 import { custKey, dealKey } from '../lib/custColor';
+import { planDayLink } from '../lib/planCal';
 import { Icon } from '../components/icons';
 import { heroGrad } from '../components/ui';
 
@@ -416,7 +417,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                         );
                       })}
                       {ts.length > 3 && (
-                        <button className="sd-ev more" onClick={() => set({ tab: 'plan', calM: d.slice(0, 7), calDay: d })} aria-label={`อีก ${ts.length - 3} นัด ${isoTh(d)} (เปิดแผนติดต่อ)`}>+{ts.length - 3}</button>
+                        <button className="sd-ev more" onClick={() => set(planDayLink(d))} aria-label={`อีก ${ts.length - 3} นัด ${isoTh(d)} (เปิดแผนติดต่อ)`}>+{ts.length - 3}</button>
                       )}
                     </span>
                   );
