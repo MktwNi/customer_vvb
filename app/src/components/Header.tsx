@@ -28,7 +28,8 @@ export function TopBar({ navOpen, docked, onMenu, onToggle }: { navOpen: boolean
       <div className="tb-brand">
         <img src={mark} alt="Global Carbon Corporation" width={38} height={38} />
         <span className="tb-brand-text">
-          <b>Global Carbon</b>
+          {/* the full name on two lines (one span per line; the space keeps copy and screen readers right) */}
+          <b><span className="bw">Global Carbon</span> <span className="bw">Corporation</span></b>
           <small>ฐานข้อมูลลูกค้า GCC</small>
         </span>
       </div>
