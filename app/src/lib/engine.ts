@@ -23,6 +23,8 @@ import {
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
+import { cashYear, type CashLine } from './sales';
+import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
@@ -2265,6 +2267,12 @@ export class GccEngine {
   /** CSV (opens in Excel) of a year's tracker table, like the old tracker's export. */
   exportSalesCsv(year: string, deals: Deal[]) {
     downloadBlob(new Blob(['﻿' + this.salesCsv(deals)], { type: 'text/csv;charset=utf-8' }), `Sales_Tracker_${year}_${todayISO()}.csv`);
+  }
+  /** CSV of a year of Cashflow (lib/cashUi.ts cashRows): the money lines, or the months / quarters summed;
+   *  `undated` adds "ยังไม่กำหนดวันรับ" at the end. Same BOM and cells as the tracker's file. */
+  exportCashCsv(year: string, lines: CashLine[], mode: CashCsvMode, undated: boolean) {
+    const text = cashCsv(cashRows(this.sales, year, cashYear(lines, year), mode, undated));
+    downloadBlob(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }), `Cashflow_${year}_${todayISO()}.csv`);
   }
   salesCsv(deals: Deal[]) {
     const S = this.sales, C = S.cfg, today = todayISO();

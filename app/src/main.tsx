@@ -6,6 +6,8 @@ import { GccEngine } from './lib/engine';
 import './index.css';
 // the filter row, popovers and dropdowns (components/Pop, Select, FilterBar, DateFilter)
 import './filters.css';
+// money by year: the Cashflow tab, the table's lens, the Dashboard's การรับเงิน and quarter card
+import './cashflow.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

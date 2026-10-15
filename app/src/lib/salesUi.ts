@@ -21,9 +21,10 @@ export function beYearInput(v: string): { year: string; ce?: string } | null {
   return null;
 }
 
-/** Years offered by the year picker: this year ±1, the one shown, and every year that has deals. */
-export function yearOptions(deals: Iterable<Deal>, shown: string, now = beYear()) {
-  const ys = new Set([now, String(+now + 1), String(+now - 1), shown]);
+/** Years offered by the year picker: this year ±1, the one shown, every year that has deals, and (`money`,
+ *  the money views) every year an installment is received or due in (cashYears). */
+export function yearOptions(deals: Iterable<Deal>, shown: string, now = beYear(), money: Iterable<string> = []) {
+  const ys = new Set([now, String(+now + 1), String(+now - 1), shown, ...money]);
   for (const d of deals) ys.add(d.year);
   return [...ys].sort();
 }

@@ -18,6 +18,7 @@ import { Bead, reachedOf } from './StageTrack';
 import { SelField, Select } from './Select';
 import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
+import { PlanYears, YearChip } from './PlanYears';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -783,6 +784,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
       ) : (
         <p className="sl-pc-note">แผนที่พิมพ์ไว้ก่อนได้งาน วันครบกำหนดแบบ “หลังได้งาน” จะเป็นวันที่จริงเมื่อบันทึก YES ที่ CLOSED DEAL</p>
       )}
+      {won && <PlanYears S={S} d={d} today={today} />}
       {canResplit && <p className="sl-pc-x">Forecast ตอนนี้ {fmtMoney(P.base)} บาท · <button type="button" className="lnk" onClick={resplit}>ปรับยอดงวดที่ยังไม่ได้รับตาม %</button></p>}
       <div className="sl-pt" role="table" aria-label="งวดการชำระ">
         <div className="sl-pr ph" role="row">
@@ -821,7 +823,10 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
                 {l.line.amt != null ? fmtMoney(l.amt) : '—'}
                 {l.line.pct != null && <small>{l.line.pct}%</small>}
               </span>
-              <span className="c-due" role="cell">{l.due ? isoTh(l.due) : l.line.due ? isoTh(l.line.due) : relText(l.line) || 'ยังไม่กำหนด'}</span>
+              <span className="c-due" role="cell">
+                {l.due ? isoTh(l.due) : l.line.due ? isoTh(l.line.due) : relText(l.line) || 'ยังไม่กำหนด'}
+                <YearChip d={d} date={l.status === 'paid' ? l.rcvDate : l.due || l.line.due} />
+              </span>
               <span className="c-how" role="cell">{HOW_TH[l.line.how]}{l.line.howT ? ' ' + l.line.howT : ''}</span>
               <span className="c-stat" role="cell">
                 {sv.kind === 'muted' ? <span className="sl-st-m">{sv.word}</span> : sv.chip ? <span className={'chip ' + sv.kind}>{sv.word}</span> : <Status kind={sv.kind}>{sv.word}</Status>}
@@ -1101,6 +1106,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
                 ]}
               />
               {r.date ? <DateChip value={r.due} onChange={(v) => upRow(i, { due: v })} label={'วันครบกำหนด ' + r.stage} /> : won && r.rel != null && <small>{isoTh(dueOf(r, won))}</small>}
+              {!r.got && <YearChip d={d} date={r.date ? r.due : won ? dueOf(r, won) : ''} />}
             </span>
             <span className="sl-pe-how">
               <Select className="sm" label={'วิธีชำระ ' + r.stage} value={r.how} onChange={(v) => upRow(i, { how: v as PayHow })} options={[{ v: '', label: 'ไม่ระบุ' }, ...HOWS.map((k) => ({ v: k, label: HOW_TH[k] }))]} />

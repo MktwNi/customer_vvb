@@ -23,6 +23,9 @@ import { Select } from '../components/Select';
 import { FilterBar, ReadChip, type FVal } from '../components/FilterBar';
 import { DateFilter, dateWords } from '../components/DateFilter';
 import { SalesDash } from './SalesDash';
+import { CashKpiRow, CashView, LensChip, LensMoney, LensNote } from './SalesCash';
+import { cashLines, cashYear, cashYears } from '../lib/sales';
+import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
 export { Modal } from '../components/Dialog';
@@ -48,7 +51,7 @@ const useSalesF = (): SalesFilter => {
 };
 /** Filters back into view state (without the year: the year picker owns it). */
 const toSlF = (F: SalesFilter): UIState['slF'] => {
-  const { year: _y, ...rest } = F;
+  const { year: _y, money: _m, ...rest } = F;
   return Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== '' && v !== null)) as UIState['slF'];
 };
 /** Anything that narrows the rows besides the quick view (the count and "ล้างทั้งหมด" show then). */
@@ -65,25 +68,42 @@ export function Sales() {
   const today = todayISO();
   const f = useSalesF();
   const yearDeals = filterDeals(S, { year }, today);
-  const shown = filterDeals(S, f, today);
+  // the lens "เงินเข้าตามปี" (table only): deals of another year with an installment in this one count too
+  const lens = ui.slLens === 'cash';
+  const fT: SalesFilter = lens ? { ...f, money: 'cash' } : f;
+  const shown = filterDeals(S, fT, today);
   // the quick views are about open work: their counts come from the other filters, and the closed tab ignores them
-  const noQuick = f.quick ? filterDeals(S, { ...f, quick: '' }, today) : shown;
+  const noQuick = f.quick || lens ? filterDeals(S, { ...fT, quick: '' }, today) : shown;
+  const closedRows = (lens ? filterDeals(S, { ...f, quick: '' }, today) : noQuick).filter((d) => d.jobStatus === 'closed');
   // not memoised: the engine changes S.deals in place (an import or a team sync can add a year)
   const all = Object.values(S.deals);
-  const years = yearOptions(all, year);
+  const v = ui.slView;
+  // the money views (Cashflow, the table's lens) count money in the picker ("เงินเข้า 15 งวด"), and offer
+  // every year money falls in
+  const moneyLines = v === 'cash' || (v === 'table' && lens) ? cashLines(S, all, today) : null;
+  const years = yearOptions(all, year, beYear(), moneyLines ? cashYears(moneyLines) : []);
   const perYear = new Map<string, number>();
   all.forEach((d) => perYear.set(d.year, (perYear.get(d.year) || 0) + 1));
-  const openN = yearDeals.filter((d) => d.jobStatus === 'open').length;
-  const closedN = yearDeals.length - openN;
+  const yearSub = (y: string) => {
+    if (y === beYear()) return 'ปีนี้';
+    if (!moneyLines || perYear.get(y)) return undefined;
+    const from = [...new Set(cashYear(moneyLines, y).lines.map((l) => l.dealYear))].sort();
+    return from.length ? `มีงวดจากงานปี ${from.join(', ')}` : undefined;
+  };
+  // the table's count and its filters' choices follow the lens: in "เงินเข้าตามปี" they hold the other years'
+  // jobs with money in this one
+  const tableYear = lens ? filterDeals(S, { year, money: 'cash' }, today) : yearDeals;
+  const openN = tableYear.filter((d) => d.jobStatus === 'open').length;
+  const closedN = yearDeals.filter((d) => d.jobStatus === 'closed').length;
   const [said, setSaid] = useState('');
-  const v = ui.slView;
   const tabs: [typeof v, ReactNode, number | null, string?][] = [
-    ['table', 'ตารางติดตาม', openN],
+    // five tabs fit a phone's row: the first reads "ตาราง" there
+    ['table', <>ตาราง<span className="sl-long">ติดตาม</span></>, openN],
     ['dash', 'Dashboard', null],
+    ['cash', 'Cashflow', null, 'เงินเข้าตามปี: รับแล้วนับตามวันที่รับ ที่ยังไม่รับนับตามวันครบกำหนด'],
     ['closed', 'ปิดงาน', closedN, 'งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี'],
     ['log', <>ประวัติ<span className="sl-long">การแก้ไข</span></>, null],
   ];
-  const now = beYear();
 
   return (
     <>
@@ -102,14 +122,14 @@ export function Sales() {
               ariaLabel={`ปี ${year} (พ.ศ.)`}
               width={240}
               search={false}
-              options={years.map((y) => ({ v: y, label: `ปี ${y}`, sub: y === now ? 'ปีนี้' : undefined, n: perYear.get(y) ? `${fmtN(perYear.get(y)!)} งาน` : 'ยังไม่มีงาน' }))}
+              options={years.map((y) => ({ v: y, label: `ปี ${y}`, sub: yearSub(y), n: moneyLines ? yearMoneyLabel(cashYear(moneyLines, y)) : perYear.get(y) ? `${fmtN(perYear.get(y)!)} งาน` : 'ยังไม่มีงาน' }))}
               onChange={(y) => {
                 set({ slYear: y, slF: toSlF({ ...f, date: null }), slCollapsed: {} });
                 setSaid(f.date ? `ช่วงเวลากลับเป็นทั้งปี ${y}` : '');
               }}
             />
             {e.can('edit') && <AddMenu />}
-            <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...noQuick.filter((d) => d.jobStatus === 'closed')]} />
+            <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...closedRows]} />
           </div>
         }
       />
@@ -130,17 +150,25 @@ export function Sales() {
             </button>
           ))}
         </div>
-        <span className="sl-close-hint">
-          <b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b>
-          <span className="sl-long"> กดปิดงานเมื่องานจบ แล้วงานจะย้ายไปแท็บ “ปิดงาน”</span>
-        </span>
+        {v === 'cash' ? (
+          <span className="sl-close-hint cf-hint">
+            <b>เงินเข้าตามปี</b>
+            <span className="sl-long"> นับแต่ละงวดในปีที่รับเงินหรือครบกำหนด ไม่ว่างานเป็นของปีไหน</span>
+          </span>
+        ) : (
+          <span className="sl-close-hint">
+            <b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b>
+            <span className="sl-long"> กดปิดงานเมื่องานจบ แล้วงานจะย้ายไปแท็บ “ปิดงาน”</span>
+          </span>
+        )}
       </div>
       <p className="sl-m-hint">
-        <b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b> ปิดงานแล้วงานจะย้ายไปแท็บ “ปิดงาน”
+        {v === 'cash' ? <><b>เงินเข้าตามปี</b> นับแต่ละงวดในปีที่รับเงินหรือครบกำหนด ไม่ว่างานเป็นของปีไหน</> : <><b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b> ปิดงานแล้วงานจะย้ายไปแท็บ “ปิดงาน”</>}
       </p>
-      {v === 'table' && <TableView e={e} S={S} F={f} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={yearDeals} today={today} openN={openN} />}
+      {v === 'table' && <TableView e={e} S={S} F={fT} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={tableYear} today={today} openN={openN} />}
       {v === 'dash' && <SalesDash S={S} deals={yearDeals} today={today} year={ui.slYear} />}
-      {v === 'closed' && <ClosedView S={S} F={f} deals={noQuick.filter((d) => d.jobStatus === 'closed')} facets={yearDeals} total={closedN} today={today} />}
+      {v === 'cash' && <CashView S={S} today={today} year={ui.slYear} />}
+      {v === 'closed' && <ClosedView S={S} F={f} deals={closedRows} facets={yearDeals} total={closedN} today={today} />}
       {v === 'log' && <LogView S={S} year={year} />}
     </>
   );
@@ -232,7 +260,7 @@ function AddMenu() {
 }
 
 function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
-  const { engine: e, set } = useApp();
+  const { engine: e, ui, set } = useApp();
   const yearTotal = Object.values(e.sales.deals).filter((d) => d.year === year).length;
   const { open, setOpen, close, btn, wrap, cls } = useMenu();
   const [lists, setLists] = useState(false);
@@ -285,6 +313,12 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
       </button>
       {open && (
         <div role="menu" aria-label="เพิ่มเติม" className={cls}>
+          {ui.slView === 'cash' && (
+            <button role="menuitem" className="menu-i" onClick={() => { close(); set({ slCashCsv: true }); }}>
+              ส่งออก CSV · Cashflow ปี {year}
+              <small>รายงวด หรือสรุปรายเดือน / รายไตรมาส</small>
+            </button>
+          )}
           <button role="menuitem" className="menu-i" onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
             {/* the table's filters apply (also when another tab is open): say so */}
             ส่งออก CSV
@@ -388,7 +422,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   const anyLate = !!base && withActIndex(S, () => base.some((d) => quickMatch(S, d, 'paylate', today)));
   // the counts in the field menu follow the search too, a little behind the typing (six passes over the year)
   const key = useDeferredValue(JSON.stringify(ui.slF));
-  const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key) }), { yearDeals, job, me, today }), [ver, key, F.year, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  // (the lens "เงินเข้าตามปี" counts the other years' jobs with money in this one too)
+  const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key), money: F.money }), { yearDeals, job, me, today }), [ver, key, F.year, F.money, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
   const value: Record<string, FVal | undefined> = { resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section, result: F.result ? { v: [F.result] } : undefined };
   const toF = (k: string, v: FVal | null): Partial<SalesFilter> => (k === 'result' ? { result: (v?.v[0] || '') as ResultF } : { [k]: v || undefined });
   const search = (
@@ -437,6 +472,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
         onChange={(k, v) => up(toF(k, v))}
         search={base ? undefined : search}
         lead={
+          <>
+          {job === 'open' && <LensChip S={S} year={F.year} today={today} value={ui.slLens} onChange={(slLens) => set({ slLens, slCollapsed: {} })} onCashTab={() => set({ slView: 'cash' })} />}
           <DateFilter
             value={F.date}
             onChange={(date) => up({ date })}
@@ -447,6 +484,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
             // open jobs have no closing date: say where the jobs closed in the range are (the KPIs count them)
             elsewhere={job === 'open' ? (draft) => (draft.basis === 'closed' ? `อยู่ในแท็บ “ปิดงาน” ${fmtN(liveCount(S, F, 'date', draft, 'closed', today))} งาน` : null) : undefined}
           />
+          </>
         }
         extra={job === 'open' && quick === 'paylate' ? <ReadChip text="เฉพาะงวดเลยกำหนด" onClear={() => pick('payment')} /> : undefined}
         anySet={on}
@@ -539,6 +577,8 @@ interface Tk {
   e: Engine; S: SalesState; today: string; ro: boolean; team: string[];
   /** the date filter in force: the rows show its date (the contact column keeps its editor on the default basis) */
   date: DateIn | null; year: string;
+  /** the lens "เงินเข้าตามปี": the money cells count the year's installments (null = by the deal's year) */
+  cash: CashLens | null;
   /** the deal being worked on (open, or opened last) */
   cur: string | undefined;
   edit: UIState['slEdit'];
@@ -567,6 +607,9 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const date = dateIn(F, today);
   const mobile = useMedia('(max-width: 760px)');
   const acts = useSalesActs();
+  // the lens "เงินเข้าตามปี": each deal's money in the year (a date range narrows it), and the cards over the
+  // same money (the year's, or the range's: they say which)
+  const cash = ui.slLens === 'cash' ? cashLensOf(S, all, ui.slYear, date?.r ?? null, today) : null;
   // an account that can only read: no adding, no stage notes, no edits in the rows
   const ro = !e.can('edit');
   const cardRef = useRef<HTMLDivElement>(null);
@@ -579,9 +622,10 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const bySec = new Map<string, Deal[]>(secs.map((s) => [s, []]));
   deals.forEach((d) => bySec.get(d.section)!.push(d));
   const visible = secs.filter((s) => bySec.get(s)!.length);
-  // one company twice in the year (two people sent it at the same moment): marked, to delete one
+  // one company twice in the year (two people sent it at the same moment): marked, to delete one (the lens's
+  // jobs of other years are not the year's rows)
   const perCo = new Map<number, number>();
-  facets.forEach((d) => d.gid != null && perCo.set(e.canonical(d.gid), (perCo.get(e.canonical(d.gid)) || 0) + 1));
+  facets.forEach((d) => d.gid != null && d.year === ui.slYear && perCo.set(e.canonical(d.gid), (perCo.get(e.canonical(d.gid)) || 0) + 1));
   const cur = ui.deal || ui.last.deal;
 
   const toggle = (id: string, focusChev = false) => {
@@ -615,7 +659,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
     });
   };
   const tk: Tk = {
-    e, S, today, ro, team: e.crm.team, date, year: ui.slYear, cur, edit: ui.slEdit, menu, setMenu, pop, setPop, toggle, openEditor, closeEditor, acts,
+    e, S, today, ro, team: e.crm.team, date, year: ui.slYear, cash, cur, edit: ui.slEdit, menu, setMenu, pop, setPop, toggle, openEditor, closeEditor, acts,
     attach: (deal, stage, kind, more) => {
       setMenu('');
       if (ui.slEdit) set({ slEdit: null });
@@ -625,7 +669,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       setMenu('');
       set({ deal: id, dpPlan: plan, slToast: null });
     },
-    dup: (d) => d.gid != null && (perCo.get(e.canonical(d.gid)) || 0) > 1,
+    dup: (d) => d.gid != null && d.year === ui.slYear && (perCo.get(e.canonical(d.gid)) || 0) > 1,
   };
 
   // the section bars stick right under the column headings: their height (fonts, zoom) sets the offset
@@ -730,23 +774,39 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       fc += m.forecast || 0;
       ac += m.actual || 0;
     }
+    // the lens: the section's money in the year, and what of it came in
+    if (cash) ({ fc, ac } = lensSum(cash, list));
     return { n: list.length, od, rd, fc, ac };
   };
 
-  if (!Object.values(S.deals).some((d) => d.year === ui.slYear))
+  // a year with no jobs of its own: in the lens "เงินเข้าตามปี" the other years' jobs with money in it are its
+  // table; otherwise the empty card says so, and offers the lens when such money exists
+  if (!Object.values(S.deals).some((d) => d.year === ui.slYear) && !(cash && all.length)) {
+    const from = cash ? [] : [...new Set(cashYear(cashLines(S, Object.values(S.deals), today), ui.slYear).lines.map((l) => l.dealYear))].sort();
     return (
       <div className="card sl-empty-card">
         <span className="card-t">ยังไม่มีลูกค้าในตารางปี {ui.slYear}</span>
         <span className="t-sec" style={{ lineHeight: 1.7 }}>
           {ro ? 'เมื่อทีมเพิ่มลูกค้า รายการจะแสดงที่นี่' : <>กด <b>เพิ่มลูกค้า</b> เพื่อค้นหาบริษัทในทะเบียนหรือเพิ่มลูกค้าใหม่ · ถ้ามีข้อมูลใน Sales Tracker เดิม ใช้เมนู ⋯ แล้วเลือก นำเข้าจาก Sales Tracker เดิม</>}
         </span>
+        {from.length > 0 && (
+          <span className="t-sec cf-elsewhere">
+            ปี {ui.slYear} มีงวดเงินจากงานปี {from.join(', ')} · <button type="button" className="lnk" onClick={() => set({ slLens: 'cash', slCollapsed: {} })}>ดูแบบเงินเข้าตามปี</button>
+          </span>
+        )}
       </div>
     );
+  }
   const stages = S.cfg.stages;
   return (
     <TkCtx.Provider value={tk}>
-      <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} />
+      {cash ? (
+        <CashKpiRow K={cash.K} year={ui.slYear} range={date} onLate={() => set({ slF: { ...ui.slF, quick: 'paylate' }, slCollapsed: {} })} />
+      ) : (
+        <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} />
+      )}
       <Toolbar S={S} F={F} yearDeals={facets} base={base} today={today} job="open" shown={deals.length} total={openN} />
+      {cash && <LensNote year={ui.slYear} range={cash.range} onBack={() => set({ slLens: 'deal' })} />}
       {!deals.length ? (
         <div className="card sl-empty-card">
           {date?.basis === 'closed' ? (
@@ -783,7 +843,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                       <span className="sl-sec-name">{name}</span>
                       <SecMeta sum={sum} />
                     </span>
-                    <span className="sl-s-tot">Forecast <b>{fmtMoney(sum.fc) || '0'}</b></span>
+                    <span className="sl-s-tot">{cash ? (cash.range ? 'ในช่วงนี้' : `ปี ${ui.slYear}`) : 'Forecast'} <b>{fmtMoney(sum.fc) || '0'}</b></span>
                   </div>
                 </div>
                 {!col && list.map((d) => <DealCard key={d.id} d={d} />)}
@@ -818,8 +878,17 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                   <th className="k-last" title="ติดต่อล่าสุด คือวันที่ติดต่อที่พิมพ์ไว้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า · เกิน 14 วันขึ้นว่า ค้าง">ติดต่อล่าสุด</th>
                 )}
                 {/* one short line under it: "และ Actual" in its place once the Actual column folds into this one */}
-                <th className="k-fc" title="Forecast คือยอดในใบเสนอราคาที่แนบที่ขั้น QUOTATION (หรือยอดที่พิมพ์เอง)">Forecast<small className="sl-th-fc">จาก QUOTATION</small><small className="sl-th-ac2">และ Actual</small></th>
-                <th className="k-ac" title={`Actual คือยอดใบแจ้งหนี้ / ใบเสร็จที่แนบที่ ${payStages(S.cfg).join(', ') || 'PAY'} รวมกัน`}>Actual<small>{actualSource(S.cfg)}</small></th>
+                {cash ? (
+                  <>
+                    <th className="k-fc" title={`ยอดของงวดที่รับหรือครบกำหนดในปี ${ui.slYear}${cash.range ? ' เฉพาะในช่วงที่เลือก' : ''}`}>เงินเข้าปี {ui.slYear}<small className="sl-th-fc">{cash.range ? 'งวดในช่วงนี้' : 'งวดในปีนี้'}</small><small className="sl-th-ac2">และรับแล้ว</small></th>
+                    <th className="k-ac" title={`ยอดที่รับแล้วในปี ${ui.slYear}${cash.range ? ' เฉพาะในช่วงที่เลือก' : ''}`}>รับแล้ว<small>{cash.range ? 'ในช่วงนี้' : `ในปี ${ui.slYear}`}</small></th>
+                  </>
+                ) : (
+                  <>
+                    <th className="k-fc" title="Forecast คือยอดในใบเสนอราคาที่แนบที่ขั้น QUOTATION (หรือยอดที่พิมพ์เอง)">Forecast<small className="sl-th-fc">จาก QUOTATION</small><small className="sl-th-ac2">และ Actual</small></th>
+                    <th className="k-ac" title={`Actual คือยอดใบแจ้งหนี้ / ใบเสร็จที่แนบที่ ${payStages(S.cfg).join(', ') || 'PAY'} รวมกัน`}>Actual<small>{actualSource(S.cfg)}</small></th>
+                  </>
+                )}
                 <th className="k-st">สถานะ</th>
                 <th className="k-act"><span className="sr-only">เพิ่มเติม</span></th>
               </tr>
@@ -843,8 +912,8 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                     </th>
                     <td className="k-m2" colSpan={2}>
                       <span className="sl-m2">
-                        <span className="k2-fc"><span className={'sl-s-sum' + (sum.fc ? '' : ' none')} title="รวม Forecast ของหมวดนี้ (งานที่เปิด)">{sum.fc ? fmtMoney(sum.fc) : '—'}</span></span>
-                        <span className="k2-ac"><span className={'sl-s-sum' + (sum.ac ? '' : ' none')} title="รวม Actual ของหมวดนี้ (งานที่เปิด)">{sum.ac ? fmtMoney(sum.ac) : '—'}</span></span>
+                        <span className="k2-fc"><span className={'sl-s-sum' + (sum.fc ? '' : ' none')} title={cash ? `รวมเงินเข้า${cash.range ? 'ในช่วงนี้' : 'ปี ' + ui.slYear} ของหมวดนี้` : 'รวม Forecast ของหมวดนี้ (งานที่เปิด)'}>{sum.fc ? fmtMoney(sum.fc) : '—'}</span></span>
+                        <span className="k2-ac"><span className={'sl-s-sum' + (sum.ac ? '' : ' none')} title={cash ? `รวมที่รับแล้ว${cash.range ? 'ในช่วงนี้' : 'ในปี ' + ui.slYear} ของหมวดนี้` : 'รวม Actual ของหมวดนี้ (งานที่เปิด)'}>{sum.ac ? fmtMoney(sum.ac) : '—'}</span></span>
                       </span>
                     </td>
                     <td className="sl-s-add" colSpan={2}>
@@ -946,6 +1015,7 @@ function DealRow({ d, open, t, kidIds, stages }: { d: Deal; open: boolean; t: Tr
               {cur && <span className="sl-tg">เปิดล่าสุด</span>}
               {isNew && <span className="sl-tg">ใหม่</span>}
               {tk.dup(d) && <span className="sl-tg bad" title={`บริษัทนี้มีในตารางปี ${d.year} มากกว่า 1 แถว เปิดแถวที่ซ้ำแล้วลบออก`}>ซ้ำ</span>}
+              {tk.cash && d.year !== tk.year && <span className="sl-tg" title={`งานของปี ${d.year} ที่มีงวดเงินในปี ${tk.year}`}>งานปี {d.year}</span>}
               <span className={'sl-ct' + (d.contactName ? '' : ' none')}>{d.contactName || 'ยังไม่มีผู้ติดต่อ'}</span>
               <span className="sl-sub-last">· {lc ? dmTh(lc) : 'ยังไม่ได้ติดต่อ'}</span>
             </span>
@@ -1187,6 +1257,7 @@ function FigSub({ v, onAttach }: { v: FigView; onAttach?: () => void }) {
 function MoneyFc({ d }: { d: Deal }) {
   const tk = useTk();
   const { e, S, ro } = tk;
+  if (tk.cash) return <LensMoney L={tk.cash} d={d} col="fc" won={dealResult(S, d) === 'YES'} />;
   const m = dealMoney(S, d);
   const att = ro ? undefined : () => tk.attach(d, S.cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', { target: 'forecast' });
   const sub = <FigSub v={fcFig(S, d)} onAttach={att} />;
@@ -1213,6 +1284,7 @@ function MoneyFc({ d }: { d: Deal }) {
 function MoneyAc({ d }: { d: Deal }) {
   const tk = useTk();
   const { e, S, today, ro } = tk;
+  if (tk.cash) return <LensMoney L={tk.cash} d={d} col="ac" won={dealResult(S, d) === 'YES'} />;
   const m = dealMoney(S, d), r = dealResult(S, d), ps = payState(S, d, today), P = ps.plan, v = acFig(S, d);
   // an invoice or receipt for the installment due next (or the first PAY stage not paid)
   const att = ro ? undefined : () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' });
@@ -1872,8 +1944,17 @@ function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, 
     );
   const sv = lineStatusView(x, today);
   const stat = sv.kind === 'muted' ? <span className="sl-st-m">{sv.word}</span> : sv.chip ? <span className={'chip ' + sv.kind}>{sv.word}</span> : <Status kind={sv.kind}>{sv.word}</Status>;
+  // the lens: where the installment's money falls ("นับในปี 2570" / "อยู่ปี 2569", the row muted)
+  // (the amount is the part that counts, as in the deal's money cell; the whole installment when none does)
+  const lw = tk.cash ? lensWhere(tk.cash, d, x.stage) : null;
+  const lensMoney = lw?.text ? (
+    <>
+      <span className="sl-amt">{fmtMoney(lw.amt)}</span>
+      <span className={'sl-dno' + (lw.inYear ? ' cf-cnt' : '')}>{lw.text}</span>
+    </>
+  ) : null;
   return (
-    <tr id={id} className={cls} data-deal={d.id} data-stage={x.stage}>
+    <tr id={id} className={cls + (lw?.text ? (lw.inYear ? ' cf-in' : ' cf-off') : '')} data-deal={d.id} data-stage={x.stage}>
       <td className="k-chev"><Bead state={st} now={isNow} late={x.lateDays > 0} stage={x.stage} /></td>
       {nameCell}
       <td className="sl-knote" colSpan={3}>
@@ -1889,7 +1970,7 @@ function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, 
       <td className="k-m2" colSpan={2}>
         <span className="sl-m2">
           <span className="k2-fc" />
-          <span className="k2-ac">{money}</span>
+          <span className="k2-ac">{lensMoney || money}</span>
         </span>
       </td>
       <td className="k-st">{stat}</td>
@@ -2067,6 +2148,7 @@ function DealCard({ d }: { d: Deal }) {
           <button type="button" className="sl-nm-b hv-tx" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
           <span className="sl-nm-s">
             {cur && <span className="sl-tg">เปิดล่าสุด</span>}
+            {tk.cash && d.year !== tk.year && <span className="sl-tg">งานปี {d.year}</span>}
             <CardWhen d={d} lc={lc} />
             {od != null && <span className="chip bad">ค้าง {fmtN(od)} วัน</span>}
           </span>
@@ -2074,6 +2156,12 @@ function DealCard({ d }: { d: Deal }) {
         <div className="sl-mc-st"><Status kind={sv.kind}>{sv.word}</Status></div>
       </div>
       <MiniTrack stages={S.cfg.stages} states={t.states} next={t.next} done={t.done} late={od != null || nextStepView(S, d, today).tone === 'late'} />
+      {tk.cash ? (
+        <div className="sl-mc-money">
+          <div className="sl-mc-m"><span>{tk.cash.range ? 'เงินเข้าในช่วงนี้' : `เงินเข้าปี ${tk.year}`}</span><LensMoney L={tk.cash} d={d} col="fc" won={won} /></div>
+          <div className="sl-mc-m"><span>{tk.cash.range ? 'รับแล้วในช่วงนี้' : `รับแล้วในปี ${tk.year}`}</span><LensMoney L={tk.cash} d={d} col="ac" won={won} /></div>
+        </div>
+      ) : (
       <div className="sl-mc-money">
         <div className="sl-mc-m">
           <span>Forecast</span>
@@ -2087,6 +2175,7 @@ function DealCard({ d }: { d: Deal }) {
           {attAc && <button type="button" className="lnk sl-mc-att" onClick={attAc}>แนบเอกสาร</button>}
         </div>
       </div>
+      )}
       <div className="sl-mc-f">
         {sv.ready && !ro ? <button type="button" className="btn pri xs" onClick={() => tk.acts.close(d.id)}>ปิดงาน</button> : sv.ready ? <span className="sl-nx txt ok">พร้อมปิดงาน</span> : <NextPill d={d} card />}
         <button type="button" className="sl-mc-tog hv" aria-expanded={open} aria-controls={`mk-${d.id}`} data-tog={d.id} onClick={() => tk.toggle(d.id)}>

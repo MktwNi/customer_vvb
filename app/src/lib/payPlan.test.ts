@@ -366,10 +366,15 @@ describe('money owed (KPI ค้างรับ), the calendar, the CSV', () => 
     expect(salesStats(s, deals, TODAY)).toMatchObject({ receivable: 147000, late: 57000, dueMonth: 20000 });
     s.deals.x.jobStatus = 'closed';
     expect(receivables(s, deals, TODAY).receivable).toBe(60000);
-    // the calendar: installments to receive in a range (late ones with from = '')
+    // the calendar: installments to receive in a range (late ones with from = ''); a closed job still
+    // owing is followed until the money comes in (Cashflow counts it too), while the KPI above leaves it out
+    expect(payDue(s, deals, '2026-10-01', '2026-10-31', TODAY).map((x) => x.line.stage)).toEqual(['PAY2', 'PAY3']);
     s.deals.x.jobStatus = 'open';
     expect(payDue(s, deals, '2026-10-01', '2026-10-31', TODAY).map((x) => x.line.stage)).toEqual(['PAY2', 'PAY3']);
     expect(payDue(s, deals, '', '2026-10-31', TODAY).map((x) => x.line.stage)).toEqual(['PAY1', 'PAY2', 'PAY3']);
+    // not won (z's plan typed before YES): never in the calendar, open or closed
+    s.deals.z.jobStatus = 'closed';
+    expect(payDue(s, deals, '', '2026-12-31', TODAY).some((x) => x.deal.id === 'z')).toBe(false);
   });
 
   it('one CSV cell lists the plan', () => {
