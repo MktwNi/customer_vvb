@@ -1,0 +1,240 @@
+/* Configurable roles and permission requests (package roles, item 4): the Users page's sections, the
+   role editor and its comparison, the request cards and history, the request dialog, สิทธิ์ของฉัน and
+   the account menu's request status. Tokens only (index.css :root); sizes 12/13/14/16/18, weights 400/500. */
+/* the sidebar's second badge: requests waiting, information not overdue (brand ink, never red) */
+.side-badge.rq{color:var(--link)}
+.side-item[aria-current=page] .side-badge.rq{background:var(--info-bg)}
+/* the page's three sections: the page-tab style Sales Tracker uses (§7.7) */
+.rl-top{display:flex;flex-direction:column;gap:18px}
+/* the same head height on every tab (one tab has a page button, the others none), so the tabs never jump */
+.rl-pgrow{min-height:40px}
+
+/* accounts: two new columns (อีเมล, หน่วยงาน) */
+.rl-acc th{padding:10px 12px}.rl-acc td{padding:12px 12px}
+.rl-acc th:nth-child(1){width:auto}
+.rl-acc th:nth-child(2){width:180px}
+.rl-acc th:nth-child(3){width:116px}
+.rl-acc th:nth-child(4){width:200px}
+.rl-acc th:nth-child(5){width:118px}
+.rl-acc th:nth-child(6){width:138px}
+.rl-acc th:nth-child(7){width:44px}
+.rl-acc .us-name,.rl-acc .us-u{overflow-wrap:normal;white-space:nowrap}
+.rl-acc .us-who-t{min-width:0}
+.rl-acc .us-ll{white-space:normal;line-height:1.45}
+.rl-acc .us-role{gap:5px}
+.rl-unit{font-size:14px;color:var(--ink)}
+.rl-mail{font-size:13px;color:var(--ink-2);overflow-wrap:anywhere;line-height:1.45}
+.rl-sub{font-size:12px;color:var(--muted);line-height:1.45}
+.rl-sub .lnk{font-size:12px}
+.rl-none{font-size:13px;color:var(--muted)}
+
+/* roles: list on the left, the selected role's capabilities on the right */
+.rl-roles{display:grid;grid-template-columns:264px minmax(0,1fr);gap:16px;align-items:start}
+.rl-list{padding:10px;display:flex;flex-direction:column;gap:2px}
+.rl-list-h{font-size:12px;color:var(--muted);padding:8px 12px 4px}
+.rl-list-h+.rl-ri{margin-top:0}
+.rl-ri{display:flex;flex-direction:column;gap:1px;width:100%;padding:9px 12px;border-radius:12px;border:0;background:transparent;text-align:left;cursor:pointer;font:inherit;color:var(--ink);transition:background-color .12s}
+.rl-ri b{font-size:14px;font-weight:500;line-height:1.45}
+.rl-ri span{font-size:13px;color:var(--ink-2);line-height:1.45}
+@media (hover:hover){.rl-ri:hover{background:var(--tint)}}
+.rl-ri[aria-current=true]{background:var(--tint-2)}
+.rl-ri[aria-current=true] b{color:var(--link)}
+.rl-list-f{margin-top:8px;padding:12px 4px 4px;border-top:1px solid var(--divider);display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.rl-list-f .rl-sub{padding:0 8px}
+
+.rl-ed{min-width:0}
+.rl-ed-h{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 24px 16px;border-bottom:1px solid var(--line)}
+.rl-ed-h h3{margin:0;font-size:18px;font-weight:500;line-height:1.4;color:var(--ink)}
+.rl-ed-h p{margin:2px 0 0;font-size:13px;color:var(--ink-2);line-height:1.55}
+.rl-ed-acts{display:flex;gap:16px;align-items:center;padding-top:4px;flex:none}
+.rl-grp{padding:6px 24px 14px}
+.rl-grp+.rl-grp{border-top:1px solid var(--line)}
+.rl-grp-h{display:flex;flex-direction:column;gap:2px;padding:14px 0 8px}
+.rl-grp-h h4{margin:0;font-size:16px;font-weight:500;line-height:1.4;color:var(--ink)}
+.rl-grp-h span{font-size:13px;color:var(--ink-2);line-height:1.6;max-width:760px}
+.rl-cap{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:2px 12px;align-items:center;padding:9px 10px;margin:0 -10px;border-radius:12px;transition:background-color .12s}
+@media (hover:hover){.rl-cap:hover{background:var(--tint)}}
+.rl-cap.chg{background:var(--tint-2)}
+.rl-ck{padding:0;min-height:0}
+.rl-ck.dis:not(.on) .fbox{background:var(--neutral-bg);border-color:var(--field)}
+/* a capability that can't change here (the admin role, a script without configurable roles): ticked, quieter */
+.rl-ck.dis.on .fbox{opacity:.6}
+.rl-cap-t{display:flex;flex-direction:column;gap:1px;min-width:0}
+.rl-cap-t b{font-size:14px;font-weight:400;color:var(--ink);line-height:1.45}
+.rl-cap.on .rl-cap-t b{font-weight:500}
+.rl-cap-t span{font-size:13px;color:var(--ink-2);line-height:1.5}
+.rl-cap.dis .rl-cap-t b{color:var(--muted)}
+.rl-cap-r{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.seg.rl-scope{padding:2px}
+.seg.rl-scope>button{height:28px;padding:0 12px;font-size:13px}
+.rl-real{display:inline-flex;align-items:center;height:22px;padding:0 10px;border-radius:999px;background:var(--info-bg);color:var(--info);font-size:12px;white-space:nowrap}
+.rl-cap.chg .rl-real{background:#fff}
+.rl-foot{font-size:13px;color:var(--muted);line-height:1.6;padding:10px 0 2px}
+.rl-save{position:sticky;bottom:0;z-index:2;display:flex;align-items:center;gap:12px;justify-content:flex-end;padding:12px 24px;border-top:1px solid var(--line);background:#fff;border-radius:0 0 var(--r-card) var(--r-card)}
+.rl-save-t{margin-right:auto;font-size:13px;color:var(--ink-2);line-height:1.5}
+.rl-save-t b{font-weight:500;color:var(--ink)}
+
+/* เทียบทุกบทบาท: read-only matrix, rows = capabilities, columns = roles */
+.rl-ri-cmp{margin-bottom:4px}
+.rl-mx-w{padding:4px 14px 18px;overflow-x:auto}
+.rl-mx-tb{width:100%;border-collapse:separate;border-spacing:0;font-size:14px}
+.rl-mx-tb th,.rl-mx-tb td{padding:9px 10px;border-bottom:1px solid var(--divider);line-height:1.45}
+.rl-mx-tb thead th{font-weight:400;vertical-align:bottom;text-align:center;border-bottom:1px solid var(--line);padding-top:14px}
+.rl-mx-tb thead th.rl-mx-cap{width:38%}
+.rl-mx-r{display:block;font-size:13px;color:var(--ink)}
+.rl-mx-n{display:block;font-size:12px;color:var(--muted)}
+.rl-mx-tb tbody th[scope=row]{text-align:left;font-weight:400;color:var(--ink)}
+.rl-mx-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rl-mx-tb td{text-align:center;width:12.4%}
+.rl-mx-g th{text-align:left;font-size:14px;font-weight:500;color:var(--ink);padding-top:18px;border-bottom:1px solid var(--line)}
+.rl-mx-y{display:inline-flex;color:var(--link)}
+.rl-mx-y svg{width:14px;height:14px}
+.rl-mx-own{font-size:12px;color:var(--ink-2)}
+.rl-mx-no{font-size:13px;color:var(--muted)}
+@media (hover:hover){.rl-mx-tb tbody tr:not(.rl-mx-g):hover>*{background:var(--hv)}}
+
+/* requests */
+.rl-req-head{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap}
+.rl-req-head h3{margin:0;font-size:18px;font-weight:500;line-height:1.4}
+.rl-req-head span{font-size:13px;color:var(--muted)}
+.rl-reqs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.rl-req{padding:18px 22px 20px;display:flex;flex-direction:column;gap:14px}
+.rl-req-h{display:flex;align-items:center;gap:12px}
+.rl-req-h .us-who{flex:1}
+.rl-req-when{font-size:12px;color:var(--muted);text-align:right;line-height:1.45;flex:none}
+.rl-ask{font-size:16px;font-weight:500;line-height:1.6;color:var(--ink);margin:0}
+.rl-ask .acct-role{vertical-align:2px;margin:0 2px}
+.rl-dl{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 14px;margin:0}
+.rl-dl dt{font-size:13px;color:var(--ink-2);line-height:1.6}
+.rl-dl dd{margin:0;font-size:14px;color:var(--ink);line-height:1.6;min-width:0}
+.rl-diff{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.rl-diff li{font-size:14px;line-height:1.55}
+.rl-diff small{font-size:12px;color:var(--muted);margin-left:6px}
+.rl-quote{font-size:14px;line-height:1.6;color:var(--ink);background:var(--frame);border-radius:12px;padding:8px 12px}
+.rl-dec{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--divider);padding-top:14px}
+.rl-dec-r{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.rl-dec .fld{width:100%;background-color:#fff}
+.rl-hist{padding:8px}
+.rl-hist-h{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;padding:12px 14px 6px}
+.rl-hist-h h3{margin:0;font-size:16px;font-weight:500}
+.rl-hist-h span{font-size:13px;color:var(--muted)}
+.rl-ht{width:100%;border-collapse:separate;border-spacing:0;font-size:14px}
+.rl-ht th{font-size:12px;font-weight:400;color:var(--muted);text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+.rl-ht td{padding:11px 14px;border-bottom:1px solid var(--divider);vertical-align:top;line-height:1.5}
+.rl-ht tbody tr:last-child td{border-bottom:0}
+@media (hover:hover){.rl-ht tbody tr:hover td{background:var(--hv)}}
+.rl-ht .d{white-space:nowrap;color:var(--ink-2);font-size:13px}
+.rl-ht small{display:block;font-size:12px;color:var(--muted)}
+.rl-ht th:nth-child(1){width:150px}.rl-ht th:nth-child(2){width:120px}.rl-ht th:nth-child(4){width:150px}.rl-ht th:nth-child(5){width:120px}
+
+/* dialogs */
+.rl-form{display:flex;flex-direction:column;gap:16px}
+.rl-now{font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:-6px}
+.rl-now .lnk{font-size:13px}
+.rl-lbl{font-size:13px;color:var(--ink-2);margin:0 0 6px}
+.rl-req-seg{align-self:flex-start}
+.rl-rcs{display:flex;flex-direction:column;gap:8px}
+.rl-rc{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-radius:var(--r-inner);border:1px solid var(--field);cursor:pointer}
+.rl-rc.on{border-color:var(--brand);background:var(--tint)}
+.rl-rc .fradio{margin-top:3px}
+.rl-rc .fck{padding:0;min-height:0}
+.rl-rc-t{display:flex;flex-direction:column;gap:2px;line-height:1.5;min-width:0}
+.rl-rc-t b{font-weight:500;font-size:14px}
+.rl-rc-t span{font-size:13px;color:var(--ink-2)}
+.rl-rc-t .gain{color:var(--ink)}
+textarea.fld.rl-ta{height:auto;min-height:76px;padding:9px 12px;line-height:1.55;resize:vertical;width:100%;font:inherit;font-size:14px;color:var(--ink);box-sizing:border-box}
+.rl-tmp{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap}
+.rl-tmp .fck{padding:0;min-height:0}
+.rl-tmp .dfld{width:200px}
+.rl-dlg-f{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.rl-dlg-f .rl-sub{margin-right:auto;max-width:300px;font-size:12px}
+.rl-req-mark{color:var(--bad)}
+.rl-capl{display:flex;flex-direction:column}
+.rl-capl-g{font-size:12px;color:var(--muted);padding:10px 0 2px}
+.rl-capl .rl-rc{border:0;border-radius:12px;padding:8px 10px;margin:0 -10px}
+.rl-capl .rl-rc.on{background:var(--tint)}
+.rl-capl .rl-rc+.rl-rc{margin-top:2px}
+
+/* สิทธิ์ของฉัน */
+.rl-me{display:flex;align-items:center;gap:12px}
+.rl-me .acct-ava{width:44px;height:44px;font-size:18px}
+.rl-me-t{display:flex;flex-direction:column;line-height:1.4;flex:1;min-width:0}
+.rl-me-t b{font-weight:500;font-size:16px}
+.rl-me-t small{font-size:13px;color:var(--ink-2)}
+.rl-extra{border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 14px;display:flex;flex-direction:column;gap:2px;font-size:14px;line-height:1.55}
+.rl-extra small{font-size:12px;color:var(--muted)}
+.rl-can{display:grid;grid-template-columns:128px minmax(0,1fr);gap:4px 16px;margin:0}
+.rl-can dt{font-size:13px;color:var(--ink-2);line-height:1.6;padding-top:8px}
+.rl-can dd{margin:0;padding:8px 0;border-bottom:1px solid var(--divider)}
+.rl-can dt{border-bottom:1px solid var(--divider)}
+.rl-can dd ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.rl-can dd li{font-size:14px;line-height:1.55}
+.rl-can dd small{font-size:12px;color:var(--muted);margin-left:6px}
+.rl-cant{display:flex;align-items:baseline;gap:10px;font-size:14px;color:var(--ink-2)}
+.rl-cant .lnk{font-size:14px}
+
+/* the account menu: the request's status in place of the menu item */
+.rl-acct-req{margin:0 4px;padding:10px 12px;border-radius:var(--r-inner);background:var(--tint);display:flex;flex-direction:column;gap:4px;font-size:13px;line-height:1.5;color:var(--ink-2)}
+.rl-acct-req-h{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--ink);font-size:14px}
+.rl-acct-req .chip{background:#fff;color:var(--link)}
+.rl-acct-req-l{display:flex;gap:14px;margin-top:2px}
+.rl-acct-req-l .lnk,.rl-acct-req-l .quiet{font-size:13px}
+.acct-item small{font-size:12px;color:var(--muted);margin-left:auto}
+
+/* the dialog's footer stays in view while a long list scrolls under it (like .dlg-head at the top) */
+.rl-stick{position:sticky;bottom:-22px;z-index:3;background:#fff;margin:0 -22px -22px;padding:12px 22px 22px;border-top:1px solid var(--line)}
+/* phone */
+@media (max-width:560px){
+  .rl-dlg-f{justify-content:flex-end}
+  .rl-dlg-f .rl-sub{max-width:none;flex:1 1 100%}
+  .rl-tmp .dfld{width:100%}
+  .rl-req-seg>button{padding:0 10px;font-size:13px}
+  .rl-capl .rl-rc:not(.on) .rl-rc-t span{display:none}
+  .rl-capl .rl-rc.need .rl-rc-t span{display:inline}
+  .rl-capl .rl-rc{align-items:center;min-height:44px}
+  .rl-capl .rl-rc.on{align-items:flex-start}
+}
+
+/* the rail's dot for requests waiting: brand ink like the badge */
+.side-dot.rq{color:var(--link)}
+.side-item[aria-current=page] .side-dot.rq{background:var(--info-bg)}
+/* the phone account box: สิทธิ์ของฉัน across the top of its two buttons */
+.side-acct-btns .rl-side-my{grid-column:1/-1}
+/* the page head keeps its height on every section (only บัญชีผู้ใช้ has a page button) */
+.rl-top .pg-row{min-height:40px}
+/* the Sales Tracker table without ดูยอดเงิน: the money columns fold to nothing (their <col> at 0px) */
+.sl-table.sl-nomoney{--w-fc:0px;--w-ac:0px}
+.sl-table.sl-nomoney :is(.k-fc,.k-ac){padding:0;visibility:hidden;overflow:hidden}
+/* the result notice of a request */
+.rl-res b{font-weight:500;color:var(--ink)}
+/* states of a section that needs the script's update, and small helpers */
+.rl-old{font-size:13px;color:var(--ink-2);line-height:1.6;padding:12px 16px;border-radius:var(--r-inner);background:var(--tint)}
+.rl-ro-box{display:flex;align-items:center;min-height:var(--ctl);padding:0 14px;border:1px solid var(--line);border-radius:var(--r-field);background:var(--frame);color:var(--ink-2);font-size:14px}
+.rl-extra-r{flex-direction:row;align-items:center;gap:12px}
+.rl-extra-r>span{flex:1;display:flex;flex-direction:column;min-width:0}
+.rl-extra.gone{opacity:.55}
+.rl-extra.gone>span>span:first-child{text-decoration:line-through}
+.rl-give{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin-top:8px;padding:10px 12px;border:1px dashed var(--field);border-radius:var(--r-inner)}
+.rl-give .sel-btn{min-width:220px}
+.rl-give .dfld{width:180px}
+.rl-cap button.rl-capb{all:unset}
+.rl-ck{cursor:pointer}
+.rl-ck.dis{cursor:default}
+.rl-cant ul{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--ink-2)}
+.rl-cant-w{display:flex;flex-direction:column;gap:4px}
+.rl-ed-note{margin:0 24px;padding-top:14px}
+.us-c .rl-mail,.us-c .rl-unit{font-size:13px}
+@media (max-width:900px){.rl-roles{grid-template-columns:minmax(0,1fr)}.rl-reqs{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:760px){
+  .rl-ed-h{flex-direction:column;padding:16px 16px 12px}.rl-grp{padding:6px 16px 12px}.rl-save{padding:12px 16px;flex-wrap:wrap}
+  .rl-cap{grid-template-columns:30px minmax(0,1fr)}.rl-cap-r{grid-column:2;justify-content:flex-start}
+  .rl-dl{grid-template-columns:minmax(0,1fr)}.rl-dl dt{padding-top:4px}
+  .rl-ht thead{display:none}.rl-ht tr{display:flex;flex-direction:column;padding:10px 14px;border-bottom:1px solid var(--divider)}.rl-ht td{padding:2px 0;border:0}
+  .rl-can{grid-template-columns:minmax(0,1fr)}.rl-can dt{border:0;padding-top:10px}
+  .rl-req{padding:16px}
+}
+/* เข้าสู่ระบบล่าสุด: the date over the time, never "น." alone on a line */
+.rl-acc .us-ll .t{display:block}
+/* the hidden checkbox and radio inputs sit inside their label: an absolutely positioned input whose
+   containing block were the app frame would make focusing it scroll the frame (which hides overflow) */
+.rl-ck,.rl-rc .fck,.rl-tmp .fck{position:relative}

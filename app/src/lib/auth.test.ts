@@ -109,7 +109,7 @@ describe('protocol helpers', () => {
     await expect(hello(reply({ ok: false, error: 'busy' }), URL)).rejects.toBeInstanceOf(TeamSyncError);
     await expect(hello(async () => { throw new TypeError('Failed to fetch'); }, URL)).rejects.toBeInstanceOf(TypeError);
   });
-  it('call: the team code as key, a session as tok, neither for sign-in; always cv 4', async () => {
+  it('call: the team code as key, a session as tok, neither for sign-in; always cv 4 (configurable roles)', async () => {
     const sent: Record<string, unknown>[] = [];
     const t: Transport = async (_u, b) => (sent.push(b), { ok: true });
     await call(t, URL, 'team-code-1', { action: 'ping' });

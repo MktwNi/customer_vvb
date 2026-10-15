@@ -2,7 +2,6 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { CONFIG } from '../lib/constants';
 import { dtTh, fmtN } from '../lib/format';
-import { ROLE_TH } from '../lib/auth';
 import { deploymentId, type TeamStatus } from '../lib/teamSync';
 import { Notice, labelCol } from './ui';
 
@@ -98,8 +97,9 @@ export function TeamSyncCard() {
   // a team-code team whose script can now do accounts: the lead turns them on from here
   const caps = cfg && !acct && e.caps?.url === cfg.url ? e.caps : null;
   const enableAccounts = () => e.teamBeginSetup();
-  // an account made ดูอย่างเดียว with edits still queued: they can't be sent; offer to drop them
-  const stuck = acct?.role === 'viewer' && e.teamPendingN > 0;
+  // an account whose role sends nothing now (ดูอย่างเดียว) with edits still queued: they can't be sent;
+  // offer to drop them
+  const stuck = !!acct && !e.canWrite() && e.teamPendingN > 0;
   const dropUnsent = async () => {
     if (!window.confirm(`ทิ้งรายการที่ส่งไม่ได้ ${fmtN(e.teamPendingN)} รายการ? ข้อมูลในเครื่องนี้จะกลับไปเป็นค่าของทีม`)) return;
     setBusy('leave');
@@ -182,7 +182,7 @@ export function TeamSyncCard() {
         <span className="upd-head" style={{ padding: '18px 22px' }}>
           <span className="upd-t">
             <span className="card-t">{title}</span>
-            <span className="upd-status">{acct ? `เข้าสู่ระบบในชื่อ ${acct.name} (${ROLE_TH[acct.role]}) · ` : ''}ซิงก์ล่าสุด {t.last ? dtTh(t.last) : '—'} · รอส่ง {fmtN(e.teamPendingN)} รายการ</span>
+            <span className="upd-status">{acct ? `เข้าสู่ระบบในชื่อ ${acct.name} (${e.roleName()}) · ` : ''}ซิงก์ล่าสุด {t.last ? dtTh(t.last) : '—'} · รอส่ง {fmtN(e.teamPendingN)} รายการ</span>
           </span>
           {chip}
         </span>
@@ -253,7 +253,7 @@ export function TeamSyncCard() {
         )}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button onClick={() => e.teamSync()} disabled={t.status === 'syncing' || !!busy || !!e.auth} className="btn sm">{t.status === 'syncing' ? 'กำลังซิงก์…' : 'ซิงก์ตอนนี้'}</button>
-          {(!acct || acct.role === 'admin') && <button onClick={copy} className="btn sm">{copied ? 'คัดลอกลิงก์แล้ว' : 'คัดลอกลิงก์เชิญทีม'}</button>}
+          {(!acct || e.can('set.users')) && <button onClick={copy} className="btn sm">{copied ? 'คัดลอกลิงก์แล้ว' : 'คัดลอกลิงก์เชิญทีม'}</button>}
           {acct ? (
             <button onClick={() => set({ acctDlg: 'logout' })} className="quiet">ออกจากระบบ</button>
           ) : (
@@ -269,7 +269,7 @@ export function TeamSyncCard() {
             <span>{about}</span>
             <span>
               {acct
-                ? (acct.role === 'admin'
+                ? (e.can('set.users')
                     ? (home ? 'ลิงก์เชิญคือที่อยู่ของเว็บนี้ เปิดแล้วจะเจอหน้าเข้าสู่ระบบของทีม' : 'ลิงก์เชิญจะพาเพื่อนไปหน้าเข้าสู่ระบบของทีมนี้') +
                       ' ส่งชื่อผู้ใช้และรหัสผ่านชั่วคราวให้แต่ละคนแยกกันทางแชตส่วนตัว (สร้างได้ที่ ผู้ใช้และสิทธิ์) · '
                     : '') + 'ถ้าสองคนแก้คนละช่องของรายการเดียวกัน จะเก็บไว้ทั้งสองค่า ถ้าแก้ช่องเดียวกัน จะใช้ค่าที่บันทึกถึงชีตทีหลัง'

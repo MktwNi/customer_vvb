@@ -138,4 +138,8 @@ export const PREF = {
   lastUser: 'gcc-team-last-user',
   /** Set when a sign-out wiped this browser's team data: other tabs reload. */
   wipe: 'gcc-team-wipe',
+  /** The team script's notification state as last heard ({url, on, since}), so the quotation check shows
+   *  from the first frame; and the bell's scope chosen here while the script has no notifications. */
+  notify: 'gcc-notify-live',
+  bellScope: 'gcc-bell-scope',
 } as const;

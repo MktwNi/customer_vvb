@@ -15,6 +15,7 @@ import { Icon } from '../components/icons';
 import { Modal } from '../components/Dialog';
 import { DocAttach, openDocFile, type AttachMore } from '../components/DocAttach';
 import { QtPhone, deleteQt } from '../components/QtCard';
+import { QtCheckLine } from '../components/QtCheckSheet';
 import { qtFigWords, qtView } from '../lib/quotes';
 import { followStep, stepMoved, type StepEd, type StepFields } from '../lib/stepEditor';
 import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } from '../components/DealActs';
@@ -72,7 +73,8 @@ export function Sales() {
   const f = useSalesF();
   const yearDeals = filterDeals(S, { year }, today);
   // the lens "เงินเข้าตามปี" (table only): deals of another year with an installment in this one count too
-  const lens = ui.slLens === 'cash';
+  // (money by the year it comes in is Cashflow's: without ดู Cashflow the table counts by the deal's year)
+  const lens = ui.slLens === 'cash' && e.can('view.cash');
   const fT: SalesFilter = lens ? { ...f, money: 'cash' } : f;
   const shown = filterDeals(S, fT, today);
   // the quick views are about open work: their counts come from the other filters, and the closed tab ignores them
@@ -107,6 +109,11 @@ export function Sales() {
     ['closed', 'ปิดงาน', closedN, 'งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี'],
     ['log', <>ประวัติ<span className="sl-long">การแก้ไข</span></>, null],
   ];
+  // Cashflow is for an account that may see it (ดู Cashflow): without it the tab goes, and a remembered
+  // choice of it opens the table
+  const cashOk = e.can('view.cash');
+  if (!cashOk) tabs.splice(2, 1);
+  const view = v === 'cash' && !cashOk ? 'table' : v;
 
   return (
     <>
@@ -131,7 +138,7 @@ export function Sales() {
                 setSaid(f.date ? `ช่วงเวลากลับเป็นทั้งปี ${y}` : '');
               }}
             />
-            {e.can('edit') && <AddMenu />}
+            {e.can('edit.deal') && <AddMenu />}
             <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...closedRows]} />
           </div>
         }
@@ -147,13 +154,13 @@ export function Sales() {
       <div className="sl-tabbar">
         <div role="tablist" aria-label="Sales Tracker" className="utabs">
           {tabs.map(([k, label, n, title]) => (
-            <button key={k} role="tab" aria-selected={v === k} onClick={() => set({ slView: k })} title={title}>
+            <button key={k} role="tab" aria-selected={view === k} onClick={() => set({ slView: k })} title={title}>
               <span>{label}</span>
               {n != null && <span className="n">{fmtN(n)}</span>}
             </button>
           ))}
         </div>
-        {v === 'cash' ? (
+        {view === 'cash' ? (
           <span className="sl-close-hint cf-hint">
             <b>เงินเข้าตามปี</b>
             <span className="sl-long"> นับแต่ละงวดในปีที่รับเงินหรือครบกำหนด ไม่ว่างานเป็นของปีไหน</span>
@@ -166,13 +173,13 @@ export function Sales() {
         )}
       </div>
       <p className="sl-m-hint">
-        {v === 'cash' ? <><b>เงินเข้าตามปี</b> นับแต่ละงวดในปีที่รับเงินหรือครบกำหนด ไม่ว่างานเป็นของปีไหน</> : <><b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b> ปิดงานแล้วงานจะย้ายไปแท็บ “ปิดงาน”</>}
+        {view === 'cash' ? <><b>เงินเข้าตามปี</b> นับแต่ละงวดในปีที่รับเงินหรือครบกำหนด ไม่ว่างานเป็นของปีไหน</> : <><b>ได้งาน (YES) ยังไม่ใช่ปิดงาน</b> ปิดงานแล้วงานจะย้ายไปแท็บ “ปิดงาน”</>}
       </p>
-      {v === 'table' && <TableView e={e} S={S} F={fT} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={tableYear} today={today} openN={openN} />}
-      {v === 'dash' && <SalesDash S={S} deals={yearDeals} today={today} year={ui.slYear} />}
-      {v === 'cash' && <CashView S={S} today={today} year={ui.slYear} />}
-      {v === 'closed' && <ClosedView S={S} F={f} deals={closedRows} facets={yearDeals} total={closedN} today={today} />}
-      {v === 'log' && <LogView S={S} year={year} />}
+      {view === 'table' && <TableView e={e} S={S} F={fT} deals={shown.filter((d) => d.jobStatus === 'open')} base={noQuick.filter((d) => d.jobStatus === 'open')} all={noQuick} facets={tableYear} today={today} openN={openN} />}
+      {view === 'dash' && <SalesDash S={S} deals={yearDeals} today={today} year={ui.slYear} />}
+      {view === 'cash' && <CashView S={S} today={today} year={ui.slYear} />}
+      {view === 'closed' && <ClosedView S={S} F={f} deals={closedRows} facets={yearDeals} total={closedN} today={today} />}
+      {view === 'log' && <LogView S={S} year={year} />}
     </>
   );
 }
@@ -327,8 +334,8 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
             ส่งออก CSV
             <small>{deals.length < yearTotal ? `${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรอง` : `ทั้งตาราง ${fmtN(yearTotal)} รายการ · เปิดใน Excel`}</small>
           </button>
-          {e.can('admin') && <button role="menuitem" className="menu-i" onClick={() => { close(); fileRef.current?.click(); }}>นำเข้าจาก Sales Tracker เดิม<small>ไฟล์สำรอง JSON หรือ CSV / Excel</small></button>}
-          {e.can('admin') && <button role="menuitem" className="menu-i" onClick={() => { close(); setLists(true); }}>จัดการหมวด / SOURCE / Services</button>}
+          {e.can('set.data') && <button role="menuitem" className="menu-i" onClick={() => { close(); fileRef.current?.click(); }}>นำเข้าจาก Sales Tracker เดิม<small>ไฟล์สำรอง JSON หรือ CSV / Excel</small></button>}
+          {e.can('set.lists') && <button role="menuitem" className="menu-i" onClick={() => { close(); setLists(true); }}>จัดการหมวด / SOURCE / Services</button>}
         </div>
       )}
       <input ref={fileRef} type="file" accept=".json,.csv,.xlsx" style={{ display: 'none' }} onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) doImport(f); }} />
@@ -476,7 +483,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
         search={base ? undefined : search}
         lead={
           <>
-          {job === 'open' && <LensChip S={S} year={F.year} today={today} value={ui.slLens} onChange={(slLens) => set({ slLens, slCollapsed: {} })} onCashTab={() => set({ slView: 'cash' })} />}
+          {job === 'open' && e.can('view.cash') && <LensChip S={S} year={F.year} today={today} value={ui.slLens} onChange={(slLens) => set({ slLens, slCollapsed: {} })} onCashTab={() => set({ slView: 'cash' })} />}
           <DateFilter
             value={F.date}
             onChange={(date) => up({ date })}
@@ -612,9 +619,11 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const acts = useSalesActs();
   // the lens "เงินเข้าตามปี": each deal's money in the year (a date range narrows it), and the cards over the
   // same money (the year's, or the range's: they say which)
-  const cash = ui.slLens === 'cash' ? cashLensOf(S, all, ui.slYear, date?.r ?? null, today) : null;
-  // an account that can only read: no adding, no stage notes, no edits in the rows
-  const ro = !e.can('edit');
+  const cash = ui.slLens === 'cash' && e.can('view.cash') ? cashLensOf(S, all, ui.slYear, date?.r ?? null, today) : null;
+  // an account that may not edit deals: no adding, no stage notes, no edits in the rows (one that may
+  // edit only its own deals gets each row's own answer, ForDeal)
+  const ro = !e.can('edit.deal');
+  const money = e.can('view.money');
   const cardRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState('');
   const [pop, setPop] = useState('');
@@ -803,7 +812,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const stages = S.cfg.stages;
   return (
     <TkCtx.Provider value={tk}>
-      {cash ? (
+      {!money ? null : cash ? (
         <CashKpiRow K={cash.K} year={ui.slYear} range={date} onLate={() => set({ slF: { ...ui.slF, quick: 'paylate' }, slCollapsed: {} })} />
       ) : (
         <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} />
@@ -849,7 +858,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                     <span className="sl-s-tot">{cash ? (cash.range ? 'ในช่วงนี้' : `ปี ${ui.slYear}`) : 'Forecast'} <b>{fmtMoney(sum.fc) || '0'}</b></span>
                   </div>
                 </div>
-                {!col && list.map((d) => <DealCard key={d.id} d={d} />)}
+                {!col && list.map((d) => <ForDeal key={d.id} d={d}><DealCard d={d} /></ForDeal>)}
                 {!col && !ro && <button type="button" className="lnk sl-m-add" onClick={() => addIn(e, set, sec, ui.slYear)}>เพิ่มลูกค้าในหมวด {name}</button>}
               </section>
             );
@@ -857,7 +866,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
         </div>
       ) : (
         <div className="sl-card" ref={cardRef} onFocus={keepFocusInView} onClick={rowClick}>
-          <table className="sl-table" aria-label={`Sales Tracker ปี ${ui.slYear} งานที่ยังเปิด`}>
+          <table className={'sl-table' + (money ? '' : ' sl-nomoney')} aria-label={`Sales Tracker ปี ${ui.slYear} งานที่ยังเปิด`}>
             <colgroup>
               <col className="w-chev" /><col className="w-name" /><col className="w-resp" /><col className="w-src" /><col className="w-stage" />
               <col className="w-last" /><col className="w-fc" /><col className="w-ac" /><col className="w-st" /><col className="w-act" />
@@ -976,7 +985,22 @@ function SecMeta({ sum }: { sum: { n: number; od: number; rd: number } }) {
 }
 
 /** A deal's row, and when it is open: its stages (one child row each) and the closing row, framed together. */
-function DealRows({ d, open, stages }: { d: Deal; open: boolean; stages: string[] }) {
+/** A deal's rows and card read the table's context with this deal's own answer to "may edit": an
+ *  account that may edit only its own deals (scope "own") sees another person's deal read-only. */
+function ForDeal({ d, children }: { d: Deal; children: ReactNode }) {
+  const tk = useTk();
+  const ro = tk.ro || !tk.e.canDeal('edit.deal', d);
+  return <TkCtx.Provider value={ro === tk.ro ? tk : { ...tk, ro }}>{children}</TkCtx.Provider>;
+}
+
+function DealRows(p: { d: Deal; open: boolean; stages: string[] }) {
+  return (
+    <ForDeal d={p.d}>
+      <DealRowsIn {...p} />
+    </ForDeal>
+  );
+}
+function DealRowsIn({ d, open, stages }: { d: Deal; open: boolean; stages: string[] }) {
   const { S, today } = useTk();
   const t = stageTrack(S, d, today);
   const kids = open ? kidList(S, d, today) : [];
@@ -1456,7 +1480,7 @@ function kidList(S: SalesState, d: Deal, today: string, showAll = false, editSta
 }
 
 function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
-  const { ui, set } = useApp();
+  const { engine: e, ui, set } = useApp();
   const tk = useTk();
   const { S, today, ro } = tk;
   const stages = S.cfg.stages;
@@ -1593,13 +1617,16 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         } else if (isNow && !ro) {
           note = <button type="button" className="lnk" data-qa={d.id + ':' + p + ':add'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)}>บันทึกวันที่และโน้ต</button>;
         }
-        // QUOTATION with a quotation: "แนบฉบับแก้ไข" always in view by its note, the version under its figure
+        // QUOTATION with a quotation: its check status (package notify) and "แนบฉบับแก้ไข" always in view by
+        // its note, the version under its figure
         const qv = p === QUOTE_STAGE ? qtView(S, d) : null;
-        if (qv?.head && !ro)
+        const qcv = qv?.head ? e.qtCheckFor(qv.head.doc) : null;
+        if (qv?.head && (!ro || qcv))
           note = (
             <span className="qt-kn">
               {note}
-              <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>
+              {qcv && <QtCheckLine doc={qv.head.doc} v={qcv} bare />}
+              {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>}
             </span>
           );
         const date = s.d ? (st === 'planned' ? <span className="sl-kdate">นัด {dmTh(s.d)}<small>{agoTh(s.d, today)}</small></span> : <span className="sl-kdate">{isoTh(s.d)}</span>) : null;
@@ -2251,7 +2278,7 @@ function CardWhen({ d, lc }: { d: Deal; lc: string }) {
 
 /** The open card: the stages as a short vertical timeline, then the closing step. */
 function CardKids({ d, t }: { d: Deal; t: Track }) {
-  const { ui, set } = useApp();
+  const { engine: e, ui, set } = useApp();
   const tk = useTk();
   const { S, today, ro } = tk;
   const stages = S.cfg.stages;
@@ -2310,6 +2337,16 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
             <>
               {right}
               {fig ? <StageAmount fig={fig} ver={p === QUOTE_STAGE ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+            </>
+          );
+        // the quotation's check status (package notify), by its figure
+        const qh = p === QUOTE_STAGE && !editing ? qtView(S, d).head : null;
+        const qcv = qh ? e.qtCheckFor(qh.doc) : null;
+        if (qh && qcv)
+          right = (
+            <>
+              {right}
+              <QtCheckLine doc={qh.doc} v={qcv} bare />
             </>
           );
         // a QUOTATION done (its quotation attached) is edited here too: a revision, its figures, its file
@@ -2468,7 +2505,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
   return (
     <>
       <p className="sl-closed-sum">
-        <span>ปิดแล้ว <b>{fmtN(deals.length)}</b> งาน{on ? ` จาก ${fmtN(total)} (${which})` : ''} · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></span>
+        <span>ปิดแล้ว <b>{fmtN(deals.length)}</b> งาน{on ? ` จาก ${fmtN(total)} (${which})` : ''}{e.can('view.money') && <> · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></>}</span>
         <span className="t-meta">งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี</span>
       </p>
       <Toolbar S={S} F={F} yearDeals={facets} today={today} job="closed" shown={deals.length} total={total} />
@@ -2505,7 +2542,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                         return x && <span className="sl-bdate-w">{BASIS_TH[extra.basis].short} {dmTh(x.d)} · {x.what}</span>;
                       })()}
                     </td>
-                    <td className="r">{e.can('edit') && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}</td>
+                    <td className="r">{e.canDeal('edit.deal', d) && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}</td>
                   </tr>
                 );
               })}

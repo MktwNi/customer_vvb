@@ -14,6 +14,7 @@ import { SelField } from './Select';
 import { DateField, Notice } from './ui';
 import { Icon } from './icons';
 import { useSalesActs } from './SalesToast';
+import { QtBack, QtCheckLine } from './QtCheckSheet';
 
 const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
 const BASIS_LONG: [DealDoc['basis'], string][] = [['total', 'รวมทั้งสิ้น (รวม VAT)'], ['subtotal', 'ก่อน VAT'], ['netPay', 'หลังหัก ณ ที่จ่าย']];
@@ -41,9 +42,9 @@ export function deleteQt(e: GccEngine, d: Deal, v: QtView, say: (t: string) => v
  * for a revision of that version.
  */
 export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => void }) {
-  const { engine: e } = useApp();
+  const { engine: e, set } = useApp();
   const acts = useSalesActs();
-  const ro = !e.can('edit');
+  const ro = !e.can('docs.up');
   const [form, setForm] = useState(false);
   const [swap, setSwap] = useState(false);
   const [tick, setTick] = useState(0);
@@ -70,6 +71,9 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
   const goes = h.state === 'cur' ? TARGET_TH.forecast : v.typed && doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : doc.target === 'forecast' ? 'ไม่ได้ใช้ (มียอดที่ใหม่กว่า)' : TARGET_TH[doc.target];
   const meta = [doc.docDate ? 'ลงวันที่ ' + isoTh(doc.docDate) : '', 'แนบโดย ' + (doc.by || 'ไม่ระบุ'), doc.name, doc.fileId ? 'Drive ของทีม' : 'อยู่ในเครื่องที่แนบ รออัปโหลด'].filter(Boolean).join(' · ');
   const olds = v.versions.length > 1 ? [...v.versions].reverse() : [];
+  // the check (package notify): its status, and "ตรวจใบนี้" for a checker while it waits
+  const cv = e.qtCheckFor(doc);
+  const check = cv?.status === 'wait' && !e.checkBlock(doc) ? () => set({ qtCheck: doc.id, qtSig: '' }) : undefined;
   return (
     <div className={'sl-docc qt' + (warn ? ' warn' : '')}>
       <div className="sl-docc-r">
@@ -81,7 +85,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
               <span className="qt-v">· ฉบับที่ {h.n}</span>
             </span>
             <small>{meta}</small>
-            {/* the check status ("รอตรวจ" / "ตรวจแล้ว" / "ส่งกลับแก้ไข") goes here once notifications ship */}
+            {cv && <QtCheckLine doc={doc} v={cv} onCheck={check} />}
           </span>
           <span className="sl-docc-a">
             <b>{doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '—'}</b>
@@ -89,6 +93,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
           </span>
         </div>
       </div>
+      <QtBack v={cv} />
       {warn && (
         <p className="sl-docc-w">
           {warn}
@@ -405,7 +410,7 @@ export function QtSwap({ d, doc, n, onClose, onSaved }: { d: Deal; doc: DealDoc;
  * editor's note field follows, see lib/stepEditor).
  */
 export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRevise: (docId: string) => void; onChange?: () => void }) {
-  const { engine: e } = useApp();
+  const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const [form, setForm] = useState(false);
   const [swap, setSwap] = useState(false);
@@ -415,6 +420,7 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
   const open = (x: DealDoc) => void openDocFile(e, x).then(() => setTick((k) => k + 1));
   const olds: QtVersion[] = v.versions.filter((x) => x !== h).reverse();
   const goes = h.state === 'cur' ? TARGET_TH.forecast : v.typed && doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : TARGET_TH[doc.target];
+  const cv = e.qtCheckFor(doc);
   return (
     <>
       <div className="qt-mc">
@@ -422,9 +428,16 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
         <span className="qt-mc-t">
           <span>{doc.docNo || KIND_TH.quotation} · ฉบับที่ {h.n}</span>
           <span className="qt-mc-m"><b>{doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : 'ไม่ระบุยอด'}</b>{doc.docDate ? ' · ' + isoTh(doc.docDate) : ''}</span>
-          <span className={'qt-mc-g' + (h.state === 'cur' ? ' ok' : '')}>{goes}</span>
+          <span className={'qt-mc-g' + (h.state === 'cur' ? ' ok' : '')}>
+            {cv && <QtCheckLine doc={doc} v={cv} bare />}
+            {goes}
+          </span>
         </span>
       </div>
+      <QtBack v={cv} />
+      {cv?.status === 'wait' && !e.checkBlock(doc) && (
+        <button type="button" className="lnk qt-go" onClick={() => set({ qtCheck: doc.id, qtSig: '' })}>ตรวจใบนี้</button>
+      )}
       {form ? (
         <QtForm d={d} doc={doc} n={h.n} onDone={(said) => (setForm(false), said && (acts.say(said), onChange?.()))} />
       ) : (

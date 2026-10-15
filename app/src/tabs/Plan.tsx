@@ -49,8 +49,8 @@ type CellEntry = { p: PayK; x?: undefined } | { x: TaskK; p?: undefined };
 
 export function Plan() {
   const { engine: e, ui, set, open, openSched } = useApp();
-  // an account that can only read sees the plan but makes no appointments
-  const ro = !e.can('edit');
+  // an account without นัดหมาย sees the plan but makes no appointments
+  const ro = !e.can('edit.task');
   const v = useEngineVersion();
   const C = e.crm, D = e.B.D;
   const today = todayISO();
@@ -363,7 +363,7 @@ export function Plan() {
                 </button>
                 <span style={{ fontSize: 13, color: 'var(--ink-2)', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
                 {/* the stage reads as plain text; a picker under the pointer (plain text for viewers) */}
-                <Select variant="cell" className="pl-stage" value={st[0]} disabled={ro} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
+                <Select variant="cell" className="pl-stage" value={st[0]} disabled={!e.can('edit.cust')} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>

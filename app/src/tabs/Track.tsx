@@ -298,7 +298,7 @@ export function Track() {
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 4 }}>
                   <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="lnk">ดูทั้งหมด {fmtN(all.length)}</button>
                   <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} className="lnk">วางแผนติดต่อ</button>
-                  {k === 'watch' && e.can('edit') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="lnk">ส่งเข้า Sales Tracker</button>}
+                  {k === 'watch' && e.can('edit.deal') && e.can('view.sales') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="lnk">ส่งเข้า Sales Tracker</button>}
                 </div>
               )}
             </div>

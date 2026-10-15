@@ -298,7 +298,7 @@ describe('swapping a quotation\'s file (เปลี่ยนไฟล์)', () 
     expect(sheet(`ddoc/${d.id}/${v1.id}`)).toBeNull();
     expect(dealMoney(A.sales, A.sales.deals[d.id]).fcDoc!.id).toBe(swapped.id);
     (A as unknown as { can: () => boolean }).can = () => false;
-    await expect(A.replaceDocFile(d.id, swapped.id, pdf('x.pdf'))).rejects.toThrow('บัญชีดูอย่างเดียว');
+    await expect(A.replaceDocFile(d.id, swapped.id, pdf('x.pdf'))).rejects.toThrow('บัญชีของคุณเปลี่ยนไฟล์ไม่ได้');
     A.dispose();
   });
 });

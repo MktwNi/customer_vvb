@@ -147,7 +147,10 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
   const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
   // การรับเงิน, pinned after ผู้รับผิดชอบ: its choices count the money of the range
-  const fields = [...fields0.filter((x) => x.pinned), payField(lines, moneyR, date ? rangeTh(moneyR) : `ทั้งปี ${year}`, undated, payCount), ...fields0.filter((x) => !x.pinned)];
+  // without ดูยอดเงิน (the script sends no amounts) the money widgets go: the payment filter, the money
+  // card, the money summaries and the quarter card
+  const money = e.can('view.money');
+  const fields = [...fields0.filter((x) => x.pinned), ...(money ? [payField(lines, moneyR, date ? rangeTh(moneyR) : `ทั้งปี ${year}`, undated, payCount)] : []), ...fields0.filter((x) => !x.pinned)];
 
   // top sellers: actual first, then forecast; closed deals per person
   const yesBy: Record<string, number> = {};
@@ -238,7 +241,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               <small>{sub2}</small>
             </div>
           ))}
-          <CashStat lines={lines} pay={F.pay || ''} r={moneyR} ranged={!!date} when={qPick ? ` · ไตรมาส ${qPick}` : date ? ' · ในช่วงนี้' : ''} />
+          {money && <CashStat lines={lines} pay={F.pay || ''} r={moneyR} ranged={!!date} when={qPick ? ` · ไตรมาส ${qPick}` : date ? ' · ในช่วงนี้' : ''} />}
         </div>
       </div>
 
@@ -296,7 +299,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                 <b>{top[0]}</b>
                 <span>{`ลูกค้า ${fmtN(top[1].n)} ราย · ปิดได้ ${fmtN(yesBy[top[0]] || 0)}`}</span>
               </div>
-              <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ${baht(top[1].actual)} บาท` : `Forecast ${baht(top[1].forecast)} บาท`}</span>
+              {money && <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ${baht(top[1].actual)} บาท` : `Forecast ${baht(top[1].forecast)} บาท`}</span>}
               {sellers.length > 1 && (
                 <div className="sd-runners">
                   {sellers.slice(1, 4).map(([k, v], i) => (
@@ -512,18 +515,18 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </section>
 
         <section className="sd-card sd-acc-card" aria-label="รายละเอียด">
-          <Acc title="สรุปยอดตามผู้รับผิดชอบ" open={!!acc.resp} onToggle={() => setAcc({ ...acc, resp: !acc.resp })}>
+          {money && <Acc title="สรุปยอดตามผู้รับผิดชอบ" open={!!acc.resp} onToggle={() => setAcc({ ...acc, resp: !acc.resp })}>
             <GroupTable rows={Object.entries(st.byResp).sort((a, b) => b[1].forecast - a[1].forecast)} />
-          </Acc>
-          <Acc title="สรุปยอดตามแหล่งที่มา" open={!!acc.ref} onToggle={() => setAcc({ ...acc, ref: !acc.ref })}>
+          </Acc>}
+          {money && <Acc title="สรุปยอดตามแหล่งที่มา" open={!!acc.ref} onToggle={() => setAcc({ ...acc, ref: !acc.ref })}>
             <GroupTable rows={Object.entries(st.byReferral).sort((a, b) => b[1].forecast - a[1].forecast)} />
-          </Acc>
+          </Acc>}
           <Acc title="ลูกค้าตามช่องทาง" sub="SOURCE · ลูกค้าหลายช่องทางนับในทุกช่องทาง" open={!!acc.src} onToggle={() => setAcc({ ...acc, src: !acc.src })}>
             <Bars items={srcRows.map(([k, x]) => [k, x.n])} />
           </Acc>
-          <Acc title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ" open={!!acc.fsrc} onToggle={() => setAcc({ ...acc, fsrc: !acc.fsrc })}>
+          {money && <Acc title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ" open={!!acc.fsrc} onToggle={() => setAcc({ ...acc, fsrc: !acc.fsrc })}>
             <Bars items={srcRows.map(([k, x]) => [k, x.forecast])} fmt={(n) => fmtMoney(n)} />
-          </Acc>
+          </Acc>}
           <Acc title="Win rate ตามช่องทาง" sub="ปิดได้ ÷ รู้ผลแล้ว" open={!!acc.wsrc} onToggle={() => setAcc({ ...acc, wsrc: !acc.wsrc })}>
             <Bars items={winRateBySource(st.bySource)} unit="%" keepZero />
           </Acc>
@@ -537,17 +540,17 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
       </div>
 
       {/* added under the original grid: the year's money by quarter (totals; units come with commission) */}
-      <div className="sd-grid2 one">
+      {money && <div className="sd-grid2 one">
         <QuarterCard
           Y={Y}
           year={year}
           now={beOf(today) === year ? quarterOf(today) : -1}
           pick={qPick - 1}
-          canPlan={e.can('edit')}
+          canPlan={e.can('edit.pay')}
           onCashTab={() => set({ slView: 'cash', slCashShow: '', slCashPick: null })}
           onPlan={(id) => (id ? set({ deal: id, dpPlan: 'edit' }) : set({ slView: 'cash', slCashShow: 'undated', slCashPick: null }))}
         />
-      </div>
+      </div>}
     </div>
   );
 }

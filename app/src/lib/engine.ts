@@ -15,9 +15,13 @@ import * as TGOSync from './tgoSync';
 import { NOTE_CAP, PERSON_FIELDS, personSuggestions, toPerson, type PersonForm } from './people';
 import {
   CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
-  type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
+  parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
-import { can as canCap, canWriteKey as canKey, derivePk, normUser, tempPassword } from './auth';
+import { derivePk, normUser, tempPassword } from './auth';
+import {
+  BUILTIN, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, parseAudit, parseGrants, parseReqs, parseRoles, sameName, capsWire,
+  type AuditRow, type CapAsk, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
+} from './caps';
 import {
   ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
@@ -26,7 +30,11 @@ import {
 import { cashYear, type CashLine } from './sales';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
-import { isQtVersion, qtPrev, qtVersions } from './quotes';
+import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
+import {
+  fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
+  type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
+} from './notify';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -49,9 +57,20 @@ const newestPerKey = (ops: SyncOp[]) => {
   return [...m.values()];
 };
 /** The script's answer to login / claim. */
-interface SignIn extends Record<string, unknown> { tok: string; exp: number; me: { u: string; name: string; role: Role }; mc?: boolean }
-/** An account as the admin page lists it. */
-export interface TeamUser { u: string; name: string; role: Role; on: number | boolean; mc: boolean; ll: string; c: string; locked?: number }
+interface SignIn extends Record<string, unknown> { tok: string; exp: number; me: { u: string; name: string; role: Role } & Record<string, unknown>; mc?: boolean }
+/** An account as the admin page lists it. `role` is the account's role id (a script with configurable
+ *  roles may name one an admin made); `em` / `ok` its notification e-mail and whether it is verified
+ *  (Code.gs v4 with notifications; left out by older scripts). */
+export interface TeamUser { u: string; name: string; role: Role; on: number | boolean; mc: boolean; ll: string; c: string; locked?: number; em?: string; ok?: number | boolean }
+/** Everything the admin page reads in one `users` call. `v4`: the script has configurable roles (it sent
+ *  its roles); an older one sends only the accounts, and the built-in roles stand in. */
+export interface TeamDir { users: TeamUser[]; roles: RoleDef[]; grants: Record<string, Grants>; reqs: Record<string, ReqPending>; audit: AuditRow[]; v4: boolean }
+/** What a request asks for (req_send). */
+export interface ReqInput { k: 'role' | 'caps'; role?: string; caps?: CapAsk[]; note: string; until?: string }
+/** A script that does not know an action yet (deployed before configurable roles). */
+const OLD_SCRIPT = 'สคริปต์ของทีมยังไม่รองรับบทบาทและคำขอสิทธิ์ — ให้ผู้ดูแลระบบอัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่';
+/** The same for the notification actions (qt_check, notify_*). */
+const OLD_NOTIFY = 'สคริปต์ของทีมยังไม่รองรับการแจ้งเตือนและการตรวจใบเสนอราคา — ให้ผู้ดูแลระบบอัปเดต Code.gs ตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน';
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -782,7 +801,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ dedup
   /** Record a merge/split decision; returns the id the given company now resolves to. */
   decide(key: string, v: 'merge' | 'split' | null) {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.dedup')) return this.deny();
     if (v == null) delete this.dec[key];
     else this.dec[key] = v;
     this.op(keyOf.dedup(key), v ?? undefined);
@@ -802,16 +821,75 @@ export class GccEngine {
     prefs.set(PREF.me, v);
     this.emit();
   }
-  /** The signed-in account's role, or null when the team has no accounts (team code, or this
-   *  browser only): then everything is allowed, as before accounts. */
+  /** The signed-in account's role (the built-in word the script reports: admin / sales / viewer), or
+   *  null when the team has no accounts (team code, or this browser only): then everything is allowed,
+   *  as before accounts. What the account may do is caps(). */
   role(): Role | null {
     return this.teamCfg?.mode === 'accounts' && this.session ? this.session.role : null;
   }
-  can(cap: 'edit' | 'delete' | 'admin') {
-    return canCap(this.role(), cap);
+  /** What the signed-in account may do (lib/caps.ts); null = no accounts: everything. From a script that
+   *  sends no capabilities (deployed before roles became configurable): the built-in caps of its role. */
+  myCaps(): CapSet | null {
+    return this.role() == null ? null : capsOf(this.session);
   }
-  canWriteKey(k: string, del: boolean) {
-    return canKey(this.role(), k, del);
+  /** The account's role name: the one the script sent, a built-in's, or the id. */
+  roleName(): string {
+    const s = this.session;
+    if (!s) return '';
+    const id = s.rid || s.role;
+    return s.rn || (isBuiltin(id) ? BUILTIN[id].n : id);
+  }
+  /** The script sent capabilities (configurable roles and permission requests are there). */
+  get rolesLive() {
+    return !!this.session?.caps;
+  }
+  /** The team's roles as last read (teamRoles, or the admin page): names for request lines. */
+  knownRoles: RoleDef[] = parseRoles(null);
+  /** A role's name by id (a role read from the script, a built-in, else the id itself). */
+  roleNameOf = (id: string) => this.knownRoles.find((r) => r.id === id)?.n || (isBuiltin(id) ? BUILTIN[id].n : id);
+  /** Every role and what it lets people do (the request dialog, สิทธิ์ของฉัน): read through `me`, which a
+   *  script with configurable roles answers with its roles; an older one: the built-in three. */
+  async teamRoles(): Promise<RoleDef[]> {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'me' });
+    this.knownRoles = parseRoles(r.roles);
+    this.emit();
+    return this.knownRoles;
+  }
+  /**
+   * May this account do `cap`? `owner`: whose record it is (a deal's ผู้รับผิดชอบ, a record's writer),
+   * for a capability held only for its own work; left out, any scope counts (show the control at all).
+   */
+  can(cap: CapId, owner?: string) {
+    return capCan(this.myCaps(), cap, owner === undefined ? undefined : sameName(owner, this.me()));
+  }
+  /** `can` for a deal: its ผู้รับผิดชอบ decides an `own` scope. */
+  canDeal(cap: CapId, d: Pick<Deal, 'resp'> | null | undefined) {
+    return this.can(cap, d ? d.resp || '' : undefined);
+  }
+  /** The account can send changes at all (a view-only one sends nothing). */
+  canWrite() {
+    return hasWrite(this.myCaps());
+  }
+  /** May this account write (or delete) record `k`? An `own` capability looks at the record's owner: the
+   *  deal's ผู้รับผิดชอบ (here and in the new value), or who wrote the record. */
+  canWriteKey(k: string, del: boolean, v?: unknown) {
+    const caps = this.myCaps();
+    if (caps == null) return true;
+    const rule = keyRule(k, del);
+    let own: boolean | undefined;
+    if (rule && rule !== 'never' && rule.own) {
+      const me = this.me();
+      const [type, id, rest] = k.split('/');
+      if (rule.own === 'resp') {
+        const d = this.sales.deals[id];
+        const nv = type === 'deal' && v && typeof v === 'object' ? (v as { resp?: string }).resp : undefined;
+        own = !!d && sameName(d.resp, me) && (type !== 'deal' || del || sameName(nv ?? d.resp, me));
+      } else {
+        const by = type === 'log' ? (this.crm.log[id] || []).find((x) => x.id === rest)?.by : type === 'dact' ? this.sales.acts?.[`${id}/${rest}`]?.by : undefined;
+        own = sameName(by, me);
+      }
+    }
+    return capWrite(caps, k, del, own);
   }
   /** A change this account may not make: nothing happens, and it is said why. */
   private deny() {
@@ -866,12 +944,13 @@ export class GccEngine {
     else this.saveCrm();
   }
   delLog(id: number | string, l: LogEntry) {
-    this.crm.log[id] = (this.crm.log[id] || []).filter((x) => x !== l);
+    // queued while the entry is still here: an "own" capability checks who wrote it (canWriteKey)
     if (l.id) this.op(keyOf.log(id, l.id));
+    this.crm.log[id] = (this.crm.log[id] || []).filter((x) => x !== l);
     this.saveCrm();
   }
   addTeam(name: string) {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.users')) return this.deny();
     const C = this.crm;
     if (name && !C.team.includes(name)) {
       C.team.push(name);
@@ -881,7 +960,7 @@ export class GccEngine {
     this.saveCrm();
   }
   delTeam(name: string) {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.users')) return this.deny();
     this.crm.team = this.crm.team.filter((x) => x !== name);
     this.op(keyOf.team(name));
     this.saveCrm();
@@ -926,7 +1005,7 @@ export class GccEngine {
   }
   /** Create one task per company; with `perDay` > 0 spread them across working days. */
   addTasks(ids: number[], p: { type: TaskType; date: string; time: string; note: string }, perDay = 0, pid?: string) {
-    if (!this.can('edit')) return this.deny();
+    if (!this.can('edit.task')) return this.deny();
     let d = p.date, n = 0;
     ids.forEach((id) => {
       const c = this.company(id);
@@ -943,7 +1022,7 @@ export class GccEngine {
     this.saveCrm();
   }
   autoPlan(list: Company[], perDay: number) {
-    if (!this.can('edit')) return this.deny();
+    if (!this.can('edit.task')) return this.deny();
     let d = nextWork(addDays(todayISO(), 1)), n = 0;
     list.forEach((c) => {
       if (n >= perDay) {
@@ -971,13 +1050,13 @@ export class GccEngine {
 
   // ---- team backup
   exportCrm() {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.data')) return this.deny();
     const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom, people: this.people };
     downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), 'GCC_ข้อมูลทีม_' + todayISO() + '.json');
   }
   /** Merge a teammate's backup into local data — never deletes; newer contact edits win. */
   async importCrm(f: File) {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.data')) return this.deny();
     // While connected, a backup only fills gaps: instead of pushing every value in the file (which
     // could revert newer team values or resurrect deleted items), re-run the first-connect merge.
     this.importing = !!this.teamCfg;
@@ -1170,7 +1249,7 @@ export class GccEngine {
     this.emit();
   }
   deleteCustomer(id: number) {
-    if (!this.can('delete')) return this.deny();
+    if (!this.can('del.rec')) return this.deny();
     if (!this.custom[id]) return;
     delete this.custom[id];
     this.op(keyOf.cust(id));
@@ -1261,7 +1340,7 @@ export class GccEngine {
   /** Delete a person. Their calls and notes at a company stay in its contact log; those kept under the
    *  person (no company the team shares) are shown nowhere else, so they go too. */
   deletePerson(id: string) {
-    if (!this.can('delete')) return this.deny();
+    if (!this.can('del.rec')) return this.deny();
     if (!this.people[id]) return;
     delete this.people[id];
     this.batchOps(() => {
@@ -1402,6 +1481,8 @@ export class GccEngine {
       this.me(),
     );
     d.client = (d.client || '').trim().slice(0, 200) || 'ลูกค้าใหม่';
+    // an account that may edit only its own deals adds deals of its own (else the team would refuse it)
+    if (this.myCaps()?.['edit.deal'] === 'own') d.resp = this.me();
     this.putDeal(d);
     this.salesLog(d, 'เพิ่มลูกค้า', d.section);
     this.saveSales();
@@ -1409,7 +1490,7 @@ export class GccEngine {
   }
   /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped. */
   addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
-    if (!this.can('edit')) {
+    if (!this.can('edit.deal')) {
       this.deny();
       return { added: 0, skipped: 0 };
     }
@@ -1467,6 +1548,10 @@ export class GccEngine {
   setStep(id: string, stage: string, st: DealStep, quiet = false, auto = false) {
     const d = this.sales.deals[id];
     if (!d) return;
+    // the note a receipt or a document fills in is the deal's (dstep/): an account that may record money
+    // or attach documents but not edit this deal (บัญชี/การเงิน) leaves the stage as it is, rather than
+    // have every receipt come back refused
+    if (auto && !this.canDeal('edit.deal', d)) return;
     const k = `${id}/${stage}`;
     const n = (st.n || '').slice(0, NOTE_MAX);
     const date = st.d || (n.trim() ? todayISO() : '');
@@ -1499,7 +1584,7 @@ export class GccEngine {
     this.saveSales();
   }
   deleteDeal(id: string) {
-    if (!this.can('delete')) return this.deny();
+    if (!this.can('del.rec')) return this.deny();
     const d = this.sales.deals[id];
     if (!d) return;
     this.batchOps(() => this.deleteDealNow(d));
@@ -1533,7 +1618,7 @@ export class GccEngine {
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
   setSalesList(name: keyof SalesCfg, items: string[]) {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.lists')) return this.deny();
     // a stage name is part of its notes' record keys (dstep/<deal>/<stage>), so no "/" there; other
     // lists are plain values ("SET/mai")
     const v = [...new Set(items.map((x) => (name === 'stages' ? x.trim().replace(/\//g, '-') : x.trim())).filter(Boolean))];
@@ -1550,7 +1635,7 @@ export class GccEngine {
     this.saveSales();
   }
   renameSection(from: string, to: string) {
-    if (!this.can('admin')) return this.deny();
+    if (!this.can('set.lists')) return this.deny();
     to = to.trim();
     if (!to || to === from) return;
     const S = this.sales.cfg;
@@ -1604,7 +1689,7 @@ export class GccEngine {
    */
   setPlan(dealId: string, lines: PlanInput[]): { kept: string[] } {
     const S = this.sales, d = S.deals[dealId], kept: string[] = [];
-    if (!this.can('edit')) return this.deny(), { kept };
+    if (!this.canDeal('edit.pay', d)) return this.deny(), { kept };
     if (!d) return { kept };
     const had = planLines(S, d), at = new Date().toISOString(), by = this.me();
     const old = had ? [] : planStart(S, d, todayISO()).lines.filter((x) => x.old && x.amt != null);
@@ -1651,8 +1736,8 @@ export class GccEngine {
    * null when nothing was done.
    */
   quickPlan(dealId: string, n: number, shares?: number[]): { stages: string[]; amounts: (number | null)[] } | null {
-    if (!this.can('edit')) return this.deny(), null;
     const S = this.sales, d = S.deals[dealId];
+    if (!this.canDeal('edit.pay', d)) return this.deny(), null;
     if (!d) return null;
     const today = todayISO(), m = dealMoney(S, d), ps = payState(S, d, today), start = planStart(S, d, today);
     const keep: PlanInput[] = ps.plan
@@ -1678,8 +1763,8 @@ export class GccEngine {
   }
   /** Change one installment's plan fields in place (the panel's inline edit); a stage without a line gets one. */
   updatePayLine(dealId: string, stage: string, patch: Partial<Omit<PlanInput, 'stage'>>) {
-    if (!this.can('edit')) return this.deny();
     const d = this.sales.deals[dealId];
+    if (!this.canDeal('edit.pay', d)) return this.deny();
     if (!d || !stage || stage.includes('/')) return;
     const had = !!planLines(this.sales, d);
     this.batchOps(() => {
@@ -1695,8 +1780,8 @@ export class GccEngine {
    * when this made the deal ready to close (the UI then offers ปิดงาน).
    */
   markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean {
-    if (!this.can('edit')) return this.deny(), false;
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
+    if (!this.canDeal('edit.pay', d)) return this.deny(), false;
     if (!d || !cur) return false;
     const today = todayISO(), was = closeReady(S, d, today);
     const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, fullAt: null, ...(r.how !== undefined ? { how: r.how } : {}), at: new Date().toISOString(), by: this.me() })!;
@@ -1714,8 +1799,8 @@ export class GccEngine {
   }
   /** Undo a hand receipt ("ยกเลิกการรับ"): the stage note it filled in goes too, while it is unchanged. */
   unmarkPaid(dealId: string, stage: string) {
-    if (!this.can('edit')) return this.deny();
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
+    if (!this.canDeal('edit.pay', d)) return this.deny();
     if (!d || !cur || (!cur.rcv && cur.got == null && !cur.full)) return;
     const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur);
     this.batchOps(() => {
@@ -1730,8 +1815,8 @@ export class GccEngine {
    *  what has come in now (PayLine.fullAt): a receipt deleted or changed later opens it again. Returns
    *  true when this made the deal ready to close. */
   setPayFull(dealId: string, stage: string, full: boolean): boolean {
-    if (!this.can('edit')) return this.deny(), false;
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
+    if (!this.canDeal('edit.pay', d)) return this.deny(), false;
     if (!d || !cur) return false;
     const fullAt = full ? this.gotWith(d, stage, cur) : null;
     if (cur.full === full && cur.fullAt === fullAt) return false;
@@ -1755,8 +1840,8 @@ export class GccEngine {
   /** "บันทึกการติดต่อ": a call, e-mail or meeting on `d` (default today) at `stage` (default where the
    *  deal is, actStage). Never rewrites the deal or a stage: the last contact is derived (lastContact). */
   addAct(dealId: string, a: { type: ActType; note: string; d?: string; stage?: string; pid?: string }): DealAct | null {
-    if (!this.can('edit')) return this.deny(), null;
     const S = this.sales, deal = S.deals[dealId];
+    if (!this.canDeal('edit.deal', deal)) return this.deny(), null;
     if (!deal) return null;
     const today = todayISO(), id = uid();
     const act = toAct({ d: a.d || today, type: a.type, note: (a.note || '').trim(), stage: a.stage ?? actStage(S, deal, today), pid: a.pid || '', by: this.me(), at: new Date().toISOString() }, dealId, id);
@@ -1773,17 +1858,18 @@ export class GccEngine {
   /** Who may remove a contact record: as with the company's contact log, its author (an account that
    *  can edit) or an admin; without accounts, anyone. */
   canDelAct(a: Pick<DealAct, 'by'>) {
-    return this.can('admin') || (this.can('edit') && a.by === this.me());
+    return this.can('del.log', a.by || '');
   }
   delAct(dealId: string, actId: string) {
     const S = this.sales, k = `${dealId}/${actId}`, a = (S.acts || {})[k], deal = S.deals[dealId];
     if (!a) return;
     if (!this.canDelAct(a)) return this.deny();
-    delete S.acts![k];
+    // queued while the record is still here: an "own" capability checks who wrote it (canWriteKey)
     this.batchOps(() => {
       this.op(keyOf.dact(dealId, actId));
       if (deal) this.salesLog(deal, 'ลบการติดต่อ', [ACT_TH[a.type], isoTh(a.d), a.note.slice(0, 80)].filter(Boolean).join(' · '));
     });
+    delete S.acts![k];
     this.saveSales();
   }
 
@@ -1813,7 +1899,7 @@ export class GccEngine {
    * no longer counted. Only a quotation for the Forecast with an amount revises anything.
    */
   async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean; revise?: string }) {
-    if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวแนบเอกสารไม่ได้');
+    if (!this.can('docs.up')) throw new Error('บัญชีของคุณแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
     if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
@@ -2006,7 +2092,7 @@ export class GccEngine {
    * copy of each file by document id (docBlob) and would go on showing the old one.
    */
   async replaceDocFile(dealId: string, docId: string, file: Blob & { name: string }) {
-    if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวเปลี่ยนไฟล์ไม่ได้');
+    if (!this.can('docs.up')) throw new Error('บัญชีของคุณเปลี่ยนไฟล์ไม่ได้');
     const S = this.sales, ok = `${dealId}/${docId}`;
     if (!S.deals[dealId] || !S.docs[ok]) throw new Error('ไม่พบเอกสารนี้แล้ว');
     if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
@@ -2054,11 +2140,11 @@ export class GccEngine {
   private dropDriveFile(fileId: string) {
     const cfg = this.teamCfg;
     const later = () => this.store.update<string[]>('docDelQueue', (q) => [...new Set([...(q || []), fileId])]).catch(() => {});
-    if (!cfg || !this.can('edit')) return void later();
+    if (!cfg || !this.can('docs.up')) return void later();
     deleteDocFile(this.fileTransport, cfg.url, this.cred(cfg), fileId).catch(later);
   }
   private async flushDocDeletes(cfg: TeamCfg) {
-    if (!this.can('edit')) return;
+    if (!this.can('docs.up')) return;
     const q = (await this.store.get<string[]>('docDelQueue').catch(() => null)) || [];
     for (const fileId of q) {
       if (this.teamCfg !== cfg) return;
@@ -2080,6 +2166,8 @@ export class GccEngine {
     const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer }>(this.docBlobKey(doc.id));
     if (b) return new Blob([b.data], { type: b.mime || doc.mime });
     const cfg = this.teamCfg;
+    // the team's copy is opened by whoever may open attached documents (the script checks it too)
+    if (!this.can('docs.open')) throw new Error('บัญชีของคุณเปิดเอกสารแนบไม่ได้ (ขอสิทธิ์ “เปิดเอกสารแนบ” ได้ที่ สิทธิ์ของฉัน)');
     if (!doc.fileId) throw new Error('ไฟล์นี้ยังอยู่ในเครื่องของคนที่แนบ ยังไม่ได้อัปโหลดขึ้น Drive ของทีม');
     if (!cfg) throw new Error('เชื่อมต่อทีม (แท็บอัปเดตข้อมูล) ก่อน จึงจะเปิดไฟล์ใน Drive ของทีมได้');
     let r: Awaited<ReturnType<typeof downloadDocFile>>;
@@ -2119,7 +2207,7 @@ export class GccEngine {
   private docRun: Promise<void> | null = null;
   async uploadDocs() {
     const cfg = this.teamCfg;
-    if (!cfg || !this.can('edit')) return;
+    if (!cfg || !this.can('docs.up')) return;
     if (this.docRun) return this.docRun;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
@@ -2204,7 +2292,7 @@ export class GccEngine {
    *  tracked that year) is skipped, so the team's newer edits always win over an old file. A client
    *  name is linked to a registry company only when exactly one company has that name. */
   async importTracker(f: File, year: string): Promise<{ deals: number; skipped: number; linked: number; ambiguous: number; inexact: number; years: string[]; batch: string }> {
-    if (!this.can('admin')) throw new Error('นำเข้าได้เฉพาะผู้ดูแลระบบ');
+    if (!this.can('set.data')) throw new Error('บัญชีของคุณนำเข้าข้อมูลไม่ได้');
     const name = (f.name || '').toLowerCase();
     let data: TrackerData[];
     if (name.endsWith('.json')) data = [parseTrackerJson(JSON.parse(await f.text()), year)];
@@ -2309,7 +2397,7 @@ export class GccEngine {
   /** Undo an import: its deals are removed for the whole team. Unlike deleting by hand, the same
    *  file can be imported again afterwards. */
   undoImport(batch: string) {
-    if (!this.can('admin')) {
+    if (!this.can('set.data')) {
       this.deny();
       return 0;
     }
@@ -2378,7 +2466,7 @@ export class GccEngine {
   private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
-    if (!this.canWriteKey(k, v === undefined)) {
+    if (!this.canWriteKey(k, v === undefined, v)) {
       // not this account's to change: the next round puts the team's value back
       this.revert.add(k);
       this.teamNote = 'บัญชีของคุณแก้รายการนี้ไม่ได้ จึงใช้ค่าของทีมแทน';
@@ -2718,8 +2806,9 @@ export class GccEngine {
         this.teamNeedKey = false;
         this.setTeam({ status: 'ok', msg: '', last: new Date().toISOString() });
         this.uploadDocs();
-        // say if the script can do accounts; asked again now and then, as the lead may update it
-        if (cfg.mode !== 'accounts' && (!this.caps || this.caps.url !== cfg.url || Date.now() - this.capsAt > 10 * 60000)) this.probeCaps(cfg.url);
+        // say if the script can do accounts (and, with accounts, whether it sends notifications); asked
+        // again now and then, as the lead may update it
+        if (!this.caps || this.caps.url !== cfg.url || Date.now() - this.capsAt > 10 * 60000) this.probeCaps(cfg.url);
       }
     } catch (e) {
       if (gen === this.teamGen && e instanceof TeamSyncError) {
@@ -2788,6 +2877,11 @@ export class GccEngine {
   }
   /** A reply for this account: a renewed token, or a new name or role set by an admin. */
   private meta(cfg: TeamCfg, r: Record<string, unknown>) {
+    // the script's notification state, when a reply says it (hello does too, see setCaps)
+    if (r && 'notify' in r) {
+      const f = parseNotifyFlag(r.notify);
+      if (f) this.heardNotify(cfg.url, f);
+    }
     const s = this.session;
     if (cfg.mode !== 'accounts' || !s || s.u !== cfg.u) return;
     let changed = false;
@@ -2796,13 +2890,8 @@ export class GccEngine {
       s.exp = Number(r.exp) || s.exp;
       changed = true;
     }
-    const me = r.me as { u?: string; name?: string; role?: Role } | undefined;
-    if (me && me.u === s.u && (me.name !== s.name || me.role !== s.role)) {
-      if (me.role === 'viewer' && s.role !== 'viewer') this.teamNote = 'ผู้ดูแลระบบเปลี่ยนบัญชีของคุณเป็น ดูอย่างเดียว — แก้ไขข้อมูลไม่ได้แล้ว';
-      if (me.name) s.name = me.name;
-      if (me.role) s.role = me.role;
-      changed = true;
-    }
+    const me = parseMe(r.me);
+    if (me.u === s.u && this.adoptMe(s, me)) changed = true;
     if (changed) {
       // signed out in another tab (or someone else signed in) and this tab did not hear of it: the
       // session is never written back (a renewed token would sign the browser in again)
@@ -2811,6 +2900,67 @@ export class GccEngine {
       this.saveSession(s);
       this.emit();
     }
+  }
+
+  /**
+   * The account as the script describes it now (name, role, capabilities, requests). Returns whether
+   * anything changed. A role that gains or loses what the script hides from it (money, commission)
+   * pulls everything again — the rows it holds were sent without those fields, or with them — and one
+   * that may no longer open documents drops the copies kept in this browser.
+   */
+  private adoptMe(s: Session, me: ReturnType<typeof parseMe>) {
+    const before = capsOf(s) || {};
+    const was = { name: s.name, role: s.role, rid: s.rid, rn: s.rn, caps: JSON.stringify(s.caps ?? null), rq: s.rq, req: JSON.stringify(s.req ?? null), g: JSON.stringify(s.g ?? null), nf: JSON.stringify(s.nf ?? null) };
+    if (me.name) s.name = me.name;
+    if (me.role) s.role = me.role;
+    if (me.rid !== undefined) s.rid = me.rid;
+    if (me.rn !== undefined) s.rn = me.rn;
+    if (me.caps !== undefined) s.caps = me.caps;
+    if (me.rq !== undefined) s.rq = me.rq;
+    if (me.req !== undefined) s.req = me.req;
+    if (me.g !== undefined) s.g = me.g;
+    if (me.nf !== undefined) s.nf = me.nf;
+    const nfOnly = was.nf !== JSON.stringify(s.nf ?? null);
+    const changed = was.name !== s.name || was.role !== s.role || was.rid !== s.rid || was.rn !== s.rn || was.caps !== JSON.stringify(s.caps ?? null) || was.rq !== s.rq || was.req !== JSON.stringify(s.req ?? null) || was.g !== JSON.stringify(s.g ?? null);
+    if (!changed) return nfOnly;
+    const after = capsOf(s) || {};
+    const roleNow = s.rid || s.role, roleWas = was.rid || was.role;
+    const res = s.req?.st === 'r' ? s.req : null;
+    // a temporary role or extra that ran out (the dates the script sent before, me.grants)
+    const today = todayISO();
+    const oldG = was.g !== 'null' ? (JSON.parse(was.g) as Session['g']) : undefined;
+    const ranOut = !!oldG && (!!(oldG.r && oldG.r.until && oldG.r.until < today) || (oldG.c || []).some((x) => !!x.until && x.until < today));
+    if (roleNow !== roleWas && !res) {
+      // the role changed (a decided request says so itself, in the banner)
+      this.teamNote = ranOut
+        ? `บทบาทชั่วคราวหมดอายุแล้ว ตอนนี้คุณเป็น ${this.roleName()}`
+        : !hasWrite(after) && hasWrite(before)
+          ? `ผู้ดูแลระบบเปลี่ยนบัญชีของคุณเป็น ${this.roleName()} — แก้ไขข้อมูลไม่ได้แล้ว`
+          : `ผู้ดูแลระบบเปลี่ยนบทบาทของคุณเป็น ${this.roleName()}`;
+    } else if (!res && was.caps !== 'null' && JSON.stringify(before) !== JSON.stringify(after)) {
+      // the same role, other capabilities: the role was edited, or an extra was added or ran out
+      this.teamNote = ranOut ? 'สิทธิ์เพิ่มชั่วคราวหมดอายุแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี' : 'สิทธิ์ของคุณเปลี่ยนแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี';
+    }
+    // what the script leaves out depends on these two: the rows held here were sent for the old set
+    const real = (c: CapSet) => `${!!c['view.money']}|${!!c['view.comm']}`;
+    const cfg = this.teamCfg;
+    if (real(before) !== real(after) && cfg && cfg.mode === 'accounts' && cfg.u === s.u) {
+      // the next round pulls every row again (each record is replaced whole); set after this round ends,
+      // which may be the one that brought the news
+      this.repull = true;
+      this.flushSoon();
+    }
+    if ((before['docs.open'] && !after['docs.open']) || (before['view.money'] && !after['view.money'])) this.purgeDocCopies();
+    return true;
+  }
+  /** The account's capabilities changed what the script sends it: pull everything again (adoptMe). */
+  private repull = false;
+  /** Copies of the team's documents kept in this browser (those the team's Drive has: a file not uploaded
+   *  yet is someone's only copy and stays). */
+  private purgeDocCopies() {
+    const ids = Object.values(this.sales.docs).filter((d) => d.fileId).map((d) => d.id);
+    ids.forEach((id) => this.store.del(this.docBlobKey(id)).catch(() => {}));
+    qtFacts.clear(); // what was read from them (figures) goes too
   }
 
   private async syncRound(cfg: TeamCfg, gen: number, first: boolean) {
@@ -2861,7 +3011,7 @@ export class GccEngine {
     // ops), plus this tab's ops that could not be stored
     await this.pq;
     const s = this.session;
-    if (cfg.mode === 'accounts' && s && this.can('edit')) {
+    if (cfg.mode === 'accounts' && s && this.canWrite()) {
       // edits queued with the team code after this account signed in (a tab of the older app still
       // open): sent in its name, as those queued before it signed in
       const old = (await this.store.get<SyncOp[]>(pendKey(cfg.url)).catch(() => null)) || [];
@@ -2877,7 +3027,7 @@ export class GccEngine {
     if (!live()) return;
     const fresh = Array.isArray(stored) ? stored.filter((o) => !this.wasDelivered(o)) : null;
     this.pending = this.withUnsaved(fresh ? new Map(fresh.map((o) => [o.k, o])) : this.pending);
-    if (this.can('edit') && !this.can('delete')) {
+    if (this.canWrite() && !this.can('del.rec')) {
       // A deletion this account may not make (queued with the team code, or before an admin made it
       // sales) is refused by the script, but what went with it would not be: the stage notes,
       // documents and their Drive files, the history entry. None of it is sent; the team's values come back.
@@ -3065,6 +3215,11 @@ export class GccEngine {
     this.applyRows(rows.filter((r) => !this.pending.has(r.k)).concat(merged, seedMerged, back), quiet);
     onApplied();
     cfg.seq = since;
+    if (this.repull) {
+      this.repull = false;
+      cfg.seq = 0;
+      this.teamAgain = true;
+    }
     // only a round that seeded may mark the session seeded, not while part of the upload exists only
     // in memory, and not if an import asked for a new seed after this round read the data
     if (seeding && seeded && sg === this.seedGen && !this.unsaved.size) {
@@ -3077,7 +3232,7 @@ export class GccEngine {
     if (!this.adoptTeamPrefs() || !live()) return;
     this.saveTeamCfg(cfg);
     // an account that can only read sends nothing; its queue (made before) waits for someone who can
-    if (this.role() === 'viewer') {
+    if (!this.canWrite()) {
       if (this.pending.size) this.teamNote = `บัญชีดูอย่างเดียวส่งการแก้ไขไม่ได้ · รอส่ง ${fmtN(this.pending.size)} รายการ`;
       return;
     }
@@ -3318,6 +3473,7 @@ export class GccEngine {
   private setCaps(c: Caps, url: string) {
     this.caps = { ...c, url };
     this.capsAt = Date.now();
+    if (c.v === 3) this.heardNotify(url, c.nf ?? null);
   }
   /** The script's public values for hashing a password (team id, rounds); they never change. */
   private async capsFor(url: string) {
@@ -3609,7 +3765,7 @@ export class GccEngine {
     await this.signedIn(url, r, rm, '');
     // the lead can be chosen as ผู้รับผิดชอบ too, like the accounts they create (adminCreate)
     const n = this.session?.name;
-    if (n && this.ready && this.can('admin') && !this.crm.team.includes(n)) this.addTeam(n);
+    if (n && this.ready && this.can('set.users') && !this.crm.team.includes(n)) this.addTeam(n);
   }
   /** A forgotten admin password: a new one with a recovery code from setup(). */
   async teamRecover(code: string, u: string, pw: string, rm = true) {
@@ -3622,6 +3778,8 @@ export class GccEngine {
   }
   private async signedIn(url: string, r: SignIn, rm: boolean, pw: string) {
     const s: Session = { url, u: r.me.u, name: r.me.name, role: r.me.role, tok: r.tok, exp: Number(r.exp) || 0, rm, mc: !!r.mc };
+    const me = parseMe(r.me);
+    (['rid', 'rn', 'caps', 'rq', 'req', 'g'] as const).forEach((k) => me[k] !== undefined && Object.assign(s, { [k]: me[k] }));
     this.saveSession(s);
     prefs.set(PREF.me, s.name); // the same name if the team ever goes back to the team code
     if (rm) prefs.set(PREF.lastUser, { u: s.u, name: s.name });
@@ -3649,7 +3807,7 @@ export class GccEngine {
     const cfg: TeamCfg = { url, key: '', seq: 0, seeded: stored?.url === url ? !!stored.seeded : false, mode: 'accounts', u: s.u };
     // remembered for a shared computer: whose unsent edits and documents are whose (see syncRound)
     await this.store.update<{ u: string; name: string }[]>(acctKey(url), (cur) => [...(cur || []).filter((a) => a && a.u !== s.u), { u: s.u, name: s.name }]).catch(() => {});
-    if (canCap(s.role, 'edit')) {
+    if (hasWrite(capsOf(s))) {
       const last = prefs.getRaw(PREF.teamLast);
       const before = [
         ...((await this.store.get<SyncOp[]>(pendKey(url)).catch(() => null)) || []),
@@ -3691,7 +3849,7 @@ export class GccEngine {
   private stampFor(s: Session) {
     return (o: SyncOp): SyncOp => {
       const v = o.v as Record<string, unknown> | undefined;
-      const own = s.role === 'sales' && /^(d?log|dact)\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
+      const own = !capsOf(s)?.['set.users'] && /^(d?log|dact)\//.test(o.k) && !!v && typeof v === 'object' && !Array.isArray(v) && 'by' in v;
       return { ...o, by: s.name, ...(own ? { v: { ...v, by: s.name } } : {}) };
     };
   }
@@ -3866,28 +4024,247 @@ export class GccEngine {
   }
 
   // ---- account admin (online only, never queued)
-  private async adminCall<T>(body: Record<string, unknown>): Promise<T> {
+  private async adminCall<T>(body: Record<string, unknown>, old = OLD_SCRIPT): Promise<T> {
     const s = this.session, cfg = this.teamCfg;
     if (!s || !cfg || cfg.mode !== 'accounts') throw new Error('ยังไม่ได้เข้าสู่ระบบ');
-    const r = await call<Record<string, unknown>>(this.transport, cfg.url, { tok: s.tok }, body);
+    let r: Record<string, unknown>;
+    try {
+      r = await call<Record<string, unknown>>(this.transport, cfg.url, { tok: s.tok }, body);
+    } catch (x) {
+      // an action the deployed script does not know yet: say which update it needs
+      if (x instanceof TeamSyncError && x.code === 'unknown_action') throw new TeamSyncError(old, 'unknown_action', x.extra);
+      throw x;
+    }
     this.meta(cfg, r);
     return r as T;
   }
   async adminUsers() {
-    return (await this.adminCall<{ users: TeamUser[] }>({ action: 'users' })).users;
+    return (await this.adminDir()).users;
   }
-  /** A new account with a temporary password made here (shown once to the admin, never stored). */
-  async adminCreate(p: { u: string; name: string; role: Role }) {
+  /** The admin page's data: accounts, and (Code.gs v4) roles, extras, requests and the audit trail. */
+  async adminDir(): Promise<TeamDir> {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'users' });
+    const v4 = 'roles' in r;
+    if (v4) this.knownRoles = parseRoles(r.roles);
+    return {
+      users: (Array.isArray(r.users) ? r.users : []) as TeamUser[],
+      roles: parseRoles(r.roles),
+      grants: parseGrants(r.grants),
+      reqs: parseReqs(r.reqs),
+      audit: parseAudit(r.audit),
+      v4,
+    };
+  }
+  /** A new account with a temporary password made here (shown once to the admin, never stored).
+   *  `em`: its notification e-mail (a script with notifications sends it a code to confirm). */
+  async adminCreate(p: { u: string; name: string; role: Role; em?: string }) {
     const cfg = this.teamCfg!;
     const c = await this.capsFor(cfg.url);
     const u = normUser(p.u), temp = tempPassword();
     const pk = await derivePk(c.tid!, c.it!, u, temp);
-    const r = await this.adminCall<{ user: TeamUser }>({ action: 'user_save', create: true, u, name: p.name.trim(), role: p.role, pk });
+    const r = await this.adminCall<{ user: TeamUser }>({ action: 'user_save', create: true, u, name: p.name.trim(), role: p.role, pk, ...(p.em ? { em: p.em } : {}) });
     if (!this.crm.team.includes(r.user.name)) this.addTeam(r.user.name); // in the ผู้รับผิดชอบ lists
     return { user: r.user, temp };
   }
-  async adminUpdate(u: string, patch: { name?: string; role?: Role; on?: 0 | 1 }) {
+  async adminUpdate(u: string, patch: { name?: string; role?: Role; on?: 0 | 1; em?: string }) {
     return (await this.adminCall<{ user: TeamUser }>({ action: 'user_save', u, ...patch })).user;
+  }
+  /** Create (no id) or change a role: name, description, capabilities. `from`: the role it was copied
+   *  from (the audit trail says so). Returns the roles as they are now. */
+  async roleSave(r: { id?: string; n: string; d: string; c: CapSet; from?: string }) {
+    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: capsWire(r.c), ...(r.from ? { from: r.from } : {}) });
+    return { id: typeof x.id === 'string' ? x.id : r.id || '', roles: 'roles' in x ? parseRoles(x.roles) : null };
+  }
+  /** Delete a role made by an admin; its accounts (and temporary grants of it) move to `to`. */
+  async roleDel(id: string, to: string) {
+    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_del', id, to });
+    return 'roles' in x ? parseRoles(x.roles) : null;
+  }
+  /** Extras for one account beyond its role (until a date, or for good). */
+  async grantSave(u: string, c: { k: CapId; s: 'all' | 'own'; until?: string }[]) {
+    await this.adminCall({ action: 'grant_save', u, c });
+  }
+  async grantDel(u: string, k: CapId | 'role') {
+    await this.adminCall({ action: 'grant_del', u, k });
+  }
+  /** Approve or refuse an account's request, with a note to them. */
+  async reqDecide(u: string, ok: boolean, note: string) {
+    await this.adminCall({ action: 'req_decide', u, ok, note: note.trim() });
+  }
+  /** Ask the admins for another role or more capabilities (online only; replaces a pending request). */
+  async reqSend(q: ReqInput) {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'req_send', k: q.k, ...(q.k === 'role' ? { role: q.role } : { caps: q.caps }), note: q.note.trim(), ...(q.until ? { until: q.until } : {}) });
+    this.reqLocal(r, { st: 'p', id: '', k: q.k, ...(q.k === 'role' ? { role: q.role } : { caps: q.caps }), note: q.note.trim(), ...(q.until ? { until: q.until } : {}), at: new Date().toISOString() });
+  }
+  /** Withdraw the pending request. */
+  async reqCancel() {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'req_cancel' });
+    this.reqLocal(r, null);
+  }
+  /** The decision was read: the banner goes. */
+  async reqAck() {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'req_ack' });
+    this.reqLocal(r, null);
+  }
+  /** After a request action: the script's me.req if it sent one, else what the action means. */
+  private reqLocal(r: Record<string, unknown>, v: Session['req']) {
+    const s = this.session;
+    if (!s) return;
+    const me = r.me && typeof r.me === 'object' && 'req' in (r.me as object);
+    if (me) return; // meta() took the script's word
+    s.req = v;
+    this.saveSession(s);
+    this.emit();
+  }
+  // ---- notifications and the quotation check (package notify; lib/notify.ts)
+  /** The team script's notification state as last heard (hello, or a reply that says `notify`) for the
+   *  connected team; null = a script without notifications: its setup steps show, the bell has payments
+   *  and appointments only, quotations show no check. Kept in this browser, so it holds from the first frame. */
+  get notifyLive(): NotifyLive | null {
+    const url = this.teamCfg?.url;
+    return url ? this.nfFor(url) : null;
+  }
+  private nfHeard: { url: string; f: NotifyLive | null } | null = null;
+  /** As heard by this tab, else as this browser last heard it (read once). */
+  private nfFor(url: string): NotifyLive | null {
+    if (!this.nfHeard || this.nfHeard.url !== url) {
+      const p = prefs.get<{ url?: string; f?: NotifyLive | null } | null>(PREF.notify, null);
+      const f = p && p.url === url && p.f ? { on: !!p.f.on, since: String(p.f.since || '') } : null;
+      this.nfHeard = { url, f };
+    }
+    return this.nfHeard.f;
+  }
+  private heardNotify(url: string, f: NotifyLive | null) {
+    const was = this.nfFor(url);
+    this.nfHeard = { url, f };
+    if (JSON.stringify(was) === JSON.stringify(f)) return;
+    prefs.set(PREF.notify, this.nfHeard);
+    this.emit();
+  }
+  /** Quotations are checked here: a team with accounts whose script has notifications switched on. */
+  get qtLive() {
+    return !!this.notifyLive?.on && this.teamCfg?.mode === 'accounts' && !!this.session;
+  }
+  /** The team's notification rules (scfg/notify.cfg, defaults until an admin saves them). */
+  notifyCfg(): NotifyCfg {
+    return parseNotifyCfg(this.sales.ncfg);
+  }
+  /** Every quotation check this browser holds (docId → record). */
+  checks(): Record<string, QtCheck> {
+    return this.sales.qchk || {};
+  }
+  /** The check status a quotation shows ("รอตรวจ" / "ตรวจแล้ว" / "ส่งกลับแก้ไข"), or null: no check here
+   *  (no notifications yet, or a document outside the check with nothing recorded). */
+  qtCheckFor(doc: DealDoc): QtCheckView | null {
+    const live = this.notifyLive;
+    if (!live?.on || this.teamCfg?.mode !== 'accounts') return null;
+    const v = qtCheckOf(this.checks()[doc.id], doc);
+    if (v.status === 'wait' && !needsCheck(this.sales, doc, live.since)) return null;
+    return v;
+  }
+  /** Why this account can't check `doc` ('' = it can): no check here, no สิทธิ์ ตรวจ/อนุมัติใบเสนอราคา, or
+   *  its own quotation (unless the team allows that). The script decides again (also the row's last writer). */
+  checkBlock(doc: Pick<DealDoc, 'by'>): '' | 'off' | 'cap' | 'self' {
+    if (!this.qtLive) return 'off';
+    if (!this.can('qt.check')) return 'cap';
+    if (!this.notifyCfg().self && sameName(doc.by, this.me())) return 'self';
+    return '';
+  }
+  /**
+   * Check a quotation (online only; the script writes `qchk/<docId>` and a history line): `ok` approves the
+   * figures, `back` sends it back with a note, `undo` takes back this account's latest check (within 10
+   * minutes). `s`: the e-mail link's signature, passed on (the script records whether it came from a mail).
+   * The record shows at once; the script's own row replaces it with the next pull.
+   */
+  async qtCheck(doc: DealDoc, st: 'ok' | 'back' | 'undo', note = '', s = '') {
+    const fp = fpOf(doc), n = note.trim().slice(0, 500);
+    let r: Record<string, unknown>;
+    try {
+      r = await this.adminCall<Record<string, unknown>>({ action: 'qt_check', k: keyOf.ddoc(doc.deal, doc.id), st, fp, ...(n ? { note: n } : {}), ...(s ? { s } : {}) }, OLD_NOTIFY);
+    } catch (x) {
+      // changed meanwhile: the next round brings the document as it is now
+      if (x instanceof TeamSyncError && x.code === 'changed') this.flushSoon();
+      throw x;
+    }
+    const Q = this.sales.qchk || (this.sales.qchk = {});
+    if (st === 'undo') delete Q[doc.id];
+    else Q[doc.id] = toQtCheck(r.rec ?? r.v) || { st, by: this.me(), at: new Date().toISOString(), fp, ...(n ? { note: n } : {}), ...(this.session ? { u: this.session.u } : {}) };
+    this.saveSales();
+    this.emit();
+    this.flushSoon();
+  }
+  /** This account's notification settings as the script last sent them (me.notify), else the defaults. */
+  myNotify(): MyNotify {
+    return this.session?.nf || myNotify0(this.can('set.users'));
+  }
+  /** Whether the script has sent this account's settings (a script with notifications). */
+  get myNotifyLive() {
+    return !!this.session?.nf;
+  }
+  /** Read this account's settings again (online). */
+  async notifyMe(): Promise<MyNotify> {
+    return this.nfLocal(await this.adminCall<Record<string, unknown>>({ action: 'notify_me', get: 1 }, OLD_NOTIFY));
+  }
+  /** Save them; a new address (`em`) is stored unconfirmed and the script mails it a 6-digit code. */
+  async saveNotifyMe(p: Pick<MyNotify, 'on' | 't' | 'sc'> & { em?: string }) {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_me', on: p.on, t: p.t, sc: p.sc, ...(p.em !== undefined ? { em: p.em } : {}) }, OLD_NOTIFY);
+    const cur = this.myNotify();
+    const mailNew = p.em !== undefined && p.em !== cur.em;
+    return this.nfLocal(r, { ...cur, on: p.on, t: p.t, sc: p.sc, ...(mailNew ? { em: p.em!, ok: false } : {}) });
+  }
+  /** Confirm the address with the code from the mail. */
+  async verifyEmail(code: string) {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_verify', code: code.replace(/\D/g, '').slice(0, 6) }, OLD_NOTIFY);
+    return this.nfLocal(r, { ...this.myNotify(), ok: true });
+  }
+  /** One test mail to this account's confirmed address (counts against the day's quota). */
+  async notifyTest() {
+    await this.adminCall({ action: 'notify_test' }, OLD_NOTIFY);
+  }
+  /** The admin page's status card: last run, today's sending and the quota, each account's choices. */
+  async notifyStatus(): Promise<NotifyStatus> {
+    const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_status' }, OLD_NOTIFY);
+    const st = parseNotifyStatus(r);
+    if (this.teamCfg && ('on' in r || 'notify' in r)) this.heardNotify(this.teamCfg.url, { on: st.on, since: st.since || this.notifyLive?.since || '' });
+    return st;
+  }
+  /** After notify_me / notify_verify: the script's me.notify when it sent one (meta took it), else a
+   *  settings object in the reply, else what was saved. */
+  private nfLocal(r: Record<string, unknown>, saved?: MyNotify): MyNotify {
+    const s = this.session;
+    const meSent = !!r.me && typeof r.me === 'object' && 'notify' in (r.me as object);
+    if (s && !meSent) {
+      const own = [r.prefs, r.notify].find((x) => !!x && typeof x === 'object' && typeof (x as { on?: unknown }).on === 'object');
+      const nf = parseMyNotify(own, this.can('set.users')) || saved;
+      if (nf) {
+        s.nf = nf;
+        this.saveSession(s);
+        this.emit();
+      }
+    }
+    return this.myNotify();
+  }
+  /** The scope of the bell (and the digest): งานที่ฉันรับผิดชอบ or ทั้งทีม — the account's setting, else
+   *  what was chosen in this browser, else the whole team for whoever manages users (or no accounts). */
+  bellScope(): Scope {
+    const nf = this.session?.nf;
+    if (nf) return nf.sc;
+    const p = prefs.getRaw(PREF.bellScope);
+    return p === 'mine' || p === 'team' ? p : this.role() == null || this.can('set.users') ? 'team' : 'mine';
+  }
+  setBellScope(sc: Scope) {
+    prefs.set(PREF.bellScope, sc);
+    this.emit();
+  }
+  /** An admin saves the team's rules (a shared record; `site` is this page's address, which the e-mails link to). */
+  saveNotifyCfg(c: NotifyCfg) {
+    if (!this.can('set.users')) return this.deny();
+    const site = typeof location !== 'undefined' && /^https?:/.test(location.protocol) ? location.origin + location.pathname : c.site;
+    const v: NotifyCfg = { ...c, site };
+    this.sales.ncfg = v;
+    this.op('scfg/notify.cfg', { ...v });
+    this.saveSales();
+    this.emit();
   }
   /** แก้ชื่อที่แสดง (before the account's first sign-in): the team list takes the new name in place of the
    *  old one, which would otherwise stay behind as a name with no account. */

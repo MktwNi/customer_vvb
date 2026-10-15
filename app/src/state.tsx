@@ -61,15 +61,25 @@ export interface UIState {
   addPerson: { gid?: number } | null;
   /** The record being worked on: open, or opened last (marked in its list so you keep your place). */
   last: { deal?: string; person?: string };
-  /** Account dialog open over the app (team accounts): change password or sign out. */
-  acctDlg: '' | 'passwd' | 'logout';
+  /** Account dialog open over the app (team accounts): change password, sign out, สิทธิ์ของฉัน, or
+   *  ขอเปลี่ยนสิทธิ์ (`reqInit`: what it opens with — the pending request to look at, or a new one). */
+  acctDlg: '' | 'passwd' | 'logout' | 'perms' | 'request' | 'notify';
+  reqInit: { k: 'role' | 'caps' } | null;
+  /** ผู้ใช้และสิทธิ์: the section open (บัญชีผู้ใช้, บทบาทและสิทธิ์, คำขอสิทธิ์, การแจ้งเตือน). */
+  usersSec: 'acc' | 'roles' | 'req' | 'notify';
   /** The "session expired" sign-in was put aside (the team chip brings it back). */
   hideRelogin: boolean;
+  /** The bell's list is open (top bar). */
+  bell: boolean;
+  /** The quotation check sheet open over the deal panel (the document's id); `qtSig` the signature of the
+   *  e-mail link it was opened from (passed on to the script, '' = opened in the app). */
+  qtCheck: string | null;
+  qtSig: string;
 }
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
  *  (components/SalesToast.tsx). */
-export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan'; deal?: string; primary?: boolean }
+export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
@@ -89,7 +99,8 @@ const initial = (): UIState => {
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false,
     deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
-    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', hideRelogin: false,
+    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
+    bell: false, qtCheck: null, qtSig: '',
   };
 };
 

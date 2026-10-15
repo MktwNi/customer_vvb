@@ -375,7 +375,8 @@ describe('sessions', () => {
     A.net.offline = false;
     await settle(A);
     expect(A.e.role()).toBe('viewer');
-    expect(A.e.can('edit')).toBe(false);
+    expect(A.e.can('edit.cust')).toBe(false);
+    expect(A.e.canWrite()).toBe(false);
     expect(A.e.teamPendingN).toBe(1);
     expect(A.e.teamNote).toMatch(/ดูอย่างเดียว/);
     expect(rows('watch/' + id)).toEqual([]);
@@ -1046,7 +1047,7 @@ describe('payment plans and roles', () => {
     expect(V.e.setPayFull(d.id, 'PAY1', true)).toBe(false);
     V.e.unmarkPaid(d.id, 'PAY1');
     V.e.clearPlan(d.id);
-    await expect(V.e.attachDoc(d.id, pdf('rc.pdf'), { ...quote, kind: 'receipt', target: 'actual', stage: 'PAY1' })).rejects.toThrow(/ดูอย่างเดียว/);
+    await expect(V.e.attachDoc(d.id, pdf('rc.pdf'), { ...quote, kind: 'receipt', target: 'actual', stage: 'PAY1' })).rejects.toThrow(/แนบเอกสารไม่ได้/);
     expect(JSON.stringify(V.e.sales)).toBe(before);
     expect(V.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
     expect(V.e.teamPendingN).toBe(0);

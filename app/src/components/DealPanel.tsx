@@ -184,7 +184,7 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
  *  document says so with both numbers, and offers the document's. */
 function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
   const { engine: e } = useApp();
-  const ro = !e.can('edit');
+  const ro = !e.can('docs.up');
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState('');
@@ -307,8 +307,10 @@ export function DealPanel() {
     refused = null;
     set({ deal: null });
   };
-  // an account that can only read sees everything (and opens the files) but changes nothing
-  const ro = !e.can('edit');
+  // an account that may not edit this deal (view only, or another person's under "own" scope) sees
+  // everything it may see but changes nothing here; money shows only with ดูยอดเงิน
+  const ro = !e.canDeal('edit.deal', d);
+  const money = e.can('view.money');
   const up = (p: Partial<Deal>) => e.updateDeal(d.id, p);
   const m = dealMoney(S, d);
   const t = stageTrack(S, d, today);
@@ -358,6 +360,7 @@ export function DealPanel() {
               <Status kind={stKind}>{stWord}</Status>
               {d.jobStatus === 'closed' ? <small>ปิดงานแล้ว{d.closedDate ? ' ' + isoTh(d.closedDate) : ''}</small> : od != null ? <small className="bad">ไม่ได้ติดต่อ {od} วัน</small> : <small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small>}
             </div>
+            {money && <>
             <div>
               <span>Forecast</span>
               {ro ? <b className={m.forecast == null ? 'none' : ''}>{m.forecast == null ? '—' : fmtMoney(m.forecast)}</b> : <StripMoney label="Forecast" value={m.forecast} onSave={(v) => up({ forecast: v })} />}
@@ -375,6 +378,7 @@ export function DealPanel() {
                 nx ? <small className={nx.lateDays ? 'bad' : ''}>{nx.stage} · {nx.lateDays ? `เลยกำหนด ${nx.lateDays} วัน` : nx.due ? dmTh(nx.due) : 'ยังไม่กำหนดวัน'}</small> : left ? <small>{ps.left.join(', ')}</small> : <small className="ok">ครบทุกงวด</small>
               ) : r === 'NO' ? <small>ไม่ได้งาน</small> : P ? <small>แผน {P.n} งวด · {fmtMoney(P.total)}</small> : <small>ยังไม่มีผลการขาย</small>}
             </div>
+            </>}
           </div>
         </div>
 
@@ -386,7 +390,7 @@ export function DealPanel() {
           <OtherDocs d={d} attach={attach} />
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />
-          {e.can('delete') && (
+          {e.can('del.rec') && (
             <button type="button" onClick={() => window.confirm(`ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ ทุกเครื่องในทีม)`) && (e.deleteDeal(d.id), close())} className="quiet dp-del">
               ลบรายการนี้
             </button>
@@ -407,7 +411,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
   const { engine: e, ui, set } = useApp();
   const acts = useSalesActs();
   const S = e.sales, stages = S.cfg.stages, today = todayISO();
-  const ro = !e.can('edit');
+  const ro = !e.canDeal('edit.deal', d);
   const t = stageTrack(S, d, today);
   const P = planOf(S, d, today), won = t.result === 'YES';
   const by = stageDocs(S, d).by;
@@ -717,7 +721,7 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
 
 function PlanCard({ d, attach }: { d: Deal; attach: Attach }) {
   const { engine: e, ui } = useApp();
-  if (ui.dpPlan === 'edit' && e.can('edit')) return <PlanEditor d={d} attach={attach} />;
+  if (ui.dpPlan === 'edit' && e.canDeal('edit.pay', d)) return <PlanEditor d={d} attach={attach} />;
   return <PlanRead d={d} recv={ui.dpPlan.startsWith('recv:') ? ui.dpPlan.slice(5) : ''} attach={attach} />;
 }
 
@@ -726,7 +730,7 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const S = e.sales, today = todayISO();
-  const ro = !e.can('edit');
+  const ro = !e.canDeal('edit.pay', d);
   const P = planOf(S, d, today), won = dealResult(S, d) === 'YES';
   const pays = payStages(S.cfg);
   const edit = () => set({ dpPlan: 'edit' });
@@ -1135,7 +1139,7 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
       <div className="sl-acc">
         <h3 id="dp-other">เอกสารอื่น</h3>
         <small>{other.length ? `${other.length} ฉบับ` : 'สัญญา / PO / เอกสารที่ไม่นับยอด'}</small>
-        {e.can('edit') && <button type="button" className="btn xs" onClick={() => attach('', 'other')}>แนบเอกสารอื่น</button>}
+        {e.can('docs.up') && <button type="button" className="btn xs" onClick={() => attach('', 'other')}>แนบเอกสารอื่น</button>}
       </div>
       {other.map((doc) => <DocCard key={doc.id} d={d} doc={doc} inUse={doc.target === 'forecast' ? fcDoc?.id === doc.id : doc.target === 'actual' && doc.amount != null} />)}
     </section>

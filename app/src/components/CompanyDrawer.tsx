@@ -26,9 +26,11 @@ interface Block { k: 't' | 'g' | 'f' | 's'; src: number; title: string; items: B
 
 export function CompanyDrawer() {
   const { engine: e, ui, set, go, openSched } = useApp();
-  // an account that can only read: no star, no edits, no new calls or appointments
-  const ro = !e.can('edit');
-  const role = e.role(); // null: no accounts (team code, or this browser only)
+  // an account that may not change customers: no star, no edits, no new calls; appointments have
+  // their own capability (edit.task)
+  const ro = !e.can('edit.cust');
+  const roT = !e.can('edit.task');
+  const accounts = e.role() != null; // false: no accounts (team code, or this browser only)
   useEngineVersion();
   const c = ui.sel != null ? e.company(ui.sel) : undefined;
   const [det, setDet] = useState<{ id: number; d: Detail } | null>(null);
@@ -219,7 +221,7 @@ export function CompanyDrawer() {
         <div className="dr-body">
           {dt === 'info' && (
             <>
-              <SalesBox c={c} />
+              {e.can('view.sales') && <SalesBox c={c} />}
               {multi && (
                 <div style={{ ...box, gap: 6 }}>
                   <H>{`รวมจาก ${c.ids.length} แถวในไฟล์ต้นทาง`}</H>
@@ -340,9 +342,9 @@ export function CompanyDrawer() {
                 <SelField style={field} text="สถานะในแผนติดต่อ" value={st[0]} onChange={(v) => e.setStage(c.id, v as StageKey)} options={STG.map(([v, label]) => ({ v, label }))} />
                 <SelField style={field} text="ผู้รับผิดชอบ" value={C.owners[c.id] || ''} onChange={(v) => e.setOwner(c.id, v)} options={[{ v: '', label: 'ยังไม่มีผู้รับผิดชอบ' }, ...C.team.map((v) => ({ v, label: v }))]} />
                 {/* with accounts the names come from the accounts an admin creates (the Update page has no team list) */}
-                {!C.team.length && (role == null || role === 'admin' ? (
-                  <button onClick={() => go(role ? 'users' : 'update', { sel: null })} className="lnk" style={{ gridColumn: '1/-1', justifySelf: 'start', fontSize: 13 }}>
-                    {role ? 'ยังไม่มีรายชื่อทีม สร้างบัญชีให้ทีมได้ที่ ผู้ใช้และสิทธิ์' : 'ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล'}
+                {!C.team.length && (!accounts || e.can('set.users') ? (
+                  <button onClick={() => go(accounts ? 'users' : 'update', { sel: null })} className="lnk" style={{ gridColumn: '1/-1', justifySelf: 'start', fontSize: 13 }}>
+                    {accounts ? 'ยังไม่มีรายชื่อทีม สร้างบัญชีให้ทีมได้ที่ ผู้ใช้และสิทธิ์' : 'ยังไม่มีรายชื่อทีม เพิ่มได้ที่แท็บอัปเดตข้อมูล'}
                   </button>
                 ) : (
                   <span className="t-meta" style={{ gridColumn: '1/-1', fontSize: 13 }}>ยังไม่มีรายชื่อทีม ผู้ดูแลระบบเพิ่มได้เมื่อสร้างบัญชีให้ทีม</span>
@@ -352,16 +354,16 @@ export function CompanyDrawer() {
               <div style={box}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                   <H>นัดหมาย</H>
-                  {!ro && <button onClick={() => openSched({ ids: [c.id] })} className="btn sm">เพิ่มนัด</button>}
+                  {!roT && <button onClick={() => openSched({ ids: [c.id] })} className="btn sm">เพิ่มนัด</button>}
                 </div>
                 {!tasks.length && <span className="empty">ยังไม่มีนัด</span>}
                 {tasks.map((t) => {
                   const ti = taskInfo(e, t);
                   return (
                     <div key={t.id} className="dr-row" style={{ display: 'flex', gap: 10, alignItems: 'center', borderTop: '1px solid var(--divider)', paddingTop: 8 }}>
-                      <DoneBox t={t} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
+                      <DoneBox t={t} onToggle={() => !roT && e.toggleTask(t)} ro={roT} />
                       <span style={{ flex: 1, fontSize: 14, textDecoration: t.done ? 'line-through' : 'none' }}>{ti.meta}{t.note ? ' · ' + t.note : ''}</span>
-                      {!ro && (
+                      {!roT && (
                         <span className="dr-acts">
                           <button onClick={() => openSched({ taskId: t.id, ids: [t.gid] })} className="lnk" style={{ fontSize: 13 }}>เลื่อน</button>
                           <button onClick={() => e.delTask(t)} className="quiet">ลบ</button>
@@ -409,7 +411,7 @@ export function CompanyDrawer() {
                           {l.text && <span style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</span>}
                           <span className="t-meta"><span style={{ color: ink }}>{tag}</span>{[l.result, dtTh(l.at), l.by].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
                         </span>
-                        {(e.can('admin') || (!ro && l.by === e.me())) && <span className="dr-acts"><button onClick={() => e.delLog(c.id, l)} className="quiet" style={{ alignSelf: 'flex-start' }}>ลบ</button></span>}
+                        {e.can('del.log', l.by || '') && <span className="dr-acts"><button onClick={() => e.delLog(c.id, l)} className="quiet" style={{ alignSelf: 'flex-start' }}>ลบ</button></span>}
                       </div>
                     );
                   })}
@@ -460,7 +462,8 @@ const newestFirst = (deals: Deal[]) => deals.sort((a, b) => b.year.localeCompare
  *  has no deal this year). */
 function SalesBox({ c }: { c: Company }) {
   const { engine: e, ui, set } = useApp();
-  const ro = !e.can('edit');
+  const ro = !e.can('edit.deal');
+  const money = e.can('view.money');
   const deals = newestFirst(e.dealsOf(c.id));
   const custom = e.custom[c.id];
   const year = ui.slYear || beYear();
@@ -470,7 +473,7 @@ function SalesBox({ c }: { c: Company }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <H>Sales Tracker</H>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {custom && !ro && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} className="lnk">แก้ไขข้อมูลลูกค้า</button>}
+          {custom && e.can('edit.cust') && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} className="lnk">แก้ไขข้อมูลลูกค้า</button>}
           {!ro && !hasYear && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
         </span>
       </div>
@@ -479,7 +482,7 @@ function SalesBox({ c }: { c: Company }) {
         const m = dealMoney(e.sales, d);
         const lc = lastContact(e.sales, d, todayISO());
         const fv = fcFig(e.sales, d);
-        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc), m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : '')].filter(Boolean);
+        const more = [d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc), money && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : '')].filter(Boolean);
         return (
           <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="hv dr-deal">
             <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>
