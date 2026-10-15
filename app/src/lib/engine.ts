@@ -32,8 +32,8 @@ import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
-import { QUOTE_STAGE, jointOf, jointRole, type JointGroup } from './sales';
-import { isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
+import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, type JointGroup } from './sales';
+import { canMergeFrom, isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
 import {
   QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
@@ -1527,9 +1527,11 @@ export class GccEngine {
     });
     return { added, skipped };
   }
-  updateDeal(id: string, patch: Partial<Deal>) {
+  updateDeal(id: string, patch: Partial<Deal>, opt: { keepJoint?: boolean } = {}) {
     const d = this.sales.deals[id];
     if (!d) return;
+    // a joint quotation and its companies share a year (package quotes): moveJointYear
+    if (!opt.keepJoint && patch.year != null && patch.year !== d.year && jointRole(this.sales, d) !== 'plain') return this.moveJointYear(d, patch);
     const n: Deal = { ...d, ...patch, id };
     // A forecast typed now is newer than any quotation this browser has seen — also when its clock is
     // behind the attacher's, and when it equals a figure typed earlier that the quotation hides.
@@ -1901,9 +1903,41 @@ export class GccEngine {
   // ---- joint quotations (package quotes, item 7): the header is an ordinary deal (the payer's row) marked by
   // jqt/<hid>; each member company keeps its own row, joined by jqm/<hid>/<dealId> (lib/sales.ts jointOf)
 
-  /** May this account make or change joint quotations ("สร้างใบเสนอราคาร่วม")? */
+  /** May this account make or change joint quotations ("สร้างใบเสนอราคาร่วม")? It writes deals too (the
+   *  header, the members' QUOTATION, new member rows): สร้างใบเสนอราคาร่วม with ดีลและขั้นตอน (own work is
+   *  enough: the header is its own, and only its own rows can be reused, rowFate 'locked'). */
   canJoint() {
-    return this.can('edit.jqt');
+    return this.can('edit.jqt') && this.can('edit.deal');
+  }
+  /** rowFate as this account may do it: a row it may not edit is 'locked'. */
+  jointFate(d: Deal, hid = '') {
+    return rowFate(this.sales, d, hid, (x) => this.canDeal('edit.deal', x));
+  }
+  /** Why a joint quotation's header or member cannot move to another year now ('' = it can, after asking):
+   *  a member leaves the joint quotation (สร้างใบเสนอราคาร่วม), the header takes every company along (each
+   *  must be a row this account may edit). */
+  jointYearBlock(d: Deal): string {
+    const S = this.sales, r = jointRole(S, d);
+    if (r === 'member') return this.can('edit.jqt') ? '' : 'บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี';
+    if (r !== 'header') return '';
+    if (!this.canJoint()) return 'บัญชีของคุณแก้ไขใบเสนอราคาร่วมไม่ได้';
+    const x = jointOf(S, d)?.members.find((m) => !this.canDeal('edit.deal', m.deal));
+    return x ? `ย้ายปีไม่ได้: ${x.deal.client} เป็นงานของ ${x.deal.resp || 'คนอื่น'} บัญชีของคุณแก้ไขแถวนั้นไม่ได้` : '';
+  }
+  /** A joint quotation's header or member moves to another year: a member leaves the joint quotation (its
+   *  row and its own records stay); the header takes every company with it, in one push. */
+  private moveJointYear(d: Deal, patch: Partial<Deal>) {
+    const S = this.sales, g = jointOf(S, d), why = this.jointYearBlock(d);
+    if (why) {
+      this.teamNote = why;
+      this.emit();
+      return;
+    }
+    this.batchOps(() => {
+      if (g && g.head.id !== d.id) this.leaveJoint(g, d);
+      this.updateDeal(d.id, patch, { keepJoint: true });
+      if (g && g.head.id === d.id) g.members.forEach((x) => this.updateDeal(x.deal.id, { year: patch.year }, { keepJoint: true }));
+    });
   }
   /**
    * "สร้างใบเสนอราคาร่วม" (and, with `p.from`, "รวมเป็นใบเสนอราคาร่วม"): the header, the payer's row of the year
@@ -1916,7 +1950,7 @@ export class GccEngine {
    * attached (the joint quotation stands; the file can be attached from its card).
    */
   async createJoint(p: JointNew): Promise<{ hid: string; attachErr: string }> {
-    if (!this.can('edit.jqt')) throw new Error('บัญชีของคุณสร้างใบเสนอราคาร่วมไม่ได้');
+    if (!this.canJoint()) throw new Error('บัญชีของคุณสร้างใบเสนอราคาร่วมไม่ได้');
     if ((p.file || p.from) && !this.can('docs.up')) throw new Error('บัญชีของคุณแนบเอกสารไม่ได้');
     const payer = p.payer.trim().slice(0, 200);
     if (!payer) throw new Error('ใส่ชื่อผู้จ่าย');
@@ -1927,6 +1961,10 @@ export class GccEngine {
     }
     const S = this.sales, from = p.from ? S.deals[p.from] : undefined;
     if (p.from && (!from || jointRole(S, from) !== 'plain')) throw new Error('ไม่พบรายการนี้แล้ว หรืออยู่ในใบเสนอราคาร่วมอื่นแล้ว');
+    // a deal with money received, a plan or closed keeps its job: only its quotation alone may move
+    if (from && (!canMergeFrom(S, from) || !this.canDeal('edit.deal', from))) throw new Error('รายการนี้รวมเป็นใบเสนอราคาร่วมไม่ได้ (มียอดรับเงิน แผนชำระ หรือปิดงานแล้ว หรือเป็นงานที่บัญชีของคุณแก้ไขไม่ได้)');
+    const locked = this.jointLocked(p.members, '', from?.id);
+    if (locked) throw new Error(locked);
     const title = (p.title.trim() || payer).slice(0, 200);
     let hid = '';
     this.batchOps(() => {
@@ -1950,15 +1988,26 @@ export class GccEngine {
     this.saveSales();
     return { hid, attachErr };
   }
-  /** Members join header `h` (a pick's row, or a new row when it has a quotation or money of its own, or
-   *  is not in the table): a membership each, in the order picked; an empty QUOTATION stage noted. */
+  /** Why picks may not join ('' = they may): another person's row this account may not edit (rowFate
+   *  'locked'). `skip`: the deal "รวมเป็นใบเสนอราคาร่วม" comes from (its quotation moves first, then it joins). */
+  private jointLocked(picks: JointPick[], hid: string, skip?: string): string {
+    for (const x of picks) {
+      const d = x.deal ? this.sales.deals[x.deal] : undefined;
+      if (d && d.id !== skip && this.jointFate(d, hid) === 'locked') return `${d.client} เป็นงานของ ${d.resp || 'คนอื่น'} บัญชีของคุณใส่แถวนี้ในใบเสนอราคาร่วมไม่ได้`;
+    }
+    return '';
+  }
+  /** Members join header `h` (a pick's row, or a new row when it has a job of its own, or is not in the
+   *  table): a membership each, in the order picked; an empty QUOTATION stage noted. */
   private joinMembers(h: Deal, picks: JointPick[], docNo: string, docDate: string, title: string) {
     const S = this.sales, today = todayISO(), t0 = Date.now(), by = this.me();
     const J = S.jqm || (S.jqm = {});
     picks.forEach((x, i) => {
       let d = x.deal ? S.deals[x.deal] : undefined;
-      if (x.deal && (!d || d.id === h.id || rowFate(S, d, h.id) === 'taken')) return; // gone, or in another joint quotation
-      if (!d || rowFate(S, d, h.id) === 'new') {
+      const fate = d ? this.jointFate(d, h.id) : 'new';
+      // gone, in another joint quotation, or a row this account may not edit
+      if (x.deal && (!d || d.id === h.id || fate === 'taken' || fate === 'locked')) return;
+      if (!d || fate === 'new') {
         // a new row of the year: the registry company's details, or those of the company's own row
         const like = d || (x.like ? S.deals[x.like] : undefined);
         const gid = x.gid != null ? x.gid : like?.gid ?? null;
@@ -1984,7 +2033,47 @@ export class GccEngine {
    * following the version in use; the deal's own QUOTATION note, when the quotation wrote it, now names the
    * joint quotation. Returns the quotation's number.
    */
-  private moveQt(fromId: string, toId: string): string {
+  /**
+   * "ย้ายไปใบเสนอราคาร่วม": a document on a member that counts nowhere (lib/joint strayDocs: attached by an
+   * older build, or before the company joined) moves to its joint quotation's header under the same id
+   * (one live record per file, this browser's copy kept). A quotation, while the joint quotation has none
+   * yet, becomes its quotation with every version (moveQt); anything else is kept there as a document that
+   * is not counted, so no figure changes unless someone confirms it there. Returns how it moved.
+   */
+  moveToJoint(memberId: string, docId: string): 'qt' | 'doc' | '' {
+    const S = this.sales, d = S.deals[memberId], doc = S.docs[`${memberId}/${docId}`];
+    const h = d && jointRole(S, d) === 'member' ? S.deals[jointHeadOf(S, d.id)] : undefined;
+    if (!d || !doc || !h) return '';
+    if (!this.can('docs.up') || !this.canDeal('edit.deal', d) || !this.canDeal('edit.deal', h)) {
+      this.deny();
+      return '';
+    }
+    let how: 'qt' | 'doc' = 'doc';
+    this.batchOps(() => {
+      if (isQtVersion(doc) && !qtVersions(S, h).length) {
+        this.moveQt(d.id, h.id, 'ย้ายไปใบเสนอราคาร่วม');
+        how = 'qt';
+        return;
+      }
+      // the stage note it filled in on the member passes on, or goes (a QUOTATION then names the joint one)
+      const st = doc.auto?.stage || '';
+      this.releaseAuto(doc);
+      if (st === QUOTE_STAGE && !stepOf(S, d.id, QUOTE_STAGE).n.trim()) {
+        const g = jointOf(S, h);
+        if (g) this.setStep(d.id, QUOTE_STAGE, { d: stepOf(S, h.id, QUOTE_STAGE).d || todayISO(), n: jointNote(jointNo(S, g)) }, true, true);
+      }
+      const { auto: _a, ...vals } = doc;
+      const n: DealDoc = { ...vals, deal: h.id, target: 'none', stage: '' };
+      S.docs[`${h.id}/${docId}`] = n;
+      this.op(keyOf.ddoc(h.id, docId), { ...n });
+      delete S.docs[`${memberId}/${docId}`];
+      this.op(keyOf.ddoc(memberId, docId));
+      this.salesLog(d, 'ย้ายไปใบเสนอราคาร่วม', `${doc.name} · ไม่นับยอด`);
+    });
+    this.saveSales();
+    return how;
+  }
+  private moveQt(fromId: string, toId: string, why = 'รวมเป็นใบเสนอราคาร่วม'): string {
     const S = this.sales, from = S.deals[fromId], vs = qtVersions(S, { id: fromId });
     if (!from || !vs.length) return '';
     const cur = dealMoney(S, from).fcDoc?.id || vs[vs.length - 1].id;
@@ -2005,7 +2094,7 @@ export class GccEngine {
     });
     if (head?.auto) this.setStep(toId, QUOTE_STAGE, { d: head.auto.d!, n: head.auto.n }, true, true);
     if (wrote) this.setStep(fromId, QUOTE_STAGE, { d: st.d, n: jointNote(head?.docNo || '') }, true, true);
-    this.salesLog(from, 'รวมเป็นใบเสนอราคาร่วม', `${head?.docNo || 'ใบเสนอราคา'} ย้ายไปใบเสนอราคาร่วม`);
+    this.salesLog(from, why, `${head?.docNo || 'ใบเสนอราคา'} ย้ายไปใบเสนอราคาร่วม`);
     return head?.docNo || '';
   }
   /**
@@ -2014,10 +2103,17 @@ export class GccEngine {
    * typed differently are written (field by field, so a teammate's edit of another member never collides).
    */
   setJointMembers(hid: string, picks: JointPick[]) {
-    if (!this.can('edit.jqt')) return this.deny();
     const S = this.sales, g = jointOf(S, { id: hid });
     if (!g) return;
-    const keep = new Set(picks.map((x) => x.deal).filter(Boolean));
+    if (!this.canJoint() || !this.canDeal('edit.deal', g.head)) return this.deny();
+    const locked = this.jointLocked(picks, hid);
+    if (locked) {
+      this.teamNote = locked;
+      this.emit();
+      return;
+    }
+    // (a company whose row this account may not edit stays: leaving would put its own figures back)
+    const keep = new Set([...picks.map((x) => x.deal).filter(Boolean), ...g.members.filter((x) => !this.canDeal('edit.deal', x.deal)).map((x) => x.deal.id)]);
     const no = jointNo(S, g), day = stepOf(S, hid, QUOTE_STAGE).d;
     this.batchOps(() => {
       g.members.forEach((x) => !keep.has(x.deal.id) && this.leaveJoint(g, x.deal));
@@ -2050,7 +2146,7 @@ export class GccEngine {
     const S = this.sales, cur = S.jqt?.[hid], h = S.deals[hid];
     const t = title.trim().slice(0, 200);
     if (!cur || !h || !t || t === cur.title) return;
-    if (!this.can('edit.jqt')) return this.deny();
+    if (!this.canJoint() || !this.canDeal('edit.deal', h)) return this.deny();
     S.jqt![hid] = { ...cur, title: t, by: this.me() };
     this.batchOps(() => {
       this.op(keyOf.jqt(hid), { ...S.jqt![hid] }, { f: ['title', 'by'] });
@@ -2139,6 +2235,9 @@ export class GccEngine {
     const mime = docMime({ name: file.name || '', type: file.type || '' });
     if (!mime) throw new Error('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
     const S = this.sales, today = todayISO();
+    // a joint quotation's member holds no money of its own (its quotation and payments are the joint
+    // quotation's): what is attached there is kept as a document that is not counted, at no stage
+    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, addHand: false, revise: undefined, kept: false };
     const id = uid();
     const stage = attachStage(S, d, info, today);
     const inList = !!stage && S.cfg.stages.includes(stage); // an extra installment (PAY3) has no step record

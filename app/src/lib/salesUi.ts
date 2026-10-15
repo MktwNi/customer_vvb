@@ -1,6 +1,6 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
 import { daysBetween, dmTh, localDay } from './format';
-import { basisDates, customersOf, filterDeals, jointHeadOf, jointRole, listValues, NONE, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
+import { basisDates, customersOf, filterDeals, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
   DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
@@ -99,7 +99,8 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: { yearDeals: Deal[]; job: 
   const { yearDeals, job, me, today } = ctx;
   const counts = (k: ListKey) => {
     const m = new Map<string, number>();
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today)).forEach((d) => listValues(d, k).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
+    // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
+    customersOf(S, filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today)).forEach((d) => listValues(k === 'section' ? payerDeal(S, d) : d, k).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
     return m;
   };
   const used = (k: ListKey) => new Set(yearDeals.flatMap((d) => listValues(d, k)));

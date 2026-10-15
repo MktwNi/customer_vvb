@@ -1042,6 +1042,11 @@ export interface BasisDate { d: string; what: string; amt?: number; tone?: 'ok' 
  * - closed: the day it was closed (ปิดงาน).
  */
 export function basisDates(s: SalesState, d: Deal, basis: DateBasis, today: string): BasisDate[] {
+  // a joint quotation's member is paid through it: its money's dates are its header's
+  if (basis === 'paid' || basis === 'due') {
+    const h = payerDeal(s, d);
+    if (h !== d) return basisDates(s, h, basis, today);
+  }
   const out: BasisDate[] = [];
   if (basis === 'contact') {
     if (d.contactDate && d.contactDate <= today) out.push({ d: d.contactDate, what: 'วันที่ติดต่อ' });
@@ -1104,7 +1109,12 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
   // the money lens: a deal of another year with an installment in this one; its lines once per pass
   const cash = f.money === 'cash' || !!f.pay, ce = ceOf(f.year) + '-';
   const lines = new Map<string, CashLine[]>();
-  const linesOf = (d: Deal) => lines.get(d.id) || lines.set(d.id, cashLines(s, [d], today)).get(d.id)!;
+  // a joint quotation's member is paid through it: its money (the lens, การรับเงิน) is its header's
+  const payer = (d: Deal) => payerDeal(s, d);
+  const linesOf = (d0: Deal) => {
+    const d = payer(d0);
+    return lines.get(d.id) || lines.set(d.id, cashLines(s, [d], today)).get(d.id)!;
+  };
   const payR = f.pay ? range || { from: ce + '01-01', to: ce + '12-31' } : null;
   // the search reads the documents' numbers ("QT-2569-052") and a joint quotation's name: indexed once per pass
   const nos = terms.length ? docNosByDeal(s) : null;
@@ -1113,7 +1123,8 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
       if (d.year !== f.year && !(cash && linesOf(d).some((l) => l.date.startsWith(ce)))) return false;
       if (f.pay && !linesOf(d).some((l) => payMatch(l, f.pay!) && inRange(l.date, payR!))) return false;
       if (f.job && d.jobStatus !== f.job) return false;
-      if (!lists.every((k) => listMatch(d, k, f[k]!))) return false;
+      // (a member is drawn under its joint quotation's band, in the header's หมวด: it is filtered there too)
+      if (!lists.every((k) => listMatch(k === 'section' ? payer(d) : d, k, f[k]!))) return false;
       if (f.result) {
         const r = dealResult(s, d);
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;
@@ -1154,17 +1165,18 @@ export function receivedOf(s: SalesState, d: Deal, today: string, plan = planOf(
 }
 /** Money received inside a range (the KPI footer "รับในช่วงนี้"), by receivedOf; a joint quotation's
  *  member has none of its own (its header's counts once). */
-export function receivedIn(s: SalesState, deals: Deal[], r: Range, today: string): number {
+export function receivedIn(s: SalesState, deals: Deal[], r: Range, today: string, attr = false): number {
   let sum = 0;
-  for (const d of deals) if (jointRole(s, d) !== 'member') for (const x of receivedOf(s, d, today)) if (inRange(x.date, r)) sum += x.amt;
+  for (const h of moneyHolds(s, deals, attr)) for (const x of receivedOf(s, h.d, today)) if (inRange(x.date, r)) sum += holdPart(s, h, x.amt);
   return sum;
 }
 /** Still owed on installments due inside a range (open, won deals): the KPI footer "ค้างในช่วงนี้". */
-export function owedIn(s: SalesState, deals: Deal[], r: Range, today: string): number {
+export function owedIn(s: SalesState, deals: Deal[], r: Range, today: string, attr = false): number {
   let sum = 0;
-  for (const d of deals) {
-    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES' || jointRole(s, d) === 'member') continue;
-    planOf(s, d, today)?.lines.forEach((l) => l.left > 0 && inRange(l.due, r) && (sum += l.left));
+  for (const h of moneyHolds(s, deals, attr)) {
+    const d = h.d;
+    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES') continue;
+    planOf(s, d, today)?.lines.forEach((l) => l.left > 0 && inRange(l.due, r) && (sum += holdPart(s, h, l.left)));
   }
   return sum;
 }
@@ -1277,8 +1289,85 @@ export function moneyOwners(s: SalesState, d: Deal, amount: number): { deal: Dea
   const parts = jointSplit(s, g, amount);
   return g.members.map((x, i) => ({ deal: x.deal, amt: parts[i] }));
 }
+/** The deal whose money and หมวด a row follows: a joint quotation's member is paid through its header and
+ *  drawn under its band (in the header's หมวด); any other deal is its own. */
+export const payerDeal = (s: SalesState, d: Deal): Deal => (jointRole(s, d) === 'member' && s.deals[jointHeadOf(s, d.id)]) || d;
 /** The deals that count as customers (a joint quotation's header is not one: its members are). */
 export const customersOf = (s: SalesState, deals: Deal[]) => deals.filter((d) => jointRole(s, d) !== 'header');
+
+/**
+ * The filters a joint quotation's money is apportioned under: ผู้รับผิดชอบ, SOURCE and REFERRAL, the
+ * breakdowns its members' parts feed (byResp, bySource, byReferral). With one of them set, a list holds a
+ * joint quotation's money as the parts of its members in the list (each with its member, also when the
+ * header is filtered out), so a person's filtered figures equal that person's row of the unfiltered
+ * summary. Any other filter (year, status, result, dates, money, search, หมวด, services) reads the joint
+ * quotation as one job, as its band shows it: its whole money when its header is in the list, else none.
+ */
+export const JOINT_ATTR_KEYS: ListKey[] = ['resp', 'source', 'referral'];
+export const jointAttr = (f: Partial<Record<ListKey, unknown>> | null | undefined) => !!f && JOINT_ATTR_KEYS.some((k) => !!f[k]);
+/** A deal whose money a list holds: a plain deal (whole), or a joint quotation's header with the members
+ *  whose parts count (`keep`: their indexes in `g.members`; null = the whole). */
+export interface MoneyHold { d: Deal; g: JointGroup | null; keep: number[] | null }
+/** The money a list of deals holds (lib comment above `jointAttr`), each deal or joint quotation once, in
+ *  list order; members never on their own. */
+export function moneyHolds(s: SalesState, deals: Deal[], attr = false): MoneyHold[] {
+  const ids = new Set(deals.map((d) => d.id)), seen = new Set<string>(), out: MoneyHold[] = [];
+  for (const d of deals) {
+    const r = jointRole(s, d);
+    if (r === 'plain') {
+      out.push({ d, g: null, keep: null });
+      continue;
+    }
+    const hid = r === 'header' ? d.id : jointHeadOf(s, d.id);
+    if (seen.has(hid)) continue;
+    seen.add(hid);
+    const g = jointOf(s, { id: hid });
+    if (!g) continue;
+    if (!attr || !g.members.length) {
+      if (ids.has(hid)) out.push({ d: g.head, g, keep: null });
+      continue;
+    }
+    const keep = g.members.map((x, i) => (ids.has(x.deal.id) ? i : -1)).filter((i) => i >= 0);
+    if (keep.length) out.push({ d: g.head, g, keep: keep.length === g.members.length ? null : keep });
+  }
+  return out;
+}
+/** The part of an amount of `h.d` a hold counts (the whole, or the sum of its kept members' parts). */
+export function holdPart(s: SalesState, h: MoneyHold, amount: number): number {
+  if (!h.keep || !h.g || !amount) return amount;
+  const parts = jointSplit(s, h.g, amount);
+  return h.keep.reduce((a, i) => a + parts[i], 0);
+}
+/** moneyOwners of a hold: only the kept members. */
+export function holdOwners(s: SalesState, h: MoneyHold, amount: number): { deal: Deal; amt: number }[] {
+  const o = moneyOwners(s, h.d, amount);
+  return h.keep ? h.keep.map((i) => o[i]).filter(Boolean) : o;
+}
+/** The Forecast and Actual a list holds (a section's sums, the KPI footer's open / closed split, the
+ *  closed tab), a joint quotation once (or its kept parts). */
+export function moneySum(s: SalesState, deals: Deal[], attr = false) {
+  const r = { fc: 0, ac: 0, fcOpen: 0, fcClosed: 0 };
+  for (const h of moneyHolds(s, deals, attr)) {
+    const m = dealMoney(s, h.d), fc = holdPart(s, h, m.forecast || 0);
+    r.fc += fc;
+    r.ac += holdPart(s, h, m.actual || 0);
+    if (h.d.jobStatus === 'closed') r.fcClosed += fc;
+    else r.fcOpen += fc;
+  }
+  return r;
+}
+/** cashLines over what a list holds: with `attr` a joint quotation's lines carry only its kept members'
+ *  parts (lines of no part are left out); without, cashLines as it is. */
+export function jointCashLines(s: SalesState, deals: Deal[], today: string, attr = false): CashLine[] {
+  if (!attr) return cashLines(s, deals, today);
+  const out: CashLine[] = [];
+  for (const h of moneyHolds(s, deals, true))
+    for (const l of cashLines(s, [h.d], today)) {
+      const amt = holdPart(s, h, l.amt);
+      if (amt) out.push(h.keep ? { ...l, amt } : l);
+    }
+  return out;
+}
 
 /** Every deal's document numbers, joined (the search reads them). */
 function docNosByDeal(s: SalesState): Map<string, string> {
@@ -1474,28 +1563,31 @@ export function sectionsFor(s: SalesState, deals: Deal[]) {
  * - late / lateN: of that, installments past their due date (amount, and how many installments);
  * - dueMonth / dueMonthN: installments due from today to the end of this month (not the late ones). */
 export interface Receivables { receivable: number; late: number; lateN: number; dueMonth: number; dueMonthN: number }
-export function receivables(s: SalesState, deals: Deal[], today: string): Receivables {
+export function receivables(s: SalesState, deals: Deal[], today: string, attr = false): Receivables {
   const r: Receivables = { receivable: 0, late: 0, lateN: 0, dueMonth: 0, dueMonthN: 0 };
   const monthEnd = today.slice(0, 8) + '31';
-  deals.forEach((d) => {
-    // a joint quotation's member owes nothing of its own (its typed figures are ignored): the header does
-    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES' || jointRole(s, d) === 'member') return;
+  // a joint quotation's member owes nothing of its own (its typed figures are ignored): the header does,
+  // once (or, under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter, the parts of the members in the list)
+  moneyHolds(s, deals, attr).forEach((h) => {
+    const d = h.d, part = (x: number) => holdPart(s, h, x);
+    if (d.jobStatus !== 'open' || dealResult(s, d) !== 'YES') return;
     const plan = planOf(s, d, today);
     if (plan)
       plan.lines.forEach((l) => {
-        if (!l.left) return;
-        r.receivable += l.left;
+        const left = part(l.left);
+        if (!left) return;
+        r.receivable += left;
         if (l.lateDays > 0) {
-          r.late += l.left;
+          r.late += left;
           r.lateN++;
         } else if (l.due && l.due >= today && l.due <= monthEnd) {
-          r.dueMonth += l.left;
+          r.dueMonth += left;
           r.dueMonthN++;
         }
       });
     else {
       const m = dealMoney(s, d);
-      if (m.forecast != null && (m.actual || 0) < m.forecast && payState(s, d, today).left.length) r.receivable += m.forecast - (m.actual || 0);
+      if (m.forecast != null && (m.actual || 0) < m.forecast && payState(s, d, today).left.length) r.receivable += part(m.forecast - (m.actual || 0));
     }
   });
   return r;
@@ -1515,11 +1607,11 @@ export interface SalesStats extends Receivables {
 /** Dashboard numbers (same definitions as the original tracker: win rate = YES / (YES + NO)). A joint
  *  quotation counts once: its header carries the money (apportioned to its members' people, sources and
  *  referrals by their parts) and is not a customer; its members are customers with no money of their own. */
-export function salesStats(s: SalesState, deals: Deal[], today: string): SalesStats {
+export function salesStats(s: SalesState, deals: Deal[], today: string, attr = false): SalesStats {
   const st: SalesStats = {
     total: 0, yes: 0, no: 0, wait: 0, none: 0, decided: 0, winRate: 0, forecast: 0, actual: 0, achieved: 0, fcConfirmed: 0, acConfirmed: 0,
     open: 0, closed: 0, overdue: 0, bySource: {}, byService: {}, stages: s.cfg.stages.map((name) => ({ name, n: 0 })), byResp: {}, byReferral: {},
-    ...receivables(s, deals, today),
+    ...receivables(s, deals, today, attr),
   };
   s.cfg.sources.forEach((x) => (st.bySource[x] = { n: 0, forecast: 0, yes: 0, decided: 0 }));
   s.cfg.services.forEach((x) => (st.byService[x] = 0));
@@ -1530,23 +1622,24 @@ export function salesStats(s: SalesState, deals: Deal[], today: string): SalesSt
     d.source.forEach((x) => (src(x).forecast += fc));
     [grp(st.byResp, d.resp), grp(st.byReferral, d.referral)].forEach((b) => ((b.forecast += fc), (b.actual += ac)));
   };
-  deals.forEach((d) => {
-    const jr = jointRole(s, d);
-    if (jr !== 'member') {
-      const m = dealMoney(s, d);
-      const fc = m.forecast || 0, ac = m.actual || 0;
-      st.forecast += fc;
-      st.actual += ac;
-      if (m.fcConfirmed) st.fcConfirmed += fc;
-      // only what the documents back: money received by hand on other installments is not confirmed by one
-      if (m.acConfirmed) st.acConfirmed += ac - m.hand;
-      if (jr === 'plain') money(d, fc, ac);
-      else {
-        const fcs = moneyOwners(s, d, fc), acs = moneyOwners(s, d, ac);
-        fcs.forEach((o, i) => money(o.deal, o.amt, acs[i].amt));
-      }
+  // the money: each deal once, a joint quotation once on its header (or the parts of its members in the
+  // list, under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter), apportioned to its members' people
+  moneyHolds(s, deals, attr).forEach((h) => {
+    const m = dealMoney(s, h.d);
+    const fc = m.forecast || 0, ac = m.actual || 0;
+    st.forecast += holdPart(s, h, fc);
+    st.actual += holdPart(s, h, ac);
+    if (m.fcConfirmed) st.fcConfirmed += holdPart(s, h, fc);
+    // only what the documents back: money received by hand on other installments is not confirmed by one
+    if (m.acConfirmed) st.acConfirmed += holdPart(s, h, ac - m.hand);
+    if (!h.g) money(h.d, fc, ac);
+    else {
+      const fcs = holdOwners(s, h, fc), acs = holdOwners(s, h, ac);
+      fcs.forEach((o, i) => money(o.deal, o.amt, acs[i].amt));
     }
-    if (jr === 'header') return;
+  });
+  deals.forEach((d) => {
+    if (jointRole(s, d) === 'header') return;
     const r = dealResult(s, d);
     st.total++;
     if (r === 'YES') st.yes++;

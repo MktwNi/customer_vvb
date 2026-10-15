@@ -44,6 +44,9 @@
 /* ---------- a member's own panel: where it belongs ---------- */
 .jq-mb{margin:6px 0 0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 12px;border-radius:var(--r-inner);background:#F7F9FE;box-shadow:inset 3px 0 0 var(--tint-line);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
 .jq-mb .lnk{font-size:var(--fs-sec)}
+/* a member's document that counts nowhere (kept under เอกสารอื่น, with "ย้ายไปใบเสนอราคาร่วม") */
+.sl-docc-n{margin:0;padding:0 14px 10px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.sl-docc-n .lnk{font-size:var(--fs-sec)}
 .dp-strip b.share{font-weight:400;color:var(--muted)}
 .jq-ms .lnk{font-size:inherit}
 

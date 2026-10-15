@@ -11,9 +11,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { cashLines, dealMoney, jointOf, jointRole, salesStats, toJqm, type Deal } from './sales';
-import { jointNote } from './joint';
+import { cashLines, cashYear, dealMoney, jointOf, jointRole, salesStats, toJqm, type Deal } from './sales';
+import { jointNote, strayDocs } from './joint';
 import { qtVersions } from './quotes';
+import { BUILTIN } from './caps';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -329,6 +330,222 @@ describe('who may', () => {
       await expect(V.createJoint({ ...spec(), members: [{ name: 'x', share: null, pct: null }] })).rejects.toThrow('บัญชีของคุณสร้างใบเสนอราคาร่วมไม่ได้');
       L.dispose();
       V.dispose();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ------------------------------------------------------------------ the review's findings, end to end
+
+describe('review: a row with a job of its own keeps it', () => {
+  it('a closed row with a typed Actual, and one received by hand on its plan, are never reused: new rows join, the money stays', async () => {
+    const [A, B] = await team();
+    // seed-c's พฤกษา: closed, a typed Actual of 180,000, no documents
+    const closed = deal(A, 'บริษัท พฤกษา โฮลดิ้ง จำกัด', { resp: 'คุณเอ', forecast: 180000, actual: 180000 });
+    A.updateDeal(closed.id, { jobStatus: 'closed' });
+    const hand = deal(A, 'ไทยพลาสติกรีไซเคิล', { resp: 'หมิว' });
+    A.setStep(hand.id, 'CLOSED DEAL', { d: '2026-09-01', n: 'YES' });
+    A.updatePayLine(hand.id, 'PAY1', { amt: 60000, due: '2026-09-30' });
+    A.markPaid(hand.id, 'PAY1', { date: '2026-09-28', amount: null });
+    const typed = deal(A, 'สยามฟู้ดส์', { resp: 'มกร', actual: 80000 });
+    const free = deal(A, 'อุดร ไบโอแมส', { resp: 'คุณบี', forecast: 50000 });
+    expect([closed, hand, typed, free].map((d) => A.jointFate(A.sales.deals[d.id]))).toEqual(['new', 'new', 'new', 'reuse']);
+    const S = A.sales, all = () => Object.values(S.deals);
+    const before = salesStats(S, all(), TODAY), got0 = cashYear(cashLines(S, all(), TODAY), '2569').totals.got;
+    expect(before.actual).toBe(180000 + 60000 + 80000);
+    later();
+    const { hid } = await A.createJoint({ ...spec(), members: [closed, hand, typed, free].map((d) => ({ deal: d.id, share: null, pct: null })) });
+    const g = jointOf(S, { id: hid })!;
+    // three new rows of those companies, the free row reused
+    expect(g.members.map((x) => x.deal.id).filter((id) => [closed.id, hand.id, typed.id].includes(id))).toEqual([]);
+    expect(g.members.map((x) => x.deal.client)).toEqual(['บริษัท พฤกษา โฮลดิ้ง จำกัด', 'ไทยพลาสติกรีไซเคิล', 'สยามฟู้ดส์', 'อุดร ไบโอแมส']);
+    expect(g.members[3].deal.id).toBe(free.id);
+    expect([closed, hand, typed].map((d) => jointRole(S, d))).toEqual(['plain', 'plain', 'plain']);
+    // nothing received disappears: the KPI Actual and Cashflow's received money as before
+    const after = salesStats(S, all(), TODAY);
+    expect(after.actual).toBe(before.actual);
+    expect(cashYear(cashLines(S, all(), TODAY), '2569').totals.got).toBe(got0);
+    expect(after.forecast).toBe(before.forecast - 50000 + 1284000); // the reused row's typed Forecast gives way to the quotation
+    await settle(A, B);
+    expect(salesStats(B.sales, Object.values(B.sales.deals), TODAY).actual).toBe(before.actual);
+    A.dispose();
+    B.dispose();
+  });
+
+  it('"รวมเป็นใบเสนอราคาร่วม" is refused from a deal with money received, a plan or closed (its quotation stays)', async () => {
+    const [A] = await team();
+    const x = deal(A, 'บางกอกสตีล เวิร์คส์', { resp: 'หมิว' });
+    const v1 = await A.attachDoc(x.id, pdf('v1.pdf'), qt(1284000));
+    A.setStep(x.id, 'CLOSED DEAL', { d: '2026-10-07', n: 'YES' });
+    A.updatePayLine(x.id, 'PAY1', { amt: 100000, due: '2026-10-09' });
+    later();
+    await expect(A.createJoint({ ...spec(), from: x.id, members: [{ deal: x.id, share: null, pct: null }] })).rejects.toThrow('รวมเป็นใบเสนอราคาร่วมไม่ได้');
+    expect(Object.keys(A.sales.jqt || {})).toEqual([]);
+    expect(qtVersions(A.sales, { id: x.id }).map((d) => d.id)).toEqual([v1.id]);
+    A.dispose();
+  });
+});
+
+describe('review: a member holds no money of its own', () => {
+  async function made() {
+    const [A, B] = await team();
+    const ms = ['บางกอกสตีล', 'อุดร ไบโอแมส'].map((n, i) => deal(A, n, { resp: ['หมิว', 'คุณบี'][i] }));
+    later();
+    const { hid } = await A.createJoint({ ...spec(), file: pdf('qt.pdf'), members: ms.map((d) => ({ deal: d.id, share: null, pct: null })) });
+    await settle(A, B);
+    return { A, B, hid, ms };
+  }
+  it('a quotation attached at a member is kept as a document that is not counted, at no stage', async () => {
+    const { A, B, hid, ms } = await made();
+    const S = A.sales, k0 = salesStats(S, Object.values(S.deals), TODAY);
+    const doc = await A.attachDoc(ms[1].id, pdf('member-qt.pdf'), qt(1284000));
+    expect(S.docs[`${ms[1].id}/${doc.id}`]).toMatchObject({ target: 'none', stage: '' });
+    expect(strayDocs(S, S.deals[ms[1].id])).toEqual([]);
+    expect(qtVersions(S, { id: ms[1].id })).toEqual([]);
+    const k1 = salesStats(S, Object.values(S.deals), TODAY);
+    expect([k1.forecast, k1.actual]).toEqual([k0.forecast, k0.actual]);
+    // a receipt too
+    const r = await A.attachDoc(ms[0].id, pdf('rc.pdf'), { ...qt(50000), kind: 'receipt', target: 'actual', stage: 'PAY1' });
+    expect(S.docs[`${ms[0].id}/${r.id}`]).toMatchObject({ target: 'none', stage: '' });
+    expect(salesStats(S, Object.values(S.deals), TODAY).actual).toBe(0);
+    expect(hid in S.deals).toBe(true);
+    A.dispose();
+    B.dispose();
+  });
+  it('"ย้ายไปใบเสนอราคาร่วม": a quotation a teammate attached before the company joined moves to the joint quotation', async () => {
+    const [A, B] = await team();
+    const x = deal(A, 'บางกอกสตีล', { resp: 'หมิว' }), y = deal(A, 'อุดร ไบโอแมส', { resp: 'คุณบี' });
+    await settle(A, B);
+    // B attaches a quotation to x while A, not seeing it yet, puts x in a joint quotation without a file
+    const v = await B.attachDoc(x.id, pdf('x.pdf'), qt(900000, { docNo: 'QT-2569-077' }));
+    later();
+    const { hid } = await A.createJoint({ ...spec({ total: null, docNo: '' }), members: [{ deal: x.id, share: null, pct: null }, { deal: y.id, share: null, pct: null }] });
+    await settle(A, B);
+    await settle(A, B);
+    const S = A.sales;
+    expect(jointRole(S, S.deals[x.id])).toBe('member');
+    expect(strayDocs(S, S.deals[x.id]).map((d) => d.id)).toEqual([v.id]);
+    expect(salesStats(S, Object.values(S.deals), TODAY).forecast).toBe(0); // counted nowhere
+    const file = S.docs[`${x.id}/${v.id}`].fileId;
+    expect(A.moveToJoint(x.id, v.id)).toBe('qt');
+    // the joint quotation had none: it is its quotation now (same id, the file kept), counted once
+    expect(qtVersions(S, { id: hid }).map((d) => d.id)).toEqual([v.id]);
+    expect(dealMoney(S, S.deals[hid])).toMatchObject({ forecast: 900000, fcConfirmed: true });
+    expect(strayDocs(S, S.deals[x.id])).toEqual([]);
+    expect(salesStats(S, Object.values(S.deals), TODAY).forecast).toBe(900000);
+    await settle(A, B);
+    expect(sheet(`ddoc/${x.id}/${v.id}`)).toBeNull();
+    expect(sheet(`ddoc/${hid}/${v.id}`)).toMatchObject({ fileId: file });
+    expect(calls.get(A)!.filter((c) => c.action === 'delfile')).toEqual([]);
+    // another stray one, now that the joint quotation has its quotation: kept there, not counted
+    const w = await B.attachDoc(y.id, pdf('y.pdf'), { ...qt(5000), kind: 'invoice', target: 'actual', stage: 'PAY1' });
+    // (B's build holds it to "not counted" already; an older build would not: play its record)
+    B.sales.docs[`${y.id}/${w.id}`] = { ...B.sales.docs[`${y.id}/${w.id}`], target: 'actual', stage: 'PAY1' };
+    A.sales.docs[`${y.id}/${w.id}`] = { ...B.sales.docs[`${y.id}/${w.id}`] };
+    expect(strayDocs(S, S.deals[y.id]).map((d) => d.id)).toEqual([w.id]);
+    expect(A.moveToJoint(y.id, w.id)).toBe('doc');
+    expect(S.docs[`${hid}/${w.id}`]).toMatchObject({ target: 'none', stage: '' });
+    expect(salesStats(S, Object.values(S.deals), TODAY)).toMatchObject({ forecast: 900000, actual: 0 });
+    A.dispose();
+    B.dispose();
+  });
+});
+
+describe('review: the year of a joint quotation\'s companies', () => {
+  it('a member moved to another year leaves the joint quotation; the header takes every company along', async () => {
+    const [A, B] = await team();
+    const ms = ['บางกอกสตีล', 'อุดร ไบโอแมส', 'สยามฟู้ดส์'].map((n, i) => deal(A, n, { resp: ['หมิว', 'คุณบี', 'มกร'][i] }));
+    later();
+    const { hid } = await A.createJoint({ ...spec(), file: pdf('qt.pdf'), members: ms.map((d) => ({ deal: d.id, share: null, pct: null })) });
+    const S = A.sales;
+    A.updateDeal(ms[0].id, { year: '2570' });
+    expect(S.deals[ms[0].id].year).toBe('2570');
+    expect(jointRole(S, S.deals[ms[0].id])).toBe('plain');
+    expect(S.steps[`${ms[0].id}/QUOTATION`]).toBeUndefined();
+    expect(jointOf(S, { id: hid })!.members.map((x) => x.deal.id)).toEqual([ms[1].id, ms[2].id]);
+    // the 2569 summary has no part for it any more
+    const st = salesStats(S, Object.values(S.deals).filter((d) => d.year === '2569'), TODAY);
+    expect(st.byResp['หมิว']?.forecast || 0).toBe(0);
+    expect(st.forecast).toBe(1284000);
+    // the header: every company with it
+    A.updateDeal(hid, { year: '2570' });
+    expect([hid, ms[1].id, ms[2].id].map((id) => S.deals[id].year)).toEqual(['2570', '2570', '2570']);
+    expect(jointOf(S, { id: hid })!.members).toHaveLength(2);
+    await settle(A, B);
+    expect([hid, ms[1].id, ms[2].id].map((id) => B.sales.deals[id].year)).toEqual(['2570', '2570', '2570']);
+    expect(sheet(`jqm/${hid}/${ms[0].id}`)).toBeNull();
+    A.dispose();
+    B.dispose();
+  });
+});
+
+describe('review: an account limited to its own deals', () => {
+  it('cannot put another person\'s row in a joint quotation (refused, nothing written); its own rows join; a role without ดีลและขั้นตอน makes none', async () => {
+    sim = createGasSim({ teamKey: '', kdfIter: 1000 });
+    sim.setup();
+    const LS = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => LS.get(k) ?? null, setItem: (k: string, v: string) => void LS.set(k, String(v)), removeItem: (k: string) => void LS.delete(k) });
+    try {
+      const L = mk('');
+      (L as unknown as { me: () => string }).me = GccEngine.prototype.me;
+      L.homeTeam = '';
+      expect(await L.teamOpen(URL)).toBe('setup');
+      await L.teamClaim(sim.ownerCode()!, 'lead', 'หมิว', 'lead-pass-123');
+      const { temp } = await L.adminCreate({ u: 'aek', name: 'เอก', role: 'sales' });
+      const { id: own } = await L.roleSave({ n: 'ขายเฉพาะงานตัวเอง', d: '', c: { ...BUILTIN.sales.c, 'edit.deal': 'own', 'edit.pay': 'own' } });
+      await L.adminUpdate('aek', { role: own });
+      const { 'edit.deal': _no, ...noDealCaps } = BUILTIN.sales.c;
+      const { id: noDeal } = await L.roleSave({ n: 'ใบเสนอราคาร่วมอย่างเดียว', d: '', c: noDealCaps });
+      const { temp: temp2 } = await L.adminCreate({ u: 'pla', name: 'ปลา', role: 'sales' });
+      await L.adminUpdate('pla', { role: noDeal });
+      const other = L.addDeal({ client: 'บริษัท ของหมิว จำกัด', resp: 'หมิว', year: '2569', section: 'Event Exhibition', forecast: 400000 });
+      await L.teamSyncNow();
+      const E = mk('');
+      (E as unknown as { me: () => string }).me = GccEngine.prototype.me;
+      E.homeTeam = '';
+      expect(await E.teamOpen(URL)).toBe('accounts');
+      LS.clear();
+      await E.teamLogin('aek', temp, true);
+      await E.teamChangePassword('', 'aek-pass-123');
+      await E.teamSyncNow();
+      const o = E.sales.deals[other.id];
+      expect(E.canDeal('edit.deal', o)).toBe(false);
+      expect(E.canJoint()).toBe(true);
+      expect(E.jointFate(o)).toBe('locked');
+      const f0 = salesStats(E.sales, Object.values(E.sales.deals), TODAY).forecast;
+      await expect(E.createJoint({ ...spec({ resp: 'เอก', total: 10 }), members: [{ deal: other.id, share: null, pct: null }] })).rejects.toThrow('บัญชีของคุณใส่แถวนี้ในใบเสนอราคาร่วมไม่ได้');
+      expect(Object.keys(E.sales.jqt || {})).toEqual([]);
+      // its own row joins
+      const mine = E.addDeal({ client: 'บริษัท ของเอก จำกัด', year: '2569', section: 'Event Exhibition' });
+      expect(mine.resp).toBe('เอก');
+      later();
+      const { hid } = await E.createJoint({ ...spec({ resp: 'เอก', total: 10 }), members: [{ deal: mine.id, share: null, pct: null }] });
+      expect(E.sales.deals[hid].resp).toBe('เอก');
+      // and adding the other's row later is refused too (said, nothing written)
+      E.setJointMembers(hid, [{ deal: mine.id, share: null, pct: null }, { deal: other.id, share: null, pct: null }]);
+      expect(E.teamNote).toContain('บัญชีของคุณใส่แถวนี้ในใบเสนอราคาร่วมไม่ได้');
+      expect(jointRole(E.sales, E.sales.deals[other.id])).toBe('plain');
+      await E.teamSyncNow();
+      expect(jointRole(E.sales, E.sales.deals[other.id])).toBe('plain');
+      expect(salesStats(E.sales, Object.values(E.sales.deals), TODAY).forecast).toBe(f0 + 10);
+      // the sheet: the joint quotation and its own member only
+      const rows = sim.post({ action: 'pull', since: 0, cv: 4, tok: E.session!.tok }).rows!.filter((r) => r.k.startsWith('jqm/')).map((r) => r.k);
+      expect(rows).toEqual([`jqm/${hid}/${mine.id}`]);
+      // a role with สร้างใบเสนอราคาร่วม but no ดีลและขั้นตอน makes none
+      const P = mk('');
+      (P as unknown as { me: () => string }).me = GccEngine.prototype.me;
+      P.homeTeam = '';
+      expect(await P.teamOpen(URL)).toBe('accounts');
+      LS.clear();
+      await P.teamLogin('pla', temp2, true);
+      await P.teamChangePassword('', 'pla-pass-123');
+      expect(P.can('edit.jqt')).toBe(true);
+      expect(P.canJoint()).toBe(false);
+      await expect(P.createJoint({ ...spec(), members: [{ name: 'x', share: null, pct: null }] })).rejects.toThrow('บัญชีของคุณสร้างใบเสนอราคาร่วมไม่ได้');
+      L.dispose();
+      E.dispose();
+      P.dispose();
     } finally {
       vi.unstubAllGlobals();
     }

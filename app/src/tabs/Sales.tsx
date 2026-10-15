@@ -31,8 +31,8 @@ import { CashKpiRow, CashView, LensChip, LensMoney, LensNote } from './SalesCash
 import { cashLines, cashYear, cashYears } from '../lib/sales';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
-import { countsActual, customersOf, docsOf, jointHeadOf, jointRole } from '../lib/sales';
-import { jointRows, rowDeals, rowMoneyDeals, type JRow } from '../lib/joint';
+import { customersOf, jointAttr, jointHeadOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
+import { canMergeFrom, jointRows, rowDeals, type JRow } from '../lib/joint';
 import { JointBand, JointCard, JointClosedRows, JointShare } from '../components/JointQt';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
@@ -92,7 +92,7 @@ export function Sales() {
   const moneyLines = v === 'cash' || (v === 'table' && lens) ? cashLines(S, all, today) : null;
   const years = yearOptions(all, year, beYear(), moneyLines ? cashYears(moneyLines) : []);
   const perYear = new Map<string, number>();
-  all.forEach((d) => perYear.set(d.year, (perYear.get(d.year) || 0) + 1));
+  customersOf(S, all).forEach((d) => perYear.set(d.year, (perYear.get(d.year) || 0) + 1));
   const yearSub = (y: string) => {
     if (y === beYear()) return 'ปีนี้';
     if (!moneyLines || perYear.get(y)) return undefined;
@@ -535,23 +535,19 @@ function NoMatch({ text }: { text: string }) {
  *  its revenue out of the totals), what is still to be received, and the share of jobs won. They follow
  *  the filters (the date range too), not the quick view; money is each matching job's whole figure, and
  *  the caption says the range. Only the footers of รับเงิน and ครบกำหนดชำระ count money inside the range. */
-function Kpis({ S, open, all, today, year, date }: { S: SalesState; open: Deal[]; all: Deal[]; today: string; year: string; date: DateIn | null }) {
+function Kpis({ S, open, all, today, year, date, attr }: { S: SalesState; open: Deal[]; all: Deal[]; today: string; year: string; date: DateIn | null; attr: boolean }) {
   const { ui, set } = useApp();
-  const st = salesStats(S, all, today);
-  const rc = receivables(S, open, today);
-  let fcOpen = 0, fcClosed = 0;
-  all.forEach((d) => {
-    const fc = jointRole(S, d) === 'member' ? 0 : dealMoney(S, d).forecast || 0;
-    if (d.jobStatus === 'closed') fcClosed += fc;
-    else fcOpen += fc;
-  });
+  // a joint quotation once (under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter: the parts of its companies shown)
+  const st = salesStats(S, all, today, attr);
+  const rc = receivables(S, open, today, attr);
+  const { fcOpen, fcClosed } = moneySum(S, all, attr);
   const m = (n: number) => fmtMoney(Math.round(n)) || '0';
   const pct = st.forecast > 0 ? Math.round((st.actual / st.forecast) * 100) : null;
   const words = date ? BASIS_TH[date.basis] : null;
   const label = date && words ? <>Forecast รวม · {words.short} <span className="sl-kpi-r">{rangeTh(date.r, { dropYear: year })}</span></> : `Forecast รวม · ปี ${year}`;
   const title = date && words ? `นับเฉพาะงานตามตัวกรอง · ${words.sent} ${rangeTh(date.r)} · ตัวเลขเป็นยอดเต็มของแต่ละงาน` : undefined;
-  const got = date?.basis === 'paid' ? receivedIn(S, all, date.r, today) : null;
-  const owed = date?.basis === 'due' ? owedIn(S, all, date.r, today) : null;
+  const got = date?.basis === 'paid' ? receivedIn(S, all, date.r, today, attr) : null;
+  const owed = date?.basis === 'due' ? owedIn(S, all, date.r, today, attr) : null;
   return (
     <div className="kpis sl-kpis">
       <Kpi hero label={label} title={title} value={m(st.forecast)} unit="บาท" foot={<>งานเปิด <b>{m(fcOpen)}</b> · ปิดแล้ว <b>{m(fcClosed)}</b></>} />
@@ -632,7 +628,9 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const acts = useSalesActs();
   // the lens "เงินเข้าตามปี": each deal's money in the year (a date range narrows it), and the cards over the
   // same money (the year's, or the range's: they say which)
-  const cash = ui.slLens === 'cash' && e.can('view.cash') ? cashLensOf(S, all, ui.slYear, date?.r ?? null, today) : null;
+  // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts a joint quotation by the parts of its companies shown
+  const attr = jointAttr(F);
+  const cash = ui.slLens === 'cash' && e.can('view.cash') ? cashLensOf(S, all, ui.slYear, date?.r ?? null, today, attr) : null;
   // an account that may not edit deals: no adding, no stage notes, no edits in the rows (one that may
   // edit only its own deals gets each row's own answer, ForDeal)
   const ro = !e.can('edit.deal');
@@ -793,21 +791,18 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   };
 
   /** A section's counts (its customers: plain rows and joint quotations' members) and money (plain rows and
-   *  the joint quotations' headers, once; members carry none). */
+   *  the joint quotations' headers, once; members carry none, but under a ผู้รับผิดชอบ / SOURCE / REFERRAL
+   *  filter a joint quotation counts the parts of its companies shown). */
   const secSum = (rows: JRow[]) => {
-    const list = rowDeals(rows), paid = rowMoneyDeals(rows);
-    let od = 0, rd = 0, fc = 0, ac = 0;
+    const list = rowDeals(rows), held = [...rows.flatMap((r) => (r.k === 'band' && r.inList ? [r.g.head] : [])), ...list];
+    let od = 0, rd = 0;
     for (const d of list) {
       if (overdueDays(S, d, today) != null) od++;
       if (closeReady(S, d, today)) rd++;
     }
-    for (const d of paid) {
-      const m = dealMoney(S, d);
-      fc += m.forecast || 0;
-      ac += m.actual || 0;
-    }
+    let { fc, ac } = moneySum(S, held, attr);
     // the lens: the section's money in the year, and what of it came in
-    if (cash) ({ fc, ac } = lensSum(cash, paid));
+    if (cash) ({ fc, ac } = lensSum(cash, moneyHolds(S, held, attr).map((h) => h.d)));
     return { n: list.length, od, rd, fc, ac };
   };
 
@@ -835,7 +830,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       {!money ? null : cash ? (
         <CashKpiRow K={cash.K} year={ui.slYear} range={date} onLate={() => set({ slF: { ...ui.slF, quick: 'paylate' }, slCollapsed: {} })} />
       ) : (
-        <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} />
+        <Kpis S={S} open={base} all={all} today={today} year={ui.slYear} date={date} attr={attr} />
       )}
       <Toolbar S={S} F={F} yearDeals={facets} base={base} today={today} job="open" shown={customersOf(S, deals).length} total={openN} />
       {cash && <LensNote year={ui.slYear} range={cash.range} onBack={() => set({ slLens: 'deal' })} />}
@@ -957,7 +952,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                       r.k === 'deal' ? (
                         <DealRows key={r.d.id} d={r.d} open={!!ui.slOpen[r.d.id]} stages={stages} />
                       ) : (
-                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} onOpen={(id, plan) => tk.openPanel(id, plan)}>
+                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} attr={attr} onOpen={(id, plan) => tk.openPanel(id, plan)}>
                           {!jqFold[r.g.head.id] && r.shown.map((d, i) => <DealRows key={d.id} d={d} open={!!ui.slOpen[d.id]} stages={stages} jm={i === r.shown.length - 1 ? 'last' : 'mid'} />)}
                         </JointBand>
                       ),
@@ -1427,7 +1422,7 @@ function RowMenu({ d }: { d: Deal }) {
   const ready = closeReady(tk.S, d, tk.today);
   // a quotation there already: its revision is one click from the row
   const qv = open && !tk.ro ? qtView(tk.S, d) : null, qh = qv?.head;
-  const jr = open ? jointRole(tk.S, d) : 'plain', hid = jr === 'member' ? jointHeadOf(tk.S, d.id) : '';
+  const hid = open && jointRole(tk.S, d) === 'member' ? jointHeadOf(tk.S, d.id) : '';
   return (
     <span
       ref={ref}
@@ -1455,18 +1450,24 @@ function RowMenu({ d }: { d: Deal }) {
           {hid && <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(hid))}>เปิดใบเสนอราคาร่วม<small>{qtView(tk.S, tk.S.deals[hid]).head?.doc.docNo || 'ใบเดียว หลายบริษัท'}</small></button>}
           {!tk.ro && (
             <>
-              <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d))}>แนบเอกสาร<small>ระบบเลือกขั้นให้</small></button>
-              {qh && (
+              {/* a joint quotation's member holds no money: what it files is evidence (its quotation and
+                  payments are the joint quotation's, "เปิดใบเสนอราคาร่วม" above) */}
+              {hid ? (
+                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, '', 'other'))}>แนบเอกสารอื่น<small>ไม่นับยอด · ใบเสนอราคาและการชำระอยู่ที่ใบเสนอราคาร่วม</small></button>
+              ) : (
+                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d))}>แนบเอกสาร<small>ระบบเลือกขั้นให้</small></button>
+              )}
+              {qh && !hid && (
                 <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qh.doc.id }))}>
                   แนบใบเสนอราคาฉบับแก้ไข<small>{qh.doc.docNo || 'ใบเสนอราคา'} · {qv!.cur ? `ตอนนี้ใช้ฉบับที่ ${qv!.cur.n}` : `ล่าสุดฉบับที่ ${qh.n}`}</small>
                 </button>
               )}
-              {qh && jr === 'plain' && tk.e.canJoint() && !docsOf(tk.S, d.id).some(countsActual) && (
+              {qh && tk.e.canJoint() && canMergeFrom(tk.S, d) && (
                 <button role="menuitem" className="menu-i" onClick={pick(() => setUi({ jqDlg: { k: 'new', from: d.id } }))}>
                   รวมเป็นใบเสนอราคาร่วม<small>ใบนี้ทำให้หลายบริษัท</small>
                 </button>
               )}
-              <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id, 'edit'))}>แผนการชำระเงิน<small>{planOf(tk.S, d, tk.today) ? 'แก้ไขแผน' : 'ตั้งแผน งวดละเท่าไร เมื่อไร'}</small></button>
+              {!hid && <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id, 'edit'))}>แผนการชำระเงิน<small>{planOf(tk.S, d, tk.today) ? 'แก้ไขแผน' : 'ตั้งแผน งวดละเท่าไร เมื่อไร'}</small></button>}
               <button
                 role="menuitem"
                 className="menu-i"
@@ -1656,7 +1657,8 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         }
         // QUOTATION with a quotation: its check status (package notify) and "แนบฉบับแก้ไข" always in view by
         // its note, the version under its figure
-        const qv = p === QUOTE_STAGE ? qtView(S, d) : null;
+        // (a joint quotation's member: its quotation is the joint one; one of its own counts nowhere, เอกสารอื่น)
+        const qv = p === QUOTE_STAGE && !hid ? qtView(S, d) : null;
         const qcv = qv?.head ? e.qtCheckFor(qv.head.doc) : null;
         if (qv?.head && (!ro || qcv))
           note = (
@@ -1671,7 +1673,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         let money: ReactNode = null;
         const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p);
         if (isMoney && st !== 'off') {
-          const fig = stageFig(S, d, p);
+          const fig = hid ? null : stageFig(S, d, p);
           const slot = !fig && !hid && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
           money = fig ? <StageAmount fig={fig} ver={qv ? qtFigWords(qv, fig.doc.id) : null} /> : slot ? (
             <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={p === QUOTE_STAGE ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${p}`}>
@@ -2196,7 +2198,7 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
               <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage, 'quotation', { target: 'forecast', revise: qh.doc.id }); }}>แนบฉบับแก้ไข</button>
             ) : !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสนอราคา</button>)}
           </span>
-          <span className="k2-ac">{isMoney && stage !== QUOTE_STAGE && won && !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสร็จ</button>}</span>
+          <span className="k2-ac">{isMoney && stage !== QUOTE_STAGE && won && !hasDoc && !jm && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสร็จ</button>}</span>
         </span>
       </td>
       <td className="k-st"><button type="button" className="btn pri xs" onClick={ed.save}>บันทึก</button></td>
@@ -2539,16 +2541,14 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
   const date = dateIn(F, today);
   // another date than contacts or closing: the date the filter found, under ปิดเมื่อ
   const extra = date && date.basis !== 'contact' && date.basis !== 'closed' ? date : null;
-  let fc = 0, ac = 0;
-  deals.forEach((d) => {
-    if (jointRole(S, d) === 'member') return; // its joint quotation's money counts once, on the header
-    const m = dealMoney(S, d);
-    fc += m.forecast || 0;
-    ac += m.actual || 0;
-  });
-  // a joint quotation is one group (its band, then its closed companies), at the top of its หมวด's rows
+  // a joint quotation's money counts once, on the header (under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter, the
+  // parts of its companies shown)
+  const { fc, ac } = moneySum(S, deals, jointAttr(F));
+  // a joint quotation is one group (its band, then its closed companies): the groups first, then the
+  // other rows in their order (mockup 14)
   const jr = jointRows(S, deals);
-  const flat = jr.secs.flatMap((x) => jr.rows.get(x) || []);
+  const all = jr.secs.flatMap((x) => jr.rows.get(x) || []);
+  const flat = [...all.filter((r) => r.k === 'band'), ...all.filter((r) => r.k === 'deal')];
   const nCust = customersOf(S, deals).length;
   const which = date ? `ตามตัวกรอง · ${dateWords(date.f, date.r).field} ${dateWords(date.f, date.r).op} ${rangeTh(date.r)}` : 'ตามตัวกรอง';
   return (

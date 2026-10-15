@@ -74,15 +74,19 @@ const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', sub
  * compared instead of the typed-Forecast check (a `check` the caller gave, such as a typed plan total, is
  * still asked about), and the old version stays as "ฉบับเดิม", not counted. The rules: lib/quotes attach*.
  */
-export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, target: target0, check, add: add0, revise, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
+export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, onClose, target: target0, check, add: add0, revise: revise0, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const cfg = e.sales.cfg, today = todayISO();
   const m0 = dealMoney(e.sales, deal);
+  // a joint quotation's member holds no money of its own: what it files is evidence, at no stage, never
+  // counted (its quotation and payments are attached at the joint quotation; the engine holds to it too)
+  const jm = jointRole(e.sales, deal) === 'member';
+  const stage = jm ? '' : stage0, revise = jm ? undefined : revise0;
   // "ระบบเลือกขั้นให้": a quotation until the deal is won (a revised one, once there is one), then an invoice
-  const kind0 = attachKind0(e.sales, deal, { kind: kindIn, stage, revise });
+  const kind0 = jm ? kindIn ?? 'other' : attachKind0(e.sales, deal, { kind: kindIn, stage, revise });
   // what a kind counts toward at this stage (a receipt at a PAY stage is Actual); a figure's own attach keeps its target
-  const defaultTarget = (k: DocKind): DocTarget => target0 ?? targetForStage(cfg, stage ?? '', k);
+  const defaultTarget = (k: DocKind): DocTarget => (jm ? 'none' : target0 ?? targetForStage(cfg, stage ?? '', k));
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [prog, setProg] = useState<{ msg: string; pct?: number } | null>(null);
@@ -285,8 +289,9 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
   const qtStep = stepOf(e.sales, deal.id, QUOTE_STAGE);
 
   return (
-    <Modal title={rev ? `แนบฉบับแก้ไข · ใบเสนอราคา${qtNo ? ' ' + qtNo : ''}` : stage ? `แนบเอกสารที่ ${stage}${stageTh(stage) ? ' · ' + stageTh(stage) : ''}` : `แนบ${KIND_TH[kind]}`} onClose={onClose} width={rev ? 640 : 620}>
+    <Modal title={jm ? 'แนบเอกสารอื่น · ไม่นับยอด' : rev ? `แนบฉบับแก้ไข · ใบเสนอราคา${qtNo ? ' ' + qtNo : ''}` : stage ? `แนบเอกสารที่ ${stage}${stageTh(stage) ? ' · ' + stageTh(stage) : ''}` : `แนบ${KIND_TH[kind]}`} onClose={onClose} width={rev ? 640 : 620}>
       <span className="sl-dlg-sub">{deal.client}</span>
+      {jm && <Notice kind="info">บริษัทนี้อยู่ในใบเสนอราคาร่วม เอกสารที่แนบที่นี่เก็บไว้เป็นหลักฐาน ไม่นับยอด · ใบเสนอราคาและใบเสร็จของงานนี้แนบที่ใบเสนอราคาร่วม</Notice>}
       {rev ? (
         <div className="sl-stagebar">
           <Bead state={stageTrack(e.sales, deal, today).states[QUOTE_STAGE] || 'future'} now stage={QUOTE_STAGE} />
@@ -364,12 +369,12 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
           {partyWarn && <Notice kind="error">ชื่อลูกค้าในเอกสาร "{facts!.party}" ไม่ตรงกับ "{deal.client}" — ตรวจว่าแนบถูกรายการ</Notice>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
             <label style={labelCol}>
-              {chk || rev ? 'ยอดในเอกสาร (บาท)' : 'ยอดเงินที่ยืนยัน (บาท)'}
+              {chk || rev || jm ? 'ยอดในเอกสาร (บาท)' : 'ยอดเงินที่ยืนยัน (บาท)'}
               <input value={amount} onChange={(ev) => { setAmount(ev.target.value); setBasis('manual'); }} inputMode="decimal" placeholder="เช่น 107,000" aria-invalid={badAmt} className="fld" style={{ fontWeight: 500, ...(badAmt ? { borderColor: 'var(--bad)' } : {}) }} />
               {badAmt && <span role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>อ่านเป็นจำนวนเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000 หรือ 1.5 ล้าน</span>}
             </label>
             {/* a revision from the quotation's card is a quotation for the Forecast: no choice to make */}
-            {!fixed && <SelField
+            {!fixed && !jm && <SelField
               style={labelCol}
               text="นับยอดนี้เป็น"
               value={target}
@@ -464,7 +469,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
             {rev && fin == null && !badAmt && <span className="t-sec">ใส่ยอดในเอกสารก่อน จึงแนบเป็นฉบับแก้ไขได้</span>}
             {!badAmt && !(rev && fin == null) && (
               <button onClick={save} disabled={saving === 'กำลังบันทึก…'} className="btn pri">
-                {rev ? `ยืนยันยอด ${fmtMoney(fin)} บาท และแนบเป็นฉบับที่ ${revN}` : fin != null ? `ยืนยันยอด ${fmtMoney(fin)} บาท และ${stage ? 'แนบที่ ' + stage : 'แนบเอกสาร'}` : 'แนบเอกสาร (ไม่ระบุยอด)'}
+                {jm ? 'แนบเอกสาร (ไม่นับยอด)' : rev ? `ยืนยันยอด ${fmtMoney(fin)} บาท และแนบเป็นฉบับที่ ${revN}` : fin != null ? `ยืนยันยอด ${fmtMoney(fin)} บาท และ${stage ? 'แนบที่ ' + stage : 'แนบเอกสาร'}` : 'แนบเอกสาร (ไม่ระบุยอด)'}
               </button>
             )}
           </div>

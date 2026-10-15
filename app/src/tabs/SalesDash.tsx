@@ -15,11 +15,11 @@ import { planDayLink } from '../lib/planCal';
 import { Icon } from '../components/icons';
 import { heroGrad } from '../components/ui';
 import { CashStat, QuarterCard, payField } from '../components/DashCash';
-import { beOf, cashLines, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
+import { beOf, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
 import { thisQuarter } from '../lib/dateRange';
 import { payIn, payMonthCounts } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
-import { jointRole } from '../lib/sales';
+import { customersOf, jointAttr, jointCashLines, jointRole } from '../lib/sales';
 import { shareOf } from '../lib/joint';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -125,7 +125,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const nextRef = useRef<HTMLButtonElement>(null);
   const F = normSalesFilter({ year, ...f });
   const list = filterDeals(S, F, today);
-  const st = salesStats(S, list, today);
+  // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts a joint quotation by the parts of its companies listed
+  const attr = jointAttr(F);
+  const st = salesStats(S, list, today, attr);
   const me = e.me();
   const ver = useEngineVersion();
   const key = JSON.stringify(f);
@@ -141,12 +143,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   // the money of the period (dash impl-note §4): every deal passing the other filters whose money falls in
   // the year, any deal year; the range is the date filter's, else the whole year
   const moneyDeals = filterDeals(S, { ...F, date: null, pay: undefined, money: 'cash' }, today);
-  const lines = cashLines(S, moneyDeals, today);
+  const lines = jointCashLines(S, moneyDeals, today, attr);
   const Y = cashYear(lines, year);
   const yr = { from: `${+year - 543}-01-01`, to: `${+year - 543}-12-31` };
   const moneyR = date ? date.r : yr;
   const qPick = F.date && /^q[1-4]$/.test(F.date.preset) ? +F.date.preset.slice(1) : F.date?.preset === 'quarter' ? thisQuarter(year, today) : 0;
-  const payCount = (p: PayF) => filterDeals(S, { ...F, quick: '', pay: p || undefined }, today).length;
+  const payCount = (p: PayF) => customersOf(S, filterDeals(S, { ...F, quick: '', pay: p || undefined }, today)).length;
   // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
   const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
   // การรับเงิน, pinned after ผู้รับผิดชอบ: its choices count the money of the range

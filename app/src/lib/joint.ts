@@ -6,10 +6,10 @@
  */
 import { dmTh, isoTh } from './format';
 import {
-  DEAL_STAGE, QUOTE_STAGE, countsActual, dealMoney, dealResult, docsOf, fmtMoney, jointBase, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights, payState, sectionsFor, stepOf,
+  DEAL_STAGE, QUOTE_STAGE, apportion, countsActual, dealMoney, dealResult, docsOf, fmtMoney, hasPlan, jointBase, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights, payState, sectionsFor, stepOf,
   type Deal, type DealDoc, type JointGroup, type JointMember, type SalesState,
 } from './sales';
-import { isQtVersion, qtView } from './quotes';
+import { isQtVersion, qtVersions, qtView } from './quotes';
 import { shortName } from './salesUi';
 
 /** A company to put in a joint quotation: an existing row (`deal`, reused), or a new row for a registry
@@ -78,13 +78,25 @@ export function shareOf(s: SalesState, d: Deal): (ShareView & { g: JointGroup })
 }
 /** How the parts are set, for the panel's heading: "แบ่งเท่ากัน" (nobody typed one) or "กำหนดส่วนแบ่งเอง". */
 export const sharesWord = (g: JointGroup) => (g.members.every((x) => x.m.share == null && x.m.pct == null) ? 'แบ่งเท่ากัน' : 'กำหนดส่วนแบ่งเอง');
-/** The parts against the quotation: "รวม 1,284,000 · เท่ากับยอดใบเสนอราคา" or how far off (warn, never blocking). */
-export function sharesCheck(parts: (number | null)[], total: number | null): { text: string; warn: boolean } {
-  const sum = parts.reduce<number>((a, x) => a + (x || 0), 0);
-  if (total == null) return { text: `รวม ${fmtMoney(sum) || '0'}`, warn: false };
-  const diff = Math.round((sum - total) * 100) / 100;
-  if (!diff) return { text: `รวม ${fmtMoney(sum)} · เท่ากับยอดใบเสนอราคา`, warn: false };
-  return { text: `รวม ${fmtMoney(sum) || '0'} · ${diff < 0 ? 'น้อยกว่า' : 'มากกว่า'}ยอดใบเสนอราคา ${fmtMoney(Math.abs(diff))}`, warn: true };
+const fmtN2 = (n: number) => String(Math.round(n * 100) / 100);
+/**
+ * The parts as typed against the quotation total (the dialog's sum line, the panel's footer): "รวม 1,284,000 ·
+ * เท่ากับยอดใบเสนอราคา" when they fit (empty parts split what is left), else how far off; parts that do not
+ * fit are scaled to it (jointWeights, apportion), so this warns, never blocks. Without a total yet: what an
+ * empty part means, or how far typed % go over 100.
+ */
+export function sharesCheck(ms: Pick<JointMember, 'share' | 'pct'>[], total: number | null): { text: string; warn: boolean } {
+  const base = total != null && total > 0 ? total : 0;
+  const empty = ms.filter((m) => m.share == null && m.pct == null).length;
+  if (!base) {
+    const pcts = ms.reduce((a, m) => a + (m.share == null && m.pct != null ? m.pct : 0), 0);
+    if (!ms.some((m) => m.share != null) && pcts > 100) return { text: `รวม ${fmtN2(pcts)}% · เกิน 100% ระบบปรับตามสัดส่วน`, warn: true };
+    return { text: 'ยังไม่มียอดรวม · แบ่งตามสัดส่วน', warn: false };
+  }
+  const sum = ms.reduce((a, m) => a + (m.share != null ? m.share : m.pct != null ? (base * m.pct) / 100 : 0), 0);
+  const diff = Math.round((sum - base) * 100) / 100;
+  if (Math.abs(diff) < 0.5 || (empty && diff < 0)) return { text: `รวม ${fmtMoney(base)} · เท่ากับยอดใบเสนอราคา`, warn: false };
+  return { text: `ส่วนแบ่งที่ใส่รวม ${fmtMoney(Math.round(sum)) || '0'} · ${diff < 0 ? 'น้อยกว่า' : 'มากกว่า'}ยอดใบเสนอราคา ${fmtMoney(Math.round(Math.abs(diff)))} · ระบบปรับตามสัดส่วน`, warn: true };
 }
 /** A share typed in the picker: "321,000" baht, "25%" a %, '' none (an equal split); undefined = unreadable. */
 export function parseShare(v: string): { share: number | null; pct: number | null } | undefined {
@@ -94,28 +106,72 @@ export function parseShare(v: string): { share: number | null; pct: number | nul
   if (p) return +p[1] <= 100 ? { share: null, pct: +p[1] } : undefined;
   return /^\d+(?:\.\d+)?$/.test(t) ? { share: +t, pct: null } : undefined;
 }
-/** The parts of the picker's rows of `total` (their shares, % and equal splits), as the panel will show them. */
-export function pickParts(picks: Pick<JointMember, 'share' | 'pct'>[], total: number | null): number[] {
-  if (!picks.length) return [];
-  const w = jointWeights(picks, total);
-  const base = total != null && total > 0 ? total : w.reduce((a, x) => a + x, 0);
+/**
+ * The parts of the picker's rows as the panel and the closing dialog will show them: baht of `total`
+ * apportioned exactly as jointSplit does (whole baht adding up to the total, the remainder on the last),
+ * null while there is no total; and each row's %. `out`: rows that withdrew (their result is NO) get
+ * none, as in the panel (unless all did).
+ */
+export function pickParts(picks: Pick<JointMember, 'share' | 'pct'>[], total: number | null, out: boolean[] = []): { amt: number[] | null; pct: number[] } {
+  const base = total != null && total > 0 ? total : null;
+  if (!picks.length) return { amt: base != null ? [] : null, pct: [] };
+  const allOut = picks.every((_, i) => !!out[i]);
+  const live = picks.map((_, i) => allOut || !out[i]);
+  const w0 = jointWeights(picks.filter((_, i) => live[i]), base);
+  let j = 0;
+  const w = picks.map((_, i) => (live[i] ? w0[j++] : 0));
   const sum = w.reduce((a, x) => a + x, 0) || 1;
-  return w.map((x) => Math.round((base * x) / sum));
+  return { amt: base != null ? apportion(base, w) : null, pct: w.map((x) => Math.round((x / sum) * 100)) };
 }
 
 /**
- * What putting a row of this year in a joint quotation does (the picker's word): `reuse` "ใช้แถวเดิม" (no
- * quotation or Actual of its own: its typed Forecast is ignored while it is a member, the record is not
- * changed); `new` "เพิ่มแถวใหม่" (it has its own quotation or money, e.g. another job: that row keeps it);
- * `taken` (a joint quotation's header, or already a member of another one: the picker refuses it).
+ * Why a row of the year keeps its own job when a joint quotation wants it (the picker then adds a new row
+ * for the company and leaves this one, with its money, as it is): '' when it has none of its own.
+ * `qt` a quotation (or a Forecast document) of its own; `money` money received (a typed Actual, a document,
+ * an installment received by hand); `plan` a payment plan; `closed` a job already closed.
  */
-export function rowFate(s: SalesState, d: Deal, hid = ''): 'reuse' | 'new' | 'taken' {
+export type OwnWhy = '' | 'qt' | 'money' | 'plan' | 'closed';
+export function ownJob(s: SalesState, d: Deal): OwnWhy {
+  if (d.jobStatus === 'closed') return 'closed';
+  const docs = docsOf(s, d.id);
+  if (docs.some((x) => isQtVersion(x) || (x.target === 'forecast' && x.amount != null))) return 'qt';
+  if (docs.some(countsActual) || !!dealMoney(s, d).actual) return 'money';
+  if (hasPlan(s, d.id)) return 'plan';
+  return '';
+}
+/** The picker's words for ownJob. */
+export const OWN_TH: Record<Exclude<OwnWhy, ''>, string> = { qt: 'มีใบเสนอราคาของตัวเองปีนี้แล้ว', money: 'มียอดรับเงินของตัวเองแล้ว', plan: 'มีแผนชำระของตัวเองแล้ว', closed: 'ปิดงานของปีนี้ไปแล้ว' };
+
+/**
+ * What putting a row of this year in a joint quotation does (the picker's word): `reuse` "ใช้แถวเดิม" (no
+ * job of its own, ownJob: its typed Forecast is ignored while it is a member, the record is not changed);
+ * `new` "เพิ่มแถวใหม่" (a job of its own, e.g. another one: that row keeps its quotation, money, plan and
+ * status); `taken` (a joint quotation's header, or already a member of another one: the picker refuses
+ * it); `locked` (a row this account may not edit, `may`: an account limited to its own deals cannot put
+ * another person's row in a joint quotation, which would take that row's money out of the totals).
+ */
+export type RowFate = 'reuse' | 'new' | 'taken' | 'locked';
+export function rowFate(s: SalesState, d: Deal, hid = '', may?: (d: Deal) => boolean): RowFate {
   if (jointRole(s, d) === 'header') return 'taken';
   const h = jointHeadOf(s, d.id);
   if (h && h !== hid) return 'taken';
-  const own = docsOf(s, d.id).some((x) => isQtVersion(x) || countsActual(x));
   // (already a member of this one: it stays as it is)
-  return own && !(hid && h === hid) ? 'new' : 'reuse';
+  if (hid && h === hid) return 'reuse';
+  if (ownJob(s, d)) return 'new';
+  return may && !may(d) ? 'locked' : 'reuse';
+}
+/** "รวมเป็นใบเสนอราคาร่วม" from a deal's quotation: a plain deal with a quotation and no other job of its own
+ *  (no money received, plan, or closing: those stay with the deal; its quotation alone moves). */
+export function canMergeFrom(s: SalesState, d: Deal): boolean {
+  if (jointRole(s, d) !== 'plain' || !qtVersions(s, d).length || d.jobStatus === 'closed') return false;
+  return !docsOf(s, d.id).some(countsActual) && !dealMoney(s, d).actual && !hasPlan(s, d.id);
+}
+/** A member's documents that would count for a plain deal (a quotation, a Forecast or Actual document,
+ *  attached by an older build or before it joined): they count nowhere, so its panel lists them under
+ *  "เอกสารอื่น" with "ย้ายไปใบเสนอราคาร่วม". None for any other deal. */
+export function strayDocs(s: SalesState, d: Deal): DealDoc[] {
+  if (jointRole(s, d) !== 'member') return [];
+  return docsOf(s, d.id).filter((x) => isQtVersion(x) || (x.target !== 'none' && x.amount != null));
 }
 
 /** One row of a table or the closed list: a deal, or a joint quotation's band with its members in the list

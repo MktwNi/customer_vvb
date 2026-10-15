@@ -5,7 +5,7 @@
  */
 import { TH_M, dmTh } from './format';
 import { inRange, rangeTh, type Range } from './dateRange';
-import { KIND_TH, beOf, cashKpis, cashLines, cashTotal, cashYear, csvCell, dealMoney, payMatch, type CashKpis, type CashLine, type CashSum, type CashYear, type DateBasis, type Deal, type PayF, type SalesState } from './sales';
+import { KIND_TH, beOf, cashKpis, cashTotal, cashYear, csvCell, dealMoney, jointCashLines, payMatch, type CashKpis, type CashLine, type CashSum, type CashYear, type DateBasis, type Deal, type PayF, type SalesState } from './sales';
 import { BASIS_TH } from './salesUi';
 
 export const MONTHS_TH = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -117,8 +117,9 @@ export function payIn(lines: CashLine[], p: Exclude<PayF, ''>, r: Range) {
  * the range's (cashCardWords says which).
  */
 export interface CashLens { year: string; range: Range | null; inYear: Map<string, CashLine[]>; byDeal: Map<string, CashLine[]>; K: CashKpis }
-export function cashLensOf(S: SalesState, deals: Deal[], year: string, range: Range | null, today: string): CashLens {
-  const lines = cashLines(S, deals, today);
+export function cashLensOf(S: SalesState, deals: Deal[], year: string, range: Range | null, today: string, attr = false): CashLens {
+  // (`attr`: under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter a joint quotation's lines carry the parts of its companies listed)
+  const lines = jointCashLines(S, deals, today, attr);
   const counted = range ? lines.filter((l) => !l.date || inRange(l.date, range)) : lines;
   const Y = cashYear(counted, year);
   const inYear = new Map<string, CashLine[]>(), byDeal = new Map<string, CashLine[]>();

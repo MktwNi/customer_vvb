@@ -24,7 +24,8 @@ import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
 // joint quotations (package quotes, item 7): the header's own panel, a member's line and stages
-import { jointRole } from '../lib/sales';
+import { jointOf, jointRole } from '../lib/sales';
+import { jointNo, strayDocs } from '../lib/joint';
 import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
@@ -185,8 +186,9 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
 /** An attached document: a picture of it (opens the file), what it is and what it counts toward; a click
  *  shows its actions (open the file, correct the amount or the type, delete). A figure kept against the
  *  document says so with both numbers, and offers the document's. */
-function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
+function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boolean; stray?: boolean }) {
   const { engine: e } = useApp();
+  const acts = useSalesActs();
   const ro = !e.can('docs.up');
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(false);
@@ -218,11 +220,19 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
       setBusy((err as Error)?.message || String(err));
     }
   };
-  const goes = inUse ? TARGET_TH[doc.target] : doc.target === 'forecast' ? 'ไม่ได้ใช้ (มียอดที่ใหม่กว่า)' : TARGET_TH[doc.target];
+  // a joint quotation's member: a document that would count elsewhere counts nowhere here (lib/joint strayDocs)
+  const goes = stray ? 'ไม่นับยอด · อยู่ในใบเสนอราคาร่วม' : inUse ? TARGET_TH[doc.target] : doc.target === 'forecast' ? 'ไม่ได้ใช้ (มียอดที่ใหม่กว่า)' : TARGET_TH[doc.target];
   // the figure counted against the document's own: kept here ("คงยอดเดิม"), or a Forecast typed after it
-  const m = dealMoney(e.sales, d), mm = docMismatch(doc);
-  const typedOver = !inUse && doc.target === 'forecast' && m.fcOverride && doc.id === fcFig(e.sales, d).doc?.id && m.forecast != null && doc.amount != null && m.forecast !== doc.amount;
+  const m = dealMoney(e.sales, d), mm = stray ? null : docMismatch(doc);
+  const typedOver = !stray && !inUse && doc.target === 'forecast' && m.fcOverride && doc.id === fcFig(e.sales, d).doc?.id && m.forecast != null && doc.amount != null && m.forecast !== doc.amount;
   const warn = mm ? mismatchText(mm.doc, mm.kept, doc.target === 'forecast' ? 'Forecast ที่ใช้' : 'ยอดที่นับ') : typedOver ? mismatchText(doc.amount!, m.forecast!, 'Forecast ที่พิมพ์ไว้') : '';
+  const g = stray ? jointOf(e.sales, d) : null;
+  const canMove = !!g && e.can('docs.up') && e.canDeal('edit.deal', d) && e.canDeal('edit.deal', g.head);
+  const move = () => {
+    const how = e.moveToJoint(d.id, doc.id);
+    if (how === 'qt') acts.say(`ย้าย${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''} ไปเป็นใบเสนอราคาของใบเสนอราคาร่วมแล้ว · นับยอดครั้งเดียวที่ใบเสนอราคาร่วม`);
+    else if (how === 'doc') acts.say(`ย้าย${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''} ไปที่ใบเสนอราคาร่วมแล้ว · เก็บเป็นเอกสารที่ไม่นับยอด แก้ให้นับได้ที่นั่น`);
+  };
   const useDoc = () => (mm ? e.updateDoc(d.id, doc.id, { amount: mm.doc, basis: 'manual' }) : e.updateDeal(d.id, { forecast: null }));
   return (
     <div className={'sl-docc' + (open ? ' open' : '') + (warn ? ' warn' : '')}>
@@ -243,6 +253,12 @@ function DocCard({ d, doc, inUse }: { d: Deal; doc: DealDoc; inUse: boolean }) {
         <p className="sl-docc-w">
           {warn}
           {!ro && <> · <button type="button" className="lnk" onClick={useDoc}>ใช้ยอดจากเอกสาร {fmtMoney(mm ? mm.doc : doc.amount)}</button></>}
+        </p>
+      )}
+      {g && (
+        <p className="sl-docc-n">
+          บริษัทนี้อยู่ในใบเสนอราคาร่วม{jointNo(e.sales, g) ? ' ' + jointNo(e.sales, g) : ''} ยอดนับที่ใบเสนอราคาร่วมครั้งเดียว เอกสารนี้จึงไม่นับยอด
+          {canMove && <> · <button type="button" className="lnk" onClick={move}>ย้ายไปใบเสนอราคาร่วม</button></>}
         </p>
       )}
       {open && (
@@ -434,7 +450,11 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
   const ro = !e.canDeal('edit.deal', d);
   const t = stageTrack(S, d, today);
   const P = planOf(S, d, today), won = t.result === 'YES';
-  const by = stageDocs(S, d).by;
+  // a joint quotation's member: a quotation or money document of its own counts nowhere, so it is not
+  // shown at its stage as if it counted (เอกสารอื่น lists it, with "ย้ายไปใบเสนอราคาร่วม")
+  const stray = strayDocs(S, d);
+  const by0 = stageDocs(S, d).by;
+  const by = stray.length ? Object.fromEntries(Object.entries(by0).map(([k, v]) => [k, v.filter((x) => !stray.includes(x))])) : by0;
   const m = dealMoney(S, d);
   const reached = reachedOf(stages, t.states);
   const late = overdueDays(S, d, today) != null;
@@ -1155,15 +1175,18 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
 /** Documents of no stage (or a stage no longer in the list): contracts, POs, anything not counted. */
 function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
   const { engine: e } = useApp();
-  const other = stageDocs(e.sales, d).other;
+  const stray = strayDocs(e.sales, d);
+  const other = stageDocs(e.sales, d).other.filter((x) => !stray.includes(x));
   const fcDoc = dealMoney(e.sales, d).fcDoc;
+  const n = other.length + stray.length;
   return (
     <section className="dp-card" aria-labelledby="dp-other">
       <div className="sl-acc">
         <h3 id="dp-other">เอกสารอื่น</h3>
-        <small>{other.length ? `${other.length} ฉบับ` : 'สัญญา / PO / เอกสารที่ไม่นับยอด'}</small>
+        <small>{n ? `${n} ฉบับ` : 'สัญญา / PO / เอกสารที่ไม่นับยอด'}</small>
         {e.can('docs.up') && <button type="button" className="btn xs" onClick={() => attach('', 'other')}>แนบเอกสารอื่น</button>}
       </div>
+      {stray.map((doc) => <DocCard key={doc.id} d={d} doc={doc} inUse={false} stray />)}
       {other.map((doc) => <DocCard key={doc.id} d={d} doc={doc} inUse={doc.target === 'forecast' ? fcDoc?.id === doc.id : doc.target === 'actual' && doc.amount != null} />)}
     </section>
   );
@@ -1172,10 +1195,23 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
 /** Contact details, the linked company, SOURCE / services, the หมวด and the year: folded by default. */
 function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · SOURCE / บริการ' }: { d: Deal; ro: boolean; title?: string }) {
   const { engine: e } = useApp();
+  const acts = useSalesActs();
   const [open, setOpen] = useState(false);
   const [opts, setOpts] = useState(false);
   const S = e.sales, C = S.cfg;
   const up = (p: Partial<Deal>) => e.updateDeal(d.id, p);
+  /** Another year: a joint quotation's company leaves it, its header takes every company along (asked first). */
+  const setYear = (y: string) => {
+    const jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
+    if (y === d.year || !g) return up({ year: y });
+    const why = e.jointYearBlock(d);
+    if (why) return acts.say(why);
+    const no = jointNo(S, g);
+    const ask = jr === 'member'
+      ? `ย้าย ${d.client} ไปปี ${y}? บริษัทนี้จะออกจากใบเสนอราคาร่วม${no ? ' ' + no : ''} (บริษัทในใบเสนอราคาร่วมอยู่ปีเดียวกัน) แถวและข้อมูลของบริษัทยังอยู่ ยอดของใบเสนอราคาร่วมไม่เปลี่ยน`
+      : `ย้ายใบเสนอราคาร่วม${no ? ' ' + no : ''} ไปปี ${y}? ทั้ง ${g.members.length} บริษัทในใบนี้ย้ายไปปี ${y} ด้วย`;
+    if (window.confirm(ask)) up({ year: y });
+  };
   const toggle = (k: 'source' | 'service', x: string) => up({ [k]: d[k].includes(x) ? d[k].filter((y) => y !== x) : [...d[k], x] });
   const referrals = [...new Set(Object.values(S.deals).map((x) => x.referral).filter(Boolean))];
   const years = [...new Set([beYear(), String(+beYear() + 1), String(+beYear() - 1), d.year])].sort();
@@ -1215,7 +1251,7 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · S
               </span>
               {/* หมวด moves the deal: it changes only on a choice in the list, never on a key over the closed button */}
               <SelField style={labelCol} text="หมวด" value={d.section} onChange={(v) => e.moveDeal(d.id, v, null)} options={[...new Set([...C.sections, d.section])].map((x) => ({ v: x, label: x || 'ไม่ระบุหมวด' }))} />
-              <SelField style={labelCol} text="ปี (พ.ศ.)" value={d.year} onChange={(v) => up({ year: v })} options={years.map((y) => ({ v: y, label: y }))} />
+              <SelField style={labelCol} text="ปี (พ.ศ.)" value={d.year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
             </div>
             <datalist id="sl-team">{e.crm.team.map((x) => <option key={x} value={x} />)}</datalist>
             <datalist id="sl-ref">{referrals.map((x) => <option key={x} value={x} />)}</datalist>

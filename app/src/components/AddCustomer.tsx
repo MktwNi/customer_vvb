@@ -6,12 +6,16 @@ import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
-import { jointRole } from '../lib/sales';
+import { customersOf, jointRole, payerDeal } from '../lib/sales';
 
-/** The หมวด choices with how many of the year's deals each has ("4 ราย"). */
+/** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
+ *  not one, its members count in the header's หมวด (where the table draws them), as the table counts them. */
 function sectionOpts(e: ReturnType<typeof useApp>['engine'], year: string): SelOpt[] {
-  const n = new Map<string, number>();
-  Object.values(e.sales.deals).forEach((d) => d.year === year && n.set(d.section, (n.get(d.section) || 0) + 1));
+  const n = new Map<string, number>(), S = e.sales;
+  customersOf(S, Object.values(S.deals).filter((d) => d.year === year)).forEach((d) => {
+    const sec = payerDeal(S, d).section;
+    n.set(sec, (n.get(sec) || 0) + 1);
+  });
   return e.sales.cfg.sections.map((x) => ({ v: x, label: x, n: n.get(x) ? `${n.get(x)} ราย` : undefined }));
 }
 

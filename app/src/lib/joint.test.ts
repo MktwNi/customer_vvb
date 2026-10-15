@@ -7,14 +7,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  apportion, cashKpis, cashLines, cashRecon, cashYear, closeReady, customersOf, dealMoney, emptySales, filterDeals, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights, moneyOwners,
-  newDeal, overdueDays, payDue, payState, receivables, receivedIn, owedIn, salesStats, stageTrack, toJqm, toJqt,
-  type Deal, type DealDoc, type JointMember, type PayLine, type SalesState,
+  apportion, cashKpis, cashLines, cashRecon, cashYear, closeReady, customersOf, dealMoney, emptySales, filterDeals, jointAttr, jointCashLines, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights, moneyHolds, moneyOwners,
+  moneySum, newDeal, normSalesFilter, overdueDays, payDue, payState, receivables, receivedIn, owedIn, salesStats, stageTrack, toJqm, toJqt,
+  type Deal, type DealDoc, type JointMember, type PayLine, type SalesFilterIn, type SalesState,
 } from './sales';
 import {
-  closeSummary, closedWord, isJointNote, jointNote, jointRows, jointShort, jointSub, jointTitle, memberLine, memberShares, parseShare, payerShort, pickParts, resultsWord, rowDeals, rowFate, rowMoneyDeals, shareOf, sharesCheck, sharesWord,
+  canMergeFrom, closeSummary, closedWord, isJointNote, jointNote, jointRows, jointShort, jointSub, jointTitle, memberLine, memberShares, ownJob, parseShare, payerShort, pickParts, resultsWord, rowDeals, rowFate, rowMoneyDeals, shareOf,
+  sharesCheck, sharesWord, strayDocs,
 } from './joint';
-import { closingView, liveCount, nextStepView, statusView } from './salesUi';
+import { closingView, liveCount, monthCounts, nextStepView, statusView, trackerFields } from './salesUi';
 import { applyRow, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
 const T = '2026-10-12';
@@ -206,6 +207,83 @@ describe('money counted once, customers per member', () => {
   });
 });
 
+// review finding 2: filtered views agree with the per-person split
+describe('under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter the joint money is its members\' parts', () => {
+  const view = (s: SalesState, f: Omit<SalesFilterIn, 'year'>) => {
+    const F = normSalesFilter({ year: '2569', ...f });
+    return { F, list: filterDeals(s, F, T), attr: jointAttr(F) };
+  };
+  it('a person\'s filtered figures equal that person\'s row of the unfiltered summary (the Dashboard and the KPIs)', () => {
+    const s = world({ yes: true, plan: true, paid1: true, shares: [{ share: 500000 }] });
+    s.deals.b3.referral = 'งานสัมมนา';
+    const st0 = salesStats(s, all(s), T);
+    for (const who of ['หมิว', 'คุณบี', 'มกร', 'คุณเอ']) {
+      const { list, attr } = view(s, { resp: { v: [who] } });
+      expect(attr).toBe(true);
+      const st = salesStats(s, list, T, attr);
+      expect([st.forecast, st.actual]).toEqual([st0.byResp[who].forecast, st0.byResp[who].actual]);
+      // only that person appears in สรุปยอดตามผู้รับผิดชอบ / ผู้ทำยอดสูงสุด
+      expect(Object.keys(st.byResp)).toEqual([who]);
+      expect(st.byResp[who]).toEqual(st0.byResp[who]);
+    }
+    // คุณบี's own row b2 brings its part though the header (หมิว's) is filtered out
+    const b = view(s, { resp: { v: ['คุณบี'] } });
+    expect(b.list.map((d) => d.id)).toEqual(['b2']);
+    expect(salesStats(s, b.list, T, true).forecast).toBe(261333);
+    // the parts of everyone add up to the whole, once
+    const sum = ['หมิว', 'คุณบี', 'มกร', 'คุณเอ'].reduce((a, w) => a + salesStats(s, view(s, { resp: { v: [w] } }).list, T, true).forecast, 0);
+    expect(sum).toBe(st0.forecast);
+    // a "not" filter keeps the others' parts
+    const nb = view(s, { resp: { v: ['คุณบี'], not: true } });
+    expect(salesStats(s, nb.list, T, true).forecast).toBe(st0.forecast - 261333);
+    // SOURCE and REFERRAL the same way
+    const src = view(s, { source: { v: ['Event Exhibition'] } });
+    expect(salesStats(s, src.list, T, src.attr).forecast).toBe(st0.bySource['Event Exhibition'].forecast);
+    const ref = view(s, { referral: { v: ['งานสัมมนา'] } });
+    expect(salesStats(s, ref.list, T, ref.attr).forecast).toBe(st0.byReferral['งานสัมมนา'].forecast);
+  });
+  it('the other money of the view follows: ค้างรับ, received / owed in a range, the section and closed sums, the Dashboard\'s Cashflow lines', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    const { list } = view(s, { resp: { v: ['คุณบี'] } });
+    const yr = { from: '2026-01-01', to: '2026-12-31' };
+    expect(receivables(s, list, T, true).receivable).toBe(642000 / 4);
+    expect(receivedIn(s, list, yr, T, true)).toBe(642000 / 4);
+    expect(owedIn(s, list, yr, T, true)).toBe(642000 / 4);
+    expect(moneySum(s, list, true)).toEqual({ fc: 321000, ac: 160500, fcOpen: 321000, fcClosed: 0 });
+    const lines = jointCashLines(s, list, T, true);
+    expect(lines.map((l) => [l.deal.id, l.stage, l.kind, l.amt])).toEqual([['h', 'PAY1', 'got', 160500], ['h', 'PAY2', 'owed', 160500]]);
+    expect(cashYear(lines, '2569').totals.got).toBe(salesStats(s, list, T, true).actual);
+    // without a person filter: the whole, once
+    expect(jointCashLines(s, all(s), T, false)).toEqual(cashLines(s, all(s), T));
+    expect(moneySum(s, all(s)).fc).toBe(salesStats(s, all(s), T).forecast);
+    // the header kept but none of its companies under the filter: none of its money
+    s.deals.h.resp = 'ปลา';
+    expect(moneyHolds(s, view(s, { resp: { v: ['ปลา'] } }).list, true)).toEqual([]);
+  });
+  it('any other filter reads the joint quotation as one job: the whole when its header is listed', () => {
+    const s = world();
+    expect(jointAttr({ section: { v: ['Event Exhibition'] } })).toBe(false);
+    expect(jointAttr({ resp: { v: ['หมิว'] } })).toBe(true);
+    expect(jointAttr(null)).toBe(false);
+    const q = view(s, { q: 'บางกอก' });
+    expect(q.list.map((d) => d.id)).toEqual(['b1']);
+    expect(salesStats(s, q.list, T, q.attr).forecast).toBe(0);
+  });
+  it('a member is filtered in its header\'s หมวด (where its row is drawn), and with its header\'s money (การรับเงิน, dates of money)', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    s.deals.b3.section = 'Partner';
+    expect(view(s, { section: { v: ['Event Exhibition'] } }).list.map((d) => d.id).sort()).toEqual(['b1', 'b2', 'b3', 'b4', 'h', 'p1']);
+    expect(view(s, { section: { v: ['Partner'] } }).list).toEqual([]);
+    const fields = trackerFields(s, normSalesFilter({ year: '2569' }), { yearDeals: all(s), job: '', me: 'หมิว', today: T });
+    expect(fields.find((f) => f.key === 'section')!.options.find((o) => o.v === 'Event Exhibition')!.n).toBe(5);
+    // การรับเงิน: the members pass with their payer; the count is of customers
+    const got = view(s, { pay: 'got' });
+    expect(got.list.map((d) => d.id).sort()).toEqual(['b1', 'b2', 'b3', 'b4', 'h']);
+    expect(customersOf(s, got.list)).toHaveLength(4);
+    expect(monthCounts(s, normSalesFilter({ year: '2569' }), 'paid', 2026, '', T)[9]).toBe(4);
+  });
+});
+
 describe('a member follows up on its own row and is paid through the joint quotation', () => {
   it('its PAY stages are not its own; won, it waits for the payer and closes when the payer has paid', () => {
     const s = world({ yes: true, plan: true });
@@ -250,16 +328,118 @@ describe('the search, the picker, the words', () => {
     expect(rowFate(s, s.deals.b1)).toBe('taken');
     expect(rowFate(s, s.deals.b1, 'h')).toBe('reuse');
   });
+  // review finding 1: a row's own money (not only its documents) keeps it out of a joint quotation
+  it('a row with money of its own is never reused: a typed Actual, a hand receipt, a plan, a closed job ("เพิ่มแถวใหม่", its money stays)', () => {
+    const fresh = () => world();
+    // typed Actual (no document)
+    let s = fresh();
+    s.deals.p1.actual = 80000;
+    expect([ownJob(s, s.deals.p1), rowFate(s, s.deals.p1)]).toEqual(['money', 'new']);
+    // an installment received by hand on its plan (no document)
+    s = fresh();
+    s.steps['p1/CLOSED DEAL'] = { d: '2026-09-01', n: 'YES' };
+    s.pays['p1/PAY1'] = L({ amt: 60000, due: '2026-09-30', rcv: '2026-09-28' });
+    expect(dealMoney(s, s.deals.p1).actual).toBe(60000);
+    expect([ownJob(s, s.deals.p1), rowFate(s, s.deals.p1)]).toEqual(['money', 'new']);
+    // a plan, nothing received yet
+    s = fresh();
+    s.pays['p1/PAY1'] = L({ amt: 60000, due: '2026-11-30' });
+    expect([ownJob(s, s.deals.p1), rowFate(s, s.deals.p1)]).toEqual(['plan', 'new']);
+    // a closed job (seed-c's พฤกษา: closed with a typed Actual of 180,000 and no documents)
+    s = fresh();
+    s.deals.p1.jobStatus = 'closed';
+    expect([ownJob(s, s.deals.p1), rowFate(s, s.deals.p1)]).toEqual(['closed', 'new']);
+    // a Forecast document of another kind counts as its own quotation
+    s = fresh();
+    s.docs['p1/f'] = { ...qt('p1', 90000), id: 'f', kind: 'other', stage: '' };
+    expect(ownJob(s, s.deals.p1)).toBe('qt');
+    // a typed Forecast alone is the estimate of this job: reused (ignored while it is a member)
+    s = fresh();
+    expect([ownJob(s, s.deals.p1), rowFate(s, s.deals.p1)]).toEqual(['', 'reuse']);
+  });
+  it('the money a reused row would have hidden stays: totals unchanged when such a row "joins" through a new row', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    s.steps['p1/CLOSED DEAL'] = { d: '2026-09-01', n: 'YES' };
+    s.pays['p1/PAY1'] = L({ amt: 60000, due: '2026-09-30', rcv: '2026-09-28' });
+    const before = salesStats(s, all(s), T), cashBefore = cashYear(cashLines(s, all(s), T), '2569').totals.got;
+    expect(rowFate(s, s.deals.p1, 'h')).toBe('new');
+    // what the engine does for "new": a new row of the company joins, p1 stays plain with its money
+    s.deals.p1b = newDeal({ id: 'p1b', client: s.deals.p1.client, year: '2569', section: 'Event Exhibition', resp: 'หมิว' }, 'หมิว', '2026-10-12T03:00:00.000Z');
+    s.jqm!['h/p1b'] = M({}, '2026-10-12T03:00:00.000Z');
+    const after = salesStats(s, all(s), T);
+    expect([after.forecast, after.actual]).toEqual([before.forecast, before.actual]);
+    expect(after.actual).toBe(642000 + 60000);
+    expect(cashYear(cashLines(s, all(s), T), '2569').totals.got).toBe(cashBefore);
+  });
+  it('"รวมเป็นใบเสนอราคาร่วม" only from a plain deal whose quotation is its only money', () => {
+    const s = world();
+    s.docs['p1/qt-p1'] = qt('p1', 100000, { docNo: 'QT-2569-030' });
+    expect(canMergeFrom(s, s.deals.p1)).toBe(true);
+    s.deals.p1.actual = 50000;
+    expect(canMergeFrom(s, s.deals.p1)).toBe(false);
+    s.deals.p1.actual = null;
+    s.pays['p1/PAY1'] = L({ amt: 50000, due: '2026-11-30' });
+    expect(canMergeFrom(s, s.deals.p1)).toBe(false);
+    delete s.pays['p1/PAY1'];
+    s.deals.p1.jobStatus = 'closed';
+    expect(canMergeFrom(s, s.deals.p1)).toBe(false);
+    s.deals.p1.jobStatus = 'open';
+    s.docs['p1/rc'] = { ...qt('p1', 20000), id: 'rc', kind: 'receipt', target: 'actual', stage: 'PAY1' };
+    expect(canMergeFrom(s, s.deals.p1)).toBe(false);
+    delete s.docs['p1/rc'];
+    expect(canMergeFrom(s, s.deals.p1)).toBe(true);
+    // no quotation, a member, a header: no
+    expect(canMergeFrom(s, s.deals.p1 && { ...s.deals.p1, id: 'none' })).toBe(false);
+    expect(canMergeFrom(s, s.deals.b1)).toBe(false);
+    expect(canMergeFrom(s, s.deals.h)).toBe(false);
+  });
+  // review finding 3: an account limited to its own deals
+  it('a row the account may not edit is "locked" (never reused); one with a job of its own still gets a new row', () => {
+    const s = world();
+    const mine = (d: Deal) => d.resp === 'คุณบี';
+    expect(rowFate(s, s.deals.p1, '', mine)).toBe('locked');
+    s.deals.p1.resp = 'คุณบี';
+    expect(rowFate(s, s.deals.p1, '', mine)).toBe('reuse');
+    s.deals.p1.resp = 'หมิว';
+    s.deals.p1.actual = 10;
+    expect(rowFate(s, s.deals.p1, '', mine)).toBe('new');
+    // already a member of this one: it stays (the dialog keeps it, without "เอาออก")
+    expect(rowFate(s, s.deals.b1, 'h', mine)).toBe('reuse');
+  });
   it('the dialog\'s parts: baht or %, an empty one an equal split, the sum against the total', () => {
     expect(parseShare('321,000')).toEqual({ share: 321000, pct: null });
     expect(parseShare(' 25 %')).toEqual({ share: null, pct: 25 });
     expect(parseShare('')).toEqual({ share: null, pct: null });
     expect(parseShare('สามแสน')).toBeUndefined();
     expect(parseShare('120%')).toBeUndefined();
-    expect(pickParts([{ share: 500000, pct: null }, { share: null, pct: null }], 1284000)).toEqual([500000, 784000]);
-    expect(pickParts([{ share: null, pct: 30 }, { share: null, pct: null }, { share: null, pct: null }], 1000)).toEqual([300, 350, 350]);
-    expect(sharesCheck([321000, 321000, 321000, 321000], 1284000)).toEqual({ text: 'รวม 1,284,000 · เท่ากับยอดใบเสนอราคา', warn: false });
-    expect(sharesCheck([321000, 321000], 1284000)).toEqual({ text: 'รวม 642,000 · น้อยกว่ายอดใบเสนอราคา 642,000', warn: true });
+    expect(pickParts([{ share: 500000, pct: null }, { share: null, pct: null }], 1284000)).toEqual({ amt: [500000, 784000], pct: [39, 61] });
+    expect(pickParts([{ share: null, pct: 30 }, { share: null, pct: null }, { share: null, pct: null }], 1000)).toEqual({ amt: [300, 350, 350], pct: [30, 35, 35] });
+    const E = { share: null, pct: null };
+    expect(sharesCheck([E, E, E, E], 1284000)).toEqual({ text: 'รวม 1,284,000 · เท่ากับยอดใบเสนอราคา', warn: false });
+    expect(sharesCheck([{ share: 321000, pct: null }, { share: 321000, pct: null }], 1284000)).toEqual({ text: 'ส่วนแบ่งที่ใส่รวม 642,000 · น้อยกว่ายอดใบเสนอราคา 642,000 · ระบบปรับตามสัดส่วน', warn: true });
+    expect(sharesCheck([{ share: 1000000, pct: null }, { share: 500000, pct: null }], 1284000)).toEqual({ text: 'ส่วนแบ่งที่ใส่รวม 1,500,000 · มากกว่ายอดใบเสนอราคา 216,000 · ระบบปรับตามสัดส่วน', warn: true });
+    // empty parts take what is left: never a warning while the typed ones fit
+    expect(sharesCheck([{ share: 500000, pct: null }, { share: null, pct: 25 }, E], 1284000).warn).toBe(false);
+  });
+  // review finding 5: the dialog rounds as the panel does
+  it('the dialog\'s parts are the panel\'s: an uneven remainder on the last, no false "off by 1"; no total, no baht', () => {
+    const s = world({ shares: [{ share: 500000 }] }), g = jointOf(s, { id: 'h' })!;
+    const picks = g.members.map((x) => x.m);
+    const pp = pickParts(picks, 1284000);
+    expect(pp.amt).toEqual([500000, 261333, 261333, 261334]);
+    expect(pp.amt).toEqual(memberShares(s, g).map((x) => x.amt));
+    expect(pp.amt).toEqual(jointSplit(s, g, 1284000));
+    expect(pp.amt!.reduce((a, x) => a + x, 0)).toBe(1284000);
+    expect(sharesCheck(picks, 1284000)).toEqual({ text: 'รวม 1,284,000 · เท่ากับยอดใบเสนอราคา', warn: false });
+    // a company that withdrew gets none, as in the panel
+    s.steps['b4/CLOSED DEAL'] = { d: '2026-08-02', n: 'NO' };
+    const out = g.members.map((x) => x.deal.id === 'b4');
+    expect(pickParts(picks, 1284000, out).amt).toEqual(memberShares(s, jointOf(s, { id: 'h' })!).map((x) => x.amt ?? 0));
+    // no total yet: no baht, the % only, and no "รวม 2"
+    const E = { share: null, pct: null };
+    expect(pickParts([E, E], null)).toEqual({ amt: null, pct: [50, 50] });
+    expect(sharesCheck([E, E], null)).toEqual({ text: 'ยังไม่มียอดรวม · แบ่งตามสัดส่วน', warn: false });
+    expect(sharesCheck([{ share: null, pct: 60 }, { share: null, pct: 60 }], null).warn).toBe(true);
   });
   it('names: the band, the short title, the payer, a member\'s line; the note it writes and recognises', () => {
     const s = world(), g = jointOf(s, { id: 'h' })!;
@@ -273,6 +453,24 @@ describe('the search, the picker, the words', () => {
     expect(shareOf(s, s.deals.p1)).toBeNull();
     expect([isJointNote('ใบเสนอราคาร่วม QT-2569-052'), isJointNote('ใบเสนอราคาร่วม'), isJointNote('ส่งใบเสนอราคาร่วมทางอีเมลแล้ว')]).toEqual([true, true, false]);
     expect(jointShort({ head: s.deals.h, qt: { title: '', at: '', by: '' } })).toBe(PAYER);
+  });
+});
+
+// review finding 4: a member holds no money of its own
+describe('a member\'s own documents', () => {
+  it('a quotation or money document on a member counts nowhere: strayDocs lists it for "ย้ายไปใบเสนอราคาร่วม"', () => {
+    const s = world();
+    expect(strayDocs(s, s.deals.b2)).toEqual([]);
+    s.docs['b2/x'] = { ...qt('b2', 1284000), id: 'x' };
+    s.docs['b2/r'] = { ...qt('b2', 50000), id: 'r', kind: 'receipt', target: 'actual', stage: 'PAY1' };
+    s.docs['b2/o'] = { ...qt('b2', 0), id: 'o', kind: 'other', target: 'none', amount: null, stage: '' };
+    expect(strayDocs(s, s.deals.b2).map((x) => x.id).sort()).toEqual(['r', 'x']);
+    // nothing counted: the KPIs as before
+    expect(salesStats(s, all(s), T).forecast).toBe(1284000 + 100000);
+    expect(salesStats(s, all(s), T).actual).toBe(0);
+    // a plain deal's documents are its own
+    s.docs['p1/x'] = { ...qt('p1', 5), id: 'x' };
+    expect(strayDocs(s, s.deals.p1)).toEqual([]);
   });
 });
 
