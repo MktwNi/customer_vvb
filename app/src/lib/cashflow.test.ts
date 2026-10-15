@@ -34,8 +34,8 @@ const YES = (d: string): Record<string, [string, string]> => ({ 'CLOSED DEAL': [
 
 /**
  * The demo seed as the mockups use it (Mon 12 Oct 2569), with ปทุมธานี ฟาร์มา (dep2) won on 8 ต.ค. and
- * paying 3 installments, the last in ก.พ. 2570. The joint quotation of the mockups comes with package
- * quotes, so the figures below are the mockups' minus its 963,000.
+ * paying 3 installments, the last in ก.พ. 2570. The joint quotation of the mockups is left out (its money,
+ * counted once, is checked in joint.test.ts), so the figures below are the mockups' minus its 963,000.
  */
 function demo(): SalesState {
   return world({
@@ -212,7 +212,7 @@ describe('money lines', () => {
     expect(a.months[11].n).toBe(1);
     expect(b.months[0].n).toBe(1);
   });
-  it('a joint quotation counts once: until package quotes, every deal is plain', () => {
+  it('the demo world has no joint quotation: every deal is plain (joint quotations: joint.test.ts)', () => {
     const s = demo();
     expect(Object.values(s.deals).every((d) => jointRole(s, d) === 'plain')).toBe(true);
     expect(all(s).every((l) => l.joint === undefined)).toBe(true);

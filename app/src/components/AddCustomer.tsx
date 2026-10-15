@@ -6,11 +6,16 @@ import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
+import { customersOf, jointRole, payerDeal } from '../lib/sales';
 
-/** The หมวด choices with how many of the year's deals each has ("4 ราย"). */
+/** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
+ *  not one, its members count in the header's หมวด (where the table draws them), as the table counts them. */
 function sectionOpts(e: ReturnType<typeof useApp>['engine'], year: string): SelOpt[] {
-  const n = new Map<string, number>();
-  Object.values(e.sales.deals).forEach((d) => d.year === year && n.set(d.section, (n.get(d.section) || 0) + 1));
+  const n = new Map<string, number>(), S = e.sales;
+  customersOf(S, Object.values(S.deals).filter((d) => d.year === year)).forEach((d) => {
+    const sec = payerDeal(S, d).section;
+    n.set(sec, (n.get(sec) || 0) + 1);
+  });
   return e.sales.cfg.sections.map((x) => ({ v: x, label: x, n: n.get(x) ? `${n.get(x)} ราย` : undefined }));
 }
 
@@ -56,7 +61,8 @@ export function AddCustomer() {
   const useExisting = (c: Company) => {
     if (a.link) e.updateDeal(a.link, { gid: c.id });
     if (a.deal) {
-      const d = e.dealsOf(c.id).find((x) => x.year === ui.slYear) || e.addDeal({ gid: c.id, section, year: ui.slYear });
+      // (a joint quotation's header is the payer's row for that quotation, not the company's own row)
+      const d = e.dealsOf(c.id).find((x) => x.year === ui.slYear && jointRole(e.sales, x) !== 'header') || e.addDeal({ gid: c.id, section, year: ui.slYear });
       set({ addCust: null, deal: d.id });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: c.id, dTab: 'info' });
@@ -158,12 +164,12 @@ export function SendToTracker() {
   const [year, setYear] = useState(ui.slYear || beYear());
   const close = () => set({ sendIds: null });
   const chosen = cos.filter((c) => pick[c.id]);
-  const has = (c: Company) => e.dealsOf(c.id).some((d) => d.year === year);
+  const has = (c: Company) => e.dealsOf(c.id).some((d) => d.year === year && jointRole(e.sales, d) !== 'header');
   const send = () => {
     const r = e.addDealsFromCompanies(chosen.map((c) => c.id), section === AUTO ? { year } : { section, year });
     const note = `ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`;
     if (cos.length === 1) {
-      const d = e.dealsOf(cos[0].id).find((x) => x.year === year);
+      const d = e.dealsOf(cos[0].id).find((x) => x.year === year && jointRole(e.sales, x) !== 'header');
       set({ sendIds: null, sel: null, deal: d ? d.id : null, slYear: year });
     } else {
       set({ sendIds: null, sel: null, tab: 'sales', slView: 'table', slYear: year, slNote: note });
