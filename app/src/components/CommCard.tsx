@@ -1,15 +1,26 @@
 import { useState } from 'react';
-import { dmTh, fmtN } from '../lib/format';
+import { dmTh, fmtN, isoTh } from '../lib/format';
 import { fmtMoney, type CashLine } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { Q_TH } from '../lib/cashUi';
-import { commRows, contribIn, howRow, periodRange, rateText, unitsOf, type CommPeriod, type ContribItem, type UnitCtx } from '../lib/contrib';
+import { commRows, contribIn, howRow, periodRange, rateParts, rateText, unitsOf, type CommPeriod, type CommRow, type ContribItem, type RatePart, type UnitCtx } from '../lib/contrib';
 import { Chevron } from './StageTrack';
 import { UnitName, unitCls } from './UnitBits';
 
 const m0 = (n: number) => fmtMoney(Math.round(n * 100) / 100) || '0';
 const z = (n: number) => (n ? m0(n) : <span className="z">—</span>);
 
+
+/** One rate of a unit in the period: "4% กับเงิน 80,000 บาท (อัตราตั้งแต่ 1 ต.ค. 2569)", "VVB" when a service's. */
+const partWords = (p: RatePart) =>
+  p.rate == null
+    ? `ไม่คิดค่าคอมมิชชั่น กับเงิน ${m0(p.got)} บาท`
+    : `${p.rate}%${p.svc.length ? ` (${p.svc.join(', ')})` : ''} กับเงิน ${m0(p.got)} บาท (อัตรา${p.from.map((f) => (f ? 'ตั้งแต่ ' + isoTh(f) : 'ตั้งแต่เริ่ม')).join(' และ ')})`;
+/** The rates behind a row that was paid at several ("2–4%"): what the range is made of, else ''. */
+const rateTip = (x: CommRow) => {
+  const ps = rateParts(x);
+  return ps.length > 1 ? ps.map(partWords).join(' · ') : '';
+};
 
 /** One received amount behind a unit's figure: "PAY2 รับ 15 ส.ค. · 60% ของ 120,000". */
 const itemWords = (x: ContribItem) => [x.line.stage, x.line.date ? `รับ ${dmTh(x.line.date)}` : ''].filter(Boolean).join(' ') + ` · ${x.p}% ของ ${m0(x.line.amt)}`;
@@ -45,6 +56,7 @@ export function CommCard({ ctx, lines, year, cq, onCq, onSetup }: { ctx: UnitCtx
   const c = contribIn(ctx, lines, r);
   const rows = commRows(ctx, c, r.to);
   const how = howRow(rows);
+  const howParts = how ? rateParts(how) : [];
   const period = cq === 'year' ? `ทั้งปี ${year}` : `${Q_TH[cq]} ${year}`;
   const withMoney = rows.filter((x) => x.got > 0 && x.unit).length;
   const pctW = (p: number) => `${Math.round(p)}%`;
@@ -92,6 +104,7 @@ export function CommCard({ ctx, lines, year, cq, onCq, onSetup }: { ctx: UnitCtx
           {rows.map((x) => {
             const on = !!open[x.u] && x.items.length > 0;
             const rt = x.none ? 'ไม่คิด' : rateText(x.rates);
+            const tip = rateTip(x);
             return [
               <tr key={x.u || '-'} className={'cm-r' + (x.items.length ? ' can' : '') + (on ? ' open' : '') + (x.got ? '' : ' zero')}>
                 <td>
@@ -99,11 +112,14 @@ export function CommCard({ ctx, lines, year, cq, onCq, onSetup }: { ctx: UnitCtx
                     <UnitName ctx={ctx} id={x.u} />
                     {x.items.length > 0 && <span className="cm-car" aria-hidden="true"><Chevron size={12} /></span>}
                   </button>
-                  <small className="un-s">{x.unit ? (x.none ? 'ไม่คิดค่าคอมมิชชั่น' : `อัตรา ${rt}`) : 'ไม่มีอัตรา'}</small>
+                  <small className="un-s" title={tip || undefined}>{x.unit ? (x.none ? 'ไม่คิดค่าคอมมิชชั่น' : `อัตรา ${rt}`) : 'ไม่มีอัตรา'}</small>
                 </td>
                 <td>{z(x.got)}</td>
                 <td>{x.got ? pctW(x.pct) : <span className="z">0%</span>}</td>
-                <td className="rt">{x.unit ? rt : '—'}</td>
+                <td className="rt" title={tip || undefined}>
+                  {x.unit ? <span className={tip ? 'cm-rng' : undefined}>{rt}</span> : '—'}
+                  {tip && <span className="sr-only"> ({tip})</span>}
+                </td>
                 <td>{z(x.comm)}</td>
               </tr>,
               ...(on
@@ -133,7 +149,14 @@ export function CommCard({ ctx, lines, year, cq, onCq, onSetup }: { ctx: UnitCtx
       <div className="cm-how">
         {how ? (
           <p>
-            <span className="cm-how-t">วิธีคิด</span> · {how.unit?.n} ได้ส่วน <b>{m0(how.got)}</b> บาท ({pctW(how.pct)} ของ {m0(c.got)}) คูณอัตรา {rateText(how.rates)} เป็นค่าคอมมิชชั่น <b>{m0(how.comm)}</b> บาท
+            <span className="cm-how-t">วิธีคิด</span> · {how.unit?.n} ได้ส่วน <b>{m0(how.got)}</b> บาท ({pctW(how.pct)} ของ {m0(c.got)})
+            {howParts.length === 1 ? (
+              <> คูณอัตรา {rateText(how.rates)}</>
+            ) : (
+              // paid at several rates in the period: each part with its own, so the line adds up to the figure
+              <>: {howParts.map((p, i) => <span key={String(p.rate)}>{i ? ' + ' : ''}{m0(p.got)} บาท {p.rate == null ? 'ไม่คิด' : `คูณ ${p.rate}%`}</span>)}</>
+            )}{' '}
+            เป็นค่าคอมมิชชั่น <b>{m0(how.comm)}</b> บาท
           </p>
         ) : (
           <p>

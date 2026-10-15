@@ -1,10 +1,13 @@
 /**
  * Units, % contribution and commission (package dash, items 8 and 9b; dash impl-note §1). Pure helpers, no DOM.
  *
- * - A unit (หน่วยงาน / ฝ่าย) is a group of staff an admin sets up: `scfg/unit.<id>` = { n, c, o, rates, off? }.
- *   Its commission rates are effective-dated: the first one (`from: ''`) prices all money, past included;
- *   each later change prices the money received from the day it was saved (never retroactive). A rate may
- *   be set per service (the deal's Services) and then replaces the unit's own while the job has it.
+ * - A unit (หน่วยงาน / ฝ่าย) is a group of staff an admin sets up: `scfg/unit.<id>` = { n, c, o, rates, off?, offs? }.
+ *   Its commission rates are effective-dated: the first real one (`from: ''`) prices all money, past
+ *   included, also when the unit was made without a rate first; each later change prices the money
+ *   received from the day it was saved (never retroactive). A rate may be set per service (the deal's
+ *   Services) and then replaces the unit's own while the job has it.
+ * - A retired unit (`off`) keeps the money received before the day it was retired; what comes in from that
+ *   day (`offs`, the spans it was retired) is ยังไม่ระบุหน่วยงาน's, until its people move or the job is split again.
  * - One person is in one unit: `scfg/unitm.<staffKey(name)>` = { unit, n }. Names are free text (a deal's
  *   ผู้รับผิดชอบ), so the key is staffKey(), never the customer-name key (which drops 2-letter names: ฝน).
  * - A deal's money is split over units by % (`dshare/<dealId>` = { lines: [{ u, p }] }, summing to 100).
@@ -33,8 +36,12 @@ export const staffKey = (s: unknown) => {
  *  `svc`: service → rate, used in place of `r` while the job has that service (the highest when several);
  *  `d`: the day it was saved (a change saved again the same day replaces it). */
 export interface UnitRate { from: string; r: number | null; svc?: Record<string, number>; d?: string }
-/** `scfg/unit.<id>`: `c` the colour slot (0 grey, 1–4 the validated hues), `o` the order, `off` retired. */
-export interface UnitRec { n: string; c: number; o: number; rates: UnitRate[]; off?: boolean; at: string; by: string }
+/** A span a unit was retired: from the day it was retired up to (not including) the day it was used again;
+ *  no `to` = still retired. `from: ''` = since the start (a retired record that did not say when). */
+export interface OffSpan { from: string; to?: string }
+/** `scfg/unit.<id>`: `c` the colour slot (0 grey, 1–4 the validated hues), `o` the order, `off` retired
+ *  (since the last of `offs`, which has no end then). */
+export interface UnitRec { n: string; c: number; o: number; rates: UnitRate[]; off?: boolean; offs?: OffSpan[]; at: string; by: string }
 export interface Unit extends UnitRec { id: string }
 /** `scfg/unitm.<staffKey>`: the person's unit and their name as written. */
 export interface UnitMember { unit: string; n: string; at: string; by: string }
@@ -71,6 +78,33 @@ function toRate(v: unknown): UnitRate | null {
   if (isDay(x.d)) out.d = x.d;
   return out;
 }
+function toSpan(v: unknown): OffSpan | null {
+  if (!v || typeof v !== 'object') return null;
+  const x = v as Record<string, unknown>;
+  const from = x.from === '' || x.from == null ? '' : isDay(x.from) ? x.from : null;
+  if (from == null) return null;
+  if (x.to == null) return { from };
+  // a span that ends before (or on) the day it began held no day: nothing to keep
+  return isDay(x.to) && x.to > from ? { from, to: x.to } : null;
+}
+/**
+ * The spans a unit was retired, as it says: closed ones sorted, and an open one (the last) exactly while
+ * it is retired. A retired record without one (written by hand, or by an earlier build) is retired from
+ * the day it was saved; an open span on a unit in use is dropped (it does not say when it ended).
+ */
+function toSpans(v: unknown, off: boolean, at: string): OffSpan[] {
+  const all = (Array.isArray(v) ? v.map(toSpan).filter((x): x is OffSpan => !!x) : []).sort((a, b) => a.from.localeCompare(b.from));
+  const out = all.filter((x) => x.to).slice(-20);
+  const open = all.filter((x) => !x.to).at(-1);
+  if (off) out.push(open || { from: dayOf(at) });
+  return out;
+}
+const dayOf = (at: unknown) => (typeof at === 'string' && isDay(at.slice(0, 10)) ? at.slice(0, 10) : '');
+/** A unit's retired spans; a retired one without an open span (not read through toUnit) from the day it was saved. */
+function spansOf(u: Pick<UnitRec, 'off' | 'offs' | 'at'>): OffSpan[] {
+  const offs = u.offs || [];
+  return u.off && !(offs.length && !offs[offs.length - 1].to) ? [...offs, { from: dayOf(u.at) }] : offs;
+}
 /** A unit as the team holds it (a row of another browser, checked); null = skipped. Its rates sorted by
  *  their day ('' first); an account without ดูค่าคอมมิชชั่น receives it without rates (the script strips them). */
 export function toUnit(v: unknown): UnitRec | null {
@@ -81,7 +115,28 @@ export function toUnit(v: unknown): UnitRec | null {
   const c = Number.isInteger(x.c) && (x.c as number) >= 0 && (x.c as number) <= UNIT_SLOTS ? (x.c as number) : 0;
   const o = typeof x.o === 'number' && Number.isFinite(x.o) ? x.o : 0;
   const rates = (Array.isArray(x.rates) ? x.rates.map(toRate).filter((r): r is UnitRate => !!r) : []).sort((a, b) => a.from.localeCompare(b.from));
-  return { n, c, o, rates, ...(x.off === true ? { off: true } : {}), at: str(x.at, 40), by: str(x.by, 100) };
+  const at = str(x.at, 40), off = x.off === true;
+  const offs = toSpans(x.offs, off, at);
+  return { n, c, o, rates, ...(off ? { off: true } : {}), ...(offs.length ? { offs } : {}), at, by: str(x.by, 100) };
+}
+/** Whether a unit was retired on `iso` (money received that day is not its). */
+export function retiredOn(u: Partial<Pick<UnitRec, 'off' | 'offs' | 'at'>> | undefined, iso: string): boolean {
+  return !!u && spansOf({ at: '', ...u }).some((x) => (!x.from || iso >= x.from) && (!x.to || iso < x.to));
+}
+/** The day the unit was retired ('' = since the start), or null while it is in use. */
+export const retiredSince = (u: Partial<Pick<UnitRec, 'off' | 'offs' | 'at'>>): string | null => (u.off ? (spansOf({ at: '', ...u }).at(-1)?.from ?? '') : null);
+/** A unit's retired spans after retiring it (`off`) or using it again on `today`: a new open span from today,
+ *  or the open one closed today (dropped when it began today: it held no day). */
+export function withOff(offs: OffSpan[] | undefined, off: boolean, today: string): OffSpan[] {
+  const out = (offs || []).map((x) => ({ ...x }));
+  const last = out.at(-1);
+  if (off) {
+    if (!last || last.to) out.push({ from: today });
+  } else if (last && !last.to) {
+    if (last.from && last.from >= today) out.pop();
+    else last.to = today;
+  }
+  return out;
 }
 export function toUnitMember(v: unknown): UnitMember | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
@@ -137,10 +192,12 @@ export function applyUnitRow(S: UnitBags, name: string, del: boolean, v: unknown
   M[m[2]] = x;
   return true;
 }
+/** A unit record as sent (a copy: the engine keeps its own). */
+export const unitWire = (v: UnitRec): UnitRec => ({ ...v, rates: v.rates.map((r) => ({ ...r, ...(r.svc ? { svc: { ...r.svc } } : {}) })), ...(v.offs ? { offs: v.offs.map((x) => ({ ...x })) } : {}) });
 /** Every unit record held here, keyed like the team's (teamSync localRecords). */
 export function unitRecords(S: UnitBags): [string, unknown][] {
   return [
-    ...Object.entries(S.units || {}).map(([id, v]): [string, unknown] => ['scfg/unit.' + id, { ...v, rates: v.rates.map((r) => ({ ...r })) }]),
+    ...Object.entries(S.units || {}).map(([id, v]): [string, unknown] => ['scfg/unit.' + id, unitWire(v)]),
     ...Object.entries(S.unitm || {}).map(([k, v]): [string, unknown] => ['scfg/unitm.' + k, { ...v }]),
     ...Object.entries(S.shares || {}).map(([id, v]): [string, unknown] => ['dshare/' + id, { ...v, lines: v.lines.map((l) => ({ ...l })) }]),
   ];
@@ -185,14 +242,16 @@ export function membersOf(ctx: Pick<UnitCtx, 'members'>, id: string): string[] {
     .map(([k, m]) => m.n || k)
     .sort((a, b) => a.localeCompare(b, 'th'));
 }
-/** Of `names` (the team's, the deals' ผู้รับผิดชอบ), those in no unit, each once by staffKey. */
+/** Of `names` (the team's, the deals' ผู้รับผิดชอบ), those in no unit in use (none, or a retired one: the money
+ *  of their jobs from the day it was retired is ยังไม่ระบุหน่วยงาน's), each once by staffKey. */
 export function unassigned(ctx: Pick<UnitCtx, 'units' | 'members'>, names: string[]): string[] {
   const seen = new Set<string>();
   return names.filter((n) => {
     const k = staffKey(n);
     if (!k || seen.has(k)) return false;
     seen.add(k);
-    return !unitOfName(ctx, n);
+    const id = unitOfName(ctx, n);
+    return !id || !!ctx.units[id].off;
   });
 }
 /** A colour slot for a new unit: the first of 1–4 no live unit uses, else grey. */
@@ -250,10 +309,16 @@ export const apportioned = (ctx: UnitCtx, d: Deal) => {
   const p = partsOf(ctx, d);
   return p.length !== 1 || p[0].deal.id !== d.id;
 };
-/** Every unit a deal's money goes to ('' = ยังไม่ระบุหน่วยงาน): what the หน่วยงาน filter matches. */
+/** Every unit a deal's money goes to ('' = ยังไม่ระบุหน่วยงาน): what the หน่วยงาน filter matches. A retired
+ *  unit's share counts for it (the money before) and for ยังไม่ระบุหน่วยงาน (the money from that day). */
 export function dealUnits(ctx: UnitCtx, d: Deal): string[] {
   const out = new Set<string>();
-  partsOf(ctx, d).forEach((x) => shareOf(ctx, x.deal).lines.forEach((l) => out.add(l.u)));
+  partsOf(ctx, d).forEach((x) =>
+    shareOf(ctx, x.deal).lines.forEach((l) => {
+      out.add(l.u);
+      if (l.u && ctx.units[l.u]?.off) out.add('');
+    }),
+  );
   return [...out];
 }
 /** "แบ่งเท่ากัน": 100 / n in tenths, the remainder on the first row (3 → 33.4, 33.3, 33.3). */
@@ -297,10 +362,14 @@ export const paysComm = (u: Pick<UnitRec, 'rates'>) => {
   const e = u.rates[u.rates.length - 1];
   return !!e && (e.r != null || !!e.svc && Object.keys(e.svc).length > 0);
 };
+/** Whether a unit has had a rate (its own or by service) at any time: until it has, the next rate set is
+ *  its first one, which prices all money, past included. */
+export const hadRate = (rates: UnitRate[]) => rates.some((e) => e.r != null || (!!e.svc && Object.keys(e.svc).length > 0));
 /**
- * A unit's rates after an edit on `today`: unchanged → as they were; no rate yet → the first one, from ''
- * (it prices the money received before too); one saved today already → replaced in place; else a new entry
- * from today (earlier money keeps its rate).
+ * A unit's rates after an edit on `today`: unchanged → as they were; no rate yet (none saved, or only
+ * "ไม่คิด" so far: a unit made before its rate was known) → the first one, from '' (it prices the money
+ * received before too); one saved today already → replaced in place; else a new entry from today (earlier
+ * money keeps its rate).
  */
 export function withRate(rates: UnitRate[], r: number | null, svc: Record<string, number>, today: string): UnitRate[] {
   const last = rates[rates.length - 1];
@@ -308,7 +377,7 @@ export function withRate(rates: UnitRate[], r: number | null, svc: Record<string
   const same = (e: UnitRate) => e.r === r && JSON.stringify(Object.fromEntries(Object.entries(e.svc || {}).sort(([a], [b]) => a.localeCompare(b)))) === JSON.stringify(svcN);
   if (last && same(last)) return rates;
   const e: UnitRate = { from: '', r, ...(Object.keys(svcN).length ? { svc: svcN } : {}), d: today };
-  if (!last) return [e];
+  if (!last || !hadRate(rates)) return [e];
   if (last.d === today) return [...rates.slice(0, -1), { ...e, from: last.from }];
   return [...rates, { ...e, from: today }];
 }
@@ -324,14 +393,30 @@ export interface UnitMoney { u: string; got: number; comm: number; items: Contri
 export interface Contrib { by: Record<string, UnitMoney>; got: number; n: number; deals: number; comm: number }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
-/** Each unit's part of one received line (parts, then each part's split; exact to the satang). */
+/** Each unit's part of one received line (parts, then each part's split; exact to the satang). A unit
+ *  retired by the day the money came in gets none of it: that part is ยังไม่ระบุหน่วยงาน's (no rate). */
 export function lineParts(ctx: UnitCtx, l: CashLine): Omit<ContribItem, 'rate' | 'comm'>[] {
   const flat: { deal: Deal; u: string; w: number }[] = [];
   const parts = partsOf(ctx, l.deal);
   const tw = parts.reduce((a, x) => a + x.w, 0);
-  parts.forEach((x) => shareOf(ctx, x.deal).lines.forEach((s) => flat.push({ deal: x.deal, u: s.u, w: (x.w / tw) * s.p })));
+  parts.forEach((x) =>
+    shareOf(ctx, x.deal).lines.forEach((s) => {
+      const u = s.u && retiredOn(ctx.units[s.u], l.date) ? '' : s.u;
+      const w = (x.w / tw) * s.p;
+      const hit = flat.find((f) => f.deal.id === x.deal.id && f.u === u);
+      if (hit) hit.w += w;
+      else flat.push({ deal: x.deal, u, w });
+    }),
+  );
   const amts = splitSatang(l.amt, flat.map((x) => x.w));
   return flat.map((x, i) => ({ line: l, deal: x.deal, u: x.u, p: Math.round(x.w * 10) / 10, amt: amts[i] }));
+}
+/** What one deal received by unit, as contribIn counts it (all dates): `lines` are its own, or for a joint
+ *  quotation's member company its header's (the parts hook gives the member its part). */
+export function dealGot(ctx: UnitCtx, lines: CashLine[], id: string): { got: number; by: Map<string, number> } {
+  const by = new Map<string, number>();
+  for (const l of lines) if (l.kind === 'got') lineParts(ctx, l).forEach((x) => x.deal.id === id && by.set(x.u, r2((by.get(x.u) || 0) + x.amt)));
+  return { got: r2([...by.values()].reduce((a, v) => a + v, 0)), by };
 }
 export function contribIn(ctx: UnitCtx, lines: CashLine[], r: Range): Contrib {
   const out: Contrib = { by: {}, got: 0, n: 0, deals: 0, comm: 0 };
@@ -406,7 +491,27 @@ export function commRows(ctx: UnitCtx, c: Contrib, end: string): CommRow[] {
 }
 /** "5%", "3–5%" (several rates applied in the period), "" for none. */
 export const rateText = (rates: number[]) => (!rates.length ? '' : rates.length === 1 ? `${rates[0]}%` : `${rates[0]}–${rates[rates.length - 1]}%`);
-/** The card's worked example: the unit with the most money that pays commission. */
+/** A row's money by the rate it was paid at (null = none), lowest first: how much at that rate, the days
+ *  the rate entries behind it start ('' = from the start) and the services whose own rate it was. */
+export interface RatePart { rate: number | null; got: number; comm: number; from: string[]; svc: string[] }
+export function rateParts(row: Pick<CommRow, 'unit' | 'items'>): RatePart[] {
+  const by = new Map<number | null, RatePart>();
+  for (const x of row.items) {
+    const p = by.get(x.rate) || (by.set(x.rate, { rate: x.rate, got: 0, comm: 0, from: [], svc: [] }), by.get(x.rate)!);
+    p.got += x.amt;
+    p.comm += x.comm;
+    const e = row.unit ? rateEntry(row.unit, x.line.date) : null;
+    if (e && !p.from.includes(e.from)) p.from.push(e.from);
+    const s = x.rate != null && e?.svc ? x.deal.service.find((k) => e.svc![k] === x.rate) : undefined;
+    if (s && e!.r !== x.rate && !p.svc.includes(s)) p.svc.push(s);
+  }
+  return [...by.values()]
+    .map((p) => ({ ...p, got: r2(p.got), comm: r2(p.comm), from: p.from.sort() }))
+    .sort((a, b) => (a.rate ?? -1) - (b.rate ?? -1));
+}
+/** The card's worked example: of the units that pay commission, the one with the most money all paid at a
+ *  single rate (its line reproduces the figure as "x บาท คูณ r%"), else the one with the most money. */
 export function howRow(rows: CommRow[]): CommRow | null {
-  return rows.filter((r) => r.got > 0 && r.comm > 0).sort((a, b) => b.got - a.got)[0] || null;
+  const ok = rows.filter((r) => r.got > 0 && r.comm > 0).sort((a, b) => b.got - a.got);
+  return ok.find((r) => r.items.length > 0 && r.items.every((x) => x.rate != null && x.rate === r.items[0].rate)) || ok[0] || null;
 }

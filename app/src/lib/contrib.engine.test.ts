@@ -6,7 +6,10 @@
  * - a sales account (no view.comm) receives no split and no rates, sees no card, and may change neither;
  * - a role given ดูค่าคอมมิชชั่น receives them after its next pull; แก้สัดส่วน lets it save a split;
  * - deleting a deal removes its split on the script, also for an account that may not change splits;
- * - with the team code (no identity) the cards stay hidden; this browser alone shows them.
+ * - with the team code (no identity) the cards stay hidden; this browser alone shows them;
+ * - a unit made without a rate takes its first one later and that one prices the money before too;
+ * - a retired unit keeps the money received before the day it was retired, not what comes in after;
+ * - a team backup restores the units, their people and the splits (and uploads them when connected).
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,7 +18,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { BUILTIN } from './caps';
-import { contribIn, periodRange, shareOf, staffKey, unitCtx, unitOfName } from './contrib';
+import { contribIn, periodRange, shareOf, staffKey, unassigned, unitCtx, unitOfName } from './contrib';
 import { cashLines } from './sales';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
@@ -228,6 +231,8 @@ describe('units and splits with this release\'s team script', () => {
     expect(shareOf(L.e.unitCtx(), L.e.sales.deals[d.id]).lines[0]).toEqual({ u: sale, p: 60 });
     L.e.retireUnit(sale, false);
     expect(L.e.sales.units![sale].off).toBeUndefined();
+    // retired and used again the same day: no day was retired
+    expect(L.e.sales.units![sale].offs).toBeUndefined();
     vi.setSystemTime(new Date('2026-11-02T03:00:00Z'));
     L.e.saveUnit(cons, { n: 'ฝ่ายที่ปรึกษา', r: 4, svc: { VVB: 5 } });
     await settle(L);
@@ -236,6 +241,138 @@ describe('units and splits with this release\'s team script', () => {
     expect(L.e.teamPendingN).toBe(0);
   });
 });
+
+/** A won deal of `resp` paid `amt` on `day` (one installment). */
+function paidDeal(t: Tab, client: string, resp: string, amt: number, day: string) {
+  const d = t.e.addDeal({ client, resp, year: '2569' });
+  t.e.setStep(d.id, 'CLOSED DEAL', { d: '2026-08-01', n: 'YES' });
+  t.e.setPlan(d.id, [{ stage: 'PAY1', amt, pct: null, due: day, rel: null, how: 'transfer', howT: '', note: '' }]);
+  t.e.markPaid(d.id, 'PAY1', { date: day, amount: amt, how: 'transfer' });
+  return d;
+}
+const contribOf = (t: Tab, r: ReturnType<typeof periodRange>) => contribIn(unitCtx(t.e.sales), cashLines(t.e.sales, Object.values(t.e.sales.deals), '2026-12-31'), r);
+
+describe('rates set later, retired units, backups', () => {
+  it('a unit made without a rate gets its first rate the next day: the money received before is priced at it', async () => {
+    const L = await lead();
+    const u = L.e.saveUnit(null, { n: 'ฝ่ายขาย', r: null, svc: {}, members: ['เอก'] })!;
+    expect(L.e.sales.units![u].c).toBe(0); // grey until it pays commission
+    paidDeal(L, 'บริษัท รับก่อน จำกัด', 'เอก', 100000, '2026-08-15');
+    expect(contribOf(L, periodRange('2569', 2)).comm).toBe(0);
+    vi.setSystemTime(new Date('2026-10-13T03:00:00Z'));
+    L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 5, svc: {} });
+    await settle(L);
+    expect(L.e.teamPendingN).toBe(0);
+    expect((stored(L, 'scfg/unit.' + u)!.v as { rates: unknown }).rates).toEqual([{ from: '', r: 5, d: '2026-10-13' }]);
+    expect(L.e.sales.units![u].c).toBe(1);
+    const c = contribOf(L, periodRange('2569', 2));
+    expect(c.by[u]).toMatchObject({ got: 100000, comm: 5000 });
+    // a change after that is effective-dated again
+    vi.setSystemTime(new Date('2026-10-20T03:00:00Z'));
+    L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 3, svc: {} });
+    expect(L.e.sales.units![u].rates.map((x) => [x.from, x.r])).toEqual([['', 5], ['2026-10-20', 3]]);
+    expect(contribOf(L, periodRange('2569', 2)).by[u].comm).toBe(5000);
+  });
+
+  it('a retired unit keeps the money received before; what comes in from that day is ยังไม่ระบุหน่วยงาน; used again later', async () => {
+    const L = await lead();
+    const { sale, cons, d } = await setUp(L); // เอก's deal: 100,000 on 15 ส.ค., 60/40
+    L.e.retireUnit(sale, true); // 12 ต.ค.
+    await settle(L);
+    expect(stored(L, 'scfg/unit.' + sale)!.v).toMatchObject({ off: true, offs: [{ from: '2026-10-12' }] });
+    vi.setSystemTime(new Date('2026-10-20T03:00:00Z'));
+    const d2 = paidDeal(L, 'บริษัท รับหลัง จำกัด', 'เอก', 200000, '2026-10-20');
+    await settle(L);
+    // the quarter before: as it was; the one after: เอก's job (100% to ฝ่ายขาย by default) is ยังไม่ระบุหน่วยงาน's
+    expect([contribOf(L, periodRange('2569', 2)).by[sale].got, contribOf(L, periodRange('2569', 2)).by[cons].got]).toEqual([60000, 40000]);
+    const q4 = contribOf(L, periodRange('2569', 3));
+    expect(q4.by[sale]).toBeUndefined();
+    expect(q4.by['']).toMatchObject({ got: 200000, comm: 0 });
+    expect(q4.comm).toBe(0);
+    // its people are listed to move (they are still in it: the money before counts for it)
+    expect(unassigned(L.e.unitCtx(), ['หมิว', 'เอก', 'มกร'])).toEqual(['หมิว', 'เอก']);
+    // another admin holds the same and counts the same
+    const A2 = await member(L, 'ton', 'ต้น', 'admin');
+    expect(A2.e.sales.units![sale].offs).toEqual([{ from: '2026-10-12' }]);
+    expect(contribOf(A2, periodRange('2569', 3)).by['']).toMatchObject({ got: 200000 });
+    // used again on 2 พ.ย.: the days it was retired stay ยังไม่ระบุหน่วยงาน's, money from then is its own again
+    vi.setSystemTime(new Date('2026-11-02T03:00:00Z'));
+    L.e.retireUnit(sale, false);
+    const d3 = paidDeal(L, 'บริษัท กลับมา จำกัด', 'เอก', 50000, '2026-11-05');
+    await settle(L);
+    expect(stored(L, 'scfg/unit.' + sale)!.v).toMatchObject({ offs: [{ from: '2026-10-12', to: '2026-11-02' }] });
+    expect((stored(L, 'scfg/unit.' + sale)!.v as { off?: boolean }).off).toBeUndefined();
+    const q4b = contribOf(L, periodRange('2569', 3));
+    expect(q4b.by[sale].items.map((x) => x.deal.id)).toEqual([d3.id]);
+    expect(q4b.by[''].items.map((x) => x.deal.id)).toEqual([d2.id]);
+    expect(shareOf(L.e.unitCtx(), L.e.sales.deals[d.id]).lines[0]).toEqual({ u: sale, p: 60 });
+  });
+
+  it('a team backup restores the units, their people and the splits; connected, it uploads them', async () => {
+    // a browser of its own sets them up and saves a backup (the real exportCrm file)
+    const A = mk('A');
+    const sale = A.e.saveUnit(null, { n: 'ฝ่ายขาย', r: 5, svc: {}, members: ['เอก'] })!;
+    const cons = A.e.saveUnit(null, { n: 'ฝ่ายที่ปรึกษา', r: 3, svc: { VVB: 5 }, members: ['มกร'] })!;
+    const old = A.e.saveUnit(null, { n: 'ฝ่ายเดิม', r: 1, svc: {} })!;
+    A.e.retireUnit(old, true);
+    const d = paidDeal(A, 'บริษัท สำรอง จำกัด', 'เอก', 100000, '2026-08-15');
+    A.e.setShare(d.id, [{ u: sale, p: 70 }, { u: cons, p: 30 }]);
+    const file = await exported(A);
+    const held = JSON.parse(await file.text()).sales;
+    expect(Object.keys(held.units).sort()).toEqual([sale, cons, old].sort());
+    // a browser of its own restores it: the same units, people, split and commission
+    const B = mk('B');
+    await B.e.importCrm(file);
+    expect(B.e.sales.units).toEqual(A.e.sales.units);
+    expect(B.e.sales.unitm).toEqual(A.e.sales.unitm);
+    expect(B.e.sales.shares).toEqual(A.e.sales.shares);
+    expect(contribOf(B, periodRange('2569', 2))).toEqual(contribOf(A, periodRange('2569', 2)));
+    // gaps only: what a browser has already stays its own
+    B.e.saveUnit(sale, { n: 'ฝ่ายขายใหม่', r: 5, svc: {} });
+    await B.e.importCrm(file);
+    expect(B.e.sales.units![sale].n).toBe('ฝ่ายขายใหม่');
+    // the lead of a new team restores it: the script gets all three through the usual upload
+    const L = await lead();
+    await L.e.importCrm(file);
+    await settle(L);
+    expect(L.e.teamPendingN).toBe(0);
+    expect(L.e.teamNote).toBe('');
+    expect(stored(L, 'scfg/unit.' + cons)!.v).toMatchObject({ n: 'ฝ่ายที่ปรึกษา', rates: [{ from: '', r: 3, svc: { VVB: 5 } }] });
+    expect(stored(L, 'scfg/unit.' + old)!.v).toMatchObject({ off: true, offs: [{ from: '2026-10-12' }] });
+    expect(stored(L, 'scfg/unitm.' + staffKey('เอก'))!.v).toMatchObject({ unit: sale });
+    expect(stored(L, 'dshare/' + d.id)!.v).toMatchObject({ lines: [{ u: sale, p: 70 }, { u: cons, p: 30 }] });
+    // an account that may restore a backup but not set units or splits: it takes none of them
+    const { id } = await L.e.roleSave({ n: 'สำรองข้อมูล', d: '', c: { ...BUILTIN.sales.c, 'set.data': 'all' } });
+    const R = await member(L, 'backup', 'บุ๊ก', id);
+    R.e.sales.units = {};
+    R.e.sales.unitm = {};
+    await R.e.importCrm(file);
+    expect(R.e.sales.units).toEqual({});
+    expect(R.e.sales.unitm).toEqual({});
+    expect(R.e.sales.shares?.[d.id]).toBeUndefined();
+  });
+});
+
+/** What exportCrm saves (the real file: its download caught here). */
+async function exported(t: Tab): Promise<File> {
+  let blob: Blob | null = null;
+  const U = globalThis.URL;
+  const mk1 = vi.spyOn(U, 'createObjectURL').mockImplementation((b) => ((blob = b as Blob), 'blob:x'));
+  const mk2 = vi.spyOn(U, 'revokeObjectURL').mockImplementation(() => {});
+  const g = globalThis as { document?: unknown };
+  const had = g.document;
+  g.document = { createElement: () => ({ style: {}, click() {}, remove() {} }), body: { appendChild() {} } };
+  try {
+    t.e.exportCrm();
+    vi.advanceTimersByTime(3000);
+  } finally {
+    g.document = had;
+    mk1.mockRestore();
+    mk2.mockRestore();
+  }
+  expect(blob).toBeTruthy();
+  return Object.assign(new Blob([await blob!.text()]), { name: 'b.json' }) as File;
+}
 
 describe('where the cards show', () => {
   it('with the team code: hidden (no identity, every browser would hold the rates); this browser alone: shown', async () => {

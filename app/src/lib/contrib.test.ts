@@ -6,8 +6,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  applyUnitRow, apportioned, commPeriod0, commRows, contribIn, dealUnits, equalSplit, freeSlot, howRow, membersOf, newUnitId, paysComm, periodRange, rateOn, rateText, setPartsHook, shareOf, shareSum, shareValid,
-  splitSatang, staffKey, toShare, toUnit, toUnitMember, unassigned, unitCtx, unitOfName, unitQuarters, unitsOf, withRate, type ShareRec, type UnitMember, type UnitRec,
+  applyUnitRow, apportioned, commPeriod0, commRows, contribIn, dealGot, dealUnits, equalSplit, freeSlot, hadRate, howRow, membersOf, newUnitId, paysComm, periodRange, rateOn, rateParts, rateText, retiredOn, retiredSince,
+  setPartsHook, shareOf, shareSum, shareValid, splitSatang, staffKey, toShare, toUnit, toUnitMember, unassigned, unitCtx, unitOfName, unitQuarters, unitRecords, unitsOf, withOff, withRate, type ShareRec, type UnitMember,
+  type UnitRec,
 } from './contrib';
 import { nameKey } from './ckey';
 import { cashLines, cashYear, emptySales, filterDeals, newDeal, type Deal, type PayLine, type SalesState } from './sales';
@@ -188,6 +189,35 @@ describe('effective-dated rates', () => {
     expect(rateOn(u, '2026-08-15', ['CFP'])).toBe(3);
     expect(withRate([], 3, { VVB: 5, '': 9, X: 101 }, '2026-10-12')).toEqual([{ from: '', r: 3, svc: { VVB: 5 }, d: '2026-10-12' }]);
   });
+  it('a unit made without a rate whose first rate is set on a later day: that rate prices all money, past included', () => {
+    // units and people first, rates later (the real rates are not known yet): blank on 1 ต.ค., 5% on 12 ต.ค.
+    const blank = withRate([], null, {}, '2026-10-01');
+    expect(blank).toEqual([{ from: '', r: null, d: '2026-10-01' }]);
+    expect(hadRate(blank)).toBe(false);
+    const rates = withRate(blank, 5, {}, '2026-10-12');
+    expect(rates).toEqual([{ from: '', r: 5, d: '2026-10-12' }]);
+    expect(rateOn({ rates }, '2026-08-15')).toBe(5);
+    expect(hadRate(rates)).toBe(true);
+    // a rate by service only is a rate too: the first one is retroactive, the unit's own set later is a change
+    const svc = withRate(blank, null, { VVB: 5 }, '2026-10-05');
+    expect(svc).toEqual([{ from: '', r: null, svc: { VVB: 5 }, d: '2026-10-05' }]);
+    expect(withRate(svc, 3, { VVB: 5 }, '2026-10-12')).toEqual([svc[0], { from: '2026-10-12', r: 3, svc: { VVB: 5 }, d: '2026-10-12' }]);
+    // once a unit has had a rate, "ไม่คิด" and a rate again are changes from their day (never retroactive)
+    const off = withRate([{ from: '', r: 3, d: '2026-07-01' }], null, {}, '2026-09-01');
+    expect(off).toEqual([{ from: '', r: 3, d: '2026-07-01' }, { from: '2026-09-01', r: null, d: '2026-09-01' }]);
+    const back = withRate(off, 5, {}, '2026-10-12');
+    expect(back.map((x) => [x.from, x.r])).toEqual([['', 3], ['2026-09-01', null], ['2026-10-12', 5]]);
+    expect([rateOn({ rates: back }, '2026-08-15'), rateOn({ rates: back }, '2026-09-15'), rateOn({ rates: back }, '2026-10-12')]).toEqual([3, null, 5]);
+  });
+  it('the mockups\' ไตรมาส 3 with ฝ่ายขาย made blank and given 5% the next day: the quarter is priced at 5%', () => {
+    const s = demo();
+    s.shares!.c1 = SH([['sale', 100]]);
+    s.units!.sale.rates = withRate(withRate([], null, {}, '2026-10-12'), 5, {}, '2026-10-13');
+    const c = contribIn(unitCtx(s), lines(s), Q3);
+    // อมตะ PAY2 120,000 + แสนสิริ PAY1 107,000 (หมิว): 227,000 at 5%
+    expect(c.by.sale).toMatchObject({ got: 227000, comm: 11350 });
+    expect(rateText(commRows(unitCtx(s), c, Q3.to)[0].rates)).toBe('5%');
+  });
   it('no commission: a null rate, no rate at all, or money before the first dated rate', () => {
     expect(rateOn({ rates: [{ from: '', r: null }] }, '2026-08-15')).toBeNull();
     expect(rateOn({ rates: [] }, '2026-08-15')).toBeNull();
@@ -295,6 +325,160 @@ describe('commission on money received', () => {
     expect(commPeriod0('2568', '2026-10-12')).toBe('year');
     expect(periodRange('2569', 1)).toEqual({ from: '2026-04-01', to: '2026-06-30' });
     expect(periodRange('2569', 'year')).toEqual({ from: '2026-01-01', to: '2026-12-31' });
+  });
+});
+
+describe('a retired unit', () => {
+  const at = '2026-10-01T03:00:00.000Z';
+  /** ฝ่ายแพลตฟอร์ม (คุณเอ, 2%) retired on 1 ต.ค. */
+  const retired = () => {
+    const s = demo();
+    s.units!.plat = { ...s.units!.plat, off: true, offs: [{ from: '2026-10-01' }], at };
+    return s;
+  };
+  it('keeps the money received before the day it was retired; what comes in from that day is ยังไม่ระบุหน่วยงาน\'s, no rate', () => {
+    const s = retired();
+    // a September receipt of ไทยออยล์ (คุณเอ) and พฤกษา's typed Actual on 5 ต.ค.
+    s.pays['w2/PAY1'] = L({ amt: 80250, due: '2026-10-08', rcv: '2026-09-30' });
+    const ctx = unitCtx(s);
+    const y = contribIn(ctx, lines(s), periodRange('2569', 'year'));
+    expect(y.by.plat.items.map((x) => [x.deal.id, x.line.date, x.amt, x.rate])).toEqual([['w2', '2026-09-30', 80250, 2]]);
+    expect(y.by.plat).toMatchObject({ got: 80250, comm: 1605 });
+    expect(y.by[''].items.filter((x) => x.deal.id === 'c2').map((x) => [x.line.date, x.amt, x.rate, x.comm])).toEqual([['2026-10-05', 180000, null, 0]]);
+    const q4 = contribIn(ctx, lines(s), periodRange('2569', 3));
+    expect(q4.by.plat).toBeUndefined();
+    // the card: the retired unit with its money (Q3), never one that got nothing
+    expect(commRows(ctx, contribIn(ctx, lines(s), Q3), Q3.to).some((r) => r.u === 'plat')).toBe(true);
+    expect(commRows(ctx, q4, periodRange('2569', 3).to).some((r) => r.u === 'plat')).toBe(false);
+    // the units still add up to the money received
+    expect(Object.values(y.by).reduce((a, m) => a + m.got, 0)).toBe(y.got);
+  });
+  it('the review\'s case: retired with 2%, a member\'s job paid 100,000 on 1 ธ.ค. gives it nothing; the member is listed to move', () => {
+    const deal = newDeal({ id: 'd1', client: 'X', resp: 'คุณเอ', year: '2569' }, 'A');
+    const s = { ...emptySales(), deals: { d1: deal }, units: { plat: U('ฝ่ายแพลตฟอร์ม', 4, [{ from: '', r: 2 }], 0, true) }, unitm: { [staffKey('คุณเอ')]: M('plat', 'คุณเอ') }, shares: {} };
+    const line = { id: 'l', deal, kind: 'got', amt: 100000, date: '2026-12-01', stage: 'PAY1' } as unknown as Parameters<typeof contribIn>[1][number];
+    // retired without a day (an earlier build's record, as the review held it): from the day it was saved, 1 ก.ค.
+    expect(s.units.plat.offs).toBeUndefined();
+    expect(retiredSince(s.units.plat)).toBe('2026-07-01');
+    expect(toUnit(s.units.plat)!.offs).toEqual([{ from: '2026-07-01' }]);
+    for (const ctx of [unitCtx(s, null), unitCtx({ ...s, units: { plat: toUnit(s.units.plat)! } }, null)]) {
+      const c = contribIn(ctx, [line], { from: '2026-10-01', to: '2026-12-31' });
+      expect(c.by.plat).toBeUndefined();
+      expect(c.by['']).toMatchObject({ got: 100000, comm: 0 });
+      expect(c.comm).toBe(0);
+      expect(unassigned(ctx, ['คุณเอ'])).toEqual(['คุณเอ']);
+      expect(unitOfName(ctx, 'คุณเอ')).toBe('plat'); // still in it: the money before counts for it
+    }
+  });
+  it('a saved split that names it: its share from that day is ยังไม่ระบุหน่วยงาน\'s, the other units keep theirs', () => {
+    const s = retired();
+    s.shares!.c2 = SH([['plat', 50], ['sale', 50]]);
+    const q4 = contribIn(unitCtx(s), lines(s), periodRange('2569', 3));
+    expect(q4.by.sale.items.filter((x) => x.deal.id === 'c2').map((x) => x.amt)).toEqual([90000]);
+    expect(q4.by[''].items.filter((x) => x.deal.id === 'c2').map((x) => [x.amt, x.p])).toEqual([[90000, 50]]);
+  });
+  it('the หน่วยงาน filter finds its jobs under it (the money before) and under ยังไม่ระบุหน่วยงาน (the money from that day)', () => {
+    const s = retired(), ctx = unitCtx(s);
+    expect(dealUnits(ctx, s.deals.c2).sort()).toEqual(['', 'plat']);
+    expect(dealUnits(unitCtx(demo()), s.deals.c2)).toEqual(['plat']);
+  });
+  it('used again: the money of the days it was retired stays ยังไม่ระบุหน่วยงาน\'s; from the day it is back, its own', () => {
+    let offs = withOff(undefined, true, '2026-10-01');
+    expect(offs).toEqual([{ from: '2026-10-01' }]);
+    expect(withOff(offs, true, '2026-10-02')).toEqual(offs); // already retired
+    offs = withOff(offs, false, '2026-11-01');
+    expect(offs).toEqual([{ from: '2026-10-01', to: '2026-11-01' }]);
+    expect([retiredOn({ offs }, '2026-09-30'), retiredOn({ offs }, '2026-10-01'), retiredOn({ offs }, '2026-10-31'), retiredOn({ offs }, '2026-11-01')]).toEqual([false, true, true, false]);
+    // retired and used again on the same day: nothing to remember
+    expect(withOff(withOff(offs, true, '2026-12-01'), false, '2026-12-01')).toEqual(offs);
+    const s = demo();
+    s.units!.plat = { ...s.units!.plat, offs };
+    s.pays['w2/PAY1'] = L({ amt: 80250, due: '2026-11-08', rcv: '2026-11-08' });
+    const q4 = contribIn(unitCtx(s), lines(s), periodRange('2569', 3));
+    expect(q4.by.plat.items.map((x) => [x.deal.id, x.line.date])).toEqual([['w2', '2026-11-08']]);
+    expect(q4.by[''].items.filter((x) => x.deal.id === 'c2').map((x) => x.line.date)).toEqual(['2026-10-05']);
+  });
+  it('reads the spans as the unit says (checked), and sends them with it', () => {
+    expect(toUnit({ n: 'ก', rates: [], off: true, offs: [{ from: '2026-10-01' }], at })!.offs).toEqual([{ from: '2026-10-01' }]);
+    // in use: an open span (it does not say when it ended) is dropped, closed ones kept and sorted
+    expect(toUnit({ n: 'ก', rates: [], offs: [{ from: '2026-10-01' }, { from: '2026-05-01', to: '2026-06-01' }], at })!.offs).toEqual([{ from: '2026-05-01', to: '2026-06-01' }]);
+    // retired: the last open span; one that ends on or before its start, or bad days, are skipped
+    expect(toUnit({ n: 'ก', rates: [], off: true, offs: [{ from: '2026-10-01', to: '2026-10-01' }, { from: 'x' }, 'junk'], at: 'bad' })!.offs).toEqual([{ from: '' }]);
+    expect(retiredOn({ offs: [{ from: '' }] }, '2020-01-01')).toBe(true);
+    expect(retiredSince({ off: true, offs: [{ from: '2026-10-01' }] })).toBe('2026-10-01');
+    expect(retiredSince({ offs: [{ from: '2026-10-01', to: '2026-11-01' }] })).toBe(null);
+    const s = retired();
+    const rec = unitRecords(s).find(([k]) => k === 'scfg/unit.plat')![1] as UnitRec;
+    expect(rec.offs).toEqual([{ from: '2026-10-01' }]);
+    expect(rec.offs).not.toBe(s.units!.plat.offs);
+  });
+});
+
+describe('what one job received by unit (the deal panel)', () => {
+  it('its own money by its split, a retired unit\'s part from that day as ยังไม่ระบุหน่วยงาน', () => {
+    const s = demo();
+    s.shares!.c1 = SH([['sale', 60], ['cons', 40]]);
+    const g = dealGot(unitCtx(s), cashLines(s, [s.deals.c1], T), 'c1');
+    expect(g.got).toBe(240000);
+    expect(Object.fromEntries(g.by)).toEqual({ sale: 144000, cons: 96000 });
+    s.units!.cons = { ...s.units!.cons, off: true, offs: [{ from: '2026-08-01' }] };
+    const g2 = dealGot(unitCtx(s), cashLines(s, [s.deals.c1], T), 'c1');
+    // PAY1 (30 มิ.ย.) 60/40; PAY2 (15 ส.ค.) 60 to ฝ่ายขาย, the 40 to ยังไม่ระบุหน่วยงาน
+    expect(Object.fromEntries(g2.by)).toEqual({ sale: 144000, cons: 48000, '': 48000 });
+    expect(g2.got).toBe(240000);
+  });
+  it('a joint quotation\'s member company: its part of the header\'s money (it has none of its own)', () => {
+    const s = withUnits(world({
+      kmu: { d: { client: 'มจพ', resp: 'หมิว' }, steps: YES('2026-07-01'), pays: { PAY1: { amt: 300000, due: '2026-08-01', rcv: '2026-08-01' } } },
+      m1: { d: { client: 'สมาชิก 1', resp: 'มกร' } },
+      m2: { d: { client: 'สมาชิก 2', resp: 'หมิว' } },
+    }));
+    s.shares!.m1 = SH([['cons', 50], ['ver', 50]]);
+    setPartsHook((st, d) => (d.id === 'kmu' ? [{ deal: st.deals.m1, w: 2 }, { deal: st.deals.m2, w: 1 }] : null));
+    const ctx = unitCtx(s), header = cashLines(s, [s.deals.kmu], T);
+    expect(dealGot(ctx, cashLines(s, [s.deals.m1], T).filter((l) => l.deal.id === 'm1'), 'm1').got).toBe(0); // nothing of its own
+    const m1 = dealGot(ctx, header, 'm1');
+    expect(m1.got).toBe(200000);
+    expect(Object.fromEntries(m1.by)).toEqual({ cons: 100000, ver: 100000 });
+    expect(dealGot(ctx, header, 'm2')).toMatchObject({ got: 100000 });
+    expect(dealGot(ctx, header, 'kmu').got).toBe(0); // the header's money all went to its members
+  });
+});
+
+describe('the card\'s rates: a range and the worked example', () => {
+  it('a range lists each rate with its money and the day it applies from; วิธีคิด prefers a unit paid at one rate', () => {
+    const s = demo();
+    s.units!.plat.rates = [{ from: '', r: 2 }, { from: '2026-10-01', r: 4 }];
+    s.pays['w2/PAY1'] = L({ amt: 80250, due: '2026-10-08', rcv: '2026-09-30' });
+    const ctx = unitCtx(s), y = contribIn(ctx, lines(s), periodRange('2569', 'year'));
+    const rows = commRows(ctx, y, '2026-12-31');
+    const plat = rows.find((r) => r.u === 'plat')!;
+    expect(rateParts(plat)).toEqual([
+      { rate: 2, got: 80250, comm: 1605, from: [''], svc: [] },
+      { rate: 4, got: 180000, comm: 7200, from: ['2026-10-01'], svc: [] },
+    ]);
+    // the parts reproduce the unit's figure
+    expect(rateParts(plat).reduce((a, p) => a + (p.got * (p.rate || 0)) / 100, 0)).toBe(plat.comm);
+    // ฝ่ายแพลตฟอร์ม has the most money but at two rates: the example is the largest unit paid at one
+    expect(plat.got).toBeGreaterThan(rows.find((r) => r.u === 'sale')!.got);
+    const how = howRow(rows)!;
+    expect(how.u).toBe('sale');
+    expect(rateParts(how)).toHaveLength(1);
+    // only units with several rates: the largest of them, worded part by part
+    expect(howRow(rows.filter((r) => r.u === 'plat'))!.u).toBe('plat');
+  });
+  it('a service\'s own rate is named, a part without commission is kept', () => {
+    const s = demo();
+    s.deals.w1 = { ...s.deals.w1, service: ['VVB'] };
+    s.shares!.w1 = SH([['ver', 100]]);
+    s.deals.c2 = { ...s.deals.c2, resp: 'คุณบี' };
+    s.units!.ver.rates = [{ from: '', r: 3, svc: { VVB: 5 } }, { from: '2026-10-01', r: null }];
+    const ctx = unitCtx(s), y = contribIn(ctx, lines(s), periodRange('2569', 'year'));
+    const ver = commRows(ctx, y, '2026-12-31').find((r) => r.u === 'ver')!;
+    expect(rateParts(ver)).toEqual([
+      { rate: null, got: 180000, comm: 0, from: ['2026-10-01'], svc: [] },
+      { rate: 5, got: 107000, comm: 5350, from: [''], svc: ['VVB'] },
+    ]);
   });
 });
 

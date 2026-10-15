@@ -28,7 +28,7 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
-import { NAME_MAX, freeSlot, newUnitId, paysComm, shareValid, staffKey, unitCtx, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
+import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
@@ -1166,6 +1166,27 @@ export class GccEngine {
         const l = toLog(v, k);
         if (l && !(k in S.log)) S.log[k] = l;
       });
+      // units, who is in which and the revenue splits (package dash), for those who may set them; rates and
+      // splits only for those who may see commission (as the script would send them)
+      if (this.can('set.units')) {
+        const comm = this.can('view.comm');
+        Object.entries((IS.units || {}) as Record<string, unknown>).forEach(([id, v]) => {
+          const u = isUnitId(id) ? toUnit(v) : null;
+          const U = S.units || (S.units = {});
+          if (u && !(id in U)) U[id] = comm ? u : { ...u, rates: [] };
+        });
+        Object.entries((IS.unitm || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const m = staffKey(k) === k ? toUnitMember(v) : null;
+          const M = S.unitm || (S.unitm = {});
+          if (m && !(k in M)) M[k] = m;
+        });
+      }
+      if (this.can('edit.share') && this.can('view.comm'))
+        Object.entries((IS.shares || {}) as Record<string, unknown>).forEach(([id, v]) => {
+          const x = toShare(v);
+          const D = S.shares || (S.shares = {});
+          if (x && S.deals[id] && !(id in D)) D[id] = x;
+        });
       Object.entries((d.custom || {}) as Record<string, unknown>).forEach(([k, v]) => {
         const c = toCust(v, +k);
         if (c && !this.custom[c.id]) {
@@ -2508,12 +2529,12 @@ export class GccEngine {
     const ctx = unitCtx(S);
     const c = cur?.c || (paysComm({ rates }) ? freeSlot(ctx) : 0);
     const o = cur ? cur.o : Math.max(0, ...Object.values(U).map((u) => u.o + 1));
-    const rec: UnitRec = { n, c, o, rates, ...(cur?.off ? { off: true } : {}), at, by };
+    const rec: UnitRec = { n, c, o, rates, ...(cur?.off ? { off: true } : {}), ...(cur?.offs ? { offs: cur.offs } : {}), at, by };
     this.batchOps(() => {
       const f = cur ? (['n', 'c', 'rates'] as const).filter((k) => JSON.stringify(cur[k]) !== JSON.stringify(rec[k])) : [];
       if (!cur || f.length) {
         U[uid2] = rec;
-        this.op(keyOf.unit(uid2), { ...rec, rates: rec.rates.map((r) => ({ ...r })) }, cur ? { f: [...f, 'at', 'by'] } : {});
+        this.op(keyOf.unit(uid2), unitWire(rec), cur ? { f: [...f, 'at', 'by'] } : {});
       }
       if (p.members) {
         const want = new Map(p.members.map((x) => [staffKey(x), x.trim().replace(/\s+/g, ' ')] as const).filter(([k]) => !!k));
@@ -2532,16 +2553,19 @@ export class GccEngine {
     this.saveSales();
     return uid2;
   }
-  /** Retire a unit (`off`) or bring it back. A retired one keeps the money already counted for it (its
-   *  members and the splits that name it stay), and is no longer offered for new splits or people. */
+  /** Retire a unit (`off`) or bring it back. A retired one keeps the money received before today (its
+   *  members and the splits that name it stay); the money that comes in from today on is
+   *  ยังไม่ระบุหน่วยงาน's (contrib lineParts: the span is kept in `offs`, so using it again later does not
+   *  give it the money of the days it was retired). It is no longer offered for new splits or people. */
   retireUnit(id: string, off: boolean) {
     if (!this.can('set.units')) return this.deny();
     const cur = this.sales.units?.[id];
     if (!cur || !!cur.off === off) return;
-    const { off: _o, ...rest } = cur;
-    const rec: UnitRec = { ...rest, ...(off ? { off: true } : {}), at: new Date().toISOString(), by: this.me() };
+    const { off: _o, offs: _s, ...rest } = cur;
+    const offs = withOff(cur.offs, off, todayISO());
+    const rec: UnitRec = { ...rest, ...(off ? { off: true } : {}), ...(offs.length ? { offs } : {}), at: new Date().toISOString(), by: this.me() };
     this.sales.units![id] = rec;
-    this.op(keyOf.unit(id), { ...rec, rates: rec.rates.map((r) => ({ ...r })) }, { f: ['off', 'at', 'by'] });
+    this.op(keyOf.unit(id), unitWire(rec), { f: ['off', 'offs', 'at', 'by'] });
     this.saveSales();
   }
   /** Put a person (a name as written: an account's display name or a free-text ผู้รับผิดชอบ) in a unit;

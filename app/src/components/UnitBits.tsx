@@ -9,7 +9,11 @@ export function UnitName({ ctx, id, cls = '' }: { ctx: Pick<UnitCtx, 'units'>; i
   return (
     <span className={'un ' + cls}>
       <i className={'ud ' + unitCls(ctx, id)} aria-hidden="true" />
-      <span className="un-n">{u ? u.n : NO_UNIT_TH}{u?.off ? ' (เลิกใช้)' : ''}</span>
+      <span className="un-n" title={(u ? u.n : NO_UNIT_TH) + (u?.off ? ' (เลิกใช้)' : '')}>
+        {u ? u.n : NO_UNIT_TH}
+        {/* the break before it, never inside it */}
+        {u?.off && <> <span className="un-off">(เลิกใช้)</span></>}
+      </span>
     </span>
   );
 }

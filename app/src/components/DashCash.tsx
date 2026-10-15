@@ -150,7 +150,7 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan, sp
         <tbody>
           {split && split.units.map((u) => (
             <tr key={u.id || '-'}>
-              <td><span className="un"><i className={'ud ' + u.cls} aria-hidden="true" /><span className="un-n">{u.n}</span></span></td>
+              <td><span className="un"><i className={'ud ' + u.cls} aria-hidden="true" /><span className="un-n" title={u.n}>{u.n}</span></span></td>
               {qs.map((_, i) => <td key={i}>{z(split.q[i][u.id] || 0)}</td>)}
               <td>{z(split.year[u.id] || 0)}</td>
             </tr>

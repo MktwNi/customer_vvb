@@ -12,10 +12,15 @@
 .ud{display:inline-block;flex:none;width:10px;height:10px;border-radius:3px}
 .un{display:flex;align-items:center;gap:8px;min-width:0}
 .un-n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.un-off{white-space:nowrap}
 
-/* the quarter card split by unit */
-.qt-wide.split th:first-child{width:118px}
+/* the quarter card split by unit: wide enough for "ยังไม่ระบุหน่วยงาน" on one line; a longer unit name wraps
+   to a second line (the full name in its title) */
+.qt-wide.split th:first-child{width:136px}
 .qt-wide.split td:first-child{color:var(--ink)}
+.qt-wide.split td:first-child .un{align-items:flex-start}
+.qt-wide.split td:first-child .ud{margin-top:5px}
+.qt-wide.split td:first-child .un-n{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}
 
 /* the commission card (beside the quarter card; under it when the Dashboard is narrow) */
 @container (max-width:860px){.sd-grid2{grid-template-columns:minmax(0,1fr)}}
@@ -35,6 +40,8 @@
 .cm-t th:nth-child(3){width:60px}
 .cm-t th:nth-child(4){width:56px}
 .cm-t .rt{color:var(--ink-2)}
+/* a range of rates ("2–4%"): what it is made of in the title */
+.cm-rng{text-decoration:underline dotted var(--muted);text-underline-offset:3px;cursor:help}
 .cm-t td.rt small{color:var(--muted);white-space:normal}
 .cm-r td:first-child{border-radius:10px 0 0 10px}
 .cm-r td:last-child{border-radius:0 10px 10px 0}
@@ -45,6 +52,11 @@
 .cm-x:disabled{cursor:default}
 .cm-x:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
 .cm-car{display:inline-flex;color:var(--ink-2);flex:none}
+/* a long unit name wraps to a second line here too (the full name in its title) */
+.cm-r .cm-x,.cm-r .cm-x .un{align-items:flex-start}
+.cm-r .cm-x .ud{margin-top:5px}
+.cm-r .cm-x .cm-car{margin-top:2px}
+.cm-r .un-n{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .cm-car svg{transition:transform .15s}
 .cm-r.open .cm-car svg{transform:rotate(180deg)}
 .cm-sub td{border-top:0;padding-top:2px;padding-bottom:6px;color:var(--ink-2);background:var(--tint)}
@@ -72,8 +84,7 @@
   .cm-t th:nth-child(1){width:47%}
   .cm-t th:nth-child(3){width:48px}
   .cm-t th,.cm-t td{padding-left:4px;padding-right:4px}
-  .cm-r .cm-x{gap:6px;align-items:flex-start}
-  .cm-r .cm-x .ud{margin-top:5px}
+  .cm-r .cm-x{gap:6px}
   .qt td small.un-s{display:block;font-size:12px}
   .cm-kpi{gap:8px}
   .cm-k{padding:10px 12px}
@@ -153,8 +164,10 @@
 .ut-foot>.lnk{font-size:14px}
 .ut-none{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:13px;color:var(--ink-2)}
 .ut-none .sel-btn{height:32px}
-.ut-off{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:13px;color:var(--muted)}
+.ut-off{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;font-size:13px;color:var(--muted)}
 .ut-off .lnk{font-size:13px}
+.ut-off-n{color:var(--ink-2)}
+.ut-was{margin-left:6px;font-size:12px;color:var(--muted)}
 .ut-ex{margin:0;padding:10px 14px;border-radius:var(--r-inner);background:var(--frame);font-size:13px;color:var(--ink-2);line-height:1.55}
 .ut-hist{font-size:12px;color:var(--muted);line-height:1.5}
 @media (max-width:700px){

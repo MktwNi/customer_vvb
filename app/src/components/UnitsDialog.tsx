@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { useApp } from '../state';
 import { isoTh, todayISO } from '../lib/format';
-import { membersOf, rateOk, staffKey, unassigned, unitOfName, unitsOf, type Unit, type UnitRate } from '../lib/contrib';
+import { hadRate, membersOf, rateOk, retiredSince, staffKey, unassigned, unitOfName, unitsOf, type Unit, type UnitRate } from '../lib/contrib';
 import { Modal } from './Dialog';
 import { Select } from './Select';
 import { Icon } from './icons';
@@ -68,7 +68,9 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
     setOpen(null);
   };
   const retire = (u: Unit) => {
-    if (!window.confirm(`เลิกใช้ “${u.n}”? เงินที่นับให้หน่วยงานนี้แล้วยังอยู่ (ทั้งคนในหน่วยงานและสัดส่วนที่แบ่งไว้) แต่จะเลือกหน่วยงานนี้ให้งานหรือคนใหม่ไม่ได้ ใช้อีกครั้งได้ภายหลัง`)) return;
+    const ms = membersOf(ctx, u.id);
+    const who = ms.length ? ` (คนในหน่วยงานนี้ ${ms.length} คนยังอยู่ จะขึ้นในรายชื่อ “ยังไม่อยู่หน่วยงานใด” ให้ย้าย)` : '';
+    if (!window.confirm(`เลิกใช้ “${u.n}”?\n\nเงินที่รับก่อนวันนี้ยังนับให้หน่วยงานนี้เหมือนเดิม ส่วนเงินที่รับตั้งแต่วันนี้ของงานที่นับให้หน่วยงานนี้ (งานของคนในหน่วยงานและสัดส่วนที่แบ่งไว้) จะนับเป็น “ยังไม่ระบุหน่วยงาน” ไม่มีค่าคอมมิชชั่น จนกว่าจะย้ายคนไปหน่วยงานอื่นหรือแบ่งสัดส่วนใหม่${who}\n\nย้ายคนแล้ว งานของเขาที่ไม่ได้แบ่งสัดส่วนไว้จะนับให้หน่วยงานใหม่ทั้งหมด รวมเงินที่รับไปแล้ว หน่วยงานที่เลิกใช้เลือกให้งานหรือคนใหม่ไม่ได้ ใช้อีกครั้งได้ภายหลัง`)) return;
     e.retireUnit(u.id, true);
     setOpen(null);
   };
@@ -76,7 +78,8 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
 
   const editor = (u: Unit | null) => {
     const hist = (u?.rates || []).filter((x) => x.r != null || x.svc);
-    const first = !u || !u.rates.length;
+    // no rate yet (none, or only "ไม่คิด" so far): the one set now is the first, and prices the money before too
+    const first = !u || !hadRate(u.rates);
     const savedToday = !!u && u.rates[u.rates.length - 1]?.d === todayISO();
     const inUnit = new Set(dr.members.map(staffKey));
     const addable = names.filter((x) => !inUnit.has(staffKey(x))).sort((a, b) => a.localeCompare(b, 'th'));
@@ -129,7 +132,7 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
                 onChange={(v) => setDr({ ...dr, members: [...dr.members, v] })}
                 options={addable.map((x) => {
                   const w = unitOfName(ctx, x);
-                  return { v: x, label: x, sub: w && w !== u?.id ? `อยู่${ctx.units[w].n}` : undefined };
+                  return { v: x, label: x, sub: w && w !== u?.id ? `อยู่${ctx.units[w].n}${ctx.units[w].off ? ' (เลิกใช้)' : ''}` : undefined };
                 })}
               />
             )}
@@ -204,10 +207,15 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
           {open !== 'new' && <button type="button" className="lnk" onClick={() => begin(null)}>เพิ่มหน่วยงาน</button>}
           {live.length > 0 && free.length > 0 && (
             <span className="ut-none">
-              ยังไม่อยู่หน่วยงานใด ({free.length} คน) งานที่คนเหล่านี้รับผิดชอบนับเป็น “ยังไม่ระบุหน่วยงาน” · เลือกหน่วยงาน:
-              {free.slice(0, 8).map((n) => (
-                <Select key={n} variant="tool" label={`เลือกหน่วยงานให้${n}`} ariaLabel={`เลือกหน่วยงานให้${n}`} value="" shown={n} onChange={(v) => e.setUnitMember(n, v)} options={live.map((u) => ({ v: u.id, label: u.n, lead: <i className={'ud u' + u.c} aria-hidden="true" /> }))} />
-              ))}
+              {free.some((n) => unitOfName(ctx, n))
+                ? `ยังไม่อยู่หน่วยงานใด หรืออยู่หน่วยงานที่เลิกใช้ (${free.length} คน) งานที่คนเหล่านี้รับผิดชอบนับเป็น “ยังไม่ระบุหน่วยงาน” (คนในหน่วยงานที่เลิกใช้: เงินที่รับตั้งแต่วันที่เลิกใช้) · เลือกหน่วยงาน:`
+                : `ยังไม่อยู่หน่วยงานใด (${free.length} คน) งานที่คนเหล่านี้รับผิดชอบนับเป็น “ยังไม่ระบุหน่วยงาน” · เลือกหน่วยงาน:`}
+              {free.slice(0, 8).map((n) => {
+                const was = unitOfName(ctx, n);
+                return (
+                  <Select key={n} variant="tool" label={`เลือกหน่วยงานให้${n}`} ariaLabel={`เลือกหน่วยงานให้${n}${was ? ` (อยู่${ctx.units[was].n} ที่เลิกใช้แล้ว)` : ''}`} value="" shown={was ? <>{n}<small className="ut-was">{ctx.units[was].n} เลิกใช้</small></> : n} onChange={(v) => e.setUnitMember(n, v)} options={live.map((u) => ({ v: u.id, label: u.n, lead: <i className={'ud u' + u.c} aria-hidden="true" /> }))} />
+                );
+              })}
               {free.length > 8 && <span>และอีก {free.length - 8} คน (เพิ่มได้ที่ “แก้ไข” ของหน่วยงาน)</span>}
             </span>
           )}
@@ -215,11 +223,17 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
         {off.length > 0 && (
           <div className="ut-off">
             <span>เลิกใช้แล้ว:</span>
-            {off.map((u) => (
-              <span key={u.id}>
-                {u.n} <button type="button" className="lnk" onClick={() => e.retireUnit(u.id, false)} aria-label={`ใช้ ${u.n} อีกครั้ง`}>ใช้อีกครั้ง</button>
-              </span>
-            ))}
+            {off.map((u) => {
+              const ms = membersOf(ctx, u.id), since = retiredSince(u);
+              return (
+                <span key={u.id} className="ut-off-i">
+                  <span className="ut-off-n">{u.n}</span>
+                  {since ? ` ตั้งแต่ ${isoTh(since)}` : ''}
+                  {ms.length > 0 && <span> · คนที่ยังอยู่ {ms.join(' · ')}</span>}{' '}
+                  <button type="button" className="lnk" onClick={() => e.retireUnit(u.id, false)} aria-label={`ใช้ ${u.n} อีกครั้ง`} title="เงินที่รับระหว่างที่เลิกใช้ยังนับเป็น “ยังไม่ระบุหน่วยงาน”">ใช้อีกครั้ง</button>
+                </span>
+              );
+            })}
           </div>
         )}
         <p className="ut-ex">ตัวอย่าง: เงินเข้า 1,000,000 บาท งานนี้แบ่ง หน่วยงาน ก 60% หน่วยงาน ข 20% หน่วยงาน ค 20% หน่วยงาน ก ได้ส่วน 600,000 บาท ถ้าอัตรา 5% เป็นค่าคอมมิชชั่น 30,000 บาท</p>
