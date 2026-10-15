@@ -14,6 +14,8 @@ import { CoAvatar } from '../components/CoAvatar';
 import { Icon } from '../components/icons';
 import { Modal } from '../components/Dialog';
 import { DocAttach, openDocFile, type AttachMore } from '../components/DocAttach';
+import { QtPhone, deleteQt } from '../components/QtCard';
+import { qtFigWords, qtView } from '../lib/quotes';
 import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } from '../components/DealActs';
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
@@ -1299,6 +1301,8 @@ function RowMenu({ d }: { d: Deal }) {
     fn();
   };
   const ready = closeReady(tk.S, d, tk.today);
+  // a quotation there already: its revision is one click from the row
+  const qv = open && !tk.ro ? qtView(tk.S, d) : null, qh = qv?.head;
   return (
     <span
       ref={ref}
@@ -1326,6 +1330,11 @@ function RowMenu({ d }: { d: Deal }) {
           {!tk.ro && (
             <>
               <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d))}>แนบเอกสาร<small>ระบบเลือกขั้นให้</small></button>
+              {qh && (
+                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qh.doc.id }))}>
+                  แนบใบเสนอราคาฉบับแก้ไข<small>{qh.doc.docNo || 'ใบเสนอราคา'} · {qv!.cur ? `ตอนนี้ใช้ฉบับที่ ${qv!.cur.n}` : `ล่าสุดฉบับที่ ${qh.n}`}</small>
+                </button>
+              )}
               <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id, 'edit'))}>แผนการชำระเงิน<small>{planOf(tk.S, d, tk.today) ? 'แก้ไขแผน' : 'ตั้งแผน งวดละเท่าไร เมื่อไร'}</small></button>
               <button
                 role="menuitem"
@@ -1511,6 +1520,15 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         } else if (isNow && !ro) {
           note = <button type="button" className="lnk" data-qa={d.id + ':' + p + ':add'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)}>บันทึกวันที่และโน้ต</button>;
         }
+        // QUOTATION with a quotation: "แนบฉบับแก้ไข" always in view by its note, the version under its figure
+        const qv = p === QUOTE_STAGE ? qtView(S, d) : null;
+        if (qv?.head && !ro)
+          note = (
+            <span className="qt-kn">
+              {note}
+              <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>
+            </span>
+          );
         const date = s.d ? (st === 'planned' ? <span className="sl-kdate">นัด {dmTh(s.d)}<small>{agoTh(s.d, today)}</small></span> : <span className="sl-kdate">{isoTh(s.d)}</span>) : null;
         // documents and amounts sit in the column they feed: QUOTATION under Forecast, PAY under Actual
         let money: ReactNode = null;
@@ -1518,7 +1536,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         if (isMoney && st !== 'off') {
           const fig = stageFig(S, d, p);
           const slot = !fig && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
-          money = fig ? <StageAmount fig={fig} /> : slot ? (
+          money = fig ? <StageAmount fig={fig} ver={qv ? qtFigWords(qv, fig.doc.id) : null} /> : slot ? (
             <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={p === QUOTE_STAGE ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${p}`}>
               แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}
             </button>
@@ -1749,16 +1767,19 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
   }
 }
 
-/** A document's amount in a child row: a button that opens the file, the document number under it, or
- *  "ไม่ตรงเอกสาร" when the figure counted is the user's own (both numbers in its title). */
-function DocAmount({ doc }: { doc: DealDoc }) {
+/** A document's amount in a child row: a button that opens the file, the document number under it (a
+ *  quotation with versions: "ฉบับที่ 2", `ver`), or "ไม่ตรงเอกสาร" when the figure counted is the user's own
+ *  (both numbers in its title). */
+function DocAmount({ doc, ver }: { doc: DealDoc; ver?: { text: string; title: string } | null }) {
   const { e } = useTk();
   const mm = docMismatch(doc);
   return (
     <>
-      <button type="button" className="sl-amt hv-tx" onClick={() => openDocFile(e, doc)} title={`${KIND_TH[doc.kind]} ${doc.docNo} · ${fmtMoney(doc.amount)} บาท เปิดไฟล์`}>{fmtMoney(doc.amount)}</button>
+      <button type="button" className="sl-amt hv-tx" onClick={() => openDocFile(e, doc)} title={`${KIND_TH[doc.kind]} ${doc.docNo}${ver ? ' ' + ver.text : ''} · ${fmtMoney(doc.amount)} บาท เปิดไฟล์`}>{fmtMoney(doc.amount)}</button>
       {mm ? (
         <span className="sl-dno warn" title={`${KIND_TH[doc.kind]} ${doc.docNo}: ${mismatchText(mm.doc, mm.kept, 'ยอดที่นับ')}`}>ไม่ตรงเอกสาร</span>
+      ) : ver ? (
+        <span className="sl-dno" title={ver.title}>{ver.text}</span>
       ) : (
         <span className="sl-dno" title={'จากเอกสาร ' + (doc.docNo || KIND_TH[doc.kind])}>{doc.docNo || KIND_TH[doc.kind]}</span>
       )}
@@ -1768,9 +1789,9 @@ function DocAmount({ doc }: { doc: DealDoc }) {
 
 /** A money stage's figure (stageFig): one document as DocAmount, several counted at a PAY stage as their
  *  sum, named by the latest. */
-function StageAmount({ fig }: { fig: NonNullable<ReturnType<typeof stageFig>> }) {
+function StageAmount({ fig, ver }: { fig: NonNullable<ReturnType<typeof stageFig>>; ver?: { text: string; title: string } | null }) {
   const { e } = useTk();
-  if (fig.n === 1) return <DocAmount doc={fig.doc} />;
+  if (fig.n === 1) return <DocAmount doc={fig.doc} ver={ver} />;
   const name = fig.doc.docNo || KIND_TH[fig.doc.kind];
   return (
     <>
@@ -1975,6 +1996,8 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
   }, []);
   const isMoney = stage === QUOTE_STAGE || isPayStage(S.cfg, stage);
   const hasDoc = (stageDocs(S, d).by[stage] || []).some((x) => x.amount != null);
+  // a quotation there already: a revised one (compared with it, which stays as "ฉบับเดิม")
+  const qh = stage === QUOTE_STAGE ? qtView(S, d).head : null;
   return (
     <>
       <td className="sl-knote" colSpan={3} ref={(el) => void (ed.box.current = el?.closest('tr') || null)}>
@@ -2006,7 +2029,11 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
       <td className="k-last" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${stage}`} /></td>
       <td className="k-m2" colSpan={2}>
         <span className="sl-m2">
-          <span className="k2-fc">{stage === QUOTE_STAGE && !hasDoc && !tk.ro && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสนอราคา</button>}</span>
+          <span className="k2-fc">
+            {stage === QUOTE_STAGE && !tk.ro && (qh ? (
+              <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage, 'quotation', { target: 'forecast', revise: qh.doc.id }); }}>แนบฉบับแก้ไข</button>
+            ) : !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสนอราคา</button>)}
+          </span>
           <span className="k2-ac">{isMoney && stage !== QUOTE_STAGE && won && !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสร็จ</button>}</span>
         </span>
       </td>
@@ -2181,7 +2208,15 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
           right = (
             <>
               {right}
-              {fig ? <StageAmount fig={fig} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+              {fig ? <StageAmount fig={fig} ver={p === QUOTE_STAGE ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+            </>
+          );
+        // a QUOTATION done (its quotation attached) is edited here too: a revision, its figures, its file
+        if (p === QUOTE_STAGE && st === 'done' && !ro && !editing)
+          right = (
+            <>
+              {right}
+              <button type="button" className="lnk sl-mk-e" data-qa={d.id + ':' + p + ':edit'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)} aria-label={`แก้ไข ${p} ${thOf(p)}`}>แก้ไข</button>
             </>
           );
         let body: ReactNode =
@@ -2284,10 +2319,17 @@ function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Lin
     ta.current?.scrollIntoView?.({ block: 'nearest' });
   }, []);
   const isMoney = stage === QUOTE_STAGE || isPayStage(tk.S.cfg, stage);
+  // QUOTATION with a quotation: the quotation (a revision, its figures, its file, earlier versions) first
+  const qv = stage === QUOTE_STAGE ? qtView(tk.S, d) : null;
   return (
     <div className="sl-mk-ed" ref={(el) => void (ed.box.current = el)} onKeyDown={ed.keys}>
       {stage === DEAL_STAGE && <ResultButtons state="" label="ผลการขาย" onPick={ed.result} />}
-      {isMoney && (stage === QUOTE_STAGE || won) && (
+      {qv?.head ? (
+        <>
+          <QtPhone d={d} v={qv} onRevise={(id) => { ed.cancel(); tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id }); }} />
+          <span className="sl-or">โน้ตของขั้นนี้</span>
+        </>
+      ) : isMoney && (stage === QUOTE_STAGE || won) && (
         <>
           <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>{stage === QUOTE_STAGE ? 'แนบใบเสนอราคา (Forecast)' : 'แนบใบเสร็จ / ใบแจ้งหนี้ (Actual)'}</button>
           {line && <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.openPanel(d.id, `recv:${stage}`); }}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
@@ -2300,6 +2342,7 @@ function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Lin
         <button type="button" className="quiet" onClick={ed.cancel}>ยกเลิก</button>
         <button type="button" className="btn pri xs" onClick={ed.save}>บันทึก</button>
       </div>
+      {qv?.head && <button type="button" className="quiet qt-mdel" onClick={() => deleteQt(tk.e, d, qv, tk.acts.say)}>ลบใบเสนอราคานี้</button>}
     </div>
   );
 }

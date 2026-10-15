@@ -9,6 +9,9 @@ import {
 } from '../lib/sales';
 import { CLOSE_TITLE, acFig, closingView, diffText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, type FigView } from '../lib/salesUi';
 import { DocAttach, SHOWABLE, openDocFile, type AttachMore } from './DocAttach';
+import { DocThumb } from './DocThumb';
+import { QtCard } from './QtCard';
+import { isQtVersion, qtView } from '../lib/quotes';
 import { ActForm, ActList } from './DealActs';
 import { DateChip } from './DateChip';
 import { Icon } from './icons';
@@ -171,36 +174,6 @@ function LinkCompany({ d, ro }: { d: Deal; ro: boolean }) {
         </button>
       ))}
     </div>
-  );
-}
-
-/** Thumbnails made this session (doc id → data URL): the panel re-renders often. */
-const thumbs = new Map<string, string>();
-/** A small picture of the document (its first page, or the image) that opens the file, so the figure can
- *  be checked by eye. Made from this browser's copy only (never a Drive download for a picture): until
- *  the file has been opened here it says what it is. `tick` changes after the file is opened. */
-function DocThumb({ doc, tick, onOpen }: { doc: DealDoc; tick: number; onOpen: () => void }) {
-  const { engine: e } = useApp();
-  const [src, setSrc] = useState(thumbs.get(doc.id) || '');
-  useEffect(() => {
-    if (thumbs.has(doc.id)) return void setSrc(thumbs.get(doc.id)!);
-    let live = true;
-    (async () => {
-      const blob = await e.docLocalBlob(doc);
-      if (!blob) return;
-      const { docThumb } = await import('../lib/docText');
-      const url = await docThumb(blob);
-      thumbs.set(doc.id, url);
-      if (live) setSrc(url);
-    })().catch(() => {}); // HEIC, a damaged file: the word stays
-    return () => {
-      live = false;
-    };
-  }, [doc.id, tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <button type="button" className="sl-thumb hv" onClick={onOpen} title={'เปิดไฟล์ ' + doc.name} aria-label={'เปิดไฟล์ ' + doc.name}>
-      {src ? <img src={src} alt="" /> : <span>{doc.mime === 'application/pdf' ? 'PDF' : 'รูป'}</span>}
-    </button>
   );
 }
 
@@ -508,6 +481,8 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           const card = !extra && p === cardStage;
           const docs = by[p] || [];
           const doc = docs.find((z) => z.amount != null);
+          // QUOTATION: its quotation versions are one card (QtCard); other documents there stay cards of their own
+          const qts = p === QUOTE_STAGE ? docs.filter(isQtVersion) : [];
           // a PAY stage the plan does not use (one done on its own, paid the old way, reads as its step)
           const unused = !!P && won && isPayStage(S.cfg, p) && !pl && t.states[p] === 'off';
           const on = !extra && i < reached, dash = on && t.states[stages[i + 1]] === 'planned';
@@ -529,7 +504,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           if (card) {
             body = (
               <>
-                <StepEdit key={p} d={d} p={p} st={st} line={pl} won={won} doc={!!doc} attach={attach} onHold={() => setPick((x) => x || p)} onDone={() => setPick('')} />
+                <StepEdit key={p} d={d} p={p} st={st} line={pl} won={won} doc={!!doc} qt={qts.length ? qtView(S, d).head?.doc : undefined} attach={attach} onHold={() => setPick((x) => x || p)} onDone={() => setPick('')} />
                 {actsAt(p, unused, st === 'off')}
               </>
             );
@@ -544,8 +519,9 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
                   <p className="sl-tl-n t-muted">ยังไม่ได้บันทึก</p>
                 ) : null}
                 {planLine}
-                {docs.map((z) => <DocCard key={z.id} d={d} doc={z} inUse={z.target === 'forecast' ? m.fcDoc?.id === z.id : z.target === 'actual' && z.amount != null} />)}
-                {!ro && !doc && st !== 'off' && !unused && !(pl && won) && ((p === QUOTE_STAGE && st === 'done') || (isPayStage(S.cfg, p) && won && !P)) && (
+                {qts.length > 0 && <QtCard d={d} onRevise={(id) => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast', revise: id })} />}
+                {docs.filter((z) => !qts.includes(z)).map((z) => <DocCard key={z.id} d={d} doc={z} inUse={z.target === 'forecast' ? m.fcDoc?.id === z.id : z.target === 'actual' && z.amount != null} />)}
+                {!ro && !doc && !qts.length && st !== 'off' && !unused && !(pl && won) && ((p === QUOTE_STAGE && st === 'done') || (isPayStage(S.cfg, p) && won && !P)) && (
                   <button type="button" className="btn xs sl-tl-att" onClick={() => attach(p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ / ใบเสร็จ'}</button>
                 )}
                 {actsAt(p, unused, st === 'off')}
@@ -626,8 +602,9 @@ function ResultBig({ d, st, date, onPick }: { d: Deal; st: StageState; date?: st
 }
 
 /** The stage being recorded: its date, its note and, on QUOTATION / a PAY after the win, the place to
- *  drop the document. What was typed is saved also when the panel closes (as the panel's fields always did). */
-function StepEdit({ d, p, st, line, won, doc, attach, onHold, onDone }: { d: Deal; p: string; st: StageState; line: LineView | null; won: boolean; doc: boolean; attach: Attach; onHold: () => void; onDone: () => void }) {
+ *  drop the document (on QUOTATION with a quotation `qt` already, a revised one). What was typed is saved
+ *  also when the panel closes (as the panel's fields always did). */
+function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d: Deal; p: string; st: StageState; line: LineView | null; won: boolean; doc: boolean; qt?: DealDoc; attach: Attach; onHold: () => void; onDone: () => void }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const today = todayISO();
@@ -663,8 +640,10 @@ function StepEdit({ d, p, st, line, won, doc, attach, onHold, onDone }: { d: Dea
     if (latest.current.dirty && !done.current) latest.current.save(true);
   }, []);
   const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p) || !!line;
-  const drop = isMoney && (p === QUOTE_STAGE || won) && !doc;
+  const drop = isMoney && (p === QUOTE_STAGE || won) && (!doc || !!qt);
   const kind = kindForStage(S.cfg, p);
+  // a revised quotation: compared with the one there, which stays as "ฉบับเดิม"
+  const more: AttachMore | undefined = qt ? { target: 'forecast', revise: qt.id } : undefined;
   return (
     <>
       {p === DEAL_STAGE && <ResultBig d={d} st={st} date={date} onPick={() => ((done.current = true), (initRef.current = stepOf(e.sales, d.id, p)))} />}
@@ -697,17 +676,17 @@ function StepEdit({ d, p, st, line, won, doc, attach, onHold, onDone }: { d: Dea
             ev.preventDefault();
             setOver(false);
             const f = ev.dataTransfer.files?.[0];
-            if (f) attach(p, kind, f);
+            if (f) attach(p, kind, f, more);
           }}
         >
           <span className="sl-drop-t">
-            <span>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ / ใบเสร็จ ของงวดนี้'}</span>
-            <small>ลากไฟล์มาวาง หรือเลือกไฟล์ · ระบบอ่านยอดให้ คุณตรวจแล้วกดยืนยัน · {p === QUOTE_STAGE ? 'เป็น Forecast' : 'รวมเข้า Actual'}</small>
+            <span>{qt ? `แนบฉบับแก้ไข${qt.docNo ? ' ของ ' + qt.docNo : ''}` : 'แนบ' + (p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ / ใบเสร็จ ของงวดนี้')}</span>
+            <small>{qt ? 'ลากไฟล์มาวาง หรือเลือกไฟล์ · ระบบเทียบยอดกับฉบับเดิมให้ · ฉบับเดิมเก็บไว้ ไม่นับยอด' : `ลากไฟล์มาวาง หรือเลือกไฟล์ · ระบบอ่านยอดให้ คุณตรวจแล้วกดยืนยัน · ${p === QUOTE_STAGE ? 'เป็น Forecast' : 'รวมเข้า Actual'}`}</small>
           </span>
           <span className="sl-drop-b">
             {line && line.status !== 'paid' && <button type="button" className="btn xs" onClick={() => set({ dpPlan: `recv:${p}` })}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
             <button type="button" className="btn xs" onClick={() => fileIn.current?.click()}>เลือกไฟล์</button>
-            <input ref={fileIn} type="file" hidden onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) attach(p, kind, f); }} />
+            <input ref={fileIn} type="file" hidden onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) attach(p, kind, f, more); }} />
           </span>
         </div>
       )}

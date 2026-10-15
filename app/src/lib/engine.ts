@@ -24,6 +24,7 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { isQtVersion, qtPrev, qtVersions } from './quotes';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1804,8 +1805,12 @@ export class GccEngine {
    * receipt adds up with the new one too (else the document replaces it). Only a document counted as
    * money received replaces anything. `info.kept`: the user kept their figure (`amount`) against the
    * document's own (`detected`, "คงยอดเดิม").
+   * `info.revise` = the quotation version a revised one follows ("แนบฉบับแก้ไข", lib/quotes): the new one
+   * is attached after every version (by `at`), becomes the Forecast, and takes over the QUOTATION note an
+   * earlier version filled in (its date, the first send, stays); the earlier versions stay as history,
+   * no longer counted. Only a quotation for the Forecast with an amount revises anything.
    */
-  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean }) {
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean; revise?: string }) {
     if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
@@ -1816,7 +1821,8 @@ export class GccEngine {
     const id = uid();
     const stage = attachStage(S, d, info, today);
     const inList = !!stage && S.cfg.stages.includes(stage); // an extra installment (PAY3) has no step record
-    const at = new Date().toISOString();
+    // a revision is numbered after every version, also when this computer's clock is behind the one that attached the last
+    const at = info.revise != null ? this.stampAfter(qtVersions(S, d).map((x) => x.at)) : new Date().toISOString();
     const cAt = this.stampAfter([d.fcAt, ...docsOf(S, dealId).map((x) => x.cAt || x.at)]);
     const doc: DealDoc = {
       id, deal: dealId, kind: info.kind, name: (file.name || 'เอกสาร').slice(0, 120), mime, size: file.size, fileId: '',
@@ -1846,6 +1852,9 @@ export class GccEngine {
     const k = `${dealId}/${id}`;
     // a document that is not money received (no amount, not Actual) replaces nothing
     const old = info.replace && countsActual(doc) ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    // a revised quotation: the versions before it (as this browser has them now, after the file was stored)
+    const revising = info.revise != null && isQtVersion(doc) && doc.target === 'forecast';
+    const earlier = revising ? qtVersions(S, d) : [];
     const pk = `${dealId}/${stage}`, pl = S.pays[pk];
     this.batchOps(() => {
       S.docs[k] = doc;
@@ -1854,10 +1863,17 @@ export class GccEngine {
       if (doc.auto) this.setStep(dealId, stage, { d: ad, n: doc.auto.n }, true, true);
       // the user's note stays; a planned date becomes the document date (only `d`, so a teammate's note edit merges)
       else if (st && noted && (!st.d || st.d > today)) this.setStep(dealId, stage, { d: ad, n: st.n }, true);
-      this.salesLog(d, 'แนบ' + KIND_TH[doc.kind], `${doc.name}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}`);
+      this.salesLog(d, revising ? 'แนบใบเสนอราคาฉบับแก้ไข' : 'แนบ' + KIND_TH[doc.kind], `${doc.name}${doc.amount != null ? ' · ' + fmtMoney(doc.amount) + ' บาท' : ''}${revising ? ' · ฉบับที่ ' + (earlier.length + 1) : ''}`);
       if (old && old.id !== id) {
         if (old.stage === stage && this.autoStillThere(old)) this.handOverAuto(old, S.docs[k], true);
         this.updateDoc(dealId, old.id, { target: 'none' });
+      }
+      if (revising) {
+        // the QUOTATION note a version filled in ("ใบเสนอราคา QT-1 · 192,600 บาท") now names this one
+        const owner = earlier.find((x) => x.auto?.stage === stage && this.autoStillThere(x));
+        if (owner) this.handOverAuto(owner, S.docs[k], true);
+        // one live quotation: every earlier version still counted stops counting (kept as "ฉบับเดิม")
+        earlier.filter((x) => x.target === 'forecast').forEach((x) => this.updateDoc(dealId, x.id, { target: 'none' }, { log: false }));
       }
       // paid partly by hand, the rest with this receipt: both count
       if (info.addHand && countsActual(doc) && pl?.rcv && !pl.add) {
@@ -1900,8 +1916,10 @@ export class GccEngine {
   /** Correct a document: its amount, what it counts toward, kind, number, date. A new amount is the
    *  document's figure as the user reads it (a misread corrected, or "ใช้ยอดจากเอกสาร"), so it is no
    *  longer one kept against the document. At a PAY stage a document that stops counting as money
-   *  received gives up the stage it completed (releaseAuto). */
-  updateDoc(dealId: string, docId: string, patch: Partial<Pick<DealDoc, 'amount' | 'target' | 'basis' | 'kind' | 'docNo' | 'docDate'>>) {
+   *  received gives up the stage it completed (releaseAuto). `opt.log` false: no history line of its own
+   *  (a step of another action that logs itself); `opt.confirm`: confirmed again even with nothing changed
+   *  (an earlier quotation version that is the Forecast again). */
+  updateDoc(dealId: string, docId: string, patch: Partial<Pick<DealDoc, 'amount' | 'target' | 'basis' | 'kind' | 'docNo' | 'docDate'>>, opt: { log?: boolean; confirm?: boolean } = {}) {
     const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
     if (!doc || !d) return;
     const n: DealDoc = { ...doc, ...patch };
@@ -1912,14 +1930,14 @@ export class GccEngine {
     }
     // (a field dropped, `kept`, is named too: a teammate's copy loses it as well)
     const f = [...new Set([...Object.keys(n), ...Object.keys(doc)])].filter((x) => JSON.stringify(n[x as keyof DealDoc]) !== JSON.stringify(doc[x as keyof DealDoc]));
-    if (!f.length) return;
+    if (!f.length && !opt.confirm) return;
     // Changing what it counts toward is a new confirmation (as a quotation it becomes the forecast), and
     // so is a new amount — except on an older quotation a newer one replaced: correcting that record
     // must not make it the forecast again.
     const fcs = docsOf(this.sales, dealId).filter((x) => x.target === 'forecast' && x.amount != null).sort((a, b) => (a.cAt || a.at).localeCompare(b.cAt || b.at));
     // not the figure in use (a newer quotation or a forecast typed after it replaced it): a correction only
     const superseded = doc.target === 'forecast' && dealMoney(this.sales, d).fcDoc?.id !== docId;
-    if (n.target !== doc.target || (n.amount !== doc.amount && !superseded)) {
+    if (opt.confirm || n.target !== doc.target || (n.amount !== doc.amount && !superseded)) {
       n.cAt = this.stampAfter([d.fcAt, ...fcs.filter((x) => x.id !== docId).map((x) => x.cAt || x.at)]);
       f.push('cAt');
     }
@@ -1937,7 +1955,7 @@ export class GccEngine {
     }
     this.sales.docs[k] = n;
     this.op(keyOf.ddoc(dealId, docId), { ...n }, { f });
-    this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
+    if (opt.log !== false) this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
     this.saveSales();
   }
   /** Whether the stage note a document filled in is a PAY stage's (an installment, also an extra one). */
@@ -1963,13 +1981,67 @@ export class GccEngine {
   deleteDoc(dealId: string, docId: string) {
     const k = `${dealId}/${docId}`, doc = this.sales.docs[k], d = this.sales.deals[dealId];
     if (!doc) return;
-    // the stage note it filled in goes with it, or passes to another document of that stage
-    this.releaseAuto(doc);
-    delete this.sales.docs[k];
-    this.op(keyOf.ddoc(dealId, docId));
+    this.batchOps(() => {
+      // the quotation in use deleted: the version before it is the Forecast again (confirmed anew, so it
+      // is the newest confirmation), and so the heir of the QUOTATION note below
+      const prev = d && isQtVersion(doc) && dealMoney(this.sales, d).fcDoc?.id === docId ? qtPrev(qtVersions(this.sales, d), docId) : null;
+      if (prev) this.updateDoc(dealId, prev.id, { target: 'forecast' }, { log: false, confirm: true });
+      // the stage note it filled in goes with it, or passes to another document of that stage
+      this.releaseAuto(doc);
+      delete this.sales.docs[k];
+      this.op(keyOf.ddoc(dealId, docId));
+      if (d) this.salesLog(d, 'ลบเอกสาร', doc.name);
+    });
     this.dropDocFile(doc);
-    if (d) this.salesLog(d, 'ลบเอกสาร', doc.name);
     this.saveSales();
+  }
+  /**
+   * "เปลี่ยนไฟล์": the same document with another file (a wrong file attached, the signed copy). A new
+   * record under a new id takes every value of the old one (amount, number, date, what it counts toward,
+   * when it was attached and confirmed, so its version and the Forecast stay as they were) and the stage
+   * note it filled in; the old record goes, with its file (team Drive trash, or only this browser's copy
+   * when it was never uploaded). A new id, not a new file under the old one: teammates' browsers keep a
+   * copy of each file by document id (docBlob) and would go on showing the old one.
+   */
+  async replaceDocFile(dealId: string, docId: string, file: Blob & { name: string }) {
+    if (!this.can('edit')) throw new Error('บัญชีดูอย่างเดียวเปลี่ยนไฟล์ไม่ได้');
+    const S = this.sales, ok = `${dealId}/${docId}`;
+    if (!S.deals[dealId] || !S.docs[ok]) throw new Error('ไม่พบเอกสารนี้แล้ว');
+    if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
+    const mime = docMime({ name: file.name || '', type: file.type || '' });
+    if (!mime) throw new Error('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
+    const id = uid(), name = (file.name || 'เอกสาร').slice(0, 120);
+    let fileId = '';
+    try {
+      await this.store.set(this.docBlobKey(id), { name, mime, data: await file.arrayBuffer() });
+    } catch {
+      if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
+      fileId = (await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: id, name, mime, blob: file })).fileId;
+    }
+    // as it is now (a teammate may have corrected or deleted it while the file was stored)
+    const old = S.docs[ok], d = S.deals[dealId];
+    if (!old || !d) {
+      this.store.del(this.docBlobKey(id)).catch(() => {});
+      if (fileId) this.dropDriveFile(fileId);
+      throw new Error('ไม่พบเอกสารนี้แล้ว (มีคนลบไประหว่างนี้)');
+    }
+    const { auto: _a, ...vals } = old;
+    const doc: DealDoc = { ...vals, id, name, mime, size: file.size, fileId, by: this.me() };
+    // the stage note the old record filled in follows the record (it names the same number and amount)
+    if (old.auto && this.autoStillThere(old)) doc.auto = { ...old.auto, n: this.autoNote(doc) };
+    const k = `${dealId}/${id}`;
+    this.batchOps(() => {
+      S.docs[k] = doc;
+      this.op(keyOf.ddoc(dealId, id), { ...doc });
+      if (doc.auto && doc.auto.n !== old.auto!.n) this.setStep(dealId, doc.auto.stage, { d: stepOf(S, dealId, doc.auto.stage).d, n: doc.auto.n }, true, true);
+      delete S.docs[ok];
+      this.op(keyOf.ddoc(dealId, docId));
+      this.salesLog(d, 'เปลี่ยนไฟล์เอกสาร', `${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''} · ${old.name} เป็น ${name}`);
+    });
+    this.dropDocFile(old);
+    this.saveSales();
+    this.uploadDocs();
+    return S.docs[k];
   }
   private dropDocFile(doc: DealDoc) {
     this.store.del(this.docBlobKey(doc.id)).catch(() => {});
