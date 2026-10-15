@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { useApp, useEngineVersion, useNarrow } from '../../state';
 import type { TeamDir, TeamUser } from '../../lib/engine';
 import { BUILTIN, can, resolveCaps, type CapSet } from '../../lib/caps';
-import { PRE_DAYS, unmatchedNames, wantsLine, type ApptRule, type LateRule, type NotifyCfg, type NotifyStatus } from '../../lib/notify';
+import { PRE_DAYS, parseMyNotify, unmatchedNames, wantsLine, type ApptRule, type LateRule, type NotifyCfg, type NotifyStatus } from '../../lib/notify';
 import { errText } from '../../lib/teamSync';
 import { fmtN, pad, todayISO } from '../../lib/format';
 import { Notice, Segmented } from '../../components/ui';
@@ -74,6 +74,8 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
   }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = todayISO();
   const users = (dir?.users || []).filter(isOn);
+  /** What an account chose to get: the users reply has it (users[].notify), an older status reply too. */
+  const wants = (u: TeamUser) => st?.users[u.u] || parseMyNotify(u.notify, can(capsOf(u), 'set.users'));
   const capsOf = (u: TeamUser) => (dir ? capsOfUser(dir, u, today) : {});
   const checkers = users.filter((u) => can(capsOf(u), 'qt.check'));
   const roleName = (u: TeamUser) => roleOf(dir?.roles || [], effRole(dir || { grants: {} }, u, today)).n;
@@ -98,7 +100,8 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
       setBusy(false);
     }
   };
-  const word = !st ? null : st.last && !st.last.ok ? ['wait', 'มีปัญหา'] : left != null && left <= 5 ? ['wait', 'ใกล้ครบโควตาวันนี้'] : ['', 'ทำงานอยู่'];
+  // st.on: the script's timer is there (setupNotify ran and nobody removed it); without it nothing is mailed
+  const word = !st ? null : !st.on ? ['wait', 'หยุดส่งอยู่'] : st.last && !st.last.ok ? ['wait', 'มีปัญหา'] : left != null && left <= 5 ? ['wait', 'ใกล้ครบโควตาวันนี้'] : ['', 'ทำงานอยู่'];
 
   return (
     <form
@@ -129,6 +132,7 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
                 'ตรวจทุก 10 นาที',
               ].filter(Boolean).join(' · ')}
             </small>
+            {st && !st.on && <small className="t-warn">ไม่พบตัวตั้งเวลาของสคริปต์ ให้เจ้าของสคริปต์เปิด Apps Script เลือกฟังก์ชัน “setupNotify” แล้วกด “Run” อีกครั้ง</small>}
             {st?.last && !st.last.ok && st.last.err && <small className="t-warn">{st.last.err}</small>}
             {stErr && <small className="t-warn">{stErr}</small>}
             {!e.notifyCfg().site && <small>กด “บันทึก” ที่หน้านี้ 1 ครั้ง เพื่อให้อีเมลมีลิงก์และโลโก้ของเว็บนี้</small>}
@@ -244,7 +248,7 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
                 </thead>
                 <tbody>
                   {users.map((u) => {
-                    const p = st?.users[u.u];
+                    const p = wants(u);
                     return (
                       <tr key={u.u}>
                         <td><Person u={u} role={roleName(u)} /></td>
@@ -289,7 +293,7 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
 
   function wantText(u: TeamUser) {
     if (!can(capsOf(u), 'notify.mail')) return <span className="no">บทบาทนี้ไม่รับอีเมล</span>;
-    const p = st?.users[u.u];
+    const p = wants(u);
     return p ? wantsLine(p, can(capsOf(u), 'qt.check')) : <span className="no">—</span>;
   }
 }

@@ -291,6 +291,9 @@ describe('links from the e-mails', () => {
     expect(parseGo('#go=plan&d=2026-10-12')).toEqual({ go: 'plan', d: '2026-10-12' });
     expect(parseGo('#go=plan&d=tomorrow')).toEqual({ go: 'plan', d: '' });
     expect(parseGo('#go=notify')).toEqual({ go: 'notify' });
+    expect(parseGo('#go=reqs')).toEqual({ go: 'reqs' });
+    // the signed part as the team script writes it: <exp base36>.<signature>.<username>
+    expect(parseGo('#go=qt&doc=mg1x2a3&s=mh8k2q0.AbCdEfGhIjKlMnOpQrSt-_.ek.1')).toEqual({ go: 'qt', doc: 'mg1x2a3', s: 'mh8k2q0.AbCdEfGhIjKlMnOpQrSt-_.ek.1' });
     expect(parseGo('#go=cash&m=2026-10&f=wait')).toEqual({ go: 'cash', m: '2026-10', f: 'wait' });
     expect(parseGo('#go=elsewhere')).toBeNull();
     expect(parseGo('#team=https://script.google.com/macros/s/x/exec')).toBeNull();

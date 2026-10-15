@@ -34,7 +34,7 @@
  *     With accounts, an unknown `u` and a name add another admin; without a name (recovery) the answer
  *     is unknown_user. setup() also prints the admins' usernames.
  * Token (accounts mode):
- *   { action: 'me', tok }                        -> { ok, me, mc }
+ *   { action: 'me', tok }                        -> { ok, me, mc, roles }   (roles: every role, as in `users` below)
  *   { action: 'passwd', tok, old, pk, rm? }      -> { ok, tok, exp, me }   (other devices are signed out)
  *   { action: 'logout', tok, all? }              -> { ok }                 (all: every device is signed out)
  *   { action: 'req_send', tok, k: 'role'|'caps', role?, caps?: [{ k, s? }], note, until? } -> { ok }  any account
@@ -71,13 +71,14 @@
  *   Row = { seq: number, k: string, v: any, del: boolean, by: string, at: string }
  *   With a token, `by` is always the account's display name (the op's by is ignored), every reply adds
  *   me, and a remembered session with fewer than 15 days left also gets a new tok + exp.
- * me = { u, name, role, rid, rn, caps, rq?, req?, notify }: rid = the role in effect (a temporary role while it
+ * me = { u, name, role, rid, rn, caps, rq?, req?, notify, grants? }: rid = the role in effect (a temporary role while it
  *   lasts), rn = its name, caps = { <capability>: 1 | 'own' } (1 = all work, 'own' = the account's own work;
  *   only what it holds), role = 'admin' | 'sales' | 'viewer' for builds before capabilities (admin = set.users,
  *   sales = any write, else viewer), rq = requests waiting (set.users holders only), req = the account's own
  *   pending request { st: 'p', id, k, role?, caps?, note, until?, at } or its unread result
  *   { st: 'r', ok, by, note, at, k, role?, caps?, until? }, notify = the account's e-mail settings
- *   { em, ok: 1 | 0 (verified), on: { qt, res, dg, pre }, t, sc } with the defaults filled in.
+ *   { em, ok: 1 | 0 (verified), on: { qt, res, dg, pre }, t, sc } with the defaults filled in; grants = the
+ *   account's own GRANTS entry (a temporary role and extras with their dates), only when it has one.
  * Quotation check (notifications): qchk/<docId> = { st: 'ok'|'back', by, at, fp: { a, n, d, f }, note?, via:
  *   'mail'|'app', u } is written only by qt_check (never by push, admins included). k = the full ddoc/<deal>/<docId>
  *   key, which must be the latest live record of that docId; fp = { a: amount, n: docNo, d: docDate, f: name + '|' +
@@ -833,7 +834,8 @@ const ADMIN_ACTIONS = ['users', 'user_save', 'role_save', 'role_del', 'grant_sav
 function account_(action, req, actor) {
   if (SELF_ACTIONS.indexOf(action) < 0 && ADMIN_ACTIONS.indexOf(action) < 0) return null;
   if (actor.legacy) return json_({ ok: false, error: 'login_required' });
-  if (action === 'me') return reply_(actor, { ok: true, mc: actor.mc });
+  // every role with what it gives (the request dialog and สิทธิ์ของฉัน list them), from the cached directory
+  if (action === 'me') return reply_(actor, { ok: true, mc: actor.mc, roles: rolesView_(auth_(false).roles || {}) });
   if (action === 'passwd') return json_(passwd_(req, actor));
   if (action === 'logout') {
     if (req.all) withLock_(() => bumpSv_(actor.u));
@@ -845,9 +847,9 @@ function account_(action, req, actor) {
   // one's own e-mail settings: any account (one that may only look manages its address too)
   if (action === 'notify_me') {
     const o = notifyMe_(req, actor);
-    const w = whoOf_(auth_(false), actor.u);
+    const w = actorNow_(actor);
     if (o.ok) o.notify = w.notify;
-    return reply_(Object.assign({}, actor, w), o);
+    return reply_(w, o);
   }
   if (action === 'notify_verify') return replyNow_(actor, notifyVerify_(req, actor));
   if (action === 'notify_test') return reply_(actor, notifyTest_(actor));
@@ -858,7 +860,7 @@ function account_(action, req, actor) {
   if (action === 'user_save') {
     const r = userSave_(req, actor);
     // an admin who signed out their own sessions gets no renewed token; `me` as saved (an own address)
-    const who = Object.assign({}, actor, whoOf_(auth_(false), actor.u));
+    const who = actorNow_(actor);
     return reply_(r.self && r.bumped ? Object.assign(who, { rm: false }) : who, r.out);
   }
   const fn = { role_save: roleSave_, role_del: roleDel_, grant_save: grantSave_, grant_del: grantDel_, req_decide: reqDecide_ }[action];
@@ -867,7 +869,15 @@ function account_(action, req, actor) {
 
 /** reply_ with `me` as the directory says right after this request's change (its request, its badge). */
 function replyNow_(actor, o) {
-  return reply_(Object.assign({}, actor, whoOf_(auth_(false), actor.u)), o);
+  return reply_(actorNow_(actor), o);
+}
+
+/** The actor with what the directory says now: fields whoOf_ leaves out when empty (a request withdrawn,
+ *  an extra removed) must not keep the values from the start of the request. */
+function actorNow_(actor) {
+  const a = Object.assign({}, actor);
+  ['req', 'rq', 'grants'].forEach((k) => delete a[k]);
+  return Object.assign(a, whoOf_(auth_(false), actor.u));
 }
 
 /** Change one's own password (old and new as pk). Every other session of the account ends. */
@@ -1547,6 +1557,9 @@ function whoOf_(A, u) {
   if (q) out.req = Object.assign({ st: 'p' }, q);
   else if (s) out.req = Object.assign({ st: 'r' }, s);
   out.notify = nfOf_(own_(A.ntf || {}, u), r.caps);
+  // the account's own temporary role and extras with their dates (สิทธิ์ของฉัน, and the note when one runs out)
+  const g = own_(A.grants || {}, u);
+  if (g && (g.r || (Array.isArray(g.c) && g.c.length))) out.grants = g;
   return out;
 }
 
@@ -1556,6 +1569,7 @@ function meOf_(u, w) {
   if (w.rq !== undefined) me.rq = w.rq;
   if (w.req) me.req = w.req;
   if (w.notify) me.notify = w.notify;
+  if (w.grants) me.grants = w.grants;
   return me;
 }
 
@@ -1866,6 +1880,8 @@ function reqDecide_(req, actor) {
     if (!x) return { ok: false, error: 'unknown_user' };
     const now = new Date().toISOString();
     const out = Object.assign({ ok: yes, by: actor.name, note: note, at: now }, reqDetail_(rec));
+    // the history says which role a role request came from
+    const detail = Object.assign(reqDetail_(rec), rec.k === 'role' ? { from: capsOf_(A, u).rid } : {});
     const vals = {};
     if (yes) {
       const g = grantOf_(A.grants, u);
@@ -1889,7 +1905,7 @@ function reqDecide_(req, actor) {
     vals.REQS = JSON.stringify(A.rqs); // only smaller
     vals.RESULTS = fitResults_(A.res);
     const q = commit_(vals);
-    audit_([[actor.name, u, yes ? 'req_ok' : 'req_no', reqDetail_(rec), note]]);
+    audit_([[actor.name, u, yes ? 'req_ok' : 'req_no', detail, note]]);
     return view_(q);
   });
 }
@@ -2916,6 +2932,8 @@ function stepsDue_(c) {
     const deal = S.deals[key.slice(0, j)], stage = key.slice(j + 1), st = S.steps[key];
     if (!deal || deal.jobStatus === 'closed' || S.cfg.stages.indexOf(stage) < 0) return;
     if (st.d !== ck.today && st.d !== ck.tomorrow) return;
+    // dated today with something written (a call logged, a document attached) is done, not to do
+    if (st.d === ck.today && String(st.n || '').trim()) return;
     if (pays.indexOf(stage) >= 0 && dealResult_(S, deal) === 'YES' && planLines_(S, deal)) return;
     out.push({ deal: deal, stage: stage, d: st.d });
   });

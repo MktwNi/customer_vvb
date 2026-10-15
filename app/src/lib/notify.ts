@@ -33,13 +33,15 @@ const str = (v: unknown, max = 300) => (typeof v === 'string' ? v.slice(0, max) 
 const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? +v : null);
 
 /** A pulled `qchk/` value, checked (a malformed one is skipped). */
+/** A check's note (sending back says what to fix): the script keeps at most this many characters. */
+export const QT_NOTE_MAX = 300;
 export function toQtCheck(v: unknown): QtCheck | null {
   if (!v || typeof v !== 'object') return null;
   const x = v as Record<string, unknown>;
   if (x.st !== 'ok' && x.st !== 'back') return null;
   const f = (x.fp && typeof x.fp === 'object' ? x.fp : {}) as Record<string, unknown>;
   const out: QtCheck = { st: x.st, by: str(x.by, 60), at: str(x.at, 40), fp: { a: num(f.a), n: str(f.n, 60), d: str(f.d, 10), f: str(f.f, 200) } };
-  if (typeof x.note === 'string' && x.note.trim()) out.note = x.note.slice(0, 500);
+  if (typeof x.note === 'string' && x.note.trim()) out.note = x.note.slice(0, QT_NOTE_MAX);
   if (x.via === 'mail' || x.via === 'app') out.via = x.via;
   if (typeof x.u === 'string' && x.u) out.u = x.u.slice(0, 40);
   return out;
@@ -180,7 +182,7 @@ export function parseNotifyStatus(r: Record<string, unknown>): NotifyStatus {
     on: f.on,
     since: f.since,
     last: l ? { at: str(l.at, 40), ok: l.ok === true || l.ok === 1, sent: num(l.sent) ?? 0, err: str(l.err, 200) } : null,
-    sent: num(r.sent ?? q.sent),
+    sent: num(r.sentToday ?? r.sent ?? q.sent),
     left: num(r.quotaLeft ?? r.left ?? q.left),
     from: str(r.from ?? r.sender, 120),
     users,
@@ -362,6 +364,7 @@ export type GoLink =
   | { go: 'deal'; id: string }
   | { go: 'plan'; d: string }
   | { go: 'notify' }
+  | { go: 'reqs' }
   | { go: 'cash'; m: string; f: string };
 const ID = /^[A-Za-z0-9_.-]{1,80}$/;
 export function parseGo(hash: string): GoLink | null {
@@ -375,13 +378,16 @@ export function parseGo(hash: string): GoLink | null {
   const g = (k: string) => (p.get(k) || '').trim();
   switch (g('go')) {
     case 'qt':
-      return ID.test(g('doc')) ? { go: 'qt', doc: g('doc'), s: /^[A-Za-z0-9_-]{1,200}$/.test(g('s')) ? g('s') : '' } : null;
+      // s = '<exp>.<signature>.<username>' as the script signs it (usernames may hold . _ -)
+      return ID.test(g('doc')) ? { go: 'qt', doc: g('doc'), s: /^[A-Za-z0-9_.-]{1,200}$/.test(g('s')) ? g('s') : '' } : null;
     case 'deal':
       return ID.test(g('id')) ? { go: 'deal', id: g('id') } : null;
     case 'plan':
       return /^\d{4}-\d\d-\d\d$/.test(g('d')) ? { go: 'plan', d: g('d') } : { go: 'plan', d: '' };
     case 'notify':
       return { go: 'notify' };
+    case 'reqs':
+      return { go: 'reqs' };
     case 'cash':
       return { go: 'cash', m: /^\d{4}-\d\d$/.test(g('m')) ? g('m') : '', f: /^[a-z]{1,10}$/.test(g('f')) ? g('f') : '' };
     default:

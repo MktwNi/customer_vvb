@@ -69,8 +69,11 @@ export function parseMe(me: unknown): Partial<Pick<Session, 'name' | 'role' | 'r
     if (c) out.caps = c;
   }
   if ('rq' in m) out.rq = Math.max(0, Number(m.rq) || 0);
+  // a script with capabilities leaves req and grants out when the account has none
   if ('req' in m) out.req = parseMyReq(m.req);
+  else if (out.caps) out.req = null;
   if ('grants' in m) out.g = parseGrants({ me: m.grants }).me || {};
+  else if (out.caps) out.g = {};
   if ('notify' in m) out.nf = parseMyNotify(m.notify);
   return out;
 }
@@ -138,8 +141,13 @@ const ERR_TH: Record<string, string> = {
   req_note: 'ใส่เหตุผลของคำขอ (ไม่เกิน 300 ตัวอักษร)',
   retry: 'เซิร์ฟเวอร์ยังตรวจสิทธิ์ไม่ได้ตอนนี้ จะลองใหม่อัตโนมัติ',
   name_dup: 'มีบทบาทชื่อนี้แล้ว',
-  bad_until: 'วันที่สิ้นสุดต้องเป็นวันหลังจากวันนี้',
+  role_name: 'ชื่อบทบาทต้องยาว 1–30 ตัวอักษร',
+  grant_held: 'บัญชีนี้มีสิทธิ์นี้จากบทบาทอยู่แล้ว (ผู้ดูแลระบบมีทุกสิทธิ์อยู่แล้ว)',
+  bad_until: 'วันที่สิ้นสุดต้องเป็นวันนี้หรือหลังจากนี้',
+  bad_req: 'คำขอไม่ครบ ลองรีเฟรชหน้าเว็บ (F5) แล้วส่งใหม่',
   no_request: 'ไม่มีคำขอนี้แล้ว (อาจถูกยกเลิกหรือตัดสินไปแล้ว)',
+  too_many_reqs: 'มีคำขอรอผู้ดูแลระบบอยู่มากเกินไป ให้ผู้ดูแลระบบตัดสินคำขอที่ค้างก่อน',
+  too_many_grants: 'สิทธิ์เพิ่มของทีมมีมากเกินที่เก็บได้ เอาสิทธิ์เพิ่มที่ไม่ใช้แล้วออกก่อน',
   // the quotation check and notifications (package notify)
   changed: 'ใบเสนอราคานี้เพิ่งถูกแก้ไขหรือแนบฉบับใหม่ ระบบโหลดข้อมูลล่าสุดแล้ว ตรวจอีกครั้ง',
   self_check: 'ใบเสนอราคาที่คุณแนบหรือแก้เอง ให้ผู้ตรวจคนอื่นตรวจ',
@@ -152,6 +160,9 @@ const ERR_TH: Record<string, string> = {
   code_tries: 'ใส่รหัสผิดหลายครั้ง กด “ส่งรหัสใหม่”',
   no_email: 'ยังไม่มีอีเมลที่ยืนยันแล้ว ใส่และยืนยันอีเมลก่อน',
   quota: 'วันนี้ส่งอีเมลครบโควตาของบัญชี Google เจ้าของสคริปต์แล้ว ลองใหม่พรุ่งนี้',
+  no_quota: 'วันนี้ส่งอีเมลครบโควตาของบัญชี Google เจ้าของสคริปต์แล้ว ลองใหม่พรุ่งนี้',
+  mail_failed: 'ส่งอีเมลไม่สำเร็จ ลองใหม่ภายหลัง ถ้ายังไม่ได้ ให้เจ้าของสคริปต์ดูหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน',
+  bad_notify: 'การตั้งค่าการแจ้งเตือนไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ (F5)',
   notify_off: 'ระบบส่งอีเมลยังไม่เปิดใช้ ให้เจ้าของสคริปต์ทำตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน',
   // a build older than the script (the version gate: cv below 4); the script sends this sentence itself
   'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)': 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)',
@@ -159,6 +170,8 @@ const ERR_TH: Record<string, string> = {
 /** The client version every request says it is: 4 = configurable roles (the script refuses writes from
  *  an older build with "มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)"; pulls stay open to it). */
 export const CV = 4;
+/** The error the script would answer with `code`, in its Thai words (for an engine that re-words a reply). */
+export const codeError = (code: string, extra: Record<string, unknown> = {}) => new TeamSyncError(ERR_TH[code] || code, code, extra);
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
  * a network error usually means a deployment setting); `home` = the same with the site's built-in

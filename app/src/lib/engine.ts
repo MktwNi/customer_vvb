@@ -14,7 +14,7 @@ import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import { NOTE_CAP, PERSON_FIELDS, personSuggestions, toPerson, type PersonForm } from './people';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  CUSTOM_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
@@ -32,7 +32,7 @@ import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 import {
-  fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
+  QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
 } from './notify';
 
@@ -61,7 +61,8 @@ interface SignIn extends Record<string, unknown> { tok: string; exp: number; me:
 /** An account as the admin page lists it. `role` is the account's role id (a script with configurable
  *  roles may name one an admin made); `em` / `ok` its notification e-mail and whether it is verified
  *  (Code.gs v4 with notifications; left out by older scripts). */
-export interface TeamUser { u: string; name: string; role: Role; on: number | boolean; mc: boolean; ll: string; c: string; locked?: number; em?: string; ok?: number | boolean }
+/** An account as the admin page reads it; `notify` = its e-mail settings (a script with notifications). */
+export interface TeamUser { u: string; name: string; role: Role; on: number | boolean; mc: boolean; ll: string; c: string; locked?: number; em?: string; ok?: number | boolean; notify?: unknown }
 /** Everything the admin page reads in one `users` call. `v4`: the script has configurable roles (it sent
  *  its roles); an older one sends only the accounts, and the built-in roles stand in. */
 export interface TeamDir { users: TeamUser[]; roles: RoleDef[]; grants: Record<string, Grants>; reqs: Record<string, ReqPending>; audit: AuditRow[]; v4: boolean }
@@ -2929,7 +2930,15 @@ export class GccEngine {
     // a temporary role or extra that ran out (the dates the script sent before, me.grants)
     const today = todayISO();
     const oldG = was.g !== 'null' ? (JSON.parse(was.g) as Session['g']) : undefined;
-    const ranOut = !!oldG && (!!(oldG.r && oldG.r.until && oldG.r.until < today) || (oldG.c || []).some((x) => !!x.until && x.until < today));
+    // the script keeps a lapsed entry (until an admin's next look) but no longer applies it, so whatever this
+    // browser's clock says: the same temporary role still listed but no longer in force, or an extra
+    // still listed whose capability went
+    const newG = s.g;
+    const sameR = !!oldG?.r && !!newG?.r && newG.r.id === oldG.r.id && newG.r.until === oldG.r.until;
+    const lapsed =
+      (sameR && roleWas === oldG!.r!.id && roleNow !== oldG!.r!.id) ||
+      (newG?.c || []).some((x) => !!x.until && (oldG?.c || []).some((o) => o.k === x.k && o.until === x.until) && !!before[x.k as CapId] && !after[x.k as CapId]);
+    const ranOut = lapsed || (!!oldG && (!!(oldG.r && oldG.r.until && oldG.r.until < today) || (oldG.c || []).some((x) => !!x.until && x.until < today)));
     if (roleNow !== roleWas && !res) {
       // the role changed (a decided request says so itself, in the banner)
       this.teamNote = ranOut
@@ -4072,7 +4081,10 @@ export class GccEngine {
   /** Create (no id) or change a role: name, description, capabilities. `from`: the role it was copied
    *  from (the audit trail says so). Returns the roles as they are now. */
   async roleSave(r: { id?: string; n: string; d: string; c: CapSet; from?: string }) {
-    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: capsWire(r.c), ...(r.from ? { from: r.from } : {}) });
+    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: capsWire(r.c), ...(r.from ? { from: r.from } : {}) }).catch((e) => {
+      // the script shares these codes with accounts: say them about a role
+      throw e instanceof TeamSyncError && e.code === 'name_taken' ? codeError('name_dup', e.extra) : e instanceof TeamSyncError && e.code === 'bad_name' ? codeError('role_name', e.extra) : e;
+    });
     return { id: typeof x.id === 'string' ? x.id : r.id || '', roles: 'roles' in x ? parseRoles(x.roles) : null };
   }
   /** Delete a role made by an admin; its accounts (and temporary grants of it) move to `to`. */
@@ -4082,7 +4094,9 @@ export class GccEngine {
   }
   /** Extras for one account beyond its role (until a date, or for good). */
   async grantSave(u: string, c: { k: CapId; s: 'all' | 'own'; until?: string }[]) {
-    await this.adminCall({ action: 'grant_save', u, c });
+    await this.adminCall({ action: 'grant_save', u, c }).catch((e) => {
+      throw e instanceof TeamSyncError && e.code === 'cap_held' ? codeError('grant_held', e.extra) : e;
+    });
   }
   async grantDel(u: string, k: CapId | 'role') {
     await this.adminCall({ action: 'grant_del', u, k });
@@ -4177,18 +4191,25 @@ export class GccEngine {
    * The record shows at once; the script's own row replaces it with the next pull.
    */
   async qtCheck(doc: DealDoc, st: 'ok' | 'back' | 'undo', note = '', s = '') {
-    const fp = fpOf(doc), n = note.trim().slice(0, 500);
+    const fp = fpOf(doc), n = note.trim().slice(0, QT_NOTE_MAX);
+    if (st === 'back' && !n) throw codeError('note_required');
     let r: Record<string, unknown>;
     try {
       r = await this.adminCall<Record<string, unknown>>({ action: 'qt_check', k: keyOf.ddoc(doc.deal, doc.id), st, fp, ...(n ? { note: n } : {}), ...(s ? { s } : {}) }, OLD_NOTIFY);
     } catch (x) {
-      // changed meanwhile: the next round brings the document as it is now
-      if (x instanceof TeamSyncError && x.code === 'changed') this.flushSoon();
+      if (x instanceof TeamSyncError) {
+        // an undo that is no longer this account's latest check (taken back already, or someone checked since)
+        if (st === 'undo' && x.code === 'changed') throw codeError('too_late', x.extra);
+        // the script's word for a missing (or too long) note
+        if (x.code === 'req_note') throw codeError('note_required', x.extra);
+        // changed meanwhile: the next round brings the document as it is now
+        if (x.code === 'changed') this.flushSoon();
+      }
       throw x;
     }
     const Q = this.sales.qchk || (this.sales.qchk = {});
     if (st === 'undo') delete Q[doc.id];
-    else Q[doc.id] = toQtCheck(r.rec ?? r.v) || { st, by: this.me(), at: new Date().toISOString(), fp, ...(n ? { note: n } : {}), ...(this.session ? { u: this.session.u } : {}) };
+    else Q[doc.id] = toQtCheck(r.chk ?? r.rec ?? r.v) || { st, by: this.me(), at: new Date().toISOString(), fp, ...(n ? { note: n } : {}), ...(this.session ? { u: this.session.u } : {}) };
     this.saveSales();
     this.emit();
     this.flushSoon();
@@ -4224,9 +4245,8 @@ export class GccEngine {
   /** The admin page's status card: last run, today's sending and the quota, each account's choices. */
   async notifyStatus(): Promise<NotifyStatus> {
     const r = await this.adminCall<Record<string, unknown>>({ action: 'notify_status' }, OLD_NOTIFY);
-    const st = parseNotifyStatus(r);
-    if (this.teamCfg && ('on' in r || 'notify' in r)) this.heardNotify(this.teamCfg.url, { on: st.on, since: st.since || this.notifyLive?.since || '' });
-    return st;
+    // st.on says whether mail goes out (the timer); the checks follow hello's flag (setup done), not this
+    return parseNotifyStatus(r);
   }
   /** After notify_me / notify_verify: the script's me.notify when it sent one (meta took it), else a
    *  settings object in the reply, else what was saved. */

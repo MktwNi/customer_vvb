@@ -1,9 +1,10 @@
 /**
- * Capabilities in the engine (package roles): against the team script deployed today (team-sync/Code.gs
- * in the simulator: no me.caps, so every account works by the built-in caps of its role), and against a
- * script with configurable roles, played here by a thin layer over the same simulator that adds what
- * Code.gs v4 sends (me.caps / rid / rn / rq / req, the users reply's roles) and answers the request
- * actions. What the layer adds is the shared contract (plan.md §1, roles impl-note §2).
+ * Capabilities in the engine (package roles), end to end with the real team script in the simulator:
+ * - against the script deployed before configurable roles (team-sync/fixtures/Code.v3.gs: no me.caps), every
+ *   account works by the built-in caps of its role and the role actions say which update they need;
+ * - against the script of this release (team-sync/Code.gs, protocol v4): roles an admin makes, own-work
+ *   scopes the script enforces, redaction of money, requests and their decisions, extras, temporary roles
+ *   that run out, and the version gate an older build meets.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +12,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { BUILTIN, capsWire, type CapSet } from './caps';
+import { BUILTIN, type CapSet } from './caps';
+import { histLine } from './reqText';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -20,6 +22,9 @@ const URL = 'https://script.google.com/macros/s/r/exec';
 const ROOT = join(__dirname, '..', '..', '..');
 const DATA = join(ROOT, 'project', 'data');
 const json = (f: string) => JSON.parse(readFileSync(DATA + '/' + f, 'utf8'));
+/** The team script deployed before this release (protocol v3: built-in roles, no capabilities). */
+const V3 = readFileSync(join(ROOT, 'team-sync', 'fixtures', 'Code.v3.gs'), 'utf8');
+const REFRESH = 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)';
 
 const LS = new Map<string, Map<string, string>>();
 let cur = '';
@@ -30,10 +35,11 @@ vi.stubGlobal('localStorage', {
   removeItem: (k: string) => void ls().delete(k),
 });
 
+const T0 = new Date('2026-10-15T03:00:00Z');
 let base: Dataset, R: RoundRaw[], sim: GasSim;
 beforeAll(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
-  vi.setSystemTime(new Date('2026-10-15T03:00:00Z'));
+  vi.setSystemTime(T0);
   const g = json('gcc.json'), c = json('gcc-certs.json');
   const rows = g.rows.slice(0, 120);
   const ids = new Set(rows.map((r: unknown[]) => r[0]));
@@ -45,46 +51,19 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-/** What a script with configurable roles adds for each username (absent: today's script). */
-interface V4 { caps?: CapSet; rid?: string; rn?: string; rq?: number; req?: unknown; roles?: Record<string, unknown>; grants?: unknown }
-let v4: Record<string, V4> | null = null;
-/** Bodies every engine sent, and the reply layer's own actions. */
+/** Bodies every engine sent. */
 const sent: Record<string, unknown>[] = [];
 interface Tab { e: GccEngine; store: ReturnType<typeof memoryStore>; browser: string }
 const tabs: Tab[] = [];
 afterEach(() => {
   tabs.splice(0).forEach((t) => t.e.dispose());
   LS.clear();
-  v4 = null;
   sent.length = 0;
+  vi.setSystemTime(T0);
 });
 
-/** The account a token belongs to (the simulator's own reply says it). */
-const whoOf = (r: Record<string, unknown>) => (r.me as { u?: string } | undefined)?.u || '';
-function layer(body: Record<string, unknown>): Record<string, unknown> {
-  sent.push(body);
-  const own = ['req_send', 'req_cancel', 'req_ack', 'role_save', 'role_del', 'grant_save', 'grant_del', 'req_decide'];
-  if (v4 && own.includes(String(body.action))) {
-    // who sent it: ask the simulator with a harmless action
-    const me = sim.post({ ...body, action: 'me' });
-    const u = whoOf(me);
-    const x = v4[u] || (v4[u] = {});
-    if (body.action === 'req_send') x.req = { st: 'p', id: 'q1', k: body.k, role: body.role, caps: body.caps, note: body.note, until: body.until, at: new Date().toISOString() };
-    if (body.action === 'req_cancel' || body.action === 'req_ack') x.req = null;
-    return { ok: true, me: { ...(me.me as object), ...x, caps: x.caps && capsWire(x.caps) } };
-  }
-  const r = sim.post(body) as Record<string, unknown>;
-  if (!v4) return r;
-  const u = whoOf(r);
-  if (u && v4[u]) {
-    const x = v4[u];
-    r.me = { ...(r.me as object), ...(x.caps ? { caps: capsWire(x.caps) } : {}), ...(x.rid ? { rid: x.rid } : {}), ...(x.rn ? { rn: x.rn } : {}), ...(x.rq != null ? { rq: x.rq } : {}), ...('req' in x ? { req: x.req } : {}), ...('grants' in x ? { grants: x.grants } : {}) };
-  }
-  if ((body.action === 'users' || body.action === 'me') && u && v4[u]?.roles) r.roles = v4[u].roles;
-  return r;
-}
-
-function mk(browser: string): Tab {
+/** A browser; `cv` other than the build's own plays a tab still open on an older build. */
+function mk(browser: string, cv?: number): Tab {
   const raw = new GccEngine();
   raw.homeTeam = '';
   raw.base = structuredClone(base);
@@ -93,8 +72,13 @@ function mk(browser: string): Tab {
   raw.store = memoryStore();
   raw.rebuild();
   raw.loading = false;
-  raw.transport = async (_u, body) => layer(body);
-  raw.fileTransport = async (_u, body) => layer(body);
+  const post = async (_u: string, body: Record<string, unknown>) => {
+    const b = cv == null ? body : { ...body, cv };
+    sent.push(b);
+    return sim.post(b) as Record<string, unknown>;
+  };
+  raw.transport = post;
+  raw.fileTransport = post;
   const e = new Proxy(raw, {
     get(t, p) {
       cur = browser;
@@ -114,17 +98,18 @@ async function settle(...ts: Tab[]) {
       await tick();
     }
 }
-async function lead() {
-  sim = createGasSim({ teamKey: '', kdfIter: 1000 });
+/** A team whose lead (หมิว) claimed the first admin account; `code`: the script (default: this release's). */
+async function lead(code?: string) {
+  sim = createGasSim({ teamKey: '', kdfIter: 1000, ...(code ? { code } : {}) });
   sim.setup();
   const L = mk('L');
   expect(await L.e.teamOpen(URL)).toBe('setup');
   await L.e.teamClaim(sim.ownerCode()!, 'lead', 'หมิว', 'lead-pass-123');
   return L;
 }
-async function member(L: Tab, u: string, name: string, role: Role) {
+async function member(L: Tab, u: string, name: string, role: Role, cv?: number) {
   const { temp } = await L.e.adminCreate({ u, name, role });
-  const M = mk(u);
+  const M = mk(u, cv);
   expect(await M.e.teamOpen(URL)).toBe('accounts');
   await M.e.teamLogin(u, temp, true);
   await M.e.teamChangePassword('', u + '-pass-123');
@@ -132,16 +117,19 @@ async function member(L: Tab, u: string, name: string, role: Role) {
   return M;
 }
 const pulls = () => sent.filter((b) => b.action === 'pull').map((b) => Number(b.since));
+/** What the script stored for key k (as an admin pulls it). */
+const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
+const SALES = BUILTIN.sales.c;
 
-describe('against the team script deployed today (no me.caps)', () => {
+describe('against the team script deployed before configurable roles (no me.caps)', () => {
   it('each account works by its role\'s built-in capabilities; cv 4 is accepted; roles and requests are not there yet', async () => {
-    const L = await lead();
+    const L = await lead(V3);
     expect(L.e.myCaps()).toEqual(BUILTIN.admin.c);
     expect(L.e.rolesLive).toBe(false);
     expect(L.e.roleName()).toBe('ผู้ดูแลระบบ');
     const S = await member(L, 'aek', 'เอก', 'sales');
     const V = await member(L, 'pla', 'ปลา', 'viewer');
-    expect(S.e.myCaps()).toEqual(BUILTIN.sales.c);
+    expect(S.e.myCaps()).toEqual(SALES);
     expect(S.e.can('view.comm')).toBe(false);
     expect(S.e.can('del.rec')).toBe(false);
     expect(S.e.can('del.log', 'เอก')).toBe(true);
@@ -153,7 +141,7 @@ describe('against the team script deployed today (no me.caps)', () => {
     const d = S.e.addDeal({ client: 'บริษัท ทดสอบสิทธิ์ จำกัด' });
     await settle(S);
     expect(S.e.teamPendingN).toBe(0);
-    expect(sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.some((r) => r.k === 'deal/' + d.id)).toBe(true);
+    expect(stored(L, 'deal/' + d.id)).toBeTruthy();
     // the admin page: the accounts, with the built-in roles standing in (read-only)
     const dir = await L.e.adminDir();
     expect(dir.v4).toBe(false);
@@ -161,12 +149,13 @@ describe('against the team script deployed today (no me.caps)', () => {
     expect(dir.users.map((u) => u.u).sort()).toEqual(['aek', 'lead', 'pla']);
     // a role action the script doesn't know says which update it needs
     await expect(L.e.roleSave({ n: 'หัวหน้าฝ่ายขาย', d: '', c: {} })).rejects.toThrow(/อัปเดต Code\.gs/);
+    await expect(S.e.reqSend({ k: 'caps', caps: [{ k: 'view.comm', s: 'all' }], note: 'x' })).rejects.toThrow(/อัปเดต Code\.gs/);
     // the request dialog's roles: the built-in three
     expect((await S.e.teamRoles()).map((r) => r.id)).toEqual(['admin', 'sales', 'viewer']);
   });
 
   it('a viewer sends nothing; an admin changing someone to viewer is said to them in the role\'s name', async () => {
-    const L = await lead();
+    const L = await lead(V3);
     const S = await member(L, 'makorn', 'มกร', 'sales');
     await L.e.adminUpdate('makorn', { role: 'viewer' });
     await settle(S);
@@ -175,18 +164,25 @@ describe('against the team script deployed today (no me.caps)', () => {
   });
 });
 
-describe('against a script with configurable roles (me.caps)', () => {
-  it('takes the role, its name and capabilities from me; an own-scope account edits only its own deals', async () => {
+describe('against the team script with configurable roles (Code.gs v4)', () => {
+  it('a role an admin makes: its name and capabilities reach the account; own work only is enforced here and on the script', async () => {
     const L = await lead();
     const S = await member(L, 'aek', 'เอก', 'sales');
-    v4 = { aek: { caps: { ...BUILTIN.sales.c, 'edit.deal': 'own', 'edit.pay': 'own' }, rid: 'sales', rn: 'พนักงานขาย' } };
-    await settle(S);
     expect(S.e.rolesLive).toBe(true);
+    expect(S.e.myCaps()).toEqual(SALES); // the built-in sales role, as the script sends it
+    const { id } = await L.e.roleSave({ n: 'ขายเฉพาะงานตัวเอง', d: '', c: { ...SALES, 'edit.deal': 'own', 'edit.pay': 'own' } });
+    expect(id).toMatch(/^r[0-9a-f]{6}$/);
+    await L.e.adminUpdate('aek', { role: id });
+    await settle(S);
+    expect(S.e.session!.rid).toBe(id);
+    expect(S.e.roleName()).toBe('ขายเฉพาะงานตัวเอง');
     expect(S.e.myCaps()!['edit.deal']).toBe('own');
+    expect(S.e.teamNote).toBe('ผู้ดูแลระบบเปลี่ยนบทบาทของคุณเป็น ขายเฉพาะงานตัวเอง');
     const mine = S.e.addDeal({ client: 'บริษัท ของเอก จำกัด', resp: 'หมิว' });
     expect(mine.resp).toBe('เอก'); // an own-scope account adds deals of its own
     const other = L.e.addDeal({ client: 'บริษัท ของหมิว จำกัด', resp: 'หมิว' });
     await settle(L, S);
+    expect(stored(L, 'deal/' + mine.id)).toBeTruthy();
     expect(S.e.canDeal('edit.deal', S.e.sales.deals[mine.id])).toBe(true);
     expect(S.e.canDeal('edit.deal', S.e.sales.deals[other.id])).toBe(false);
     // another person's deal: nothing changes here, and it is said why
@@ -194,6 +190,9 @@ describe('against a script with configurable roles (me.caps)', () => {
     expect(S.e.teamNote).toBe('บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้');
     expect(S.e.canWriteKey('dstep/' + other.id + '/CALL1', false)).toBe(false);
     expect(S.e.canWriteKey('dstep/' + mine.id + '/CALL1', false)).toBe(true);
+    // the script decides the same, whatever a browser sends
+    const forced = sim.post({ action: 'push', cv: 4, tok: S.e.session!.tok, ops: [{ k: 'dstep/' + other.id + '/CALL1', v: { d: '2026-10-15', n: 'x' } }, { k: 'dstep/' + mine.id + '/CALL1', v: { d: '2026-10-15', n: 'y' } }] });
+    expect(forced.denied).toEqual(['dstep/' + other.id + '/CALL1']);
   });
 
   it('a role that may record money but not edit deals: the receipt is saved, the automatic stage note is not', async () => {
@@ -202,85 +201,153 @@ describe('against a script with configurable roles (me.caps)', () => {
     const d = L.e.addDeal({ client: 'บริษัท รับเงิน จำกัด' });
     L.e.setPlan(d.id, [{ stage: 'PAY1', amt: 1000, pct: null, due: '2026-10-20', rel: null, how: 'transfer', howT: '', note: '' }]);
     await settle(L, A);
-    v4 = { fon: { caps: { 'view.sales': 'all', 'view.money': 'all', 'view.cash': 'all', 'edit.pay': 'all', 'docs.up': 'all', 'pay.check': 'all' }, rid: 'acct', rn: 'บัญชี/การเงิน' } };
+    const acct: CapSet = { 'view.sales': 'all', 'view.plan': 'all', 'view.money': 'all', 'view.cash': 'all', 'docs.open': 'all', 'edit.pay': 'all', 'docs.up': 'all', 'qt.check': 'all', 'pay.check': 'all', 'notify.mail': 'all' };
+    const { id } = await L.e.roleSave({ n: 'บัญชี/การเงิน', d: '', c: acct });
+    await L.e.adminUpdate('fon', { role: id });
     await settle(A);
     expect(A.e.roleName()).toBe('บัญชี/การเงิน');
+    expect(A.e.myCaps()).toEqual(acct);
     A.e.markPaid(d.id, 'PAY1', { date: '2026-10-15', amount: 1000 });
     expect(A.e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ rcv: '2026-10-15', got: 1000 });
     expect(A.e.sales.steps[`${d.id}/PAY1`]).toBeUndefined();
     await settle(A);
     expect(A.e.teamPendingN).toBe(0);
-    // what the role change said, not a refused stage note
+    // stored on the script, with its history line; no refused stage note
+    expect(stored(L, `dpay/${d.id}/PAY1`)!.v).toMatchObject({ rcv: '2026-10-15', got: 1000 });
+    expect(stored(L, `dstep/${d.id}/PAY1`)).toBeUndefined();
     expect(A.e.teamNote).toBe('ผู้ดูแลระบบเปลี่ยนบทบาทของคุณเป็น บัญชี/การเงิน');
   });
 
-  it('gaining or losing a capability the script redacts pulls everything again; losing documents drops their copies here', async () => {
+  it('losing ดูยอดเงิน: everything is pulled again without the amounts and document copies go; given back, the amounts return', async () => {
     const L = await lead();
     const S = await member(L, 'makorn', 'มกร', 'sales');
-    v4 = { makorn: { caps: { ...BUILTIN.sales.c }, rid: 'sales' } };
-    await settle(S);
+    const d = L.e.addDeal({ client: 'บริษัท ยอดเงิน จำกัด', forecast: 350000 });
+    await settle(L, S);
+    expect(S.e.sales.deals[d.id].forecast).toBe(350000);
     const blob = 'docblob:d1';
     await S.store.set(blob, { name: 'a.pdf', mime: 'application/pdf', data: new ArrayBuffer(4) });
     S.e.sales.docs['x/d1'] = { id: 'd1', deal: 'x', kind: 'quotation', name: 'a.pdf', mime: 'application/pdf', size: 4, fileId: 'F1' } as never;
     sent.length = 0;
     await settle(S);
     expect(pulls().some((s) => s === 0)).toBe(false); // nothing changed: from where it was
-    // the admin takes ดูยอดเงิน away (everything that needs it goes with it)
-    v4.makorn.caps = { 'view.sales': 'all', 'view.plan': 'all', 'edit.cust': 'all', 'edit.task': 'all' };
+    // the admin takes ดูยอดเงิน from the built-in sales role (everything that needs it goes with it)
+    await L.e.roleSave({ id: 'sales', n: 'พนักงานขาย', d: '', c: { 'view.sales': 'all', 'view.plan': 'all', 'edit.cust': 'all', 'edit.task': 'all' } });
     sent.length = 0;
     await settle(S);
     expect(pulls()).toContain(0);
     expect(S.e.can('view.money')).toBe(false);
     expect(S.e.teamNote).toBe('สิทธิ์ของคุณเปลี่ยนแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี');
     expect(await S.store.get(blob)).toBeFalsy();
-    // given back: everything again too
-    v4.makorn.caps = { ...BUILTIN.sales.c };
+    // the script sent the deal without its amount
+    expect(S.e.sales.deals[d.id].forecast).toBeNull();
+    expect(JSON.stringify(sent.filter((b) => b.action === 'pull'))).not.toContain('350000');
+    // given back: everything again, amounts included
+    await L.e.roleSave({ id: 'sales', n: 'พนักงานขาย', d: '', c: SALES });
     sent.length = 0;
     await settle(S);
     expect(pulls()).toContain(0);
+    expect(S.e.sales.deals[d.id].forecast).toBe(350000);
   });
 
   it('a temporary role that runs out is said as such, not as an admin\'s change', async () => {
     const L = await lead();
     const S = await member(L, 'aek', 'เอก', 'sales');
-    v4 = { aek: { caps: { ...BUILTIN.sales.c, 'view.comm': 'all' }, rid: 'head', rn: 'หัวหน้าฝ่ายขาย', grants: { r: { id: 'head', until: '2026-10-20', by: 'lead', at: '2026-10-01' } } } };
+    const { id } = await L.e.roleSave({ n: 'หัวหน้าฝ่ายขาย', d: '', c: { ...SALES, 'view.comm': 'all', 'qt.check': 'all' } });
+    await S.e.reqSend({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2026-10-20' });
+    await L.e.reqDecide('aek', true, '');
     await settle(S);
-    expect(S.e.session!.g?.r?.until).toBe('2026-10-20');
-    vi.setSystemTime(new Date('2026-10-21T03:00:00Z'));
-    v4.aek = { caps: { ...BUILTIN.sales.c }, rid: 'sales', rn: 'พนักงานขาย', grants: {} };
+    expect(S.e.roleName()).toBe('หัวหน้าฝ่ายขาย');
+    expect(S.e.session!.g?.r).toMatchObject({ id, until: '2026-10-20' });
+    await S.e.reqAck();
+    vi.setSystemTime(new Date('2026-10-20T16:59:00Z')); // 23:59 on the 20th in Bangkok: still holds
     await settle(S);
+    expect(S.e.roleName()).toBe('หัวหน้าฝ่ายขาย');
+    vi.setSystemTime(new Date('2026-10-20T17:00:00Z')); // midnight in Bangkok
+    await settle(S);
+    expect(S.e.roleName()).toBe('พนักงานขาย');
+    expect(S.e.myCaps()).toEqual(SALES);
     expect(S.e.teamNote).toBe('บทบาทชั่วคราวหมดอายุแล้ว ตอนนี้คุณเป็น พนักงานขาย');
-    vi.setSystemTime(new Date('2026-10-15T03:00:00Z'));
   });
 
-  it('requests: send, the pending state, cancel; the decision until it is read', async () => {
+  it('requests: the roles to ask for, send, the pending state, cancel; the admin\'s badge and decision; the result until it is read', async () => {
     const L = await lead();
     const S = await member(L, 'aek', 'เอก', 'sales');
-    v4 = { aek: { caps: { ...BUILTIN.sales.c }, rid: 'sales', rn: 'พนักงานขาย', roles: { head: { n: 'หัวหน้าฝ่ายขาย', c: { ...capsWire(BUILTIN.sales.c), 'view.comm': 1, 'qt.check': 1 }, o: 3 } } }, lead: { caps: { ...BUILTIN.admin.c }, rq: 0 } };
-    await settle(S);
+    const { id } = await L.e.roleSave({ n: 'หัวหน้าฝ่ายขาย', d: '', c: { ...SALES, 'view.comm': 'all', 'qt.check': 'all' } });
     const roles = await S.e.teamRoles();
-    expect(roles.map((r) => r.id)).toEqual(['admin', 'sales', 'viewer', 'head']);
-    expect(S.e.roleNameOf('head')).toBe('หัวหน้าฝ่ายขาย');
-    await S.e.reqSend({ k: 'role', role: 'head', note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31' });
-    expect(S.e.session!.req).toMatchObject({ st: 'p', k: 'role', role: 'head', until: '2027-01-31' });
-    const body = sent.find((b) => b.action === 'req_send')!;
-    expect(body).toMatchObject({ action: 'req_send', k: 'role', role: 'head', note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31', cv: 4 });
+    expect(roles.map((r) => r.id)).toEqual(['admin', 'sales', 'viewer', id]);
+    expect(S.e.roleNameOf(id)).toBe('หัวหน้าฝ่ายขาย');
+    await S.e.reqSend({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31' });
+    expect(S.e.session!.req).toMatchObject({ st: 'p', k: 'role', role: id, until: '2027-01-31', note: 'ดูแลทีมแทนช่วงลา' });
+    expect(sent.find((b) => b.action === 'req_send')).toMatchObject({ action: 'req_send', k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31', cv: 4 });
     await S.e.reqCancel();
     expect(S.e.session!.req).toBeNull();
-    // an admin decided: the result comes with the next reply, and stays until read
-    v4.aek.req = { ok: true, by: 'หมิว', note: 'ตามที่ขอ', at: '2026-10-15T04:00:00Z', role: 'head', until: '2027-01-31' };
-    v4.aek.rid = 'head';
-    v4.aek.rn = 'หัวหน้าฝ่ายขาย';
-    v4.aek.caps = { ...BUILTIN.sales.c, 'view.comm': 'all', 'qt.check': 'all' };
+    await S.e.reqSend({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31' });
+    // the admin's badge comes with the next reply
+    await settle(L);
+    expect(L.e.session!.rq).toBe(1);
+    const dir = await L.e.adminDir();
+    expect(dir.v4).toBe(true);
+    expect(dir.reqs.aek).toMatchObject({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา' });
+    await L.e.reqDecide('aek', true, 'ตามที่ขอ');
+    expect(L.e.session!.rq).toBe(0);
     await settle(S);
-    expect(S.e.session!.req).toMatchObject({ st: 'r', ok: true, by: 'หมิว', role: 'head' });
+    expect(S.e.session!.req).toMatchObject({ st: 'r', ok: true, by: 'หมิว', note: 'ตามที่ขอ', role: id, until: '2027-01-31' });
     expect(S.e.roleName()).toBe('หัวหน้าฝ่ายขาย');
+    expect(S.e.can('qt.check')).toBe(true);
     expect(S.e.teamNote).toBe(''); // the banner says it, not a team note
     await S.e.reqAck();
     expect(S.e.session!.req).toBeNull();
-    // the admin's badge count
-    v4.lead.rq = 2;
+    // the history on the admin page, in words
+    const after = await L.e.adminDir();
+    const lines = after.audit.map((a) => histLine(a, (r) => L.e.roleNameOf(r), (u) => after.users.find((x) => x.u === u)?.name || u)).filter(Boolean);
+    expect(lines[0]).toMatchObject({ who: 'เอก', by: 'หมิว', what: 'ขอเปลี่ยนบทบาท จาก พนักงานขาย เป็น หัวหน้าฝ่ายขาย ถึง 31 ม.ค. 2570', result: 'อนุมัติ', sub: '“ตามที่ขอ”' });
+  });
+
+  it('a capability request and an extra given directly: the account gets them, with their dates; nobody decides their own', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    await S.e.reqSend({ k: 'caps', caps: [{ k: 'edit.share', s: 'all' }], note: 'แบ่งสัดส่วนงานร่วม', until: '2026-11-30' });
+    // what it needs is asked for too
+    expect(S.e.session!.req).toMatchObject({ st: 'p', k: 'caps', caps: [{ k: 'view.comm', s: 'all' }, { k: 'edit.share', s: 'all' }] });
+    await L.e.reqDecide('aek', false, 'ยังไม่จำเป็น');
+    await settle(S);
+    expect(S.e.session!.req).toMatchObject({ st: 'r', ok: false, note: 'ยังไม่จำเป็น' });
+    expect(S.e.can('edit.share')).toBe(false);
+    await S.e.reqSend({ k: 'caps', caps: [{ k: 'edit.share', s: 'all' }], note: 'งานร่วมกับฝ่ายที่ปรึกษา', until: '2026-11-30' });
+    await L.e.reqDecide('aek', true, '');
+    await settle(S);
+    expect(S.e.can('edit.share')).toBe(true);
+    expect(S.e.session!.g?.c?.map((x) => [x.k, x.until])).toEqual([['view.comm', '2026-11-30'], ['edit.share', '2026-11-30']]);
+    await S.e.reqAck(); // the result was read
+    await L.e.grantSave('aek', [{ k: 'del.rec', s: 'all' }]);
+    await settle(S);
+    expect(S.e.can('del.rec')).toBe(true);
+    expect(S.e.teamNote).toBe('สิทธิ์ของคุณเปลี่ยนแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี');
+    await expect(L.e.grantSave('aek', [{ k: 'edit.deal', s: 'all' }])).rejects.toThrow('บัญชีนี้มีสิทธิ์นี้จากบทบาทอยู่แล้ว');
+    await expect(L.e.grantSave('lead', [{ k: 'del.rec', s: 'all' }])).rejects.toMatchObject({ code: 'not_self' });
+    await L.e.grantDel('aek', 'del.rec');
+    await settle(S);
+    expect(S.e.can('del.rec')).toBe(false);
+  });
+
+  it('a role\'s name taken, an admin asking: the words say what about', async () => {
+    const L = await lead();
+    await L.e.roleSave({ n: 'หัวหน้าฝ่ายขาย', d: '', c: SALES });
+    await expect(L.e.roleSave({ n: ' หัวหน้าฝ่ายขาย ', d: '', c: SALES })).rejects.toThrow('มีบทบาทชื่อนี้แล้ว');
+    await expect(L.e.roleSave({ n: 'ก'.repeat(31), d: '', c: SALES })).rejects.toThrow('ชื่อบทบาทต้องยาว 1–30 ตัวอักษร');
+    await expect(L.e.reqSend({ k: 'caps', caps: [{ k: 'view.comm', s: 'all' }], note: 'x' })).rejects.toMatchObject({ code: 'forbidden' });
+  });
+
+  it('a tab still open on an older build may read but its changes are refused with the refresh message, and kept', async () => {
+    const L = await lead();
+    const d = L.e.addDeal({ client: 'บริษัท แท็บเก่า จำกัด' });
     await settle(L);
-    expect(L.e.session!.rq).toBe(2);
+    const O = await member(L, 'old', 'ทดลอง', 'sales', 3);
+    expect(O.e.sales.deals[d.id]).toBeTruthy(); // it reads
+    O.e.updateDeal(d.id, { referral: 'จากแท็บเก่า' });
+    await settle(O);
+    expect(O.e.teamPendingN).toBeGreaterThan(0); // kept, sent again after a refresh
+    expect(O.e.team.msg).toBe(REFRESH);
+    expect(stored(L, 'deal/' + d.id)!.v).not.toMatchObject({ referral: 'จากแท็บเก่า' });
   });
 });

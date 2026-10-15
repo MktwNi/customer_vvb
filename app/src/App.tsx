@@ -117,7 +117,7 @@ export default function App() {
   }, [e, set]);
 
   // links in the notification e-mails: #go=qt&doc=…&s=… (a quotation to check), #go=deal&id=…, #go=plan&d=…,
-  // #go=notify, #go=cash&m=… (lib/notify.ts parseGo). The link is kept through signing in (this tab's
+  // #go=notify, #go=reqs (an admin's waiting permission requests), #go=cash&m=… (lib/notify.ts parseGo). The link is kept through signing in (this tab's
   // sessionStorage), then opened once its record is here (or a sync round found nothing); the hash is cleared.
   // It carries no authority: the check itself needs a signed-in checker.
   const [goN, setGoN] = useState(0);
@@ -159,6 +159,7 @@ export default function App() {
     goDone();
     if (g.go === 'plan') go('plan', g.d ? { calDay: g.d, calM: g.d.slice(0, 7) } : {});
     else if (g.go === 'notify') e.session && set({ acctDlg: 'notify' });
+    else if (g.go === 'reqs') e.can('set.users') && go('users', { usersSec: 'req' });
     else if (g.go === 'cash') go('sales', { slView: 'cash' });
   }, [e, version, goN, set, go]);
 

@@ -148,7 +148,8 @@ export const live = (until: string | undefined, today: string) => !until || unti
  * gives nothing (default deny); admin is always everything.
  */
 export function resolveCaps(baseRole: string, roles: Record<string, CapSet>, g: Grants | undefined, today: string): CapSet {
-  const rid = g?.r && live(g.r.until, today) ? g.r.id : baseRole;
+  // a temporary role holds while it lasts and exists; never admin (the script decides the same, capsOf_)
+  const rid = g?.r && g.r.id !== 'admin' && live(g.r.until, today) && (g.r.id in roles || isBuiltin(g.r.id)) ? g.r.id : baseRole;
   if (rid === 'admin') return { ...ALL_CAPS };
   let c: CapSet = { ...(roles[rid] || {}) };
   delete c[LOCKED_CAP];
@@ -249,7 +250,9 @@ export function keyRule(k: string, del: boolean): KeyRule | null | 'never' {
       const name = k.slice(5);
       if (/^paychk\./.test(name) || /^notify\./.test(name)) return r('set.users', 'set.users');
       if (/^unitm?\./.test(name)) return r('set.units', 'set.units');
-      return r('set.lists', 'set.lists'); // a plain list, ct.* (customer types), cc.* (colours)
+      // a plain list (no dot), ct.* (customer types), cc.* (colours); any other kind is unknown
+      if (!name.includes('.') || /^(ct|cc)\./.test(name)) return r('set.lists', 'set.lists');
+      return null;
     }
   }
   return null;

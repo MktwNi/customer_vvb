@@ -51,9 +51,10 @@ const str = (x: unknown) => (x == null ? '' : String(x));
 
 /**
  * An audit row in words, or null for rows the history does not show (a role edited, a request sent or
- * withdrawn). Actions: req_decide {ok, k, role, caps, until, from}, user_role / role_change / user_save
- * {from, to} (an admin set someone's role), grant_save {c, until} / grant_del {k} (extras given or taken),
- * grant_expire {k | role, until}.
+ * withdrawn, an account added). Actions as the team script writes them: req_ok / req_no {k, role, caps,
+ * until, from} (a request decided; req_decide {ok, …} is read too), user_role {from, to} (an admin set
+ * someone's role), grant_save {caps: [{k, s, until}]} / grant_del {k | role} (extras given or taken),
+ * grant_expired {k | role, until}.
  */
 export function histLine(a: AuditRow, nameOf: NameOf, nameOfUser: (u: string) => string): HistLine | null {
   const d = a.detail;
@@ -61,14 +62,18 @@ export function histLine(a: AuditRow, nameOf: NameOf, nameOfUser: (u: string) =>
   const by = a.actor ? nameOfUser(a.actor) : '';
   const at = a.at ? dtTh(a.at) : '';
   const caps = asksOf(d.caps ?? d.c);
-  const u = d.until ? str(d.until).slice(0, 10) : '';
+  // the date: the row's own, else the one every capability in it shares (grant_save keeps it per capability)
+  const per = Array.isArray(d.caps) ? [...new Set((d.caps as { until?: unknown }[]).map((x) => str(x && x.until).slice(0, 10)))] : [];
+  const u = d.until ? str(d.until).slice(0, 10) : per.length === 1 ? per[0] : '';
   const base = { at, who, by, sub: a.note ? `“${a.note}”` : '' };
   switch (a.action) {
+    case 'req_ok':
+    case 'req_no':
     case 'req_decide': {
       const what = d.role
         ? `ขอเปลี่ยนบทบาท${d.from ? ` จาก ${nameOf(str(d.from))}` : ''} เป็น ${nameOf(str(d.role))}${until(u)}`
         : `ขอสิทธิ์เพิ่ม: ${caps.map((x) => CAP[x.k].label).join(', ') || '—'}${until(u)}`;
-      const ok = d.ok === true || d.ok === 1 || d.ok === '1';
+      const ok = a.action === 'req_ok' || (a.action === 'req_decide' && (d.ok === true || d.ok === 1 || d.ok === '1'));
       return { ...base, what, result: ok ? 'อนุมัติ' : 'ไม่อนุมัติ', kind: ok ? 'info' : '' };
     }
     case 'user_role':
@@ -81,8 +86,10 @@ export function histLine(a: AuditRow, nameOf: NameOf, nameOfUser: (u: string) =>
       return { ...base, what: `ให้สิทธิ์เพิ่ม: ${caps.map((x) => CAP[x.k].label).join(', ') || '—'}${until(u)}`, sub: a.note ? `“${a.note}”` : 'ไม่ได้มาจากคำขอ', result: 'ให้โดยผู้ดูแลระบบ', kind: '' };
     case 'grant_del': {
       const k = str(d.k);
-      return { ...base, what: `เอาสิทธิ์เพิ่มออก: ${isCap(k) ? CAP[k].label : k === 'role' ? 'บทบาทชั่วคราว' : k}`, result: 'เอาออกโดยผู้ดูแลระบบ', kind: '' };
+      const what = d.role ? `เอาบทบาทชั่วคราวออก: ${nameOf(str(d.role))}` : `เอาสิทธิ์เพิ่มออก: ${isCap(k) ? CAP[k].label : k === 'role' ? 'บทบาทชั่วคราว' : k}`;
+      return { ...base, what, result: 'เอาออกโดยผู้ดูแลระบบ', kind: '' };
     }
+    case 'grant_expired':
     case 'grant_expire': {
       const k = str(d.k);
       const what = d.role ? `บทบาทชั่วคราว ${nameOf(str(d.role))}` : `สิทธิ์เพิ่ม: ${isCap(k) ? CAP[k].label : k}`;

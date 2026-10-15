@@ -661,6 +661,7 @@ describe('notifyTick: the weekday digest "สรุปวันนี้"', () =
       { k: 'dpay/d4/PAY1', v: { amt: 7000, due: '2026-10-09' } },
       deal('d5', { client: 'บริษัท ซากิโนมิยะ ประเทศไทย จำกัด', resp: 'หัวหน้า' }),
       { k: 'dstep/d5/FOLLOW1', v: { d: '2026-10-13', n: '' } }, // a planned follow-up tomorrow
+      { k: 'dstep/d5/QUOTATION', v: { d: '2026-10-12', n: 'ใบเสนอราคา QT-2569-021 · ส่งแล้ว' } }, // recorded today: done, not to do
       { k: 'owner/101', v: 'เอก' },
       { k: 'task/t1', v: { gid: 101, title: 'บริษัท ฝาจีบ จำกัด (มหาชน)', type: 'call', date: '2026-10-12', time: '', note: 'ตามผลบอร์ด', done: false } },
       { k: 'task/t2', v: { gid: 101, title: 'บริษัท ฝาจีบ จำกัด (มหาชน)', type: 'call', date: '2026-10-09', time: '14:00', note: 'โทรตามใบเสนอราคา', done: false } },
@@ -722,6 +723,7 @@ describe('notifyTick: the weekday digest "สรุปวันนี้"', () =
     expect(h).not.toContain('ไม่ได้งาน');
     expect(h).toContain('โทร · ตามผลบอร์ด · เอก');
     expect(h).toContain('FOLLOW1 ติดตามครั้งที่ 1 · หัวหน้า');
+    expect(h).not.toContain('QUOTATION'); // the stage written today is done
     expect(h).toContain('เกินกำหนด 3 วัน');
     expect(h).not.toContain('ทำแล้ว');
     expect(h).toContain(SITE + '#go=deal&amp;id=d1');

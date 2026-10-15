@@ -639,12 +639,32 @@ describe('permission requests', () => {
     expect(usersOf(s).pla.r).toBe(id);
     const me = call(s, tok, 'ping').me!;
     expect(me).toMatchObject({ rid: id, rn: 'บัญชี/การเงิน', caps: ACCT, role: 'sales', req: { st: 'r', ok: true, by: 'หัวหน้า', note: 'อนุมัติ', k: 'role', role: id, at: new Date(T0 + 2 * H).toISOString() } });
-    expect(call(s, tok, 'req_ack')).toMatchObject({ ok: true });
+    const acked = call(s, tok, 'req_ack');
+    expect(acked).toMatchObject({ ok: true });
+    expect(acked.me).not.toHaveProperty('req');
     expect(call(s, tok, 'ping').me).not.toHaveProperty('req');
     expect(audit(s).filter((a) => a.action.startsWith('req_')).map((a) => [a.actor, a.u, a.action, a.note])).toEqual([
       ['ปลา', 'pla', 'req_send', 'ช่วยตรวจรับเงินสิ้นเดือน'],
       ['หัวหน้า', 'pla', 'req_ok', 'อนุมัติ'],
     ]);
+  });
+
+  it('me lists every role for the request dialog; an account sees its own extras with their dates; the history names the old role', () => {
+    const { s, admin } = team();
+    const tok = member(s, admin, 'pla', 'ปลา', 'viewer');
+    const id = role(s, admin, 'บัญชี/การเงิน', ACCT);
+    const r = call(s, tok, 'me');
+    expect(Object.keys(rolesOf(r))).toEqual(['admin', 'sales', 'viewer', id]);
+    expect(rolesOf(r)[id]).toMatchObject({ n: 'บัญชี/การเงิน', c: ACCT });
+    expect(rolesOf(r).admin.c).toEqual(BUILT.admin);
+    expect(meOf(r)).not.toHaveProperty('grants'); // none yet
+    call(s, tok, 'req_send', { k: 'role', role: id, note: 'ช่วงปิดงบ', until: '2026-10-31' });
+    call(s, admin, 'req_decide', { u: 'pla', ok: true });
+    expect(call(s, admin, 'grant_save', { u: 'pla', c: [{ k: 'del.rec', until: '2026-10-20' }] })).toMatchObject({ ok: true });
+    expect(meOf(call(s, tok, 'ping'))).toMatchObject({ rid: id, grants: { r: { id, until: '2026-10-31', by: 'หัวหน้า' }, c: [{ k: 'del.rec', s: 'all', until: '2026-10-20', by: 'หัวหน้า' }] } });
+    // only one's own: another account's reply carries none of it
+    expect(meOf(call(s, admin, 'ping'))).not.toHaveProperty('grants');
+    expect(audit(s).find((a) => a.action === 'req_ok')!.detail).toEqual({ k: 'role', role: id, until: '2026-10-31', from: 'viewer' });
   });
 
   it('a capability request adds what it needs; approved, it is an extra of that account only', () => {
@@ -697,7 +717,9 @@ describe('permission requests', () => {
     call(s, tok, 'req_send', { k: 'role', role: 'viewer', note: 'ครั้งที่สาม' });
     expect(Object.keys(props(s, 'REQS'))).toEqual(['somchai']);
     expect(call(s, admin, 'req_decide', { u: 'somchai', ok: true, id: first }).error).toBe('changed');
-    expect(call(s, tok, 'req_cancel')).toMatchObject({ ok: true, me: { u: 'somchai' } });
+    const cancelled = call(s, tok, 'req_cancel');
+    expect(cancelled).toMatchObject({ ok: true, me: { u: 'somchai' } });
+    expect(cancelled.me).not.toHaveProperty('req'); // the reply itself says it is gone
     expect(call(s, tok, 'me').me).not.toHaveProperty('req');
     expect(call(s, tok, 'req_cancel')).toMatchObject({ ok: true });
     expect(call(s, admin, 'req_decide', { u: 'somchai', ok: true }).error).toBe('no_request');

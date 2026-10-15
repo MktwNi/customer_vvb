@@ -36,6 +36,18 @@ describe('request words', () => {
     expect(histLine({ at: 'x', actor: 'mew', u: 'ek', action: 'req_send', detail: {}, note: '' }, nameOf, who)).toBeNull();
     expect(histLine({ at: 'x', actor: 'mew', u: 'ek', action: 'user_save', detail: { name: 'x' }, note: '' }, nameOf, who)).toBeNull();
   });
+  it('history lines as the team script writes them (actor = a display name; req_ok / req_no; dates per capability)', () => {
+    const who = (u: string) => ({ mk: 'มกร', ek: 'เอก', pla: 'ปลา' })[u] || u;
+    expect(histLine({ at: 'x', actor: 'หมิว', u: 'ek', action: 'req_ok', detail: { k: 'role', role: 'sales', until: '2026-10-31', from: 'viewer' }, note: 'ช่วงงานเยอะ' }, nameOf, who)).toMatchObject({
+      who: 'เอก', by: 'หมิว', what: 'ขอเปลี่ยนบทบาท จาก ดูอย่างเดียว เป็น พนักงานขาย ถึง 31 ต.ค. 2569', result: 'อนุมัติ', kind: 'info', sub: '“ช่วงงานเยอะ”',
+    });
+    expect(histLine({ at: 'x', actor: 'หมิว', u: 'mk', action: 'req_no', detail: { k: 'caps', caps: [{ k: 'view.money', s: 'all' }, { k: 'view.comm', s: 'all' }] }, note: '' }, nameOf, who)).toMatchObject({ what: 'ขอสิทธิ์เพิ่ม: ดูยอดเงิน, ดูค่าคอมมิชชั่น / สัดส่วนรายได้', result: 'ไม่อนุมัติ', kind: '' });
+    expect(histLine({ at: 'x', actor: 'หมิว', u: 'pla', action: 'grant_save', detail: { caps: [{ k: 'del.rec', s: 'all', until: '2026-10-20' }] }, note: '' }, nameOf, who)).toMatchObject({ what: 'ให้สิทธิ์เพิ่ม: ลบดีล ลูกค้า และผู้ติดต่อ ถึง 20 ต.ค. 2569', result: 'ให้โดยผู้ดูแลระบบ' });
+    expect(histLine({ at: 'x', actor: 'หมิว', u: 'pla', action: 'grant_save', detail: { caps: [{ k: 'del.rec', s: 'all', until: '' }] }, note: '' }, nameOf, who)!.what).toBe('ให้สิทธิ์เพิ่ม: ลบดีล ลูกค้า และผู้ติดต่อ');
+    expect(histLine({ at: 'x', actor: 'หมิว', u: 'pla', action: 'grant_del', detail: { role: 'head' }, note: '' }, nameOf, who)!.what).toBe('เอาบทบาทชั่วคราวออก: หัวหน้าฝ่ายขาย');
+    expect(histLine({ at: 'x', actor: '', u: 'pla', action: 'grant_expired', detail: { role: 'head', until: '2026-10-09' }, note: '' }, nameOf, who)).toMatchObject({ what: 'บทบาทชั่วคราว หัวหน้าฝ่ายขาย ถึง 9 ต.ค. 2569', result: 'หมดอายุแล้ว', by: '' });
+    for (const action of ['user_add', 'role_save', 'role_del', 'req_cancel']) expect(histLine({ at: 'x', actor: 'หมิว', u: 'pla', action, detail: { role: 'sales' }, note: '' }, nameOf, who)).toBeNull();
+  });
 });
 
 describe('the Users page helpers', () => {

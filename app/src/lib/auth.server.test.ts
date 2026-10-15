@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, derivePk, type GasSim } from '../../../team-sync/sim.mjs';
+import { BUILTIN as WEB_ROLES, canWriteKey } from './caps';
 
 /** The built-in roles (custom ones are in roles.server.test.ts). */
 type Role = 'admin' | 'sales' | 'viewer';
@@ -36,6 +37,8 @@ const BUILTIN: Record<Role, { rn: string; caps: Record<string, 1 | 'own'> }> = {
 };
 /** The e-mail settings of an account that never set any (notify.server.test.ts): the whole team for admins. */
 const NF = (role: Role) => ({ em: '', ok: 0, on: { qt: 1, res: 1, dg: 1, pre: 0 }, t: '07:30', sc: role === 'admin' ? 'team' : 'mine' });
+/** The `me` action's roles (every role with what it gives) while the team has only the built-in three. */
+const BUILTIN_VIEW = Object.fromEntries((['admin', 'sales', 'viewer'] as Role[]).map((r, o) => [r, expect.objectContaining({ n: BUILTIN[r].rn, o, c: BUILTIN[r].caps, bi: 1 })]));
 /** `me` in a reply for an account with a built-in role and no request (admins also get the request count). */
 const ME = (u: string, name: string, role: Role, rq = 0) => ({ u, name, role, rid: role, rn: BUILTIN[role].rn, caps: BUILTIN[role].caps, ...(role === 'admin' ? { rq } : {}), notify: NF(role) });
 /** An account in the users / user_save replies, with its (unset) notification address and settings. */
@@ -637,7 +640,7 @@ describe('session tokens', () => {
     const r = call(s, admin, 'pull', { since: 0 });
     expect(r).toMatchObject({ ok: true, tok: expect.stringMatching(/^g1\./), exp: T0 + 15 * DAY + 1000 + 30 * DAY });
     const renewed = String(r.tok);
-    expect(call(s, renewed, 'me')).toEqual({ ok: true, mc: false, me: ME('lead', 'หัวหน้า', 'admin') });
+    expect(call(s, renewed, 'me')).toEqual({ ok: true, mc: false, me: ME('lead', 'หัวหน้า', 'admin'), roles: BUILTIN_VIEW });
     for (const action of ['ping', 'me', 'users']) expect(call(s, admin, action)).toHaveProperty('tok'); // any reply renews
     at(30 * DAY + 1000);
     expect(call(s, admin, 'ping')).toEqual(expired);
@@ -715,7 +718,7 @@ describe('temporary password (must change)', () => {
       ['user_save', { u: 'lead', kick: true }],
     ];
     for (const [action, extra] of blocked) expect(call(s, tok, action, extra)).toMatchObject({ ok: false, error: 'must_change_password' });
-    expect(call(s, tok, 'me')).toEqual({ ok: true, mc: true, me: ME('nid', 'นิด', 'admin') });
+    expect(call(s, tok, 'me')).toEqual({ ok: true, mc: true, me: ME('nid', 'นิด', 'admin'), roles: BUILTIN_VIEW });
     expect(call(s, tok, 'passwd', { old: s.pk('nid', 'nope'), pk: s.pk('nid', 'mine-0001') })).toEqual({ ok: false, error: 'wrong_password' });
     expect(call(s, tok, 'passwd', { old: s.pk('nid', 'temp-1'), pk: 'short' })).toEqual({ ok: false, error: 'bad_password_data' });
     const p = call(s, tok, 'passwd', { old: s.pk('nid', 'temp-1'), pk: s.pk('nid', 'mine-0001') });
@@ -782,6 +785,8 @@ describe('what each built-in role may write', () => {
       pull = () => call(s, tok, 'pull', { since: 0 });
     }
     const allowed = all.filter((x) => builtinWrite(role, x.k, x.del)).map((x) => x.k);
+    // the web app's rule (lib/caps.ts) for the built-in role says the same (these records are nobody's yet)
+    if (role) for (const x of all) expect([x.k, canWriteKey(WEB_ROLES[role].c, x.k, x.del, true)]).toEqual([x.k, allowed.includes(x.k)]);
     // an account's deal delete also deletes that deal's revenue split (team-code pushes stay as they were)
     const shares = role === null ? [] : allowed.filter((k) => k.startsWith('deal/') && !k.startsWith('deal/write')).map((k) => 'dshare/' + k.slice(5));
     const r = push(all.map((x) => x.op));

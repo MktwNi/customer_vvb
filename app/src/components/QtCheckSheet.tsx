@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, useNarrow } from '../state';
 import { dmTh, downloadBlob, isoTh, localDay, pad, todayISO } from '../lib/format';
 import { dealMoney, fmtMoney, type DealDoc } from '../lib/sales';
 import { qtFacts, qtView } from '../lib/quotes';
-import { QT_CHIP, QT_WORD, checkedLine, docById, qtDayOf, type QtCheckView } from '../lib/notify';
+import { QT_CHIP, QT_NOTE_MAX, QT_WORD, checkedLine, docById, qtDayOf, type QtCheckView } from '../lib/notify';
 import { errText } from '../lib/teamSync';
 import type { DocFacts } from '../lib/docExtract';
 import { commitFocus, isTopDialog, useDialog } from './useDialog';
@@ -256,7 +256,7 @@ function Sheet({ doc, sig, onClose }: { doc: DealDoc; sig: string; onClose: () =
             {mode === 'return' ? (
               <label className="apv-ret">
                 บอก {who} ว่าต้องแก้อะไร
-                <textarea className="fld" rows={3} value={note} maxLength={500} autoFocus onChange={(ev) => setNote(ev.target.value)} />
+                <textarea className="fld" rows={3} value={note} maxLength={QT_NOTE_MAX} autoFocus onChange={(ev) => setNote(ev.target.value)} />
                 <small>{who} จะเห็นข้อความนี้บนใบเสนอราคา{mailOn ? ' และได้รับทางอีเมล' : ''}</small>
               </label>
             ) : (

@@ -6,7 +6,7 @@ import {
   sameCaps, sameName, summarize, type CapId, type CapSet,
 } from './caps';
 import { canWriteKey as legacyWrite } from './auth';
-import { keyOf } from './teamSync';
+import { keyOf, parseMe } from './teamSync';
 
 const ids = (c: CapSet) => Object.keys(c).sort();
 const HEAD: CapSet = { ...BUILTIN.sales.c, 'view.comm': 'all', 'edit.share': 'all', 'del.rec': 'all', 'del.log': 'all', 'qt.check': 'all' };
@@ -237,5 +237,17 @@ describe('what the script sends', () => {
     const a = parseAudit([{ at: '2026-10-01', actor: 'mew', u: 'ek', action: 'req_decide', detail: '{"ok":true}', note: '' }, { at: '2026-10-05', actor: 'ton', u: 'pla', action: 'grant_expire', detail: { k: 'edit.task' }, note: '' }, 7]);
     expect(a.map((x) => x.at)).toEqual(['2026-10-05', '2026-10-01']);
     expect(a[1].detail).toEqual({ ok: true });
+  });
+});
+
+describe('me as the team script sends it', () => {
+  it('a script with capabilities leaves out a request or extras the account does not have: none (not "as before")', () => {
+    expect(parseMe({ u: 'ek', role: 'sales', caps: { 'view.sales': 1 } })).toMatchObject({ caps: { 'view.sales': 'all' }, req: null, g: {} });
+    expect(parseMe({ u: 'ek', caps: {}, req: { st: 'p', id: 'q', k: 'caps', caps: [{ k: 'view.comm', s: 'all' }], note: 'x', at: 'a' }, grants: { r: { id: 'head', until: '2026-10-20', by: 'หมิว', at: 'a' } } })).toMatchObject({
+      req: { st: 'p', k: 'caps' }, g: { r: { id: 'head', until: '2026-10-20' } },
+    });
+    // a script before capabilities: nothing is said about them (capsOf falls back to the role)
+    const old = parseMe({ u: 'ek', name: 'เอก', role: 'sales' });
+    expect('req' in old || 'g' in old || 'caps' in old).toBe(false);
   });
 });
