@@ -311,13 +311,13 @@ const POINTS: ReactNode[] = [
 ];
 function BrandPanel({ url }: { url: string }) {
   return (
-    <section className="auth-brand" aria-label="Global Carbon · ฐานข้อมูลลูกค้า GCC">
+    <section className="auth-brand" aria-label="Global Carbon Corporation · ฐานข้อมูลลูกค้า GCC">
       {/* stays in view beside a long form */}
       <div className="auth-brand-in">
         <div className="auth-logo">
           <img src={mark} alt="" width={46} height={46} />
           <span>
-            <b>Global Carbon</b>
+            <b><span className="bw">Global Carbon</span> <span className="bw">Corporation</span></b>
             <small>ฐานข้อมูลลูกค้า GCC</small>
           </span>
         </div>

@@ -119,7 +119,7 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
         <div className="side-brand">
           <img className="side-mark" src={mark} alt="Global Carbon Corporation" width={36} height={36} />
           <span className="side-brand-text lbl">
-            <b className="brand-word">Global Carbon</b>
+            <b className="brand-word"><span className="bw">Global Carbon</span> <span className="bw">Corporation</span></b>
             <small>ฐานข้อมูลลูกค้า GCC</small>
           </span>
           <button ref={closeRef} className="side-close" onClick={onClose} aria-label="ปิดเมนู">

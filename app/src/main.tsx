@@ -10,6 +10,8 @@ import './filters.css';
 import './cashflow.css';
 // the quotation card, its versions and the revision dialog (components/QtCard, DocAttach)
 import './quotes.css';
+// per-customer colours on แผนติดต่อ (lib/custColor.ts)
+import './custcolor.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

@@ -9,6 +9,9 @@ import { DateFilter, dateWords } from '../components/DateFilter';
 import { TT } from '../lib/constants';
 import type { Task } from '../lib/types';
 import { CoAvatar, coreName } from '../components/CoAvatar';
+// a customer's avatar takes its colour on แผนติดต่อ (the top seller, a person, keeps the name swatch)
+import { custKey, dealKey } from '../lib/custColor';
+import { planDayLink } from '../lib/planCal';
 import { Icon } from '../components/icons';
 import { heroGrad } from '../components/ui';
 import { CashStat, QuarterCard, payField } from '../components/DashCash';
@@ -368,7 +371,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               const c = d.gid != null ? e.company(d.gid) : undefined;
               return (
                 <button key={d.id} className="sd-win-i" title={d.client} onClick={() => set({ deal: d.id })}>
-                  <CoAvatar colored name={d.client} web={c?.web} set={c?.set} size={32} />
+                  <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={32} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
@@ -436,12 +439,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                         return (
                           <button key={t.id} className={'sd-ev' + (t.done ? ' done' : '')} style={{ boxShadow: `0 0 0 2px ${ty[2]}, 0 0 0 4px #F7F9FE` }} onClick={() => open(t.gid)} title={label} aria-label={label}
                             onMouseEnter={() => setEvTip(label)} onMouseLeave={() => setEvTip(null)} onFocus={() => setEvTip(label)} onBlur={() => setEvTip(null)}>
-                            <CoAvatar colored name={c ? c.name : t.title} web={c?.web} set={c?.set} size={24} />
+                            <CoAvatar colored ckey={custKey(e, t.gid, t.title)} name={c ? c.name : t.title} web={c?.web} set={c?.set} size={24} />
                           </button>
                         );
                       })}
                       {ts.length > 3 && (
-                        <button className="sd-ev more" onClick={() => set({ tab: 'plan', calM: d.slice(0, 7), calDay: d })} aria-label={`อีก ${ts.length - 3} นัด ${isoTh(d)} (เปิดแผนติดต่อ)`}>+{ts.length - 3}</button>
+                        <button className="sd-ev more" onClick={() => set(planDayLink(d))} aria-label={`อีก ${ts.length - 3} นัด ${isoTh(d)} (เปิดแผนติดต่อ)`}>+{ts.length - 3}</button>
                       )}
                     </span>
                   );
@@ -468,7 +471,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                 const name = c ? c.name : t.title;
                 return (
                   <button key={t.id} className="sd-win-i" title={name} onClick={() => open(t.gid)}>
-                    <CoAvatar colored name={name} web={c?.web} set={c?.set} size={30} ring={ty[2]} />
+                    <CoAvatar colored ckey={custKey(e, t.gid, t.title)} name={name} web={c?.web} set={c?.set} size={30} ring={ty[2]} />
                     <span className="sd-fi-t">
                       <b>{coreName(name) || name}</b>
                       <small>{`${ty[1]} · ${t.date === today ? 'วันนี้' : `${WD_LONG[dow(t.date)]} ${short(t.date)}`}${t.time ? ' ' + t.time : ''}`}</small>
@@ -495,7 +498,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               const when = lc ? 'ติดต่อล่าสุด ' + (lc.slice(0, 4) === today.slice(0, 4) ? short(lc) : isoTh(lc)) : 'ยังไม่ระบุวันที่ติดต่อ';
               return (
                 <button key={d.id} className="sd-fi" title={d.client} onClick={() => set({ deal: d.id })}>
-                  <CoAvatar colored name={d.client} web={c?.web} set={c?.set} size={34} />
+                  <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={34} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>

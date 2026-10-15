@@ -22,6 +22,8 @@ export interface UIState {
   oInd: string; oProv: string; oExpM: string; oFy: string; oSt: string;
   // Plan tab
   calM: string; calDay: string; plFeed: FeedKey; plStage: StageKey | ''; plOwner: string; perDay: number; picked: Record<number, 1>; plLim: number;
+  /** The one customer the calendar shows (its ckey, lib/custColor.ts), pressed in "ลูกค้าในเดือนนี้"; '' = all. */
+  plCust: string;
   // Dedup tab
   ddF: 'pending' | 'auto' | 'decided' | 'all'; ddPage: number;
   // Sales Tracker
@@ -82,7 +84,7 @@ const initial = (): UIState => {
     f: { ...EMPTY_FILTERS, view, sort: view === 'cert' ? 'ap' : 'default' },
     page: 0, sel: null, dTab: 'info', sched: null,
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
-    calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
+    calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60, plCust: '',
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false,

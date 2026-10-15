@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { coreName, monoSize, monogram } from './CoAvatar';
+import { avatarFill, coreName, monoSize, monogram } from './CoAvatar';
+import { CUST_PAL, slotOf } from '../lib/custColor';
+
+describe('avatar colours', () => {
+  it('a customer (colored with its key) takes its plan colour and that colour\'s monogram text', () => {
+    const p = CUST_PAL[slotOf('26')];
+    expect(avatarFill('บริษัท ซากิโนมิยะ ประเทศไทย จำกัด', true, '26')).toEqual({ bg: p.c, fg: p.on });
+    // the key decides, not how the name is written (a deal's client text and the registry name agree)
+    expect(avatarFill('ซากิโนมิยะ', true, '26')).toEqual(avatarFill('บริษัท ซากิโนมิยะ ประเทศไทย จำกัด', true, '26'));
+  });
+  it('a person (the top seller: colored, no key) keeps the name swatch, white text, never the customer palette', () => {
+    const f = avatarFill('หมิว', true);
+    expect(f.fg).toBe('#fff');
+    expect(CUST_PAL.map((x) => x.c)).not.toContain(f.bg);
+    expect(avatarFill('หมิว', true)).toEqual(f);
+  });
+  it('is the light tint when not coloured, key or not', () => {
+    expect(avatarFill('บริษัท ก จำกัด')).toEqual({ bg: 'var(--info-bg)' });
+    expect(avatarFill('บริษัท ก จำกัด', false, '26')).toEqual({ bg: 'var(--info-bg)' });
+  });
+});
 
 describe('company monograms', () => {
   it('drop legal words and personal titles before taking the letter', () => {

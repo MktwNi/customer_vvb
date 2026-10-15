@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react';
+import { custColor } from '../lib/custColor';
 
 /** The company's own name without the legal-form words around it ("บริษัท … จำกัด (มหาชน)"). */
 export function coreName(name: string) {
@@ -28,13 +29,24 @@ export function monoSize(size: number, letters: number) {
   return size >= 80 ? 40 : size >= 64 ? 28 : size >= 56 ? 24 : size >= 44 ? 18 : size >= 40 ? 16 : 14;
 }
 
-/** The Sales dashboard keeps the owner's coloured monograms (`colored`): white text on each is at least 4.5:1. */
+/** The Sales dashboard keeps the owner's coloured monograms (`colored`): white text on each is at least 4.5:1.
+ *  These colour a person (the top seller); a customer takes its own colour (lib/custColor.ts). */
 const SWATCH = ['#1F5BD8', '#0B6E66', '#6D4BD8', '#B4570B', '#B03A64', '#2E7D32', '#3949AB', '#0E7490'];
 const hash = (s: string) => {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return Math.abs(h);
 };
+/** A monogram's fill and letter colour: the light tint; `colored` with a customer key (`ckey`): the
+ *  customer's colour, as on แผนติดต่อ; `colored` alone (a person): a swatch from the name. */
+export function avatarFill(name: string, colored?: boolean, ckey?: string): { bg: string; fg?: string } {
+  if (!colored) return { bg: 'var(--info-bg)' };
+  if (ckey) {
+    const p = custColor(ckey);
+    return { bg: p.c, fg: p.on };
+  }
+  return { bg: SWATCH[hash(coreName(name) || name) % SWATCH.length], fg: '#fff' };
+}
 
 const hostOf = (web?: string) => {
   if (!web) return '';
@@ -51,12 +63,12 @@ const hostOf = (web?: string) => {
  * symbol for listed companies, else the first letter of the name. Decorative: the name is always
  * written next to it.
  */
-type AvatarProps = { name: string; web?: string; set?: string; size?: number; ring?: string; colored?: boolean; style?: CSSProperties };
+type AvatarProps = { name: string; web?: string; set?: string; size?: number; ring?: string; colored?: boolean; ckey?: string; style?: CSSProperties };
 export function CoAvatar(p: AvatarProps) {
   // a new website (contact edited) starts its logo check afresh
   return <CoAvatarInner key={hostOf(p.web)} {...p} />;
 }
-function CoAvatarInner({ name, web, set, size = 36, ring, colored, style }: AvatarProps) {
+function CoAvatarInner({ name, web, set, size = 36, ring, colored, ckey, style }: AvatarProps) {
   const host = hostOf(web);
   const [logo, setLogo] = useState<'wait' | 'ok' | 'none'>(host ? 'wait' : 'none');
   const full = monogram(name, set);
@@ -64,12 +76,12 @@ function CoAvatarInner({ name, web, set, size = 36, ring, colored, style }: Avat
   // letter (a symbol is never cut: a cut one can be another company's)
   const text = size < 28 ? Array.from(full)[0] : full.length > 3 && size < 36 ? monogram(name) : full;
   const fs = monoSize(size, text.length);
-  const bg = colored ? SWATCH[hash(coreName(name) || name) % SWATCH.length] : 'var(--info-bg)';
+  const { bg, fg } = avatarFill(name, colored, ckey);
   return (
     <span
       className="co-ava"
       aria-hidden="true"
-      style={{ width: size, height: size, fontSize: fs, background: logo === 'ok' ? '#fff' : bg, color: colored ? '#fff' : undefined, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, ...style }}
+      style={{ width: size, height: size, fontSize: fs, background: logo === 'ok' ? '#fff' : bg, color: fg, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, ...style }}
     >
       {logo !== 'ok' && text}
       {host && logo !== 'none' && (
