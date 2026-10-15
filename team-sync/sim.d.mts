@@ -39,7 +39,15 @@ export interface GasSim {
   };
   get(): Record<string, unknown>;
   setup(): void;
-  sheet(): { rows: string[][]; getLastRow(): number; getMaxRows(): number; getMaxColumns(): number } | undefined;
+  sheet(): GasSheet | undefined;
+  /** Any sheet of the spreadsheet by name (e.g. "audit"), or undefined. */
+  sheetOf(name: string): GasSheet | undefined;
+  /** The script's capability catalogue, key table and built-in roles (undefined in scripts before capabilities). */
+  consts: { CAPS_?: GasCap[]; KEY_CAP?: GasKeyRule[]; BUILTIN_ROLES?: { id: string; n: string; d: string }[] };
+  /** Mail the script sent (one recipient each), the daily quota left (assignable), and whether the script lock was held at each send. */
+  mail: { sent: GasMail[]; quota: number; calls: { at: number; locked: boolean }[] };
+  /** The project's time-driven triggers. */
+  triggers: { getHandlerFunction(): string; getUniqueId(): string; getEventType(): string; every: number }[];
   props: Record<string, string>;
   cache: Record<string, string>;
   /** Drop everything in the script cache, as Google may do at any time. */
@@ -80,6 +88,12 @@ export interface GasSim {
   bootstrapAdmin(o: { u: string; name: string; pw: string; rm?: boolean }): string;
 }
 export interface GasStats { propRead: number; propWrite: number; cacheGet: number }
+export interface GasSheet { rows: string[][]; getLastRow(): number; getMaxRows(): number; getMaxColumns(): number }
+/** A capability of Code.gs CAPS_: group, Thai label, real (redacted in pull), scope (may be 'own'), needs, built-in defaults [admin, sales, viewer]. */
+export interface GasCap { id: string; g: 'v' | 'e' | 'a'; th: string; real?: number; scope?: number; needs?: string; d: (0 | 1 | 'own')[] }
+/** A row of Code.gs KEY_CAP: what writing (w) / deleting (d) a key prefix needs, and the own-work rule (ow / od). */
+export interface GasKeyRule { p: string; w: string | string[]; d: string | string[]; ow?: 'deal' | 'resp' | 'by'; od?: 'deal' | 'resp' | 'by' }
+export interface GasMail { to: string; subject: string; htmlBody?: string; body?: string; name?: string; replyTo?: string; [k: string]: unknown }
 /** LockService's script lock, or its user lock (shared by every request of a web app that executes as its owner). */
 export type GasLockKind = 'script' | 'user';
 export function createGasSim(opts?: { teamKey?: string; code?: string; driveAuthorized?: boolean; kdfIter?: number }): GasSim;

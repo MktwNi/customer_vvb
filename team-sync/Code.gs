@@ -12,15 +12,16 @@
  * กด Run "setup" (รับรหัสตั้งค่าผู้ดูแลระบบใน Execution log) แล้ว Deploy → Manage deployments → Edit
  * → Version: New version (ดู README หัวข้อ "เปิดใช้บัญชีผู้ใช้")
  *
- * Protocol v3 (POST, body = JSON text, Content-Type: text/plain to avoid a CORS preflight).
- * The web app sends `cv: 3` with every request. A team works in one of three modes (see hello):
+ * Protocol v4 (POST, body = JSON text, Content-Type: text/plain to avoid a CORS preflight).
+ * The web app sends `cv: 4` with every request (builds before the capabilities sent `cv: 3`). A team
+ * works in one of three modes (see hello):
  *   legacy   — no accounts yet and TEAM_KEY is set: every request carries `key` (the team code), as in v2
  *   setup    — no accounts and no TEAM_KEY: only hello and claim work
  *   accounts — at least one account exists: requests carry `tok` (a session token); TEAM_KEY grants nothing
  *
  * Public (no key or token):
- *   { action: 'hello' }                          -> { ok, app: 'gcc-team-sync', v: 3, files: true, mode, tid, it }
- *   { action: 'login', u, pk, rm }               -> { ok, tok, exp, me: { u, name, role }, mc }
+ *   { action: 'hello' }                          -> { ok, app: 'gcc-team-sync', v: 4, files: true, mode, tid, it }
+ *   { action: 'login', u, pk, rm }               -> { ok, tok, exp, me, mc }   (me: see "me" below)
  *   { action: 'claim', code, u, name?, pk, rm }  -> same as login (first admin, or admin recovery)
  *     pk = base64url, no padding, of PBKDF2-HMAC-SHA256(NFC(password), salt 'gcc-team|v1|' + tid + '|' + u,
  *     `it` iterations, 32 bytes), computed in the browser: the password itself never reaches this script.
@@ -33,8 +34,19 @@
  *   { action: 'me', tok }                        -> { ok, me, mc }
  *   { action: 'passwd', tok, old, pk, rm? }      -> { ok, tok, exp, me }   (other devices are signed out)
  *   { action: 'logout', tok, all? }              -> { ok }                 (all: every device is signed out)
- *   { action: 'users', tok }                     -> { ok, users: [{ u, name, role, on, mc, ll, c, locked }] }  admin
- *   { action: 'user_save', tok, u, create?, name?, role?, on?, pk?, unlock?, kick? } -> { ok, user }       admin
+ *   { action: 'req_send', tok, k: 'role'|'caps', role?, caps?: [{ k, s? }], note, until? } -> { ok }  any account
+ *   { action: 'req_cancel', tok } / { action: 'req_ack', tok }  -> { ok }   (withdraw one's request / hide its result)
+ * Token, set.users (an admin):
+ *   { action: 'users', tok }                     -> { ok, users: [{ u, name, role, on, mc, ll, c, locked }],
+ *                                                     roles, grants, reqs, audit }
+ *   { action: 'user_save', tok, u, create?, name?, role?, on?, pk?, unlock?, kick? } -> { ok, user }
+ *   { action: 'role_save', tok, id?, n, d?, c?, from?, o? }  -> { ok, id, roles, grants, reqs }
+ *   { action: 'role_del', tok, id, to? }         -> { ok, roles, grants, reqs }   (members and grants move to `to`)
+ *   { action: 'grant_save', tok, u, c: [{ k, s?, until? }] } / { action: 'grant_del', tok, u, k } -> { ok, roles, grants, reqs }
+ *   { action: 'req_decide', tok, u, ok, note?, id? } -> { ok, roles, grants, reqs }
+ *     roles  = { <id>: { n, d, c, o, at?, by?, bi?: 1 } } every role, built-ins (bi) included; admin's c is everything
+ *     grants = GRANTS, reqs = REQS (see "Script Properties" below); audit = the last 50 rows, newest first:
+ *              [{ at, actor, u, action, detail, note }]
  * Team code (legacy mode) or token (accounts mode):
  *   { action: 'ping', key }                     -> { ok, seq, files: true }
  *   { action: 'pull', key, since, limit? }      -> { ok, seq, rows: Row[], more }
@@ -45,23 +57,37 @@
  *   Op  = { k: string, v?: any, del?: boolean, by?: string }
  *   Row = { seq: number, k: string, v: any, del: boolean, by: string, at: string }
  *   With a token, `by` is always the account's display name (the op's by is ignored), every reply adds
- *   me: { u, name, role }, and a remembered session with fewer than 15 days left also gets a new tok + exp.
- * Roles: admin does everything. sales may not write scfg/, dedup/, team/, dundo/ nor delete deal/, cust/,
- * person/ (refused per op in `denied`, never stored); its log/, dlog/ and dact/ values get by = its name.
- * viewer only reads: push, upload and delfile answer 'forbidden'.
+ *   me, and a remembered session with fewer than 15 days left also gets a new tok + exp.
+ * me = { u, name, role, rid, rn, caps, rq?, req? }: rid = the role in effect (a temporary role while it
+ *   lasts), rn = its name, caps = { <capability>: 1 | 'own' } (1 = all work, 'own' = the account's own work;
+ *   only what it holds), role = 'admin' | 'sales' | 'viewer' for builds before capabilities (admin = set.users,
+ *   sales = any write, else viewer), rq = requests waiting (set.users holders only), req = the account's own
+ *   pending request { st: 'p', id, k, role?, caps?, note, until?, at } or its unread result
+ *   { st: 'r', ok, by, note, at, k, role?, caps?, until? }.
+ * Capabilities (CAPS_, the same catalogue as the web app's lib/caps.ts): what a key needs is in KEY_CAP
+ * (default deny: an unknown prefix needs set.users, qchk/ is never pushed). A refused op is listed in
+ * `denied` and never stored. push needs a write capability, upload and delfile docs.up, file docs.open.
+ * Accounts without set.users get by = their name in log/, dlog/, dact/ values, and by + at = their name
+ * and the time in dchk/ and mclose/. pull strips money without view.money and commission without view.comm.
+ * A token request from an older build (cv < 4) may still read, but push, upload and delfile answer
+ * 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)', which those builds show as is (their queue is kept).
  *   Errors: { ok: false, error: 'unauthorized' | 'no_team_key' | 'busy' | 'bad_json' | 'unknown_action'
  *            | 'file_too_large' | 'bad_file_type' | 'empty_file' | 'not_found' | 'drive_permission'
  *            | 'login_required' | 'session_expired' | 'account_disabled' | 'must_change_password' | 'forbidden'
  *            | 'bad_login' | 'locked' (+ retryIn seconds) | 'too_many_attempts' | 'no_accounts' | 'bad_code'
  *            | 'bad_user' | 'bad_name' | 'bad_role' | 'bad_password_data' | 'wrong_password' | 'name_taken'
- *            | 'user_exists' | 'unknown_user' | 'too_many_users' | 'not_self' | 'last_admin' | 'name_locked' | ... }
+ *            | 'user_exists' | 'unknown_user' | 'too_many_users' | 'not_self' | 'last_admin' | 'name_locked'
+ *            | 'role_in_use' | 'role_locked' | 'bad_cap' | 'cap_held' | 'too_many_roles' | 'req_note' | 'bad_until'
+ *            | 'bad_req' | 'no_request' | 'changed' | 'too_many_grants' | 'too_many_reqs' | ... }
  *   A team-code request in accounts mode answers 'login_required' (or, without cv, a Thai sentence that
  *   older web apps show as is).
  * The sheet is an append-only log ordered by seq; a later row for the same key wins.
  * Superseded rows are compacted away automatically once the log grows.
  * `files: true` in ping tells the web app this version stores attachments (older ones omit it).
  * file / delfile only ever touch files inside the documents folder, never the rest of the Drive.
- * Accounts live in Script Properties (USERS: salted hashes of pk, never returned by any action).
+ * Accounts live in Script Properties (USERS: salted hashes of pk, never returned by any action), with
+ * ROLES, GRANTS, REQS and RESULTS (see "capabilities and roles" below); the "audit" tab of this
+ * spreadsheet records who changed roles, extras and requests.
  */
 
 // ⬇⬇⬇ รหัสทีม (ไม่บังคับ) ทีมที่ซิงก์ด้วยรหัสทีมอยู่แล้ว: วางบรรทัด TEAM_KEY เดิมกลับตรงนี้ ทุกคนจะซิงก์ต่อได้
@@ -80,8 +106,10 @@ const DOC_FOLDER_NAME = 'GCC Sales Tracker — เอกสาร';
 const MAX_FILE = 10 * 1024 * 1024; // bytes after decoding (base64 adds a third on the wire)
 const DOC_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
 
-// accounts (protocol v3)
-const API_V = 3;
+// accounts (protocol v3), capabilities (protocol v4)
+const API_V = 4;
+const CLIENT_V = 4; // web app builds before this one may read, but not write (see doPost)
+const NEW_VERSION_MSG = 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)';
 const KDF_ITER_DEFAULT = 200000; // PBKDF2 iterations the browser uses to turn a password into pk
 const TOKEN_LONG_S = 2592000; // "remember me": 30 days, renewed while in use
 const TOKEN_SHORT_S = 43200; // otherwise 12 hours, never renewed
@@ -99,12 +127,100 @@ const CODE_TTL_MS = 86400000; // the setup / recovery code from setup() lasts 24
 const CODE_MAX_TRIES = 5;
 const USER_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 const PK_RE = /^[A-Za-z0-9_-]{43}$/;
-const ROLES = ['admin', 'sales', 'viewer'];
-// key prefixes sales may not write at all / may not delete (the web app has the same lists)
-const SALES_DENY = ['scfg/', 'dedup/', 'team/', 'dundo/'];
-const ADMIN_DEL = ['deal/', 'cust/', 'person/'];
 const DUMMY_SALT = 'gcc-no-such-user';
 const OLD_CLIENT_MSG = 'ทีมเปลี่ยนเป็นระบบเข้าสู่ระบบแล้ว — รีเฟรชหน้าเว็บ (F5) แล้วเข้าสู่ระบบด้วยบัญชีของคุณ';
+
+// capabilities and roles (protocol v4)
+const TZ = 'Asia/Bangkok'; // the team's calendar: an extra "until 31 ต.ค." lasts through that day here
+const MAX_ROLES = 10; // the three built-in roles count
+const PROP_MAX_BYTES = 8500; // ROLES, GRANTS, REQS, RESULTS (Script Properties hold 9 kB per value)
+const NOTE_MAX = 300;
+const AUDIT_SHEET = 'audit';
+const AUDIT_HEADER = ['at', 'actor', 'u', 'action', 'detail', 'note'];
+const AUDIT_KEEP_MS = 365 * 86400000; // older audit rows are dropped on an admin's `users`
+/**
+ * The capability catalogue, the same as the web app's lib/caps.ts (a test compares the two).
+ * g: v = ดูได้, e = แก้ไขได้, a = เข้าถึงและจัดการ. real: pull_ takes this data out for an account without
+ * it. scope: may be given for the account's own work only ('own'). needs: dropped while that one is
+ * missing. d: the built-in roles [admin, sales, viewer] (1 = all work, 'own' = own work, 0 = no).
+ * set.users belongs to admin alone: it is never part of another role, an extra or a request.
+ */
+const CAPS_ = [
+  { id: 'view.sales', g: 'v', th: 'ดู Sales Tracker และผู้ติดต่อ', d: [1, 1, 1] },
+  { id: 'view.plan', g: 'v', th: 'ดูแผนติดต่อ', d: [1, 1, 1] },
+  { id: 'view.money', g: 'v', th: 'ดูยอดเงิน', real: 1, d: [1, 1, 1] },
+  { id: 'view.cash', g: 'v', th: 'ดู Cashflow', needs: 'view.money', d: [1, 1, 1] },
+  { id: 'view.comm', g: 'v', th: 'ดูค่าคอมมิชชั่น / สัดส่วนรายได้', real: 1, needs: 'view.money', d: [1, 0, 0] },
+  { id: 'docs.open', g: 'v', th: 'เปิดเอกสารแนบ', needs: 'view.money', d: [1, 1, 1] },
+  { id: 'edit.cust', g: 'e', th: 'ลูกค้าและผู้ติดต่อ', d: [1, 1, 0] },
+  { id: 'edit.deal', g: 'e', th: 'ดีลและขั้นตอน', scope: 1, needs: 'view.money', d: [1, 1, 0] },
+  { id: 'edit.task', g: 'e', th: 'นัดหมาย', d: [1, 1, 0] },
+  { id: 'edit.pay', g: 'e', th: 'แผนชำระเงินและการรับเงิน', scope: 1, needs: 'view.money', d: [1, 1, 0] },
+  { id: 'docs.up', g: 'e', th: 'แนบเอกสาร', needs: 'view.money', d: [1, 1, 0] },
+  { id: 'edit.ctag', g: 'e', th: 'ติดประเภทลูกค้า', d: [1, 1, 0] },
+  { id: 'edit.jqt', g: 'e', th: 'สร้างใบเสนอราคาร่วม', needs: 'view.money', d: [1, 1, 0] },
+  { id: 'edit.share', g: 'e', th: 'แก้สัดส่วน % ของงาน', needs: 'view.comm', d: [1, 0, 0] },
+  { id: 'del.rec', g: 'e', th: 'ลบดีล ลูกค้า และผู้ติดต่อ', d: [1, 0, 0] },
+  { id: 'del.log', g: 'e', th: 'ลบบันทึกการติดต่อ', scope: 1, d: [1, 'own', 0] },
+  { id: 'qt.check', g: 'a', th: 'ตรวจ/อนุมัติใบเสนอราคา', needs: 'view.money', d: [1, 0, 0] },
+  { id: 'pay.check', g: 'a', th: 'ตรวจยืนยันรับเงิน (บัญชี)', needs: 'view.cash', d: [1, 0, 0] },
+  { id: 'notify.mail', g: 'a', th: 'รับอีเมลแจ้งเตือน', d: [1, 1, 0] },
+  { id: 'set.lists', g: 'a', th: 'ตั้งค่ารายการ', d: [1, 0, 0] },
+  { id: 'set.units', g: 'a', th: 'ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น', needs: 'view.comm', d: [1, 0, 0] },
+  { id: 'set.dedup', g: 'a', th: 'ตรวจข้อมูลซ้ำ', d: [1, 0, 0] },
+  { id: 'set.data', g: 'a', th: 'นำเข้า ส่งออก และไฟล์สำรอง', d: [1, 0, 0] },
+  { id: 'set.users', g: 'a', th: 'จัดการผู้ใช้และสิทธิ์', d: [1, 0, 0] },
+];
+/** The built-in roles: their ids are what USERS has always stored. admin is locked to everything. */
+const BUILTIN_ROLES = [
+  { id: 'admin', n: 'ผู้ดูแลระบบ', d: 'ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และสิทธิ์' },
+  { id: 'sales', n: 'พนักงานขาย', d: 'เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร ลบได้เฉพาะบันทึกของตัวเอง' },
+  { id: 'viewer', n: 'ดูอย่างเดียว', d: 'ดูได้ทุกหน้า รวมยอดเงินและ Cashflow แก้ไขไม่ได้' },
+];
+/**
+ * What writing (w) and deleting (d) a record needs, by key prefix; the first match wins. A capability id,
+ * a list (any one of them), or '' = nobody (qchk/: only the qt_check action writes it). ow / od: when the
+ * account holds that capability for its own work only, what makes the record its own: 'deal' = the
+ * deal's resp (ผู้รับผิดชอบ) is the account's display name, before and after the change; 'resp' = the
+ * resp of the deal in the key is; 'by' = the account wrote the key's latest row. `scfg/<name>` without a
+ * dot needs set.lists. Any other key (an unknown prefix or scfg kind) needs set.users: default deny.
+ * The web app's lib/caps.ts has the same table (a test compares the two).
+ */
+const KEY_CAP = [
+  { p: 'qchk/', w: '', d: '' },
+  { p: 'stage/', w: 'edit.cust', d: 'edit.cust' },
+  { p: 'owner/', w: 'edit.cust', d: 'edit.cust' },
+  { p: 'watch/', w: 'edit.cust', d: 'edit.cust' },
+  { p: 'contact/', w: 'edit.cust', d: 'edit.cust' },
+  { p: 'cust/', w: 'edit.cust', d: 'del.rec' },
+  { p: 'person/', w: 'edit.cust', d: 'del.rec' },
+  { p: 'log/', w: 'edit.cust', d: 'del.log', od: 'by' },
+  { p: 'task/', w: 'edit.task', d: 'edit.task' },
+  { p: 'deal/', w: 'edit.deal', d: 'del.rec', ow: 'deal' },
+  { p: 'dstep/', w: 'edit.deal', d: 'edit.deal', ow: 'resp', od: 'resp' },
+  { p: 'dact/', w: 'edit.deal', d: 'del.log', ow: 'resp', od: 'by' },
+  { p: 'dlog/', w: ['edit.deal', 'edit.pay', 'docs.up', 'edit.jqt', 'edit.share', 'pay.check'], d: 'set.users' },
+  { p: 'ddoc/', w: 'docs.up', d: 'docs.up' },
+  { p: 'dpay/', w: 'edit.pay', d: 'edit.pay', ow: 'resp', od: 'resp' },
+  { p: 'ctag/', w: 'edit.ctag', d: 'edit.ctag' },
+  { p: 'jqt/', w: 'edit.jqt', d: 'del.rec' },
+  { p: 'jqm/', w: 'edit.jqt', d: 'edit.jqt' },
+  { p: 'dshare/', w: 'edit.share', d: 'edit.share' },
+  { p: 'ccol/', w: 'edit.cust', d: 'edit.cust' },
+  { p: 'dchk/', w: 'pay.check', d: 'pay.check' },
+  { p: 'mclose/', w: 'pay.check', d: 'pay.check' },
+  { p: 'scfg/paychk.', w: 'set.users', d: 'set.users' },
+  { p: 'scfg/notify.', w: 'set.users', d: 'set.users' },
+  { p: 'scfg/unit.', w: 'set.units', d: 'set.units' },
+  { p: 'scfg/unitm.', w: 'set.units', d: 'set.units' },
+  { p: 'scfg/ct.', w: 'set.lists', d: 'set.lists' },
+  { p: 'scfg/cc.', w: 'set.lists', d: 'set.lists' },
+  { p: 'dedup/', w: 'set.dedup', d: 'set.dedup' },
+  { p: 'team/', w: 'set.users', d: 'set.users' },
+  { p: 'dundo/', w: 'set.data', d: 'set.data' },
+];
+/** Capabilities that write something by push: an account with none of them may not push at all. */
+const WRITE_CAPS_ = KEY_CAP.reduce((a, r) => a.concat(r.w || [], r.d || []), ['set.users']).filter((c, i, a) => a.indexOf(c) === i);
 
 // setup is the first function in the file, so the editor's Run button selects it by default.
 /**
@@ -188,14 +304,22 @@ function doPost(e) {
     if (!actor.legacy && actor.mc && ['me', 'passwd', 'logout'].indexOf(action) < 0) return reply_(actor, { ok: false, error: 'must_change_password' });
     const acct = account_(action, req, actor); // null for the actions below
     if (acct) return acct;
-    if (!actor.legacy && actor.role === 'viewer' && ['push', 'upload', 'delfile'].indexOf(action) >= 0) return reply_(actor, { ok: false, error: 'forbidden' });
+    if (!actor.legacy) {
+      // a tab still open on a build from before the capabilities may read, but not write: it would
+      // send records shaped by the old rules (its queue is kept, and sent again after a refresh)
+      if (['push', 'upload', 'delfile'].indexOf(action) >= 0 && !(Number(req.cv) >= CLIENT_V)) return reply_(actor, { ok: false, error: NEW_VERSION_MSG });
+      // what the account's capabilities allow, checked here and not inside the cases below (the file
+      // cases stay one block); each op of a push is checked again by its key in push_
+      const need = action === 'push' ? WRITE_CAPS_ : action === 'upload' || action === 'delfile' ? ['docs.up'] : action === 'file' ? ['docs.open'] : null;
+      if (need && !need.some((c) => actor.caps[c])) return reply_(actor, { ok: false, error: 'forbidden' });
+    }
     switch (action) {
       case 'ping':
         // only creating / repairing the sheet needs the lock; a ready sheet is just read
         if (!sheetReady_()) withLock_(() => sheet_());
         return reply_(actor, { ok: true, seq: cachedSeq_() ?? seq_(), files: true });
       case 'pull':
-        return reply_(actor, pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL)));
+        return reply_(actor, pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL), actor));
       case 'push':
         return reply_(actor, push_(req.ops || [], actor));
       // the three file actions stay together, right before default: teamFiles.test.ts cuts them out as
@@ -315,8 +439,18 @@ function rowOut_(r) {
   return { seq: Number(r[0]), k: String(r[1]), v: v, del: r[3] === 1 || r[3] === true || r[3] === '1', by: String(r[4] || ''), at: String(r[5] || '') };
 }
 
-/** Rows with seq > since, oldest first (rows are stored in ascending seq order). */
-function pull_(since, limit) {
+/**
+ * Rows with seq > since, oldest first (rows are stored in ascending seq order). For an account,
+ * what its capabilities may not see is taken out of each row (redact_); the rows themselves and
+ * their seq stay, so the reader's position in the log is the same for every account.
+ */
+function pull_(since, limit, actor) {
+  const out = pullRows_(since, limit);
+  if (actor && !actor.legacy && out.rows.length && (!actor.caps['view.money'] || !actor.caps['view.comm'])) out.rows = out.rows.map((r) => redact_(r, actor.caps));
+  return out;
+}
+
+function pullRows_(since, limit) {
   const cur = curSeq_();
   if (since >= cur) return { ok: true, seq: cur, rows: [], more: false };
   // read under the lock so a concurrent append/compaction can't shift rows mid-read
@@ -337,7 +471,10 @@ function pull_(since, limit) {
   });
 }
 
-/** Append ops as rows. `actor` is { legacy: true } for the team code, else the signed-in account. */
+/**
+ * Append ops as rows. `actor` is { legacy: true } for the team code, else the signed-in account, whose
+ * capabilities decide op by op (KEY_CAP): a refused op is listed in `denied`, never stored, and uses no seq.
+ */
 function push_(ops, actor) {
   if (!Array.isArray(ops)) return { ok: false, error: 'bad_ops' };
   if (ops.length > MAX_OPS) return { ok: false, error: 'too_many_ops' };
@@ -347,35 +484,56 @@ function push_(ops, actor) {
     if (actor.legacy && hasUsers_(readUsers_())) return { ok: false, error: 'login_required' };
     let seq = Number(props.getProperty('SEQ') || 0);
     const now = new Date().toISOString();
-    const sales = !actor.legacy && actor.role === 'sales';
+    const caps = actor.legacy ? null : actor.caps;
+    // accounts other than admins write log entries and checks in their own name, checks also at this time
+    const stamp = !!caps && !caps['set.users'];
+    const list = ops.map((op) => {
+      op = op || {};
+      const del = !!op.del;
+      // the web app applies a row without a value as a deletion
+      return { op: op, k: String(op.k || ''), del: del, delR: del || op.v === undefined || op.v === null };
+    });
+    const allowed = caps ? opGate_(list, caps, actor.name) : null;
     const rows = [];
     const rejected = [];
     const denied = [];
-    for (let i = 0; i < ops.length; i++) {
-      const op = ops[i] || {};
-      const k = String(op.k || '');
+    const stored = {}; // keys this push stores
+    const shares = []; // dshare/<id> of the deals this push deletes
+    for (let i = 0; i < list.length; i++) {
+      const x = list[i], op = x.op, k = x.k, del = x.del, delR = x.delR;
       if (!k || k.length > 500) continue;
-      const del = !!op.del;
-      // the web app applies a row without a value as a deletion
-      const delR = del || op.v === undefined || op.v === null;
-      if (sales && (startsAny_(k, SALES_DENY) || (delR && startsAny_(k, ADMIN_DEL)))) {
-        denied.push(k); // not stored and uses no seq
+      if (allowed ? !allowed(x) : k.indexOf('qchk/') === 0) {
+        // not stored and uses no seq (qchk/ is written only by the qt_check action, also for the team code)
+        (allowed ? denied : rejected).push(k);
         continue;
       }
       let val = op.v;
-      // a contact-log entry (company log, deal history, a deal's contact record) written by sales
-      // always carries its own name (key order kept)
-      if (sales && !delR && /^(d?log|dact)\//.test(k) && val && typeof val === 'object' && !Array.isArray(val) && Object.prototype.hasOwnProperty.call(val, 'by'))
-        val = Object.assign({}, val, { by: actor.name });
+      if (stamp && !delR && val && typeof val === 'object' && !Array.isArray(val)) {
+        // a contact-log entry (company log, deal history, a deal's contact record) always carries the
+        // writer's own name (key order kept); a payment check or a month close also the server's time
+        if (/^(d?log|dact)\//.test(k) && Object.prototype.hasOwnProperty.call(val, 'by')) val = Object.assign({}, val, { by: actor.name });
+        else if (/^(dchk|mclose)\//.test(k)) val = Object.assign({}, val, { by: actor.name, at: now });
+      }
       const v = del || val === undefined ? '' : JSON.stringify(val);
       if (v.length > MAX_CELL) {
         rejected.push(k); // never store a placeholder other browsers would apply as data
         continue;
       }
+      if (allowed) allowed.done(x, val);
       seq++;
       // with a token the row's author is the account, whatever the op says
       rows.push([String(seq), k, v, del ? '1' : '0', String(actor.legacy ? op.by || '' : actor.name).slice(0, 100), now]);
+      stored[k] = 1;
+      if (caps && delR && k.indexOf('deal/') === 0) shares.push('dshare/' + k.slice(5));
     }
+    // a deleted deal takes its revenue split along: an account without view.comm never received that
+    // row, so its browser can't delete it (team-code pushes stay as they always were)
+    shares.forEach((k) => {
+      if (stored[k] || k.length > 500) return;
+      stored[k] = 1;
+      seq++;
+      rows.push([String(seq), k, '', '1', String(actor.name).slice(0, 100), now]);
+    });
     if (rows.length) {
       const sh = sheet_();
       const start = sh.getLastRow() + 1;
@@ -399,10 +557,6 @@ function push_(ops, actor) {
     if (!actor.legacy) out.denied = denied;
     return out;
   });
-}
-
-function startsAny_(k, prefixes) {
-  return prefixes.some((p) => k.indexOf(p) === 0);
 }
 
 /**
@@ -487,7 +641,7 @@ function login_(req) {
   if (y.err) return { ok: false, error: y.err };
   clearFails_(u);
   const t = tok_(p.AUTH_SECRET, u, y.sv, rm);
-  return { ok: true, tok: t.tok, exp: t.exp, me: { u: u, name: y.n, role: y.r }, mc: !!y.mc };
+  return { ok: true, tok: t.tok, exp: t.exp, me: meOf_(u, whoOf_(auth_(false), u)), mc: !!y.mc };
 }
 
 /**
@@ -544,12 +698,16 @@ function claim_(req) {
   if (r.err) return { ok: false, error: r.err };
   clearFails_(u);
   const t = tok_(r.sec, u, r.x.sv, rm);
-  return { ok: true, tok: t.tok, exp: t.exp, me: { u: u, name: r.x.n, role: r.x.r }, mc: false };
+  return { ok: true, tok: t.tok, exp: t.exp, me: meOf_(u, whoOf_(auth_(false), u)), mc: false };
 }
 
-/** me / passwd / logout / users / user_save; null for any other action. */
+// account actions every signed-in account may use / those that need set.users
+const SELF_ACTIONS = ['me', 'passwd', 'logout', 'req_send', 'req_cancel', 'req_ack'];
+const ADMIN_ACTIONS = ['users', 'user_save', 'role_save', 'role_del', 'grant_save', 'grant_del', 'req_decide'];
+
+/** The account actions (sign-in, requests, users, roles and extras); null for any other action. */
 function account_(action, req, actor) {
-  if (['me', 'passwd', 'logout', 'users', 'user_save'].indexOf(action) < 0) return null;
+  if (SELF_ACTIONS.indexOf(action) < 0 && ADMIN_ACTIONS.indexOf(action) < 0) return null;
   if (actor.legacy) return json_({ ok: false, error: 'login_required' });
   if (action === 'me') return reply_(actor, { ok: true, mc: actor.mc });
   if (action === 'passwd') return json_(passwd_(req, actor));
@@ -557,11 +715,23 @@ function account_(action, req, actor) {
     if (req.all) withLock_(() => bumpSv_(actor.u));
     return json_({ ok: true });
   }
-  if (actor.role !== 'admin') return reply_(actor, { ok: false, error: 'forbidden' });
+  if (action === 'req_send') return replyNow_(actor, reqSend_(req, actor));
+  if (action === 'req_cancel') return replyNow_(actor, reqDrop_(actor, 'REQS'));
+  if (action === 'req_ack') return replyNow_(actor, reqDrop_(actor, 'RESULTS'));
+  if (!actor.caps['set.users']) return reply_(actor, { ok: false, error: 'forbidden' });
   if (action === 'users') return reply_(actor, users_());
-  const r = userSave_(req, actor);
-  // an admin who signed out their own sessions gets no renewed token
-  return reply_(r.self && r.bumped ? Object.assign({}, actor, { rm: false }) : actor, r.out);
+  if (action === 'user_save') {
+    const r = userSave_(req, actor);
+    // an admin who signed out their own sessions gets no renewed token
+    return reply_(r.self && r.bumped ? Object.assign({}, actor, { rm: false }) : actor, r.out);
+  }
+  const fn = { role_save: roleSave_, role_del: roleDel_, grant_save: grantSave_, grant_del: grantDel_, req_decide: reqDecide_ }[action];
+  return replyNow_(actor, fn(req, actor));
+}
+
+/** reply_ with `me` as the directory says right after this request's change (its request, its badge). */
+function replyNow_(actor, o) {
+  return reply_(Object.assign({}, actor, whoOf_(auth_(false), actor.u)), o);
 }
 
 /** Change one's own password (old and new as pk). Every other session of the account ends. */
@@ -588,15 +758,48 @@ function passwd_(req, actor) {
   if (!sv) return { ok: false, error: 'session_expired' };
   clearFails_(actor.u);
   const t = tok_(actor.sec, actor.u, sv, req.rm === undefined || req.rm === null ? actor.rm : !!req.rm);
-  return { ok: true, tok: t.tok, exp: t.exp, me: { u: actor.u, name: actor.name, role: actor.role } };
+  return { ok: true, tok: t.tok, exp: t.exp, me: meOf_(actor.u, actor) };
 }
 
-/** Admin: every account, without salts or hashes. locked = seconds until a lockout ends (0 = none). */
+/**
+ * Admin: every account (without salts or hashes; locked = seconds until a lockout ends, 0 = none), every
+ * role, the extras, the waiting requests and the last 50 audit rows. Extras past their date are removed
+ * here, each with an audit row, and so are audit rows older than a year.
+ */
 function users_() {
-  const db = readUsers_();
+  const props = PropertiesService.getScriptProperties();
+  let p = props.getProperties();
+  const today = today_();
+  if (expired_(objProp_(p.GRANTS), today).length || auditOld_()) {
+    withLock_(() => {
+      const q = props.getProperties();
+      const grants = objProp_(q.GRANTS);
+      const gone = expired_(grants, today);
+      if (gone.length) {
+        gone.forEach((x) => {
+          const g = grantOf_(grants, x.u);
+          if (x.k === 'role') delete g.r;
+          else g.c = g.c.filter((e) => e.k !== x.k);
+          setGrant_(grants, x.u, g);
+        });
+        commit_({ GRANTS: JSON.stringify(grants) }); // only smaller
+        audit_(gone.map((x) => ['', x.u, 'grant_expired', x.k === 'role' ? { role: x.id, until: x.until } : { k: x.k, until: x.until }, '']));
+      }
+      trimAudit_();
+    });
+    p = props.getProperties();
+  }
+  const db = usersOf_(p);
   const names = Object.keys(db.users);
   const lk = names.length ? CacheService.getScriptCache().getAll(names.map((u) => 'LK:' + ck_(u))) : {};
-  return { ok: true, users: names.map((u) => Object.assign(pub_(u, db.users[u]), { locked: secsLeft_(lk['LK:' + ck_(u)]) })) };
+  return {
+    ok: true,
+    users: names.map((u) => Object.assign(pub_(u, db.users[u]), { locked: secsLeft_(lk['LK:' + ck_(u)]) })),
+    roles: rolesView_(rolesOf_(p).roles),
+    grants: objProp_(p.GRANTS),
+    reqs: objProp_(p.REQS),
+    audit: auditTail_(50),
+  };
 }
 
 /** Admin: create an account (temporary password as pk, must change it) or change one. */
@@ -604,7 +807,9 @@ function userSave_(req, actor) {
   const u = normUser_(req.u);
   const has = (v) => v !== undefined && v !== null;
   const r = withLock_(() => {
-    const db = readUsers_();
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const db = usersOf_(p);
+    const roles = rolesOf_(p).roles;
     let x = own_(db.users, u);
     if (req.create) {
       if (!USER_RE.test(u)) return { err: 'bad_user' };
@@ -612,7 +817,7 @@ function userSave_(req, actor) {
       const name = cleanDisplay_(req.name);
       if (!name) return { err: 'bad_name' };
       if (nameTaken_(db, name, '')) return { err: 'name_taken' };
-      if (ROLES.indexOf(req.role) < 0) return { err: 'bad_role' };
+      if (!roleExists_(roles, req.role)) return { err: 'bad_role' };
       const pk = String(req.pk || '');
       if (!PK_RE.test(pk)) return { err: 'bad_password_data' };
       if (Object.keys(db.users).length >= MAX_USERS) return { err: 'too_many_users' };
@@ -620,12 +825,13 @@ function userSave_(req, actor) {
       setPk_(x, pk);
       db.users[u] = x;
       saveUsers_(db);
+      audit_([[actor.name, u, 'user_add', { role: req.role }, '']]);
       return { x: x, bumped: false, clear: true };
     }
     if (!x) return { err: 'unknown_user' };
     let role = x.r, on = x.on, name = x.n;
     if (has(req.role)) {
-      if (ROLES.indexOf(req.role) < 0) return { err: 'bad_role' };
+      if (!roleExists_(roles, req.role)) return { err: 'bad_role' };
       role = req.role;
     }
     if (has(req.on)) on = req.on === true || Number(req.on) === 1 ? 1 : 0;
@@ -645,6 +851,7 @@ function userSave_(req, actor) {
     if (has(req.pk) && !PK_RE.test(pk)) return { err: 'bad_password_data' };
     let bumped = false;
     if (on !== x.on && !on) bumped = true;
+    const from = x.r;
     x.on = on;
     x.r = role;
     x.n = name;
@@ -655,7 +862,21 @@ function userSave_(req, actor) {
     }
     if (req.kick) bumped = true;
     if (bumped) x.sv = (Number(x.sv) || 0) + 1;
-    saveUsers_(db);
+    if (role === from) {
+      saveUsers_(db);
+      return { x: x, bumped: bumped, clear: !!pk || !!req.unlock };
+    }
+    // a role set by an admin replaces a temporary role from an approved request
+    const grants = objProp_(p.GRANTS);
+    const g = grantOf_(grants, u);
+    const vals = { USERS: prepUsers_(db) };
+    if (g.r) {
+      delete g.r;
+      setGrant_(grants, u, g);
+      vals.GRANTS = JSON.stringify(grants); // only smaller
+    }
+    commit_(vals);
+    audit_([[actor.name, u, 'user_role', { from: from, to: role }, '']]);
     return { x: x, bumped: bumped, clear: !!pk || !!req.unlock };
   });
   if (r.err) return { out: { ok: false, error: r.err } };
@@ -714,6 +935,10 @@ function auth_(fresh) {
   }
 }
 
+/**
+ * The cached directory: the accounts (no salts or hashes) plus ROLES, GRANTS, REQS (rqs) and RESULTS
+ * (res), so a request's capabilities, the admins' badge and an account's request need no Properties read.
+ */
 function dirOf_(db, p) {
   const u = {};
   Object.keys(db.users).forEach((k) => {
@@ -721,7 +946,10 @@ function dirOf_(db, p) {
     u[k] = { n: x.n, r: x.r, on: x.on, sv: x.sv, mc: x.mc };
   });
   if (!Object.keys(u).length) return { m: 'none' };
-  return { m: 'accounts', sec: p.AUTH_SECRET, tid: p.TEAM_ID, it: Number(p.KDF_ITER || KDF_ITER_DEFAULT), u: u };
+  return {
+    m: 'accounts', sec: p.AUTH_SECRET, tid: p.TEAM_ID, it: Number(p.KDF_ITER || KDF_ITER_DEFAULT), u: u,
+    roles: rolesOf_(p).roles, grants: objProp_(p.GRANTS), rqs: objProp_(p.REQS), res: objProp_(p.RESULTS),
+  };
 }
 
 function mode_(A) {
@@ -744,11 +972,58 @@ function hasUsers_(db) {
 
 /** Save USERS (caller holds the lock) and rewrite the cached directory, so a change applies at once. */
 function saveUsers_(db) {
+  commit_({ USERS: prepUsers_(db) });
+}
+
+/** USERS as stored, refused (too_many_users) when it would not fit. */
+function prepUsers_(db) {
   const s = JSON.stringify(db);
   if (s.length > USERS_MAX_LEN) throw gccError_('too_many_users');
+  return s;
+}
+
+/** A JSON Script Property value, refused (the error `code`) when it would not fit. */
+function prep_(o, code) {
+  const s = JSON.stringify(o);
+  if (bytes_(s) > PROP_MAX_BYTES) throw gccError_(code);
+  return s;
+}
+
+/**
+ * Write Script Properties prepared with prep_ / prepUsers_ (caller holds the lock), then rewrite the
+ * cached directory once, so the change applies to the next request of every account. Returns them all.
+ */
+function commit_(vals) {
   const props = PropertiesService.getScriptProperties();
-  props.setProperty('USERS', s);
-  putCache_('AUTHC', JSON.stringify(dirOf_(db, props.getProperties())), AUTH_CACHE_S);
+  Object.keys(vals).forEach((k) => props.setProperty(k, vals[k]));
+  const p = props.getProperties();
+  putCache_('AUTHC', JSON.stringify(dirOf_(usersOf_(p), p)), AUTH_CACHE_S);
+  return p;
+}
+
+/** UTF-8 length of a string (what the Properties limit counts; a Thai character is 3 bytes). */
+function bytes_(s) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c < 0xdc00) {
+      n += 4; // a surrogate pair
+      i++;
+    } else n += 3;
+  }
+  return n;
+}
+
+/** A Script Property holding a JSON object; {} when missing or not an object. */
+function objProp_(s) {
+  try {
+    const o = JSON.parse(s || '{}');
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch (err) {
+    return {};
+  }
 }
 
 /** Creates the team id, the pk iteration count and the token secret if missing (caller holds the lock). */
@@ -772,8 +1047,9 @@ function sig_(P, sec) {
 }
 
 /**
- * The account a token belongs to: {u, name, role, mc, rm, exp, sv, sec}, or {err}. Role, name and the
- * active flag come from the directory, so a change applies on the account's next request.
+ * The account a token belongs to: {u, name, role, rid, rn, caps, rq?, req?, mc, rm, exp, sv, sec}, or
+ * {err}. Name, role, capabilities and the active flag come from the directory, so a change applies on
+ * the account's next request.
  */
 function actor_(A, tok) {
   try {
@@ -786,7 +1062,7 @@ function actor_(A, tok) {
     if (!x) return { err: 'session_expired' };
     if (x.on !== 1) return { err: 'account_disabled' };
     if (x.sv !== t.sv) return { err: 'session_expired' };
-    return { u: u, name: x.n, role: x.r, mc: !!x.mc, rm: !!t.rm, exp: Number(t.exp), sv: x.sv, sec: A.sec };
+    return Object.assign({ u: u, mc: !!x.mc, rm: !!t.rm, exp: Number(t.exp), sv: x.sv, sec: A.sec }, whoOf_(A, u));
   } catch (err) {
     return { err: 'session_expired' };
   }
@@ -795,7 +1071,7 @@ function actor_(A, tok) {
 /** The JSON reply; for an account it adds me, and renews a remembered token that has under 15 days left. */
 function reply_(actor, o) {
   if (actor && !actor.legacy) {
-    o.me = { u: actor.u, name: actor.name, role: actor.role };
+    o.me = meOf_(actor.u, actor);
     if (actor.rm && actor.exp - Date.now() < RENEW_BELOW_S * 1000) {
       const t = tok_(actor.sec, actor.u, actor.sv, true);
       o.tok = t.tok;
@@ -982,6 +1258,757 @@ function ownerCode_() {
     oc = null;
   }
   return oc && oc.h && Number(oc.exp) > Date.now() && (Number(oc.n) || 0) < CODE_MAX_TRIES ? oc : null;
+}
+
+// ------------------------------------------------------------------ capabilities and roles
+//
+// Script Properties (all JSON; read through the cached directory, written only under the lock, and every
+// write rewrites the cache):
+//   ROLES   {v:1, roles:{<id>:{n, d, c:{<cap>:1|'own'}, o, at, by}}}: custom roles, and the built-ins
+//           sales / viewer once an admin edited them (else their CAPS_ defaults). admin is always everything.
+//   GRANTS  {<u>:{r?:{id, until, by, at}, c?:[{k, s:'all'|'own', until?, by, at}]}}: a temporary role from an
+//           approved request (USERS keeps the account's own role) and extras for one account. until is a
+//           yyyy-mm-dd in the team's time zone and counts through that day; a lapsed entry grants nothing
+//           and is removed (with an audit row) on the next admin `users`.
+//   REQS    {<u>:{id, k:'role'|'caps', role?, caps?:[{k, s}], note, until?, at}}: one pending request per account.
+//   RESULTS {<u>:{ok, by, note, at, k, role?, caps?, until?}}: the decision the account has not hidden yet.
+
+/** The catalogue entry of a capability, or null. */
+function capDef_(id) {
+  for (let i = 0; i < CAPS_.length; i++) if (CAPS_[i].id === id) return CAPS_[i];
+  return null;
+}
+
+function builtinIx_(id) {
+  for (let i = 0; i < BUILTIN_ROLES.length; i++) if (BUILTIN_ROLES[i].id === id) return i;
+  return -1;
+}
+
+/** ROLES as stored: { v: 1, roles: {...} }. */
+function rolesOf_(p) {
+  const o = objProp_(p && p.ROLES);
+  const roles = o.roles && typeof o.roles === 'object' && !Array.isArray(o.roles) ? o.roles : {};
+  return { v: 1, roles: roles };
+}
+
+function roleExists_(roles, id) {
+  return typeof id === 'string' && id !== '' && (builtinIx_(id) >= 0 || !!own_(roles, id));
+}
+
+function roleName_(roles, id) {
+  const s = id === 'admin' ? null : own_(roles, id);
+  if (s && s.n) return String(s.n);
+  const i = builtinIx_(id);
+  return i >= 0 ? BUILTIN_ROLES[i].n : '';
+}
+
+/** A role's capabilities { <cap>: 1 | 'own' }: admin everything, a stored role its own, a built-in its
+ *  defaults, an unknown id nothing (default deny). set.users only ever with admin. */
+function roleCaps_(roles, id) {
+  const c = {};
+  if (id === 'admin') {
+    CAPS_.forEach((x) => (c[x.id] = 1));
+    return c;
+  }
+  const s = own_(roles, id);
+  const i = builtinIx_(id);
+  if (s && s.c && typeof s.c === 'object') {
+    CAPS_.forEach((x) => {
+      const v = s.c[x.id];
+      if (v && x.id !== 'set.users') c[x.id] = v === 'own' && x.scope ? 'own' : 1;
+    });
+  } else if (i >= 0) {
+    CAPS_.forEach((x) => x.d[i] && (c[x.id] = x.d[i]));
+  }
+  return dropUnmet_(c);
+}
+
+/** Drops every capability whose `needs` is missing, until none is left (pay.check → view.cash → view.money). */
+function dropUnmet_(c) {
+  for (let again = true; again; ) {
+    again = false;
+    CAPS_.forEach((x) => {
+      if (c[x.id] && x.needs && !c[x.needs]) {
+        delete c[x.id];
+        again = true;
+      }
+    });
+  }
+  return c;
+}
+
+/** Today in the team's time zone, yyyy-mm-dd. */
+function today_() {
+  return Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+}
+
+/** A role or an extra still in force: no end date, or one not past (`until` counts through that day). */
+function live_(until, today) {
+  return !until || String(until) >= today;
+}
+
+/**
+ * What account `u` may do: { rid, caps }. rid = a temporary role while it lasts, else its own role;
+ * caps = that role's capabilities plus the account's extras still in force (an extra limited to own
+ * work does not narrow what the role gives for all work), less any whose `needs` is missing.
+ */
+function capsOf_(A, u) {
+  const x = own_(A.u, u);
+  if (!x) return { rid: '', caps: {} };
+  const g = own_(A.grants || {}, u) || {};
+  const today = today_();
+  const tmp = g.r && g.r.id !== 'admin' && live_(g.r.until, today) && roleExists_(A.roles || {}, g.r.id) ? String(g.r.id) : '';
+  const rid = tmp || String(x.r);
+  const caps = roleCaps_(A.roles || {}, rid);
+  if (rid !== 'admin') {
+    (Array.isArray(g.c) ? g.c : []).forEach((e) => {
+      const def = e && capDef_(e.k);
+      if (!def || def.id === 'set.users' || !live_(e.until, today)) return;
+      if (caps[def.id] !== 1) caps[def.id] = e.s === 'own' && def.scope ? 'own' : 1;
+    });
+    dropUnmet_(caps);
+  }
+  return { rid: rid, caps: caps };
+}
+
+/** The role name builds before the capabilities know: admin with set.users, sales with any write, else viewer. */
+function legacyRole_(caps) {
+  return caps['set.users'] ? 'admin' : WRITE_CAPS_.some((c) => caps[c]) ? 'sales' : 'viewer';
+}
+
+/** Requests waiting for a decision (from active accounts). */
+function pendingCount_(A) {
+  const q = A.rqs || {};
+  return Object.keys(q).filter((u) => {
+    const x = own_(A.u, u);
+    return x && x.on === 1;
+  }).length;
+}
+
+/** What the directory says about account `u` for `me`: name, role, capabilities and its request. */
+function whoOf_(A, u) {
+  const x = own_(A.u || {}, u);
+  const r = capsOf_(A, u);
+  const out = { name: x ? x.n : '', role: legacyRole_(r.caps), rid: r.rid, rn: roleName_(A.roles || {}, r.rid), caps: r.caps };
+  if (r.caps['set.users']) out.rq = pendingCount_(A);
+  const q = own_(A.rqs || {}, u), s = own_(A.res || {}, u);
+  if (q) out.req = Object.assign({ st: 'p' }, q);
+  else if (s) out.req = Object.assign({ st: 'r' }, s);
+  return out;
+}
+
+/** `me` in a reply (see the protocol at the top). */
+function meOf_(u, w) {
+  const me = { u: u, name: w.name, role: w.role, rid: w.rid, rn: w.rn, caps: w.caps };
+  if (w.rq !== undefined) me.rq = w.rq;
+  if (w.req) me.req = w.req;
+  return me;
+}
+
+/** Every role for the admin pages: built-ins first (bi: 1), each with the capabilities it gives. */
+function rolesView_(roles) {
+  const out = {};
+  BUILTIN_ROLES.forEach((b, i) => {
+    const s = b.id === 'admin' ? null : own_(roles, b.id);
+    out[b.id] = Object.assign({ n: b.n, d: b.d, o: i }, s || {}, { c: roleCaps_(roles, b.id), bi: 1 });
+  });
+  Object.keys(roles).forEach((id) => {
+    if (builtinIx_(id) < 0 && roles[id] && typeof roles[id] === 'object') out[id] = Object.assign({}, roles[id], { c: roleCaps_(roles, id) });
+  });
+  return out;
+}
+
+// ---- which records a capability lets an account write (push_)
+
+/** The KEY_CAP entry for key `k`; scfg/<name> without a dot gets set.lists; anything else null (set.users). */
+function keyRule_(k) {
+  for (let i = 0; i < KEY_CAP.length; i++) if (k.indexOf(KEY_CAP[i].p) === 0) return KEY_CAP[i];
+  if (/^scfg\/[^.]*$/.test(k)) return { p: 'scfg/', w: 'set.lists', d: 'set.lists' };
+  return null;
+}
+
+/** What `caps` allow for key `k`: 0 = nothing, 1 = any record, or the rule that decides whether the
+ *  record is the account's own ('deal', 'resp', 'by') when the capability covers its own work only. */
+function keyAccess_(caps, k, del) {
+  const r = keyRule_(k);
+  const need = r ? (del ? r.d : r.w) : 'set.users';
+  if (!need) return 0;
+  const list = Array.isArray(need) ? need : [need];
+  let own = 0;
+  for (let i = 0; i < list.length; i++) {
+    const v = caps[list[i]];
+    if (v === 1) return 1;
+    if (v === 'own') own = (r && (del ? r.od : r.ow)) || 1;
+  }
+  return own;
+}
+
+/**
+ * The per-op check of push_ for an account: allowed(x) says whether its capabilities allow op x, and
+ * allowed.done(x, value) is called for each op stored, so later ops of the same push see it (a new deal,
+ * then its steps). "Own work" is decided on the sheet: a deal record is the account's when its resp
+ * (ผู้รับผิดชอบ) is the account's display name, a deal's steps, contacts and payments when that deal's
+ * is, and a log entry or contact when the account wrote its latest row. The sheet is read once, and only
+ * for a push that has such an op.
+ */
+function opGate_(list, caps, name) {
+  const deals = {}, keys = {};
+  list.forEach((x) => {
+    x.r = x.k && x.k.length <= 500 ? keyAccess_(caps, x.k, x.delR) : 0;
+    if (x.r === 'deal' || x.r === 'resp') deals[dealOf_(x.k)] = 1;
+    else if (x.r === 'by') keys[x.k] = 1;
+  });
+  const cur = latest_(deals, keys);
+  const allowed = (x) => {
+    if (x.r === 1 || !x.r) return x.r === 1;
+    if (x.r === 'by') return !has_(cur.by, x.k) || sameName_(cur.by[x.k], name);
+    const id = dealOf_(x.k);
+    const resp = has_(cur.resp, id) ? cur.resp[id] : null;
+    if (x.r === 'resp') return resp != null && sameName_(resp, name);
+    // 'deal': the deal itself, the account's both before and after this change
+    const v = x.op.v;
+    return (resp == null || sameName_(resp, name)) && !!v && typeof v === 'object' && sameName_(v.resp, name);
+  };
+  allowed.done = (x, val) => {
+    if (x.k.indexOf('deal/') === 0) cur.resp[x.k.slice(5)] = x.delR ? null : String((val && val.resp) || '');
+    if (has_(keys, x.k)) cur.by[x.k] = name;
+  };
+  return allowed;
+}
+
+/** The deal id in a deal record's key: deal/<id>, dstep/<id>/<stage>, dpay/<id>/<stage>, dact/<id>/<act>. */
+function dealOf_(k) {
+  return k.split('/')[1] || '';
+}
+
+/**
+ * From the latest row of each key: the resp of each deal id in `deals` (null when deleted) and the author
+ * of each key in `keys`. Reads the key, value, deleted and author columns once (caller holds the lock).
+ */
+function latest_(deals, keys) {
+  const out = { resp: {}, by: {} };
+  let left = Object.keys(deals).length + Object.keys(keys).length;
+  if (!left) return out;
+  const sh = sheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return out;
+  const vals = sh.getRange(2, 2, last - 1, 4).getValues();
+  for (let i = vals.length - 1; i >= 0 && left > 0; i--) {
+    const k = String(vals[i][0]);
+    if (k.indexOf('deal/') === 0 && has_(deals, k.slice(5)) && !has_(out.resp, k.slice(5))) {
+      let v = null;
+      if (!(vals[i][2] === 1 || vals[i][2] === true || vals[i][2] === '1') && vals[i][1] !== '') {
+        try {
+          v = JSON.parse(vals[i][1]);
+        } catch (err) {
+          v = null;
+        }
+      }
+      out.resp[k.slice(5)] = v && typeof v === 'object' ? String(v.resp || '') : null;
+      left--;
+    }
+    if (has_(keys, k) && !has_(out.by, k)) {
+      out.by[k] = String(vals[i][3] || '');
+      left--;
+    }
+  }
+  return out;
+}
+
+/** Two display names are the same person: compared as names are typed (spaces, case, NFC); '' never matches. */
+function sameName_(a, b) {
+  const n = (s) => String(s == null ? '' : s).normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+  return n(a) !== '' && n(a) === n(b);
+}
+
+function has_(o, k) {
+  return Object.prototype.hasOwnProperty.call(o, k);
+}
+
+// ---- what a capability lets an account read (pull_)
+
+// money in text the web app writes itself (a stage note "ใบเสนอราคา QT-1 · 350,000 บาท", the deal history
+// "รับชำระ PAY1" / "2 งวด · 53,500 + 53,500"): an amount before บาท, and any number with thousands separators
+const MONEY_TEXT_RE = /\d[\d,]*(?:\.\d+)?\s*บาท/g;
+const MONEY_NUM_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?/g;
+// the fields that hold money, and the text fields that may mention it, by key prefix
+const MONEY_FIELDS = { 'deal/': ['forecast', 'actual'], 'ddoc/': ['amount', 'detected'], 'dpay/': ['amt', 'pct', 'got', 'fullAt'], 'jqm/': ['share', 'pct'], 'dchk/': ['amt'], 'mclose/': ['amt'] };
+const MONEY_NOTES = { 'dstep/': ['n'], 'dlog/': ['detail'], 'dchk/': ['note'] };
+
+function unmoney_(s) {
+  return typeof s === 'string' ? s.replace(MONEY_TEXT_RE, '…').replace(MONEY_NUM_RE, '…') : s;
+}
+
+/**
+ * A pulled row as an account without view.money / view.comm may see it. Without view.money the money
+ * fields are null and amounts in the app's own notes are "…"; without view.comm a revenue split
+ * (dshare/) comes as a deletion and a unit (scfg/unit.*) without its rates. The row keeps its seq.
+ * Text people typed themselves ("ราคา 350000") is theirs and stays.
+ */
+function redact_(row, caps) {
+  const k = row.k;
+  if (!caps['view.comm'] && k.indexOf('dshare/') === 0) return Object.assign({}, row, { v: null, del: true });
+  const v = row.v;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return row;
+  let o = null;
+  const edit = () => o || (o = Object.assign({}, v));
+  if (!caps['view.comm'] && k.indexOf('scfg/unit.') === 0 && has_(v, 'rates')) delete edit().rates;
+  if (!caps['view.money']) {
+    const p = k.slice(0, k.indexOf('/') + 1);
+    (MONEY_FIELDS[p] || []).forEach((f) => has_(v, f) && v[f] != null && (edit()[f] = null));
+    (MONEY_NOTES[p] || []).forEach((f) => typeof v[f] === 'string' && (edit()[f] = unmoney_(v[f])));
+    if (p === 'ddoc/' && v.auto && typeof v.auto === 'object' && typeof v.auto.n === 'string') edit().auto = Object.assign({}, v.auto, { n: unmoney_(v.auto.n) });
+  }
+  return o ? Object.assign({}, row, { v: o }) : row;
+}
+
+// ---- requests (any account) and their decision (set.users)
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** An end date: '' for none, the date when it is a real yyyy-mm-dd not before today, else null. */
+function untilOf_(v) {
+  if (v == null || v === '') return '';
+  const s = String(v);
+  if (!DATE_RE.test(s)) return null;
+  const d = new Date(s + 'T00:00:00Z');
+  if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) return null;
+  return s >= today_() ? s : null;
+}
+
+/** A note: trimmed, '' when empty, null when longer than NOTE_MAX characters. */
+function noteOf_(v) {
+  const s = String(v == null ? '' : v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim();
+  return Array.from(s).length > NOTE_MAX ? null : s;
+}
+
+/** Capabilities asked for or given: [{ k, s, until? }] in catalogue order, or { err }. Never set.users. */
+function capList_(list, withUntil) {
+  if (!Array.isArray(list) || !list.length || list.length > CAPS_.length) return { err: 'bad_cap' };
+  const out = {};
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i] || {};
+    const def = capDef_(typeof e === 'string' ? e : e.k);
+    if (!def || def.id === 'set.users') return { err: 'bad_cap' };
+    const c = { k: def.id, s: e.s === 'own' && def.scope ? 'own' : 'all' };
+    if (withUntil) {
+      const until = untilOf_(e.until);
+      if (until === null) return { err: 'bad_until' };
+      if (until) c.until = until;
+    }
+    out[def.id] = c;
+  }
+  return CAPS_.filter((x) => out[x.id]).map((x) => out[x.id]);
+}
+
+/** Already held: for all work, or for own work when only that is asked. */
+function held_(caps, c) {
+  return caps[c.k] === 1 || (caps[c.k] === 'own' && c.s === 'own');
+}
+
+/** The list plus whatever its capabilities need and `have` lacks (asked for all work, with the same end date). */
+function withNeeds_(list, have) {
+  const out = list.slice();
+  const add = (c) => {
+    let n = capDef_(c.k).needs;
+    while (n && !have[n] && !out.some((x) => x.k === n)) {
+      const e = { k: n, s: 'all' };
+      if (c.until) e.until = c.until;
+      out.push(e);
+      n = capDef_(n).needs;
+    }
+  };
+  list.forEach(add);
+  return CAPS_.map((x) => out.filter((c) => c.k === x.id)[0]).filter(Boolean);
+}
+
+function reqDetail_(rec) {
+  const d = { k: rec.k };
+  if (rec.role) d.role = rec.role;
+  if (rec.caps) d.caps = rec.caps;
+  if (rec.until) d.until = rec.until;
+  return d;
+}
+
+/**
+ * Any account but an admin: ask for another role, or for capabilities, with a reason and an optional end
+ * date. It replaces the account's earlier request and hides its last result. Never admin or set.users.
+ */
+function reqSend_(req, actor) {
+  if (actor.caps['set.users']) return { ok: false, error: 'forbidden' }; // an admin already has everything
+  const note = noteOf_(req.note);
+  if (!note) return { ok: false, error: 'req_note' };
+  const until = untilOf_(req.until);
+  if (until === null) return { ok: false, error: 'bad_until' };
+  if (req.k !== 'role' && req.k !== 'caps') return { ok: false, error: 'bad_req' };
+  const r = withLock_(() => {
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const A = dirOf_(usersOf_(p), p);
+    const w = capsOf_(A, actor.u);
+    const rec = { id: Utilities.getUuid().replace(/-/g, '').slice(0, 12), k: req.k };
+    if (req.k === 'role') {
+      const role = String(req.role == null ? '' : req.role);
+      if (role === 'admin') return { err: 'role_locked' }; // made only by an admin, on the accounts page
+      if (!roleExists_(A.roles, role)) return { err: 'bad_role' };
+      if (role === w.rid) return { err: 'cap_held' };
+      rec.role = role;
+    } else {
+      const caps = capList_(req.caps, false);
+      if (caps.err) return caps;
+      if (caps.some((c) => held_(w.caps, c))) return { err: 'cap_held' };
+      rec.caps = withNeeds_(caps, w.caps);
+    }
+    rec.note = note;
+    if (until) rec.until = until;
+    rec.at = new Date().toISOString();
+    A.rqs[actor.u] = rec;
+    const vals = { REQS: prep_(A.rqs, 'too_many_reqs') };
+    if (own_(A.res, actor.u)) {
+      delete A.res[actor.u];
+      vals.RESULTS = JSON.stringify(A.res);
+    }
+    commit_(vals);
+    audit_([[actor.name, actor.u, 'req_send', reqDetail_(rec), note]]);
+    return {};
+  });
+  return r.err ? { ok: false, error: r.err } : { ok: true };
+}
+
+/** The requester withdraws its request (REQS) or hides its result (RESULTS); nothing there is fine too. */
+function reqDrop_(actor, name) {
+  withLock_(() => {
+    const o = objProp_(PropertiesService.getScriptProperties().getProperty(name));
+    const rec = own_(o, actor.u);
+    if (!rec) return;
+    delete o[actor.u];
+    commit_({ [name]: JSON.stringify(o) });
+    if (name === 'REQS') audit_([[actor.name, actor.u, 'req_cancel', reqDetail_(rec), '']]);
+  });
+  return { ok: true };
+}
+
+/**
+ * set.users: approve or refuse account u's request (never one's own). A role without an end date becomes
+ * the account's role; with one, a temporary role. Capabilities become extras of that account. The
+ * account sees the result in me.req until it hides it. `id` (optional) must still be the request shown.
+ */
+function reqDecide_(req, actor) {
+  const u = normUser_(req.u);
+  if (u === actor.u) return { ok: false, error: 'not_self' };
+  const yes = req.ok === true || req.ok === 1;
+  const note = noteOf_(req.note);
+  if (note === null) return { ok: false, error: 'req_note' };
+  return withLock_(() => {
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const db = usersOf_(p);
+    const A = dirOf_(db, p);
+    const rec = own_(A.rqs, u);
+    if (!rec) return { ok: false, error: 'no_request' };
+    if (req.id != null && req.id !== rec.id) return { ok: false, error: 'changed' };
+    const x = own_(db.users, u);
+    if (!x) return { ok: false, error: 'unknown_user' };
+    const now = new Date().toISOString();
+    const out = Object.assign({ ok: yes, by: actor.name, note: note, at: now }, reqDetail_(rec));
+    const vals = {};
+    if (yes) {
+      const g = grantOf_(A.grants, u);
+      if (rec.k === 'role') {
+        if (rec.role === 'admin' || !roleExists_(A.roles, rec.role)) return { ok: false, error: 'bad_role' };
+        if (rec.until) g.r = { id: rec.role, until: rec.until, by: actor.name, at: now };
+        else {
+          if (x.r === 'admin' && x.on === 1 && activeAdmins_(db) <= 1) return { ok: false, error: 'last_admin' };
+          x.r = rec.role;
+          delete g.r;
+          vals.USERS = prepUsers_(db);
+        }
+      } else {
+        g.c = mergeCaps_(g.c, (rec.caps || []).map((c) => extra_(c, rec.until, actor.name, now)));
+      }
+      setGrant_(A.grants, u, g);
+      vals.GRANTS = prep_(A.grants, 'too_many_grants');
+    }
+    delete A.rqs[u];
+    A.res[u] = out;
+    vals.REQS = JSON.stringify(A.rqs); // only smaller
+    vals.RESULTS = fitResults_(A.res);
+    const q = commit_(vals);
+    audit_([[actor.name, u, yes ? 'req_ok' : 'req_no', reqDetail_(rec), note]]);
+    return view_(q);
+  });
+}
+
+/** RESULTS as stored; the oldest results nobody hid yet give way when it would not fit. */
+function fitResults_(res) {
+  let s = JSON.stringify(res);
+  while (bytes_(s) > PROP_MAX_BYTES && Object.keys(res).length > 1) {
+    const old = Object.keys(res).sort((a, b) => String(res[a].at).localeCompare(String(res[b].at)))[0];
+    delete res[old];
+    s = JSON.stringify(res);
+  }
+  return s;
+}
+
+/** What the admin pages show after a change: every role, the extras and the waiting requests. */
+function view_(p) {
+  return { ok: true, roles: rolesView_(rolesOf_(p).roles), grants: objProp_(p.GRANTS), reqs: objProp_(p.REQS) };
+}
+
+// ---- roles (set.users)
+
+/** A role name: whitespace collapsed, 1-30 characters, no control characters; '' when not valid. */
+function cleanRoleName_(s) {
+  const n = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const len = Array.from(n).length;
+  return len >= 1 && len <= 30 && !/[\u0000-\u001f\u007f]/.test(n) ? n : '';
+}
+
+/** A role's capabilities as sent: { <cap>: 1 | 'own' | 'all' | true }, or { err }. Never set.users. */
+function capMap_(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return { err: 'bad_cap' };
+  const out = {};
+  const ids = Object.keys(c);
+  for (let i = 0; i < ids.length; i++) {
+    const v = c[ids[i]];
+    if (!v) continue;
+    const def = capDef_(ids[i]);
+    if (!def || def.id === 'set.users') return { err: 'bad_cap' };
+    out[def.id] = v === 'own' && def.scope ? 'own' : 1;
+  }
+  return { c: out };
+}
+
+/**
+ * Create a role (no id; at most MAX_ROLES with the built-ins) or change one: name (unique), description,
+ * capabilities (`c`, or copied `from` another role) and order. admin can't be changed. A capability whose
+ * `needs` is missing is left out. The change applies to every account of the role on its next request.
+ */
+function roleSave_(req, actor) {
+  const id = req.id == null || req.id === '' ? '' : String(req.id);
+  if (id === 'admin') return { ok: false, error: 'role_locked' };
+  return withLock_(() => {
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const R = rolesOf_(p);
+    const all = rolesView_(R.roles);
+    if (id && !roleExists_(R.roles, id)) return { ok: false, error: 'bad_role' };
+    if (!id && Object.keys(all).length >= MAX_ROLES) return { ok: false, error: 'too_many_roles' };
+    const old = id ? all[id] : null;
+    const n = req.n == null && old ? old.n : cleanRoleName_(req.n);
+    if (!n) return { ok: false, error: 'bad_name' };
+    if (Object.keys(all).some((k) => k !== id && String(all[k].n).toLowerCase() === n.toLowerCase())) return { ok: false, error: 'name_taken' };
+    const d = req.d == null ? (old ? String(old.d || '') : '') : Array.from(String(req.d).replace(/\s+/g, ' ').trim()).slice(0, 120).join('');
+    let c;
+    if (req.c != null) {
+      const m = capMap_(req.c);
+      if (m.err) return { ok: false, error: m.err };
+      c = m.c;
+    } else if (req.from != null && req.from !== '') {
+      if (!roleExists_(R.roles, String(req.from))) return { ok: false, error: 'bad_role' };
+      c = roleCaps_(R.roles, String(req.from));
+      delete c['set.users'];
+    } else c = old ? old.c : {};
+    dropUnmet_(c);
+    let rid = id;
+    while (!rid || (!id && (all[rid] || builtinIx_(rid) >= 0))) rid = 'r' + Utilities.getUuid().replace(/-/g, '').slice(0, 6);
+    const os = Object.keys(all).map((k) => Number(all[k].o) || 0);
+    const o = req.o != null && isFinite(Number(req.o)) ? Number(req.o) : old ? Number(old.o) || 0 : Math.max.apply(null, os.concat([0])) + 1;
+    const before = old ? old.c : {};
+    R.roles[rid] = { n: n, d: d, c: c, o: o, at: new Date().toISOString(), by: actor.name };
+    const q = commit_({ ROLES: prep_(R, 'too_many_roles') });
+    const add = Object.keys(c).filter((k) => before[k] !== c[k]).map((k) => (c[k] === 'own' ? k + ':own' : k));
+    const del = Object.keys(before).filter((k) => !c[k]);
+    audit_([[actor.name, '', 'role_save', { id: rid, n: n, add: add, del: del, new: !old }, '']]);
+    return Object.assign(view_(q), { id: rid });
+  });
+}
+
+/** Delete a custom role (never a built-in). Its accounts and temporary roles move to `to` in the same write. */
+function roleDel_(req, actor) {
+  const id = String(req.id == null ? '' : req.id);
+  if (builtinIx_(id) >= 0) return { ok: false, error: 'role_locked' };
+  return withLock_(() => {
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const R = rolesOf_(p);
+    if (!own_(R.roles, id)) return { ok: false, error: 'bad_role' };
+    const db = usersOf_(p);
+    const grants = objProp_(p.GRANTS);
+    const members = Object.keys(db.users).filter((u) => db.users[u].r === id);
+    const temp = Object.keys(grants).filter((u) => grants[u] && grants[u].r && grants[u].r.id === id);
+    const to = req.to == null ? '' : String(req.to);
+    if (members.length || temp.length) {
+      if (!to) return { ok: false, error: 'role_in_use' };
+      if (to === id || to === 'admin' || !roleExists_(R.roles, to)) return { ok: false, error: 'bad_role' };
+    }
+    members.forEach((u) => (db.users[u].r = to));
+    temp.forEach((u) => (grants[u].r = Object.assign({}, grants[u].r, { id: to })));
+    const n = R.roles[id].n;
+    delete R.roles[id];
+    const vals = { ROLES: JSON.stringify(R) };
+    if (members.length) vals.USERS = prepUsers_(db);
+    if (temp.length) vals.GRANTS = JSON.stringify(grants);
+    const q = commit_(vals);
+    audit_([[actor.name, '', 'role_del', { id: id, n: n, to: to, users: members.concat(temp) }, '']]);
+    return view_(q);
+  });
+}
+
+// ---- extras for one account (set.users)
+
+/** GRANTS[u] as a copy to change: { r?, c: [] }. */
+function grantOf_(grants, u) {
+  const g = own_(grants, u) || {};
+  const out = { c: Array.isArray(g.c) ? g.c.slice() : [] };
+  if (g.r) out.r = g.r;
+  return out;
+}
+
+/** Store GRANTS[u], or drop it when it holds nothing. */
+function setGrant_(grants, u, g) {
+  const o = {};
+  if (g.r) o.r = g.r;
+  if (g.c && g.c.length) o.c = g.c;
+  if (o.r || o.c) grants[u] = o;
+  else delete grants[u];
+}
+
+function extra_(c, until, by, at) {
+  const e = { k: c.k, s: c.s === 'own' ? 'own' : 'all' };
+  if (c.until || until) e.until = c.until || until;
+  e.by = by;
+  e.at = at;
+  return e;
+}
+
+/** Extras, each capability once (the newer one wins), in catalogue order. */
+function mergeCaps_(old, add) {
+  const keep = (Array.isArray(old) ? old : []).filter((e) => e && !add.some((a) => a.k === e.k));
+  const all = keep.concat(add);
+  return CAPS_.map((x) => all.filter((e) => e.k === x.id)[0]).filter(Boolean);
+}
+
+/** Lapsed entries of GRANTS: [{ u, k, until, id? }] (k = 'role' for a temporary role). */
+function expired_(grants, today) {
+  const out = [];
+  Object.keys(grants).forEach((u) => {
+    const g = grants[u] || {};
+    if (g.r && !live_(g.r.until, today)) out.push({ u: u, k: 'role', id: g.r.id, until: g.r.until });
+    (Array.isArray(g.c) ? g.c : []).forEach((e) => e && !live_(e.until, today) && out.push({ u: u, k: e.k, until: e.until }));
+  });
+  return out;
+}
+
+/**
+ * Give account u extra capabilities (never oneself, never set.users): [{ k, s?, until? }]. One the
+ * account's role already gives is refused (cap_held); what they need is added. An extra given again
+ * replaces the earlier one (scope, end date).
+ */
+function grantSave_(req, actor) {
+  const u = normUser_(req.u);
+  if (u === actor.u) return { ok: false, error: 'not_self' };
+  const list = capList_(req.c, true);
+  if (list.err) return { ok: false, error: list.err };
+  return withLock_(() => {
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const A = dirOf_(usersOf_(p), p);
+    if (!own_(A.u, u)) return { ok: false, error: 'unknown_user' };
+    const rid = capsOf_(A, u).rid;
+    const base = roleCaps_(A.roles, rid);
+    if (rid === 'admin' || list.some((c) => held_(base, c))) return { ok: false, error: 'cap_held' };
+    const now = new Date().toISOString();
+    const add = withNeeds_(list, base).map((c) => extra_(c, '', actor.name, now));
+    const g = grantOf_(A.grants, u);
+    g.c = mergeCaps_(g.c, add);
+    setGrant_(A.grants, u, g);
+    const q = commit_({ GRANTS: prep_(A.grants, 'too_many_grants') });
+    audit_([[actor.name, u, 'grant_save', { caps: add.map((e) => ({ k: e.k, s: e.s, until: e.until || '' })) }, '']]);
+    return view_(q);
+  });
+}
+
+/** Remove one extra of account u (k = a capability, or 'role' for a temporary role). */
+function grantDel_(req, actor) {
+  const u = normUser_(req.u);
+  if (u === actor.u) return { ok: false, error: 'not_self' };
+  const k = String(req.k == null ? '' : req.k);
+  return withLock_(() => {
+    const p = PropertiesService.getScriptProperties().getProperties();
+    const grants = objProp_(p.GRANTS);
+    const g = grantOf_(grants, u);
+    const had = k === 'role' ? g.r : g.c.filter((e) => e.k === k)[0];
+    if (!had) return view_(p);
+    if (k === 'role') delete g.r;
+    else g.c = g.c.filter((e) => e.k !== k);
+    setGrant_(grants, u, g);
+    const q = commit_({ GRANTS: JSON.stringify(grants) }); // only smaller
+    audit_([[actor.name, u, 'grant_del', k === 'role' ? { role: had.id } : { k: k }, '']]);
+    return view_(q);
+  });
+}
+
+// ---- the audit tab (same spreadsheet, never pulled)
+
+/** The "audit" sheet; created with its header on first use. */
+function auditSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(AUDIT_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(AUDIT_SHEET);
+    if (sh.getMaxColumns() > AUDIT_HEADER.length) sh.deleteColumns(AUDIT_HEADER.length + 1, sh.getMaxColumns() - AUDIT_HEADER.length);
+    sh.getRange(1, 1, 1, AUDIT_HEADER.length).setValues([AUDIT_HEADER]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+/** Append audit rows [actor, u, action, detail, note] (caller holds the lock). */
+function audit_(list) {
+  if (!list.length) return;
+  const sh = auditSheet_();
+  const now = new Date().toISOString();
+  const start = sh.getLastRow() + 1;
+  const need = start + list.length - 1 - sh.getMaxRows();
+  if (need > 0) sh.insertRowsAfter(sh.getMaxRows(), need);
+  const rng = sh.getRange(start, 1, list.length, AUDIT_HEADER.length);
+  rng.setNumberFormat('@');
+  rng.setValues(list.map((x) => [now, String(x[0] || '').slice(0, 100), String(x[1] || ''), x[2], JSON.stringify(x[3] || {}), String(x[4] || '')]));
+}
+
+/** Whether the oldest audit row is older than a year (one cell read). */
+function auditOld_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(AUDIT_SHEET);
+  if (!sh || sh.getLastRow() < 2) return false;
+  return String(sh.getRange(2, 1).getValue()) < new Date(Date.now() - AUDIT_KEEP_MS).toISOString();
+}
+
+/** Drops audit rows older than a year (caller holds the lock); rows are in time order. */
+function trimAudit_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(AUDIT_SHEET);
+  if (!sh || sh.getLastRow() < 2) return;
+  const cut = new Date(Date.now() - AUDIT_KEEP_MS).toISOString();
+  const at = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  let n = 0;
+  while (n < at.length && String(at[n][0]) < cut) n++;
+  if (n) sh.deleteRows(2, n);
+}
+
+/** The last `n` audit rows, newest first. */
+function auditTail_(n) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(AUDIT_SHEET);
+  const last = sh ? sh.getLastRow() : 0;
+  if (last < 2) return [];
+  const from = Math.max(2, last - n + 1);
+  return sh
+    .getRange(from, 1, last - from + 1, AUDIT_HEADER.length)
+    .getValues()
+    .reverse()
+    .map((r) => {
+      let detail = {};
+      try {
+        detail = JSON.parse(r[4] || '{}');
+      } catch (err) {
+        detail = {};
+      }
+      return { at: String(r[0]), actor: String(r[1]), u: String(r[2]), action: String(r[3]), detail: detail, note: String(r[5]) };
+    });
 }
 
 // ------------------------------------------------------------------ attached documents (Google Drive)
