@@ -6,12 +6,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  cashKpis, cashLines, cashRecon, cashTotal, cashYear, cashYears, emptySales, filterDeals, jointRole, newDeal, owedIn, payDue, payMatch, quarterOf, receivables, receivedIn, receivedOf,
+  cashKpis, cashLines, cashRecon, cashTotal, cashYear, cashYears, emptySales, filterDeals, jointRole, newDeal, normSalesFilter, owedIn, payDue, payMatch, quarterOf, receivables, receivedIn, receivedOf,
   type Deal, type DealDoc, type PayLine, type SalesState,
 } from './sales';
-import { cashCsv, cashLensOf, cashRows, compactBaht, crossYearTag, instSub, instText, instWords, lensSum, lensWhere, moneyTicks, payIn, splitExample, statusWord, yearMoneyLabel, yearSplit } from './cashUi';
+import { cashCardWords, cashCsv, cashLensOf, cashRows, compactBaht, crossYearTag, instSub, instText, instWords, lensSum, lensWhere, moneyTicks, monthYearTh, payIn, payMonthCounts, splitExample, statusWord, yearMoneyLabel, yearSplit } from './cashUi';
+import { monthEnd } from './dateRange';
 import { searchHelp } from './helpContent';
-import { yearOptions } from './salesUi';
+import { liveCount, monthCounts, trackerFields, yearOptions } from './salesUi';
 
 const T = '2026-10-12';
 const L = (p: Partial<PayLine> = {}): PayLine => ({ amt: null, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', rcv: '', got: null, full: false, fullAt: null, add: false, at: '', by: '', ...p });
@@ -240,6 +241,13 @@ describe('the money lens and the การรับเงิน filter', () => {
     // 2570: the 2569 deal's installment
     expect(ids({ year: '2570', pay: 'owed' })).toEqual(['dep2']);
   });
+  it('in the lens the filters offer the jobs it shows: 2570 has the 2569 job of คุณบี', () => {
+    const F = normSalesFilter({ year: '2570', money: 'cash' });
+    const shown = filterDeals(s, F, T);
+    const resp = trackerFields(s, F, { yearDeals: shown, job: 'open', me: '', today: T }).find((f) => f.key === 'resp')!;
+    expect(resp.options.map((o) => [o.v, o.n])).toContainEqual(['คุณบี', 1]);
+    expect(liveCount(s, F, 'resp', { v: ['คุณบี'] }, 'open', T)).toBe(1);
+  });
   it('the filter shape keeps only what it knows', () => {
     const f = (x: unknown) => filterDeals(s, { year: '2569', ...(x as object) }, T).length;
     expect(f({ pay: 'bogus', money: 'x' })).toBe(filterDeals(s, { year: '2569' }, T).length);
@@ -254,21 +262,60 @@ describe('the table lens and the Dashboard money', () => {
     const d = s.deals.dep2;
     expect(lensSum(L, [d])).toEqual({ fc: 159000, ac: 0 });
     expect(['PAY1', 'PAY2', 'PAY3'].map((p) => lensWhere(L, d, p))).toEqual([
-      { inYear: false, text: 'อยู่ปี 2569' },
-      { inYear: false, text: 'อยู่ปี 2569' },
-      { inYear: true, text: 'นับในปี 2570' },
+      { inYear: false, text: 'อยู่ปี 2569', amt: 212000 },
+      { inYear: false, text: 'อยู่ปี 2569', amt: 159000 },
+      { inYear: true, text: 'นับในปี 2570', amt: 159000 },
     ]);
     expect(L.K).toMatchObject({ total: 159000, owed: 159000, from: { '2569': 1 } });
     // a stage with no money line (a deal without a plan) says nothing
-    expect(lensWhere(L, s.deals.c2, 'PAY1')).toEqual({ inYear: false, text: '' });
+    expect(lensWhere(L, s.deals.c2, 'PAY1')).toEqual({ inYear: false, text: '', amt: 0 });
   });
-  it('a date range narrows the counted installments; the cards are the year\'s', () => {
-    const L = cashLensOf(s, deals, '2569', { from: '2026-10-01', to: '2026-12-31' }, T);
+  it('a date range narrows the counted installments, and the cards count the same money and say so', () => {
+    const q4 = { from: '2026-10-01', to: '2026-12-31' };
+    const L = cashLensOf(s, deals, '2569', q4, T);
     expect(lensSum(L, deals)).toEqual({ fc: 1041500, ac: 305000 });
     expect(lensSum(L, [s.deals.c1])).toEqual({ fc: 0, ac: 0 });
+    // the cards are Q4's (not the year's 1,483,500 / 747,000), the sum of the money cells
+    expect(L.K).toMatchObject({ total: 1041500, got: 305000, owed: 736500, late: 80250, dueMonth: 156000, n: 9 });
+    expect(L.K.total).toBe(lensSum(L, deals).fc);
+    expect(L.K.total).toBe(cashTotal(cashYear(all(s), '2569').quarters[3]));
     // undated money stays in its bucket whatever the range
     expect(L.K.undated).toBe(125000);
-    expect(lensSum(cashLensOf(s, deals, '2569', null, T), deals).fc).toBe(cashTotal(cashYear(all(s), '2569').totals));
+    const Y = cashLensOf(s, deals, '2569', null, T);
+    expect(lensSum(Y, deals).fc).toBe(cashTotal(cashYear(all(s), '2569').totals));
+    expect(Y.K).toMatchObject({ total: 1483500, got: 747000 });
+    // the words: the year's cards, or the range's named like the deal lens's hero
+    expect(cashCardWords('2569')).toMatchObject({ hero: 'เงินเข้าทั้งปี · 2569', heroR: '', owed: 'ค้างรับในปีนี้', scope: 'ในปีนี้' });
+    const w = cashCardWords('2569', { basis: 'contact', r: q4 });
+    expect(w).toMatchObject({ hero: 'เงินเข้า · ติดต่อ', heroR: 'ต.ค. – ธ.ค.', owed: 'ค้างรับในช่วงนี้', scope: 'ในช่วงนี้', undated: 'ไม่อยู่ในยอดช่วงนี้' });
+    expect(w.heroTitle).toContain('ต.ค. – ธ.ค. 2569');
+    expect(Object.values(w).join(' ')).not.toMatch(/ทั้งปี|ในปีนี้/);
+    // the payment rows: counted in the range, outside it in the year, or in another year
+    expect(lensWhere(L, s.deals.dep2, 'PAY1')).toEqual({ inYear: true, text: 'นับในช่วงนี้', amt: 212000 });
+    expect(lensWhere(L, s.deals.dep2, 'PAY3')).toEqual({ inYear: false, text: 'อยู่ปี 2570', amt: 159000 });
+    expect(lensWhere(L, s.deals.c1, 'PAY1')).toEqual({ inYear: false, text: 'อยู่นอกช่วงที่เลือก', amt: 120000 });
+  });
+  it('a part-paid installment across the year end: each year counts its own part, the row and the tag say so', () => {
+    // งวด 1 of 100,000 due 15 ม.ค. 2570, 40,000 of it received on 1 ต.ค. 2569; งวด 2 in 2570
+    const w = world({ x: { d: { forecast: 150000 }, steps: YES('2026-09-01'), pays: { PAY1: { amt: 100000, due: '2027-01-15', rcv: '2026-10-01', got: 40000 }, PAY2: { amt: 50000, due: '2027-03-01' } } } });
+    const xs = w.deals.x, lines = cashLines(w, [xs], T);
+    expect(lines.map((l) => [l.stage, l.kind, l.amt, l.date])).toEqual([['PAY1', 'got', 40000, '2026-10-01'], ['PAY1', 'owed', 60000, '2027-01-15'], ['PAY2', 'owed', 50000, '2027-03-01']]);
+    const L69 = cashLensOf(w, [xs], '2569', null, T), L70 = cashLensOf(w, [xs], '2570', null, T), L71 = cashLensOf(w, [xs], '2571', null, T);
+    // the row's amount is the part in the year, as the deal's money cell counts it
+    expect(lensWhere(L69, xs, 'PAY1')).toEqual({ inYear: true, text: 'นับในปี 2569 · อีกส่วนอยู่ปี 2570', amt: 40000 });
+    expect(lensSum(L69, [xs])).toEqual({ fc: 40000, ac: 40000 });
+    expect(lensWhere(L70, xs, 'PAY1')).toEqual({ inYear: true, text: 'นับในปี 2570 · อีกส่วนอยู่ปี 2569', amt: 60000 });
+    expect(lensSum(L70, [xs])).toEqual({ fc: 110000, ac: 0 });
+    expect(lensWhere(L70, xs, 'PAY2')).toEqual({ inYear: true, text: 'นับในปี 2570', amt: 50000 });
+    expect(lensWhere(L71, xs, 'PAY1')).toEqual({ inYear: false, text: 'อยู่ปี 2569, 2570', amt: 100000 });
+    // the cross-year tag says the installment is split, not that it is all in the other year
+    expect(crossYearTag(lines, '2569')).toBe('ข้ามปี: งวด 2 และบางส่วนของงวด 1 อยู่ปี 2570');
+    expect(crossYearTag(lines, '2570')).toBe('ข้ามปี: บางส่วนของงวด 1 อยู่ปี 2569');
+    expect(crossYearTag(lines.slice(0, 2), '2569')).toBe('ข้ามปี: บางส่วนของงวด 1 อยู่ปี 2570');
+  });
+  it('the lens popover\'s example names the last installment\'s month (no day)', () => {
+    const ex = splitExample(all(s))!;
+    expect(monthYearTh(ex.last)).toBe('ก.พ. 2570');
   });
   it('การรับเงิน in a range: received on its day, owed and late on the due date, undated in none', () => {
     const lines = all(s), y = { from: '2026-01-01', to: '2026-12-31' }, q3 = { from: '2026-07-01', to: '2026-09-30' };
@@ -280,6 +327,27 @@ describe('the table lens and the Dashboard money', () => {
     const Y = cashYear(lines, '2569');
     expect([0, 1, 2, 3].map((q) => payIn(lines, 'got', { from: `2026-${String(q * 3 + 1).padStart(2, '0')}-01`, to: ['2026-03-31', '2026-06-30', '2026-09-30', '2026-12-31'][q] }).amt)).toEqual(Y.quarters.map((x) => x.got));
     expect(payIn(lines, 'owed', { from: '2027-01-01', to: '2027-12-31' }).amt).toBe(159000);
+  });
+  it('the date popover\'s months under การรับเงิน count the money\'s own dates, as the filter does (พฤกษา in ก.ย.)', () => {
+    // the Dashboard's money deals: every deal of the filters, any deal year with money in this one
+    const F = { year: '2569' };
+    const lines = cashLines(s, filterDeals(s, { ...F, money: 'cash' }, T), T);
+    const got = payMonthCounts(lines, 'got', 2026);
+    // ก.ย.: only แสนสิริ (19 ก.ย.); พฤกษา's PAY1 stage is dated 25 ก.ย. but its money came in on 5 ต.ค.
+    expect(got[8]).toBe(1);
+    expect(got[9]).toBe(2);
+    // the stage dates (the popover without การรับเงิน) count พฤกษา in ก.ย.
+    expect(monthCounts(s, F, 'paid', 2026, '', T)[8]).toBe(2);
+    // each month equals what picking it gives: the footer's count and the rows
+    const month = (m: number) => {
+      const from = `2026-${String(m + 1).padStart(2, '0')}-01`;
+      return { basis: 'paid' as const, preset: 'custom' as const, from, to: monthEnd(from) };
+    };
+    for (const m of [3, 5, 7, 8, 9]) expect(liveCount(s, { ...F, pay: 'got' }, 'date', month(m), '', T)).toBe(got[m]);
+    expect(payMonthCounts(lines, 'owed', 2026)[9]).toBe(liveCount(s, { ...F, pay: 'owed' }, 'date', { ...month(9), basis: 'due' }, '', T));
+    expect(payMonthCounts(lines, 'late', 2026)[9]).toBe(1);
+    // the next year: the 2569 deal's installment
+    expect(payMonthCounts(lines, 'owed', 2027)[1]).toBe(1);
   });
 });
 

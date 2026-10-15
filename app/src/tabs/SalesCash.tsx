@@ -3,10 +3,11 @@ import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, fmtN } from '../lib/format';
 import {
   beOf, cashKpis, cashLines, cashRecon, cashYear, dealMoney, filterDeals, fmtMoney, normSalesFilter, quarterOf,
-  type CashKpis, type CashLine, type CashRecon as Recon, type CashYear, type Deal, type SalesFilter, type SalesState,
+  type CashKpis, type CashLine, type CashRecon as Recon, type CashYear, type DateBasis, type Deal, type SalesFilter, type SalesState,
 } from '../lib/sales';
+import { rangeTh, type Range } from '../lib/dateRange';
 import { shortName, trackerFields, liveCount } from '../lib/salesUi';
-import { MONTHS_TH, Q_TH, cashRows, crossYearTag, dayTh, instSub, instText, instWords, payerName, splitExample, type CashCsvMode, type CashLens } from '../lib/cashUi';
+import { MONTHS_TH, Q_TH, cashCardWords, cashRows, crossYearTag, dayTh, instSub, instText, instWords, monthYearTh, payerName, splitExample, type CashCsvMode, type CashLens } from '../lib/cashUi';
 import { useMedia } from '../components/Sidebar';
 import { Kpi, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
@@ -22,11 +23,29 @@ const m0 = (n: number) => fmtMoney(Math.round(n)) || '0';
 // ------------------------------------------------------------------ the cards and the line under them
 
 /**
+ * A card that is a button and holds a link of its own (ค้างรับในปีนี้ with its late figure): a link cannot
+ * sit inside a button, so the button covers the card from behind and the link sits above it (cashflow.css
+ * .cf-kpi-st). Same look as ui.tsx Kpi.
+ */
+function KpiWithLink({ label, value, zero, foot, onClick, pressed, title }: { label: string; value: string; zero?: boolean; foot: ReactNode; onClick: () => void; pressed?: boolean; title: string }) {
+  return (
+    <div className="kpi hv cf-kpi-st">
+      <button type="button" className="cf-kpi-hit" onClick={onClick} aria-pressed={pressed} title={title} aria-label={`${label} ${value} บาท · ${title}`} />
+      <span className="kpi-l">{label}</span>
+      <span className={'kpi-v' + (zero ? ' zero' : '')}>{value}<small>บาท</small></span>
+      <span className="kpi-f">{foot}</span>
+    </div>
+  );
+}
+
+/**
  * The four Cashflow cards of a year (the tab, and the table in the lens "เงินเข้าตามปี"): the year's money
- * (hero), received, owed in the year (late in red, due this month), and the year's undated money.
+ * (hero), received, owed in the year (late in red, due this month), and the year's undated money. In the
+ * lens with a ช่วงเวลา (`range`) the cards count the range's money and say so (cashCardWords).
  * `onShow`: the cards are buttons that narrow the list below to that money; the late figure is a link.
  */
-export function CashKpiRow({ K, year, show, onShow, onLate }: { K: CashKpis; year: string; show?: Show; onShow?: (s: Show) => void; onLate?: () => void }) {
+export function CashKpiRow({ K, year, range, show, onShow, onLate }: { K: CashKpis; year: string; range?: { basis: DateBasis; r: Range } | null; show?: Show; onShow?: (s: Show) => void; onLate?: () => void }) {
+  const W = cashCardWords(year, range);
   const fromOther = K.n > 0 && K.ownN === 0 ? Object.keys(K.from).sort() : [];
   const pct = K.total ? Math.round((K.got / K.total) * 100) : 0;
   const pick = (s: Show) => (onShow ? () => onShow(show === s ? '' : s) : undefined);
@@ -41,30 +60,32 @@ export function CashKpiRow({ K, year, show, onShow, onLate }: { K: CashKpis; yea
         {late || <span>ไม่มีงวดเลยกำหนด</span>}
         {K.dueMonthN > 0 && <span>ถึงกำหนดเดือนนี้ {m0(K.dueMonth)}</span>}
       </span>
-    ) : K.owedN ? `${fmtN(K.owedN)} งวด · ครบกำหนด ${dayTh(K.firstDue)}${K.owedN > 1 ? ' เป็นงวดแรก' : ''}` : 'ไม่มียอดค้างในปีนี้';
+    ) : K.owedN ? `${fmtN(K.owedN)} งวด · ครบกำหนด ${dayTh(K.firstDue)}${K.owedN > 1 ? ' เป็นงวดแรก' : ''}` : `ไม่มียอดค้าง${W.scope}`;
+  const owedTitle = 'ดูเฉพาะงวดที่ยังไม่ได้รับ';
   return (
     <div className="kpis sl-kpis">
       <Kpi
         hero
-        label={`เงินเข้าทั้งปี · ${year}`}
+        label={W.heroR ? <>{W.hero} <span className="sl-kpi-r">{W.heroR}</span></> : W.hero}
         value={m0(K.total)}
         unit="บาท"
-        title="รับแล้วนับตามวันที่รับเงิน ที่ยังไม่รับนับตามวันครบกำหนด"
+        title={W.heroTitle}
         foot={
           fromOther.length ? <>มาจากงาน{fromOther.map((y) => 'ปี ' + y).join(' และ ')} ทั้งหมด · {fmtN(K.n)} งวด</>
           : K.n ? <>รับแล้ว <b>{pct}%</b> · ทั้งหมด {fmtN(K.n)} งวด</>
-          : 'ยังไม่มีงวดเงินในปีนี้'
+          : `ยังไม่มีงวดเงิน${W.scope}`
         }
       />
       <Kpi label="รับแล้ว" value={m0(K.got)} unit="บาท" zero={!K.got} onClick={pick('got')} pressed={onShow ? show === 'got' : undefined} title={onShow ? 'ดูเฉพาะรายการที่รับแล้ว' : undefined}
-        foot={K.gotN ? `${fmtN(K.gotN)} รายการ · ล่าสุด ${dmTh(K.lastGot)}` : 'ยังไม่มีเงินเข้าในปีนี้'} />
-      {K.late > 0 ? (
-        <Kpi label="ค้างรับในปีนี้" value={m0(K.owed)} unit="บาท" foot={owedFoot} />
+        foot={K.gotN ? `${fmtN(K.gotN)} รายการ · ล่าสุด ${dmTh(K.lastGot)}` : `ยังไม่มีเงินเข้า${W.scope}`} />
+      {onShow && K.owed && late ? (
+        // the card narrows the list to what is owed, its late figure to what is late
+        <KpiWithLink label={W.owed} value={m0(K.owed)} foot={owedFoot} onClick={pick('owed')!} pressed={show === 'owed'} title={owedTitle} />
       ) : (
-        <Kpi label="ค้างรับในปีนี้" value={m0(K.owed)} unit="บาท" zero={!K.owed} onClick={K.owed ? pick('owed') : undefined} pressed={onShow && K.owed ? show === 'owed' : undefined} title={onShow && K.owed ? 'ดูเฉพาะงวดที่ยังไม่ได้รับ' : undefined} foot={owedFoot} />
+        <Kpi label={W.owed} value={m0(K.owed)} unit="บาท" zero={!K.owed} onClick={K.owed && !late ? pick('owed') : undefined} pressed={onShow && K.owed && !late ? show === 'owed' : undefined} title={onShow && K.owed && !late ? owedTitle : undefined} foot={owedFoot} />
       )}
       <Kpi label="ยังไม่กำหนดวันรับ" value={m0(K.undated)} unit="บาท" zero={!K.undated} onClick={K.undated ? pick('undated') : undefined} pressed={onShow && K.undated ? show === 'undated' : undefined} title={onShow && K.undated ? 'ดูเฉพาะเงินที่ยังไม่มีวันรับ' : undefined}
-        foot={K.undatedDeals ? `งานปี ${year} · ${fmtN(K.undatedDeals)} งาน · ไม่อยู่ในยอดปี` : `งานปี ${year} ยังไม่มี`} />
+        foot={K.undatedDeals ? `งานปี ${year} · ${fmtN(K.undatedDeals)} งาน · ${W.undated}` : `งานปี ${year} ยังไม่มี`} />
     </div>
   );
 }
@@ -454,10 +475,10 @@ export function LensMoney({ L, d, col, won }: { L: CashLens; d: Deal; col: 'fc' 
   );
 }
 /** The note above the table in the lens, with the way back. */
-export function LensNote({ year, onBack }: { year: string; onBack: () => void }) {
+export function LensNote({ year, range, onBack }: { year: string; range?: Range | null; onBack: () => void }) {
   return (
     <p className="cf-lnote">
-      <b>นับยอดแบบเงินเข้าตามปี {year}</b> · แสดงงานทุกปีที่มีงวดในปี {year} · ยอดนับเฉพาะงวดในปีนี้ · <button type="button" className="lnk" onClick={onBack}>กลับไปนับยอดขายตามปีของงาน</button>
+      <b>นับยอดแบบเงินเข้าตามปี {year}</b> · แสดงงานทุกปีที่มีงวดในปี {year} · ยอดนับเฉพาะงวด{range ? `ใน ${rangeTh(range, { dropYear: year })}` : 'ในปีนี้'} · <button type="button" className="lnk" onClick={onBack}>กลับไปนับยอดขายตามปีของงาน</button>
     </p>
   );
 }
@@ -502,7 +523,7 @@ export function LensChip({ S, year, today, value, onChange, onCashTab }: { S: Sa
             <div className="cf-ex">
               {ex ? (
                 <>
-                  ตัวอย่าง <b>{shortName(ex.deal.client)} {m0(ex.total)}</b> · {fmtN(ex.n)} งวด งวดสุดท้าย {dayTh(ex.last).replace(/^\d+ /, '')}
+                  ตัวอย่าง <b>{shortName(ex.deal.client)} {m0(ex.total)}</b> · {fmtN(ex.n)} งวด งวดสุดท้าย {monthYearTh(ex.last)}
                   <br />ตามปีของงาน: ปี {ex.deal.year} นับ <b>{m0(ex.total)}</b>
                   <br />เงินเข้าตามปี: {ex.years.map((y, i) => <Fragment key={y.year}>{i ? ' · ' : ''}ปี {y.year} นับ <b>{m0(y.amt)}</b></Fragment>)}
                 </>

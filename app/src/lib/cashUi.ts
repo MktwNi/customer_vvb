@@ -4,8 +4,9 @@
  * are unit-tested. No DOM.
  */
 import { TH_M, dmTh } from './format';
-import { inRange, type Range } from './dateRange';
-import { KIND_TH, beOf, cashKpis, cashLines, cashTotal, cashYear, csvCell, dealMoney, payMatch, type CashKpis, type CashLine, type CashSum, type CashYear, type Deal, type PayF, type SalesState } from './sales';
+import { inRange, rangeTh, type Range } from './dateRange';
+import { KIND_TH, beOf, cashKpis, cashLines, cashTotal, cashYear, csvCell, dealMoney, payMatch, type CashKpis, type CashLine, type CashSum, type CashYear, type DateBasis, type Deal, type PayF, type SalesState } from './sales';
+import { BASIS_TH } from './salesUi';
 
 export const MONTHS_TH = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 /** The months of each calendar quarter: "ม.ค.–มี.ค.". */
@@ -21,17 +22,25 @@ export function instWords(ns: number[]) {
 
 /**
  * The tag of a deal whose installments fall in more than one year, seen from year `be`: where the others
- * are ("ข้ามปี: งวด 3 อยู่ปี 2570", "ข้ามปี: งวด 1–2 อยู่ปี 2569"); '' when they are all in `be` (or there is
- * no plan to number them). `lines` = the deal's own lines.
+ * are ("ข้ามปี: งวด 3 อยู่ปี 2570", "ข้ามปี: งวด 1–2 อยู่ปี 2569"); an installment split between years (part
+ * received in one, the rest due in the next) is "บางส่วนของงวด 1"; '' when they are all in `be` (or there
+ * is no plan to number them). `lines` = the deal's own lines.
  */
 export function crossYearTag(lines: CashLine[], be: string) {
-  const by = new Map<string, number[]>();
-  lines.forEach((l) => {
-    const y = beOf(l.date);
-    if (y && y !== be && l.n > 0) by.set(y, [...(by.get(y) || []), l.n]);
-  });
+  // where each installment's money is ('' = undated)
+  const at = new Map<number, Set<string>>();
+  lines.forEach((l) => l.n > 0 && at.set(l.n, (at.get(l.n) || new Set()).add(beOf(l.date))));
+  const by = new Map<string, { whole: number[]; part: number[] }>();
+  at.forEach((ys, n) =>
+    ys.forEach((y) => {
+      if (!y || y === be) return;
+      const b = by.get(y) || by.set(y, { whole: [], part: [] }).get(y)!;
+      (ys.size > 1 ? b.part : b.whole).push(n);
+    }),
+  );
   if (!by.size) return '';
-  return 'ข้ามปี: ' + [...by].sort(([a], [b]) => a.localeCompare(b)).map(([y, ns]) => `${instWords(ns)} อยู่ปี ${y}`).join(' · ');
+  const words = (b: { whole: number[]; part: number[] }) => [instWords(b.whole), b.part.length ? 'บางส่วนของ' + instWords(b.part) : ''].filter(Boolean).join(' และ');
+  return 'ข้ามปี: ' + [...by].sort(([a], [b]) => a.localeCompare(b)).map(([y, b]) => `${words(b)} อยู่ปี ${y}`).join(' · ');
 }
 
 /** "งวด 1/3", or "ไม่มีแผน" for money without a plan. */
@@ -101,9 +110,12 @@ export function payIn(lines: CashLine[], p: Exclude<PayF, ''>, r: Range) {
   return { amt: ls.reduce((a, l) => a + l.amt, 0), n: ls.length, deals: new Set(ls.map((l) => l.deal.id)).size };
 }
 
-/** The table in the lens "เงินเข้าตามปี": each deal's money in the year (and inside the date range when
- *  one is set: it narrows the counted installments), every line of each deal (the payment rows say where
- *  theirs fall), and the year's cards. */
+/**
+ * The table in the lens "เงินเข้าตามปี": each deal's counted money (`inYear`: its lines in the year, and
+ * inside the date range when one is set), every line of each deal (the payment rows say where theirs
+ * fall), and the cards. The cards count the same lines as the money cells: the year's, or with a range
+ * the range's (cashCardWords says which).
+ */
 export interface CashLens { year: string; range: Range | null; inYear: Map<string, CashLine[]>; byDeal: Map<string, CashLine[]>; K: CashKpis }
 export function cashLensOf(S: SalesState, deals: Deal[], year: string, range: Range | null, today: string): CashLens {
   const lines = cashLines(S, deals, today);
@@ -114,15 +126,56 @@ export function cashLensOf(S: SalesState, deals: Deal[], year: string, range: Ra
   lines.forEach((l) => byDeal.set(l.deal.id, [...(byDeal.get(l.deal.id) || []), l]));
   return { year, range, inYear, byDeal, K: cashKpis(Y, year, today) };
 }
-/** Where an installment's money falls, under its amount in the lens: "นับในปี 2570" or "อยู่ปี 2569"
- *  ('' for a stage with no money line: not a plan installment, or nothing owed nor received on it). */
-export function lensWhere(L: CashLens, d: Deal, stage: string): { inYear: boolean; text: string } {
+/**
+ * An installment's row in the lens: the money of it that counts (`inYear`: its lines in the year, or in
+ * the range) and where it falls, under the amount: "นับในปี 2570" (with a range "นับในช่วงนี้"), with
+ * "· อีกส่วนอยู่ปี 2569" when part of it falls elsewhere (part received in one year, the rest due in the
+ * next); when none of it counts, the whole installment and where it is ("อยู่ปี 2569", "นอกช่วงที่เลือก",
+ * "ยังไม่กำหนดวัน"). text '' for a stage with no money line (not a plan installment, nothing owed nor received).
+ */
+export function lensWhere(L: CashLens, d: Deal, stage: string): { inYear: boolean; text: string; amt: number } {
   const ls = (L.byDeal.get(d.id) || []).filter((l) => l.stage === stage && l.src === 'plan');
-  if (!ls.length) return { inYear: false, text: '' };
-  if ((L.inYear.get(d.id) || []).some((l) => l.stage === stage)) return { inYear: true, text: `นับในปี ${L.year}` };
-  const ys = [...new Set(ls.map((l) => beOf(l.date)).filter(Boolean))].sort();
-  return { inYear: false, text: ys.length ? `อยู่ปี ${ys.join(', ')}` : 'ยังไม่กำหนดวัน' };
+  if (!ls.length) return { inYear: false, text: '', amt: 0 };
+  const counted = new Set((L.inYear.get(d.id) || []).filter((l) => l.stage === stage && l.src === 'plan').map((l) => l.id));
+  const here = ls.filter((l) => counted.has(l.id)), rest = ls.filter((l) => !counted.has(l.id));
+  const sum = (xs: CashLine[]) => xs.reduce((a, l) => a + l.amt, 0);
+  // where lines that do not count are: other years, this year outside the range, no date
+  const place = (xs: CashLine[]) => {
+    const ys = [...new Set(xs.map((l) => beOf(l.date)).filter((y) => y && y !== L.year))].sort();
+    if (ys.length) return `อยู่ปี ${ys.join(', ')}`;
+    return xs.some((l) => l.date) ? 'อยู่นอกช่วงที่เลือก' : 'ยังไม่กำหนดวัน';
+  };
+  if (!here.length) return { inYear: false, text: place(rest), amt: sum(ls) };
+  const text = L.range ? 'นับในช่วงนี้' : `นับในปี ${L.year}`;
+  return { inYear: true, text: rest.length ? `${text} · อีกส่วน${place(rest)}` : text, amt: sum(here) };
 }
+/**
+ * What the Cashflow cards are called: the year's ("เงินเข้าทั้งปี · 2569", "ค้างรับในปีนี้"), or, in the
+ * table's lens with a ช่วงเวลา, the range's, named the way the deal lens names its hero ("เงินเข้า · ติดต่อ"
+ * + "ต.ค. – ธ.ค.", "ค้างรับในช่วงนี้"). `scope` ends the empty footers ("ยังไม่มีเงินเข้าในปีนี้").
+ */
+export function cashCardWords(year: string, at?: { basis: DateBasis; r: Range } | null) {
+  if (!at) return { hero: `เงินเข้าทั้งปี · ${year}`, heroR: '', heroTitle: 'รับแล้วนับตามวันที่รับเงิน ที่ยังไม่รับนับตามวันครบกำหนด', owed: 'ค้างรับในปีนี้', scope: 'ในปีนี้', undated: 'ไม่อยู่ในยอดปี' };
+  const w = BASIS_TH[at.basis];
+  return {
+    hero: `เงินเข้า · ${w.short}`,
+    heroR: rangeTh(at.r, { dropYear: year }),
+    heroTitle: `นับเฉพาะงานตามตัวกรอง · ${w.sent} ${rangeTh(at.r)} · นับเฉพาะงวดที่รับเงินหรือครบกำหนดในช่วงนี้`,
+    owed: 'ค้างรับในช่วงนี้',
+    scope: 'ในช่วงนี้',
+    undated: 'ไม่อยู่ในยอดช่วงนี้',
+  };
+}
+
+/** The 12 months of `ceYear` for the date popover while การรับเงิน is set: in each, how many deals have
+ *  money of that kind on its own dates (received on the day it came in, owed on its due date), as the
+ *  filter and its footer count them; undated money is in no month. */
+export function payMonthCounts(lines: CashLine[], p: Exclude<PayF, ''>, ceYear: number): number[] {
+  const by = Array.from({ length: 12 }, () => new Set<string>()), y = String(ceYear) + '-';
+  lines.forEach((l) => payMatch(l, p) && l.date.startsWith(y) && by[+l.date.slice(5, 7) - 1].add(l.deal.id));
+  return by.map((s) => s.size);
+}
+
 /** A section's sums in the lens: the money falling in the year, and what of it came in. */
 export function lensSum(L: CashLens, deals: Deal[]) {
   let fc = 0, ac = 0;

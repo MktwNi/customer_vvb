@@ -11,6 +11,11 @@
 
 /* ---- the Cashflow tab */
 .cf-hint b{font-weight:500;color:var(--ink)}
+/* a card that is a button and holds a link of its own (ค้างรับในปีนี้ and its late figure): the button
+   covers the card from behind (out of the cards' row grid), the link sits above it */
+.cf-kpi-st{position:relative;cursor:pointer}
+.cf-kpi-hit{position:absolute;inset:0;margin:0;padding:0;border:0;border-radius:inherit;background:transparent;cursor:pointer;font:inherit}
+.cf-kpi-st .kpi-f .sl-kpi-link{position:relative;z-index:1}
 .cf-recon{margin:-4px 2px 0;font-size:var(--fs-sec);color:var(--muted);line-height:1.6}
 .cf-recon b{font-weight:500;color:var(--ink-2)}
 .cf-recon .lnk{font-size:var(--fs-sec)}
@@ -171,6 +176,9 @@
   .sl-tabbar .utabs>button{padding:10px 6px 9px}
   .cf-card{padding:18px 16px}
   .cf-h .btn{flex:none}
+  /* the CSV dialog: its three choices one under another, all in view */
+  .cf-dlg .seg{display:flex;flex-direction:column;align-items:stretch;overflow:visible;border-radius:18px}
+  .cf-dlg .seg>button{justify-content:flex-start}
 }
 
 /* ---- the Dashboard (its layout untouched: a 4th stat, a filter, presets, one new row of cards) */

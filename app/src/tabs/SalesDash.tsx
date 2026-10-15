@@ -14,7 +14,7 @@ import { heroGrad } from '../components/ui';
 import { CashStat, QuarterCard, payField } from '../components/DashCash';
 import { beOf, cashLines, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
 import { thisQuarter } from '../lib/dateRange';
-import { payIn } from '../lib/cashUi';
+import { payIn, payMonthCounts } from '../lib/cashUi';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -251,7 +251,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               year={year}
               today={today}
               count={(draft) => liveCount(S, F, 'date', draft, '', today)}
-              monthCounts={(basis, y) => monthCounts(S, F, basis, y, '', today)}
+              // with การรับเงิน the months count deals by their money's own dates, as the filter and its footer do
+              monthCounts={(basis, y) => (F.pay ? payMonthCounts(lines, F.pay, y) : monthCounts(S, F, basis, y, '', today))}
               unit="ราย"
               lock={F.pay ? { basis: payBasis(F.pay), hint: F.pay === 'got' ? 'นับงวดที่รับเงินแล้วตามวันที่รับ การ์ดเงินจะนับเฉพาะเงินที่รับในช่วงนี้' : 'นับงวดที่ยังไม่ได้รับตามวันครบกำหนด การ์ดเงินจะนับเฉพาะงวดที่ครบกำหนดในช่วงนี้' } : undefined}
               // on the money's own dates the footer adds the money of the draft range (the stat will show it)
