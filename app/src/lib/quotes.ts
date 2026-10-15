@@ -6,7 +6,7 @@
  * so it is unit-tested; the engine (attachDoc / replaceDocFile / deleteDoc) and the screens share it.
  */
 import { dmTh, isoTh, localDay } from './format';
-import { QUOTE_STAGE, dealMoney, fmtMoney, type Deal, type DealDoc, type SalesState } from './sales';
+import { QUOTE_STAGE, attachStage, dealMoney, dealResult, fmtMoney, kindForStage, type Deal, type DealDoc, type DocKind, type DocTarget, type SalesState } from './sales';
 import type { DocFacts } from './docExtract';
 
 /** A version of the deal's quotation: a quotation document attached at QUOTATION. */
@@ -121,3 +121,38 @@ export function swapCheck(old: Pick<DealDoc, 'amount' | 'docNo' | 'docDate' | 'b
 /** What the reader found in files this session (document id → its facts): the edit form offers the
  *  figures with and before VAT without reading the file again. Device- and session-local, never synced. */
 export const qtFacts = new Map<string, DocFacts>();
+
+// ---- the attach dialog (DocAttach): its first type, whether it is a revision, what it is checked against
+
+/**
+ * The type the attach dialog starts with: a revision asked for is a quotation; else the caller's, the
+ * stage's (QUOTATION a quotation, a PAY stage an invoice); with no stage ("แนบเอกสาร · ระบบเลือกขั้นให้")
+ * a quotation until the deal is won with a quotation counted, then an invoice. The file read may change it.
+ */
+export function attachKind0(s: SalesState, d: Deal, ask: { kind?: DocKind; stage?: string; revise?: string }): DocKind {
+  if (ask.revise != null) return 'quotation';
+  return ask.kind ?? (ask.stage ? kindForStage(s.cfg, ask.stage) : dealMoney(s, d).fcDoc && dealResult(s, d) === 'YES' ? 'invoice' : 'quotation');
+}
+
+/**
+ * The version an attach revises ("แนบฉบับแก้ไข"), or null when it is not a revision. Asked for from the
+ * quotation's card (`revise`): that version, else the one the card is about. Otherwise a quotation
+ * counted as the Forecast that goes to QUOTATION while the deal has a quotation there is one too (one
+ * live quotation at a time): it follows the one the card is about. Another type, another target ("ไม่นับยอด",
+ * Actual), another stage, or no quotation yet: not a revision.
+ */
+export function attachRevision(s: SalesState, d: Deal, a: { kind: DocKind; target: DocTarget; stage?: string; revise?: string }, today: string): QtVersion | null {
+  const v = qtView(s, d);
+  if (a.revise == null && !(a.kind === 'quotation' && a.target === 'forecast' && (a.stage ?? attachStage(s, d, { kind: a.kind, target: a.target }, today)) === QUOTE_STAGE)) return null;
+  return v.versions.find((x) => x.doc.id === a.revise) || v.head;
+}
+
+/**
+ * The figure an attached document is checked against ("ตรงกับเอกสาร", or "ใช้ยอดจากเอกสาร" / "คงยอดเดิม"):
+ * the one the caller gave (the total typed in the plan) always, also on a revision; else none on a
+ * revision (it is compared with the version it follows instead); else the stage's own (`own()`: the
+ * typed Forecast, the installment's plan, what was received by hand, the typed Actual).
+ */
+export function attachCheck<C>(check: C | null | undefined, rev: QtVersion | null, own: () => C | null): C | null {
+  return check ?? (rev ? null : own());
+}

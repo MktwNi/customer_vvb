@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dealMoney, emptySales, newDeal, salesStats, type DealDoc, type SalesState } from './sales';
-import { isQtVersion, qtDelText, qtDiffText, qtFigWords, qtPrev, qtVerLabel, qtVerShort, qtVerText, qtVersions, qtView, swapCheck, thList } from './quotes';
+import { attachCheck, attachKind0, attachRevision, isQtVersion, qtDelText, qtDiffText, qtFigWords, qtPrev, qtVerLabel, qtVerShort, qtVerText, qtVersions, qtView, swapCheck, thList } from './quotes';
 import type { DocFacts } from './docExtract';
 import { dmTh } from './format';
 import { HELP_TOPICS, searchHelp } from './helpContent';
@@ -151,6 +151,73 @@ describe('swapping a quotation\'s file', () => {
     expect(swapCheck(old, facts({})).tone).toBe('none');
     // only a number among the other figures: that one is shown
     expect(swapCheck(old, facts({ candidates: [{ value: 182970, label: '', source: 'largest', score: 1, line: '' }] }))).toMatchObject({ tone: 'ok', amount: 182970 });
+  });
+});
+
+describe('the attach dialog', () => {
+  const two = () =>
+    world([
+      { id: 'v1', amount: 192600, target: 'none', at: '2026-10-04T03:00:00.000Z', cAt: '2026-10-09T03:00:00.001Z' },
+      { id: 'v2', amount: 182970, at: '2026-10-09T03:00:00.000Z', cAt: '2026-10-09T03:00:00.000Z' },
+    ]);
+  const won = <T extends { s: SalesState }>(w: T) => ((w.s.steps['d1/CLOSED DEAL'] = { d: '2026-10-10', n: 'YES' }), w);
+
+  it('starts as the type asked for, the stage\'s, or (no stage) a quotation until the deal is won with one', () => {
+    const { s, d } = two();
+    expect(attachKind0(s, d, { kind: 'receipt' })).toBe('receipt');
+    expect(attachKind0(s, d, { stage: 'QUOTATION' })).toBe('quotation');
+    expect(attachKind0(s, d, { stage: 'PAY1' })).toBe('invoice');
+    // "แนบเอกสาร · ระบบเลือกขั้นให้": a quotation is in use but the deal is not won yet
+    expect(attachKind0(s, d, {})).toBe('quotation');
+    // won, with a quotation counted: the next document is the invoice
+    const w = won(two());
+    expect(attachKind0(w.s, w.d, {})).toBe('invoice');
+    // won with no quotation (the Forecast typed): still a quotation first
+    const typed = won(world([], 150000));
+    expect(attachKind0(typed.s, typed.d, {})).toBe('quotation');
+    // a revision asked for is a quotation whatever the caller's type
+    expect(attachKind0(w.s, w.d, { revise: 'v2', kind: 'invoice', stage: 'PAY1' })).toBe('quotation');
+  });
+
+  it('is a revision when asked for, or when a quotation for the Forecast goes to QUOTATION while there is one', () => {
+    const { s, d } = two();
+    const q = { kind: 'quotation' as const, target: 'forecast' as const };
+    // asked for from the card: that version (an earlier one too), else the one the card is about
+    expect(attachRevision(s, d, { ...q, stage: 'QUOTATION', revise: 'v1' }, TODAY)!.doc.id).toBe('v1');
+    expect(attachRevision(s, d, { ...q, stage: 'QUOTATION', revise: 'gone' }, TODAY)!.doc.id).toBe('v2');
+    // chosen as the type at QUOTATION, or with no stage (it goes to QUOTATION): one live quotation
+    expect(attachRevision(s, d, { ...q, stage: 'QUOTATION' }, TODAY)).toMatchObject({ n: 2, state: 'cur' });
+    expect(attachRevision(s, d, q, TODAY)!.doc.id).toBe('v2');
+    // not counted, counted as Actual, another type, another stage, "เอกสารอื่น": not a revision
+    expect(attachRevision(s, d, { ...q, target: 'none', stage: 'QUOTATION' }, TODAY)).toBeNull();
+    expect(attachRevision(s, d, { ...q, target: 'actual' }, TODAY)).toBeNull();
+    expect(attachRevision(s, d, { kind: 'invoice', target: 'forecast', stage: 'QUOTATION' }, TODAY)).toBeNull();
+    expect(attachRevision(s, d, { ...q, stage: 'PAY1' }, TODAY)).toBeNull();
+    expect(attachRevision(s, d, { ...q, stage: '' }, TODAY)).toBeNull();
+    // no quotation yet: the first one is no revision, even asked for
+    const none = world([]);
+    expect(attachRevision(none.s, none.d, { ...q, stage: 'QUOTATION' }, TODAY)).toBeNull();
+    expect(attachRevision(none.s, none.d, { ...q, stage: 'QUOTATION', revise: 'v1' }, TODAY)).toBeNull();
+    // a stage list without QUOTATION: nothing goes there
+    const noQ = two();
+    noQ.s.cfg.stages = noQ.s.cfg.stages.filter((p) => p !== 'QUOTATION');
+    expect(attachRevision(noQ.s, noQ.d, q, TODAY)).toBeNull();
+  });
+
+  it('checks the figure the caller gave, also on a revision (a typed plan total is never replaced silently)', () => {
+    const { s, d } = two();
+    const rev = attachRevision(s, d, { kind: 'quotation', target: 'forecast', stage: 'QUOTATION' }, TODAY);
+    const typed = { what: 'ยอดรวมที่พิมพ์', value: 200000 };
+    let asked = 0;
+    const own = () => (asked++, { what: 'Forecast ที่พิมพ์ไว้', value: 150000 });
+    expect(attachCheck(typed, rev, own)).toBe(typed);
+    expect(attachCheck(typed, null, own)).toBe(typed);
+    // a revision without one: compared with the version it follows, not with the stage's figure
+    expect(attachCheck(undefined, rev, own)).toBeNull();
+    expect(asked).toBe(0);
+    // neither: the stage's own figure
+    expect(attachCheck(undefined, null, own)).toEqual({ what: 'Forecast ที่พิมพ์ไว้', value: 150000 });
+    expect(attachCheck(null, null, () => null)).toBeNull();
   });
 });
 

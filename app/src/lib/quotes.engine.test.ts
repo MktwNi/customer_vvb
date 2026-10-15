@@ -10,8 +10,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { dealMoney, salesStats, toDoc, type DealDoc } from './sales';
+import { dealMoney, salesStats, stepOf, toDoc, type DealDoc } from './sales';
 import { qtVersions, qtView } from './quotes';
+import { followStep, stepMoved, type StepEd, type StepFields } from './stepEditor';
 import type { SyncOp } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -299,6 +300,117 @@ describe('swapping a quotation\'s file (เปลี่ยนไฟล์)', () 
     (A as unknown as { can: () => boolean }).can = () => false;
     await expect(A.replaceDocFile(d.id, swapped.id, pdf('x.pdf'))).rejects.toThrow('บัญชีดูอย่างเดียว');
     A.dispose();
+  });
+});
+
+/**
+ * A stage editor left open on QUOTATION (the phone card's, the deal panel's step card) while a quotation
+ * action rewrites the QUOTATION note: the editor follows (lib/stepEditor), so its บันทึก neither asks
+ * "มีคนแก้ขั้นนี้" nor writes back a note naming a superseded amount or a deleted version.
+ */
+describe('an open QUOTATION editor and the quotation actions', () => {
+  // the phone card's rule (its note, its date); the panel's step card has the same one for a done QUOTATION
+  const fields: StepFields = (x) => ({ note: x.n, date: x.d && x.d <= TODAY ? x.d : TODAY });
+  // the stage as the editors read it (an empty one when it has no record)
+  const now = (e: GccEngine, id: string) => stepOf(e.sales, id, 'QUOTATION');
+  const open = (e: GccEngine, id: string): StepEd => {
+    const init = { ...now(e, id) };
+    return { init, ...fields(init) };
+  };
+  /** The editor's บันทึก: false when it would ask first (the stage moved under it). */
+  const save = (e: GccEngine, id: string, ed: StepEd) => {
+    if (stepMoved(ed.init, now(e, id))) return false;
+    e.setStep(id, 'QUOTATION', { d: ed.date, n: ed.note });
+    return true;
+  };
+  const two = async (A: GccEngine) => {
+    const d = deal(A);
+    const v1 = await A.attachDoc(d.id, pdf('qa.pdf'), qt(100000, { docNo: 'QT-A', docDate: '2026-10-05' }));
+    later();
+    const v2 = await A.attachDoc(d.id, pdf('qa2.pdf'), qt(90000, { docNo: 'QT-A', docDate: '2026-10-08', revise: v1.id }));
+    expect(step(A, d.id)).toEqual({ d: '2026-10-05', n: 'ใบเสนอราคา QT-A · 90,000 บาท' });
+    return { d, v1, v2 };
+  };
+
+  it('"แก้ไขข้อมูล" saved in the phone editor: its note follows the new amount, and the note stays the document\'s', async () => {
+    const [A] = await team();
+    const { d, v2 } = await two(A);
+    const stale = open(A, d.id);
+    let ed = stale;
+    later();
+    A.updateDoc(d.id, v2.id, { amount: 88000, basis: 'manual', docNo: 'QT-A', docDate: '2026-10-08', kind: 'quotation' });
+    expect(step(A, d.id).n).toBe('ใบเสนอราคา QT-A · 88,000 บาท');
+    // (left as it opened, the editor's save asked "มีคนแก้ขั้นนี้" and wrote "90,000" back)
+    expect(stepMoved(stale.init, now(A, d.id))).toBe(true);
+    ed = followStep(ed, now(A, d.id), fields, true);
+    expect(ed.note).toBe('ใบเสนอราคา QT-A · 88,000 บาท');
+    expect(save(A, d.id, ed)).toBe(true);
+    expect(step(A, d.id)).toEqual({ d: '2026-10-05', n: 'ใบเสนอราคา QT-A · 88,000 บาท' });
+    expect(docOf(A, d.id, v2.id).auto!.n).toBe(step(A, d.id).n);
+    // still the document's note: the next correction moves it too
+    later();
+    A.updateDoc(d.id, v2.id, { amount: 87000 });
+    expect(step(A, d.id).n).toBe('ใบเสนอราคา QT-A · 87,000 บาท');
+    A.dispose();
+  });
+
+  it('"ลบใบเสนอราคานี้" in the phone editor: the note names version 1 again, not the deleted one', async () => {
+    const [A] = await team();
+    const { d, v1, v2 } = await two(A);
+    let ed = open(A, d.id);
+    later();
+    A.deleteDoc(d.id, v2.id);
+    ed = followStep(ed, now(A, d.id), fields, true);
+    expect(ed).toMatchObject({ note: 'ใบเสนอราคา QT-A · 100,000 บาท', date: '2026-10-05' });
+    expect(save(A, d.id, ed)).toBe(true);
+    expect(step(A, d.id).n).toBe('ใบเสนอราคา QT-A · 100,000 บาท');
+    expect(docOf(A, d.id, v1.id).auto!.n).toBe(step(A, d.id).n);
+    // the last one deleted too: the note goes, and the editor shows an empty stage on today
+    later();
+    A.deleteDoc(d.id, v1.id);
+    ed = followStep(ed, now(A, d.id), fields, true);
+    expect(ed).toEqual({ init: { d: '', n: '' }, note: '', date: TODAY });
+    A.dispose();
+  });
+
+  it('a revision attached from the panel\'s step card: the card holds the new note; typed text stays without a false question', async () => {
+    const [A] = await team();
+    const d = deal(A);
+    const v1 = await A.attachDoc(d.id, pdf('q1.pdf'), qt(100000, { docNo: 'QT-B', docDate: '2026-10-05' }));
+    const card = open(A, d.id);
+    const typed = { ...open(A, d.id), note: 'ลูกค้าขอแก้ราคา ส่งฉบับใหม่ทางอีเมล' };
+    later();
+    const v2 = await A.attachDoc(d.id, pdf('qt-2pages.pdf'), qt(195810, { docNo: 'QT2569-0031', revise: v1.id }));
+    const live = now(A, d.id);
+    expect(live).toEqual({ d: '2026-10-05', n: 'ใบเสนอราคา QT2569-0031 · 195,810 บาท' });
+    // untouched: it follows (and the panel closes it)
+    expect(followStep(card, live, fields, true)).toEqual({ init: live, note: live.n, date: '2026-10-05' });
+    // typed in: the text stays, saving does not ask, and the note is the user's from then on
+    const ed = followStep(typed, live, fields, true);
+    expect(ed.note).toBe('ลูกค้าขอแก้ราคา ส่งฉบับใหม่ทางอีเมล');
+    expect(save(A, d.id, ed)).toBe(true);
+    later();
+    A.updateDoc(d.id, v2.id, { amount: 190000 });
+    expect(step(A, d.id).n).toBe('ลูกค้าขอแก้ราคา ส่งฉบับใหม่ทางอีเมล');
+    A.dispose();
+  });
+
+  it('a teammate\'s change: an untouched editor follows it; one typed in asks before saving over it', async () => {
+    const [A, B] = await team();
+    const { d, v2 } = await two(A);
+    await settle(A, B);
+    const quiet = open(A, d.id), typed = { ...open(A, d.id), note: 'โทรตามแล้ว' };
+    later();
+    B.updateDoc(d.id, v2.id, { amount: 85000 });
+    await settle(A, B);
+    const live = now(A, d.id);
+    expect(live.n).toBe('ใบเสนอราคา QT-A · 85,000 บาท');
+    expect(followStep(quiet, live, fields).note).toBe(live.n);
+    const kept = followStep(typed, live, fields);
+    expect(kept).toBe(typed);
+    expect(save(A, d.id, kept)).toBe(false);
+    A.dispose();
+    B.dispose();
   });
 });
 

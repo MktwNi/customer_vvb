@@ -16,6 +16,7 @@ import { Modal } from '../components/Dialog';
 import { DocAttach, openDocFile, type AttachMore } from '../components/DocAttach';
 import { QtPhone, deleteQt } from '../components/QtCard';
 import { qtFigWords, qtView } from '../lib/quotes';
+import { followStep, stepMoved, type StepEd, type StepFields } from '../lib/stepEditor';
 import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } from '../components/DealActs';
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
@@ -1922,17 +1923,28 @@ function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, 
 // ------------------------------------------------------------------ the stage editor (table row and phone card)
 
 /** The editor's state: the note (a draft left with Escape comes back), the date (today unless the stage
- *  was done earlier), save / cancel / the result. Saving checks that nobody changed the stage meanwhile. */
+ *  was done earlier), save / cancel / the result. Saving checks that nobody changed the stage meanwhile;
+ *  a change while nothing was typed (a quotation action, a teammate) is followed instead (lib/stepEditor). */
 function useStepEditor(d: Deal, stage: string) {
   const tk = useTk();
   const { e, today } = tk;
   const key = d.id + '/' + stage;
-  const [init] = useState(() => stepOf(e.sales, d.id, stage));
-  const [note, setNote] = useState(() => drafts.get(key) ?? (stage === DEAL_STAGE && /^(yes|no)$/i.test(init.n.trim()) ? '' : init.n));
-  const [date, setDate] = useState(() => (init.d && init.d <= today ? init.d : today));
+  // what the fields show for a stage: its note (a YES / NO is the result's buttons, not a note), its date (else today)
+  const fields: StepFields = (s) => ({ note: stage === DEAL_STAGE && /^(yes|no)$/i.test(s.n.trim()) ? '' : s.n, date: s.d && s.d <= today ? s.d : today });
+  const [ed, setEd] = useState<StepEd>(() => {
+    const init = stepOf(e.sales, d.id, stage), f = fields(init);
+    return { init, note: drafts.get(key) ?? f.note, date: f.date };
+  });
+  const { init, note, date } = ed;
+  const setNote = (n: string) => setEd((x) => ({ ...x, note: n }));
+  const setDate = (v: string) => setEd((x) => ({ ...x, date: v }));
+  // `own`: moved by this editor's own quotation action (what was typed stays, and saving does not ask)
+  const follow = (own = false) => setEd((x) => followStep(x, stepOf(e.sales, d.id, stage), fields, own));
+  const live = stepOf(e.sales, d.id, stage);
+  useEffect(() => follow(), [live.d, live.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = () => {
-    const live = stepOf(e.sales, d.id, stage);
-    return (live.d !== init.d || live.n !== init.n) && !window.confirm(`มีคนแก้ขั้นนี้ระหว่างที่เปิดอยู่:\n"${live.n || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`);
+    const now = stepOf(e.sales, d.id, stage);
+    return stepMoved(init, now) && !window.confirm(`มีคนแก้ขั้นนี้ระหว่างที่เปิดอยู่:\n"${now.n || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`);
   };
   const save = () => {
     if (changed()) return tk.closeEditor();
@@ -1979,7 +1991,7 @@ function useStepEditor(d: Deal, stage: string) {
       cancel();
     }
   };
-  return { note, setNote, date, setDate, save, cancel, result, box, keys, init };
+  return { note, setNote, date, setDate, save, cancel, result, box, keys, init, follow };
 }
 const PLACEHOLDER = (S: SalesState, p: string) =>
   p === QUOTE_STAGE ? 'หรือพิมพ์โน้ต เช่น ส่งใบเสนอราคาทางอีเมลแล้ว' : isPayStage(S.cfg, p) ? 'หรือพิมพ์โน้ต เช่น ลูกค้าโอนงวดนี้แล้ว' : p === DEAL_STAGE ? 'หรือหมายเหตุ เช่น รอผู้บริหารอนุมัติ' : 'โน้ต เช่น คุยกับใคร ได้ข้อมูลอะไร นัดอะไรต่อ';
@@ -2326,7 +2338,8 @@ function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Lin
       {stage === DEAL_STAGE && <ResultButtons state="" label="ผลการขาย" onPick={ed.result} />}
       {qv?.head ? (
         <>
-          <QtPhone d={d} v={qv} onRevise={(id) => { ed.cancel(); tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id }); }} />
+          {/* its figures corrected or its file swapped here: the note below follows the new QUOTATION note */}
+          <QtPhone d={d} v={qv} onRevise={(id) => { ed.cancel(); tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id }); }} onChange={() => ed.follow(true)} />
           <span className="sl-or">โน้ตของขั้นนี้</span>
         </>
       ) : isMoney && (stage === QUOTE_STAGE || won) && (
@@ -2342,7 +2355,7 @@ function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Lin
         <button type="button" className="quiet" onClick={ed.cancel}>ยกเลิก</button>
         <button type="button" className="btn pri xs" onClick={ed.save}>บันทึก</button>
       </div>
-      {qv?.head && <button type="button" className="quiet qt-mdel" onClick={() => deleteQt(tk.e, d, qv, tk.acts.say)}>ลบใบเสนอราคานี้</button>}
+      {qv?.head && <button type="button" className="quiet qt-mdel" onClick={() => deleteQt(tk.e, d, qv, tk.acts.say) && ed.follow(true)}>ลบใบเสนอราคานี้</button>}
     </div>
   );
 }

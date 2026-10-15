@@ -3,10 +3,10 @@ import { useApp } from '../state';
 import { norm } from '../lib/core';
 import { dmTh, isoTh, todayISO } from '../lib/format';
 import {
-  KIND_TH, QUOTE_STAGE, attachPreview, attachStage, closeReady, countedAt, dealMoney, dealResult, fmtMoney, kindForStage, mismatchText, parseAmount, planOf, stageTh, stageTrack, stepOf, targetForStage,
+  KIND_TH, QUOTE_STAGE, attachPreview, closeReady, countedAt, dealMoney, fmtMoney, mismatchText, parseAmount, planOf, stageTh, stageTrack, stepOf, targetForStage,
   type Deal, type DealDoc, type DocKind, type DocTarget,
 } from '../lib/sales';
-import { qtDiffText, qtFacts, qtView } from '../lib/quotes';
+import { attachCheck, attachKind0, attachRevision, qtDiffText, qtFacts, qtView } from '../lib/quotes';
 import type { DocFacts } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { Modal } from './Dialog';
@@ -70,7 +70,8 @@ const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', sub
  * attached either way, and a kept figure shows "ไม่ตรงเอกสาร"). Nothing changes silently, nothing blocks saving.
  * A quotation for the Forecast while the deal has one at QUOTATION is a revision ("แนบฉบับแก้ไข", `revise`
  * names the version it follows; chosen as the type it becomes one too): the old and new figures are
- * compared instead of the typed-Forecast check, and the old version stays as "ฉบับเดิม", not counted.
+ * compared instead of the typed-Forecast check (a `check` the caller gave, such as a typed plan total, is
+ * still asked about), and the old version stays as "ฉบับเดิม", not counted. The rules: lib/quotes attach*.
  */
 export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, target: target0, check, add: add0, revise, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
   const { engine: e } = useApp();
@@ -78,7 +79,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
   const cfg = e.sales.cfg, today = todayISO();
   const m0 = dealMoney(e.sales, deal);
   // "ระบบเลือกขั้นให้": a quotation until the deal is won (a revised one, once there is one), then an invoice
-  const kind0: DocKind = revise != null ? 'quotation' : kindIn ?? (stage ? kindForStage(cfg, stage) : m0.fcDoc && dealResult(e.sales, deal) === 'YES' ? 'invoice' : 'quotation');
+  const kind0 = attachKind0(e.sales, deal, { kind: kindIn, stage, revise });
   // what a kind counts toward at this stage (a receipt at a PAY stage is Actual); a figure's own attach keeps its target
   const defaultTarget = (k: DocKind): DocTarget => target0 ?? targetForStage(cfg, stage ?? '', k);
   const [file, setFile] = useState<File | null>(null);
@@ -207,18 +208,16 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
   // a revision: the version it follows (the one asked for, else the one the card is about), whose figures
   // it is compared with; `fixed` = asked for from the quotation's card (type and target are not choices)
   const qv = qtView(e.sales, deal), fixed = revise != null;
-  const toQuote = (stage ?? attachStage(e.sales, deal, { kind, target }, today)) === QUOTE_STAGE;
-  const rev = fixed || (kind === 'quotation' && target === 'forecast' && toQuote) ? qv.versions.find((v) => v.doc.id === revise) || qv.head : null;
+  const rev = attachRevision(e.sales, deal, { kind, target, stage, revise }, today);
   const revN = qv.versions.length + 1;
-  // the figure this document should match: given by the figure it was attached from, else the typed
-  // Forecast, the installment's plan (or what was received by hand), or the typed Actual
-  const chk: DocCheck | null =
-    rev ? null
-    : check ? check
-    : tgt === 'forecast' ? (!m0.fcDoc && m0.forecast != null ? { what: 'Forecast ที่พิมพ์ไว้', value: m0.forecast } : null)
+  // the figure this document should match: given by the figure it was attached from (also on a revision),
+  // else none on a revision, else the typed Forecast, the installment's plan (or what was received by
+  // hand), or the typed Actual
+  const chk: DocCheck | null = attachCheck(check, rev, () =>
+    tgt === 'forecast' ? (!m0.fcDoc && m0.forecast != null ? { what: 'Forecast ที่พิมพ์ไว้', value: m0.forecast } : null)
     : tgt !== 'actual' ? null
     : line ? (line.hand && !line.docs.length && !addHand ? { what: 'ยอดที่รับ', value: line.got } : line.amt > 0 ? ((old || handPart) && mode === 'add' ? { what: 'ยอดที่ยังขาดตามแผน', value: Math.max(0, line.amt - line.got) } : { what: 'แผน', value: line.amt }) : null)
-    : !m0.acDocs && !m0.hand && deal.actual != null ? { what: 'Actual ที่พิมพ์ไว้', value: deal.actual } : null;
+    : !m0.acDocs && !m0.hand && deal.actual != null ? { what: 'Actual ที่พิมพ์ไว้', value: deal.actual } : null);
   const same = !!chk && amt != null && Math.abs(amt - chk.value) < 0.005;
   const differs = !!chk && amt != null && !same && tgt !== 'none';
   // the figure confirmed: the document's, or the user's own when they keep it (the document is attached either way)
@@ -436,7 +435,7 @@ export function DocAttach({ deal, kind: kindIn, stage, file: dropped, onClose, t
                 </thead>
                 <tbody>
                   <tr><th scope="row">เลขที่ · ลงวันที่</th><td className="old">{noDate(rev.doc.docNo, rev.doc.docDate)}</td><td>{noDate(docNo, docDate)}</td></tr>
-                  <tr className="sum"><th scope="row">ยอดที่นับ{basis !== 'manual' ? ` (${BASIS_TH[basis]})` : ''}</th><td className="old">{rev.doc.amount != null ? fmtMoney(rev.doc.amount) : '—'}</td><td>{fin != null ? fmtMoney(fin) : '—'}</td></tr>
+                  <tr className="sum"><th scope="row">ยอดที่นับ{basis !== 'manual' && fin === amt ? ` (${BASIS_TH[basis]})` : ''}</th><td className="old">{rev.doc.amount != null ? fmtMoney(rev.doc.amount) : '—'}</td><td>{fin != null ? fmtMoney(fin) : '—'}</td></tr>
                 </tbody>
               </table>
               {qtDiffText(rev.doc.amount, fin) && <span className="qt-diff">{qtDiffText(rev.doc.amount, fin)}</span>}

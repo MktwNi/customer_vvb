@@ -12,6 +12,7 @@ import { DocAttach, SHOWABLE, openDocFile, type AttachMore } from './DocAttach';
 import { DocThumb } from './DocThumb';
 import { QtCard } from './QtCard';
 import { isQtVersion, qtView } from '../lib/quotes';
+import { followStep, stepMoved, stepTyped, type StepEd, type StepFields } from '../lib/stepEditor';
 import { ActForm, ActList } from './DealActs';
 import { DateChip } from './DateChip';
 import { Icon } from './icons';
@@ -609,21 +610,29 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
   const acts = useSalesActs();
   const today = todayISO();
   const S = e.sales;
-  // the stage as the card opened it (a change by someone else meanwhile is asked about on saving)
-  const initRef = useRef(stepOf(S, d.id, p));
-  const init = initRef.current;
   const planned = st === 'planned' && !line;
-  const date0 = planned || line || !init.d || init.d > today ? today : init.d;
-  const [date, setDate] = useState(date0);
-  const [note, setNote] = useState(p === DEAL_STAGE && /^(yes|no)$/i.test(init.n.trim()) ? '' : init.n);
+  // what the fields show for a stage: its note (a YES / NO is the result's buttons), its date (else today)
+  const fields: StepFields = (s) => ({ note: p === DEAL_STAGE && /^(yes|no)$/i.test(s.n.trim()) ? '' : s.n, date: planned || line || !s.d || s.d > today ? today : s.d });
+  // the stage as the card opened it (a change by someone else meanwhile is asked about on saving; one
+  // while nothing was typed, such as the QUOTATION note a revision rewrites, is followed: lib/stepEditor)
+  const [ed, setEd] = useState<StepEd>(() => {
+    const s = stepOf(S, d.id, p);
+    return { init: s, ...fields(s) };
+  });
+  const { init, note, date } = ed;
+  const setNote = (v: string) => setEd((x) => ({ ...x, note: v }));
+  const setDate = (v: string) => setEd((x) => ({ ...x, date: v }));
+  const follow = (own = false) => setEd((x) => followStep(x, stepOf(e.sales, d.id, p), fields, own));
+  const live = stepOf(S, d.id, p);
+  useEffect(() => follow(), [live.d, live.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [over, setOver] = useState(false);
   const fileIn = useRef<HTMLInputElement>(null);
-  const dirty = note !== (p === DEAL_STAGE && /^(yes|no)$/i.test(init.n.trim()) ? '' : init.n) || date !== date0;
+  const dirty = stepTyped(ed, fields);
   // saved (or cleared) already: leaving the card writes nothing more
   const done = useRef(false);
   const save = (quiet = false) => {
-    const live = stepOf(e.sales, d.id, p);
-    if ((live.d !== init.d || live.n !== init.n) && !window.confirm(`มีคนแก้ขั้นนี้ระหว่างที่เปิดอยู่:\n"${live.n || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`)) return;
+    const now = stepOf(e.sales, d.id, p);
+    if (stepMoved(init, now) && !window.confirm(`มีคนแก้ขั้นนี้ระหว่างที่เปิดอยู่:\n"${now.n || '(ว่าง)'}"\n\nบันทึกของคุณทับหรือไม่?`)) return;
     done.current = true;
     const was = closeReady(e.sales, d, today);
     e.setStep(d.id, p, { d: date, n: p === DEAL_STAGE && !note.trim() && /^(yes|no)$/i.test(init.n.trim()) ? init.n : note });
@@ -634,19 +643,22 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
     onDone();
   };
   // closing the panel (×, Escape, the backdrop) keeps what was typed
-  const latest = useRef({ dirty, save });
-  latest.current = { dirty, save };
+  const latest = useRef({ dirty, save, follow });
+  latest.current = { dirty, save, follow };
   useEffect(() => () => {
     if (latest.current.dirty && !done.current) latest.current.save(true);
   }, []);
   const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p) || !!line;
   const drop = isMoney && (p === QUOTE_STAGE || won) && (!doc || !!qt);
   const kind = kindForStage(S.cfg, p);
+  // a file attached from here: the card's work is done, it closes (the step shows the document and the
+  // note it wrote); with something typed it stays open, and saving that does not ask about the document's note
+  const attached = () => (latest.current.dirty ? latest.current.follow(true) : onDone());
   // a revised quotation: compared with the one there, which stays as "ฉบับเดิม"
-  const more: AttachMore | undefined = qt ? { target: 'forecast', revise: qt.id } : undefined;
+  const more: AttachMore = qt ? { target: 'forecast', revise: qt.id, onSaved: attached } : { onSaved: attached };
   return (
     <>
-      {p === DEAL_STAGE && <ResultBig d={d} st={st} date={date} onPick={() => ((done.current = true), (initRef.current = stepOf(e.sales, d.id, p)))} />}
+      {p === DEAL_STAGE && <ResultBig d={d} st={st} date={date} onPick={() => ((done.current = true), follow(true))} />}
       {line && line.status !== 'paid' && (
         <p className="sl-tl-plan">แผน {line.line.amt != null ? fmtMoney(line.amt) + ' บาท' : 'ยังไม่ใส่ยอด'}{lineMeta(line.line) ? ' · ' + lineMeta(line.line) : ''}</p>
       )}

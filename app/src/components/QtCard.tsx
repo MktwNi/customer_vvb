@@ -19,15 +19,17 @@ const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน 
 const BASIS_LONG: [DealDoc['basis'], string][] = [['total', 'รวมทั้งสิ้น (รวม VAT)'], ['subtotal', 'ก่อน VAT'], ['netPay', 'หลังหัก ณ ที่จ่าย']];
 const BASIS_WORD: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
 
-/** Delete the version the quotation's card is about, after saying what that does to the Forecast. */
+/** Delete the version the quotation's card is about, after saying what that does to the Forecast;
+ *  true when it was deleted. */
 export function deleteQt(e: GccEngine, d: Deal, v: QtView, say: (t: string) => void) {
   const h = v.head;
-  if (!h) return;
+  if (!h) return false;
   const what = qtDelText(v, d);
   const no = h.doc.docNo ? ' ' + h.doc.docNo : '';
-  if (!window.confirm(`ลบใบเสนอราคา${no} ฉบับที่ ${h.n} (${h.doc.name})?\n${what}${h.doc.fileId ? ' · ไฟล์ย้ายไปถังขยะของ Drive ทีม' : ''}`)) return;
+  if (!window.confirm(`ลบใบเสนอราคา${no} ฉบับที่ ${h.n} (${h.doc.name})?\n${what}${h.doc.fileId ? ' · ไฟล์ย้ายไปถังขยะของ Drive ทีม' : ''}`)) return false;
   e.deleteDoc(d.id, h.doc.id);
   say(`ลบใบเสนอราคา${no} ฉบับที่ ${h.n} แล้ว · ${what}`);
+  return true;
 }
 
 /**
@@ -111,7 +113,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
             items={[
               { label: 'ดาวน์โหลดไฟล์', sub: doc.name, act: download },
               // (item 7 adds "รวมเป็นใบเสนอราคาร่วม" here)
-              { label: `ลบฉบับที่ ${h.n}`, sub: qtDelText(v, d), act: () => deleteQt(e, d, v, acts.say), sep: true },
+              { label: `ลบฉบับที่ ${h.n}`, sub: qtDelText(v, d), act: () => void deleteQt(e, d, v, acts.say), sep: true },
             ]}
           />
         </div>
@@ -295,9 +297,10 @@ export function QtForm({ d, doc, n, onDone }: { d: Deal; doc: DealDoc; n: number
  * "เปลี่ยนไฟล์": the same quotation with another file (a wrong file attached, the signed copy). The new
  * file is read and compared with what is stored (amount, number, date): a match says so; a difference
  * suggests a revision instead ("แนบเป็นฉบับแก้ไขแทน" takes the file there). The values stay as they are;
- * the old file goes to the team Drive's trash (engine.replaceDocFile).
+ * the old file goes to the team Drive's trash (engine.replaceDocFile). `onSaved`: after the swap, or the
+ * revision attached instead.
  */
-export function QtSwap({ d, doc, n, onClose }: { d: Deal; doc: DealDoc; n: number; onClose: () => void }) {
+export function QtSwap({ d, doc, n, onClose, onSaved }: { d: Deal; doc: DealDoc; n: number; onClose: () => void; onSaved?: () => void }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const [file, setFile] = useState<File | null>(null);
@@ -336,7 +339,7 @@ export function QtSwap({ d, doc, n, onClose }: { d: Deal; doc: DealDoc; n: numbe
       if (!ctl.signal.aborted) setProg('');
     }
   };
-  if (asRev && file) return <DocAttach deal={d} stage={QUOTE_STAGE} kind="quotation" target="forecast" revise={doc.id} file={file} onClose={onClose} />;
+  if (asRev && file) return <DocAttach deal={d} stage={QUOTE_STAGE} kind="quotation" target="forecast" revise={doc.id} file={file} onClose={onClose} onSaved={() => onSaved?.()} />;
   const c = swapCheck(doc, facts);
   const read = [c.amount != null ? fmtMoney(c.amount) + ' บาท' : '', c.docNo, c.docDate ? isoTh(c.docDate) : ''].filter(Boolean).join(' · ');
   const save = async () => {
@@ -346,6 +349,7 @@ export function QtSwap({ d, doc, n, onClose }: { d: Deal; doc: DealDoc; n: numbe
       const x = await e.replaceDocFile(d.id, doc.id, file);
       if (facts) qtFacts.set(x.id, facts);
       onClose();
+      onSaved?.();
       acts.say(`เปลี่ยนไฟล์ของใบเสนอราคา${doc.docNo ? ' ' + doc.docNo : ''} ฉบับที่ ${n} แล้ว`);
     } catch (x) {
       setSaving('บันทึกไม่สำเร็จ: ' + ((x as Error)?.message || x));
@@ -397,8 +401,10 @@ export function QtSwap({ d, doc, n, onClose }: { d: Deal; doc: DealDoc; n: numbe
 /**
  * The quotation in the phone card's QUOTATION editor: a small card (picture, number and version, figure,
  * what it counts toward), "แนบฉบับแก้ไข", "แก้ไขข้อมูล" | "เปลี่ยนไฟล์", and the earlier versions.
+ * `onChange`: its figures were saved or its file swapped (the QUOTATION note may name it anew: the
+ * editor's note field follows, see lib/stepEditor).
  */
-export function QtPhone({ d, v, onRevise }: { d: Deal; v: QtView; onRevise: (docId: string) => void }) {
+export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRevise: (docId: string) => void; onChange?: () => void }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const [form, setForm] = useState(false);
@@ -420,7 +426,7 @@ export function QtPhone({ d, v, onRevise }: { d: Deal; v: QtView; onRevise: (doc
         </span>
       </div>
       {form ? (
-        <QtForm d={d} doc={doc} n={h.n} onDone={(said) => (setForm(false), said && acts.say(said))} />
+        <QtForm d={d} doc={doc} n={h.n} onDone={(said) => (setForm(false), said && (acts.say(said), onChange?.()))} />
       ) : (
         <>
           <button type="button" className="btn wide" onClick={() => onRevise(doc.id)}>แนบฉบับแก้ไข</button>
@@ -439,7 +445,7 @@ export function QtPhone({ d, v, onRevise }: { d: Deal; v: QtView; onRevise: (doc
           </span>
         </div>
       ))}
-      {swap && <QtSwap d={d} doc={doc} n={h.n} onClose={() => setSwap(false)} />}
+      {swap && <QtSwap d={d} doc={doc} n={h.n} onClose={() => setSwap(false)} onSaved={onChange} />}
     </>
   );
 }
