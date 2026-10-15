@@ -23,6 +23,7 @@ import { SelField, Select } from './Select';
 import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
+import { ShareCard } from './ShareCard';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -385,9 +386,12 @@ export function DealPanel() {
         <div className="dp-body">
           {/* the plan is amounts: an account without ดูยอดเงิน follows payments by the PAY stages below */}
           {money && planFirst && <PlanCard d={d} attach={attach} />}
+          {/* สัดส่วนรายได้ under the plan, wherever it is (package dash; only with ดูค่าคอมมิชชั่น) */}
+          {money && planFirst && <ShareCard key={'sh' + d.id} d={d} />}
           {/* its own state (the card held, the quick-add) belongs to this deal */}
           <StepsCard key={d.id} d={d} attach={attach} />
           {money && !planFirst && <PlanCard d={d} attach={attach} />}
+          {money && !planFirst && <ShareCard key={'sh' + d.id} d={d} />}
           <OtherDocs d={d} attach={attach} />
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />

@@ -1,0 +1,252 @@
+/**
+ * Units, revenue splits and commission in the engine (package dash), end to end with this release's team
+ * script (team-sync/Code.gs, protocol v4) in the simulator. No script change is needed: the allow-list,
+ * the redaction for accounts without ดูค่าคอมมิชชั่น and the split's removal with its deal shipped in phase 2.
+ * - an admin sets up units (rates, people) and a deal's split; they reach another admin as written;
+ * - a sales account (no view.comm) receives no split and no rates, sees no card, and may change neither;
+ * - a role given ดูค่าคอมมิชชั่น receives them after its next pull; แก้สัดส่วน lets it save a split;
+ * - deleting a deal removes its split on the script, also for an account that may not change splits;
+ * - with the team code (no identity) the cards stay hidden; this browser alone shows them.
+ */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
+import { GccEngine } from './engine';
+import { memoryStore } from './storage';
+import { BUILTIN } from './caps';
+import { contribIn, periodRange, shareOf, staffKey, unitCtx, unitOfName } from './contrib';
+import { cashLines } from './sales';
+import type { Role } from './teamSync';
+import type { Dataset, RoundRaw } from './types';
+
+vi.setConfig({ testTimeout: 30000 });
+const URL = 'https://script.google.com/macros/s/u/exec';
+const ROOT = join(__dirname, '..', '..', '..');
+const DATA = join(ROOT, 'project', 'data');
+const json = (f: string) => JSON.parse(readFileSync(DATA + '/' + f, 'utf8'));
+
+const LS = new Map<string, Map<string, string>>();
+let cur = '';
+const ls = () => LS.get(cur) || (LS.set(cur, new Map()), LS.get(cur)!);
+vi.stubGlobal('localStorage', {
+  getItem: (k: string) => ls().get(k) ?? null,
+  setItem: (k: string, v: string) => void ls().set(k, String(v)),
+  removeItem: (k: string) => void ls().delete(k),
+});
+
+const T0 = new Date('2026-10-12T03:00:00Z');
+let base: Dataset, R: RoundRaw[], sim: GasSim;
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+  vi.setSystemTime(T0);
+  const g = json('gcc.json'), c = json('gcc-certs.json');
+  const rows = g.rows.slice(0, 60);
+  const ids = new Set(rows.map((r: unknown[]) => r[0]));
+  base = { asOf: g.asOf, dicts: g.dicts, rows, cdicts: c.dicts, certs: c.rows.filter((r: unknown[]) => ids.has(r[0])), source: 'file' };
+  R = json('rounds.json');
+});
+afterAll(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+interface Tab { e: GccEngine; browser: string }
+const tabs: Tab[] = [];
+afterEach(() => {
+  tabs.splice(0).forEach((t) => t.e.dispose());
+  LS.clear();
+  vi.setSystemTime(T0);
+});
+function mk(browser: string): Tab {
+  const raw = new GccEngine();
+  raw.homeTeam = '';
+  raw.base = structuredClone(base);
+  raw.R = R.map((x) => ({ ...x, annT: Date.parse(x.ann), docT: Date.parse(x.doc) }));
+  raw.ref = '2026-10-12';
+  raw.store = memoryStore();
+  raw.rebuild();
+  raw.loading = false;
+  const post = async (_u: string, body: Record<string, unknown>) => sim.post(body) as Record<string, unknown>;
+  raw.transport = post;
+  raw.fileTransport = post;
+  const e = new Proxy(raw, {
+    get(t, p) {
+      cur = browser;
+      const v = Reflect.get(t, p, t);
+      return typeof v === 'function' ? (...a: unknown[]) => ((cur = browser), (v as (...x: unknown[]) => unknown).apply(t, a)) : v;
+    },
+  });
+  const tab = { e, browser };
+  tabs.push(tab);
+  return tab;
+}
+const tick = () => new Promise<void>((r) => setImmediate(r));
+async function settle(...ts: Tab[]) {
+  for (let i = 0; i < 3; i++)
+    for (const t of ts) {
+      await t.e.teamSyncNow();
+      await tick();
+    }
+}
+async function lead() {
+  sim = createGasSim({ teamKey: '', kdfIter: 1000 });
+  sim.setup();
+  const L = mk('L');
+  expect(await L.e.teamOpen(URL)).toBe('setup');
+  await L.e.teamClaim(sim.ownerCode()!, 'lead', 'หมิว', 'lead-pass-123');
+  return L;
+}
+async function member(L: Tab, u: string, name: string, role: Role) {
+  const { temp } = await L.e.adminCreate({ u, name, role });
+  const M = mk(u);
+  expect(await M.e.teamOpen(URL)).toBe('accounts');
+  await M.e.teamLogin(u, temp, true);
+  await M.e.teamChangePassword('', u + '-pass-123');
+  await settle(M);
+  return M;
+}
+/** What the script holds for key k (as an admin pulls it). */
+const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
+
+/** The lead's setup: two units with their people, a won deal of เอก paid 100,000 on 15 ส.ค., split 60/40. */
+async function setUp(L: Tab) {
+  const sale = L.e.saveUnit(null, { n: 'ฝ่ายขาย', r: 5, svc: {}, members: ['หมิว', 'เอก'] })!;
+  const cons = L.e.saveUnit(null, { n: 'ฝ่ายที่ปรึกษา', r: 3, svc: { VVB: 5 }, members: ['มกร'] })!;
+  const d = L.e.addDeal({ client: 'บริษัท แบ่งรายได้ จำกัด', resp: 'เอก', year: '2569' });
+  L.e.setStep(d.id, 'CLOSED DEAL', { d: '2026-08-01', n: 'YES' });
+  L.e.setPlan(d.id, [{ stage: 'PAY1', amt: 100000, pct: null, due: '2026-08-15', rel: null, how: 'transfer', howT: '', note: '' }]);
+  L.e.markPaid(d.id, 'PAY1', { date: '2026-08-15', amount: 100000, how: 'transfer' });
+  L.e.setShare(d.id, [{ u: sale, p: 60 }, { u: cons, p: 40 }]);
+  await settle(L);
+  return { sale, cons, d };
+}
+
+describe('units and splits with this release\'s team script', () => {
+  it('an admin\'s units, people and split reach the team as written; commission is worked out from them', async () => {
+    const L = await lead();
+    const { sale, cons, d } = await setUp(L);
+    expect(L.e.teamPendingN).toBe(0);
+    expect(L.e.seesComm()).toBe(true);
+    expect(stored(L, 'scfg/unit.' + sale)!.v).toMatchObject({ n: 'ฝ่ายขาย', c: 1, rates: [{ from: '', r: 5 }] });
+    expect(stored(L, 'scfg/unitm.' + staffKey('เอก'))!.v).toMatchObject({ unit: sale, n: 'เอก' });
+    expect(stored(L, 'dshare/' + d.id)!.v).toMatchObject({ lines: [{ u: sale, p: 60 }, { u: cons, p: 40 }], by: 'หมิว' });
+    // the history says a split changed, never the split
+    const logs = Object.values(L.e.sales.log).filter((x) => x.deal === d.id && x.action === 'แก้สัดส่วนรายได้');
+    expect(logs).toHaveLength(1);
+    expect(logs[0].detail).toBe('');
+    // another admin's browser holds the same and works out the same commission
+    const A2 = await member(L, 'ton', 'ต้น', 'admin');
+    const ctx = unitCtx(A2.e.sales);
+    expect(unitOfName(ctx, 'เอก')).toBe(sale);
+    expect(shareOf(ctx, A2.e.sales.deals[d.id]).lines).toEqual([{ u: sale, p: 60 }, { u: cons, p: 40 }]);
+    const c = contribIn(ctx, cashLines(A2.e.sales, Object.values(A2.e.sales.deals), '2026-10-12'), periodRange('2569', 2));
+    expect([c.by[sale].comm, c.by[cons].comm, c.comm]).toEqual([3000, 1200, 4200]);
+  });
+
+  it('a sales account receives no split and no rates, shows no card, and may change neither', async () => {
+    const L = await lead();
+    const { sale, cons, d } = await setUp(L);
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    expect(S.e.myCaps()).toEqual(BUILTIN.sales.c);
+    expect(S.e.seesComm()).toBe(false);
+    // what the script sent: units by name and their people (the default split needs them), no rates, no split
+    expect(S.e.sales.units![sale]).toMatchObject({ n: 'ฝ่ายขาย', rates: [] });
+    expect(S.e.sales.units![cons].rates).toEqual([]);
+    expect(S.e.sales.unitm![staffKey('เอก')].unit).toBe(sale);
+    expect(S.e.sales.shares?.[d.id]).toBeUndefined();
+    const ctx = unitCtx(S.e.sales);
+    expect(contribIn(ctx, cashLines(S.e.sales, Object.values(S.e.sales.deals), '2026-10-12'), periodRange('2569', 'year')).comm).toBe(0);
+    // nothing to change here, and the script refuses it whatever a browser sends
+    S.e.setShare(d.id, [{ u: sale, p: 100 }]);
+    expect(S.e.teamNote).toBe('บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้');
+    expect(S.e.canWriteKey('dshare/' + d.id, false)).toBe(false);
+    expect(S.e.canWriteKey('scfg/unit.' + sale, false)).toBe(false);
+    expect(S.e.canWriteKey('scfg/unitm.' + staffKey('เอก'), false)).toBe(false);
+    S.e.saveUnit(sale, { n: 'ฝ่ายขายของเอก', r: 50, svc: {} });
+    expect(S.e.sales.units![sale].n).toBe('ฝ่ายขาย');
+    const forced = sim.post({ action: 'push', cv: 4, tok: S.e.session!.tok, ops: [{ k: 'dshare/' + d.id, v: { lines: [{ u: sale, p: 100 }] } }, { k: 'scfg/unit.' + sale, v: { n: 'x', c: 1, o: 0, rates: [{ from: '', r: 50 }] } }] });
+    expect(forced.denied).toEqual(['dshare/' + d.id, 'scfg/unit.' + sale]);
+    expect(stored(L, 'dshare/' + d.id)!.v).toMatchObject({ lines: [{ u: sale, p: 60 }, { u: cons, p: 40 }] });
+  });
+
+  it('a role given ดูค่าคอมมิชชั่น receives splits and rates on its next pull; with แก้สัดส่วน it saves one', async () => {
+    const L = await lead();
+    const { sale, cons, d } = await setUp(L);
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    expect(S.e.sales.shares?.[d.id]).toBeUndefined();
+    const { id } = await L.e.roleSave({ n: 'หัวหน้าฝ่ายขาย', d: '', c: { ...BUILTIN.sales.c, 'view.comm': 'all', 'edit.share': 'all' } });
+    await L.e.adminUpdate('aek', { role: id });
+    await settle(S);
+    await settle(S);
+    expect(S.e.seesComm()).toBe(true);
+    expect(S.e.can('edit.share')).toBe(true);
+    expect(S.e.sales.units![sale].rates).toEqual([expect.objectContaining({ from: '', r: 5 })]);
+    expect(S.e.sales.shares![d.id].lines).toEqual([{ u: sale, p: 60 }, { u: cons, p: 40 }]);
+    S.e.setShare(d.id, [{ u: sale, p: 50 }, { u: cons, p: 50 }]);
+    await settle(S);
+    expect(S.e.teamPendingN).toBe(0);
+    expect(stored(L, 'dshare/' + d.id)!.v).toMatchObject({ lines: [{ u: sale, p: 50 }, { u: cons, p: 50 }], by: 'เอก' });
+    // a split that is not 100% is never sent
+    S.e.setShare(d.id, [{ u: sale, p: 50 }, { u: cons, p: 30 }]);
+    expect(S.e.sales.shares![d.id].lines[1].p).toBe(50);
+    // ... and losing the capability takes the splits and rates away again
+    await L.e.adminUpdate('aek', { role: 'sales' });
+    await settle(S);
+    await settle(S);
+    expect(S.e.seesComm()).toBe(false);
+    expect(S.e.sales.shares?.[d.id]).toBeUndefined();
+    expect(S.e.sales.units![sale].rates).toEqual([]);
+  });
+
+  it('deleting a deal removes its split on the script, also for an account that may not change splits', async () => {
+    const L = await lead();
+    const { d } = await setUp(L);
+    // ลบดีล without แก้สัดส่วน: its browser never sends the split's deletion, the script removes it
+    const { id } = await L.e.roleSave({ n: 'ลบได้', d: '', c: { ...BUILTIN.sales.c, 'del.rec': 'all', 'view.comm': 'all' } });
+    const D = await member(L, 'del', 'นิด', id);
+    expect(D.e.sales.shares![d.id]).toBeTruthy();
+    D.e.deleteDeal(d.id);
+    expect(D.e.sales.shares?.[d.id]).toBeUndefined();
+    await settle(D);
+    expect(D.e.teamNote).toBe('');
+    expect(stored(L, 'dshare/' + d.id)!.del).toBe(true);
+    await settle(L);
+    expect(L.e.sales.shares?.[d.id]).toBeUndefined();
+  });
+
+  it('a person moves between units; a retired unit keeps its money; an edit of the rate is effective-dated', async () => {
+    const L = await lead();
+    const { sale, cons, d } = await setUp(L);
+    L.e.setUnitMember('เอก', cons);
+    expect(unitOfName(L.e.unitCtx(), 'เอก')).toBe(cons);
+    L.e.setUnitMember('เอก', '');
+    expect(L.e.sales.unitm![staffKey('เอก')]).toBeUndefined();
+    L.e.retireUnit(sale, true);
+    expect(L.e.sales.units![sale].off).toBe(true);
+    // the money split to it before stays with it
+    expect(shareOf(L.e.unitCtx(), L.e.sales.deals[d.id]).lines[0]).toEqual({ u: sale, p: 60 });
+    L.e.retireUnit(sale, false);
+    expect(L.e.sales.units![sale].off).toBeUndefined();
+    vi.setSystemTime(new Date('2026-11-02T03:00:00Z'));
+    L.e.saveUnit(cons, { n: 'ฝ่ายที่ปรึกษา', r: 4, svc: { VVB: 5 } });
+    await settle(L);
+    expect((stored(L, 'scfg/unit.' + cons)!.v as { rates: unknown }).rates).toEqual([expect.objectContaining({ from: '', r: 3 }), expect.objectContaining({ from: '2026-11-02', r: 4 })]);
+    expect(stored(L, 'scfg/unitm.' + staffKey('เอก'))!.del).toBe(true);
+    expect(L.e.teamPendingN).toBe(0);
+  });
+});
+
+describe('where the cards show', () => {
+  it('with the team code: hidden (no identity, every browser would hold the rates); this browser alone: shown', async () => {
+    sim = createGasSim({ teamKey: 'team-key-123', kdfIter: 1000 });
+    const A = mk('A');
+    expect(await A.e.teamConnect(URL, 'team-key-123')).toBe(true);
+    expect(A.e.role()).toBe(null);
+    expect(A.e.seesComm()).toBe(false);
+    const B = mk('B');
+    expect(B.e.seesComm()).toBe(true);
+    const id = B.e.saveUnit(null, { n: 'ฝ่ายขาย', r: 5, svc: {} });
+    expect(B.e.sales.units![id!]).toMatchObject({ n: 'ฝ่ายขาย', c: 1, rates: [{ from: '', r: 5 }] });
+  });
+});

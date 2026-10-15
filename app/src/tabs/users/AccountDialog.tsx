@@ -8,11 +8,12 @@ import { Select } from '../../components/Select';
 import { DateField, Notice } from '../../components/ui';
 import { authError } from '../../components/Login';
 import { EMAIL_RE, extrasOf, roleOf, userName } from './shared';
+import { unitOfName, unitsOf } from '../../lib/contrib';
 
 /**
  * แก้ไขบัญชี (an account's row ⋯): its display name (only before its first sign-in: afterwards the name is
  * in the data), notification e-mail (verified with a code the script sends; package notify), unit
- * (package dash: a placeholder until units exist), role, and the extras given to this person alone
+ * (package dash: scfg/unitm.<staffKey(name)>, for those who set up units), role, and the extras given to this person alone
  * (until a date, or for good). Saved together with บันทึก, online only.
  */
 export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, lost }: {
@@ -24,6 +25,12 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
   const [name, setName] = useState(u.name);
   const [em, setEm] = useState(u.em || '');
   const [role, setRole] = useState(u.role);
+  // หน่วยงาน (package dash): the person's unit by their display name (staffKey), changed by ตั้งค่าหน่วยงาน only
+  const uctx = e.unitCtx();
+  const unit0 = unitOfName(uctx, u.name);
+  const [unit, setUnit] = useState(unit0);
+  const canUnit = e.can('set.units') && e.seesComm();
+  const units = unitsOf(uctx, true).filter((x) => !x.off || x.id === unit0);
   const [drop, setDrop] = useState<string[]>([]); // extras (cap ids, or 'role') to take away
   const [add, setAdd] = useState<CapGrant[]>([]);
   const [give, setGive] = useState<{ k: CapId | ''; until: string } | null>(null);
@@ -73,6 +80,14 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
       for (const k of drop) await e.grantDel(u.u, k as CapId | 'role');
       if (add.length) await e.grantSave(u.u, add.map((x) => ({ k: x.k as CapId, s: x.s || 'all', ...(x.until ? { until: x.until } : {}) })));
       if (drop.length || add.length) said.push('สิทธิ์เพิ่ม');
+      // the unit is a shared record (queued like any edit), once the account's own changes went through;
+      // after a rename it moves to the new name
+      const named = nameOk && n !== u.name;
+      if (canUnit && (unit !== unit0 || (named && unit0))) {
+        if (named && unit0) e.setUnitMember(u.name, '');
+        e.setUnitMember(named ? n : u.name, unit);
+        said.push('หน่วยงาน');
+      }
       onSaved(said.length ? `บันทึก${said.join(' ')} ของ ${n} แล้ว` : '');
       onClose();
     } catch (x) {
@@ -106,9 +121,25 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
           </div>
           <div className="auth-field">
             <span className="rl-lbl" id={ids + 'u'} style={{ margin: 0 }}>หน่วยงาน/ฝ่าย</span>
-            {/* units (package dash) come with the commission split: until then the field says so */}
-            <Select label="หน่วยงาน/ฝ่าย" labelledBy={ids + 'u'} value="" onChange={() => {}} disabled options={[{ v: '', label: 'ยังไม่มีหน่วยงาน' }]} />
-            <span className="auth-hint">ใช้แบ่งยอดและค่าคอมมิชชั่นตามหน่วยงาน · เลือกได้เมื่อตั้งหน่วยงานแล้ว (มาพร้อมการแบ่งยอดตามหน่วยงาน)</span>
+            {units.length ? (
+              <Select
+                label="หน่วยงาน/ฝ่าย"
+                labelledBy={ids + 'u'}
+                value={unit}
+                onChange={(v) => (setUnit(v), setErr(''))}
+                disabled={!canUnit}
+                options={[{ v: '', label: 'ยังไม่ระบุหน่วยงาน' }, ...units.map((x) => ({ v: x.id, label: x.n + (x.off ? ' (เลิกใช้)' : ''), lead: <i className={'ud u' + x.c} aria-hidden="true" /> }))]}
+              />
+            ) : (
+              <Select label="หน่วยงาน/ฝ่าย" labelledBy={ids + 'u'} value="" onChange={() => {}} disabled options={[{ v: '', label: 'ยังไม่มีหน่วยงาน' }]} />
+            )}
+            <span className="auth-hint">
+              {!units.length
+                ? 'ใช้แบ่งยอดและค่าคอมมิชชั่นตามหน่วยงาน · ตั้งหน่วยงานได้ที่ Sales Tracker ปุ่มเพิ่มเติม (สามจุด) แล้วเลือก “หน่วยงานและค่าคอมมิชชั่น”'
+                : canUnit
+                  ? `งานที่ ${u.name} รับผิดชอบนับให้หน่วยงานนี้ 100% ถ้าไม่ได้แบ่งสัดส่วนไว้`
+                  : 'เปลี่ยนได้เฉพาะบทบาทที่มีสิทธิ์ ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น'}
+            </span>
           </div>
         </div>
         <div className="auth-field">

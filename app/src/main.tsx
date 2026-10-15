@@ -16,6 +16,9 @@ import './custcolor.css';
 import './roles.css';
 // notifications and the quotation check: the bell, the check sheet, การแจ้งเตือนของฉัน and the admin section
 import './notify.css';
+// units, % contribution and commission: the Dashboard's commission card and unit split, the deal panel's
+// สัดส่วนรายได้, the units dialog (lib/contrib.ts)
+import './units.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first
