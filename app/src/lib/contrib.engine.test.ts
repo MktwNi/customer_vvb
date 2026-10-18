@@ -7,7 +7,8 @@
  * - a role given ดูค่าคอมมิชชั่น receives them after its next pull; แก้สัดส่วน lets it save a split;
  * - deleting a deal removes its split on the script, also for an account that may not change splits;
  * - with the team code (no identity) the cards stay hidden; this browser alone shows them;
- * - a unit made without a rate takes its first one later and that one prices the money before too;
+ * - a unit saved as ไม่คิด and given a rate later: from that day, unless the admin asks for the money before too;
+ * - a unit used again while a live unit took its colour gets a free one;
  * - a retired unit keeps the money received before the day it was retired, not what comes in after;
  * - a team backup restores the units, their people and the splits (and uploads them when connected).
  */
@@ -253,25 +254,66 @@ function paidDeal(t: Tab, client: string, resp: string, amt: number, day: string
 const contribOf = (t: Tab, r: ReturnType<typeof periodRange>) => contribIn(unitCtx(t.e.sales), cashLines(t.e.sales, Object.values(t.e.sales.deals), '2026-12-31'), r);
 
 describe('rates set later, retired units, backups', () => {
-  it('a unit made without a rate gets its first rate the next day: the money received before is priced at it', async () => {
+  it('a unit saved as ไม่คิด and given a rate the next day: from that day; asked to, the money before too', async () => {
     const L = await lead();
     const u = L.e.saveUnit(null, { n: 'ฝ่ายขาย', r: null, svc: {}, members: ['เอก'] })!;
     expect(L.e.sales.units![u].c).toBe(0); // grey until it pays commission
     paidDeal(L, 'บริษัท รับก่อน จำกัด', 'เอก', 100000, '2026-08-15');
     expect(contribOf(L, periodRange('2569', 2)).comm).toBe(0);
+    // 5% the next day, as by default: the money received while it was ไม่คิด stays without commission
     vi.setSystemTime(new Date('2026-10-13T03:00:00Z'));
     L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 5, svc: {} });
     await settle(L);
     expect(L.e.teamPendingN).toBe(0);
-    expect((stored(L, 'scfg/unit.' + u)!.v as { rates: unknown }).rates).toEqual([{ from: '', r: 5, d: '2026-10-13' }]);
+    expect((stored(L, 'scfg/unit.' + u)!.v as { rates: unknown }).rates).toEqual([{ from: '', r: null, d: '2026-10-12' }, { from: '2026-10-13', r: 5, d: '2026-10-13' }]);
     expect(L.e.sales.units![u].c).toBe(1);
-    const c = contribOf(L, periodRange('2569', 2));
-    expect(c.by[u]).toMatchObject({ got: 100000, comm: 5000 });
-    // a change after that is effective-dated again
+    expect(contribOf(L, periodRange('2569', 2)).by[u]).toMatchObject({ got: 100000, comm: 0 });
+    // the same day, "ใช้กับเงินที่รับมาแล้วทั้งหมดด้วย" (made before its rate was known): the quarter is priced at 5%
+    L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 5, svc: {}, back: true });
+    await settle(L);
+    expect((stored(L, 'scfg/unit.' + u)!.v as { rates: unknown }).rates).toEqual([{ from: '', r: 5, d: '2026-10-13' }]);
+    expect(contribOf(L, periodRange('2569', 2)).by[u]).toMatchObject({ got: 100000, comm: 5000 });
+    // another admin counts the same
+    const A2 = await member(L, 'ton', 'ต้น', 'admin');
+    expect(contribOf(A2, periodRange('2569', 2)).by[u]).toMatchObject({ comm: 5000 });
+    // a change after that is effective-dated again; `back` no longer applies once it has had a rate
     vi.setSystemTime(new Date('2026-10-20T03:00:00Z'));
-    L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 3, svc: {} });
+    L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 3, svc: {}, back: true });
     expect(L.e.sales.units![u].rates.map((x) => [x.from, x.r])).toEqual([['', 5], ['2026-10-20', 3]]);
     expect(contribOf(L, periodRange('2569', 2)).by[u].comm).toBe(5000);
+    // set back to 5% the same day: no second 5% entry
+    L.e.saveUnit(u, { n: 'ฝ่ายขาย', r: 5, svc: {} });
+    await settle(L);
+    expect((stored(L, 'scfg/unit.' + u)!.v as { rates: unknown }).rates).toEqual([{ from: '', r: 5, d: '2026-10-13' }]);
+  });
+
+  it('colours: a new unit never takes a retired unit\'s; one used again while a live unit has its colour takes a free one', async () => {
+    const L = await lead();
+    const c = (id: string) => L.e.sales.units![id].c;
+    const ids = ['ฝ่ายขาย', 'ฝ่ายที่ปรึกษา', 'ฝ่ายทวนสอบ', 'ฝ่ายแพลตฟอร์ม'].map((n, i) => L.e.saveUnit(null, { n, r: i + 2, svc: {} })!);
+    expect(ids.map(c)).toEqual([1, 2, 3, 4]);
+    // the review's case: ฝ่ายทวนสอบ retired today (its money of this year still shows in its hue), ฝ่ายวิจัย added:
+    // grey, not ฝ่ายทวนสอบ's hue
+    L.e.retireUnit(ids[2], true);
+    const res = L.e.saveUnit(null, { n: 'ฝ่ายวิจัย', r: 4, svc: {} })!;
+    expect(c(res)).toBe(0);
+    // used again while no live unit has its hue: it keeps it
+    L.e.retireUnit(ids[2], false);
+    expect(c(ids[2])).toBe(3);
+    // a live unit holds a retired unit's hue (as an earlier build gave it): used again, no hue free → grey
+    L.e.retireUnit(ids[3], true);
+    L.e.sales.units![res] = { ...L.e.sales.units![res], c: 4 };
+    L.e.retireUnit(ids[3], false);
+    expect(c(ids[3])).toBe(0);
+    // ฝ่ายที่ปรึกษา used again while ฝ่ายวิจัย holds its hue: it takes the one no unit uses now (4: ฝ่ายวิจัย left it)
+    L.e.retireUnit(ids[1], true);
+    L.e.sales.units![res] = { ...L.e.sales.units![res], c: 2 };
+    L.e.retireUnit(ids[1], false);
+    await settle(L);
+    expect(c(ids[1])).toBe(4);
+    expect((stored(L, 'scfg/unit.' + ids[1])!.v as { c: number }).c).toBe(4);
+    expect((stored(L, 'scfg/unit.' + ids[3])!.v as { c: number }).c).toBe(0);
+    expect(L.e.teamPendingN).toBe(0);
   });
 
   it('a retired unit keeps the money received before; what comes in from that day is ยังไม่ระบุหน่วยงาน; used again later', async () => {

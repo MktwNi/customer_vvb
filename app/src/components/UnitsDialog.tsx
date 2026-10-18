@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { useApp } from '../state';
 import { isoTh, todayISO } from '../lib/format';
-import { hadRate, membersOf, rateOk, retiredSince, staffKey, unassigned, unitOfName, unitsOf, type Unit, type UnitRate } from '../lib/contrib';
+import { membersOf, rateMode, rateOk, retiredSince, staffKey, unassigned, unitOfName, unitsOf, type Unit, type UnitRate } from '../lib/contrib';
 import { Modal } from './Dialog';
 import { Select } from './Select';
 import { Icon } from './icons';
@@ -17,7 +17,8 @@ export function rateWords(e?: UnitRate | null): string {
 const rateIn = (s: string) => (s.trim() === '' ? null : Number(s.trim().replace(',', '.')));
 const cleanName = (s: string) => s.trim().replace(/\s+/g, ' ');
 
-interface Draft { n: string; r: string; members: string[]; svc: { s: string; r: string }[] }
+/** `back`: a rate given to a unit that has only been ไม่คิด prices the money received before too (rateMode 'choose'). */
+interface Draft { n: string; r: string; members: string[]; svc: { s: string; r: string }[]; back: boolean }
 
 /**
  * หน่วยงานและค่าคอมมิชชั่น (dash impl-note §4, mockups 07, 07b): the units with their people and rates, one
@@ -32,7 +33,7 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
   const ctx = e.unitCtx();
   const all = unitsOf(ctx, true), live = all.filter((u) => !u.off), off = all.filter((u) => u.off);
   const [open, setOpen] = useState<string | null>(() => (all.length ? null : 'new'));
-  const [dr, setDr] = useState<Draft>({ n: '', r: '', members: [], svc: [] });
+  const [dr, setDr] = useState<Draft>({ n: '', r: '', members: [], svc: [], back: false });
   const [err, setErr] = useState('');
   const names = [...new Set([...e.legacyNames().map((x) => x.name), ...Object.values(ctx.members).map((m) => m.n)])].filter((x) => staffKey(x));
   const services = e.sales.cfg.services;
@@ -44,6 +45,7 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
       r: last?.r != null ? String(last.r) : '',
       members: u ? membersOf(ctx, u.id) : [],
       svc: Object.entries(last?.svc || {}).map(([s, r]) => ({ s, r: String(r) })),
+      back: false,
     });
     setErr('');
     setOpen(u ? u.id : 'new');
@@ -64,7 +66,7 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
       if (x.s in svc) return setErr(`ใส่อัตราของ ${x.s} ซ้ำ`);
       svc[x.s] = v;
     }
-    e.saveUnit(id, { n, r, svc, members: dr.members });
+    e.saveUnit(id, { n, r, svc, members: dr.members, back: dr.back });
     setOpen(null);
   };
   const retire = (u: Unit) => {
@@ -77,10 +79,15 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
   const free = unassigned(ctx, names);
 
   const editor = (u: Unit | null) => {
-    const hist = (u?.rates || []).filter((x) => x.r != null || x.svc);
-    // no rate yet (none, or only "ไม่คิด" so far): the one set now is the first, and prices the money before too
-    const first = !u || !hadRate(u.rates);
-    const savedToday = !!u && u.rates[u.rates.length - 1]?.d === todayISO();
+    const hist = u?.rates || [];
+    // what the rate set now does to the money received before: the first one prices it too; a change does
+    // not; a unit that has only been ไม่คิด asks (from today unless the admin says otherwise)
+    const today = todayISO();
+    const mode = u ? rateMode(u.rates, today) : 'first';
+    const savedToday = !!u && u.rates[u.rates.length - 1]?.d === today;
+    const typed = rateIn(dr.r) != null || dr.svc.some((x) => x.s && x.r.trim());
+    const ask = mode === 'choose' && typed;
+    const offSince = u?.rates.find((x) => x.d)?.d;
     const inUnit = new Set(dr.members.map(staffKey));
     const addable = names.filter((x) => !inUnit.has(staffKey(x))).sort((a, b) => a.localeCompare(b, 'th'));
     return (
@@ -97,10 +104,23 @@ export function UnitsDialog({ onClose }: { onClose: () => void }) {
               <span aria-hidden="true">%</span>
             </span>
             <small>
-              {first ? 'อัตรานี้ใช้กับเงินที่รับมาแล้วทั้งหมดด้วย' : savedToday ? 'แก้อัตราที่บันทึกวันนี้' : 'อัตราใหม่ใช้กับเงินที่รับตั้งแต่วันที่บันทึก เงินที่รับก่อนหน้าใช้อัตราเดิม'} · เว้นว่างถ้าไม่คิดค่าคอมมิชชั่น
+              {mode === 'first' ? 'อัตรานี้ใช้กับเงินที่รับมาแล้วทั้งหมดด้วย' : mode === 'choose' ? (ask ? 'เลือกด้านล่างว่าใช้กับเงินช่วงไหน' : 'ตอนนี้ไม่คิดค่าคอมมิชชั่น') : savedToday ? 'แก้อัตราที่บันทึกวันนี้' : 'อัตราใหม่ใช้กับเงินที่รับตั้งแต่วันที่บันทึก เงินที่รับก่อนหน้าใช้อัตราเดิม'} · เว้นว่างถ้าไม่คิดค่าคอมมิชชั่น
             </small>
           </label>
         </div>
+        {ask && (
+          <fieldset className="ut-when">
+            <legend>อัตรานี้ใช้กับ</legend>
+            <label>
+              <input type="radio" name={ids + 'w'} checked={!dr.back} onChange={() => setDr({ ...dr, back: false })} />
+              <span>เงินที่รับตั้งแต่วันนี้<small>เงินที่รับก่อนหน้ายังไม่คิดค่าคอมมิชชั่น{offSince ? ` ตามที่ตั้งไว้ตั้งแต่ ${isoTh(offSince)}` : ''}</small></span>
+            </label>
+            <label>
+              <input type="radio" name={ids + 'w'} checked={dr.back} onChange={() => setDr({ ...dr, back: true })} />
+              <span>เงินที่รับมาแล้วทั้งหมดด้วย<small>เมื่อตั้งหน่วยงานไว้ก่อนรู้อัตรา ไตรมาสที่ผ่านมาจะคิดค่าคอมมิชชั่นด้วยอัตรานี้</small></span>
+            </label>
+          </fieldset>
+        )}
         {hist.length > 1 && (
           <span className="ut-hist">
             ประวัติอัตรา: {hist.map((x, i) => `${rateWords(x)} ${x.from ? 'ตั้งแต่ ' + isoTh(x.from) : 'ตั้งแต่เริ่ม'}${i === hist.length - 1 ? ' (ตอนนี้)' : ''}`).join(' · ')}

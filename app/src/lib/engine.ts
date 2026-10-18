@@ -28,7 +28,7 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
-import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
+import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
@@ -2514,10 +2514,11 @@ export class GccEngine {
   /**
    * Add (`id` null) or change a unit: its name, commission rate (null = none) and rates by service, and with
    * `members` the names in it (as written: each one moves here from any other unit, and those left out leave
-   * it). Rates are effective-dated (contrib withRate): a change prices the money received from today. A new
-   * unit that pays commission takes the first free colour. Returns the unit's id.
+   * it). Rates are effective-dated (contrib withRate): a change prices the money received from today; `back`
+   * prices the money before too, for a unit that has only been "ไม่คิด" (rateMode 'choose'). A unit that
+   * pays commission takes the first free colour. Returns the unit's id.
    */
-  saveUnit(id: string | null, p: { n: string; r: number | null; svc: Record<string, number>; members?: string[] }): string | undefined {
+  saveUnit(id: string | null, p: { n: string; r: number | null; svc: Record<string, number>; members?: string[]; back?: boolean }): string | undefined {
     if (!this.can('set.units')) return void this.deny();
     const S = this.sales, U = S.units || (S.units = {}), M = S.unitm || (S.unitm = {});
     const n = p.n.trim().replace(/\s+/g, ' ').slice(0, NAME_MAX);
@@ -2525,9 +2526,10 @@ export class GccEngine {
     const at = new Date().toISOString(), by = this.me();
     const cur = id ? U[id] : undefined;
     const uid2 = cur ? id! : newUnitId(Object.keys(U));
-    const rates = withRate(cur?.rates || [], p.r, p.svc, todayISO());
+    const today = todayISO();
+    const rates = withRate(cur?.rates || [], p.r, p.svc, today, !!p.back);
     const ctx = unitCtx(S);
-    const c = cur?.c || (paysComm({ rates }) ? freeSlot(ctx) : 0);
+    const c = cur?.c || (paysComm({ rates }) ? freeSlot(ctx, today, id || '') : 0);
     const o = cur ? cur.o : Math.max(0, ...Object.values(U).map((u) => u.o + 1));
     const rec: UnitRec = { n, c, o, rates, ...(cur?.off ? { off: true } : {}), ...(cur?.offs ? { offs: cur.offs } : {}), at, by };
     this.batchOps(() => {
@@ -2556,16 +2558,19 @@ export class GccEngine {
   /** Retire a unit (`off`) or bring it back. A retired one keeps the money received before today (its
    *  members and the splits that name it stay); the money that comes in from today on is
    *  ยังไม่ระบุหน่วยงาน's (contrib lineParts: the span is kept in `offs`, so using it again later does not
-   *  give it the money of the days it was retired). It is no longer offered for new splits or people. */
+   *  give it the money of the days it was retired). It is no longer offered for new splits or people. Used
+   *  again while a live unit has its colour, it takes a free one (contrib freeSlot). */
   retireUnit(id: string, off: boolean) {
     if (!this.can('set.units')) return this.deny();
     const cur = this.sales.units?.[id];
     if (!cur || !!cur.off === off) return;
     const { off: _o, offs: _s, ...rest } = cur;
-    const offs = withOff(cur.offs, off, todayISO());
-    const rec: UnitRec = { ...rest, ...(off ? { off: true } : {}), ...(offs.length ? { offs } : {}), at: new Date().toISOString(), by: this.me() };
+    const today = todayISO();
+    const offs = withOff(cur.offs, off, today);
+    const c = !off && slotTaken(unitCtx(this.sales), id) ? freeSlot(unitCtx(this.sales), today, id) : cur.c;
+    const rec: UnitRec = { ...rest, c, ...(off ? { off: true } : {}), ...(offs.length ? { offs } : {}), at: new Date().toISOString(), by: this.me() };
     this.sales.units![id] = rec;
-    this.op(keyOf.unit(id), unitWire(rec), { f: ['off', 'offs', 'at', 'by'] });
+    this.op(keyOf.unit(id), unitWire(rec), { f: [...(c !== cur.c ? ['c'] : []), 'off', 'offs', 'at', 'by'] });
     this.saveSales();
   }
   /** Put a person (a name as written: an account's display name or a free-text ผู้รับผิดชอบ) in a unit;

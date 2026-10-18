@@ -124,13 +124,17 @@ export function CommCard({ ctx, lines, year, cq, onCq, onSetup }: { ctx: UnitCtx
               </tr>,
               ...(on
                 ? x.items.map((it, i) => (
+                    // the unit row's five cells (the rate column hides by its class when the card is narrow):
+                    // a job's own rate shows when the unit was paid at several, under its name on a phone
                     <tr key={`${x.u || '-'}/${i}`} className="cm-sub">
                       <td>
                         <span className="cm-sn" title={it.deal.client}>{shortName(it.deal.client)}</span>
                         <small>{itemWords(it)}</small>
+                        {it.rate != null && x.rates.length > 1 && <small className="un-s">อัตรา {it.rate}%</small>}
                       </td>
                       <td>{m0(it.amt)}</td>
-                      <td colSpan={2}>{it.rate != null && x.rates.length > 1 ? <small>อัตรา {it.rate}%</small> : null}</td>
+                      <td />
+                      <td className="rt">{it.rate != null && x.rates.length > 1 ? `${it.rate}%` : null}</td>
                       <td>{it.comm ? m0(Math.round(it.comm * 100) / 100) : <span className="z">—</span>}</td>
                     </tr>
                   ))
