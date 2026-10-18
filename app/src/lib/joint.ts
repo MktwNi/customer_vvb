@@ -41,15 +41,17 @@ export const noteNo = (n: string) => /^ใบเสนอราคาร่ว�
 /** The joint quotation's number: the quotation in use (else the newest version); before its file is attached,
  *  the number typed when it was made (its header's QUOTATION note, engine.createJoint); '' without either. */
 export const jointNo = (s: SalesState, g: JointGroup) => qtView(s, g.head).head?.doc.docNo || noteNo(stepOf(s, g.head.id, QUOTE_STAGE).n);
-/** A short name for the job: "CFP มหาวิทยาลัย…พระนครเหนือ (มจพ)" → "CFP มจพ" (its Latin words and the
- *  abbreviation in brackets); a title without brackets as it is; none: the payer's short name. */
+/** A short name for the job: "CFP มหาวิทยาลัย…พระนครเหนือ (มจพ)" → "CFP มจพ" (the payer's long name gives way
+ *  to the abbreviation in brackets; every other word of the title stays: "CFP 4 บริษัท (มจพ)" → "CFP 4 บริษัท
+ *  มจพ"); a title without brackets as it is; none: the payer's short name. */
 export function jointShort(g: Pick<JointGroup, 'head' | 'qt'>) {
   const t = g.qt.title.trim();
   if (!t) return shortName(g.head.client);
   const m = /^(.*)\(([^()]{1,24})\)\s*$/.exec(t);
   if (!m) return t;
-  const latin = m[1].split(/\s+/).filter((w) => /^[A-Za-z0-9][\w.+-]*$/.test(w));
-  return [...latin, m[2].trim()].join(' ');
+  const payer = g.head.client.replace(/\s+/g, '');
+  const kept = m[1].split(/\s+/).filter((w) => w && (/^[A-Za-z0-9][\w.+-]*$/.test(w) || !payer.includes(w)));
+  return [...kept, m[2].trim()].join(' ');
 }
 /** The payer as the band and the panel name it: the title's abbreviation ("มจพ"), else its short name. */
 export function payerShort(g: Pick<JointGroup, 'head' | 'qt'>) {

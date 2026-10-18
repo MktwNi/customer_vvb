@@ -542,13 +542,14 @@ function NameCell({ S, r, onOpen, tag }: { S: SalesState; r: ChkRow; onOpen: () 
       <span className="cf-nm">
         <span className="cf-nm-l">
           {r.deal ? (
-            <button type="button" className="cf-nm-b hv-tx" onClick={onOpen} title={`${r.deal.client} เปิดรายละเอียด`}>{nameOf(r)}</button>
+            <button type="button" className="cf-nm-b hv-tx" onClick={onOpen} title={`${nameOf(r)} · ${r.deal.client} เปิดรายละเอียด`}>{nameOf(r)}</button>
           ) : (
             <span className="cf-nm-b">{nameOf(r)}</span>
           )}
-          {tag && <span className="chip cf-tag">{tag}</span>}
         </span>
-        <span className="cf-nm-s">{subOf(S, r.deal)}</span>
+        {/* the cross-year chip on the second line: the name (a joint quotation's "มจพ · ใบเสนอราคาร่วม 4 บริษัท")
+            keeps the first line whole at 1366 */}
+        <span className="cf-nm-s">{tag && <span className="chip cf-tag" title={tag}>{tag}</span>}{subOf(S, r.deal)}</span>
       </span>
     </span>
   );

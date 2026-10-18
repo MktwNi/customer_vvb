@@ -31,7 +31,7 @@ import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 import { ShareCard } from './ShareCard';
 // the month check (cash follow-up): the chips on received lines, the question before a checked line changes
 import { PayChip, PayNoPlan, PayNote, PayStripChip, askPay, useDealChecks, usePayGuard } from './PayChk';
-import { attachLines, planCheckWords, previewOf } from '../lib/payCheck';
+import { attachLines, invoiceOnly, planCheckWords, previewOf } from '../lib/payCheck';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
 const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
@@ -866,6 +866,8 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
         {P.lines.map((l) => {
           const sv = lineStatusView(l, today), lf = lineFig(l);
           const hand = l.status === 'paid' && l.hand;
+          // received on an invoice only (it counts as money in): its receipt replaces it, as accounting asks
+          const invOnly = l.status === 'paid' && !hand && invoiceOnly(S, d.id, l.stage);
           // every installment takes its document: an invoice or receipt for that stage, checked against its plan
           const att = (label: string, add = false) => <button type="button" className="lnk" onClick={() => attach(l.stage, 'receipt', undefined, { target: 'actual', add })}>{label}</button>;
           const unmark = <button type="button" className="quiet" onClick={() => guard.ask({ d, lines: [l.stage], kind: 'cancel', title: 'ยกเลิกการรับเงิน ' + l.stage, verb: 'ยกเลิกการรับ', plain: `ยกเลิกการรับ ${l.stage}? (${fmtMoney(l.handGot)} บาท ที่บันทึกเอง)`, run: () => e.unmarkPaid(d.id, l.stage) })}>ยกเลิกการรับ</button>;
@@ -886,6 +888,8 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
               {att('แนบใบเสร็จ')}
               {unmark}
             </>
+          ) : invOnly ? (
+            att('แนบใบเสร็จแทนใบแจ้งหนี้')
           ) : l.status === 'paid' && l.full && l.got < l.amt ? (
             <button type="button" className="quiet" onClick={() => e.setPayFull(d.id, l.stage, false)}>ยกเลิกถือว่าครบ</button>
           ) : null;

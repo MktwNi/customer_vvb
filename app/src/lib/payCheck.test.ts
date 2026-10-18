@@ -11,7 +11,7 @@ import {
   PAYCHK_CFG0, afterClose, barOf, basisWord, canClose, canConfirm, canReturn, canTick, canUndo, carriedLate, changeWords, chipOf, chkCounts, chkFileName, chkMatch, chkRows, chkSheets, closeRecord,
   closeStateOf, dealChecks, docLineId, docWord, evidenceWord, fpDiff, instOf, isChkF, lineIdOf, lineLabel, noteOf, parsePayChkCfg, planCheckWords, recordersOf, logsByDeal, sameFp, splitKey, sumRows, sumTotal, toMonthClose, toPayCheck,
   waitingElsewhere, yearCheck, ymOf, ymTh, type ChkRow, type PayCheck,
-  attachLines, cashCheckRows, guardHits, pageKeep, payBackBell, previewOf, returnedTo, teamMonth,
+  attachLines, cashCheckRows, guardHits, invoiceOnly, pageKeep, payBackBell, previewOf, returnedTo, teamMonth,
   PREVIEW_HEAD, canReclose, closeDrift, driftWords, movedOut, movedTo, sheetLines, sheetPreview, whereOf, type MonthClose,
 } from './payCheck';
 import { NOTIFY_CFG0, bellItems } from './notify';
@@ -452,6 +452,25 @@ describe('the deal panel', () => {
     // a plan stage on a deal with a plan, the document's own line on one without
     expect(docLineId(s, { id: 'r1', deal: 'c1', stage: 'PAY2' })).toBe('PAY2');
     expect(docLineId(s, { id: 'rc1', deal: 'c4', stage: 'PAY1' })).toBe('doc.rc1');
+  });
+});
+
+describe('received on an invoice only (accounting asks for the receipt)', () => {
+  it('true while every counted document at the stage is an invoice; a receipt replacing it, or none, ends it', () => {
+    const s = demo();
+    expect(invoiceOnly(s, 'w3', 'PAY1')).toBe(false);
+    s.docs['w3/inv'] = doc({ id: 'inv', deal: 'w3', kind: 'invoice', amount: 49000, stage: 'PAY1' });
+    expect(invoiceOnly(s, 'w3', 'PAY1')).toBe(true);
+    expect(invoiceOnly(s, 'w3', 'PAY2')).toBe(false);
+    // the receipt "ใช้ยอดนี้แทน": the invoice stays as evidence, counting nothing
+    s.docs['w3/inv'] = { ...s.docs['w3/inv'], target: 'none' };
+    s.docs['w3/rc'] = doc({ id: 'rc', deal: 'w3', kind: 'receipt', amount: 49000, stage: 'PAY1' });
+    expect(invoiceOnly(s, 'w3', 'PAY1')).toBe(false);
+    // an invoice and a receipt both counted (paid in parts): a receipt is there already
+    s.docs['w3/inv'] = { ...s.docs['w3/inv'], target: 'actual' };
+    expect(invoiceOnly(s, 'w3', 'PAY1')).toBe(false);
+    // an invoice without an amount counts nothing
+    expect(invoiceOnly({ ...s, docs: { x: doc({ id: 'x', deal: 'w2', kind: 'invoice', amount: null, stage: 'PAY1' }) } }, 'w2', 'PAY1')).toBe(false);
   });
 });
 

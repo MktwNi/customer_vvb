@@ -156,3 +156,5 @@
 .mc-ph-row>*{flex:1 1 auto;min-width:0}
 .mc-ph-sel{width:100%}
 .mc-ph-x{width:100%}
+/* the cross-year chip leads the second line (the name keeps the first line whole) */
+.mc-list .cf-nm-s .chip.cf-tag{height:18px;padding:0 8px;margin-right:6px;vertical-align:1px}

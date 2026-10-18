@@ -658,6 +658,13 @@ export function guardHits(before: ChkRow[], closes: Record<string, MonthClose>, 
   fresh.forEach((a) => closes[a.ym] && !out.some((h) => h.to?.key === a.key) && out.push({ r: a, ym: a.ym, close: closes[a.ym], gone: false, added: true, out: '', to: null }));
   return out;
 }
+/** An installment received on invoices only: every document counted at the stage is an invoice (an invoice
+ *  counts as money in, package cash rule 11). The deal panel then offers "แนบใบเสร็จแทนใบแจ้งหนี้", the
+ *  receipt replacing it (the attach dialog's "ใช้ยอดนี้แทน"), as accounting asks when it returns the line. */
+export function invoiceOnly(s: SalesState, dealId: string, stage: string) {
+  const ds = Object.values(s.docs).filter((x) => x.deal === dealId && x.stage === stage && countsActual(x));
+  return ds.length > 0 && ds.every((x) => x.kind === 'invoice');
+}
 /** The received lines a document attached at a stage may change, asked about before the attach dialog
  *  opens (the document is not chosen yet): none for a quotation or a document that counts toward nothing;
  *  on a deal with a plan the stage's installment; without one a typed Actual (a document takes its place). */

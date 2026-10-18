@@ -457,6 +457,9 @@ describe('the search, the picker, the words', () => {
     expect(shareOf(s, s.deals.p1)).toBeNull();
     expect([isJointNote('ใบเสนอราคาร่วม QT-2569-052'), isJointNote('ใบเสนอราคาร่วม'), isJointNote('ส่งใบเสนอราคาร่วมทางอีเมลแล้ว')]).toEqual([true, true, false]);
     expect(jointShort({ head: s.deals.h, qt: { title: '', at: '', by: '' } })).toBe(PAYER);
+    // a title of the team's own words keeps them; only the payer's long name gives way to the abbreviation
+    expect(jointShort({ head: s.deals.h, qt: { title: 'CFP 4 บริษัท (มจพ)', at: '', by: '' } })).toBe('CFP 4 บริษัท มจพ');
+    expect(jointShort({ head: s.deals.h, qt: { title: 'CFP รอบ 2 ' + PAYER + ' (มจพ)', at: '', by: '' } })).toBe('CFP รอบ 2 มจพ');
   });
 });
 
