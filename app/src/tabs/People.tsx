@@ -3,8 +3,9 @@ import { useApp, useEngineVersion } from '../state';
 import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
-import { KIND_TH, docsOf, fmtMoney, dealMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
+import { KIND_TH, docsOf, fmtMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
+import { moneyWords } from '../lib/joint';
 import type { Company, LogEntry, Person, Task } from '../lib/types';
 import { CoAvatar, monoSize } from '../components/CoAvatar';
 import { Modal } from '../components/Dialog';
@@ -627,7 +628,6 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
   const { engine: e, set } = useApp();
   const S = e.sales;
   const tr = stageTrack(S, d, todayISO());
-  const m = dealMoney(S, d);
   const mine = !!d.contactName && nameKey(d.contactName) === nameKey(p.name);
   return (
     <button className="pe-deal" onClick={() => set({ deal: d.id })}>
@@ -639,7 +639,8 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
         {S.cfg.stages.map((s) => <i key={s} className={'s-' + tr.states[s]} title={s} />)}
       </span>
       <span className="pe-sub">
-        {[m.forecast != null ? 'Forecast ' + fmtMoney(m.forecast) : '', m.actual != null ? 'Actual ' + fmtMoney(m.actual) : '', d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : ''].filter(Boolean).join(' · ')}
+        {/* (a joint quotation's member: its part, never its own typed figures, which count nowhere) */}
+        {[...moneyWords(S, d, e.can('view.money')), d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : ''].filter(Boolean).join(' · ')}
       </span>
     </button>
   );

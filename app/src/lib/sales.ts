@@ -614,7 +614,8 @@ export function stageTrack(s: SalesState, d: Deal, today: string) {
     next: next >= 0 ? stages[next] : '',
     nextStep: next >= 0 ? stepOf(s, d.id, stages[next]) : null,
     done,
-    total: stages.length,
+    // (a joint quotation's member: the PAY stages the joint quotation pays are not its own, "ทำแล้ว 2 จาก 6")
+    total: stages.length - (jm ? steps.filter((x) => x.off).length : 0),
     result: res,
   };
 }
@@ -1378,11 +1379,14 @@ export function moneySum(s: SalesState, deals: Deal[], attr = false) {
 export function jointCashLines(s: SalesState, deals: Deal[], today: string, attr = false): CashLine[] {
   if (!attr) return cashLines(s, deals, today);
   const out: CashLine[] = [];
-  for (const h of moneyHolds(s, deals, true))
+  for (const h of moneyHolds(s, deals, true)) {
+    // (a part says of how many of its companies, so a list of lines does not read it as the whole payment)
+    const w = h.keep && h.g ? jointParts(s, h.g) : [], part = h.keep ? h.keep.filter((i) => w[i] > 0).length : 0;
     for (const l of cashLines(s, [h.d], today)) {
       const amt = holdPart(s, h, l.amt);
-      if (amt) out.push(h.keep ? { ...l, amt } : l);
+      if (amt) out.push(h.keep ? { ...l, amt, ...(l.joint ? { joint: { ...l.joint, part } } : {}) } : l);
     }
+  }
   return out;
 }
 
@@ -1393,11 +1397,12 @@ function docNosByDeal(s: SalesState): Map<string, string> {
   return m;
 }
 /** What the search finds a deal by besides its own fields: its documents' numbers, and in a joint quotation
- *  its name and the header's quotation numbers (a member is found by the joint QT's number). */
+ *  its name and the header's quotation numbers, and the header's QUOTATION note (the number typed when it was
+ *  made without its file): a member is found by the joint QT's number. */
 function jointHay(s: SalesState, d: Deal, nos: Map<string, string>) {
   const own = nos.get(d.id) || '';
   const hid = s.jqt?.[d.id] ? d.id : jointHeadOf(s, d.id);
-  return hid ? `${own} ${s.jqt?.[hid]?.title || ''} ${hid !== d.id ? nos.get(hid) || '' : ''}` : own;
+  return hid ? `${own} ${s.jqt?.[hid]?.title || ''} ${hid !== d.id ? (nos.get(hid) || '') + ' ' + stepOf(s, hid, QUOTE_STAGE).n : ''}` : own;
 }
 
 /**
@@ -1411,7 +1416,7 @@ export interface CashLine {
   id: string;
   deal: Deal;
   /** a joint quotation's header: how many member companies, and its title (package quotes) */
-  joint?: { members: number; title: string };
+  joint?: { members: number; title: string; /** under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter: the amount is the part of this many of its companies (jointCashLines) */ part?: number };
   stage: string; n: number; of: number;
   amt: number;
   kind: 'got' | 'owed';

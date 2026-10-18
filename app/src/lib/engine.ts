@@ -33,7 +33,7 @@ import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
-import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, type JointGroup } from './sales';
+import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, type JointGroup } from './sales';
 import { canMergeFrom, isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
 import {
   QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
@@ -1200,6 +1200,16 @@ export class GccEngine {
         const c = toMonthClose(v), M = S.mclose || (S.mclose = {});
         if (c && /^\d{4}-\d\d$/.test(k) && !(k in M)) M[k] = c;
       });
+      // joint quotations: the header's mark and each membership (else the header turns into a plain customer
+      // and the members' own typed figures count again); only for deals this browser has
+      Object.entries(IS.jqt || {}).forEach(([k, v]) => {
+        const q = toJqt(v), J = S.jqt || (S.jqt = {});
+        if (q && !k.includes('/') && S.deals[k] && !(k in J)) J[k] = q;
+      });
+      Object.entries(IS.jqm || {}).forEach(([k, v]) => {
+        const i = k.indexOf('/'), m = toJqm(v), J = S.jqm || (S.jqm = {});
+        if (m && i > 0 && S.jqt?.[k.slice(0, i)] && S.deals[k.slice(i + 1)] && !(k in J)) J[k] = m;
+      });
       Object.entries((d.custom || {}) as Record<string, unknown>).forEach(([k, v]) => {
         const c = toCust(v, +k);
         if (c && !this.custom[c.id]) {
@@ -2004,6 +2014,7 @@ export class GccEngine {
     const locked = this.jointLocked(p.members, '', from?.id);
     if (locked) throw new Error(locked);
     const title = (p.title.trim() || payer).slice(0, 200);
+    const docNo = p.docNo.trim().slice(0, 60);
     let hid = '';
     this.batchOps(() => {
       const h = this.addDeal({ client: payer, gid: p.payerGid, year: p.year, section: p.section, resp: p.resp, service: p.service.slice() }, 'สร้างใบเสนอราคาร่วม');
@@ -2011,20 +2022,35 @@ export class GccEngine {
       const jq = { title, at: new Date().toISOString(), by: this.me() };
       (S.jqt || (S.jqt = {}))[hid] = jq;
       this.op(keyOf.jqt(hid), { ...jq });
-      let no = p.docNo;
+      let no = docNo;
       if (from) no = this.moveQt(from.id, hid) || no;
-      else if (!p.file && p.total != null) this.updateDeal(hid, { forecast: p.total });
+      else if (!p.file) this.jointTyped(hid, p.total, docNo, p.docDate);
       this.joinMembers(S.deals[hid], p.members, no, p.docDate, title);
     });
     let attachErr = '';
     if (p.file)
       try {
-        await this.attachDoc(hid, p.file, { kind: 'quotation', amount: p.total, target: 'forecast', basis: p.basis || 'manual', detected: p.detected ?? p.total, docNo: p.docNo, docDate: p.docDate, stage: QUOTE_STAGE });
+        await this.attachDoc(hid, p.file, { kind: 'quotation', amount: p.total, target: 'forecast', basis: p.basis || 'manual', detected: p.detected ?? p.total, docNo, docDate: p.docDate, stage: QUOTE_STAGE });
       } catch (err) {
         attachErr = (err as Error)?.message || String(err);
+        // the joint quotation stands without its file: what was typed is kept as if none had been chosen
+        if (S.deals[hid]) this.batchOps(() => this.jointTyped(hid, p.total, docNo, p.docDate));
       }
     this.saveSales();
     return { hid, attachErr };
+  }
+  /**
+   * A joint quotation without its file (none chosen, or it could not be attached): its total is the header's
+   * typed Forecast, and the quotation is recorded at the header's QUOTATION as its members' is ("ใบเสนอราคาร่วม
+   * QT-…", on the day it is dated, today at the latest), so the band, the search, the closing dialog and the
+   * members' line have its number and the day it was sent (lib/joint jointNo). Attaching the file later takes
+   * the note over (attachDoc). Existing records only.
+   */
+  private jointTyped(hid: string, total: number | null, docNo: string, docDate: string) {
+    const S = this.sales, today = todayISO();
+    if (total != null) this.updateDeal(hid, { forecast: total });
+    const st = stepOf(S, hid, QUOTE_STAGE);
+    if (S.cfg.stages.includes(QUOTE_STAGE) && !st.d && !st.n.trim()) this.setStep(hid, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
   }
   /** Why picks may not join ('' = they may): another person's row this account may not edit (rowFate
    *  'locked'). `skip`: the deal "รวมเป็นใบเสนอราคาร่วม" comes from (its quotation moves first, then it joins). */
@@ -2046,11 +2072,12 @@ export class GccEngine {
       // gone, in another joint quotation, or a row this account may not edit
       if (x.deal && (!d || d.id === h.id || fate === 'taken' || fate === 'locked')) return;
       if (!d || fate === 'new') {
-        // a new row of the year: the registry company's details, or those of the company's own row
+        // a new row of the year: the registry company's details, or those of the company's own row; its job is
+        // the joint quotation's, so it has its Services (the Services chart and filter count it as a customer)
         const like = d || (x.like ? S.deals[x.like] : undefined);
         const gid = x.gid != null ? x.gid : like?.gid ?? null;
         d = this.addDeal({
-          year: h.year, section: h.section,
+          year: h.year, section: h.section, service: h.service.slice(),
           ...(gid != null ? { gid } : { client: (x.name || like?.client || '').trim() }),
           ...(like ? { contactName: like.contactName, phone: like.phone, email: like.email, resp: like.resp } : {}),
         });
@@ -2293,7 +2320,8 @@ export class GccEngine {
     const ad = info.docDate && info.docDate <= today ? info.docDate : today;
     // at a PAY stage only a counted payment completes it: a contract filed there is evidence, not money
     const st = inList && (!isPayStage(S.cfg, stage) || countsActual(doc)) ? stepOf(S, dealId, stage) : null;
-    const noted = !!st?.n.trim();
+    // (a joint quotation made without its file noted its QUOTATION for it: the file takes that note over)
+    const noted = !!st?.n.trim() && !(isQtVersion(doc) && isJointNote(st.n) && jointRole(S, d) === 'header');
     if (st && !noted) doc.auto = { stage, n: this.autoNote(doc), d: ad };
     // keep the file in this browser first: it is uploaded to the team's Drive in the background
     let kept = true;

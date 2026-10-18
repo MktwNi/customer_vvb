@@ -15,6 +15,9 @@ import { FilterBar, sentence, type FVal } from '../components/FilterBar';
 import { CashChart, CashKey } from '../components/CashChart';
 import { MonthCheck, YearCheck, useOpenMonth } from '../components/MonthCheck';
 import { cashCheckRows, chkRows, pageKeep, sumRows, ymOf } from '../lib/payCheck';
+// joint quotations (package quotes, item 7): the same money as the Dashboard under a person filter; customers per company
+import { customersOf } from '../lib/sales';
+import { viewCashLines } from '../lib/joint';
 import { Check, Pop, Radio } from '../components/Pop';
 import { Chevron } from '../components/StageTrack';
 
@@ -140,7 +143,9 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
   const F = normSalesFilter({ year, ...ui.slCashF, money: 'cash' });
   const base = filterDeals(S, { year, money: 'cash' }, today);
   const deals = filterDeals(S, F, today);
-  const lines = cashLines(S, deals, today);
+  // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts a joint quotation by the parts of its companies listed,
+  // as the Dashboard and the KPIs do (lib/joint viewCashLines)
+  const lines = viewCashLines(S, F, today, deals);
   const Y = cashYear(lines, year), K = cashKpis(Y, year, today), R = cashRecon(lines, year);
   const own = Object.values(S.deals).some((d) => d.year === year);
   const mode = ui.slCashMode, show = ui.slCashShow;
@@ -188,7 +193,7 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
           onChange={(k, v) => up({ [k]: v || undefined })}
           anySet={filtered}
           onClearAll={() => set({ slCashF: {} })}
-          count={filtered ? { shown: deals.length, total: base.length } : null}
+          count={filtered ? { shown: customersOf(S, deals).length, total: customersOf(S, base).length } : null}
           liveCount={(k, d) => liveCount(S, F, k, d, '', today)}
         />
       </div>

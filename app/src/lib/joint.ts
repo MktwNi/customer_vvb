@@ -6,8 +6,9 @@
  */
 import { dmTh, isoTh } from './format';
 import {
-  DEAL_STAGE, QUOTE_STAGE, apportion, countsActual, dealMoney, dealResult, docsOf, fmtMoney, hasPlan, jointBase, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights, payState, sectionsFor, stepOf,
-  type Deal, type DealDoc, type JointGroup, type JointMember, type SalesState,
+  DEAL_STAGE, QUOTE_STAGE, apportion, countsActual, dealMoney, dealResult, docsOf, filterDeals, fmtMoney, hasPlan, holdPart, jointAttr, jointBase, jointCashLines, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights,
+  moneyHolds, payState, sectionsFor, stepOf,
+  type CashLine, type Deal, type DealDoc, type JointGroup, type JointMember, type SalesFilterIn, type SalesState,
 } from './sales';
 import { isQtVersion, qtVersions, qtView } from './quotes';
 import { shortName } from './salesUi';
@@ -35,8 +36,11 @@ export const jointNote = (docNo: string) => `ใบเสนอราคาร�
  *  since); a note anyone typed is never one. */
 export const isJointNote = (n: string) => /^ใบเสนอราคาร่วม(?: \S+)?$/.test(n.trim());
 
-/** The joint quotation's number: the quotation in use (else the newest version), '' before one is attached. */
-export const jointNo = (s: SalesState, g: JointGroup) => qtView(s, g.head).head?.doc.docNo || '';
+/** The number in a note a joint quotation wrote ("ใบเสนอราคาร่วม QT-2569-052" → "QT-2569-052"); '' for any other. */
+export const noteNo = (n: string) => /^ใบเสนอราคาร่วม (\S+)$/.exec(n.trim())?.[1] || '';
+/** The joint quotation's number: the quotation in use (else the newest version); before its file is attached,
+ *  the number typed when it was made (its header's QUOTATION note, engine.createJoint); '' without either. */
+export const jointNo = (s: SalesState, g: JointGroup) => qtView(s, g.head).head?.doc.docNo || noteNo(stepOf(s, g.head.id, QUOTE_STAGE).n);
 /** A short name for the job: "CFP มหาวิทยาลัย…พระนครเหนือ (มจพ)" → "CFP มจพ" (its Latin words and the
  *  abbreviation in brackets); a title without brackets as it is; none: the payer's short name. */
 export function jointShort(g: Pick<JointGroup, 'head' | 'qt'>) {
@@ -160,6 +164,18 @@ export function rowFate(s: SalesState, d: Deal, hid = '', may?: (d: Deal) => boo
   if (ownJob(s, d)) return 'new';
   return may && !may(d) ? 'locked' : 'reuse';
 }
+/**
+ * A company's line in the dialog's list (mockup 10: "ใช้แถวเดิม · Event Exhibition · หมิว"): what joining does,
+ * then the หมวด and the person its part is attributed to. A row reused keeps its own; a new row goes in the
+ * joint quotation's หมวด (`section`), followed up by the person of the row it is made like (`like`), else
+ * `resp` (who a new row of the registry company, or a name typed, gets: engine.addDeal).
+ */
+export function pickLine(s: SalesState, p: Pick<JointPick, 'deal' | 'like'>, section: string, resp: string): string {
+  const d = p.deal ? s.deals[p.deal] : undefined;
+  if (d && !p.like) return ['ใช้แถวเดิม', d.section || 'ไม่ระบุหมวด', d.resp].filter(Boolean).join(' · ');
+  const like = p.like ? s.deals[p.like] : undefined;
+  return ['เพิ่มแถวใหม่', section || 'ไม่ระบุหมวด', like ? like.resp : resp].filter(Boolean).join(' · ');
+}
 /** "รวมเป็นใบเสนอราคาร่วม" from a deal's quotation: a plain deal with a quotation and no other job of its own
  *  (no money received, plan, or closing: those stay with the deal; its quotation alone moves). */
 export function canMergeFrom(s: SalesState, d: Deal): boolean {
@@ -219,6 +235,29 @@ export function jointRows(s: SalesState, deals: Deal[]): { secs: string[]; rows:
 export const rowDeals = (rows: JRow[]) => rows.flatMap((r) => (r.k === 'deal' ? [r.d] : r.shown));
 /** The deals whose money a section sums: plain rows and the headers in the list (members carry none). */
 export const rowMoneyDeals = (rows: JRow[]) => rows.flatMap((r) => (r.k === 'deal' ? [r.d] : r.inList ? [r.g.head] : []));
+/**
+ * What of a joint quotation's money the view counts, as its band (table, phone card, ปิดงาน) shows it beside the
+ * section's sum (lib/sales moneyHolds): `whole` with its header in the list and no ผู้รับผิดชอบ / SOURCE /
+ * REFERRAL filter; under such a filter the parts of its companies shown (`part` maps an amount of the header
+ * to the part counted); `none` when the view counts none of it (its header filtered out, e.g. a search for one
+ * of its companies or a quick view; or none of the companies shown has a part): the band then says so.
+ */
+export function bandPart(s: SalesState, b: Pick<Extract<JRow, { k: 'band' }>, 'g' | 'shown' | 'inList'>, attr: boolean): { whole: boolean; none: boolean; part: (x: number) => number } {
+  const all = { whole: true, none: false, part: (x: number) => x }, nothing = { whole: false, none: true, part: () => 0 };
+  if (!attr) return b.inList ? all : nothing;
+  const h = moneyHolds(s, [...(b.inList ? [b.g.head] : []), ...b.shown], true)[0];
+  if (!h) return nothing;
+  if (!h.keep) return all;
+  const w = jointParts(s, b.g);
+  return h.keep.some((i) => w[i] > 0) ? { whole: false, none: false, part: (x: number) => holdPart(s, h, x) } : nothing;
+}
+/**
+ * The Cashflow tab's money for filter `F` (its cards, chart, list and CSV): the lines of the deals passing it,
+ * a joint quotation's carrying the parts of its companies listed under a ผู้รับผิดชอบ / SOURCE / REFERRAL
+ * filter (jointAttr), as the Dashboard, the KPIs and the money lens count it: the same money on every screen.
+ * `deals`: those deals when the caller has them already.
+ */
+export const viewCashLines = (s: SalesState, F: SalesFilterIn, today: string, deals = filterDeals(s, F, today)): CashLine[] => jointCashLines(s, deals, today, jointAttr(F));
 
 /** "ได้ 3 · ไม่ได้ 1" over the members' results; '' while none is known. */
 export function resultsWord(s: SalesState, g: JointGroup) {
@@ -261,6 +300,18 @@ export function memberLine(s: SalesState, d: Deal, money: boolean) {
   const no = jointNo(s, v.g);
   const share = !money ? '' : v.out ? 'ถอนตัวแล้ว ไม่มีส่วนแบ่ง' : v.amt != null ? `ส่วนแบ่ง ${fmtMoney(v.amt)} (${v.pct}%)` : `ส่วนแบ่ง ${v.pct}%`;
   return [`อยู่ในใบเสนอราคาร่วม${no ? ' ' + no : ''} (${payerShort(v.g)})`, `ร่วมกับอีก ${v.g.members.length - 1} บริษัท`, share].filter(Boolean).join(' · ');
+}
+/** A deal's money in words where it is listed among a person's or company's deals (People): a joint
+ *  quotation's member its part ("ส่วนแบ่ง 321,000 ใน QT ร่วม"; its own typed figures count nowhere), any other
+ *  deal its Forecast and Actual. None without ดูยอดเงิน (`money`). */
+export function moneyWords(s: SalesState, d: Deal, money: boolean): string[] {
+  if (!money) return [];
+  if (jointRole(s, d) === 'member') {
+    const v = shareOf(s, d);
+    return !v ? [] : [v.out ? 'ถอนตัวจาก QT ร่วม' : `ส่วนแบ่ง ${v.amt != null ? fmtMoney(v.amt) : v.pct + '%'} ใน QT ร่วม`];
+  }
+  const m = dealMoney(s, d);
+  return [m.forecast != null ? 'Forecast ' + fmtMoney(m.forecast) : '', m.actual != null ? 'Actual ' + fmtMoney(m.actual) : ''].filter(Boolean);
 }
 /** Under a withdrawn member's figure: "ถอนตัว 2 ส.ค." (its NO date). */
 export const outWord = (s: SalesState, d: Deal) => {

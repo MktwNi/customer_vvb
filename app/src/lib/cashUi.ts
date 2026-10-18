@@ -60,8 +60,10 @@ export function statusWord(l: CashLine) {
   if (!l.date) return 'ยังไม่กำหนดวันรับ';
   return l.status === 'late' ? 'เลยกำหนด' : l.status === 'due' ? 'ถึงกำหนด' : 'รอรับ';
 }
+/** "ใบเสนอราคาร่วม 4 บริษัท", and under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter "· ส่วนของ 1 บริษัท" (the amount is that part). */
+const jointWords = (j: NonNullable<CashLine['joint']>) => `ใบเสนอราคาร่วม ${j.members} บริษัท${j.part ? ` · ส่วนของ ${j.part} บริษัท` : ''}`;
 /** The client as the money views name it: a joint quotation's header says how many companies it pays for. */
-export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => (l.joint ? `${short(l.deal.client)} · ใบเสนอราคาร่วม ${l.joint.members} บริษัท` : short(l.deal.client));
+export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => (l.joint ? `${short(l.deal.client)} · ${jointWords(l.joint)}` : short(l.deal.client));
 
 /** The year picker's line on the money views: "เงินเข้า 15 งวด" / "ไม่มีเงินเข้า". */
 export const yearMoneyLabel = (Y: Pick<CashYear, 'totals'>) => (Y.totals.n ? `เงินเข้า ${Y.totals.n} งวด` : 'ไม่มีเงินเข้า');
@@ -210,7 +212,7 @@ export function cashRows(s: SalesState, be: string, Y: CashYear, mode: CashCsvMo
   }
   const head = ['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'งวด', 'ยอด (บาท)', 'ครบกำหนด', 'วันที่รับ', 'สถานะ', 'เลขใบเสนอราคา', 'ใบเสนอราคาร่วม (จำนวนบริษัท)'];
   const line = (l: CashLine): (string | number)[] => [
-    be, l.date ? monthYearTh(l.date) : '', l.joint ? `${l.deal.client} (ใบเสนอราคาร่วม ${l.joint.members} บริษัท)` : l.deal.client, l.dealYear, l.deal.section, l.deal.resp,
+    be, l.date ? monthYearTh(l.date) : '', l.joint ? `${l.deal.client} (${jointWords(l.joint)})` : l.deal.client, l.dealYear, l.deal.section, l.deal.resp,
     l.n > 0 ? `${l.n}/${l.of}` : 'ไม่มีแผน', l.amt, l.due, l.rcv, statusWord(l), dealMoney(s, l.deal).fcDoc?.docNo || '', l.joint ? l.joint.members : '',
   ];
   return { head, rows: [...Y.lines.map(line), ...(undated ? Y.undated.map(line) : [])] };

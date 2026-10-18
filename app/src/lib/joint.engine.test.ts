@@ -13,6 +13,10 @@ import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { cashLines, cashYear, dealMoney, jointOf, jointRole, salesStats, toJqm, type Deal } from './sales';
 import { jointNote, strayDocs } from './joint';
+// the second review's fixes
+import { customersOf, filterDeals, normSalesFilter, stepOf } from './sales';
+import { jointNo, memberLine } from './joint';
+import { statusView } from './salesUi';
 import { qtVersions } from './quotes';
 import { BUILTIN } from './caps';
 import type { Dataset, RoundRaw } from './types';
@@ -549,5 +553,159 @@ describe('review: an account limited to its own deals', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// ------------------------------------------------------------------ the second review's findings
+
+describe('review 2: a joint quotation made without its file', () => {
+  it('records the number and the date typed at the header\'s QUOTATION, as its companies\' (the band, the search and the members\' line have them); the file attached later takes over', async () => {
+    const [A, B] = await team();
+    const ms = ['บางกอกสตีล เวิร์คส์', 'อุดร ไบโอแมส', 'สยามฟู้ดส์ แปรรูป'].map((n, i) => deal(A, n, { resp: ['หมิว', 'คุณบี', 'มกร'][i] }));
+    later();
+    const { hid, attachErr } = await A.createJoint({ ...spec({ total: 900000, docNo: 'QT-2569-099', docDate: '2026-10-08' }), members: ms.map((d) => ({ deal: d.id, share: null, pct: null })) });
+    expect(attachErr).toBe('');
+    const S = A.sales, h = S.deals[hid], g = jointOf(S, h)!;
+    // the header says what its companies say: sent on the day typed, under the number typed
+    expect(stepOf(S, hid, 'QUOTATION')).toEqual({ d: '2026-10-08', n: jointNote('QT-2569-099') });
+    g.members.forEach((x) => expect(stepOf(S, x.deal.id, 'QUOTATION')).toEqual({ d: '2026-10-08', n: jointNote('QT-2569-099') }));
+    expect(jointNo(S, g)).toBe('QT-2569-099');
+    expect(memberLine(S, ms[1], true)).toBe('อยู่ในใบเสนอราคาร่วม QT-2569-099 (มจพ) · ร่วมกับอีก 2 บริษัท · ส่วนแบ่ง 300,000 (33%)');
+    expect(dealMoney(S, h)).toMatchObject({ forecast: 900000, fcConfirmed: false });
+    expect(statusView(S, h, TODAY).word).toBe('กำลังติดตาม');
+    // its number finds the header and every company: the KPI counts the money once, not 0
+    const found = filterDeals(S, normSalesFilter({ year: '2569', q: 'QT-2569-099' }), TODAY);
+    expect(found.map((d) => d.id).sort()).toEqual([hid, ...ms.map((d) => d.id)].sort());
+    expect(salesStats(S, found, TODAY)).toMatchObject({ forecast: 900000, total: 3 });
+    // a teammate's browser and the sheet: existing records only (dstep/)
+    await settle(A, B);
+    expect(sheet(`dstep/${hid}/QUOTATION`)).toEqual({ d: '2026-10-08', n: jointNote('QT-2569-099') });
+    expect(jointNo(B.sales, jointOf(B.sales, { id: hid })!)).toBe('QT-2569-099');
+    // the file, attached later at the joint quotation's card: its note and its figure take over
+    later();
+    await A.attachDoc(hid, pdf('QT-2569-099.pdf'), qt(905000, { docNo: 'QT-2569-099', docDate: '2026-10-08' }));
+    expect(stepOf(S, hid, 'QUOTATION')).toEqual({ d: '2026-10-08', n: 'ใบเสนอราคา QT-2569-099 · 905,000 บาท' });
+    expect(dealMoney(S, S.deals[hid])).toMatchObject({ forecast: 905000, fcConfirmed: true });
+    expect(jointNo(S, jointOf(S, { id: hid })!)).toBe('QT-2569-099');
+    A.dispose();
+    B.dispose();
+  });
+
+  it('a date ahead of today is recorded as today; a file that could not be attached leaves what was typed (the total, the number)', async () => {
+    const A = mk('หมิว');
+    const m1 = deal(A, 'บางกอกสตีล'), m2 = deal(A, 'อุดร ไบโอแมส');
+    later();
+    const a = await A.createJoint({ ...spec({ total: 500000, docNo: 'QT-2569-120', docDate: '2026-11-30' }), members: [{ deal: m1.id, share: null, pct: null }] });
+    expect(stepOf(A.sales, a.hid, 'QUOTATION')).toEqual({ d: TODAY, n: jointNote('QT-2569-120') });
+    // this browser cannot keep the file (and no team to send it to): the joint quotation stands on what was typed
+    const set0 = A.store.set.bind(A.store);
+    A.store.set = async (k, v) => (String(k).startsWith('docblob:') ? Promise.reject(new Error('quota')) : set0(k, v));
+    later();
+    const b = await A.createJoint({ ...spec({ total: 700000, docNo: 'QT-2569-121' }), file: pdf('qt.pdf'), members: [{ deal: m2.id, share: null, pct: null }] });
+    expect(b.attachErr).toContain('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ');
+    expect(dealMoney(A.sales, A.sales.deals[b.hid])).toMatchObject({ forecast: 700000, fcConfirmed: false });
+    expect(stepOf(A.sales, b.hid, 'QUOTATION')).toEqual({ d: '2026-10-06', n: jointNote('QT-2569-121') });
+    expect(jointNo(A.sales, jointOf(A.sales, { id: b.hid })!)).toBe('QT-2569-121');
+    expect(salesStats(A.sales, Object.values(A.sales.deals), TODAY).forecast).toBe(500000 + 700000);
+    A.dispose();
+  });
+});
+
+describe('review 2: a backup keeps its joint quotations', () => {
+  /** what "ส่งออกไฟล์สำรอง" downloads (exportCrm), caught on its way to the browser */
+  function exported(e: GccEngine): File {
+    let blob: Blob | null = null;
+    const spy = vi.spyOn(globalThis.URL, 'createObjectURL').mockImplementation((b) => ((blob = b as Blob), 'blob:x'));
+    vi.stubGlobal('document', { createElement: () => ({ style: {}, click() {}, remove() {} }), body: { appendChild() {} } });
+    try {
+      e.exportCrm();
+    } finally {
+      spy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+    expect(blob).not.toBeNull();
+    return Object.assign(blob!, { name: 'backup.json' }) as unknown as File;
+  }
+  it('restored into another browser (and from there into a new team sheet): the same roles, the money once, the customers per company', async () => {
+    const A = mk('หมิว');
+    // the reviewer's case: two rows with typed Forecasts (80,000 and 200,000) that give way to the quotation
+    const b1 = deal(A, 'บางกอกสตีล เวิร์คส์', { resp: 'หมิว', forecast: 80000 }), b2 = deal(A, 'อุดร ไบโอแมส', { resp: 'คุณบี', forecast: 200000 });
+    const p1 = deal(A, 'ไทยพลาสติกรีไซเคิล', { forecast: 100000 });
+    later();
+    const { hid } = await A.createJoint({ ...spec(), members: [{ deal: b1.id, share: 500000, pct: null }, { deal: b2.id, share: null, pct: null }, { name: 'โคราช ซีเมนต์', share: null, pct: 25 }] });
+    const all = (e: GccEngine) => Object.values(e.sales.deals);
+    const roles = (e: GccEngine) => Object.fromEntries(all(e).map((d) => [d.id, jointRole(e.sales, d)]));
+    const before = { roles: roles(A), st: salesStats(A.sales, all(A), TODAY), n: customersOf(A.sales, all(A)).length, g: jointOf(A.sales, { id: hid })! };
+    expect(before.st.forecast).toBe(1284000 + 100000);
+    const file = exported(A);
+    // another browser, on its own
+    const [B, C] = await team();
+    const L = mk('มินท์');
+    await L.importCrm(file);
+    expect(roles(L)).toEqual(before.roles);
+    expect(salesStats(L.sales, all(L), TODAY).forecast).toBe(before.st.forecast);
+    expect(salesStats(L.sales, all(L), TODAY).byResp).toEqual(before.st.byResp);
+    expect(customersOf(L.sales, all(L))).toHaveLength(before.n);
+    const g = jointOf(L.sales, { id: hid })!;
+    expect(g.qt).toEqual(before.g.qt);
+    expect(g.members.map((x) => [x.deal.id, x.m.share, x.m.pct])).toEqual(before.g.members.map((x) => [x.deal.id, x.m.share, x.m.pct]));
+    expect(p1.id in L.sales.deals).toBe(true);
+    // connected to a new team sheet, the restore sends them too
+    await B.importCrm(file);
+    await settle(B, C);
+    expect(sheet('jqt/' + hid)).toMatchObject({ title: before.g.qt.title });
+    expect(sheetKeys('jqm/')).toEqual(before.g.members.map((x) => `jqm/${hid}/${x.deal.id}`).sort());
+    expect(roles(C)).toEqual(before.roles);
+    expect(salesStats(C.sales, all(C), TODAY).forecast).toBe(before.st.forecast);
+    A.dispose();
+    B.dispose();
+    C.dispose();
+    L.dispose();
+  });
+  it('a membership whose deal or joint quotation this browser does not have is left out; one it has is never overwritten', async () => {
+    const A = mk('หมิว');
+    const b1 = deal(A, 'บางกอกสตีล'), b2 = deal(A, 'อุดร ไบโอแมส');
+    later();
+    const { hid } = await A.createJoint({ ...spec(), members: [{ deal: b1.id, share: null, pct: null }, { deal: b2.id, share: null, pct: null }] });
+    const file = exported(A);
+    const data = JSON.parse(await file.text());
+    // a hand-edited file: a membership of a deal not in the file, one of a header not marked, junk
+    data.sales.jqm[`${hid}/nope`] = { share: 1, pct: null, at: '', by: '' };
+    data.sales.jqm[`${b1.id}/${b2.id}`] = { share: 1, pct: null, at: '', by: '' };
+    data.sales.jqm['bad'] = { share: 1 };
+    data.sales.jqt['x/y'] = { title: 'x' };
+    const json = JSON.stringify(data);
+    const L = mk('มินท์');
+    await L.importCrm({ text: async () => json } as unknown as File);
+    expect(Object.keys(L.sales.jqt || {})).toEqual([hid]);
+    expect(Object.keys(L.sales.jqm || {}).sort()).toEqual([`${hid}/${b1.id}`, `${hid}/${b2.id}`].sort());
+    // a second restore: what this browser has stays as it is
+    L.setJointMembers(hid, [{ deal: b1.id, share: 400000, pct: null }, { deal: b2.id, share: null, pct: null }]);
+    await L.importCrm({ text: async () => json } as unknown as File);
+    expect(L.sales.jqm![`${hid}/${b1.id}`].share).toBe(400000);
+    A.dispose();
+    L.dispose();
+  });
+});
+
+describe('review 2: new member rows carry the joint quotation\'s Services', () => {
+  it('a CFP joint quotation of new rows counts its companies in the Services chart and the Services filter; a reused row keeps its own', async () => {
+    const [A] = await team();
+    const co = A.B.companies.find((c) => !A.dealsOf(c.id).length)!;
+    const reused = deal(A, 'บางกอกสตีล', { service: [] });
+    const own = deal(A, 'ไทยเบฟ รีไซเคิล', { resp: 'คุณบี', service: ['CFO'] });
+    await A.attachDoc(own.id, pdf('own.pdf'), qt(80000, { docNo: 'QT-2569-030' }));
+    later();
+    const { hid } = await A.createJoint({ ...spec({ service: ['CFP'] }), members: [{ gid: co.id, share: null, pct: null }, { name: 'โคราช ซีเมนต์', share: null, pct: null }, { deal: own.id, like: own.id, share: null, pct: null }, { deal: reused.id, share: null, pct: null }] });
+    const S = A.sales, g = jointOf(S, { id: hid })!;
+    expect(g.members.map((x) => x.deal.service)).toEqual([['CFP'], ['CFP'], ['CFP'], []]);
+    expect(S.deals[own.id].service).toEqual(['CFO']);
+    const st = salesStats(S, Object.values(S.deals), TODAY);
+    expect(st.byService.CFP).toBe(3);
+    const cfp = filterDeals(S, normSalesFilter({ year: '2569', service: { v: ['CFP'] } }), TODAY);
+    expect(customersOf(S, cfp)).toHaveLength(3);
+    expect(cfp.some((d) => d.id === hid)).toBe(true);
+    expect(salesStats(S, cfp, TODAY).forecast).toBe(1284000);
+    A.dispose();
   });
 });
