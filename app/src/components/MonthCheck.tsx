@@ -6,8 +6,8 @@ import { MONTHS_TH, dayTh, instSub, instText, payerName } from '../lib/cashUi';
 import { shortName } from '../lib/salesUi';
 import { sameName } from '../lib/caps';
 import {
-  CHK_F, afterClose, basisWord, canConfirm, canReturn, canTick, canUndo, carriedLate, chipOf, chkCounts, chkFileName, chkMatch, chkSheets, docWord, instOf, isSelf, logsByDeal, noteOf,
-  sumRows, sumTotal, waitingElsewhere, yearCheck, ymOf, ymTh, type ChkF, type ChkRow, type MonthRow,
+  CHK_F, PREVIEW_HEAD, basisWord, canConfirm, canReclose, canReturn, canTick, canUndo, carriedLate, chipOf, chkCounts, chkFileName, chkMatch, chkSheets, docWord, driftWords, instOf, isSelf, logsByDeal, noteOf,
+  sheetPreview, sumRows, sumTotal, waitingElsewhere, yearCheck, ymOf, ymTh, type ChkF, type ChkRow, type MonthRow,
 } from '../lib/payCheck';
 import { xlsxBlob } from '../lib/xlsx';
 import { CoAvatar } from './CoAvatar';
@@ -249,8 +249,19 @@ export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, sco
     </div>
   );
 
-  // the closed month's banner: the whole month against the close record (not the filter's share of it)
-  const changed = close ? afterClose(whole) : 0;
+  // the closed month's banner: the whole month against the close record (not the filter's share of it): a
+  // line to check again, cancelled, or moved to another month, or a checked sum that is not the close's
+  const drift = close && monthRow ? monthRow.drift : null;
+  const k = drift ? drift.redo + drift.orphans + drift.moved : 0;
+  const driftParts = drift
+    ? [
+        drift.redo ? `กลับเป็น “รอตรวจ” ต้องตรวจใหม่${k !== drift.redo ? ` ${fmtN(drift.redo)} รายการ` : ''}` : '',
+        drift.moved ? `ย้ายไปเดือนอื่น ${fmtN(drift.moved)} รายการ รอตรวจในเดือนใหม่` : '',
+        drift.orphans ? `ยกเลิกหลังตรวจ ${fmtN(drift.orphans)} รายการ รอรับทราบ` : '',
+      ].filter(Boolean)
+    : [];
+  // every line of it checked again: closed again with what it holds now
+  const reclose = checker && !block && canReclose(whole, ym, drift, today);
   const banner = close && (
     <div className="mc-closed">
       <span className="mc-closed-1">
@@ -258,12 +269,11 @@ export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, sco
         <span>{close.by || 'บัญชี'} · {dayTh(localDay(close.at))} · ตอนปิด ตรวจแล้วครบ {fmtN(close.n)} รายการ{close.amt != null ? ` ${m0(close.amt)} บาท` : ''}</span>
         {checker && !block && <><span className="sp" /><button type="button" className="lnk" onClick={() => (e.reopenMonth(ym), acts.say(`เปิดเดือน ${ymTh(ym)} อีกครั้งแล้ว`))}>เปิดเดือนอีกครั้ง</button></>}
       </span>
-      {changed > 0 && (
+      {drift?.flagged && (
         <span>
-          มีรายการเปลี่ยนหลังปิดเดือน <b>{fmtN(changed)} รายการ</b>
-          {whole.n > whole.ok && ' กลับเป็น “รอตรวจ” ต้องตรวจใหม่'}
-          {whole.orphans > 0 && `${whole.n > whole.ok ? ' ·' : ''} ยกเลิกหลังตรวจ ${fmtN(whole.orphans)} รายการ รอรับทราบ`}
+          {k ? <>มีรายการเปลี่ยนหลังปิดเดือน <b>{fmtN(k)} รายการ</b> {driftParts.join(' · ')}</> : <>ยอดที่ตรวจแล้วเปลี่ยนจากตอนปิด · ตรวจแล้วตอนนี้ <b>{fmtN(whole.ok)} รายการ</b> ตอนปิด {fmtN(close.n)} รายการ</>}
           {' '}· ยอดเข้าเดือนนี้{fw ? 'ทั้งเดือน' : ''}ตอนนี้ {m0(whole.got)} บาท {close.amt == null ? '' : Math.abs(close.amt - whole.got) < 0.005 ? 'เท่ากับตอนปิด' : `ตอนปิด ${m0(close.amt)} บาท`}
+          {reclose && <> · <button type="button" className="lnk" onClick={() => closeMonth(ym)}>ปิดเดือนอีกครั้งด้วยยอดนี้</button></>}
         </span>
       )}
     </div>
@@ -679,9 +689,10 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
   const ls = sheets[0];
   const got = rows.filter((r) => r.kind === 'got');
   const toCome = rows.filter((r) => r.kind === 'late' || r.kind === 'owed');
+  const orphans = rows.filter((r) => r.kind === 'orphan').length;
   const c = sumRows(rows);
-  const cols = [1, 2, 3, 4, 6, 8, 12, 13];
-  const cell = (v: unknown) => (v == null ? '' : typeof v === 'number' ? fmtMoney(v) : typeof v === 'object' ? (v as { date: string }).date : String(v));
+  // the preview: the sheet's first lines in short columns that fit the dialog (screen 17)
+  const prev = sheetPreview(S, rows, owed, 4, shortName);
   const name = chkFileName(ym, ce);
   const save = async () => {
     setBusy('กำลังทำไฟล์…');
@@ -697,7 +708,9 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
       <div className="cf-dlg mc-xl">
         <div>
           <div className="cf-fl">ในไฟล์มี 2 ชีต</div>
-          <div className="mc-xl-t"><b>รายการ</b> หนึ่งแถวต่อหนึ่งรายการ {fmtN(ls.rows.length)} แถว · <b>สรุป</b> ยอดเข้าแล้ว รอรับ เลยกำหนด และบัญชีตรวจแล้ว {fmtN(c.ok)} จาก {fmtN(c.n)} รายการ</div>
+          <div className="mc-xl-t">
+            <b>รายการ</b> หนึ่งแถวต่อหนึ่งรายการ {fmtN(ls.rows.length)} แถว{orphans ? ` (รวมยกเลิกหลังตรวจ ${fmtN(orphans)} แถวท้ายชีต ไม่นับในยอด)` : ''} · <b>สรุป</b> ยอดเข้าแล้ว รอรับ เลยกำหนด และบัญชีตรวจแล้ว {fmtN(c.ok)} จาก {fmtN(c.n)} รายการ
+          </div>
         </div>
         {filter && (
           <div>
@@ -716,12 +729,12 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
           </label>
         )}
         <div>
-          <div className="cf-fl">ตัวอย่าง {fmtN(Math.min(4, ls.rows.length))} แถวแรกของชีต “รายการ”</div>
-          {ls.rows.length ? (
-            <div className="cf-prev">
+          <div className="cf-fl">ตัวอย่าง {fmtN(prev.length)} แถวแรกของชีต “รายการ”</div>
+          {prev.length ? (
+            <div className="cf-prev mc-prev">
               <table>
-                <thead><tr>{cols.map((i) => <th key={i} className={i === 4 ? 'r' : undefined}>{ls.head[i]}</th>)}</tr></thead>
-                <tbody>{ls.rows.slice(0, 4).map((r, j) => <tr key={j}>{cols.map((i) => <td key={i} className={i === 4 ? 'r' : undefined}>{cell(r[i])}</td>)}</tr>)}</tbody>
+                <thead><tr>{PREVIEW_HEAD.map((h, i) => <th key={i} className={i === 3 ? 'r' : undefined}>{h}</th>)}</tr></thead>
+                <tbody>{prev.map((r, j) => <tr key={j}>{r.map((v, i) => <td key={i} className={i === 3 ? 'r' : i === 0 ? 'wr' : undefined}>{v}</td>)}</tr>)}</tbody>
               </table>
             </div>
           ) : (
@@ -758,13 +771,18 @@ export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: 
     if (!c.gotN) return c.owedN || c.lateN ? <span className="cf-mute">ยังไม่มีเงินเข้า</span> : null;
     if (!c.n) return <span className="cf-mute">ก่อนเริ่มตรวจ</span>;
     if (c.ok === c.n && !c.orphans) return <span className="mc-chk"><span className="chip info">ตรวจครบ</span><span className="mc-meta">{fmtN(c.n)} รายการ</span></span>;
-    const extra = m.close
-      ? [`แก้หลังปิด ${afterClose(c)}`]
-      : [c.wait + c.changed ? `รอตรวจ ${c.wait + c.changed}` : '', c.back ? `ส่งกลับแก้ไข ${c.back}` : '', c.orphans ? `ยกเลิกหลังตรวจ ${c.orphans}` : ''].filter(Boolean);
+    const extra = [c.wait + c.changed ? `รอตรวจ ${c.wait + c.changed}` : '', c.back ? `ส่งกลับแก้ไข ${c.back}` : '', c.orphans ? `ยกเลิกหลังตรวจ ${c.orphans}` : ''].filter(Boolean);
     return <span className="cf-cell"><span>ตรวจแล้ว {fmtN(c.ok)} จาก {fmtN(c.n)}</span><small>{extra.join(' · ')}</small></span>;
   };
   const closeCell = (m: MonthRow) => {
-    if (m.state === 'closed') return <span className="cf-cell"><span>ปิดแล้ว</span><small>{[m.close!.by, dmTh(localDay(m.close!.at))].filter(Boolean).join(' ')}</small></span>;
+    // the whole month against its close: what changed after it (a line moved out of it too)
+    if (m.state === 'closed')
+      return (
+        <span className="cf-cell">
+          <span>ปิดแล้ว</span>
+          <small>{[m.drift?.flagged ? driftWords(m.drift) : '', [m.close!.by, dmTh(localDay(m.close!.at))].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</small>
+        </span>
+      );
     if (m.state === 'current') return <span className="cf-mute">เดือนปัจจุบัน</span>;
     if (m.state === 'can')
       return may ? (
@@ -791,7 +809,7 @@ export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: 
       {phone ? (
         <div className="mc-yl">
           {Y.months.map((m, i) => {
-            const c = m.sum, any = c.gotN + c.owedN + c.lateN + c.orphans;
+            const c = m.sum, any = c.gotN + c.owedN + c.lateN + c.orphans + (m.drift?.flagged ? 1 : 0);
             return (
               <div key={m.ym} className={'mc-yl-r' + (m.ym === pick ? ' cur' : '') + (any ? '' : ' empty')}>
                 <button type="button" className="mc-yl-b" aria-pressed={m.ym === pick} disabled={!any} onClick={() => open(i)}>
@@ -816,7 +834,7 @@ export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: 
           </thead>
           <tbody>
             {Y.months.map((m, i) => {
-              const c = m.sum, any = c.gotN + c.owedN + c.lateN + c.orphans;
+              const c = m.sum, any = c.gotN + c.owedN + c.lateN + c.orphans + (m.drift?.flagged ? 1 : 0);
               const cur = m.ym === pick;
               return (
                 <tr key={m.ym} className={'cf-row' + (any ? '' : ' mc-empty') + (cur ? ' mc-cur' : '')} onClick={any ? () => open(i) : undefined}>

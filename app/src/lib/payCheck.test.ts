@@ -6,12 +6,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
-import { cashKpis, cashLines, cashYear, emptySales, newDeal, normSalesFilter, type Deal, type DealDoc, type DealLog, type PayLine, type SalesState } from './sales';
+import { cashKpis, cashLines, cashYear, emptySales, newDeal, normSalesFilter, type CashLine, type Deal, type DealDoc, type DealLog, type PayLine, type PlanInput, type SalesState } from './sales';
 import {
   PAYCHK_CFG0, afterClose, barOf, basisWord, canClose, canConfirm, canReturn, canTick, canUndo, carriedLate, changeWords, chipOf, chkCounts, chkFileName, chkMatch, chkRows, chkSheets, closeRecord,
   closeStateOf, dealChecks, docLineId, docWord, evidenceWord, fpDiff, instOf, isChkF, lineIdOf, lineLabel, noteOf, parsePayChkCfg, planCheckWords, recordersOf, logsByDeal, sameFp, splitKey, sumRows, sumTotal, toMonthClose, toPayCheck,
   waitingElsewhere, yearCheck, ymOf, ymTh, type ChkRow, type PayCheck,
   attachLines, cashCheckRows, guardHits, pageKeep, payBackBell, previewOf, returnedTo, teamMonth,
+  PREVIEW_HEAD, canReclose, closeDrift, driftWords, movedOut, movedTo, sheetLines, sheetPreview, whereOf, type MonthClose,
 } from './payCheck';
 import { NOTIFY_CFG0, bellItems } from './notify';
 import { colName, excelSerial, sheetName, sheetXml, xlsxBytes, xlsxFiles } from './xlsx';
@@ -388,7 +389,7 @@ describe('the Excel file', () => {
     expect(chkSheets(s, rows, months, false)[0].rows).toHaveLength(2);
     expect(items.rows[0].slice(0, 7)).toEqual(['ต.ค. 2569', 'พฤกษา โฮลดิ้ง', '', 'ไม่มีแผน', 180000, 'พิมพ์เอง', { date: '2026-10-05' }]);
     expect(items.rows[0].slice(12)).toEqual(['ส่งกลับแก้ไข', 'ฝน', { date: '2026-10-12' }, 'ยอดไม่ตรง']);
-    expect(sum.rows).toEqual([['ตุลาคม 2569', 305000, 156000, 80250, 541250, 2, 1, 125000, 0, 1, 'ยังไม่ปิด', '', null]]);
+    expect(sum.rows).toEqual([['ตุลาคม 2569', 305000, 156000, 80250, 541250, 2, 1, 125000, 0, 1, 0, 'ยังไม่ปิด', '', null]]);
     const bytes = await xlsxBytes([items, sum]);
     const z = await JSZip.loadAsync(bytes);
     expect(Object.keys(z.files).sort()).toEqual(['[Content_Types].xml', '_rels/.rels', 'xl/_rels/workbook.xml.rels', 'xl/styles.xml', 'xl/workbook.xml', 'xl/worksheets/sheet1.xml', 'xl/worksheets/sheet2.xml'].sort());
@@ -633,4 +634,252 @@ describe('the bell: money sent back to whoever recorded it', () => {
     s.deals.c2 = { ...s.deals.c2, actual: 179000 };
     expect(returnedTo(s, s.pchk, since, 'มกร', T)).toEqual([]);
   });
+});
+
+describe('a closed month that loses a line (review 2: a line moved out of it left "ปิดแล้ว" with no word)', () => {
+  /** The reviewer's repro: a receipt at PAY1 (stage date 30 Sep) checked by ฝน, September closed. */
+  function sepClosed() {
+    const s = world({ a: { d: { client: 'บริษัท เอ', forecast: 214000 }, steps: { ...YES('2026-09-01'), PAY1: ['2026-09-30', 'รับงวด 1'] }, pays: { PAY1: { amt: 107000, due: '2026-09-30' }, PAY2: { amt: 107000, due: '2026-11-30' } } } });
+    s.docs['a/rc1'] = doc({ id: 'rc1', deal: 'a', docNo: 'RC-1', amount: 107000, stage: 'PAY1', at: '2026-09-30T00:00:00.000Z' });
+    const r0 = byKey(rowsOf(s), 'a/PAY1');
+    expect([r0.date, r0.state]).toEqual(['2026-09-30', 'wait']);
+    s.pchk = { 'a/PAY1': rec({ amt: r0.fp!.amt, d: r0.fp!.d, f: r0.fp!.f, at: '2026-10-01T03:00:00.000Z' }) };
+    const close = closeRecord(sumRows(month(rowsOf(s), '2026-09')), 'ฝน', '2026-10-02T03:00:00.000Z');
+    expect(close).toMatchObject({ n: 1, amt: 107000 });
+    return { s, closes: { '2026-09': close } as Record<string, MonthClose> };
+  }
+  const sepOf = (s: SalesState, closes: Record<string, MonthClose>) => yearCheck(rowsOf(s), 2026, closes, T, rowsOf(s)).months[8];
+  it('the question says the closed month\'s sum changes and the line waits in its new month', () => {
+    const { s, closes } = sepClosed();
+    const after = previewOf.step(s, 'a', 'PAY1', { d: '2026-10-02', n: 'รับงวด 1' });
+    const h = guardHits(dealChecks(s, s.deals.a, s.pchk!, PAYCHK_CFG0.since, T), closes, { after: dealChecks(after, after.deals.a, s.pchk!, PAYCHK_CFG0.since, T) });
+    expect(h.map((x) => [x.r.key, x.ym, !!x.close, x.out, x.gone])).toEqual([['a/PAY1', '2026-09', true, '2026-10', false]]);
+    // a line edited inside the closed month: no move
+    const inside = previewOf.step(s, 'a', 'PAY1', { d: '2026-09-29', n: 'รับงวด 1' });
+    expect(guardHits(dealChecks(s, s.deals.a, s.pchk!, PAYCHK_CFG0.since, T), closes, { after: dealChecks(inside, inside.deals.a, s.pchk!, PAYCHK_CFG0.since, T) }).map((x) => x.out)).toEqual(['']);
+  });
+  it('after the move September is flagged (the old count said nothing), with the line counted as moved out', () => {
+    const { s, closes } = sepClosed();
+    expect(sepOf(s, closes).drift).toEqual({ redo: 0, orphans: 0, moved: 0, same: true, flagged: false });
+    s.steps['a/PAY1'] = { d: '2026-10-02', n: 'รับงวด 1' };
+    const sep = sepOf(s, closes);
+    expect([sep.state, sep.team.got, sep.team.n, afterClose(sep.team)]).toEqual(['closed', 0, 0, 0]); // what the screen used to go by
+    expect(movedOut(rowsOf(s), '2026-09')).toBe(1);
+    expect(sep.drift).toEqual({ redo: 0, orphans: 0, moved: 1, same: false, flagged: true });
+    expect(driftWords(sep.drift)).toBe('ย้ายออกหลังปิด 1');
+    expect(byKey(rowsOf(s), 'a/PAY1')).toMatchObject({ ym: '2026-10', state: 'changed' });
+    // nothing to check in September now: it can't be closed again (only opened again)
+    expect(canReclose(sep.team, '2026-09', sep.drift, T)).toBe(false);
+    // closed again after the move (as the month is now, the line waiting in October): nothing to say
+    const reclosed = { '2026-09': closeRecord(sep.team, 'ฝน', '2026-10-12T05:00:00.000Z') };
+    expect(sepOf(s, reclosed).drift).toEqual({ redo: 0, orphans: 0, moved: 0, same: true, flagged: false });
+    // the file's close column says so
+    expect(chkSheets(s, month(rowsOf(s), '2026-09'), [sep], true)[1].rows[0].slice(10, 12)).toEqual([0, 'ปิดแล้ว · ย้ายออกหลังปิด 1']);
+    // checked again in October: September's checked sum still isn't the close's
+    const r = byKey(rowsOf(s), 'a/PAY1');
+    s.pchk!['a/PAY1'] = rec({ amt: r.fp!.amt, d: r.fp!.d, f: r.fp!.f });
+    const again = sepOf(s, closes);
+    expect(again.drift).toMatchObject({ moved: 0, same: false, flagged: true });
+    expect(driftWords(again.drift)).toBe('ยอดเปลี่ยนจากตอนปิด');
+  });
+  it('a hand receipt moved out (the reviewer\'s edge1), and one moved into the next year is still flagged', () => {
+    const s = demo();
+    s.pchk = { 'w1/PAY1': rec({ amt: 107000, d: '2026-09-19' }) };
+    const closes = { '2026-09': closeRecord(teamMonth(s, s.pchk, PAYCHK_CFG0.since, T, '2026-09'), 'ฝน', 'x') };
+    s.pays['w1/PAY1'] = { ...s.pays['w1/PAY1'], rcv: '2026-10-02' };
+    expect(sepOf(s, closes).drift).toMatchObject({ moved: 1, flagged: true });
+    // December closed, the receipt's date moved to January: found across the year
+    const t = world({ dec: { d: { client: 'บริษัท ธันวา' }, steps: YES('2026-11-01'), pays: { PAY1: { amt: 70000, due: '2026-12-20', rcv: '2026-12-20' } } } });
+    const JAN = '2027-01-12';
+    const at = (st: SalesState) => chkRows(st, cashLines(st, Object.values(st.deals), JAN), st.pchk || {}, PAYCHK_CFG0.since);
+    t.pchk = { 'dec/PAY1': rec({ amt: 70000, d: '2026-12-20' }) };
+    const dc = { '2026-12': closeRecord(sumRows(month(at(t), '2026-12')), 'ฝน', 'x') };
+    t.pays['dec/PAY1'] = { ...t.pays['dec/PAY1'], rcv: '2027-01-03' };
+    const { rows, team } = cashCheckRows(at(t), 2026, null);
+    expect(yearCheck(rows, 2026, dc, JAN, team).months[11].drift).toMatchObject({ moved: 1, flagged: true });
+    // even without the other year's lines the sum no longer matches the close
+    expect(yearCheck(rows, 2026, dc, JAN).months[11].drift).toMatchObject({ moved: 0, same: false, flagged: true });
+  });
+  it('a line changed inside the month and checked again: not flagged; new money checked after the close: closed again', () => {
+    const s = demo();
+    s.pchk = { 'w1/PAY1': rec({ amt: 107000, d: '2026-09-19' }) };
+    const closes = { '2026-09': closeRecord(teamMonth(s, s.pchk, PAYCHK_CFG0.since, T, '2026-09'), 'ฝน', 'x') };
+    s.pays['w1/PAY1'] = { ...s.pays['w1/PAY1'], rcv: '2026-09-20' };
+    expect(sepOf(s, closes).drift).toMatchObject({ redo: 1, flagged: true });
+    expect(driftWords(sepOf(s, closes).drift)).toBe('แก้หลังปิด 1');
+    s.pchk['w1/PAY1'] = rec({ amt: 107000, d: '2026-09-20' });
+    expect(sepOf(s, closes).drift!.flagged).toBe(false);
+    // ไทยออยล์ PAY1 received on 28 Sep after the close, then checked: the month holds more than its close
+    s.pays['w2/PAY1'] = { ...s.pays['w2/PAY1'], rcv: '2026-09-28' };
+    s.pchk['w2/PAY1'] = rec({ amt: 80250, d: '2026-09-28' });
+    const sep = sepOf(s, closes);
+    expect(sep.drift).toMatchObject({ redo: 0, same: false, flagged: true });
+    expect(canReclose(sep.team, '2026-09', sep.drift, T)).toBe(true);
+    const again = { '2026-09': closeRecord(sep.team, 'ฝน', 'y') };
+    expect(again['2026-09']).toMatchObject({ n: 2, amt: 187250 });
+    expect(sepOf(s, again).drift!.flagged).toBe(false);
+    expect(closeDrift(sep.team, { by: '', at: '', n: 2, amt: null })).toMatchObject({ same: true }); // a hidden sum is not compared
+  });
+});
+
+describe('every edit of received money asks (review 2: "ใช้ยอดจากเอกสาร" and a first plan did not)', () => {
+  const since = PAYCHK_CFG0.since;
+  const hitsOf = (s: SalesState, id: string, after: SalesState, closes = {}) =>
+    guardHits(dealChecks(s, s.deals[id], s.pchk || {}, since, T), closes, { after: after.deals[id] ? dealChecks(after, after.deals[id], s.pchk || {}, since, T) : [] });
+  it('"ใช้ยอดจากเอกสาร" on a receipt kept at the plan\'s amount', () => {
+    const s = demo();
+    s.docs['c1/rc2'] = doc({ id: 'rc2', deal: 'c1', docNo: 'RC-2', stage: 'PAY2', amount: 120000, detected: 120500, kept: true });
+    const r = byKey(rowsOf(s), 'c1/PAY2');
+    s.pchk = { 'c1/PAY2': rec({ amt: r.fp!.amt, d: r.fp!.d, f: r.fp!.f }) };
+    expect(byKey(rowsOf(s), 'c1/PAY2').state).toBe('ok');
+    const h = hitsOf(s, 'c1', previewOf.doc(s, 'c1', 'rc2', { amount: 120500, basis: 'manual' }));
+    expect(h.map((x) => [x.r.key, x.gone])).toEqual([['c1/PAY2', false]]);
+    expect(hitsOf(s, 'c1', previewOf.doc(s, 'c1', 'rc2', { amount: 120000, basis: 'manual' }))).toEqual([]);
+  });
+  /** The reviewer's edge2: a deal without a plan, a receipt at PAY1 (20 Sep) checked as its own line. */
+  function noPlan() {
+    const s = world({ a: { d: { client: 'บริษัท เอ', forecast: 214000 }, steps: { ...YES('2026-09-01'), PAY1: ['2026-09-20', ''] } } });
+    s.docs['a/rc1'] = doc({ id: 'rc1', deal: 'a', docNo: 'RC-1', amount: 107000, stage: 'PAY1', docDate: '2026-09-20', at: '2026-09-20T00:00:00.000Z' });
+    const r = byKey(rowsOf(s), 'a/doc.rc1');
+    s.pchk = { 'a/doc.rc1': rec({ amt: r.fp!.amt, d: r.fp!.d, f: r.fp!.f, at: '2026-10-01T03:00:00.000Z' }) };
+    return s;
+  }
+  const plan: PlanInput[] = [
+    { stage: 'PAY1', amt: 107000, pct: null, due: '2026-09-30', rel: null, how: 'transfer', howT: '', note: '' },
+    { stage: 'PAY2', amt: 107000, pct: null, due: '2026-11-30', rel: null, how: 'transfer', howT: '', note: '' },
+  ];
+  it('a first plan (the editor, and the table\'s one-click plan): the money moves to PAY1, asked first', () => {
+    const s = noPlan();
+    const h = hitsOf(s, 'a', previewOf.plan(s, 'a', plan, T));
+    expect(h.map((x) => [x.r.key, x.gone, x.to?.key])).toEqual([['a/doc.rc1', true, 'a/PAY1']]);
+    expect(whereOf(h[0].to!)).toBe('PAY1');
+    expect(hitsOf(s, 'a', previewOf.firstPlan(s, 'a', T)).map((x) => [x.r.key, x.to?.key])).toEqual([['a/doc.rc1', 'a/PAY1']]);
+    // the preview leaves the state alone; a deal that has a plan: the one-click preview changes nothing
+    expect(Object.keys(s.pays)).toEqual([]);
+    const withPlan = previewOf.plan(s, 'a', plan, T);
+    expect(previewOf.firstPlan(withPlan, 'a', T)).toBe(withPlan);
+    // a stage no longer listed goes unless received; a received one stays
+    const two = { ...withPlan, pays: { ...withPlan.pays, 'a/PAY1': { ...withPlan.pays['a/PAY1'], rcv: '2026-09-20' } } };
+    expect(Object.keys(previewOf.plan(two, 'a', [plan[1]], T).pays).sort()).toEqual(['a/PAY1', 'a/PAY2']);
+    expect(Object.keys(previewOf.plan(withPlan, 'a', [plan[1]], T).pays)).toEqual(['a/PAY1', 'a/PAY2']); // PAY1 counts its receipt
+  });
+  it('a first plan over a typed Actual of a closed month: one question for the line, not a second one for "new" money', () => {
+    const s = demo();
+    s.pchk = { 'c4/typed': rec({ amt: 95000, d: '2026-04-20' }) };
+    const apr = { '2026-04': { by: 'ฝน', at: '2026-05-05T03:00:00.000Z', n: 1, amt: 95000 } };
+    const h = hitsOf(s, 'c4', previewOf.firstPlan(s, 'c4', T), apr);
+    expect(h.map((x) => [x.r.key, x.ym, x.gone, x.added, x.to?.key, x.to?.date])).toEqual([['c4/typed', '2026-04', true, false, 'c4/PAY1', '2026-04-20']]);
+  });
+});
+
+describe('an orphan whose money only changed line id (review 2: it said the money no longer counted)', () => {
+  it('a plan set on the deal: "ตอนนี้นับเป็นเงินเข้าที่ PAY1 แทน · รอตรวจใหม่", September unchanged', () => {
+    const s = world({ a: { d: { client: 'บริษัท เอ', forecast: 214000 }, steps: { ...YES('2026-09-01'), PAY1: ['2026-09-20', ''] } } });
+    s.docs['a/rc1'] = doc({ id: 'rc1', deal: 'a', docNo: 'RC-1', amount: 107000, stage: 'PAY1', docDate: '2026-09-20', at: '2026-09-20T00:00:00.000Z' });
+    const r = byKey(rowsOf(s), 'a/doc.rc1');
+    s.pchk = { 'a/doc.rc1': rec({ amt: r.fp!.amt, d: r.fp!.d, f: r.fp!.f, at: '2026-10-01T03:00:00.000Z' }) };
+    const got0 = sumRows(month(rowsOf(s), '2026-09')).got;
+    s.pays['a/PAY1'] = L({ amt: 107000, due: '2026-09-30' });
+    s.pays['a/PAY2'] = L({ amt: 107000, due: '2026-11-30' });
+    const rows = rowsOf(s), o = byKey(rows, 'a/doc.rc1');
+    expect(o.kind).toBe('orphan');
+    expect(o.to?.key).toBe('a/PAY1');
+    expect(sp(noteOf(s, o))!.body).toBe('ฝน ตรวจไว้เมื่อ 1 ต.ค. ที่ยอด 107,000 บาท รับ 20 ก.ย. 2569 · ตอนนี้นับเป็นเงินเข้าที่ PAY1 แทน · รอตรวจใหม่');
+    expect(sumRows(month(rows, '2026-09')).got).toBe(got0);
+  });
+  it('a typed Actual replaced by a document; the last document deleted so the typed Actual counts again', () => {
+    const s = demo();
+    s.pchk = { 'demo3/typed': rec({ amt: 125000, d: '2026-10-06' }) };
+    s.docs['demo3/rc3'] = doc({ id: 'rc3', deal: 'demo3', docNo: 'RC-3', amount: 126000, stage: 'PAY1', docDate: '2026-10-06' });
+    const o = byKey(rowsOf(s), 'demo3/typed');
+    expect(o.to?.key).toBe('demo3/doc.rc3');
+    expect(sp(noteOf(s, o))!.body).toBe('ฝน ตรวจไว้เมื่อ 12 ต.ค. ที่ยอด 125,000 บาท รับ 6 ต.ค. 2569 · ตอนนี้นับเป็นเงินเข้าที่ ใบเสร็จ RC-3 ยอด 126,000 บาท แทน · รอตรวจใหม่');
+    // c2 (no plan, typed 180,000): its receipt was checked, then deleted
+    const t = demo();
+    t.docs['c2/rc9'] = doc({ id: 'rc9', deal: 'c2', docNo: 'RC-9', amount: 180000, stage: 'PAY2', docDate: '2026-10-05' });
+    const r = byKey(rowsOf(t), 'c2/doc.rc9');
+    t.pchk = { 'c2/doc.rc9': rec({ amt: r.fp!.amt, d: r.fp!.d, f: r.fp!.f }) };
+    delete t.docs['c2/rc9'];
+    const g = byKey(rowsOf(t), 'c2/doc.rc9');
+    expect([g.kind, g.to?.key]).toEqual(['orphan', 'c2/typed']);
+    expect(sp(noteOf(t, g))!.body).toContain('ตอนนี้นับเป็นเงินเข้าที่ Actual ที่พิมพ์ไว้ แทน');
+  });
+  it('money really cancelled says so, even with another line of the same date and amount', () => {
+    const s = world({ p: { d: { forecast: 100000 }, steps: YES('2026-09-01'), pays: { PAY1: { amt: 50000, due: '2026-09-10', rcv: '2026-09-10' }, PAY2: { amt: 50000, due: '2026-09-10', rcv: '2026-09-10' } } } });
+    s.pchk = { 'p/PAY1': rec({ amt: 50000, d: '2026-09-10' }) };
+    s.pays['p/PAY1'] = { ...s.pays['p/PAY1'], rcv: '' };
+    const o = byKey(rowsOf(s), 'p/PAY1');
+    expect([o.kind, o.to]).toEqual(['orphan', null]);
+    expect(noteOf(s, o)!.body).toContain('ตอนนี้ไม่ได้นับเป็นเงินเข้าแล้ว');
+    // the result changed to NO, the deal deleted: nothing counts
+    const t = demo();
+    t.pchk = { 'w1/PAY1': rec({ amt: 107000, d: '2026-09-19' }) };
+    t.steps['w1/CLOSED DEAL'] = { d: '2026-09-04', n: 'NO' };
+    expect(byKey(rowsOf(t), 'w1/PAY1').to).toBeNull();
+    expect(movedTo(t, 'gone/PAY1', { amt: 1, d: '2026-09-01' }, rowsOf(t))).toBeNull();
+    // a document still on a deal without a plan that stopped counting: cancelled there
+    const u = demo();
+    u.docs['c4/rc1'] = doc({ id: 'rc1', deal: 'c4', amount: 95000, stage: 'PAY1', docDate: '2026-04-20' });
+    const r = byKey(rowsOf(u), 'c4/doc.rc1');
+    u.pchk = { 'c4/doc.rc1': rec({ amt: r.fp!.amt, d: r.fp!.d, f: r.fp!.f }) };
+    u.docs['c4/rc1'] = { ...u.docs['c4/rc1'], target: 'none' };
+    expect(byKey(rowsOf(u), 'c4/doc.rc1')).toMatchObject({ kind: 'orphan', to: null });
+  });
+});
+
+describe('the Excel file keeps lines cancelled after their check (review 2: it left them out)', () => {
+  function oct() {
+    const s = demo();
+    // ไทยออยล์ PAY1 was checked as received, then the receipt was cancelled: an orphan of October
+    s.pchk = { 'c2/typed': rec({ s: 'back', amt: 180000, d: '2026-10-05', note: 'ยอดไม่ตรง' }), 'demo3/typed': rec({ amt: 125000, d: '2026-10-06' }), 'w2/PAY1': rec({ amt: 80250, d: '2026-10-08' }) };
+    const rows = month(rowsOf(s), '2026-10');
+    return { s, rows, months: yearCheck(rowsOf(s), 2026, {}, T).months.filter((m) => m.ym === '2026-10') };
+  }
+  it('at the end of sheet รายการ, as checked and not counted; counted in the summary', () => {
+    const { s, rows, months } = oct();
+    const [items, sum] = chkSheets(s, rows, months, true);
+    expect(items.rows).toHaveLength(6);
+    expect(items.rows.at(-1)).toEqual(['ต.ค. 2569', 'ไทยออยล์ เอนเนอร์ยี่', '', 'PAY1 (งวดที่ยกเลิก)', 80250, 'ยอดตอนตรวจ', { date: '2026-10-08' }, null, 'ยกเลิกหลังตรวจ', '', '', '', 'ตรวจแล้ว · ยกเลิกหลังตรวจ ไม่นับในยอด', 'ฝน', { date: '2026-10-12' }, '']);
+    expect(chkSheets(s, rows, months, false)[0].rows.map((r) => r[8])).toEqual(['รับแล้ว', 'รับแล้ว', 'ยกเลิกหลังตรวจ']);
+    expect(sum.head[10]).toBe('ยกเลิกหลังตรวจ (รายการ)');
+    expect(sum.rows[0].slice(1, 11)).toEqual([305000, 156000, 80250, 541250, 2, 1, 125000, 0, 1, 1]); // the money as on screen: the orphan is not in it
+    expect(sheetLines(rows, true).map((r) => r.kind)).toEqual(['got', 'got', 'late', 'owed', 'owed', 'orphan']);
+  });
+  it('an orphan whose money moved says where it counts now', () => {
+    const s = demo();
+    s.pchk = { 'demo3/typed': rec({ amt: 125000, d: '2026-10-06' }) };
+    s.docs['demo3/rc3'] = doc({ id: 'rc3', deal: 'demo3', docNo: 'RC-3', amount: 125000, stage: 'PAY1', docDate: '2026-10-06' });
+    const rows = month(rowsOf(s), '2026-10');
+    const months = yearCheck(rowsOf(s), 2026, {}, T).months.filter((m) => m.ym === '2026-10');
+    expect(chkSheets(s, rows, months, false)[0].rows.at(-1)![12]).toBe('ตรวจแล้ว · ยกเลิกหลังตรวจ ไม่นับในยอด · ตอนนี้นับเป็นเงินเข้าที่ ใบเสร็จ RC-3 แทน · รอตรวจใหม่');
+  });
+  it('the dialog\'s preview: 8 short columns (screen 17), the first lines of the sheet', () => {
+    const { s, rows } = oct();
+    expect(PREVIEW_HEAD).toEqual(['ลูกค้า', 'เลขใบเสนอราคา', 'งวด', 'ยอด (บาท)', 'วันที่รับ', 'สถานะเงิน', 'บัญชีตรวจ', 'ผู้ตรวจ']);
+    const p = sheetPreview(s, rows, true, 4, (x) => x.split(' ')[0]);
+    expect(p).toEqual([
+      ['พฤกษา', '', 'ไม่มีแผน', '180,000', '2026-10-05', 'รับแล้ว', 'ส่งกลับแก้ไข', 'ฝน 2026-10-12'],
+      ['คงธนา', '', 'ไม่มีแผน', '125,000', '2026-10-06', 'รับแล้ว', 'ตรวจแล้ว', 'ฝน 2026-10-12'],
+      ['ไทยออยล์', '', 'งวด 1/2', '80,250', '', 'เลยกำหนด', '', ''],
+      ['เบทาโกร', '', 'งวด 1/2', '49,000', '', 'รอรับ', '', ''],
+    ]);
+    // only the money received (and the orphan last)
+    expect(sheetPreview(s, rows, false, 4).map((r) => r[6])).toEqual(['ส่งกลับแก้ไข', 'ตรวจแล้ว', 'ยกเลิกหลังตรวจ']);
+  });
+});
+
+describe('a joint quotation (spec §F test 7)', () => {
+  it('the header\'s lines are checkable and say who pays; the file names the joint quotation', () => {
+    const s = demo();
+    // the header's lines as cashLines gives them once package quotes is in (lib/sales.ts CashLine.joint)
+    const ls = lines(s).map((l): CashLine => (l.deal.id === 'w1' ? { ...l, joint: { members: 3, title: 'QT ร่วม' } } : l));
+    const rows = chkRows(s, ls, {}, PAYCHK_CFG0.since);
+    const h = byKey(rows, 'w1/PAY1');
+    expect([h.kind, h.state]).toEqual(['got', 'wait']);
+    expect(instOf(h, s).sub).toBe('ผู้จ่าย แสนสิริ กรีน พร็อพเพอร์ตี้');
+    const months = yearCheck(rows, 2026, {}, T).months.filter((m) => m.ym === '2026-09');
+    expect(chkSheets(s, month(rows, '2026-09'), months, false)[0].rows[0][1]).toBe('แสนสิริ กรีน พร็อพเพอร์ตี้ (ใบเสนอราคาร่วม 3 บริษัท)');
+  });
+  // jointRole (lib/sales.ts) is a stub on this branch: every deal is 'plain' until package quotes merges
+  it.todo('the members of a joint quotation contribute no lines (cashLines skips jointRole member): add with the quotes merge');
 });

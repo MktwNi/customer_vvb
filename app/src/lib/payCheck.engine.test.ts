@@ -12,8 +12,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { cashLines, emptySales, type PlanInput } from './sales';
-import { canClose, chkRows, sumRows, type ChkRow } from './payCheck';
+import { cashLines, emptySales, type DealDoc, type PlanInput, type SalesState } from './sales';
+import { canClose, chkRows, dealChecks, previewOf, sumRows, type ChkRow } from './payCheck';
 import type { CapSet } from './caps';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
@@ -261,6 +261,44 @@ describe('the month check against the team script', () => {
     expect(N.e.payChecks()[key]).toMatchObject({ s: 'back', amt: null });
     expect(N.e.payChecks()[key].note).not.toContain('53,500');
     expect(L.e.payChecks()[key]).toMatchObject({ amt: 53500, note: 'ยอด 53,500 บาท ไม่มีสลิป' });
+  });
+});
+
+describe('the question\'s plan preview (review 2: a first plan moved checked money without asking)', () => {
+  /** A won deal without a plan: a receipt at PAY1 (20 Sep), PAY2 done the old way (its note, 25 Sep) with
+   *  the typed Actual covering it. */
+  function noPlan(e: GccEngine, client: string) {
+    const d = e.addDeal({ client, year: '2569' });
+    e.setStep(d.id, 'CLOSED DEAL', { d: '2026-09-01', n: 'YES' });
+    e.setStep(d.id, 'PAY1', { d: '2026-09-20', n: 'รับงวด 1' });
+    e.setStep(d.id, 'PAY2', { d: '2026-09-25', n: 'รับเงินแล้ว' });
+    e.updateDeal(d.id, { forecast: 321000, actual: 214000 });
+    e.sales.docs[d.id + '/rc1'] = { id: 'rc1', deal: d.id, kind: 'receipt', name: 'r.pdf', mime: 'application/pdf', size: 1, fileId: '', docNo: 'RC-1', docDate: '2026-09-20', amount: 107000, target: 'actual', detected: 107000, basis: 'total', stage: 'PAY1', at: '2026-09-20T03:00:00.000Z', by: 'หมิว' } as DealDoc;
+    return d;
+  }
+  /** The received lines a check is about: key, amount, date, evidence. */
+  const got = (s: SalesState, id: string) => dealChecks(s, s.deals[id], {}, '2026-01-01', TODAY).filter((r) => r.kind === 'got').map((r) => [r.key, r.fp]);
+  const plan = (s: SalesState, id: string) => Object.fromEntries(Object.entries(s.pays).filter(([k]) => k.startsWith(id + '/')).map(([k, v]) => [k, { ...v, at: '', by: '' }]));
+  it('previewOf.plan stores what setPlan stores (a first plan, then an edit that drops a stage); firstPlan what quickPlan keeps', async () => {
+    const L = await lead();
+    const d = noPlan(L.e, 'บริษัท พรีวิวแผน จำกัด');
+    expect(got(L.e.sales, d.id).map((x) => x[0])).toEqual([d.id + '/doc.rc1']); // the receipt is the Actual's money
+    const first = [line('PAY1', 107000, { due: '2026-09-20' }), line('PAY2', 107000, { due: '2026-09-25' }), line('PAY3', 107000, { due: '2026-12-20' })];
+    const pv = previewOf.plan(L.e.sales, d.id, first, TODAY);
+    L.e.setPlan(d.id, first);
+    expect(plan(pv, d.id)).toEqual(plan(L.e.sales, d.id));
+    expect(got(pv, d.id)).toEqual(got(L.e.sales, d.id));
+    expect(got(L.e.sales, d.id).map((x) => x[0])).toEqual([d.id + '/PAY1', d.id + '/PAY2']);
+    // an edit: PAY3's amount, a new PAY4, PAY2 (received) left out of the list stays
+    const edit = [line('PAY1', 107000, { due: '2026-09-20' }), line('PAY3', 50000, { due: '2026-12-20' }), line('PAY4', 57000, { due: '2027-01-20' })];
+    const pv2 = previewOf.plan(L.e.sales, d.id, edit, TODAY);
+    L.e.setPlan(d.id, edit);
+    expect(plan(pv2, d.id)).toEqual(plan(L.e.sales, d.id));
+    // the table's one-click plan on another deal: the received lines it keeps are the preview's
+    const q = noPlan(L.e, 'บริษัท พรีวิวด่วน จำกัด');
+    const pq = previewOf.firstPlan(L.e.sales, q.id, TODAY);
+    expect(L.e.quickPlan(q.id, 2)).not.toBeNull();
+    expect(got(pq, q.id)).toEqual(got(L.e.sales, q.id));
   });
 });
 

@@ -241,7 +241,12 @@ function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boole
     if (how === 'qt') acts.say(`ย้าย${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''} ไปเป็นใบเสนอราคาของใบเสนอราคาร่วมแล้ว · นับยอดครั้งเดียวที่ใบเสนอราคาร่วม`);
     else if (how === 'doc') acts.say(`ย้าย${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''} ไปที่ใบเสนอราคาร่วมแล้ว · เก็บเป็นเอกสารที่ไม่นับยอด แก้ให้นับได้ที่นั่น`);
   };
-  const useDoc = () => (mm ? e.updateDoc(d.id, doc.id, { amount: mm.doc, basis: 'manual' }) : e.updateDeal(d.id, { forecast: null }));
+  // the document's figure in place of the one kept: the counted amount of a received line changes, so a
+  // checked one is asked about first
+  const useDoc = () =>
+    mm
+      ? guard.ask({ d, after: previewOf.doc(e.sales, d.id, doc.id, { amount: mm.doc, basis: 'manual' }), kind: 'edit', title: `ใช้ยอดจากเอกสาร ${doc.docNo || doc.name}`, verb: 'ใช้ยอดจากเอกสาร', run: () => e.updateDoc(d.id, doc.id, { amount: mm.doc, basis: 'manual' }) })
+      : e.updateDeal(d.id, { forecast: null });
   return (
     <div className={'sl-docc' + (open ? ' open' : '') + (warn ? ' warn' : '')}>
       <div className="sl-docc-r">
@@ -1077,13 +1082,10 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
       set({ dpPlan: '' });
       acts.say(`บันทึกแผนชำระแล้ว · ${lines.length} งวด · รวม ${fmtMoney(sum)} บาท${kept.length ? ' · เก็บงวดที่รับแล้ว ' + kept.join(', ') + ' ไว้' : ''}`);
     };
-    // money received by hand at the planned amount moves with it: a checked line is asked about first
-    const moved = rows.filter((r) => {
-      const l = P?.lines.find((x) => x.stage === r.stage);
-      return !!l && l.hand && l.line.got == null && (amtOf(r) ?? null) !== l.line.amt;
-    });
-    if (moved.length) guard.ask({ d, lines: moved.map((r) => r.stage), kind: 'edit', title: 'แก้ยอดงวดที่รับเงินแล้ว', verb: 'บันทึกแผน', run });
-    else run();
+    // the plan as it will be: money received by hand at the planned amount moves with it, and a deal's
+    // first plan takes its received money from its documents or typed Actual to its stages; a checked line
+    // (or one of a closed month) is asked about first
+    guard.ask({ d, after: previewOf.plan(S, d.id, lines, today), kind: 'edit', title: P ? 'แก้แผนชำระ' : 'ตั้งแผนชำระ', verb: 'บันทึกแผน', run });
   };
   const clear = () => {
     if (!window.confirm('ลบแผนชำระนี้? งวดที่รับเงินแล้วยังเก็บไว้')) return;

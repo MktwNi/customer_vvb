@@ -117,6 +117,10 @@
 .mc-xl{display:flex;flex-direction:column;gap:14px}
 .mc-xl-t{font-size:var(--fs-body);line-height:1.6;color:var(--ink)}
 .mc-xl-t b{font-weight:500}
+/* the preview fits the dialog: the client's name wraps between words, the short columns stay on one line
+   (a phone scrolls the preview box, never the page) */
+.cf-prev.mc-prev td{vertical-align:top;line-height:1.45}
+.cf-prev.mc-prev td.wr{white-space:normal;min-width:96px}
 
 /* the deal panel: the check of a received installment, the plan's summary, the confirm before changing it */
 .sl-pr .c-stat .mc-chk{margin-top:4px}

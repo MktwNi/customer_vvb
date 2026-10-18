@@ -3,7 +3,7 @@ import { useApp } from '../state';
 import { dmTh, localDay, todayISO } from '../lib/format';
 import { fmtMoney, hasPlan, type Deal, type SalesState } from '../lib/sales';
 import { dayTh } from '../lib/cashUi';
-import { chipOf, dealChecks, guardHits, noteOf, ymTh, type ChkRow, type GuardHit } from '../lib/payCheck';
+import { chipOf, dealChecks, guardHits, noteOf, whereOf, ymTh, type ChkRow, type GuardHit } from '../lib/payCheck';
 import type { GccEngine } from '../lib/engine';
 import { DialogActions, Modal } from './Dialog';
 
@@ -139,10 +139,24 @@ function hitWords(a: PayAsk, h: GuardHit): ReactNode {
   const rec = !h.added && (r.state === 'ok' || r.state === 'back') ? r.rec : null;
   const who = rec?.by || 'บัญชี';
   const month = ymTh(h.ym);
-  const closeWords = h.close && <> · เดือน{month}ปิดแล้ว ({h.close.by || 'บัญชี'} {dmTh(localDay(h.close.at))}) {h.added ? 'บันทึกได้' : 'แก้ได้'} แต่เดือนนั้นจะมีรายการที่ต้องตรวจใหม่</>;
+  // what the closed month will show: a line to check again in it, or (a line leaving it, money that stops
+  // counting there) a sum that no longer equals the close
+  const dest = h.out || (h.gone && h.to && h.to.ym !== h.ym ? h.to.ym : '');
+  const after = h.added
+    ? 'บันทึกได้ แต่เดือนนั้นจะมีรายการที่ต้องตรวจใหม่'
+    : dest
+      ? `แก้ได้ แต่ยอดของเดือนนั้นจะไม่เท่ากับตอนปิด และ${h.out ? 'งวดนี้' : 'เงินนี้'}จะไปรอตรวจในเดือน${ymTh(dest)}`
+      : h.gone && !h.to
+        ? 'แก้ได้ แต่ยอดของเดือนนั้นจะไม่เท่ากับตอนปิด'
+        : 'แก้ได้ แต่เดือนนั้นจะมีรายการที่ต้องตรวจใหม่';
+  const closeWords = h.close && <> · เดือน{month} ปิดแล้ว ({h.close.by || 'บัญชี'} {dmTh(localDay(h.close.at))}) {after}</>;
+  const orphan = rec ? <> {who} จะเห็นรายการเดิมว่า “ยกเลิกหลังตรวจ” ในหน้า Cashflow เดือน{month} จนกว่าจะกดรับทราบ</> : '';
   if (h.added) return <>เงินนี้จะนับเป็นเงินเข้าเดือน{month}{closeWords}</>;
   if (a.kind === 'cancel')
     return <>ถ้ายกเลิก งวดนี้กลับเป็น “รอชำระ”{rec ? <> และ {who} จะเห็นรายการนี้ว่า “ยกเลิกหลังตรวจ” ในหน้า Cashflow เดือน{month} จนกว่าจะกดรับทราบ</> : ''}{closeWords}</>;
+  // only its line id changes (a plan set on a deal without one): the money counts on, under another line
+  if (h.gone && h.to)
+    return <>ถ้า{a.verb} เงินนี้จะย้ายไปนับที่ {whereOf(h.to)}{Math.abs(h.to.amt - r.amt) >= 0.005 ? ` ยอด ${fmtMoney(h.to.amt)} บาท` : ''}{h.to.date !== r.date ? ` รับ ${dayTh(h.to.date)}` : ''} และรอตรวจใหม่{rec ? <> ·{orphan}</> : ''}{closeWords}</>;
   if (h.gone)
     return <>ถ้า{a.verb} เงินงวดนี้จะไม่นับเป็นเงินเข้าแล้ว{rec ? <> และ {who} จะเห็นรายการนี้ว่า “ยกเลิกหลังตรวจ” ในหน้า Cashflow เดือน{month} จนกว่าจะกดรับทราบ</> : ''}{closeWords}</>;
   if (a.kind === 'delete')
@@ -166,6 +180,8 @@ export function PayGuardHost() {
   return (
     <Modal title={a.title} onClose={() => setCur(null)} width={480} focus="dialog">
       <div className="mc-cf">
+        {/* the change's own warning (what a delete takes away) comes first, then what it does to the check */}
+        {a.plain && <p>{a.plain}</p>}
         {hits.map((h) => {
           const { r } = h;
           const rec = !h.added && (r.state === 'ok' || r.state === 'back') ? r.rec : null;
