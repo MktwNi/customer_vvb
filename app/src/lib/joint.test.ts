@@ -560,12 +560,14 @@ describe('review 2: the Cashflow tab counts a joint quotation as the Dashboard d
   it('a line that is a part says of how many companies (the list and the CSV), so it is not read as the whole payment', () => {
     const s = world({ yes: true, plan: true, paid1: true });
     const one = viewCashLines(s, tab(s, { resp: { v: ['คุณบี'] } }), T);
-    expect(one.map((l) => l.joint)).toEqual([{ members: 4, title: s.jqt!.h.title, part: 1 }, { members: 4, title: s.jqt!.h.title, part: 1 }]);
-    expect(payerName(one[0], (x) => x)).toBe(`${PAYER} · ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท`);
+    // (and which: the units' split of the part goes to that company alone, lib/contrib lineParts)
+    expect(one.map((l) => l.joint)).toEqual([{ members: 4, title: s.jqt!.h.title, part: 1, keep: ['b2'] }, { members: 4, title: s.jqt!.h.title, part: 1, keep: ['b2'] }]);
+    // (the payer by its title's abbreviation, as the band names it: the count is never cut off)
+    expect(payerName(one[0], (x) => x)).toBe('มจพ · ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท');
     const csv = cashRows(s, '2569', cashYear(one, '2569'), 'lines', true);
     expect(csv.rows[0][2]).toBe(`${PAYER} (ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท)`);
     const whole = viewCashLines(s, tab(s, {}), T).find((l) => l.deal.id === 'h')!;
-    expect(payerName(whole, (x) => x)).toBe(`${PAYER} · ใบเสนอราคาร่วม 4 บริษัท`);
+    expect(payerName(whole, (x) => x)).toBe('มจพ · ใบเสนอราคาร่วม 4 บริษัท');
   });
 });
 

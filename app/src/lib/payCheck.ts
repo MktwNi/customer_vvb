@@ -18,12 +18,12 @@
  *   on every record, the rest is this client's rule (plan.md §6).
  */
 import {
-  HOW_TH, PLAN_FIELDS, PLAN_MAX, cashLines, countedAt, countsActual, dealMoney, filterDeals, fmtMoney, hasPlan, kindForStage, planLines, planStart, targetForStage, toPay,
+  HOW_TH, PLAN_FIELDS, PLAN_MAX, cashLines, countedAt, countsActual, dealMoney, filterDeals, fmtMoney, hasPlan, holdPart, jointAttr, jointOf, jointParts, kindForStage, planLines, planStart, targetForStage, toPay,
   type CashLine, type CashSum, type Deal, type DealDoc, type DealLog, type DocKind, type PayLine, type PlanInput, type SalesFilter, type SalesState,
 } from './sales';
 import { sameName } from './caps';
 import { TH_M, dmTh, isoTh, localDay } from './format';
-import { MONTHS_TH, instSub, instText } from './cashUi';
+import { MONTHS_TH, instSub, instText, jointWords } from './cashUi';
 import { QT_CHIP, QT_WORD, checkedLine, type BellRow } from './notify';
 import type { XCell, XSheet } from './xlsx';
 
@@ -418,16 +418,33 @@ export function teamMonth(s: SalesState, checks: Record<string, PayCheck>, since
 
 // ------------------------------------------------------------------ the Cashflow page's rows
 
+/** The month check's rows through the page's filter: a row as the page shows it, or null when it is not in it. */
+export type PageView = (r: ChkRow) => ChkRow | null;
 /**
- * The Cashflow page's filter (ผู้รับผิดชอบ, แหล่งที่มา, บริการ, referral, หมวด) as a test on the month check's
- * rows, whatever year their deal is of (a line of December carried into January); null when none is set.
- * A check whose deal was deleted passes no filter.
+ * The Cashflow page's filter (ผู้รับผิดชอบ, แหล่งที่มา, บริการ, referral, หมวด) on the month check's rows, whatever
+ * year their deal is of (a line of December carried into January); null when none is set. A check whose
+ * deal was deleted passes no filter. A joint quotation's lines (its header's, once) under a ผู้รับผิดชอบ /
+ * SOURCE / REFERRAL filter are the parts of its companies the filter lists, as the Cashflow chart and cards
+ * count them (sales jointCashLines): the amount is that part, the line says of how many companies, and
+ * none of it when no company of it is listed. Its check stays the whole line's (`fp`).
  */
-export function pageKeep(s: SalesState, f: SalesFilter, today: string): ((r: ChkRow) => boolean) | null {
+export function pageKeep(s: SalesState, f: SalesFilter, today: string): PageView | null {
   if (!(f.resp || f.source || f.service || f.referral || f.section)) return null;
   const ids = new Set<string>();
   new Set(Object.values(s.deals).map((d) => d.year)).forEach((y) => filterDeals(s, { ...f, year: y, money: undefined }, today).forEach((d) => ids.add(d.id)));
-  return (r) => !!r.deal && ids.has(r.dealId);
+  const attr = jointAttr(f);
+  return (r) => {
+    if (!r.deal) return null;
+    const g = attr && s.jqt?.[r.dealId] ? jointOf(s, r.deal) : null;
+    if (!g || !g.members.length) return ids.has(r.dealId) ? r : null;
+    const keep = g.members.map((x, i) => (ids.has(x.deal.id) ? i : -1)).filter((i) => i >= 0);
+    if (keep.length === g.members.length) return r;
+    const w = jointParts(s, g), kept = keep.filter((i) => w[i] > 0);
+    const amt = kept.length ? holdPart(s, { d: g.head, g, keep }, r.amt) : 0;
+    if (!amt) return null;
+    const line = r.line && { ...r.line, amt, ...(r.line.joint ? { joint: { ...r.line.joint, part: kept.length, keep: kept.map((i) => g.members[i].deal.id) } } : {}) };
+    return { ...r, amt, line };
+  };
 }
 /**
  * The month check's three sets of rows from every deal's (`all`, chkRows of cashLines of every deal):
@@ -436,9 +453,9 @@ export function pageKeep(s: SalesState, f: SalesFilter, today: string): ((r: Chk
  * months), `team` every line without the filter (closing a month covers the whole month; yearCheck takes
  * the shown year's months from it, and finds a line that moved out of a closed month in any year).
  */
-export function cashCheckRows(all: ChkRow[], ceYear: number, keep: ((r: ChkRow) => boolean) | null) {
+export function cashCheckRows(all: ChkRow[], ceYear: number, keep: PageView | null) {
   const inYear = (r: ChkRow) => r.ym.startsWith(ceYear + '-');
-  const wide = keep ? all.filter(keep) : all;
+  const wide = keep ? all.map(keep).filter((r): r is ChkRow => !!r) : all;
   return { rows: wide.filter(inYear), wide, team: all };
 }
 
@@ -789,7 +806,7 @@ export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owe
     const pl = l.src === 'plan' ? (s.pays || {})[`${d.id}/${l.stage}`] : undefined;
     const held = r.state === 'ok' || r.state === 'back';
     return [
-      ymTh(r.ym, true), l.joint ? `${d.client} (ใบเสนอราคาร่วม ${l.joint.members} บริษัท)` : d.client, dealMoney(s, d).fcDoc?.docNo || '', instText(l) + (l.src === 'plan' ? ` (${l.stage})` : ''),
+      ymTh(r.ym, true), l.joint ? `${d.client} (${jointWords(l.joint)})` : d.client, dealMoney(s, d).fcDoc?.docNo || '', instText(l) + (l.src === 'plan' ? ` (${l.stage})` : ''),
       r.amt, basisWord(r), dateCell(l.rcv), dateCell(l.due), moneyWord(r), pl?.how ? HOW_TH[pl.how] : '',
       r.kind === 'got' ? (r.docs.length ? r.docs.map(docWord).join(', ') : 'ไม่มีไฟล์') : '', r.by.join(', '),
       checkWord(r), held ? r.rec!.by : '', held ? dateCell(localDay(r.rec!.at)) : null, r.state === 'back' ? r.rec!.note || '' : '',

@@ -19,7 +19,7 @@
  *
  * Only the types come from sales.ts, so sales.ts may use these helpers (the หน่วยงาน filter) without a
  * cycle. A joint quotation (package quotes) apportions its header's money to its member deals before the
- * unit split: that is the `parts` hook (setPartsHook), which defaults to "the deal itself".
+ * unit split: that is the `parts` hook (setPartsHook; sales.ts registers jointPartsOf), else "the deal itself".
  */
 import type { CashLine, Deal, SalesState } from './sales';
 import { inRange, type Range } from './dateRange';
@@ -208,7 +208,8 @@ export function unitRecords(S: UnitBags): [string, unknown][] {
 
 /** How a deal's money is attributed before its unit split. Default: all of it to the deal itself. A joint
  *  quotation's header (package quotes) gives its money to its member deals by their share (jqm share, else
- *  pct, else equally): the joint-QT build registers that with setPartsHook. Weights need not sum to 1. */
+ *  pct, else equally): lib/sales.ts registers that (jointPartsOf) with setPartsHook when it loads. Weights
+ *  need not sum to 1. */
 export interface Part { deal: Deal; w: number }
 export type PartsHook = (s: SalesState, d: Deal) => Part[] | null | undefined;
 let partsHook: PartsHook | null = null;
@@ -430,7 +431,11 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  *  retired by the day the money came in gets none of it: that part is ยังไม่ระบุหน่วยงาน's (no rate). */
 export function lineParts(ctx: UnitCtx, l: CashLine): Omit<ContribItem, 'rate' | 'comm'>[] {
   const flat: { deal: Deal; u: string; w: number }[] = [];
-  const parts = partsOf(ctx, l.deal);
+  // a joint quotation's line as a filtered view holds it (the part of some of its companies, sales
+  // jointCashLines): those companies' parts alone
+  const all = partsOf(ctx, l.deal), keep = l.joint?.keep;
+  const kept = keep ? all.filter((x) => keep.includes(x.deal.id)) : [];
+  const parts = kept.length ? kept : all;
   const tw = parts.reduce((a, x) => a + x.w, 0);
   parts.forEach((x) =>
     shareOf(ctx, x.deal).lines.forEach((s) => {

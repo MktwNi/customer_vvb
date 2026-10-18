@@ -61,9 +61,15 @@ export function statusWord(l: CashLine) {
   return l.status === 'late' ? 'เลยกำหนด' : l.status === 'due' ? 'ถึงกำหนด' : 'รอรับ';
 }
 /** "ใบเสนอราคาร่วม 4 บริษัท", and under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter "· ส่วนของ 1 บริษัท" (the amount is that part). */
-const jointWords = (j: NonNullable<CashLine['joint']>) => `ใบเสนอราคาร่วม ${j.members} บริษัท${j.part ? ` · ส่วนของ ${j.part} บริษัท` : ''}`;
-/** The client as the money views name it: a joint quotation's header says how many companies it pays for. */
-export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => (l.joint ? `${short(l.deal.client)} · ${jointWords(l.joint)}` : short(l.deal.client));
+export const jointWords = (j: NonNullable<CashLine['joint']>) => `ใบเสนอราคาร่วม ${j.members} บริษัท${j.part ? ` · ส่วนของ ${j.part} บริษัท` : ''}`;
+/** The client as the money views name it: a joint quotation's header says how many companies it pays for,
+ *  the payer by the abbreviation its title ends with ("มจพ · ใบเสนอราคาร่วม 4 บริษัท", as the band names it,
+ *  lib/joint payerShort), so the count is not cut off after a long payer name; else by its short name. */
+export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => {
+  if (!l.joint) return short(l.deal.client);
+  const abbr = /\(([^()]{1,24})\)\s*$/.exec(l.joint.title.trim())?.[1]?.trim();
+  return `${abbr || short(l.deal.client)} · ${jointWords(l.joint)}`;
+};
 
 /** The year picker's line on the money views: "เงินเข้า 15 งวด" / "ไม่มีเงินเข้า". */
 export const yearMoneyLabel = (Y: Pick<CashYear, 'totals'>) => (Y.totals.n ? `เงินเข้า ${Y.totals.n} งวด` : 'ไม่มีเงินเข้า');

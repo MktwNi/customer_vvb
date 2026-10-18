@@ -15,6 +15,7 @@ import {
   PREVIEW_HEAD, canReclose, closeDrift, driftWords, movedOut, movedTo, sheetLines, sheetPreview, whereOf, type MonthClose,
 } from './payCheck';
 import { NOTIFY_CFG0, bellItems } from './notify';
+import { viewCashLines } from './joint';
 import { colName, excelSerial, sheetName, sheetXml, xlsxBytes, xlsxFiles } from './xlsx';
 import { applyRow, localRecords, noEffects, type SharedState } from './teamSync';
 
@@ -880,6 +881,55 @@ describe('a joint quotation (spec §F test 7)', () => {
     const months = yearCheck(rows, 2026, {}, T).months.filter((m) => m.ym === '2026-09');
     expect(chkSheets(s, month(rows, '2026-09'), months, false)[0].rows[0][1]).toBe('แสนสิริ กรีน พร็อพเพอร์ตี้ (ใบเสนอราคาร่วม 3 บริษัท)');
   });
-  // jointRole (lib/sales.ts) is a stub on this branch: every deal is 'plain' until package quotes merges
-  it.todo('the members of a joint quotation contribute no lines (cashLines skips jointRole member): add with the quotes merge');
+  /** w1 as a joint quotation's header (jqt/w1) paying for three companies; their own typed money counts nowhere. */
+  const joint = () => {
+    const s = demo();
+    s.deals.m1 = newDeal({ id: 'm1', client: 'สมาชิก หนึ่ง', year: '2569', resp: 'ต้น', forecast: 999000, actual: 50000 }, 'หมิว', '2026-01-05T03:00:00.000Z');
+    s.deals.m2 = newDeal({ id: 'm2', client: 'สมาชิก สอง', year: '2569', resp: 'มกร' }, 'หมิว', '2026-01-05T03:00:00.000Z');
+    s.deals.m3 = newDeal({ id: 'm3', client: 'สมาชิก สาม', year: '2569', resp: 'มกร' }, 'หมิว', '2026-01-05T03:00:00.000Z');
+    ['m1', 'm2', 'm3'].forEach((id) => Object.assign(s.steps, { [`${id}/CLOSED DEAL`]: { d: '2026-09-04', n: 'YES' }, [`${id}/PAY1`]: { d: '2026-09-19', n: 'รับเอง' } }));
+    s.jqt = { w1: { title: 'CFP มจพ', at: '2026-09-01T00:00:00.000Z', by: 'หมิว' } };
+    s.jqm = {
+      'w1/m1': { share: null, pct: 50, at: '2026-09-01T00:00:01.000Z', by: 'หมิว' },
+      'w1/m2': { share: null, pct: null, at: '2026-09-01T00:00:02.000Z', by: 'หมิว' },
+      'w1/m3': { share: null, pct: null, at: '2026-09-01T00:00:03.000Z', by: 'หมิว' },
+    };
+    return s;
+  };
+  it('the members contribute no lines: the header\'s installments appear once, with the member count, checkable once', () => {
+    const s = joint(), rows = rowsOf(s);
+    expect(rows.filter((r) => ['m1', 'm2', 'm3'].includes(r.dealId))).toEqual([]);
+    const h = rows.filter((r) => r.dealId === 'w1');
+    expect(h.map((r) => [r.key, r.kind, r.amt])).toEqual([['w1/PAY1', 'got', 107000], ['w1/PAY2/owed', 'owed', 107000]]);
+    expect(h.every((r) => r.line?.joint?.members === 3)).toBe(true);
+    // the months still equal the Cashflow bars (the members' typed 50,000 is in neither)
+    const Y = cashYear(lines(s), '2569');
+    for (let i = 0; i < 12; i++) expect(barOf(sumRows(month(rows, ymOf(2026, i)))), 'month ' + i).toEqual(Y.months[i]);
+    const months = yearCheck(rows, 2026, {}, T).months.filter((m) => m.ym === '2026-09');
+    expect(chkSheets(s, month(rows, '2026-09'), months, false)[0].rows[0][1]).toBe('แสนสิริ กรีน พร็อพเพอร์ตี้ (ใบเสนอราคาร่วม 3 บริษัท)');
+  });
+  it('under a person filter the header\'s lines are the parts of the companies listed, as the Cashflow chart counts them', () => {
+    const s = joint();
+    // มกร follows m2 and m3: a quarter each of the 107,000 (m1 has 50%)
+    const F = normSalesFilter({ year: '2569', resp: 'มกร', money: 'cash' });
+    const { rows } = cashCheckRows(rowsOf(s), 2026, pageKeep(s, F, T));
+    const sep = byKey(rows, 'w1/PAY1');
+    expect(sep.amt).toBe(53500);
+    expect(sep.line?.joint).toMatchObject({ members: 3, part: 2, keep: ['m2', 'm3'] });
+    expect(sep.fp?.amt).toBe(107000); // the check is the whole line's
+    // the month card and the year table equal the Cashflow tab's figures through the same filter
+    const Y = cashYear(viewCashLines(s, F, T), '2569');
+    for (let i = 0; i < 12; i++) expect(barOf(sumRows(month(rows, ymOf(2026, i)))), 'month ' + i).toEqual(Y.months[i]);
+    const months = yearCheck(rows, 2026, {}, T).months.filter((m) => m.ym === '2026-09');
+    expect(chkSheets(s, month(rows, '2026-09'), months, false)[0].rows[0][1]).toBe('แสนสิริ กรีน พร็อพเพอร์ตี้ (ใบเสนอราคาร่วม 3 บริษัท · ส่วนของ 2 บริษัท)');
+    // the payer's own person (หมิว follows w1, no company of it): none of it, as on the chart
+    const H = normSalesFilter({ year: '2569', resp: 'หมิว', money: 'cash' });
+    expect(cashCheckRows(rowsOf(s), 2026, pageKeep(s, H, T)).rows.filter((r) => r.dealId === 'w1')).toEqual([]);
+    expect(viewCashLines(s, H, T).filter((l) => l.deal.id === 'w1')).toEqual([]);
+    // a filter that is not a person's (หมวด) reads it as one job: the whole line
+    s.deals.w1 = { ...s.deals.w1, section: 'TGO' };
+    const sec = normSalesFilter({ year: '2569', section: 'TGO' });
+    expect(cashCheckRows(rowsOf(s), 2026, pageKeep(s, sec, T)).rows.find((r) => r.key === 'w1/PAY1')?.amt).toBe(107000);
+    expect(viewCashLines(s, { ...sec, money: 'cash' }, T).find((l) => l.id === 'w1/PAY1/got')?.amt).toBe(107000);
+  });
 });

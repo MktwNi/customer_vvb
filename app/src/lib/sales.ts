@@ -18,7 +18,7 @@ import type { NotifyCfg, QtCheck } from './notify';
 import type { MonthClose, PayCheck, PayChkCfg } from './payCheck';
 import type { CustomCo } from './types';
 // units and the revenue split (package dash): only plain helpers, which import nothing from here at run time
-import { dealUnits, unitCtx, type ShareRec, type UnitMember, type UnitRec } from './contrib';
+import { dealUnits, setPartsHook, unitCtx, type Part, type ShareRec, type UnitMember, type UnitRec } from './contrib';
 
 /** The old tracker's starting lists: a section usually has a SOURCE of a similar name (matchSource). */
 export const DEFAULT_SECTIONS = ['Retention', 'EnWaste Expo', 'SET/mai', 'IEAT (กนอ).', 'Event Organizer', 'Partner', 'Event Exhibition', 'Course Training', 'สสว.', 'Depa', 'TGO', 'VB SAVE+', 'Social', 'อื่นๆ'];
@@ -1307,6 +1307,20 @@ export function moneyOwners(s: SalesState, d: Deal, amount: number): { deal: Dea
   const parts = jointSplit(s, g, amount);
   return g.members.map((x, i) => ({ deal: x.deal, amt: parts[i] }));
 }
+/**
+ * How a joint quotation's header gives its money to units (lib/contrib's parts hook, package dash): to its
+ * member companies by their parts (jointParts: a share in baht, else a %, else equal; none for one that
+ * withdrew), each then split by its own สัดส่วนรายได้, so the money counts once and every unit's part of a
+ * line adds up to it. null for any other deal (its own split), and for a header without members.
+ */
+export function jointPartsOf(s: SalesState, d: Pick<Deal, 'id'>): Part[] | null {
+  if (!s.jqt?.[d.id]) return null;
+  const g = jointOf(s, d);
+  if (!g || !g.members.length) return null;
+  const w = jointParts(s, g);
+  return g.members.map((x, i) => ({ deal: x.deal, w: w[i] }));
+}
+setPartsHook(jointPartsOf);
 /** The deal whose money and หมวด a row follows: a joint quotation's member is paid through its header and
  *  drawn under its band (in the header's หมวด); any other deal is its own. */
 export const payerDeal = (s: SalesState, d: Deal): Deal => (jointRole(s, d) === 'member' && s.deals[jointHeadOf(s, d.id)]) || d;
@@ -1381,10 +1395,12 @@ export function jointCashLines(s: SalesState, deals: Deal[], today: string, attr
   const out: CashLine[] = [];
   for (const h of moneyHolds(s, deals, true)) {
     // (a part says of how many of its companies, so a list of lines does not read it as the whole payment)
-    const w = h.keep && h.g ? jointParts(s, h.g) : [], part = h.keep ? h.keep.filter((i) => w[i] > 0).length : 0;
+    // and which (`keep`: the units' split of the line then goes to those companies alone, lib/contrib lineParts)
+    const w = h.keep && h.g ? jointParts(s, h.g) : [], kept = h.keep && h.g ? h.keep.filter((i) => w[i] > 0) : [];
+    const keep = kept.map((i) => h.g!.members[i].deal.id);
     for (const l of cashLines(s, [h.d], today)) {
       const amt = holdPart(s, h, l.amt);
-      if (amt) out.push(h.keep ? { ...l, amt, ...(l.joint ? { joint: { ...l.joint, part } } : {}) } : l);
+      if (amt) out.push(h.keep ? { ...l, amt, ...(l.joint ? { joint: { ...l.joint, part: kept.length, keep } } : {}) } : l);
     }
   }
   return out;
@@ -1416,7 +1432,12 @@ export interface CashLine {
   id: string;
   deal: Deal;
   /** a joint quotation's header: how many member companies, and its title (package quotes) */
-  joint?: { members: number; title: string; /** under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter: the amount is the part of this many of its companies (jointCashLines) */ part?: number };
+  joint?: {
+    members: number; title: string;
+    /** under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter: the amount is the part of this many of its companies
+     *  (jointCashLines), `keep` their deal ids */
+    part?: number; keep?: string[];
+  };
   stage: string; n: number; of: number;
   amt: number;
   kind: 'got' | 'owed';

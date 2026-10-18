@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { useApp } from '../state';
 import { isoTh, localDay, todayISO } from '../lib/format';
-import { cashLines, dealMoney, fmtMoney, jointRole, type Deal } from '../lib/sales';
+import { cashLines, dealMoney, fmtMoney, jointRole, payerDeal, type Deal } from '../lib/sales';
+// a joint quotation's member: its part of the quotation is its whole job here (its own typed Forecast counts nowhere)
+import { shareOf as jointShare } from '../lib/joint';
 import { apportioned, dealGot, equalSplit, pctOk, retiredSince, shareOf, shareSum, shareValid, splitSatang, unitsOf, type ShareLine } from '../lib/contrib';
 import { Select } from './Select';
 import { Icon } from './icons';
@@ -52,12 +54,13 @@ export function ShareCard({ d }: { d: Deal }) {
       </section>
     );
   const sh = shareOf(ctx, d);
-  const fc = dealMoney(S, d).forecast;
   // what this job received, by unit, as the Dashboard counts it (contrib lineParts): a joint quotation's
-  // member company has no money of its own, its part of the header's comes through the parts hook; a unit
-  // retired by the day money came in gets none of it (ยังไม่ระบุหน่วยงาน)
+  // member company has no money of its own, its part of the header's comes through the parts hook (and its
+  // whole job is its part of the quotation); a unit retired by the day money came in gets none of it
+  // (ยังไม่ระบุหน่วยงาน)
   const member = jointRole(S, d) === 'member';
-  const src = member ? Object.values(S.deals).filter((x) => jointRole(S, x) === 'header') : [d];
+  const fc = member ? (jointShare(S, d)?.amt ?? null) : dealMoney(S, d).forecast;
+  const src = member ? [payerDeal(S, d)] : [d];
   const { got, by: gotU } = dealGot(ctx, cashLines(S, src, today), d.id);
   /** "X เลิกใช้แล้วตั้งแต่ …": the money from that day is ยังไม่ระบุหน่วยงาน's */
   const offNote = (ids: string[]) => {

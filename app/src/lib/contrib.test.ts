@@ -11,7 +11,7 @@ import {
   type UnitRec,
 } from './contrib';
 import { nameKey } from './ckey';
-import { cashLines, cashYear, emptySales, filterDeals, newDeal, type Deal, type PayLine, type SalesState } from './sales';
+import { cashLines, cashYear, emptySales, filterDeals, jointPartsOf, newDeal, type Deal, type PayLine, type SalesState } from './sales';
 import { trackerFields } from './salesUi';
 import { applyRow, keyOf, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
@@ -63,7 +63,8 @@ function demo(): SalesState {
 const lines = (s: SalesState) => cashLines(s, Object.values(s.deals), T);
 const Q3 = periodRange('2569', 2);
 
-afterEach(() => setPartsHook(null));
+// (a test may set its own parts hook: the app's, sales.ts jointPartsOf, comes back after it)
+afterEach(() => setPartsHook(jointPartsOf));
 
 describe('staffKey: a staff name, not a company name', () => {
   it('keeps two-letter Thai nicknames (ฝน, บี) that the customer key drops', () => {
