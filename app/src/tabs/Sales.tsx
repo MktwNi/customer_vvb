@@ -1934,12 +1934,13 @@ export function ResultButtons({ state, big, label, onPick }: { state: StageState
 function QuickPlan({ d }: { d: Deal }) {
   const { e, S, acts, openPanel } = useTk();
   const m = dealMoney(S, d), left = Math.max(0, (m.forecast || 0) - (m.actual || 0));
-  const go = (n: number) => {
+  // money already received moves onto the plan's stages: a checked line is asked about first
+  const go = (n: number) => askPay(e, { d, after: previewOf.firstPlan(S, d.id, todayISO()), kind: 'edit', title: 'ตั้งแผนชำระ', verb: 'ตั้งแผน', run: () => {
     const r = e.quickPlan(d.id, n);
     if (!r) return;
     const amts = r.amounts.every((x) => x != null) ? r.amounts.map((x) => fmtMoney(x)).join(' + ') + ' บาท' : 'ใส่ยอดได้ที่แผนการชำระ';
     acts.say(`ตั้งแผน ${n} งวดแล้ว · ${amts} · งวดแรกครบกำหนด 30 วันหลังได้งาน${n > 1 ? ' แล้วทุก 30 วัน' : ''}`, { ms: 8000, acts: [{ label: 'แก้ไขแผน', act: 'plan', deal: d.id, primary: true }] });
-  };
+  } });
   return (
     <span className="sl-qp">
       <span className="sl-qp-l">ยังไม่มีแผนชำระ{m.forecast ? ` · ${m.actual ? 'เหลือ ' + fmtMoney(left) : 'จาก Forecast ' + fmtMoney(m.forecast)}` : ''}</span>
