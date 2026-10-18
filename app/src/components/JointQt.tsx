@@ -3,12 +3,13 @@ import { useApp, useEngineVersion } from '../state';
 import { norm } from '../lib/core';
 import { dmTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
-  DEAL_STAGE, QUOTE_STAGE, closeReady, dealMoney, dealResult, fmtMoney, holdPart, jointOf, jointSplit, moneyHolds, parseAmount, payState, stageTrack, stepOf,
+  DEAL_STAGE, QUOTE_STAGE, closeReady, dealMoney, dealResult, fmtMoney, jointOf, jointSplit, parseAmount, payState, stageTrack, stepOf,
   type Deal, type DealDoc, type DocKind, type JointGroup, type SalesState,
 } from '../lib/sales';
 import { JOINT_PAID, nextStepView, shortName, statusView } from '../lib/salesUi';
 import {
-  OWN_TH, closeSummary, closedWord, jointNo, jointShort, jointSub, jointTitle, memberLine, memberShares, outWord, ownJob, parseShare, payerShort, pickParts, resultsWord, sentDay, shareOf, sharesCheck, sharesWord,
+  OWN_TH, bandPart, closeSummary, closedWord, jointNo, jointShort, jointSub, jointTitle, memberLine, memberShares, outWord, ownJob, parseShare, payerShort, pickLine, pickParts, resultsWord, sentDay, shareOf, sharesCheck,
+  sharesWord,
   type JRow, type JointPick, type RowFate,
 } from '../lib/joint';
 import { qtView } from '../lib/quotes';
@@ -214,6 +215,8 @@ function JointEdit({ from, section, hid, onClose }: { from?: string; section?: s
   };
 
   const team = [...new Set([...e.crm.team, resp, e.me()].filter(Boolean))];
+  /** who a new row of a registry company, or of a name typed, is followed up by (engine.addDeal) */
+  const newResp = (p: Row['pick']) => (p.gid != null && e.crm.owners[e.company(p.gid)?.id ?? p.gid]) || e.me();
   const head = !g && (
     <div className="jc-sec">
       <div className="jc-h"><b>หัวใบเสนอราคา</b></div>
@@ -295,7 +298,7 @@ function JointEdit({ from, section, hid, onClose }: { from?: string; section?: s
           <div className="jc-r ph" role="row"><span role="columnheader">บริษัท · แถวใน Sales Tracker</span>{money && <><span role="columnheader" className="r">ส่วนแบ่ง (บาท)</span><span role="columnheader" className="r">%</span></>}<span /></div>
           {rows.map((r, i) => (
             <div key={r.key} className="jc-r" role="row">
-              <span className="jc-nm" role="cell"><b title={r.name}>{shortName(r.name)}</b><small title={r.sub}>{r.sub}</small></span>
+              <span className="jc-nm" role="cell"><b title={r.name}>{shortName(r.name)}</b><small title={r.sub}>{pickLine(S, r.pick, g ? g.head.section : sec, newResp(r.pick))}</small></span>
               {money && (
                 <>
                   <input className="fld" role="cell" value={r.typed} inputMode="decimal" placeholder={out[i] ? 'ถอนตัว' : parts.amt ? fmtMoney(parts.amt[i]) || '0' : 'เท่ากัน'} aria-label={'ส่วนแบ่ง ' + r.name} aria-invalid={!shares[i]} onChange={(ev) => setRows(rows.map((x, j) => (j === i ? { ...x, typed: ev.target.value } : x)))} />
@@ -455,40 +458,58 @@ function JMenu({ label, items }: { label: string; items: { label: string; sub?: 
   );
 }
 
-/** What the band's and the card's status cell says: the quotation's check (package notify), else the payer's state. */
-function HeadState({ S, g, compact }: { S: SalesState; g: JointGroup; compact?: boolean }) {
+/** The quotation's check (package notify) for the band's and the card's status, when it has one. */
+function useHeadCheck(S: SalesState, g: JointGroup) {
   const { engine: e } = useApp();
   const doc = qtView(S, g.head).head?.doc;
   const cv = doc ? e.qtCheckFor(doc) : null;
-  if (doc && cv) return compact ? <QtCheckLine doc={doc} v={cv} bare /> : <span className="jq-st"><QtCheckLine doc={doc} v={cv} bare /><small>{cv.rec ? checkedLine(cv.rec) : cv.stale ? 'แก้หลังตรวจ' : 'ส่งให้ผู้ตรวจแล้ว'}</small></span>;
+  return doc && cv ? { doc, cv } : null;
+}
+/** What the band's and the card's status cell says: the quotation's check, else the payer's state. */
+function HeadState({ S, g, compact }: { S: SalesState; g: JointGroup; compact?: boolean }) {
+  const ck = useHeadCheck(S, g);
+  if (ck) return compact ? <QtCheckLine doc={ck.doc} v={ck.cv} bare /> : <span className="jq-st"><QtCheckLine doc={ck.doc} v={ck.cv} bare /><small>{ck.cv.rec ? checkedLine(ck.cv.rec) : ck.cv.stale ? 'แก้หลังตรวจ' : 'ส่งให้ผู้ตรวจแล้ว'}</small></span>;
   const sv = statusView(S, g.head, todayISO());
   return <span className="jq-st"><Status kind={sv.kind}>{sv.word}</Status>{!compact && sv.sub && <small>{sv.sub}</small>}</span>;
+}
+
+type BandPart = ReturnType<typeof bandPart>;
+const PART_T = 'ตัวกรองผู้รับผิดชอบ / SOURCE / แหล่งที่มา นับเฉพาะส่วนแบ่งของบริษัทที่แสดง';
+const NONE_T = 'ใบเสนอราคาร่วมนี้ไม่อยู่ในรายการตามตัวกรอง (แสดงเพราะมีบริษัทในใบนี้) ยอดจึงไม่นับในยอดของหมวดและ KPI';
+/**
+ * A band's figure as the view counts it beside the section's sum (lib/joint bandPart): the whole, once (with
+ * `note`, e.g. "นับครั้งเดียว"); the part of the companies shown, "จาก" the whole; or, when the view counts none
+ * of it, the whole muted with "ไม่นับในมุมมองนี้".
+ */
+function BandFig({ v, bp, note, children }: { v: number | null; bp: BandPart; note?: ReactNode; children?: ReactNode }) {
+  if (v == null) return <span className="sl-mn"><b className="none">—</b>{bp.whole && note}</span>;
+  if (bp.none) return <span className="sl-mn" title={NONE_T}><b className="none">{m0(v)}</b><small>ไม่นับในมุมมองนี้</small></span>;
+  if (!bp.whole) return <span className="sl-mn" title={PART_T}><b>{m0(bp.part(v))}</b><small>จาก {m0(v)}</small></span>;
+  return <span className="sl-mn"><b>{m0(v)}</b>{note}{children}</span>;
 }
 
 /**
  * A joint quotation in the table: the band ("ใบเสนอราคาร่วม QT-… · CFP มจพ", "4 บริษัท · ผู้จ่าย … · หมิว", the
  * day it was sent, the Forecast counted once, the Actual, the check, ⋯), then its members' rows (`children`,
- * drawn by the table with their left edge), then a small gap. Its caret folds the members away.
+ * drawn by the table with their left edge), then a small gap. Its caret folds the members away. `onRevise`:
+ * "แนบใบเสนอราคาฉบับแก้ไข" opens the attach dialog for that version (the table hosts it).
  */
-export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, children }: { b: Extract<JRow, { k: 'band' }>; folded: boolean; onFold: () => void; ro: boolean; cash: CashLens | null; attr?: boolean; onOpen: (id: string, plan?: '' | 'edit') => void; children: ReactNode }) {
+export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise, children }: { b: Extract<JRow, { k: 'band' }>; folded: boolean; onFold: () => void; ro: boolean; cash: CashLens | null; attr?: boolean; onOpen: (id: string, plan?: '' | 'edit') => void; onRevise?: (docId: string) => void; children: ReactNode }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const S = e.sales, g = b.g, h = g.head, today = todayISO();
   const money = e.can('view.money');
   const m = dealMoney(S, h), P = dealResult(S, h) === 'YES' ? payState(S, h, today).plan : null;
-  // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts the parts of the companies shown (lib/sales jointAttr):
-  // the band says how much of its figure that is, so the section's sum reads right
-  const hold = attr ? moneyHolds(S, [...(b.inList ? [h] : []), ...b.shown], true)[0] : undefined;
-  const scoped = !!attr && (!hold || !!hold.keep);
-  /** the part of an amount the filter counts (the whole without such a filter) */
-  const pt = (x: number) => (!scoped ? x : hold ? holdPart(S, hold, x) : 0);
+  // what of its money the view counts, as the section's sum does: the whole, the parts of the companies shown
+  // (a ผู้รับผิดชอบ / SOURCE / REFERRAL filter), or none (its header filtered out)
+  const bp = bandPart(S, b, !!attr), pt = bp.part;
   const sent = sentDay(S, g), title = jointTitle(S, g), part = closedWord(g);
   const qv = qtView(S, h).head;
   const canEdit = !ro && e.canJoint();
   const items = [
     { label: 'เปิดรายละเอียด', act: () => onOpen(h.id) },
     ...(canEdit ? [{ label: 'แก้ไขรายชื่อบริษัท', sub: `${g.members.length} บริษัท`, act: () => set({ jqDlg: { k: 'members', hid: h.id } }) }] : []),
-    ...(!ro && qv ? [{ label: 'แนบใบเสนอราคาฉบับแก้ไข', sub: `${qv.doc.docNo || 'ใบเสนอราคา'} · ตอนนี้ฉบับที่ ${qv.n}`, act: () => onOpen(h.id) }] : []),
+    ...(!ro && qv && onRevise ? [{ label: 'แนบใบเสนอราคาฉบับแก้ไข', sub: `${qv.doc.docNo || 'ใบเสนอราคา'} · ตอนนี้ฉบับที่ ${qv.n}`, act: () => onRevise(qv.doc.id) }] : []),
     ...(!ro && money ? [{ label: 'แผนการชำระเงิน', sub: P ? 'แก้ไขแผนของผู้จ่าย' : 'ตั้งแผนของผู้จ่าย', act: () => onOpen(h.id, 'edit') }] : []),
     ...(!ro && h.jobStatus === 'open' ? [{ label: 'ปิดงาน', sub: `ปิดทั้งใบเสนอราคาและ ${g.members.length} บริษัท (ถามยืนยัน)`, act: () => acts.close(h.id), sep: true }] : []),
   ];
@@ -508,22 +529,15 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, children 
         <td className="k-last"><span className="jq-kdate">{sent ? isoTh(sent) : '—'}<small>{sent ? 'ส่งใบเสนอราคา' : 'ยังไม่ได้ส่ง'}</small></span></td>
         <td className="k-fc">
           {money && (cash ? <LensMoney L={cash} d={h} col="fc" won={dealResult(S, h) === 'YES'} /> : (
-            scoped ? (
-              <span className="sl-mn" title="ตัวกรองผู้รับผิดชอบ / SOURCE / แหล่งที่มา นับเฉพาะส่วนแบ่งของบริษัทที่แสดง">
-                <b className={m.forecast == null ? 'none' : ''}>{m.forecast == null ? '—' : m0(pt(m.forecast))}</b>
-                <small>จาก {m0(m.forecast)}</small>
-              </span>
-            ) : (
-              <span className="sl-mn">
-                <b className={m.forecast == null ? 'none' : ''}>{m0(m.forecast)}</b>
-                <small title="ยอดของใบเสนอราคาร่วมนับครั้งเดียวที่นี่ ส่วนแบ่งของแต่ละบริษัทไม่นับซ้ำ">นับครั้งเดียว</small>
-                {m.actual != null && <span className="sl-ac2">Actual <b>{fmtMoney(m.actual)}</b></span>}
-              </span>
-            )
+            <BandFig v={m.forecast} bp={bp} note={<small title="ยอดของใบเสนอราคาร่วมนับครั้งเดียวที่นี่ ส่วนแบ่งของแต่ละบริษัทไม่นับซ้ำ">นับครั้งเดียว</small>}>
+              {m.actual != null && <span className="sl-ac2">Actual <b>{fmtMoney(m.actual)}</b></span>}
+            </BandFig>
           ))}
         </td>
         <td className="k-ac">
-          {money && (cash ? <LensMoney L={cash} d={h} col="ac" won={dealResult(S, h) === 'YES'} /> : (
+          {money && (cash ? <LensMoney L={cash} d={h} col="ac" won={dealResult(S, h) === 'YES'} /> : bp.none ? (
+            <span className="sl-mn" title={NONE_T}><b className="none">—</b></span>
+          ) : (
             <span className="sl-mn">
               <b className={P ? (P.got ? '' : 'none') : m.actual == null ? 'none' : ''}>{P ? (P.got ? fmtMoney(pt(P.got)) || '0' : '—') : m.actual == null ? '—' : m0(pt(m.actual))}</b>
               {P && (P.left ? <small className={P.late.length ? 'bad' : ''}>ค้าง {fmtMoney(pt(P.left)) || '0'}</small> : <small className="ok">รับครบ</small>)}
@@ -541,14 +555,17 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, children 
 
 /**
  * A joint quotation on a phone (screen 15): one card in its section: the quotation, the Forecast counted
- * once, its check, and its companies (a tap opens that company's row, where its steps are recorded);
- * "รายละเอียด" opens the joint quotation. The members are not repeated as cards of their own.
+ * once (as the view counts it: `attr`, lib/joint bandPart), its check (else the payer's state, said so), and
+ * its companies (a tap opens that company's row, where its steps are recorded); "รายละเอียด" opens the joint
+ * quotation. The members are not repeated as cards of their own.
  */
-export function JointCard({ b, onOpen }: { b: Extract<JRow, { k: 'band' }>; onOpen: (id: string) => void }) {
+export function JointCard({ b, attr, onOpen }: { b: Extract<JRow, { k: 'band' }>; attr?: boolean; onOpen: (id: string) => void }) {
   const { engine: e } = useApp();
   const S = e.sales, g = b.g, h = g.head, today = todayISO(), money = e.can('view.money');
   const m = dealMoney(S, h), sent = sentDay(S, g), no = jointNo(S, g);
   const shares = memberShares(S, g);
+  const bp = bandPart(S, b, !!attr);
+  const checked = !!useHeadCheck(S, g);
   const list = b.shown.length ? b.shown : [];
   return (
     <article className="jm" aria-label={jointTitle(S, g)} data-jqt={h.id}>
@@ -558,8 +575,8 @@ export function JointCard({ b, onOpen }: { b: Extract<JRow, { k: 'band' }>; onOp
         <span className="jm-s">{['ผู้จ่าย ' + payerShort(g), h.resp, sent ? 'ส่ง ' + dmTh(sent) : 'ยังไม่ได้ส่ง'].filter(Boolean).join(' · ')}</span>
       </div>
       <div className="jm-money">
-        {money && <div className="sl-mc-m"><span>Forecast</span><b className={m.forecast == null ? 'none' : ''}>{m0(m.forecast)}</b><small>นับครั้งเดียว</small></div>}
-        <div className="sl-mc-m"><span>ตรวจใบเสนอราคา</span><HeadState S={S} g={g} compact /></div>
+        {money && <div className="sl-mc-m"><span>Forecast</span><BandFig v={m.forecast} bp={bp} note={<small>นับครั้งเดียว</small>} /></div>}
+        <div className="sl-mc-m"><span>{checked ? 'ตรวจใบเสนอราคา' : 'สถานะ'}</span><HeadState S={S} g={g} compact /></div>
       </div>
       <div className="jm-list">
         {list.map((d) => {
@@ -582,13 +599,14 @@ export function JointCard({ b, onOpen }: { b: Extract<JRow, { k: 'band' }>; onOp
 
 // ------------------------------------------------------------------ ปิดงาน (screen 14)
 
-/** A joint quotation in the ปิดงาน list: its band (results "ได้ 3 · ไม่ได้ 1", the Forecast and Actual once)
- *  and its closed companies under it (their parts grey, a withdrawn one "ถอนตัว"). */
-export function JointClosedRows({ b, onReopen }: { b: Extract<JRow, { k: 'band' }>; onReopen?: () => void }) {
+/** A joint quotation in the ปิดงาน list: its band (results "ได้ 3 · ไม่ได้ 1", the Forecast and Actual once, as
+ *  the list's sum counts them: `attr`, lib/joint bandPart) and its closed companies under it (their parts grey,
+ *  a withdrawn one "ถอนตัว"). */
+export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: 'band' }>; attr?: boolean; onReopen?: () => void }) {
   const { engine: e, set } = useApp();
   const S = e.sales, g = b.g, h = g.head, today = todayISO(), money = e.can('view.money');
   const m = dealMoney(S, h), P = payState(S, h, today).plan, v = qtView(S, h);
-  const part = closedWord(g);
+  const part = closedWord(g), bp = bandPart(S, b, !!attr);
   return (
     <>
       <tr className="jq-cband" data-jqt={h.id}>
@@ -600,8 +618,8 @@ export function JointClosedRows({ b, onReopen }: { b: Extract<JRow, { k: 'band' 
           </span>
         </td>
         <td><span className="jq-res">{resultsWord(S, g) || 'ยังไม่มีผล'}</span></td>
-        <td className="r">{money && <span className="sl-mn"><b className={m.forecast == null ? 'none' : ''}>{m0(m.forecast)}</b><small className={m.fcConfirmed ? 'ok' : ''}>{m.fcDoc ? (v.cur && v.versions.length > 1 ? `จากเอกสาร ฉบับที่ ${v.cur.n}` : 'จากเอกสาร') : 'นับครั้งเดียว'}</small></span>}</td>
-        <td className="r c-opt">{money && <span className="sl-mn"><b className={m.actual == null ? 'none' : ''}>{m0(m.actual)}</b>{P && <small className={P.left ? '' : 'ok'}>{P.left ? `ค้าง ${fmtMoney(P.left)}` : `รับครบ ${P.n} งวด`}</small>}</span>}</td>
+        <td className="r">{money && <BandFig v={m.forecast} bp={bp} note={<small className={m.fcConfirmed ? 'ok' : ''}>{m.fcDoc ? (v.cur && v.versions.length > 1 ? `จากเอกสาร ฉบับที่ ${v.cur.n}` : 'จากเอกสาร') : 'นับครั้งเดียว'}</small>} />}</td>
+        <td className="r c-opt">{money && <BandFig v={m.actual} bp={bp} note={P && <small className={P.left ? '' : 'ok'}>{P.left ? `ค้าง ${fmtMoney(bp.part(P.left))}` : `รับครบ ${P.n} งวด`}</small>} />}</td>
         <td className="c-opt t-sec">{h.jobStatus === 'closed' && h.closedDate ? isoTh(h.closedDate) : 'ยังเปิดอยู่'}</td>
         <td className="r">{onReopen && h.jobStatus === 'closed' && <button type="button" className="lnk sl-reopen" onClick={onReopen}>เปิดงานอีกครั้ง</button>}</td>
       </tr>
@@ -746,7 +764,9 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
                         </span>
                       </span>
                       {money && <span className="jp-sh" role="cell">{sh.out ? <><span className="t-muted">—</span><small>{outWord(S, x.deal)}</small></> : <><span>{sh.amt != null ? fmtMoney(sh.amt) : '—'}</span><small>{sh.pct}%</small></>}</span>}
-                      <span className="jp-nx" role="cell"><span>{nx.stage ? 'ถัดไป ' + nx.stage : nx.hint}</span><small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small></span>
+                      {/* (paid in full by the payer, a company has nothing left but ปิดงาน: "ครบทุกขั้น" beside
+                          "ทำแล้ว 2 จาก 6 ขั้น" would contradict itself when it skipped stages) */}
+                      <span className="jp-nx" role="cell"><span>{nx.kind === 'done' ? (x.deal.jobStatus === 'closed' ? 'ปิดงานแล้ว' : 'พร้อมปิดงาน') : nx.stage ? 'ถัดไป ' + nx.stage : nx.hint}</span><small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small></span>
                       <span role="cell"><Status kind={sv.kind}>{sv.word}</Status>{x.deal.jobStatus === 'closed' && <small className="t-meta"> · ปิดแล้ว</small>}</span>
                     </div>
                   );

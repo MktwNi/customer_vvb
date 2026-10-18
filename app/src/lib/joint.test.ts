@@ -15,6 +15,10 @@ import {
   canMergeFrom, closeSummary, closedWord, isJointNote, jointNote, jointRows, jointShort, jointSub, jointTitle, memberLine, memberShares, ownJob, parseShare, payerShort, pickParts, resultsWord, rowDeals, rowFate, rowMoneyDeals, shareOf,
   sharesCheck, sharesWord, strayDocs,
 } from './joint';
+// the second review's fixes
+import { bandPart, jointNo, moneyWords, noteNo, pickLine, viewCashLines } from './joint';
+import { payStages } from './sales';
+import { cashRows, payerName } from './cashUi';
 import { closingView, liveCount, monthCounts, nextStepView, statusView, trackerFields } from './salesUi';
 import { applyRow, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
@@ -519,5 +523,139 @@ describe('sync: the two records', () => {
   it('a part edited here merges field by field with a teammate\'s change to the same membership', () => {
     const r = rebaseOp({ seq: 9, k: 'jqm/h/b1', v: { share: null, pct: 30, at: 'a', by: 'มินท์' }, del: false, by: 'มินท์', at: '' }, { k: 'jqm/h/b1', v: { share: 321000, pct: null, at: 'a', by: 'หมิว' }, f: ['share', 'by'] });
     expect(r).toEqual({ v: { share: 321000, pct: 30, at: 'a', by: 'หมิว' } });
+  });
+});
+
+// ------------------------------------------------------------------ the second review's findings
+
+describe('review 2: the Cashflow tab counts a joint quotation as the Dashboard does', () => {
+  // the tab's filter (tabs/SalesCash CashView) and the Dashboard's money of the period (tabs/SalesDash)
+  const tab = (_s: SalesState, f: Omit<SalesFilterIn, 'year'>) => normSalesFilter({ year: '2569', ...f, money: 'cash' });
+  const dash = (s: SalesState, F: SalesFilterIn) => jointCashLines(s, filterDeals(s, { ...F, date: null, pay: undefined, money: 'cash' }, T), T, jointAttr(F));
+  const sum = (ls: { amt: number }[]) => ls.reduce((a, l) => a + l.amt, 0);
+  it('under a ผู้รับผิดชอบ filter: the tab\'s money equals the Dashboard\'s and that person\'s row of สรุปยอดตามผู้รับผิดชอบ', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    delete s.deals.p1; // (not won: no money in Cashflow, but a Forecast in หมิว's row)
+    const st0 = salesStats(s, all(s), T);
+    for (const who of ['หมิว', 'คุณบี', 'มกร', 'คุณเอ']) {
+      const F = tab(s, { resp: { v: [who] } });
+      const Y = cashYear(viewCashLines(s, F, T), '2569'), D = cashYear(dash(s, F), '2569');
+      expect(Y.totals).toEqual(D.totals);
+      expect(cashKpis(Y, '2569', T)).toEqual(cashKpis(D, '2569', T));
+      // received = the person's Actual, every line of the year = the person's Forecast (the plan is the whole quotation)
+      expect(Y.totals.got).toBe(st0.byResp[who].actual);
+      expect(sum(Y.lines)).toBe(st0.byResp[who].forecast);
+    }
+    // the reviewer's case: คุณบี (whose company is b2) gets the part of PAY1 received, หมิว (header and b1) one part, not the whole
+    const kb = cashYear(viewCashLines(s, tab(s, { resp: { v: ['คุณบี'] } }), T), '2569');
+    expect([kb.totals.got, sum(kb.lines)]).toEqual([160500, 321000]);
+    const mw = cashYear(viewCashLines(s, tab(s, { resp: { v: ['หมิว'] } }), T), '2569');
+    expect(sum(mw.lines)).toBe(321000);
+    // ค้างรับของงานปี (the tab's line under the cards) follows the same money
+    expect(cashRecon(viewCashLines(s, tab(s, { resp: { v: ['คุณบี'] } }), T), '2569').open).toBe(160500);
+    // without such a filter: the whole quotation, once, as before
+    expect(viewCashLines(s, tab(s, {}), T)).toEqual(cashLines(s, filterDeals(s, tab(s, {}), T), T));
+    expect(viewCashLines(s, tab(s, { section: { v: ['Event Exhibition'] } }), T).filter((l) => l.deal.id === 'h').map((l) => l.amt)).toEqual([642000, 642000]);
+  });
+  it('a line that is a part says of how many companies (the list and the CSV), so it is not read as the whole payment', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    const one = viewCashLines(s, tab(s, { resp: { v: ['คุณบี'] } }), T);
+    expect(one.map((l) => l.joint)).toEqual([{ members: 4, title: s.jqt!.h.title, part: 1 }, { members: 4, title: s.jqt!.h.title, part: 1 }]);
+    expect(payerName(one[0], (x) => x)).toBe(`${PAYER} · ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท`);
+    const csv = cashRows(s, '2569', cashYear(one, '2569'), 'lines', true);
+    expect(csv.rows[0][2]).toBe(`${PAYER} (ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท)`);
+    const whole = viewCashLines(s, tab(s, {}), T).find((l) => l.deal.id === 'h')!;
+    expect(payerName(whole, (x) => x)).toBe(`${PAYER} · ใบเสนอราคาร่วม 4 บริษัท`);
+  });
+});
+
+describe('review 2: the band says what of its money the view counts', () => {
+  /** each band of a view, and the section's sum it sits in (tabs/Sales secSum) */
+  const bands = (s: SalesState, f: Omit<SalesFilterIn, 'year'>) => {
+    const F = normSalesFilter({ year: '2569', ...f }), list = filterDeals(s, F, T), attr = jointAttr(F);
+    const { rows } = jointRows(s, list);
+    return [...rows.values()].flat().flatMap((r) => {
+      if (r.k !== 'band') return [];
+      const held = [...(r.inList ? [r.g.head] : []), ...r.shown];
+      return [{ r, bp: bandPart(s, r, attr), counted: moneySum(s, held, attr).fc }];
+    });
+  };
+  const fc = 1284000;
+  it('the whole with its header listed; the parts of the companies shown under a person filter; none when the view leaves its header out', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    const [a] = bands(s, {});
+    expect([a.bp.whole, a.bp.none, a.bp.part(fc), a.counted]).toEqual([true, false, fc, fc]);
+    // a search for one of its companies (or a quick view): the band shows, its money is not counted
+    const [q] = bands(s, { q: 'บางกอก' });
+    expect([q.r.inList, q.bp.whole, q.bp.none, q.bp.part(fc), q.counted]).toEqual([false, false, true, 0, 0]);
+    // a person filter: that person's companies' part, what the section sums
+    const [k] = bands(s, { resp: { v: ['คุณบี'] } });
+    expect([k.bp.whole, k.bp.none, k.bp.part(fc), k.counted]).toEqual([false, false, 321000, 321000]);
+    // every company shown (SOURCE of all four): the whole
+    const [src] = bands(s, { source: { v: ['Event Exhibition'] } });
+    expect([src.bp.whole, src.bp.part(fc), src.counted]).toEqual([true, fc, fc]);
+    // its header listed under the filter but none of its companies: none
+    s.deals.h.resp = 'ปลา';
+    const [p] = bands(s, { resp: { v: ['ปลา'] } });
+    expect([p.r.inList, p.r.shown.length, p.bp.none, p.counted]).toEqual([true, 0, true, 0]);
+    // only a company that withdrew shown: none (it has no part)
+    s.deals.h.resp = 'หมิว';
+    s.steps['b4/CLOSED DEAL'] = { d: '2026-08-02', n: 'NO' };
+    const [w] = bands(s, { resp: { v: ['คุณเอ'] } });
+    expect([w.bp.none, w.counted]).toEqual([true, 0]);
+  });
+});
+
+describe('review 2: the words', () => {
+  it('the number of a joint quotation made without its file is the one typed (its header\'s QUOTATION note)', () => {
+    const s = world();
+    delete s.docs['h/qt-h'];
+    s.steps['h/QUOTATION'] = { d: '2026-10-06', n: jointNote('QT-2569-099') };
+    // (a company's QUOTATION may say something else: a note of its own it kept when it joined)
+    s.steps['b1/QUOTATION'] = { d: '2026-10-06', n: 'ส่งทางอีเมลถึงคุณสมชาย' };
+    const g = jointOf(s, { id: 'h' })!;
+    expect(jointNo(s, g)).toBe('QT-2569-099');
+    expect(jointTitle(s, g)).toBe('ใบเสนอราคาร่วม QT-2569-099 · CFP มจพ');
+    expect(memberLine(s, s.deals.b2, false)).toBe('อยู่ในใบเสนอราคาร่วม QT-2569-099 (มจพ) · ร่วมกับอีก 3 บริษัท');
+    expect([noteNo('ใบเสนอราคาร่วม QT-2569-099'), noteNo('ใบเสนอราคาร่วม'), noteNo('ใบเสนอราคา QT-1 · 100 บาท')]).toEqual(['QT-2569-099', '', '']);
+    // found by its number: the header and its companies, the money once
+    const F = normSalesFilter({ year: '2569', q: 'QT-2569-099' });
+    expect(filterDeals(s, F, T).map((d) => d.id).sort()).toEqual(['b1', 'b2', 'b3', 'b4', 'h']);
+    // a document's number wins once attached
+    s.docs['h/qt-h'] = qt('h', 900000, { docNo: 'QT-2569-100' });
+    expect(jointNo(s, jointOf(s, { id: 'h' })!)).toBe('QT-2569-100');
+  });
+  it('the dialog\'s line of a company: what joining does, then its หมวด and person ("ใช้แถวเดิม · Event Exhibition · คุณบี")', () => {
+    const s = world();
+    s.deals.x = newDeal({ id: 'x', client: 'ไทยเบฟ รีไซเคิล', year: '2569', section: 'Partner', resp: 'มกร' }, 'หมิว');
+    expect(pickLine(s, { deal: 'b2' }, 'อื่นๆ', 'หมิว')).toBe('ใช้แถวเดิม · Event Exhibition · คุณบี');
+    // a row with a job of its own: a new row in the joint quotation's หมวด, the person of that row
+    expect(pickLine(s, { deal: 'x', like: 'x' }, 'Event Exhibition', 'หมิว')).toBe('เพิ่มแถวใหม่ · Event Exhibition · มกร');
+    // a registry company or a name typed: who the new row gets
+    expect(pickLine(s, {}, 'Event Exhibition', 'หมิว')).toBe('เพิ่มแถวใหม่ · Event Exhibition · หมิว');
+    expect(pickLine(s, {}, '', 'หมิว')).toBe('เพิ่มแถวใหม่ · ไม่ระบุหมวด · หมิว');
+  });
+  it('a person\'s page: a member\'s part, never its own typed Forecast; a plain deal its figures; nothing without ดูยอดเงิน', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    expect(dealMoney(s, s.deals.b2).forecast).toBe(50000); // its own typed figure, ignored while a member
+    expect(moneyWords(s, s.deals.b2, true)).toEqual(['ส่วนแบ่ง 321,000 ใน QT ร่วม']);
+    expect(moneyWords(s, s.deals.b2, false)).toEqual([]);
+    expect(moneyWords(s, s.deals.p1, true)).toEqual(['Forecast 100,000']);
+    s.steps['b4/CLOSED DEAL'] = { d: '2026-08-02', n: 'NO' };
+    expect(moneyWords(s, s.deals.b4, true)).toEqual(['ถอนตัวจาก QT ร่วม']);
+  });
+  it('a member\'s stages do not count the PAY stages the joint quotation pays ("ทำแล้ว 2 จาก 6"); a plain deal\'s all', () => {
+    const s = world({ yes: true, plan: true, paid1: true });
+    s.pays['h/PAY2'].rcv = '2026-10-11';
+    s.steps['b1/CLOSED DEAL'] = { d: '2026-10-07', n: 'YES' };
+    const n = s.cfg.stages.length, pays = payStages(s.cfg).length;
+    const t = stageTrack(s, s.deals.b1, T);
+    expect([t.done, t.total]).toEqual([2, n - pays]);
+    expect(nextStepView(s, s.deals.b1, T).kind).toBe('done');
+    expect(stageTrack(s, s.deals.p1, T).total).toBe(n);
+    expect(stageTrack(s, s.deals.h, T).total).toBe(n);
+    // a PAY stage a member did on its own (an older build) is its own again
+    s.steps['b1/PAY1'] = { d: '2026-10-09', n: 'รับแล้ว' };
+    expect(stageTrack(s, s.deals.b1, T).total).toBe(n - pays + 1);
   });
 });

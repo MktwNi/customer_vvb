@@ -31,8 +31,8 @@ import { CashKpiRow, CashView, LensChip, LensMoney, LensNote } from './SalesCash
 import { cashLines, cashYear, cashYears } from '../lib/sales';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
-import { customersOf, jointAttr, jointHeadOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
-import { canMergeFrom, jointRows, rowDeals, type JRow } from '../lib/joint';
+import { customersOf, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
+import { canMergeFrom, jointNo, jointRows, rowDeals, type JRow } from '../lib/joint';
 import { JointBand, JointCard, JointClosedRows, JointShare } from '../components/JointQt';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
@@ -873,7 +873,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                     {money && <span className="sl-s-tot">{cash ? (cash.range ? 'ในช่วงนี้' : `ปี ${ui.slYear}`) : 'Forecast'} <b>{fmtMoney(sum.fc) || '0'}</b></span>}
                   </div>
                 </div>
-                {!col && list.map((r) => (r.k === 'deal' ? <ForDeal key={r.d.id} d={r.d}><DealCard d={r.d} /></ForDeal> : <JointCard key={'jq' + r.g.head.id} b={r} onOpen={(id) => tk.openPanel(id)} />))}
+                {!col && list.map((r) => (r.k === 'deal' ? <ForDeal key={r.d.id} d={r.d}><DealCard d={r.d} /></ForDeal> : <JointCard key={'jq' + r.g.head.id} b={r} attr={attr} onOpen={(id) => tk.openPanel(id)} />))}
                 {!col && !ro && <button type="button" className="lnk sl-m-add" onClick={() => addIn(e, set, sec, ui.slYear)}>เพิ่มลูกค้าในหมวด {name}</button>}
               </section>
             );
@@ -952,7 +952,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                       r.k === 'deal' ? (
                         <DealRows key={r.d.id} d={r.d} open={!!ui.slOpen[r.d.id]} stages={stages} />
                       ) : (
-                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} attr={attr} onOpen={(id, plan) => tk.openPanel(id, plan)}>
+                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} attr={attr} onOpen={(id, plan) => tk.openPanel(id, plan)} onRevise={(id) => tk.attach(r.g.head, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id })}>
                           {!jqFold[r.g.head.id] && r.shown.map((d, i) => <DealRows key={d.id} d={d} open={!!ui.slOpen[d.id]} stages={stages} jm={i === r.shown.length - 1 ? 'last' : 'mid'} />)}
                         </JointBand>
                       ),
@@ -1447,7 +1447,7 @@ function RowMenu({ d }: { d: Deal }) {
       {open && (
         <span role="menu" className={'menu sl-menu sl-rowmenu' + (up ? ' up' : '')}>
           <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(d.id))}>เปิดรายละเอียด</button>
-          {hid && <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(hid))}>เปิดใบเสนอราคาร่วม<small>{qtView(tk.S, tk.S.deals[hid]).head?.doc.docNo || 'ใบเดียว หลายบริษัท'}</small></button>}
+          {hid && <button role="menuitem" className="menu-i" onClick={pick(() => tk.openPanel(hid))}>เปิดใบเสนอราคาร่วม<small>{jointNo(tk.S, jointOf(tk.S, { id: hid })!) || 'ใบเดียว หลายบริษัท'}</small></button>}
           {!tk.ro && (
             <>
               {/* a joint quotation's member holds no money: what it files is evidence (its quotation and
@@ -2543,7 +2543,8 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
   const extra = date && date.basis !== 'contact' && date.basis !== 'closed' ? date : null;
   // a joint quotation's money counts once, on the header (under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter, the
   // parts of its companies shown)
-  const { fc, ac } = moneySum(S, deals, jointAttr(F));
+  const attr = jointAttr(F);
+  const { fc, ac } = moneySum(S, deals, attr);
   // a joint quotation is one group (its band, then its closed companies): the groups first, then the
   // other rows in their order (mockup 14)
   const jr = jointRows(S, deals);
@@ -2575,7 +2576,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
             </thead>
             <tbody>
               {flat.map((row) => {
-                if (row.k === 'band') return <JointClosedRows key={'jq' + row.g.head.id} b={row} onReopen={e.canDeal('edit.deal', row.g.head) ? () => e.reopenJoint(row.g.head.id) : undefined} />;
+                if (row.k === 'band') return <JointClosedRows key={'jq' + row.g.head.id} b={row} attr={attr} onReopen={e.canDeal('edit.deal', row.g.head) ? () => e.reopenJoint(row.g.head.id) : undefined} />;
                 const d = row.d;
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (

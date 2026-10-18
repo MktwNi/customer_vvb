@@ -25,7 +25,7 @@ import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
 // joint quotations (package quotes, item 7): the header's own panel, a member's line and stages
 import { jointOf, jointRole } from '../lib/sales';
-import { jointNo, strayDocs } from '../lib/joint';
+import { isJointNote, jointNo, strayDocs } from '../lib/joint';
 import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
@@ -560,7 +560,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
               <>
                 {p === DEAL_STAGE && (st === 'yes' || st === 'no' || st === 'wait') ? (
                   ro ? <Status kind={st === 'yes' ? 'ok' : st === 'no' ? 'bad' : 'warn'}>{st === 'yes' ? 'ได้งาน (YES)' : st === 'no' ? 'ไม่ได้งาน (NO)' : 'รอผล · ' + s.n}</Status> : <ResultBig d={d} st={st} />
-                ) : s.n && !docs.some((z) => z.auto?.n === s.n) && !(pl && s.n === paidNote(pl.line)) ? (
+                ) : s.n && !docs.some((z) => z.auto?.n === s.n) && !(pl && s.n === paidNote(pl.line)) && !(jm && p === QUOTE_STAGE && isJointNote(s.n)) ? (
                   <p className="sl-tl-n">{s.n}</p>
                 ) : isNow && ro ? (
                   <p className="sl-tl-n t-muted">ยังไม่ได้บันทึก</p>
