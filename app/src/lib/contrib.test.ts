@@ -6,8 +6,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  applyUnitRow, apportioned, commPeriod0, commRows, contribIn, dealGot, dealUnits, equalSplit, freeSlot, hadRate, howRow, membersOf, newUnitId, paysComm, periodRange, rateOn, rateParts, rateText, retiredOn, retiredSince,
-  setPartsHook, shareOf, shareSum, shareValid, splitSatang, staffKey, toShare, toUnit, toUnitMember, unassigned, unitCtx, unitOfName, unitQuarters, unitRecords, unitsOf, withOff, withRate, type ShareRec, type UnitMember,
+  applyUnitRow, apportioned, commPeriod0, commRows, contribIn, dealGot, dealUnits, equalSplit, freeSlot, hadRate, howRow, membersOf, newUnitId, paysComm, periodRange, rateMode, rateOn, rateParts, rateText, retiredOn, retiredSince,
+  setPartsHook, shareOf, shareSum, shareValid, slotTaken, splitSatang, staffKey, toShare, toUnit, toUnitMember, unassigned, unitCtx, unitOfName, unitQuarters, unitRecords, unitsOf, withOff, withRate, type ShareRec, type UnitMember,
   type UnitRec,
 } from './contrib';
 import { nameKey } from './ckey';
@@ -113,6 +113,32 @@ describe('who is in which unit', () => {
     expect(id).not.toBe('u' + (1000).toString(36));
     expect(id).toMatch(/^[a-z0-9_-]{1,24}$/);
   });
+  it('a retired unit keeps its colour: a new unit takes one no unit uses, never a hue a retired unit with money still shows', () => {
+    // the review's case: four paying units, ฝ่ายทวนสอบ (violet, slot 3 here) retired this year, then ฝ่ายวิจัย added
+    const s2 = withUnits(emptySales());
+    s2.units!.ver = { ...s2.units!.ver, off: true, offs: [{ from: '2026-10-12' }] };
+    expect(freeSlot(unitCtx(s2), T)).toBe(0); // all four hues still shown this year: grey, not ฝ่ายทวนสอบ's
+    // with a hue free, that one (not the retired unit's)
+    delete s2.units!.cons;
+    expect(freeSlot(unitCtx(s2), T)).toBe(2);
+    // a unit retired before last year began shows no money this year or last: its hue may be used again
+    s2.units!.cons = U('ฝ่ายที่ปรึกษา', 2, [{ from: '', r: 3 }], 1);
+    s2.units!.ver = { ...s2.units!.ver, offs: [{ from: '2024-12-31' }] };
+    expect(freeSlot(unitCtx(s2), T)).toBe(3);
+    s2.units!.ver = { ...s2.units!.ver, offs: [{ from: '2025-01-01' }] };
+    expect(freeSlot(unitCtx(s2), T)).toBe(0);
+    // the unit being given a slot is left out of what is taken
+    expect(freeSlot(unitCtx(s2), T, 'ver')).toBe(3);
+  });
+  it('a unit used again while a live unit has its colour needs another (slotTaken)', () => {
+    const s2 = withUnits(emptySales());
+    s2.units!.old = U('ฝ่ายเดิม', 2, [{ from: '', r: 1 }], 9, true);
+    expect(slotTaken(unitCtx(s2), 'old')).toBe(true); // ฝ่ายที่ปรึกษา is slot 2
+    expect(slotTaken(unitCtx(s2), 'cons')).toBe(false); // the retired one does not count
+    expect(slotTaken(unitCtx(s2), 'exec')).toBe(false); // grey is not a hue
+    delete s2.units!.cons;
+    expect(slotTaken(unitCtx(s2), 'old')).toBe(false);
+  });
 });
 
 describe('a deal\'s split', () => {
@@ -189,32 +215,73 @@ describe('effective-dated rates', () => {
     expect(rateOn(u, '2026-08-15', ['CFP'])).toBe(3);
     expect(withRate([], 3, { VVB: 5, '': 9, X: 101 }, '2026-10-12')).toEqual([{ from: '', r: 3, svc: { VVB: 5 }, d: '2026-10-12' }]);
   });
-  it('a unit made without a rate whose first rate is set on a later day: that rate prices all money, past included', () => {
-    // units and people first, rates later (the real rates are not known yet): blank on 1 ต.ค., 5% on 12 ต.ค.
+  it('a unit saved as ไม่คิด and given a rate on a later day: from that day by default, never retroactive (the review\'s case)', () => {
+    // ไม่คิด since 5 ม.ค. 2569 on purpose, 1% from 4 ม.ค. 2570: money of 2569 stays without commission
+    const blank = withRate([], null, {}, '2026-01-05');
+    expect(blank).toEqual([{ from: '', r: null, d: '2026-01-05' }]);
+    expect(rateMode(blank, '2026-01-05')).toBe('first');
+    expect(rateMode(blank, '2027-01-04')).toBe('choose');
+    const rates = withRate(blank, 1, {}, '2027-01-04');
+    expect(rates).toEqual([{ from: '', r: null, d: '2026-01-05' }, { from: '2027-01-04', r: 1, d: '2027-01-04' }]);
+    expect(rateOn({ rates }, '2026-06-01')).toBeNull();
+    expect(rateOn({ rates }, '2027-01-04')).toBe(1);
+    expect(rateMode(rates, '2027-02-01')).toBe('change');
+    // a rate by service only is a rate too
+    const svc = withRate(blank, null, { VVB: 5 }, '2026-10-05');
+    expect(svc).toEqual([blank[0], { from: '2026-10-05', r: null, svc: { VVB: 5 }, d: '2026-10-05' }]);
+    expect(rateOn({ rates: svc }, '2026-08-15', ['VVB'])).toBeNull();
+    expect(hadRate(svc)).toBe(true);
+  });
+  it('a unit made before its rate was known: asked to, the first rate prices the money received before too', () => {
+    // blank on 1 ต.ค., 5% on 12 ต.ค. with "ใช้กับเงินที่รับมาแล้วทั้งหมดด้วย"
     const blank = withRate([], null, {}, '2026-10-01');
-    expect(blank).toEqual([{ from: '', r: null, d: '2026-10-01' }]);
-    expect(hadRate(blank)).toBe(false);
-    const rates = withRate(blank, 5, {}, '2026-10-12');
+    const rates = withRate(blank, 5, {}, '2026-10-12', true);
     expect(rates).toEqual([{ from: '', r: 5, d: '2026-10-12' }]);
     expect(rateOn({ rates }, '2026-08-15')).toBe(5);
-    expect(hadRate(rates)).toBe(true);
-    // a rate by service only is a rate too: the first one is retroactive, the unit's own set later is a change
-    const svc = withRate(blank, null, { VVB: 5 }, '2026-10-05');
-    expect(svc).toEqual([{ from: '', r: null, svc: { VVB: 5 }, d: '2026-10-05' }]);
-    expect(withRate(svc, 3, { VVB: 5 }, '2026-10-12')).toEqual([svc[0], { from: '2026-10-12', r: 3, svc: { VVB: 5 }, d: '2026-10-12' }]);
-    // once a unit has had a rate, "ไม่คิด" and a rate again are changes from their day (never retroactive)
+    // chosen "from today" first, then switched the same day: the money before is priced too
+    const today = withRate(blank, 5, {}, '2026-10-12');
+    expect(rateMode(today, '2026-10-12')).toBe('choose');
+    expect(withRate(today, 5, {}, '2026-10-12', true)).toEqual([{ from: '', r: 5, d: '2026-10-12' }]);
+    // and back to "from today" the same day while the ไม่คิด entry is still there
+    expect(withRate(today, 5, {}, '2026-10-12')).toBe(today);
+    // `back` with no rate typed, or once the unit has had a rate, changes nothing about the past
+    expect(withRate(blank, null, {}, '2026-10-12', true)).toBe(blank);
+    const had = [{ from: '', r: 3, d: '2026-07-01' }];
+    expect(withRate(had, 5, {}, '2026-10-12', true)).toEqual([had[0], { from: '2026-10-12', r: 5, d: '2026-10-12' }]);
+    // a service rate given back: retroactive too
+    expect(withRate(blank, null, { VVB: 5 }, '2026-10-05', true)).toEqual([{ from: '', r: null, svc: { VVB: 5 }, d: '2026-10-05' }]);
+  });
+  it('once a unit has had a rate, "ไม่คิด" and a rate again are changes from their day', () => {
     const off = withRate([{ from: '', r: 3, d: '2026-07-01' }], null, {}, '2026-09-01');
     expect(off).toEqual([{ from: '', r: 3, d: '2026-07-01' }, { from: '2026-09-01', r: null, d: '2026-09-01' }]);
     const back = withRate(off, 5, {}, '2026-10-12');
     expect(back.map((x) => [x.from, x.r])).toEqual([['', 3], ['2026-09-01', null], ['2026-10-12', 5]]);
     expect([rateOn({ rates: back }, '2026-08-15'), rateOn({ rates: back }, '2026-09-15'), rateOn({ rates: back }, '2026-10-12')]).toEqual([3, null, 5]);
   });
-  it('the mockups\' ไตรมาส 3 with ฝ่ายขาย made blank and given 5% the next day: the quarter is priced at 5%', () => {
+  it('a rate changed and changed back the same day leaves no second entry with the same rate (the review\'s case)', () => {
+    const r1 = withRate([], 3, {}, '2026-01-05');
+    const r2 = withRate(r1, 5, {}, '2026-10-12');
+    expect(r2).toEqual([r1[0], { from: '2026-10-12', r: 5, d: '2026-10-12' }]);
+    expect(withRate(r2, 3, {}, '2026-10-12')).toEqual(r1);
+    // the same with rates by service: back to what it was, by value (the order of the services does not matter)
+    const s1 = withRate([], 3, { VVB: 5, CFO: 4 }, '2026-01-05');
+    const s2 = withRate(s1, 3, { VVB: 6, CFO: 4 }, '2026-10-12');
+    expect(s2).toHaveLength(2);
+    expect(withRate(s2, 3, { CFO: 4, VVB: 5 }, '2026-10-12')).toEqual(s1);
+    // a ไม่คิด set and taken back the same day
+    expect(withRate(withRate(r1, null, {}, '2026-10-12'), 3, {}, '2026-10-12')).toEqual(r1);
+    // the same rate on another day changes nothing
+    expect(withRate(r1, 3, {}, '2026-10-13')).toBe(r1);
+  });
+  it('the mockups\' ไตรมาส 3 with ฝ่ายขาย made blank and given 5% the next day: 0 from that day by default, 5% when asked', () => {
     const s = demo();
     s.shares!.c1 = SH([['sale', 100]]);
     s.units!.sale.rates = withRate(withRate([], null, {}, '2026-10-12'), 5, {}, '2026-10-13');
-    const c = contribIn(unitCtx(s), lines(s), Q3);
-    // อมตะ PAY2 120,000 + แสนสิริ PAY1 107,000 (หมิว): 227,000 at 5%
+    let c = contribIn(unitCtx(s), lines(s), Q3);
+    // อมตะ PAY2 120,000 + แสนสิริ PAY1 107,000 (หมิว): 227,000, received before the rate
+    expect(c.by.sale).toMatchObject({ got: 227000, comm: 0 });
+    s.units!.sale.rates = withRate(withRate([], null, {}, '2026-10-12'), 5, {}, '2026-10-13', true);
+    c = contribIn(unitCtx(s), lines(s), Q3);
     expect(c.by.sale).toMatchObject({ got: 227000, comm: 11350 });
     expect(rateText(commRows(unitCtx(s), c, Q3.to)[0].rates)).toBe('5%');
   });

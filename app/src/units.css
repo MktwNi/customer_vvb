@@ -15,8 +15,17 @@
 .un-off{white-space:nowrap}
 
 /* the quarter card split by unit: wide enough for "ยังไม่ระบุหน่วยงาน" on one line; a longer unit name wraps
-   to a second line (the full name in its title) */
-.qt-wide.split th:first-child{width:136px}
+   to a second line (the full name in its title). The late figures sit on one line under ค้างรับ, named once
+   in the row's first cell. Two cards side by side in a narrow Dashboard: a narrower name column and
+   tighter cells, so the figures stay inside their columns. */
+.qt-wide.split th:first-child{width:124px}
+.qt-wide.split td small{white-space:nowrap}
+@container (min-width:861px) and (max-width:1000px){
+  .qt-wide.split th:first-child{width:96px}
+  .qt-wide.split th,.qt-wide.split td{padding-left:3px;padding-right:3px}
+  .qt-wide.split th:first-child,.qt-wide.split td:first-child{padding-left:0}
+  .qt-wide.split th:last-child,.qt-wide.split td:last-child{padding-right:0}
+}
 .qt-wide.split td:first-child{color:var(--ink)}
 .qt-wide.split td:first-child .un{align-items:flex-start}
 .qt-wide.split td:first-child .ud{margin-top:5px}
@@ -75,12 +84,19 @@
 .cm-empty{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:16px;border-radius:var(--r-inner);background:var(--frame);font-size:14px;color:var(--ink-2);line-height:1.6}
 .cm-empty p{margin:0}
 .cm-empty small{font-size:12px;color:var(--muted)}
+/* beside the quarter card in a narrow Dashboard: the short period buttons and column heads, as on a phone */
+@container (min-width:861px) and (max-width:1000px){
+  .cm-seg-l{display:inline}
+  .cm-seg .lg,.cm-t .lg{display:none}
+  .cm-seg .sm,.cm-t .sm{display:inline}
+  .cm-seg>button{padding:0 12px}
+}
 @container (max-width:640px){
   .cm-seg-l{display:inline}
   .cm-seg .lg,.cm-t .lg{display:none}
   .cm-seg .sm,.cm-t .sm{display:inline}
   .cm-seg>button{padding:0 12px}
-  .cm-t th:nth-child(4),.cm-t td:nth-child(4){display:none}
+  .cm-t .rt{display:none}
   .cm-t th:nth-child(1){width:47%}
   .cm-t th:nth-child(3){width:48px}
   .cm-t th,.cm-t td{padding-left:4px;padding-right:4px}
@@ -170,6 +186,12 @@
 .ut-was{margin-left:6px;font-size:12px;color:var(--muted)}
 .ut-ex{margin:0;padding:10px 14px;border-radius:var(--r-inner);background:var(--frame);font-size:13px;color:var(--ink-2);line-height:1.55}
 .ut-hist{font-size:12px;color:var(--muted);line-height:1.5}
+/* a rate for a unit that has only been ไม่คิด: from today, or the money received before too */
+.ut-when{display:flex;flex-wrap:wrap;gap:8px 24px;margin:0;padding:0;border:0;min-width:0}
+.ut-when legend{float:left;width:100%;padding:0;margin-bottom:2px;font-size:13px;color:var(--ink-2)}
+.ut-when label{display:flex;align-items:flex-start;gap:8px;flex:1 1 240px;min-width:0;font-size:14px;color:var(--ink);cursor:pointer;line-height:1.45}
+.ut-when input{flex:none;margin:3px 0 0;accent-color:var(--brand)}
+.ut-when small{display:block;font-size:12px;color:var(--muted);line-height:1.5}
 @media (max-width:700px){
   .ut-r{grid-template-columns:minmax(0,1fr) auto 48px;row-gap:2px}
   .ut-r.ph{display:none}

@@ -2,10 +2,11 @@
  * Units, % contribution and commission (package dash, items 8 and 9b; dash impl-note §1). Pure helpers, no DOM.
  *
  * - A unit (หน่วยงาน / ฝ่าย) is a group of staff an admin sets up: `scfg/unit.<id>` = { n, c, o, rates, off?, offs? }.
- *   Its commission rates are effective-dated: the first real one (`from: ''`) prices all money, past
- *   included, also when the unit was made without a rate first; each later change prices the money
- *   received from the day it was saved (never retroactive). A rate may be set per service (the deal's
- *   Services) and then replaces the unit's own while the job has it.
+ *   Its commission rates are effective-dated: the first one (`from: ''`, "ไม่คิด" included) prices all money,
+ *   past included; each later change prices the money received from the day it was saved (never
+ *   retroactive). A unit saved as ไม่คิด on an earlier day and given a rate asks (rateMode 'choose'): from
+ *   today by default, or all money when the admin says it was made before its rate was known. A rate may
+ *   be set per service (the deal's Services) and then replaces the unit's own while the job has it.
  * - A retired unit (`off`) keeps the money received before the day it was retired; what comes in from that
  *   day (`offs`, the spans it was retired) is ยังไม่ระบุหน่วยงาน's, until its people move or the job is split again.
  * - One person is in one unit: `scfg/unitm.<staffKey(name)>` = { unit, n }. Names are free text (a deal's
@@ -254,12 +255,28 @@ export function unassigned(ctx: Pick<UnitCtx, 'units' | 'members'>, names: strin
     return !id || !!ctx.units[id].off;
   });
 }
-/** A colour slot for a new unit: the first of 1–4 no live unit uses, else grey. */
-export function freeSlot(ctx: Pick<UnitCtx, 'units'>): number {
-  const used = new Set(unitsOf(ctx).map((u) => u.c));
+/**
+ * A colour slot for a unit that pays commission (`except`: the unit being given one, left out): the first of
+ * 1–4 no other unit uses, retired ones included (a retired unit keeps its colour in the charts and the
+ * commission table of the years it has money); else one held only by units retired before last year began
+ * (none of their money shows this year or last); else grey. Two series of one chart never share a hue.
+ */
+export function freeSlot(ctx: Pick<UnitCtx, 'units'>, today = '', except = ''): number {
+  const us = unitsOf(ctx, true).filter((u) => u.id !== except);
+  const used = new Set(us.map((u) => u.c));
   for (let c = 1; c <= UNIT_SLOTS; c++) if (!used.has(c)) return c;
+  const y0 = isDay(today) ? `${+today.slice(0, 4) - 1}-01-01` : '';
+  for (let c = 1; c <= UNIT_SLOTS && y0; c++) {
+    const on = us.filter((u) => u.c === c);
+    if (on.every((u) => { const s = retiredSince(u); return s != null && s < y0; })) return c;
+  }
   return 0;
 }
+/** Whether a unit's colour is also a live unit's (another one, not grey): the unit used again needs another. */
+export const slotTaken = (ctx: Pick<UnitCtx, 'units'>, id: string) => {
+  const c = ctx.units[id]?.c;
+  return !!c && Object.entries(ctx.units).some(([k, u]) => k !== id && !u.off && u.c === c);
+};
 /** A new unit id, not one of `taken`. */
 export function newUnitId(taken: Iterable<string>, seed = Date.now()): string {
   const t = new Set(taken);
@@ -362,24 +379,40 @@ export const paysComm = (u: Pick<UnitRec, 'rates'>) => {
   const e = u.rates[u.rates.length - 1];
   return !!e && (e.r != null || !!e.svc && Object.keys(e.svc).length > 0);
 };
-/** Whether a unit has had a rate (its own or by service) at any time: until it has, the next rate set is
- *  its first one, which prices all money, past included. */
+/** Whether a unit has had a rate (its own or by service) in these entries. */
 export const hadRate = (rates: UnitRate[]) => rates.some((e) => e.r != null || (!!e.svc && Object.keys(e.svc).length > 0));
+/** The entries saved before `today` (the one saved today, always the last, is still being edited). */
+const savedBefore = (rates: UnitRate[], today: string) => (rates.length && rates[rates.length - 1].d === today ? rates.slice(0, -1) : rates);
 /**
- * A unit's rates after an edit on `today`: unchanged → as they were; no rate yet (none saved, or only
- * "ไม่คิด" so far: a unit made before its rate was known) → the first one, from '' (it prices the money
- * received before too); one saved today already → replaced in place; else a new entry from today (earlier
- * money keeps its rate).
+ * What a rate set on `today` does to the money received before (the units dialog's hint and choice):
+ * - 'first': nothing saved before today (a new unit, or one made today): the unit's first rate, from the
+ *   start, so it prices all money, past included (impl-note §1: else every quarter before go-live shows 0);
+ * - 'choose': only "ไม่คิด" saved before today: from today by default (the days it was ไม่คิด stay so, as
+ *   for a unit that pays none on purpose), or all money when the admin says so (made before its rate was known);
+ * - 'change': it has had a rate: from today, earlier money keeps the rate it had (never retroactive).
  */
-export function withRate(rates: UnitRate[], r: number | null, svc: Record<string, number>, today: string): UnitRate[] {
+export type RateMode = 'first' | 'choose' | 'change';
+export function rateMode(rates: UnitRate[], today: string): RateMode {
+  const base = savedBefore(rates, today);
+  return !base.length ? 'first' : hadRate(base) ? 'change' : 'choose';
+}
+/**
+ * A unit's rates after an edit on `today` (`back`: in 'choose' mode, price the money received before too).
+ * The first rate, or a 'choose' one with `back`, is the only entry, from ''. Else a change is a new entry
+ * from today (one saved today already is replaced; set back to the rate before it, it goes: no second
+ * entry with the same rate). Unchanged → the same list.
+ */
+export function withRate(rates: UnitRate[], r: number | null, svc: Record<string, number>, today: string, back = false): UnitRate[] {
   const last = rates[rates.length - 1];
   const svcN = Object.fromEntries(Object.entries(svc).filter(([k, n]) => k.trim() && rateOk(n)).sort(([a], [b]) => a.localeCompare(b)));
   const same = (e: UnitRate) => e.r === r && JSON.stringify(Object.fromEntries(Object.entries(e.svc || {}).sort(([a], [b]) => a.localeCompare(b)))) === JSON.stringify(svcN);
-  if (last && same(last)) return rates;
   const e: UnitRate = { from: '', r, ...(Object.keys(svcN).length ? { svc: svcN } : {}), d: today };
-  if (!last || !hadRate(rates)) return [e];
-  if (last.d === today) return [...rates.slice(0, -1), { ...e, from: last.from }];
-  return [...rates, { ...e, from: today }];
+  const mode = rateMode(rates, today);
+  if (mode === 'first' || (mode === 'choose' && back && hadRate([e]))) return rates.length === 1 && !last.from && same(last) ? rates : [e];
+  if (last && same(last)) return rates;
+  const base = savedBefore(rates, today);
+  if (same(base[base.length - 1])) return base;
+  return [...base, { ...e, from: today }];
 }
 
 // ------------------------------------------------------------------ money by unit

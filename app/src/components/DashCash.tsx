@@ -156,11 +156,21 @@ export function QuarterCard({ Y, year, now, pick, onCashTab, onPlan, canPlan, sp
             </tr>
           ))}
           <tr className="sum"><td>รับแล้ว</td>{qs.map((q, i) => <td key={i}>{z(q.got)}</td>)}<td>{m0(tot.got)}</td></tr>
-          <tr className="wait">
-            <td>ค้างรับ</td>
-            {qs.map((q, i) => <td key={i}>{z(owedOf(i))}{q.late > 0 && <small>เลยกำหนด {m0(q.late)}</small>}</td>)}
-            <td>{z(tot.owed)}</td>
-          </tr>
+          {split ? (
+            // by unit the quarter columns are narrower: "เลยกำหนด" names the red line once, in the row's first
+            // cell, so each quarter's late figure stays on one line under its ค้างรับ (mockups 01b, 04)
+            <tr className="wait">
+              <td>ค้างรับ{tot.late > 0 && <small>เลยกำหนด</small>}</td>
+              {qs.map((q, i) => <td key={i}>{z(owedOf(i))}{q.late > 0 && <small><span className="sr-only">เลยกำหนด </span>{m0(q.late)}</small>}</td>)}
+              <td>{z(tot.owed)}{tot.late > 0 && <small><span className="sr-only">เลยกำหนด </span>{m0(tot.late)}</small>}</td>
+            </tr>
+          ) : (
+            <tr className="wait">
+              <td>ค้างรับ</td>
+              {qs.map((q, i) => <td key={i}>{z(owedOf(i))}{q.late > 0 && <small>เลยกำหนด {m0(q.late)}</small>}</td>)}
+              <td>{z(tot.owed)}</td>
+            </tr>
+          )}
         </tbody>
       </table>
       <table className="qt qt-narrow">
