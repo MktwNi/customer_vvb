@@ -6,7 +6,7 @@ import { beYear, fmtMoney, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { ccVars, custKey, dealKey } from '../lib/custColor';
 import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from '../lib/planCal';
-import { jobTag, planRows, planSrc, rowsOf, srcCounts, type PlanSrc } from '../lib/planList';
+import { filterRows, jobTag, ownerChoices, planRows, planSrc, rowsOf, srcCounts, unplanned, type PlanSrc } from '../lib/planList';
 import type { Company, StageKey, Task } from '../lib/types';
 import { PageHead } from '../components/ui';
 import { FilterBar } from '../components/FilterBar';
@@ -98,12 +98,13 @@ export function Plan() {
   // an older value (a registry feed) or the tracker for an account without it: the default
   const src: PlanSrc = planSrc(ui.plFeed) === 'sales' && !sees ? 'all' : planSrc(ui.plFeed);
   const srcRows = rowsOf(rowsAll, src);
-  let tg = srcRows;
-  if (ui.plStage) tg = tg.filter((r) => r.stage === ui.plStage);
-  if (ui.plOwner) tg = tg.filter((r) => (ui.plOwner === '-' ? !r.owner : r.owner === ui.plOwner));
-  // an appointment needs a company of the register: a client not linked to one is opened in the tracker
-  const unpl = tg.flatMap((r) => (r.c && !r.task ? [r.c] : []));
+  const tg = filterRows(srcRows, ui.plStage, ui.plOwner);
+  // "ยังไม่มีแผน": no appointment and no step planned ahead in the tracker (lib/planList.ts hasPlan); an
+  // appointment needs a company of the register: a client not linked to one is opened in the tracker
+  const unpl = unplanned(tg);
   const unlinked = tg.filter((r) => !r.c).length;
+  // the hints above the list point at it only when it has a company to press นัด on
+  const pickHere = !ro && srcRows.some((r) => r.c);
   const shown = tg.slice(0, ui.plLim || 60);
   const shownCos = shown.flatMap((r) => (r.c ? [r.c] : []));
   const pk = ui.picked || {};
@@ -156,7 +157,10 @@ export function Plan() {
       <span className="pl-ev-n">{chipName(x.deal.client)}</span>
     </span>
   );
-  const teamOpts = [{ v: '-', label: 'ยังไม่มีผู้รับผิดชอบ' }].concat(C.team.map((v) => ({ v, label: v })));
+  // the team and every other name a row shows (a tracker job's ผู้รับผิดชอบ), and the one picked if it has gone
+  const owners = ownerChoices(C.team, rowsAll);
+  if (ui.plOwner && ui.plOwner !== '-' && !owners.includes(ui.plOwner)) owners.push(ui.plOwner);
+  const teamOpts = [{ v: '-', label: 'ยังไม่มีผู้รับผิดชอบ' }].concat(owners.map((v) => ({ v, label: v })));
 
   return (
     <>
@@ -165,7 +169,7 @@ export function Plan() {
         <div className="pl-sum-total">
           <span>งานค้างทั้งหมด</span>
           <b>{fmtN(open_.length)}</b>
-          <small>{open_.length ? `นัดไว้ ${fmtN(new Set(open_.map((t) => e.canonical(t.gid))).size)} บริษัท` : 'ยังไม่มีนัด · เลือกบริษัทด้านล่างแล้วกด นัด'}</small>
+          <small>{open_.length ? `นัดไว้ ${fmtN(new Set(open_.map((t) => e.canonical(t.gid))).size)} บริษัท` : pickHere ? 'ยังไม่มีนัด · เลือกบริษัทด้านล่างแล้วกด นัด' : 'ยังไม่มีนัด'}</small>
         </div>
         <div className="pl-segs">
           {segs.map(([label, n, cls]) => (
@@ -223,7 +227,7 @@ export function Plan() {
           <div className="pl-legend">
             <span className="pl-lg-h">
               ลูกค้าในเดือนนี้
-              <small>{legend.length ? `${fmtN(legend.length)} บริษัท · กดชื่อเพื่อดูเฉพาะรายนั้น` : ro ? 'ยังไม่มีนัดในเดือนนี้' : 'ยังไม่มีนัดในเดือนนี้ · เลือกบริษัทที่รายชื่อด้านล่างแล้วกด นัด'}</small>
+              <small>{legend.length ? `${fmtN(legend.length)} บริษัท · กดชื่อเพื่อดูเฉพาะรายนั้น` : pickHere ? 'ยังไม่มีนัดในเดือนนี้ · เลือกบริษัทที่รายชื่อด้านล่างแล้วกด นัด' : 'ยังไม่มีนัดในเดือนนี้'}</small>
               {only && <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>}
             </span>
             {legend.length > 0 && (
@@ -263,7 +267,7 @@ export function Plan() {
               <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>
             </div>
           )}
-          {!dayT.length && !dayP.length && <span className="pl-empty">ไม่มีงานในวันนี้ · เลือกวันอื่น หรือกด นัด ที่รายชื่อด้านล่าง</span>}
+          {!dayT.length && !dayP.length && <span className="pl-empty">{pickHere ? 'ไม่มีงานในวันนี้ · เลือกวันอื่น หรือกด นัด ที่รายชื่อด้านล่าง' : 'ไม่มีงานในวันนี้ · เลือกวันอื่น'}</span>}
           {dayP.map((x) => payItem(x))}
           {dayT.map(({ t, ck }) => {
             const ti = taskInfo(e, t);
@@ -307,7 +311,8 @@ export function Plan() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <h3 className="card-t">รายชื่อที่ต้องติดต่อ</h3>
-            <span className="t-sec">{`${fmtN(tg.length)} บริษัท · ยังไม่มีนัด ${fmtN(unpl.length)}${unlinked ? ` · ยังไม่ได้เชื่อมบริษัท ${fmtN(unlinked)}` : ''}`}</span>
+            {/* nothing to count over an empty list (its own words say why) */}
+            {tg.length > 0 && <span className="t-sec">{`${fmtN(tg.length)} บริษัท · ยังไม่มีแผน ${fmtN(unpl.length)}${unlinked ? ` · ยังไม่ได้เชื่อมบริษัท ${fmtN(unlinked)}` : ''}`}</span>}
           </div>
           <div className="pl-tools">
             <Select variant="tool" prefix="รายการ" label="รายการ" value={src} onChange={(x) => set({ plFeed: x, picked: {}, plLim: 60 })} options={srcOpts} search={false} width={320} />
@@ -393,7 +398,7 @@ export function Plan() {
                 {/* the stage reads as plain text; a picker under the pointer (plain text for viewers); a client
                     not linked to the register has none (it is a company's) */}
                 {c ? (
-                  <Select variant="cell" className="pl-stage" value={stageOf(r.stage)[0]} disabled={!e.can('edit.cust')} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
+                  <Select variant="cell" className="pl-stage" value={stageOf(r.stage || 'none')[0]} disabled={!e.can('edit.cust')} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
                 ) : (
                   <span className="pl-nolink">ยังไม่ได้เชื่อมบริษัท</span>
                 )}

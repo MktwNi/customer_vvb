@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { dmTh } from './format';
-import { jobTag, openJob, planRows, planSrc, rowsOf, srcCounts, type PlanCo, type PlanIn } from './planList';
+import { filterRows, hasPlan, jobTag, openJob, ownerChoices, planRows, planSrc, rowsOf, srcCounts, unplanned, type PlanCo, type PlanIn } from './planList';
 import { emptySales, newDeal, type Deal, type PayLine, type SalesState } from './sales';
 import type { StageKey, Task } from './types';
 
@@ -146,7 +146,8 @@ describe('the rows: followed companies and open tracker jobs, one row per compan
     const rows = planRows(input({ sales: s, tasks: [task('t', 777, '2026-10-13')] }));
     expect(rows).toHaveLength(2);
     const u = rows.find((r) => r.name.includes('สยามฟู้ดส์'))!;
-    expect(u).toMatchObject({ c: null, phone: '081-000-0000', owner: 'คุณบี', stage: 'none', task: null, watch: false });
+    // no sales status: it is a company's (lib/planList.ts filterRows)
+    expect(u).toMatchObject({ c: null, phone: '081-000-0000', owner: 'คุณบี', stage: null, task: null, watch: false });
     expect(u.jobs.map((j) => j.deal.id).sort()).toEqual(['u1', 'u2']);
     const g = rows.find((r) => r.name === 'โคราช ซีเมนต์')!;
     expect(g.c).toBeNull();
@@ -236,6 +237,86 @@ describe('the order: what needs action first, then the soonest, then what has no
     const [r] = planRows(input({ sales: s }));
     expect(r.jobs[0]).toMatchObject({ late: false, idle: null, when: '2026-10-25' });
     expect(r.late).toBe(false);
+  });
+});
+
+describe('"ยังไม่มีแผน": what นัดรายที่ยังไม่มีแผน books and the count beside the list', () => {
+  it('leaves out a company with an appointment or a tracker step planned ahead, and a client not linked', () => {
+    const s = emptySales();
+    // c10: its next step (FOLLOW1) set on 20 Oct in the tracker: planned, no appointment needed
+    deal(s, 'plan', { gid: 10 }, { ...toQuote, FOLLOW1: ['2026-10-20'] });
+    // c20: nobody contacted since 1 Sep: late, no plan (it most needs one)
+    deal(s, 'idle', { gid: 20 });
+    // c30: an installment late: a reason to call, not a plan
+    deal(s, 'owed', { gid: 30 }, { ...toQuote, 'CLOSED DEAL': ['2026-10-01', 'YES'] });
+    s.pays['owed/PAY1'] = L({ amt: 1000, due: '2026-10-10' });
+    // c40: an appointment (one that passed still is: it is moved, not booked again)
+    // c50: next step not planned
+    deal(s, 'next', { gid: 50 }, toQuote);
+    deal(s, 'u', { gid: null, client: 'สยามฟู้ดส์' }, toQuote);
+    const rows = planRows(input({ sales: s, tasks: [task('t40', 40, '2026-10-05')], watch: [40] }));
+    const r10 = rows.find((r) => r.key === 'c10')!;
+    expect(r10).toMatchObject({ late: false, when: '2026-10-20', task: null });
+    expect(hasPlan(r10)).toBe(true);
+    expect(hasPlan(rows.find((r) => r.key === 'c40')!)).toBe(true);
+    expect(rows.filter((r) => !hasPlan(r)).map((r) => r.key)).toEqual(['c20', 'c30', 'c50', 'nสยามฟู้ดส์']);
+    // in the list's order, only companies of the register (an appointment needs one)
+    expect(unplanned(rows).map((c) => c.id)).toEqual([20, 30, 50]);
+  });
+
+  it('counts a company as planned when any of its jobs has a step planned ahead', () => {
+    const s = emptySales();
+    deal(s, 'idle', { gid: 10 });
+    deal(s, 'plan', { gid: 10, service: ['CFP'] }, { ...toQuote, FOLLOW1: ['2026-10-22'] });
+    const rows = planRows(input({ sales: s, watch: [20] }));
+    expect(rows.find((r) => r.key === 'c10')!.jobs).toHaveLength(2);
+    expect(unplanned(rows).map((c) => c.id)).toEqual([20]);
+  });
+
+  it('is the filtered list’s', () => {
+    const s = emptySales();
+    deal(s, 'a', { gid: 10, resp: 'มกร' }, toQuote);
+    deal(s, 'b', { gid: 20, resp: 'ปลา' }, toQuote);
+    const rows = planRows(input({ sales: s }));
+    expect(unplanned(filterRows(rows, '', 'ปลา')).map((c) => c.id)).toEqual([20]);
+  });
+});
+
+describe('the filters: สถานะการขาย and ผู้รับผิดชอบ', () => {
+  function fixture() {
+    const s = emptySales();
+    // won, an installment late, its client not linked: no sales status
+    deal(s, 'won', { gid: null, client: 'ไทยออยล์', resp: 'มกร' }, { ...toQuote, 'CLOSED DEAL': ['2026-10-01', 'YES'] });
+    s.pays['won/PAY1'] = L({ amt: 1000, due: '2026-10-08' });
+    deal(s, 'u', { gid: null, client: 'แสนสิริ' }, toQuote);
+    deal(s, 'a', { gid: 10, resp: 'มกร' }, toQuote);
+    deal(s, 'b', { gid: 20, resp: 'ปลา' }, toQuote);
+    return planRows(input({ sales: s, watch: [30, 40], owners: { 20: 'หมิว', 40: 'คุณเอ' }, stages: { 30: 'interested' } }));
+  }
+
+  it('never lists a client not linked under a สถานะการขาย (ยังไม่ติดต่อ is a company’s status)', () => {
+    const rows = fixture();
+    expect(filterRows(rows, 'none', '').map((r) => r.key).sort()).toEqual(['c10', 'c20', 'c40']);
+    expect(filterRows(rows, 'interested', '').map((r) => r.key)).toEqual(['c30']);
+    expect(filterRows(rows, '', '')).toHaveLength(rows.length);
+    expect(filterRows(rows, '', '').filter((r) => !r.c)).toHaveLength(2);
+  });
+
+  it('finds every owner a row shows, the tracker job’s too; "-" is a row naming nobody', () => {
+    const rows = fixture();
+    // c10's owner comes from its job (the company has none); c20's company names one over its job's
+    expect(filterRows(rows, '', 'มกร').map((r) => r.name).sort()).toEqual([COS[0].name, 'ไทยออยล์'].sort());
+    expect(filterRows(rows, '', 'ปลา')).toEqual([]);
+    expect(filterRows(rows, '', 'หมิว').map((r) => r.key)).toEqual(['c20']);
+    expect(filterRows(rows, '', '-').map((r) => r.key).sort()).toEqual(['c30', 'nแสนสิริ']);
+    expect(filterRows(rows, 'none', 'มกร').map((r) => r.key)).toEqual(['c10']);
+  });
+
+  it('offers the team, then the other names on the rows (by name, once each)', () => {
+    const rows = fixture();
+    expect(ownerChoices(['หมิว', 'คุณเอ', 'คุณบี'], rows)).toEqual(['หมิว', 'คุณเอ', 'คุณบี', 'มกร']);
+    expect(ownerChoices([], [{ owner: 'ปลา' }, { owner: '' }, { owner: 'มกร' }, { owner: 'ปลา' }])).toEqual(['ปลา', 'มกร']);
+    expect(ownerChoices(['หมิว', '', 'หมิว'], [])).toEqual(['หมิว']);
   });
 });
 

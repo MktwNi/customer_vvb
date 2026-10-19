@@ -744,7 +744,8 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .pl-src .pl-tag{cursor:pointer;border:0;border-radius:11px;font:inherit;font-size:var(--fs-meta);color:var(--neutral);height:auto;min-height:22px;padding:3px 10px;line-height:1.35;white-space:normal;text-align:left;flex:0 1 auto;max-width:100%}
 .pl-warn{color:var(--warn)}
 .pl-meta{min-width:0}
-.pl-nolink{font-size:var(--fs-sec);color:var(--muted)}
+/* in the stage column: its text starts where a cell picker's does (its 1px border and 6px padding) */
+.pl-nolink{font-size:var(--fs-sec);color:var(--muted);padding-left:7px}
 .pl-none{display:flex;flex-direction:column;gap:6px;padding:16px 0 4px;border-top:1px solid var(--divider);font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
 .pl-none b{font-size:var(--fs-card);font-weight:500;color:var(--ink)}
 .pl-none-a{display:flex;flex-wrap:wrap;gap:6px 20px}

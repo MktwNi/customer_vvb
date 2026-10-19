@@ -26,17 +26,18 @@ export function planSrc(v: unknown): PlanSrc {
  *  installment is late, or nobody has contacted the client for more than OVERDUE_DAYS: `idle` days). */
 export interface PlanJob { deal: Deal; next: NextStepView; when: string; late: boolean; idle: number | null }
 /** A row: the company (null = a client not linked to the register), its name and phone (the job's when the
- *  register has none), who is responsible (the company's ผู้รับผิดชอบ, else the job's), its sales status, where
- *  it comes from (followed, its jobs most urgent first), its first open appointment, and the date to act on
- *  (the appointment's or the jobs', the earliest) with whether it has passed. `idle`: days since a job's
- *  client was last contacted when that is too long and no appointment ahead takes care of it (null else). */
+ *  register has none), who is responsible (the company's ผู้รับผิดชอบ, else the job's), its sales status (null
+ *  for a client not linked: the status is a company's, so a สถานะการขาย filter never lists it), where it comes
+ *  from (followed, its jobs most urgent first), its first open appointment, and the date to act on (the
+ *  appointment's or the jobs', the earliest) with whether it has passed. `idle`: days since a job's client
+ *  was last contacted when that is too long and no appointment ahead takes care of it (null else). */
 export interface PlanRow<C extends PlanCo = PlanCo> {
   key: string;
   c: C | null;
   name: string;
   phone: string;
   owner: string;
-  stage: StageKey;
+  stage: StageKey | null;
   watch: boolean;
   jobs: PlanJob[];
   task: Task | null;
@@ -86,13 +87,14 @@ const byUrgency = (a: PlanJob, b: PlanJob) =>
   +b.late - +a.late || (a.when ? (b.when ? a.when.localeCompare(b.when) : -1) : b.when ? 1 : 0) || a.deal.order - b.deal.order || a.deal.id.localeCompare(b.deal.id);
 
 /** Every row, in the list's order: what needs action first (a late appointment or job, the oldest first), then
- *  what is dated (the soonest first), then what has no plan yet (jobs before companies only followed, by name). */
+ *  what is dated (an appointment, a step planned in the tracker, an installment's due date: the soonest first),
+ *  then what has no date at all (jobs before companies only followed, by name). */
 export function planRows<C extends PlanCo>(x: PlanIn<C>): PlanRow<C>[] {
   const rows = new Map<string, PlanRow<C>>();
   const row = (key: string, c: C | null, name: string): PlanRow<C> => {
     let r = rows.get(key);
     if (!r) {
-      r = { key, c, name, phone: c?.phone || '', owner: c ? x.owners[c.id] || '' : '', stage: (c && x.stages[c.id]) || 'none', watch: false, jobs: [], task: null, when: '', late: false, idle: null };
+      r = { key, c, name, phone: c?.phone || '', owner: c ? x.owners[c.id] || '' : '', stage: c ? x.stages[c.id] || 'none' : null, watch: false, jobs: [], task: null, when: '', late: false, idle: null };
       rows.set(key, r);
     }
     return r;
@@ -153,6 +155,31 @@ export const rowsOf = <R extends Pick<PlanRow, 'watch' | 'jobs'>>(rows: readonly
 /** How many rows each source has (the picker's counts). */
 export function srcCounts(rows: readonly Pick<PlanRow, 'watch' | 'jobs'>[]): Record<PlanSrc, number> {
   return { all: rows.length, watch: rows.filter((r) => r.watch).length, sales: rows.filter((r) => r.jobs.length > 0).length };
+}
+
+/** The two filters over the rows: สถานะการขาย (a client not linked has none, so it is left out whenever one is
+ *  set) and ผู้รับผิดชอบ ('-' = nobody: neither the company nor its jobs name one). '' = any. */
+export function filterRows<R extends Pick<PlanRow, 'stage' | 'owner'>>(rows: readonly R[], stage: StageKey | '', owner: string): R[] {
+  return rows.filter((r) => (!stage || r.stage === stage) && (!owner || (owner === '-' ? !r.owner : r.owner === owner)));
+}
+/** The names the ผู้รับผิดชอบ filter offers: the team, then whoever else a row names (a tracker job's
+ *  ผู้รับผิดชอบ outside the team), by name, so every owner on a row can be picked (the tracker's owner picker
+ *  merges the team with deal.resp the same way). */
+export function ownerChoices(team: readonly string[], rows: readonly Pick<PlanRow, 'owner'>[]): string[] {
+  const t = new Set(team.filter(Boolean));
+  const more = [...new Set(rows.map((r) => r.owner).filter((o) => o && !t.has(o)))].sort((a, b) => a.localeCompare(b, 'th'));
+  return [...t, ...more];
+}
+
+/** A row with a plan: an open appointment, or a tracker job whose next step is set on a date ahead ("นัด 20
+ *  ต.ค." in its tag: the tracker's plan for that contact). An installment's due date or a contact overdue is
+ *  not a plan, it is a reason to call. "ยังไม่มีแผน" on the page (the count, and what "นัดรายที่ยังไม่มีแผน"
+ *  books) is the rows without one. */
+export const hasPlan = (r: Pick<PlanRow, 'task' | 'jobs'>) => !!r.task || r.jobs.some((j) => j.next.kind === 'planned');
+/** The companies "นัดรายที่ยังไม่มีแผน" books, in the list's order: rows with a company of the register (an
+ *  appointment needs one) and no plan. */
+export function unplanned<C extends PlanCo>(rows: readonly PlanRow<C>[]): C[] {
+  return rows.flatMap((r) => (r.c && !hasPlan(r) ? [r.c] : []));
 }
 
 /** A job's tag: "Sales Tracker · ถัดไป FOLLOW1 ติดตามครั้งที่ 1" (the tracker table's next-step words: "นัด 20
