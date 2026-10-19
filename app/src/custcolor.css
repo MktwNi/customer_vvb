@@ -1,0 +1,83 @@
+/* ---- per-customer colours on แผนติดต่อ (tabs/Plan.tsx, lib/custColor.ts). A customer's colour is always a
+   bar, a stripe or a dot beside its name in ink (`--c` the mark, `--cb` its tint, set inline from the frozen
+   palette); never coloured text, which is how a customer-TYPE tag looks. Installments take no customer
+   colour: they are outlined in their status colour with the word รับเงิน. */
+
+/* the calendar 2/3 and the day 1/3; stacked below 1180px of viewport (the chips then have room for the time) */
+.pl-wrap{display:grid;grid-template-columns:minmax(0,2fr) minmax(340px,1fr);gap:16px;align-items:start}
+@media (max-width:1180px){.pl-wrap{grid-template-columns:minmax(0,1fr)}}
+
+/* a day cell's lines: up to 3 chips, or 2 and "อีก N" */
+.pl-evs{display:flex;flex-direction:column;gap:2px;min-width:0;container-type:inline-size}
+.pl-ev{position:relative;display:flex;align-items:center;gap:4px;height:19px;padding:0 5px 0 8px;border-radius:5px;background:var(--cb);font-size:12px;line-height:19px;color:var(--ink);white-space:nowrap;overflow:hidden;min-width:0}
+.pl-ev::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c)}
+.pl-ev-n{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* the time only when the chip is wide enough: the full-width calendar below 1180px (114–126px chips with the
+   menu docked); at 2/3 width (about 75–85px) the name only, the time is in the tooltip and the day list */
+.pl-ev-t{display:none;flex:none;color:var(--ink-2)}
+@container (min-width:112px){.pl-ev-t{display:inline}}
+.pl-ev.done{background:var(--neutral-bg)}
+.pl-ev.done .pl-ev-n{color:var(--muted)}
+.pl-ev.pay{background:#fff;box-shadow:inset 0 0 0 1px var(--mark-wait);padding-left:6px}
+.pl-ev.pay::before{display:none}
+.pl-ev.pay .pl-ev-k{flex:none;color:var(--warn)}
+/* late: red and a frame twice as heavy (the colour is never the only cue; the cell's label says เลยกำหนด) */
+.pl-ev.pay.late{box-shadow:inset 0 0 0 2px var(--mark-no)}
+.pl-ev.pay.late .pl-ev-k{color:var(--bad)}
+.pl-more{font-size:12px;line-height:18px;color:var(--link);padding-left:8px}
+
+/* phones: dots in place of the names (a ring for an installment, faded when done) */
+.pl-dots{display:none;gap:3px;align-items:center;flex-wrap:wrap}
+.pl-dot{width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
+.pl-dot.done{opacity:.4}
+.pl-dot.pay{background:#fff;box-shadow:inset 0 0 0 1.5px var(--mark-wait)}
+/* late: a red ring with a dot in its middle (a shape of its own, not only another colour) */
+.pl-dot.pay.late{background:radial-gradient(circle,var(--mark-no) 0 1.1px,#fff 1.5px);box-shadow:inset 0 0 0 1.5px var(--mark-no)}
+.pl-dmore{flex-basis:100%;font-size:12px;line-height:1.2;color:var(--link)}
+@media (max-width:760px){
+  .pl-evs{display:none}
+  .pl-dots{display:flex}
+}
+
+/* "ลูกค้าในเดือนนี้" at the foot of the calendar: a dot and the name; pressing one shows that customer alone */
+.pl-legend{border-top:1px solid var(--divider);padding-top:12px;display:flex;flex-direction:column;gap:8px}
+.pl-lg-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-2)}
+.pl-lg-h small{font-size:12px;color:var(--muted)}
+.pl-lg-h .lnk{margin-left:auto;font-size:13px}
+.pl-lg-list{display:flex;flex-wrap:wrap;gap:2px 4px;margin:0 -8px}
+.pl-lg{cursor:pointer;display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 10px 0 8px;border:0;border-radius:999px;background:none;font:inherit;font-size:13px;color:var(--ink);white-space:nowrap}
+@media (hover:hover){.pl-lg:hover{background:var(--tint)}}
+.pl-lg i{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
+.pl-lg small{font-size:12px;color:var(--muted)}
+.pl-lg[aria-pressed=true]{background:var(--tint-2);color:var(--link);box-shadow:inset 0 0 0 1px var(--tint-line)}
+.pl-lg-key{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.pl-lg-key .pl-ev{display:inline-flex;flex:none}
+/* phones: the legend is one row that scrolls sideways inside the card (never the page), so the day list
+   starts right under the calendar; the cut-off last name shows that it scrolls */
+@media (max-width:760px){
+  .pl-lg-list{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain}
+  .pl-lg-list::-webkit-scrollbar{display:none}
+  .pl-lg{flex:none}
+}
+
+/* the day panel and งานที่กำลังจะถึง: the customer's colour as a stripe or bar (a website icon never hides it) */
+.pl-task.cc{position:relative;overflow:hidden;padding-left:16px}
+.pl-task.cc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c)}
+.pl-task.done-t{background:#FBFCFE}
+.pl-bar{width:4px;height:28px;border-radius:2px;background:var(--c);flex:none}
+/* "แสดงเฉพาะ …" over the day while one customer is shown alone */
+.pl-filt{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);background:var(--tint);border-radius:12px;padding:8px 12px}
+.pl-filt i{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
+.pl-filt .lnk{margin-left:auto;font-size:13px}
+/* the day panel is a 1/3 column: a card's buttons go on their own row under the text */
+.pl-wrap .pl-task{flex-wrap:wrap;align-items:flex-start;row-gap:8px}
+.pl-wrap .pl-task>.ckb{margin-top:8px}
+.pl-wrap .pl-task-act{flex-basis:100%;justify-content:flex-end}
+
+/* high contrast: the marks become outlines and the names carry the meaning */
+@media (forced-colors:active){
+  .pl-ev{border:1px solid CanvasText}
+  .pl-ev::before{background:CanvasText}
+  .pl-ev.pay.late{border-width:2px}
+  .pl-dot,.pl-lg i,.pl-filt i,.pl-bar,.pl-task.cc::before{forced-color-adjust:none}
+}

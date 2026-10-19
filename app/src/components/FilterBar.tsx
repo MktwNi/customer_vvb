@@ -5,8 +5,10 @@ import { Chevron } from './StageTrack';
 import { Av, Check, Pop, Radio, XMark, useHL, type PopWhy } from './Pop';
 
 /** One choice of a filter: `n` = how many rows have it (with every other filter on); `sub` a grey word
- *  after it ("ฉัน"); `chip` = how the chip says it, when shorter than the label ("ได้งาน"). */
-export interface FOpt { v: string; label: string; n?: number; sub?: string; chip?: string }
+ *  after it ("ฉัน"); `chip` = how the chip says it, when shorter than the label ("ได้งาน"); `desc` a grey
+ *  line under it and `meta` what stands at its end in place of the count (การรับเงิน: the money and how many
+ *  installments). */
+export interface FOpt { v: string; label: string; n?: number; sub?: string; chip?: string; desc?: string; meta?: ReactNode }
 /** A filter the row offers: a list (ticks, several values, "คือ / ไม่ใช่") or a single choice (radios). */
 export interface FField {
   key: string; label: string;
@@ -28,6 +30,11 @@ export interface FField {
   find?: string;
   /** a hairline in the field menu before this one */
   sep?: boolean;
+  /** a single choice's first radio: its grey line ("ไม่กรองตามการรับเงิน") */
+  allDesc?: string;
+  /** the value popover: a grey line under its title, a note under the list, and its footer's words for a
+   *  draft (in place of "เหลือ N งาน") */
+  lead?: ReactNode; note?: ReactNode; sum?: (draft: FVal | null) => ReactNode;
 }
 export interface FVal { v: string[]; not?: true }
 
@@ -373,10 +380,11 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
   const name = 'fv-' + f.key;
   // "ค้นหาชื่อ", "ค้นหาหมวด", "ค้นหา SOURCE" (a space before a Latin name)
   const findWord = f.find ?? (f.people ? 'ค้นหาชื่อ' : 'ค้นหา' + (/^[A-Za-z]/.test(f.label) ? ' ' : '') + f.label);
-  const row = (v: string, label: string, n: number | undefined, sub?: string, i = 0) => {
+  const rich = f.options.some((o) => o.desc);
+  const row = (v: string, label: string, n: number | undefined, sub?: string, i = 0, desc?: string, meta?: ReactNode) => {
     const isOn = single ? (v ? sel[0] === v : !sel.length) : sel.includes(v);
     return (
-      <label key={v || '~all'} data-hl="" className={'fck' + (isOn ? ' on' : '') + (n === 0 ? ' zero' : '')}>
+      <label key={v || '~all'} data-hl="" className={'fck' + (isOn ? ' on' : '') + (n === 0 && meta == null ? ' zero' : '')}>
         <input
           type={single ? 'radio' : 'checkbox'}
           name={name}
@@ -395,8 +403,9 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
         <span className="fck-l">
           {label}
           {sub && <span className="fck-s">{sub}</span>}
+          {desc && <small className="fck-d">{desc}</small>}
         </span>
-        {n != null && <span className="fck-n">{fmtN(n)}</span>}
+        {meta != null ? <span className="fck-m">{meta}</span> : n != null && <span className="fck-n">{fmtN(n)}</span>}
       </label>
     );
   };
@@ -410,7 +419,7 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
       label={'ตัวกรอง ' + f.label}
       title={f.label}
       kind="dialog"
-      width={320}
+      width={rich ? 360 : 320}
       className="val"
     >
       <div
@@ -433,6 +442,7 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
             </div>
           )}
         </div>
+        {f.lead && <p className="fval-lead">{f.lead}</p>}
         {long && (
           <div className="fval-find">
             <input
@@ -487,7 +497,7 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
             listRef.current = el;
             hl.ref.current = el;
           }}
-          className="hl-list fval-list"
+          className={'hl-list fval-list' + (rich ? ' fval-rich' : '')}
           role={single ? 'radiogroup' : 'group'}
           aria-label={f.label}
           onKeyDown={listKeys}
@@ -497,13 +507,14 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
           onBlur={hl.bind.onBlur}
         >
           <i className="hl" aria-hidden="true" />
-          {single && f.all != null && !t && row('', f.all, allN)}
-          {list.map((o, i) => row(o.v, o.label, o.n, o.sub, i))}
+          {single && f.all != null && !t && row('', f.all, allN, undefined, 0, f.allDesc, f.allDesc && allN != null ? `${fmtN(allN)} ${unit}` : undefined)}
+          {list.map((o, i) => row(o.v, o.label, o.n, o.sub, i, o.desc, o.meta))}
           {!list.length && <div className="pop-empty" aria-hidden="true">ไม่พบ “{q.trim()}”</div>}
         </div>
         <span className="sr-only" role="status">{list.length ? '' : `ไม่พบ “${q.trim()}”`}</span>
+        {f.note && <p className="fval-note">{f.note}</p>}
         <div className="fval-foot">
-          <span className="pop-sum">{left != null && <>เหลือ <b>{fmtN(left)}</b> {unit}</>}</span>
+          <span className="pop-sum">{f.sum ? f.sum(draft) : left != null && <>เหลือ <b>{fmtN(left)}</b> {unit}</>}</span>
           <button type="button" className="quiet fval-cancel" onClick={() => onClose('cancel')}>ยกเลิก</button>
           <button type="button" className="btn pri sm" onClick={apply}>ใช้ตัวกรอง</button>
         </div>

@@ -1,0 +1,160 @@
+/* Joint quotations (ใบเสนอราคาร่วม, package quotes item 7): the table's band and member rows (.jq-*), the
+   create / members dialog (.jc-*), the panel (.jp-*), the closing dialog (.jx-*), the ปิดงาน list (.jq-c*),
+   the phone card (.jm-*) and a member's own panel (.jq-mb). App tokens only; weights 400/500, sizes on the
+   scale. A light grey-blue band with a 3px tint edge says "these rows belong together"; nothing is coloured
+   for its own sake. */
+
+/* ---------- the band in the tracker table (a row of 10 cells, like a deal's) ---------- */
+.jq-gap>td{height:10px;padding:0!important;border:0!important;background:transparent!important}
+.jq-band>*{height:60px;background:#F7F9FE;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.jq-band>:first-child{border-radius:var(--r-band) 0 0 0;box-shadow:inset 3px 0 0 var(--tint-line);border-left:1px solid var(--line)}
+.jq-band>:last-child{border-radius:0 var(--r-band) 0 0;border-right:1px solid var(--line)}
+.jq-band.folded>:first-child{border-radius:var(--r-band) 0 0 var(--r-band)}
+.jq-band.folded>:last-child{border-radius:0 var(--r-band) var(--r-band) 0}
+.jq-band .k-chev{text-align:center}
+.jq-band .sl-caret{margin-left:0}
+.jq-band.folded .sl-caret svg{transform:rotate(-90deg)}
+.jq-in{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
+.jq-nm{cursor:pointer;border:0;padding:0;background:none;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.jq-sub{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.jq-band .sl-mn small{color:var(--muted)}
+.jq-band .sl-mn small.bad{color:var(--bad)}.jq-band .sl-mn small.ok{color:var(--ok)}
+.jq-st{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.jq-st small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.jq-kdate{display:flex;flex-direction:column;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.45;white-space:nowrap}
+.jq-kdate small{font-size:var(--fs-meta);color:var(--muted)}
+/* the members under it: their own rows, with the band's edge down the left */
+.sl-row.jq-m>.k-chev{box-shadow:inset 3px 0 0 var(--tint-line)}
+.sl-row.jq-m>*{border-top-color:var(--divider)}
+.sl-row.jq-m.last>*{border-bottom:1px solid var(--line)}
+.sl-row.jq-m.last>:first-child{border-radius:0 0 0 var(--r-band)}
+.jq-sh b.share{font-weight:400;color:var(--muted)}
+.jq-sh small{color:var(--muted)}
+
+/* ---------- ปิดงาน: the band and its closed companies ---------- */
+.sl-ltable tr.jq-cband>*{background:#F7F9FE;border-top:1px solid var(--line);height:60px}
+.sl-ltable tr.jq-cband>:first-child{box-shadow:inset 3px 0 0 var(--tint-line);border-radius:var(--r-band) 0 0 0}
+.sl-ltable tr.jq-cband>:last-child{border-radius:0 var(--r-band) 0 0}
+.sl-ltable tr.jq-cm>:first-child{box-shadow:inset 3px 0 0 var(--tint-line);padding-left:20px}
+.sl-ltable tr.jq-cm.last>*{border-bottom:1px solid var(--line)}
+.sl-ltable tr.jq-cm.last>:first-child{border-radius:0 0 0 var(--r-band)}
+.sl-ltable tr.jq-cm .sl-mn b.share{font-weight:400;color:var(--muted)}
+.jq-res{font-size:var(--fs-sec);color:var(--ink-2)}
+
+/* ---------- a member's own panel: where it belongs ---------- */
+.jq-mb{margin:6px 0 0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 12px;border-radius:var(--r-inner);background:#F7F9FE;box-shadow:inset 3px 0 0 var(--tint-line);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.jq-mb .lnk{font-size:var(--fs-sec)}
+/* a member's document that counts nowhere (kept under เอกสารอื่น, with "ย้ายไปใบเสนอราคาร่วม") */
+.sl-docc-n{margin:0;padding:0 14px 10px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.sl-docc-n .lnk{font-size:var(--fs-sec)}
+.dp-strip b.share{font-weight:400;color:var(--muted)}
+.jq-ms .lnk{font-size:inherit}
+
+/* ---------- the create / members dialog ---------- */
+.jc-cols{display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);gap:28px;align-items:start}
+.jc-cols>.jc-sec+.jc-sec{border-left:1px solid var(--divider);padding-left:28px}
+.jc-one{display:flex;flex-direction:column;gap:12px}
+.jc-sec{display:flex;flex-direction:column;gap:10px;min-width:0}
+.jc-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.jc-h b{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
+.jc-h .lnk{font-size:var(--fs-sec)}
+.jc-g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 12px}
+.jc-lab{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-sec);color:var(--ink-2);min-width:0}
+.jc-lab .fld{width:100%;box-sizing:border-box}
+.jc-tot{font-weight:500}
+.jc-file{display:flex;gap:10px;align-items:center;min-width:0;min-height:40px}
+.jc-file .btn{flex:none}
+.jc-file .t-sec{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-sec);color:var(--ink-2)}
+.jc-payer .t-meta{font-size:var(--fs-meta)}
+.jc-add{display:flex;flex-direction:column;gap:6px;min-width:0}
+.jc-q{display:flex;align-items:center;gap:8px;height:40px;border:1px solid var(--field);border-radius:var(--r-field);padding:0 12px;color:var(--ink-2);background:#fff}
+.jc-q:focus-within{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
+.jc-q input{border:0;outline:0;flex:1;min-width:0;font:inherit;font-size:var(--fs-body);color:var(--ink);background:transparent}
+.jc-res{position:static;min-width:0;max-height:280px;overflow-y:auto}
+.jc-res .menu-i{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;text-align:left}
+.jc-res .menu-i>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.jc-res .menu-i small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jc-res .menu-i em{font-style:normal;font-size:var(--fs-sec);color:var(--link);flex:none}
+.jc-res .menu-i.off{cursor:default;color:var(--muted)}
+.jc-list{border:1px solid var(--line);border-radius:var(--r-inner);overflow:hidden}
+.jc-r{display:grid;grid-template-columns:minmax(0,1fr) 128px 52px 56px;gap:12px;align-items:center;padding:6px 12px;border-top:1px solid var(--divider);font-size:var(--fs-body);min-height:44px}
+.jc-list.nomoney .jc-r{grid-template-columns:minmax(0,1fr) 56px}
+.jc-r:first-child{border-top:0}
+.jc-r.ph{min-height:30px;padding-top:6px;padding-bottom:4px;font-size:var(--fs-meta);color:var(--muted);background:#FBFCFF}
+.jc-r.ph .r{text-align:right}
+.jc-nm{display:flex;flex-direction:column;min-width:0;line-height:1.4}
+.jc-nm b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jc-nm small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jc-r .fld{height:34px;text-align:right;padding:0 10px;width:100%;box-sizing:border-box}
+.jc-pct{text-align:right;color:var(--ink-2);font-size:var(--fs-sec)}
+.jc-r .quiet{justify-self:end}
+.jc-sum{display:flex;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;font-size:var(--fs-sec);color:var(--ink-2)}
+@media (max-width:900px){
+  .jc-cols{grid-template-columns:minmax(0,1fr);gap:18px}
+  .jc-cols>.jc-sec+.jc-sec{border-left:0;padding-left:0;border-top:1px solid var(--divider);padding-top:16px}
+}
+@media (max-width:520px){
+  .jc-g2{grid-template-columns:minmax(0,1fr)}
+  .jc-r{grid-template-columns:minmax(0,1fr) 104px 48px;row-gap:4px}
+  .jc-r .quiet{grid-column:1/-1;justify-self:start;padding-left:0}
+  .jc-r.ph>:last-child{display:none}
+}
+
+/* ---------- the joint quotation's panel ---------- */
+.jp-list{display:flex;flex-direction:column}
+.jp-r{display:grid;grid-template-columns:minmax(0,1fr) 104px 150px 118px;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--divider);font-size:var(--fs-body);color:var(--ink)}
+.jp-list.nomoney .jp-r{grid-template-columns:minmax(0,1fr) 150px 118px}
+.jp-r.ph{padding:0 0 8px;border-top:0;font-size:var(--fs-meta);color:var(--muted)}
+.jp-r .r{text-align:right}
+.jp-co{display:flex;gap:10px;align-items:center;min-width:0}
+.jp-nm{display:flex;flex-direction:column;min-width:0;line-height:1.4}
+.jp-nm button{cursor:pointer;border:0;padding:0;background:none;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.jp-nm small{font-size:var(--fs-meta);color:var(--muted)}
+.jp-sh{display:flex;flex-direction:column;align-items:flex-end;line-height:1.4}
+.jp-sh small{font-size:var(--fs-meta);color:var(--muted)}
+.jp-nx{display:flex;flex-direction:column;line-height:1.4;font-size:var(--fs-sec);color:var(--ink-2);min-width:0}
+.jp-nx>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jp-nx small{font-size:var(--fs-meta);color:var(--muted)}
+.jp-f{display:flex;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;font-size:var(--fs-meta);color:var(--muted);border-top:1px solid var(--divider);padding-top:10px}
+.jp-f b{color:var(--ink);font-weight:500}
+.jp-res .sl-yn{align-self:flex-start}
+.dp.jp input.dp-name:not(:focus){text-overflow:ellipsis}
+.jp-cf{margin:-4px 4px 0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+@media (max-width:760px){
+  .jp-r{grid-template-columns:minmax(0,1fr) 96px;row-gap:4px}
+  .jp-list.nomoney .jp-r{grid-template-columns:minmax(0,1fr)}
+  .jp-r.ph>:nth-child(n+3){display:none}
+  .jp-nx,.jp-r>:last-child{grid-column:1/-1;padding-left:42px}
+  .jp-nx{flex-direction:row;gap:8px;flex-wrap:wrap}
+}
+
+/* ---------- the closing dialog ---------- */
+.jx-p{margin:0;line-height:1.6;color:var(--ink)}
+.jx-p small{display:block;font-size:var(--fs-sec);color:var(--ink-2)}
+.jx-list{border:1px solid var(--line);border-radius:var(--r-inner);padding:2px 14px}
+.jx-r{display:grid;grid-template-columns:minmax(0,1fr) 104px 104px;gap:12px;align-items:center;padding:9px 0;border-top:1px solid var(--divider);font-size:var(--fs-body)}
+.jx-r:first-child{border-top:0}
+.jx-r.ph{font-size:var(--fs-meta);color:var(--muted);padding:8px 0 6px}
+.jx-r .r{text-align:right}
+.jx-r .none{color:var(--muted)}
+.jx-r.sum{font-weight:500}
+.jx-r.sum span:first-child{font-weight:400;color:var(--ink-2);font-size:var(--fs-sec)}
+.jx-n{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.6}
+@media (max-width:520px){.jx-r{grid-template-columns:minmax(0,1fr) 88px 88px}}
+
+/* ---------- a phone: one card per joint quotation ---------- */
+.jm{background:#fff;border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-card), inset 3px 0 0 var(--tint-line);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.jm-h{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.jm-l{font-size:var(--fs-meta);color:var(--muted)}
+.jm-nm{cursor:pointer;border:0;padding:0;background:none;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jm-s{font-size:var(--fs-sec);color:var(--ink-2)}
+.jm-money{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.jm-money .jq-st{padding-top:2px}
+.jm-list{display:flex;flex-direction:column;border-top:1px solid var(--divider)}
+.jm-r{cursor:pointer;display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;border:0;border-bottom:1px solid var(--divider);background:transparent;padding:10px 2px;font:inherit;text-align:left;color:var(--ink)}
+.jm-t{display:flex;flex-direction:column;min-width:0;line-height:1.4}
+.jm-t b{font-size:var(--fs-body);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jm-t small,.jm-a small{font-size:var(--fs-meta);color:var(--muted)}
+.jm-a{display:flex;flex-direction:column;align-items:flex-end;line-height:1.4;font-size:var(--fs-body);color:var(--muted)}
+.jm-f{display:flex;justify-content:space-between;gap:10px;align-items:baseline;font-size:var(--fs-meta);color:var(--muted)}
+.jm-f .lnk{font-size:var(--fs-sec)}

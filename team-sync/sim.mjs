@@ -52,6 +52,11 @@ function fakeSheet(name) {
       rows.splice(before - 1, 0, ...Array.from({ length: n }, () => []));
       maxRows += n;
     },
+    deleteRows: (from, n) => {
+      if (from < 1 || n < 1 || from + n - 1 > maxRows) throw new Error('Those rows are out of bounds.');
+      rows.splice(from - 1, n);
+      maxRows -= n;
+    },
     deleteColumns: (from, n) => {
       rows = rows.map((row) => row.filter((_, j) => j < from - 1 || j >= from - 1 + n));
       maxCols -= n;
@@ -120,6 +125,21 @@ const Utilities = {
   },
   computeHmacSha256Signature: (value, key) => toByteArray(createHmac('sha256', bytesOf(key)).update(bytesOf(value)).digest()),
   getUuid: () => randomUUID(),
+  /** A date in a time zone, with the SimpleDateFormat letters the script uses: yyyy MM dd HH mm ss EEE u. */
+  formatDate: (date, tz, fmt) => {
+    const d = date instanceof Date ? date : new Date(date);
+    if (isNaN(d.getTime())) throw gasError('Invalid argument: date');
+    let parts;
+    try {
+      const f = new Intl.DateTimeFormat('en-US', { timeZone: String(tz), year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short', hourCycle: 'h23' });
+      parts = Object.fromEntries(f.formatToParts(d).map((p) => [p.type, p.value]));
+    } catch {
+      throw gasError('Invalid argument: timeZone');
+    }
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const map = { yyyy: parts.year, MM: parts.month, dd: parts.day, HH: parts.hour, mm: parts.minute, ss: parts.second, EEE: parts.weekday, u: String(days.indexOf(parts.weekday) + 1) };
+    return String(fmt).replace(/yyyy|MM|dd|HH|mm|ss|EEE|u/g, (t) => map[t]);
+  },
   DigestAlgorithm: { SHA_256: 'SHA_256' },
   Charset: { UTF_8: 'UTF_8' },
 };
@@ -273,7 +293,66 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     };
     return lock;
   };
+  // MailApp: every message sent (one recipient each, as the script sends them), and the daily quota left
+  // (100 recipients a day on a consumer Gmail account; Workspace accounts have more). `fail` = a message
+  // every send throws (e.g. the permission was never granted); `log` = called with each message sent.
+  const mail = { sent: [], quota: 100, calls: [], fail: '', log: null };
+  const MailApp = {
+    sendEmail: (a, subject, body, opts) => {
+      const m = typeof a === 'object' && a !== null ? { ...a } : { to: a, subject, body, ...(opts || {}) };
+      mail.calls.push({ at: Date.now(), locked: locks.script.held || locks.user.held });
+      if (mail.fail) throw gasError(mail.fail);
+      if (!(mail.quota > 0)) throw gasError('Service invoked too many times for one day: email.');
+      if (!m.to || /[,;\s]/.test(String(m.to))) throw gasError('Invalid email: ' + m.to);
+      mail.quota--;
+      mail.sent.push(m);
+      if (mail.log) mail.log(m);
+    },
+    getRemainingDailyQuota: () => {
+      if (mail.fail) throw gasError(mail.fail);
+      return mail.quota;
+    },
+  };
+  // ScriptApp: the project's triggers (time-driven only)
+  const triggers = [];
+  let trigN = 0;
+  const ScriptApp = {
+    EventType: { CLOCK: 'CLOCK' },
+    newTrigger: (fn) => {
+      const t = { fn: String(fn), every: 0, id: 'trig-' + ++trigN };
+      const b = {
+        timeBased: () => b,
+        everyMinutes: (n) => ((t.every = n), b),
+        everyHours: (n) => ((t.every = n * 60), b),
+        create: () => {
+          const tr = { getHandlerFunction: () => t.fn, getUniqueId: () => t.id, getEventType: () => 'CLOCK', every: t.every };
+          triggers.push(tr);
+          return tr;
+        },
+      };
+      return b;
+    },
+    getProjectTriggers: () => triggers.slice(),
+    deleteTrigger: (tr) => {
+      const i = triggers.findIndex((x) => x.getUniqueId() === tr.getUniqueId());
+      if (i >= 0) triggers.splice(i, 1);
+    },
+  };
   const sandbox = {
+    MailApp,
+    ScriptApp,
+    HtmlService: {
+      createHtmlOutput: (html = '') => {
+        let s = String(html);
+        const o = { getContent: () => s, setContent: (x) => ((s = String(x)), o), append: (x) => ((s += String(x)), o), setTitle: () => o };
+        return o;
+      },
+    },
+    Session: {
+      getScriptTimeZone: () => 'Asia/Bangkok',
+      getActiveUser: () => ({ getEmail: () => '' }),
+      getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }),
+    },
     SpreadsheetApp: {
       flush: () => {},
       getActiveSpreadsheet: () => ({
@@ -335,7 +414,9 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
   // script's clock (token expiry, the "at" column), even for a simulator created before them
   Object.defineProperty(sandbox, 'Date', { get: () => globalThis.Date, enumerable: true });
   vm.createContext(sandbox);
-  vm.runInContext(src + '\n;globalThis.__api = { doGet, doPost, compact_, setup };', sandbox, { filename: 'Code.gs' });
+  // the catalogue and the key table only exist in scripts with capabilities (not in the fixtures)
+  const extra = ['CAPS_', 'KEY_CAP', 'BUILTIN_ROLES'].map((n) => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ');
+  vm.runInContext(src + `\n;globalThis.__api = { doGet, doPost, compact_, setup, ${extra} };`, sandbox, { filename: 'Code.gs' });
   const api = sandbox.__api;
   const post = (body) => JSON.parse(api.doPost({ postData: { contents: typeof body === 'string' ? body : JSON.stringify(body) } }).getContent());
   /** The last one-time code setup() printed ("1234-5678"), if any. */
@@ -349,8 +430,27 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
     /** Run setup() as the owner does from the editor. */
     setup: () => api.setup(),
     sheet: () => sheets.sync,
+    /** Any sheet of the spreadsheet by name (e.g. "audit"), or undefined. */
+    sheetOf: (n) => sheets[n],
     /** Pre-create a sheet (e.g. an existing empty "sync" sheet without a header). */
     addSheet: (n) => (sheets[n] = fakeSheet(n)),
+    /** The script's capability catalogue, key table and built-in roles (undefined in older scripts). */
+    consts: { CAPS_: api.CAPS_, KEY_CAP: api.KEY_CAP, BUILTIN_ROLES: api.BUILTIN_ROLES },
+    /**
+     * Call a top-level function of the script by name, as the editor's Run button or a trigger does
+     * (e.g. 'setupNotify', 'notifyTick'), or one of its helpers for a parity test. Values come back
+     * through JSON, so they compare like plain data.
+     */
+    run: (name, ...args) => {
+      const f = sandbox[name];
+      if (typeof f !== 'function') throw new Error('Code.gs has no function ' + name);
+      const out = f(...args);
+      return out === undefined ? undefined : JSON.parse(JSON.stringify(out));
+    },
+    /** Mail the script sent (sent), the quota left (assignable) and whether the script lock was held at each send (calls). */
+    mail,
+    /** The project's time-driven triggers. */
+    triggers,
     props,
     cache,
     /** Drop everything in the script cache, as Google may do at any time. */
@@ -367,7 +467,7 @@ export function createGasSim({ teamKey = 'test-key-123', code, driveAuthorized =
      */
     bootstrapAdmin: ({ u, name, pw, rm = true }) => {
       api.setup();
-      const r = post({ action: 'claim', cv: 3, code: ownerCode(), u, name, pk: pk(u, pw), rm });
+      const r = post({ action: 'claim', cv: 4, code: ownerCode(), u, name, pk: pk(u, pw), rm });
       if (!r.ok) throw new Error('claim failed: ' + r.error);
       return r.tok;
     },

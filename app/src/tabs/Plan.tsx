@@ -4,6 +4,8 @@ import { FEEDS, STG, TT, stageOf } from '../lib/constants';
 import { TH_M, addDays, daysBetween, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
 import { fmtMoney, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
+import { ccVars, custKey, dealKey } from '../lib/custColor';
+import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from '../lib/planCal';
 import type { Company, FeedKey, StageKey, Task } from '../lib/types';
 import { feedLine } from './Track';
 import { PageHead } from '../components/ui';
@@ -38,10 +40,17 @@ export function DoneBox({ t, onToggle, ro = false }: { t: Task; onToggle: () => 
   );
 }
 
+/** An appointment with its customer: the key (colour, legend, filter), the full name and the short one. */
+interface TaskK { t: Task; ck: string; full: string; name: string; date: string }
+/** An installment still to be received, with its deal's customer. */
+interface PayK { deal: Deal; line: LineView; ck: string }
+/** One line of a day cell: an installment or an appointment. */
+type CellEntry = { p: PayK; x?: undefined } | { x: TaskK; p?: undefined };
+
 export function Plan() {
   const { engine: e, ui, set, open, openSched } = useApp();
-  // an account that can only read sees the plan but makes no appointments
-  const ro = !e.can('edit');
+  // an account without นัดหมาย sees the plan but makes no appointments
+  const ro = !e.can('edit.task');
   const v = useEngineVersion();
   const C = e.crm, D = e.B.D;
   const today = todayISO();
@@ -53,15 +62,29 @@ export function Plan() {
   const first = `${calM}-01`;
   const start = addDays(first, -dow(first));
   const selISO = ui.calDay || today;
-  const byDay: Record<string, Task[]> = {};
-  C.tasks.forEach((t) => (byDay[t.date] || (byDay[t.date] = [])).push(t));
-  const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i)).filter((_, i) => i < 35 || addDays(start, 35).slice(0, 7) === calM);
-  const dayT = (byDay[selISO] || []).slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  // every appointment with its customer (lib/custColor.ts: one key, so one colour on every page)
+  const tasksK: TaskK[] = C.tasks.map((t) => {
+    const c = e.company(t.gid), full = c ? c.name : t.title;
+    return { t, ck: custKey(e, t.gid, t.title), full, name: shortName(full), date: t.date };
+  });
   // installments of won deals still to be received (the payment plan): read-only entries, never stored
-  const pays = e.payDue('', '9999-12-31');
-  const payBy: Record<string, { deal: Deal; line: LineView }[]> = {};
-  pays.forEach((x) => (payBy[x.line.due] || (payBy[x.line.due] = [])).push(x));
+  // (amounts the account may not see: no installments at all, as the bell)
+  const money = e.can('view.money');
+  const pays = money ? e.payDue('', '9999-12-31') : [];
+  const paysK: PayK[] = pays.map((x) => ({ ...x, ck: dealKey(e, x.deal) }));
+  // the customer pressed in the legend (this session only), while it still has an entry
+  const only = activeCust(ui.plCust, [...tasksK, ...paysK].map((x) => x.ck));
+  const onlyName = only ? tasksK.find((x) => x.ck === only)?.name || shortName(paysK.find((x) => x.ck === only)?.deal.client || '') : '';
+  const byDay: Record<string, TaskK[]> = {};
+  onlyCust(tasksK, only).forEach((x) => (byDay[x.date] || (byDay[x.date] = [])).push(x));
+  // untimed first, then by time (the day list's order)
+  Object.values(byDay).forEach((l) => l.sort((a, b) => (a.t.time || '').localeCompare(b.t.time || '')));
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i)).filter((_, i) => i < 35 || addDays(start, 35).slice(0, 7) === calM);
+  const dayT = byDay[selISO] || [];
+  const payBy: Record<string, PayK[]> = {};
+  onlyCust(paysK, only).forEach((x) => (payBy[x.line.due] || (payBy[x.line.due] = [])).push(x));
   const dayP = payBy[selISO] || [];
+  const legend = monthCustomers(tasksK, calM);
 
   const plannedBy: Record<number, Task> = {};
   open_.forEach((t) => {
@@ -86,14 +109,14 @@ export function Plan() {
     ['7 วันข้างหน้า', open_.filter((t) => t.date > today && t.date <= wk).length, ''],
     ['หลังจากนั้น', open_.filter((t) => t.date > wk).length, ''],
     // installments late or due within 7 days
-    ['รับเงิน', pays.filter((x) => x.line.due <= wk).length, 't-warn'],
+    ...(money ? [['รับเงิน', pays.filter((x) => x.line.due <= wk).length, 't-warn'] as [string, number, string]] : []),
   ];
   const avOf = (key: string, gid: number, title: string, size = 28) => {
     const c = e.company(gid);
     return <CoAvatar key={key} name={c ? c.name : title} web={c?.web} set={c?.set} size={size} />;
   };
-  const upcoming = open_.filter((t) => t.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
-  const upPays = pays.filter((x) => x.line.due >= today).slice(0, 4);
+  const upcoming = onlyCust(tasksK, only).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || '')).slice(0, 8);
+  const upPays = onlyCust(paysK, only).filter((x) => x.line.due >= today).slice(0, 4);
   /** "รับชำระ PAY2 · กรีนวัลเลย์ ฟู้ดส์ · 53,500 บาท": opens the deal (the receipt is recorded there). */
   const payItem = (x: { deal: Deal; line: LineView }, when?: boolean) => (
     <button key={x.deal.id + x.line.stage} className={'pl-pay hv' + (when ? ' up' : '') + (x.line.lateDays ? ' late' : '')} onClick={() => set({ deal: x.deal.id })}>
@@ -101,11 +124,30 @@ export function Plan() {
       <small>{x.line.lateDays ? `เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : when ? isoTh(x.line.due) : x.line.due === today ? 'ครบกำหนดวันนี้' : `อีก ${fmtN(daysBetween(today, x.line.due))} วัน`}</small>
     </button>
   );
+  /** A day's appointment in its cell: the customer's colour bar on its tint and the short name in ink (the
+   *  time too when the chip is wide enough); the full name, type and time in its tooltip. */
+  const taskChip = (x: TaskK) => {
+    const ty = TT.find((k) => k[0] === x.t.type) || TT[0];
+    return (
+      <span key={x.t.id} className={'pl-ev' + (x.t.done ? ' done' : '')} style={ccVars(x.ck)} title={[x.full, ty[1], x.t.time, x.t.done ? 'ทำแล้ว' : ''].filter(Boolean).join(' · ')}>
+        {x.t.time && <span className="pl-ev-t">{x.t.time}</span>}
+        <span className="pl-ev-n">{chipName(x.full)}</span>
+      </span>
+    );
+  };
+  /** A day's installment in its cell: outlined in its status colour (late: red) with the word รับเงิน, never
+   *  in a customer colour, so it does not read as an appointment. */
+  const payChip = (x: PayK) => (
+    <span key={x.deal.id + x.line.stage} className={'pl-ev pay' + (x.line.lateDays ? ' late' : '')} title={`รับชำระ ${x.line.stage} · ${shortName(x.deal.client)} · ${fmtMoney(x.line.left || x.line.amt)} บาท${x.line.lateDays ? ` · เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : ''}`}>
+      <span className="pl-ev-k">รับเงิน</span>
+      <span className="pl-ev-n">{chipName(x.deal.client)}</span>
+    </span>
+  );
   const teamOpts = [{ v: '-', label: 'ยังไม่มีผู้รับผิดชอบ' }].concat(C.team.map((v) => ({ v, label: v })));
 
   return (
     <>
-      <PageHead title="แผนติดต่อ" sub={`นัดโทร ส่งอีเมล หรือเข้าพบ ${e.teamCfg ? "แชร์กับทีม" : "บันทึกในเครื่องนี้"}`} />
+      <PageHead title="แผนติดต่อ" sub={`นัดโทร ส่งอีเมล หรือเข้าพบ ${e.teamCfg ? "แชร์กับทีม" : "บันทึกในเครื่องนี้"} · สีแยกตามลูกค้า`} />
       <section className="pl-sum card" aria-label="สรุปงานที่นัดไว้">
         <div className="pl-sum-total">
           <span>งานค้างทั้งหมด</span>
@@ -122,7 +164,8 @@ export function Plan() {
         </div>
       </section>
 
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,520px),1fr))', gap: 16, alignItems: 'start' }}>
+      {/* the calendar 2/3, the day 1/3; stacked below 1180px */}
+      <section className="pl-wrap">
         <div className="pl-cal card">
           <div className="pl-cal-head">
             <span className="pl-month">{`${TH_M[m - 1]} ${y + 543}`}</span>
@@ -139,14 +182,56 @@ export function Plan() {
               const ps = payBy[d] || [];
               const inM = d.slice(0, 7) === calM, isSel = d === selISO, wkd = dow(d) === 0 || dow(d) === 6;
               const cls = 'pl-cell' + (inM ? '' : ' out') + (wkd ? ' wk' : '') + (d === today ? ' today' : '') + (isSel ? ' sel' : '');
+              // installments first, then the appointments by time: up to 3 lines (phones: 3 dots)
+              const entries: CellEntry[] = [...ps.map((p) => ({ p })), ...ts.map((x) => ({ x }))];
+              const lines = cellLines(entries), dots = cellDots(entries);
               return (
-                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={`${isoTh(d)}${d === today ? ' (วันนี้)' : ''} · ${ts.length} งาน${ps.length ? ` · รับเงิน ${ps.length} งวด` : ''}`}>
+                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => x.name), ps.map((x) => ({ name: shortName(x.deal.client), late: x.line.lateDays > 0 })))}>
                   <span className="pl-dn">{+d.slice(8)}</span>
-                  {ts.length > 0 && <span className="pl-cnt">{fmtN(ts.length)}<span className="pl-cnt-u"> งาน</span></span>}
-                  {ps.length > 0 && <span className={'pl-cnt pay' + (ps.some((x) => x.line.lateDays) ? ' late' : '')}><span className="pl-cnt-u">รับเงิน </span>{fmtN(ps.length)}</span>}
+                  {entries.length > 0 && (
+                    <>
+                      <span className="pl-evs" aria-hidden="true">
+                        {lines.shown.map((en) => (en.p ? payChip(en.p) : taskChip(en.x)))}
+                        {lines.more > 0 && <span className="pl-more">อีก {fmtN(lines.more)}</span>}
+                      </span>
+                      <span className="pl-dots" aria-hidden="true">
+                        {dots.shown.map((en) => en.p
+                          ? <i key={en.p.deal.id + en.p.line.stage} className={'pl-dot pay' + (en.p.line.lateDays ? ' late' : '')} />
+                          : <i key={en.x.t.id} className={'pl-dot' + (en.x.t.done ? ' done' : '')} style={ccVars(en.x.ck)} />)}
+                        {dots.more > 0 && <span className="pl-dmore">อีก {fmtN(dots.more)}</span>}
+                      </span>
+                    </>
+                  )}
                 </button>
               );
             })}
+          </div>
+          {/* the month's customers: a colour dot and the name (the type tag elsewhere is coloured text) */}
+          <div className="pl-legend">
+            <span className="pl-lg-h">
+              ลูกค้าในเดือนนี้
+              <small>{legend.length ? `${fmtN(legend.length)} บริษัท · กดชื่อเพื่อดูเฉพาะรายนั้น` : ro ? 'ยังไม่มีนัดในเดือนนี้' : 'ยังไม่มีนัดในเดือนนี้ · เลือกบริษัทที่รายชื่อด้านล่างแล้วกด นัด'}</small>
+              {only && <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>}
+            </span>
+            {legend.length > 0 && (
+              <>
+                <div className="pl-lg-list">
+                  {legend.map((it) => (
+                    <button key={it.ck} className="pl-lg" aria-pressed={it.ck === only} style={ccVars(it.ck)} onClick={() => set({ plCust: it.ck === only ? '' : it.ck })} title={`${it.name} · ${fmtN(it.n)} นัดในเดือนนี้`}>
+                      <i aria-hidden="true" />
+                      {it.name}
+                      <small>{fmtN(it.n)}</small>
+                    </button>
+                  ))}
+                </div>
+                {money && (
+                  <span className="pl-lg-key">
+                    <span className="pl-ev pay"><span className="pl-ev-k">รับเงิน</span></span>
+                    งวดที่ต้องรับเงิน · กรอบแดงหนาคือเลยกำหนด
+                  </span>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -158,12 +243,20 @@ export function Plan() {
               <span>{fmtN(dayT.length)} งาน{dayP.length ? ` · รับเงิน ${fmtN(dayP.length)} งวด` : ''}</span>
             </span>
           </div>
+          {only && (
+            <div className="pl-filt" style={ccVars(only)}>
+              <i aria-hidden="true" />
+              <span>แสดงเฉพาะ {onlyName}</span>
+              <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>
+            </div>
+          )}
           {!dayT.length && !dayP.length && <span className="pl-empty">ไม่มีงานในวันนี้ · เลือกวันอื่น หรือกด นัด ที่รายชื่อด้านล่าง</span>}
           {dayP.map((x) => payItem(x))}
-          {dayT.map((t) => {
+          {dayT.map(({ t, ck }) => {
             const ti = taskInfo(e, t);
+            // the customer's colour as a stripe beside the card: a website icon in the avatar never hides it
             return (
-              <div key={t.id} className="pl-task">
+              <div key={t.id} className={'pl-task cc' + (t.done ? ' done-t' : '')} style={ccVars(ck)}>
                 <DoneBox t={t} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
                 {avOf(t.id, t.gid, t.title, 36)}
                 <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
@@ -182,13 +275,14 @@ export function Plan() {
           <span className="pl-up-h">งานที่กำลังจะถึง</span>
           {!upcoming.length && !upPays.length && <span className="pl-empty">ยังไม่มีงานที่กำลังจะถึง</span>}
           {/* contacts and installments in one list by date */}
-          {[...upcoming.map((t) => ({ at: t.date, t, x: undefined })), ...upPays.map((x) => ({ at: x.line.due, t: undefined, x }))].sort((a, b) => a.at.localeCompare(b.at)).slice(0, 10).map(({ t, x }) => {
+          {[...upcoming.map((u) => ({ at: u.date, u, x: undefined })), ...upPays.map((x) => ({ at: x.line.due, u: undefined, x }))].sort((a, b) => a.at.localeCompare(b.at)).slice(0, 10).map(({ u, x }) => {
+            // an installment keeps its status look and has no customer bar
             if (x) return payItem(x, true);
-            if (!t) return null;
-            const ti = taskInfo(e, t);
+            if (!u) return null;
+            const t = u.t, ti = taskInfo(e, t);
             return (
               <button key={t.id} className="pl-up hv" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '8px', margin: '0 4px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 14, color: 'var(--ink)' }}>
-                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>{avOf(t.id, t.gid, t.title, 28)}<span style={{ minWidth: 0 }}>{ti.title}</span></span>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}><i className="pl-bar" style={ccVars(u.ck)} aria-hidden="true" />{avOf(t.id, t.gid, t.title, 28)}<span style={{ minWidth: 0 }}>{ti.title}</span></span>
                 <span style={{ color: 'var(--ink-2)', fontSize: 13, whiteSpace: 'nowrap' }}>{ti.when}</span>
               </button>
             );
@@ -273,7 +367,7 @@ export function Plan() {
                 </button>
                 <span style={{ fontSize: 13, color: 'var(--ink-2)', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
                 {/* the stage reads as plain text; a picker under the pointer (plain text for viewers) */}
-                <Select variant="cell" className="pl-stage" value={st[0]} disabled={ro} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
+                <Select variant="cell" className="pl-stage" value={st[0]} disabled={!e.can('edit.cust')} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>

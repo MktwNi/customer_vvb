@@ -1,17 +1,19 @@
 /**
- * Accounts and roles in the team script (team-sync/Code.gs, protocol v3), run through the simulator.
+ * Accounts and roles in the team script (team-sync/Code.gs, protocol v4), run through the simulator.
  * Passwords become pk the way the web app derives them (PBKDF2 in Node, 1000 iterations in the
  * simulator). Every secret — salts, hashes, the token secret, setup codes, tokens — is generated
- * while the tests run; none is stored in the repo.
+ * while the tests run; none is stored in the repo. Custom roles, extras, requests, redaction and the
+ * full key table are in roles.server.test.ts.
  */
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, derivePk, type GasSim } from '../../../team-sync/sim.mjs';
-import { canWriteKey } from './auth';
-import type { Role } from './teamSync';
+import { BUILTIN as WEB_ROLES, canWriteKey } from './caps';
 
+/** The built-in roles (custom ones are in roles.server.test.ts). */
+type Role = 'admin' | 'sales' | 'viewer';
 const KEY = 'test-key-123';
 const TEAM_SYNC = join(__dirname, '..', '..', '..', 'team-sync');
 const V2 = readFileSync(join(TEAM_SYNC, 'fixtures', 'Code.v2.gs'), 'utf8');
@@ -20,7 +22,27 @@ const T0 = Date.parse('2026-10-08T03:00:00.000Z');
 const MIN = 60000, H = 60 * MIN, DAY = 24 * H;
 const at = (ms: number) => vi.setSystemTime(T0 + ms);
 
-// the parity test below checks the script against the web app's own write rule (canWriteKey)
+/**
+ * The built-in roles' capabilities as the roles design gives them (roles/impl-note.md §1.1): they keep
+ * what each role could do before capabilities; sales may delete only its own contact records.
+ */
+const ALL_CAPS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users'];
+const VIEW_CAPS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'docs.open'];
+const SALES_CAPS = [...VIEW_CAPS, 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail'];
+const ones = (l: string[]): Record<string, 1> => Object.fromEntries(l.map((c) => [c, 1 as const]));
+const BUILTIN: Record<Role, { rn: string; caps: Record<string, 1 | 'own'> }> = {
+  admin: { rn: 'ผู้ดูแลระบบ', caps: ones(ALL_CAPS) },
+  sales: { rn: 'พนักงานขาย', caps: { ...ones(SALES_CAPS), 'del.log': 'own' } },
+  viewer: { rn: 'ดูอย่างเดียว', caps: ones(VIEW_CAPS) },
+};
+/** The e-mail settings of an account that never set any (notify.server.test.ts): the whole team for admins. */
+const NF = (role: Role) => ({ em: '', ok: 0, on: { qt: 1, res: 1, dg: 1, pre: 0 }, t: '07:30', sc: role === 'admin' ? 'team' : 'mine' });
+/** The `me` action's roles (every role with what it gives) while the team has only the built-in three. */
+const BUILTIN_VIEW = Object.fromEntries((['admin', 'sales', 'viewer'] as Role[]).map((r, o) => [r, expect.objectContaining({ n: BUILTIN[r].rn, o, c: BUILTIN[r].caps, bi: 1 })]));
+/** `me` in a reply for an account with a built-in role and no request (admins also get the request count). */
+const ME = (u: string, name: string, role: Role, rq = 0) => ({ u, name, role, rid: role, rn: BUILTIN[role].rn, caps: BUILTIN[role].caps, ...(role === 'admin' ? { rq } : {}), notify: NF(role) });
+/** An account in the users / user_save replies, with its (unset) notification address and settings. */
+const ACCT = (o: Record<string, unknown> & { role: Role }) => ({ ...o, em: '', ok: 0, notify: NF(o.role) });
 
 // ------------------------------------------------------------------ helpers
 
@@ -59,7 +81,8 @@ function team(opts: Parameters<typeof createGasSim>[0] = {}) {
   const admin = s.bootstrapAdmin({ u: 'lead', name: 'หัวหน้า', pw: 'lead-password-1' });
   return { s, admin };
 }
-const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 3, tok, ...extra });
+/** A request from the current web app (cv 4); builds before capabilities sent cv 3 (see "older builds"). */
+const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 4, tok, ...extra });
 const login = (s: GasSim, u: string, pw: string, rm = true) => s.post({ action: 'login', cv: 3, u, pk: s.pk(u, pw), rm });
 const claim = (s: GasSim, code: string | undefined, u: string, name: string | undefined, pw: string, rm = true) =>
   s.post({ action: 'claim', cv: 3, code, u, name, pk: s.pk(u, pw), rm });
@@ -75,7 +98,7 @@ function member(s: GasSim, admin: string, u: string, name: string, role: Role) {
   const t = login(s, u, 'temp-' + u);
   expect(t).toMatchObject({ ok: true, mc: true });
   const r = call(s, String(t.tok), 'passwd', { old: s.pk(u, 'temp-' + u), pk: s.pk(u, 'own-' + u) });
-  expect(r).toMatchObject({ ok: true, me: { u, name, role } });
+  expect(r).toMatchObject({ ok: true, me: ME(u, name, role) });
   return String(r.tok);
 }
 const users = (s: GasSim) => JSON.parse(s.props.USERS).users as Record<string, { n: string; r: Role; on: number; sv: number; mc: number; ll: string; c: string }>;
@@ -191,15 +214,16 @@ describe('hello', () => {
   it('needs no key and tells the mode, the team id and the iteration count', () => {
     const fresh = mk({ teamKey: '' });
     const h = fresh.post({ action: 'hello', cv: 3 });
-    expect(h).toEqual({ ok: true, app: 'gcc-team-sync', v: 3, files: true, mode: 'setup', tid: expect.stringMatching(/^[0-9a-f]{16}$/), it: 1000 });
+    // notify: the e-mail trigger is not installed yet (setupNotify, see notify.server.test.ts)
+    expect(h).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'setup', tid: expect.stringMatching(/^[0-9a-f]{16}$/), it: 1000, notify: { on: 0, since: '' } });
     // created on first use, then permanent
     expect(fresh.props.TEAM_ID).toBe(h.tid);
     expect(fresh.props.AUTH_SECRET).toMatch(/^[0-9a-f-]{72}$/);
     expect(fresh.post({ action: 'hello' }).tid).toBe(h.tid);
-    expect(mk({ teamKey: KEY }).post({ action: 'hello', cv: 3 })).toMatchObject({ ok: true, v: 3, files: true, mode: 'legacy', it: 1000 });
+    expect(mk({ teamKey: KEY }).post({ action: 'hello', cv: 3 })).toMatchObject({ ok: true, v: 4, files: true, mode: 'legacy', it: 1000 });
     const { s } = team();
     const a = s.post({ action: 'hello', cv: 3 });
-    expect(a).toEqual({ ok: true, app: 'gcc-team-sync', v: 3, files: true, mode: 'accounts', tid: s.props.TEAM_ID, it: 1000 });
+    expect(a).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'accounts', tid: s.props.TEAM_ID, it: 1000, notify: { on: 1, since: '2026-10-08' } });
     expect(JSON.stringify(a)).not.toMatch(/lead|หัวหน้า/);
     // a real script starts at 200000 iterations
     const real = mk({ teamKey: '' });
@@ -305,11 +329,11 @@ describe('claim (first admin and recovery)', () => {
     expect(s.post({ action: 'hello' }).mode).toBe('setup');
     // usernames are case-insensitive (the web app derives pk with the lower-case name)
     const r = s.post({ action: 'claim', cv: 3, code, u: ' Lead ', name: 'หัวหน้า', pk: s.pk('lead', 'pw-lead-01'), rm: true });
-    expect(r).toEqual({ ok: true, tok: expect.stringMatching(/^g1\.[\w-]+=*\.[\w-]+=*$/), exp: T0 + 30 * DAY, me: { u: 'lead', name: 'หัวหน้า', role: 'admin' }, mc: false });
+    expect(r).toEqual({ ok: true, tok: expect.stringMatching(/^g1\.[\w-]+=*\.[\w-]+=*$/), exp: T0 + 30 * DAY, me: ME('lead', 'หัวหน้า', 'admin'), mc: false });
     expect(users(s).lead).toEqual({ n: 'หัวหน้า', r: 'admin', on: 1, sv: 1, s: expect.any(String), h: expect.any(String), mc: 0, c: new Date(T0).toISOString(), ll: new Date(T0).toISOString() });
     expect(s.props.OWNER_CODE).toBeUndefined();
     expect(s.post({ action: 'hello' }).mode).toBe('accounts');
-    expect(call(s, String(r.tok), 'ping')).toEqual({ ok: true, seq: 0, files: true, me: { u: 'lead', name: 'หัวหน้า', role: 'admin' } });
+    expect(call(s, String(r.tok), 'ping')).toEqual({ ok: true, seq: 0, files: true, me: ME('lead', 'หัวหน้า', 'admin') });
     expect(login(s, 'lead', 'pw-lead-01', false)).toMatchObject({ ok: true, exp: T0 + 12 * H, mc: false });
     // the helper the other tests use does the same
     const t = mk({ teamKey: '' });
@@ -420,7 +444,7 @@ describe('login', () => {
     addUser(s, admin, 'somchai', 'สมชาย', 'sales', 'temp-pw-1');
     at(H);
     const r = login(s, 'somchai', 'temp-pw-1', false);
-    expect(r).toEqual({ ok: true, tok: expect.stringMatching(/^g1\./), exp: T0 + H + 12 * H, me: { u: 'somchai', name: 'สมชาย', role: 'sales' }, mc: true });
+    expect(r).toEqual({ ok: true, tok: expect.stringMatching(/^g1\./), exp: T0 + H + 12 * H, me: ME('somchai', 'สมชาย', 'sales'), mc: true });
     expect(users(s).somchai.ll).toBe(new Date(T0 + H).toISOString());
     expect(s.post({ action: 'login', u: ' SomChai ', pk: s.pk('somchai', 'temp-pw-1') }).ok).toBe(true);
   });
@@ -603,7 +627,7 @@ describe('session tokens', () => {
     const tok = String(login(s, 'lead', 'lead-password-1', false).tok);
     at(12 * H - 1000);
     const r = call(s, tok, 'ping');
-    expect(r).toEqual({ ok: true, seq: 0, files: true, me: { u: 'lead', name: 'หัวหน้า', role: 'admin' } });
+    expect(r).toEqual({ ok: true, seq: 0, files: true, me: ME('lead', 'หัวหน้า', 'admin') });
     at(12 * H + 1);
     expect(call(s, tok, 'ping')).toEqual(expired);
   });
@@ -616,7 +640,7 @@ describe('session tokens', () => {
     const r = call(s, admin, 'pull', { since: 0 });
     expect(r).toMatchObject({ ok: true, tok: expect.stringMatching(/^g1\./), exp: T0 + 15 * DAY + 1000 + 30 * DAY });
     const renewed = String(r.tok);
-    expect(call(s, renewed, 'me')).toEqual({ ok: true, mc: false, me: { u: 'lead', name: 'หัวหน้า', role: 'admin' } });
+    expect(call(s, renewed, 'me')).toEqual({ ok: true, mc: false, me: ME('lead', 'หัวหน้า', 'admin'), roles: BUILTIN_VIEW });
     for (const action of ['ping', 'me', 'users']) expect(call(s, admin, action)).toHaveProperty('tok'); // any reply renews
     at(30 * DAY + 1000);
     expect(call(s, admin, 'ping')).toEqual(expired);
@@ -647,7 +671,7 @@ describe('session tokens', () => {
     // a password change ends the other device's session too, and hands this one a new token
     const a = String(login(s, 'somchai', 'own-somchai').tok), b = String(login(s, 'somchai', 'own-somchai').tok);
     const p = call(s, a, 'passwd', { old: s.pk('somchai', 'own-somchai'), pk: s.pk('somchai', 'pw-2-somchai') });
-    expect(p).toEqual({ ok: true, tok: expect.any(String), exp: T0 + 30 * DAY, me: { u: 'somchai', name: 'สมชาย', role: 'sales' } });
+    expect(p).toEqual({ ok: true, tok: expect.any(String), exp: T0 + 30 * DAY, me: ME('somchai', 'สมชาย', 'sales') });
     for (const t of [a, b]) expect(call(s, t, 'ping')).toEqual(expired);
     expect(call(s, String(p.tok), 'ping').ok).toBe(true);
     // reset by an admin (new temporary password)
@@ -694,7 +718,7 @@ describe('temporary password (must change)', () => {
       ['user_save', { u: 'lead', kick: true }],
     ];
     for (const [action, extra] of blocked) expect(call(s, tok, action, extra)).toMatchObject({ ok: false, error: 'must_change_password' });
-    expect(call(s, tok, 'me')).toEqual({ ok: true, mc: true, me: { u: 'nid', name: 'นิด', role: 'admin' } });
+    expect(call(s, tok, 'me')).toEqual({ ok: true, mc: true, me: ME('nid', 'นิด', 'admin'), roles: BUILTIN_VIEW });
     expect(call(s, tok, 'passwd', { old: s.pk('nid', 'nope'), pk: s.pk('nid', 'mine-0001') })).toEqual({ ok: false, error: 'wrong_password' });
     expect(call(s, tok, 'passwd', { old: s.pk('nid', 'temp-1'), pk: 'short' })).toEqual({ ok: false, error: 'bad_password_data' });
     const p = call(s, tok, 'passwd', { old: s.pk('nid', 'temp-1'), pk: s.pk('nid', 'mine-0001') });
@@ -720,7 +744,23 @@ describe('temporary password (must change)', () => {
 
 // ------------------------------------------------------------------ 9. role matrix
 
-describe('what each role may write (parity with the web app\'s rule)', () => {
+/**
+ * What a built-in role may write while nobody has edited it (plan.md §1, roles/impl-note.md §2.2): what
+ * the roles allowed before capabilities, with three deliberate changes — an unknown prefix needs
+ * set.users (default deny), the deal history (dlog/) is deleted only by an admin, and sales deletes only
+ * contact records it wrote itself (none of these keys is stored yet, so it may). qchk/ is never pushed.
+ * The table for every prefix and for custom roles is in roles.server.test.ts.
+ */
+function builtinWrite(role: Role | null, k: string, del: boolean) {
+  if (k.startsWith('qchk/')) return false;
+  if (role === null || role === 'admin') return true;
+  if (role === 'viewer') return false;
+  const sales = ['stage/', 'owner/', 'watch/', 'task/', 'log/', 'contact/', 'deal/', 'dstep/', 'ddoc/', 'dpay/', 'dact/', 'dlog/', 'cust/', 'person/', 'ctag/', 'jqt/', 'jqm/', 'ccol/'];
+  if (!sales.some((p) => k.startsWith(p))) return false;
+  return !(del && ['deal/', 'cust/', 'person/', 'dlog/', 'jqt/'].some((p) => k.startsWith(p)));
+}
+
+describe('what each built-in role may write', () => {
   const PREFIXES = ['stage', 'owner', 'watch', 'task', 'log', 'contact', 'dedup', 'deal', 'dstep', 'ddoc', 'dpay', 'dact', 'dlog', 'scfg', 'cust', 'person', 'dundo', 'team', 'zzz'];
   // a write, and a delete in each of the three forms the web app may send
   const FORMS = [
@@ -731,7 +771,7 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
   ];
   const all = PREFIXES.flatMap((p) => FORMS.map((f) => ({ k: `${p}/${f.name}-1`, del: f.del, op: f.op(`${p}/${f.name}-1`) })));
 
-  it.each([null, 'admin', 'sales'] as const)('%s: the script stores exactly what canWriteKey allows', (role) => {
+  it.each([null, 'admin', 'sales'] as const)('%s: the script stores exactly what the role may write', (role) => {
     let s: GasSim, push: (ops: unknown[]) => Reply, pull: () => Reply;
     if (role === null) {
       s = mk();
@@ -744,23 +784,29 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
       push = (ops) => call(s, tok, 'push', { ops });
       pull = () => call(s, tok, 'pull', { since: 0 });
     }
-    const allowed = all.filter((x) => canWriteKey(role, x.k, x.del)).map((x) => x.k);
+    const allowed = all.filter((x) => builtinWrite(role, x.k, x.del)).map((x) => x.k);
+    // the web app's rule (lib/caps.ts) for the built-in role says the same (these records are nobody's yet)
+    if (role) for (const x of all) expect([x.k, canWriteKey(WEB_ROLES[role].c, x.k, x.del, true)]).toEqual([x.k, allowed.includes(x.k)]);
+    // an account's deal delete also deletes that deal's revenue split (team-code pushes stay as they were)
+    const shares = role === null ? [] : allowed.filter((k) => k.startsWith('deal/') && !k.startsWith('deal/write')).map((k) => 'dshare/' + k.slice(5));
     const r = push(all.map((x) => x.op));
-    expect(r.n).toBe(allowed.length);
-    expect(r.seq).toBe(allowed.length); // refused ops use no seq
+    expect(r.n).toBe(allowed.length + shares.length);
+    expect(r.seq).toBe(allowed.length + shares.length); // refused ops use no seq
     if (role === null) expect(r).not.toHaveProperty('denied');
     else expect(r.denied).toEqual(all.filter((x) => !allowed.includes(x.k)).map((x) => x.k));
     const stored = new Set(pull().rows!.map((x) => x.k));
-    for (const x of all) expect([x.k, stored.has(x.k)]).toEqual([x.k, canWriteKey(role, x.k, x.del)]);
-    if (role === 'sales') expect(allowed.length).toBe(all.length - 4 * 4 - 3 * 3); // 4 prefixes refused, 3 more only as deletes
+    for (const x of all) expect([x.k, stored.has(x.k)]).toEqual([x.k, allowed.includes(x.k)]);
+    expect([...stored].filter((k) => k.startsWith('dshare/'))).toEqual(shares);
+    if (role === 'sales') expect(allowed.length).toBe(all.length - 5 * 4 - 4 * 3); // 5 prefixes refused, 4 more only as deletes
+    if (role === 'admin') expect(allowed.length).toBe(all.length);
   });
 
   it('viewer: push, upload and delete are forbidden, reading and opening files work', () => {
     const { s, admin } = team();
     const fileId = String(call(s, admin, 'upload', upload).fileId);
     const v = member(s, admin, 'vee', 'วี', 'viewer');
-    expect(all.every((x) => !canWriteKey('viewer', x.k, x.del))).toBe(true);
-    expect(call(s, v, 'push', { ops: all.map((x) => x.op) })).toEqual({ ok: false, error: 'forbidden', me: { u: 'vee', name: 'วี', role: 'viewer' } });
+    expect(all.every((x) => !builtinWrite('viewer', x.k, x.del))).toBe(true);
+    expect(call(s, v, 'push', { ops: all.map((x) => x.op) })).toEqual({ ok: false, error: 'forbidden', me: ME('vee', 'วี', 'viewer') });
     expect(call(s, v, 'push', { ops: [] }).error).toBe('forbidden');
     expect(call(s, v, 'upload', { ...upload, docId: 'x' }).error).toBe('forbidden');
     expect(call(s, v, 'delfile', { fileId }).error).toBe('forbidden');
@@ -770,13 +816,13 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
     expect(s.drive.list().find((x) => x.id === fileId)!.trashed).toBe(false);
   });
 
-  it('installments of a payment plan (dpay/<deal>/<stage>): sales may write and delete them, a viewer may not — the script needs no change', () => {
+  it('installments of a payment plan (dpay/<deal>/<stage>): sales may write and delete them, a viewer may not', () => {
     const { s, admin } = team();
     const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
     const v = { amt: 53500, pct: 50, due: '2026-10-20', rel: null, how: 'transfer', howT: '', note: 'เมื่อส่งรายงาน', rcv: '', got: null, full: false, at: '2026-10-08T03:00:00.000Z', by: 'X' };
     for (const [k, del] of [['dpay/x/PAY1', false], ['dpay/x/PAY1', true]] as const) {
-      expect(canWriteKey('sales', k, del)).toBe(true);
-      expect(canWriteKey('viewer', k, del)).toBe(false);
+      expect(builtinWrite('sales', k, del)).toBe(true);
+      expect(builtinWrite('viewer', k, del)).toBe(false);
     }
     expect(call(s, tok, 'push', { ops: [{ k: 'dpay/x/PAY1', v }, { k: 'dpay/x/PAY2', v: { ...v, due: '' } }] })).toMatchObject({ ok: true, n: 2 });
     expect(call(s, tok, 'push', { ops: [{ k: 'dpay/x/PAY2', del: true }] })).toMatchObject({ ok: true, n: 1 });
@@ -795,8 +841,8 @@ describe('what each role may write (parity with the web app\'s rule)', () => {
     const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
     const v = { d: '2026-10-08', type: 'call', note: 'โทรครั้งที่ 3', stage: 'CALL2', pid: '', by: 'X', at: '2026-10-08T03:00:00.000Z' };
     for (const del of [false, true]) {
-      expect(canWriteKey('sales', 'dact/x/a', del)).toBe(true);
-      expect(canWriteKey('viewer', 'dact/x/a', del)).toBe(false);
+      expect(builtinWrite('sales', 'dact/x/a', del)).toBe(true);
+      expect(builtinWrite('viewer', 'dact/x/a', del)).toBe(false);
     }
     expect(call(s, tok, 'push', { ops: [{ k: 'dact/x/a', v }, { k: 'dact/x/b', v: { ...v, type: 'email' } }] })).toMatchObject({ ok: true, n: 2, denied: [] });
     expect(call(s, tok, 'push', { ops: [{ k: 'dact/x/b', del: true }] })).toMatchObject({ ok: true, n: 1, denied: [] });
@@ -845,10 +891,10 @@ describe('who wrote it: the script stamps the account\'s name', () => {
         { k: 'person/p1', v: { name: 'y', by: 'X', upBy: 'X' } },
         { k: 'log/1/d', v: null }, // a deletion: nothing to stamp
         { k: 'log/1/e', v: ['by'] },
-        { k: 'catalog/1', v: { by: 'X' } },
+        { k: 'catalog/1', v: { by: 'X' } }, // an unknown prefix: only an admin may write it
       ],
     });
-    expect(r).toMatchObject({ ok: true, n: 8, denied: [] });
+    expect(r).toMatchObject({ ok: true, n: 7, denied: ['catalog/1'] });
     const got = Object.fromEntries(rows(s, admin).map((x) => [x.k, x.v]));
     expect(got['log/1/a']).toEqual({ ...v, by: 'สมชาย' });
     expect(Object.keys(got['log/1/a'] as object)).toEqual(['id', 'at', 'type', 'text', 'by', 'res']);
@@ -858,7 +904,7 @@ describe('who wrote it: the script stamps the account\'s name', () => {
     expect(got['person/p1']).toEqual({ name: 'y', by: 'X', upBy: 'X' });
     expect(got['log/1/d']).toBeNull();
     expect(got['log/1/e']).toEqual(['by']);
-    expect(got['catalog/1']).toEqual({ by: 'X' });
+    expect(got).not.toHaveProperty('catalog/1');
     // in the sheet itself, too
     const cell = s.sheet()!.rows.find((row) => row[1] === 'log/1/a')![2];
     expect(cell).toBe(JSON.stringify({ ...v, by: 'สมชาย' }));
@@ -879,7 +925,7 @@ describe('managing users (admin only)', () => {
     const { s, admin } = team();
     for (const [u, name, role] of [['somchai', 'สมชาย', 'sales'], ['vee', 'วี', 'viewer']] as const) {
       const tok = member(s, admin, u, name, role);
-      expect(call(s, tok, 'users')).toEqual({ ok: false, error: 'forbidden', me: { u, name, role } });
+      expect(call(s, tok, 'users')).toEqual({ ok: false, error: 'forbidden', me: ME(u, name, role) });
       expect(call(s, tok, 'user_save', { create: true, u: 'x' + u, name: 'x' + name, role: 'admin', pk: s.pk('x' + u, 'pw') }).error).toBe('forbidden');
       expect(call(s, tok, 'user_save', { u, role: 'admin' }).error).toBe('forbidden');
       expect(call(s, tok, 'user_save', { u: 'lead', on: 0 }).error).toBe('forbidden');
@@ -898,10 +944,15 @@ describe('managing users (admin only)', () => {
     expect(r).toEqual({
       ok: true,
       users: [
-        { u: 'lead', name: 'หัวหน้า', role: 'admin', on: 1, mc: false, ll: new Date(T0).toISOString(), c: new Date(T0).toISOString(), locked: 0 },
-        { u: 'somchai', name: 'สมชาย', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0 + H).toISOString(), locked: 600 },
+        ACCT({ u: 'lead', name: 'หัวหน้า', role: 'admin', on: 1, mc: false, ll: new Date(T0).toISOString(), c: new Date(T0).toISOString(), locked: 0 }),
+        ACCT({ u: 'somchai', name: 'สมชาย', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0 + H).toISOString(), locked: 600 }),
       ],
-      me: { u: 'lead', name: 'หัวหน้า', role: 'admin' },
+      // roles, extras, requests and the audit tab: see roles.server.test.ts
+      roles: expect.objectContaining({ admin: expect.objectContaining({ n: 'ผู้ดูแลระบบ', bi: 1 }), sales: expect.any(Object), viewer: expect.any(Object) }),
+      grants: {},
+      reqs: {},
+      audit: [{ at: new Date(T0 + H).toISOString(), actor: 'หัวหน้า', u: 'somchai', action: 'user_add', detail: { role: 'sales' }, note: '' }],
+      me: ME('lead', 'หัวหน้า', 'admin'),
     });
   });
 
@@ -917,7 +968,7 @@ describe('managing users (admin only)', () => {
     for (const pk of ['', 'short', undefined]) expect(make({ pk })).toMatchObject({ ok: false, error: 'bad_password_data' });
     expect(Object.keys(users(s))).toEqual(['lead']);
     const r = make({ u: 'NewBie', name: '  คุณ   มือใหม่ ' });
-    expect(r).toEqual({ ok: true, user: { u: 'newbie', name: 'คุณ มือใหม่', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0).toISOString(), locked: 0 }, me: { u: 'lead', name: 'หัวหน้า', role: 'admin' } });
+    expect(r).toEqual({ ok: true, user: ACCT({ u: 'newbie', name: 'คุณ มือใหม่', role: 'sales', on: 1, mc: true, ll: '', c: new Date(T0).toISOString(), locked: 0 }), me: ME('lead', 'หัวหน้า', 'admin') });
     // display names are compared without case
     expect(make({ u: 'anna1', name: 'Anna' }).ok).toBe(true);
     expect(make({ u: 'anna2', name: 'ANNA' })).toMatchObject({ ok: false, error: 'name_taken' });
@@ -946,7 +997,7 @@ describe('managing users (admin only)', () => {
 
   it('guards: unknown_user, last_admin, not_self, name_locked, name_taken, bad_role', () => {
     const { s, admin } = team();
-    expect(call(s, admin, 'user_save', { u: 'ghost', role: 'sales' })).toEqual({ ok: false, error: 'unknown_user', me: { u: 'lead', name: 'หัวหน้า', role: 'admin' } });
+    expect(call(s, admin, 'user_save', { u: 'ghost', role: 'sales' })).toEqual({ ok: false, error: 'unknown_user', me: ME('lead', 'หัวหน้า', 'admin') });
     expect(call(s, admin, 'user_save', { u: '', kick: true }).error).toBe('unknown_user');
     // the only admin can't step down or switch themselves off
     expect(call(s, admin, 'user_save', { u: 'lead', role: 'sales' }).error).toBe('last_admin');

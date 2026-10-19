@@ -22,10 +22,23 @@ export interface UIState {
   oInd: string; oProv: string; oExpM: string; oFy: string; oSt: string;
   // Plan tab
   calM: string; calDay: string; plFeed: FeedKey; plStage: StageKey | ''; plOwner: string; perDay: number; picked: Record<number, 1>; plLim: number;
+  /** The one customer the calendar shows (its ckey, lib/custColor.ts), pressed in "ลูกค้าในเดือนนี้"; '' = all. */
+  plCust: string;
   // Dedup tab
   ddF: 'pending' | 'auto' | 'decided' | 'all'; ddPage: number;
   // Sales Tracker
-  slView: 'table' | 'dash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
+  slView: 'table' | 'dash' | 'cash' | 'closed' | 'log'; slYear: string; slF: Omit<SalesFilter, 'year'>; slCollapsed: Record<string, 1>;
+  /** How the table counts money ("นับยอด"): by the deal's year (as always) or "เงินเข้าตามปี" (each
+   *  installment in the year it is received or due). The Cashflow tab: months or quarters, the bar picked
+   *  (its month or quarter; null = the whole year), the card picked (the list shows only that money), and
+   *  its own filter row. This browser only, never synced. */
+  slLens: 'deal' | 'cash'; slCashMode: 'm' | 'q'; slCashPick: number | null; slCashShow: '' | 'got' | 'owed' | 'late' | 'undated'; slCashF: Omit<SalesFilter, 'year'>;
+  /** The Cashflow CSV dialog is open (from its list or the ⋯ menu). */
+  slCashCsv: boolean;
+  /** The month check under the Cashflow chart (lib/payCheck.ts): the month open (0–11 of the shown year),
+   *  'y' the whole year, null = the default (this month in this year, else the first month with money);
+   *  and its filter chip. This browser only. */
+  slChkM: number | 'y' | null; slChkF: 'all' | 'wait' | 'ok' | 'back' | 'owed' | 'late';
   /** Deals whose stages are open under their row; deals whose done stages are unfolded ("แสดง"); the
    *  one stage editor open in the table. This browser only, never synced. */
   slOpen: Record<string, 1>; slShowAll: Record<string, 1>;
@@ -52,15 +65,28 @@ export interface UIState {
   addPerson: { gid?: number } | null;
   /** The record being worked on: open, or opened last (marked in its list so you keep your place). */
   last: { deal?: string; person?: string };
-  /** Account dialog open over the app (team accounts): change password or sign out. */
-  acctDlg: '' | 'passwd' | 'logout';
+  /** Account dialog open over the app (team accounts): change password, sign out, สิทธิ์ของฉัน, or
+   *  ขอเปลี่ยนสิทธิ์ (`reqInit`: what it opens with — the pending request to look at, or a new one). */
+  acctDlg: '' | 'passwd' | 'logout' | 'perms' | 'request' | 'notify';
+  reqInit: { k: 'role' | 'caps' } | null;
+  /** ผู้ใช้และสิทธิ์: the section open (บัญชีผู้ใช้, บทบาทและสิทธิ์, คำขอสิทธิ์, การแจ้งเตือน). */
+  usersSec: 'acc' | 'roles' | 'req' | 'notify';
   /** The "session expired" sign-in was put aside (the team chip brings it back). */
   hideRelogin: boolean;
+  /** The bell's list is open (top bar). */
+  bell: boolean;
+  /** The quotation check sheet open over the deal panel (the document's id); `qtSig` the signature of the
+   *  e-mail link it was opened from (passed on to the script, '' = opened in the app). */
+  qtCheck: string | null;
+  qtSig: string;
+  /** A joint quotation's dialog (components/JointQt.tsx): make one (`from`: "รวมเป็นใบเสนอราคาร่วม" from that
+   *  deal's quotation; `section`: the หมวด it starts in), change its companies, or close it. */
+  jqDlg: { k: 'new'; from?: string; section?: string } | { k: 'members'; hid: string } | { k: 'close'; hid: string } | null;
 }
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
  *  (components/SalesToast.tsx). */
-export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan'; deal?: string; primary?: boolean }
+export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
@@ -75,11 +101,13 @@ const initial = (): UIState => {
     f: { ...EMPTY_FILTERS, view, sort: view === 'cert' ? 'ap' : 'default' },
     page: 0, sel: null, dTab: 'info', sched: null,
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
-    calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60,
+    calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60, plCust: '',
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
+    slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all',
     deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
-    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', hideRelogin: false,
+    person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
+    bell: false, qtCheck: null, qtSig: '', jqDlg: null,
   };
 };
 
@@ -127,6 +155,9 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
         // another year of the tracker (the year picker, ส่งเข้า Sales Tracker, an import's "ดูตารางปี"): a date
         // range goes back to the whole year, the other filters stay (filters spec §7.6)
         if (n.slYear !== s.slYear) n.slF = withoutDate(n.slF);
+        // a picked month or quarter of Cashflow is about the old year
+        if (n.slYear !== s.slYear && !('slCashPick' in patch)) n.slCashPick = null;
+        if (n.slYear !== s.slYear && !('slChkM' in patch)) n.slChkM = null;
         return n;
       }),
     [engine],

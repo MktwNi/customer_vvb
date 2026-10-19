@@ -114,6 +114,13 @@ const PATHS = {
       <path d="M15 5.5V5a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 4 5v8a1.5 1.5 0 0 0 1.5 1.5H6" />
     </>
   ),
+  // notifications (the only new icon of package notify)
+  bell: (
+    <>
+      <path d="M6 9.5a6 6 0 0 1 12 0c0 4.2 1.3 6 2.3 7H3.7c1-1 2.3-2.8 2.3-7z" />
+      <path d="M10 19.5a2 2 0 0 0 4 0" />
+    </>
+  ),
   more: <path d="M5.5 12h.01M12 12h.01M18.5 12h.01" strokeWidth={3} />,
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   link: (

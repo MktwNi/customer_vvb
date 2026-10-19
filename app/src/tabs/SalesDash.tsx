@@ -9,8 +9,23 @@ import { DateFilter, dateWords } from '../components/DateFilter';
 import { TT } from '../lib/constants';
 import type { Task } from '../lib/types';
 import { CoAvatar, coreName } from '../components/CoAvatar';
+// a customer's avatar takes its colour on แผนติดต่อ (the top seller, a person, keeps the name swatch)
+import { custKey, dealKey } from '../lib/custColor';
+import { planDayLink } from '../lib/planCal';
 import { Icon } from '../components/icons';
 import { heroGrad } from '../components/ui';
+import { CashStat, QuarterCard, payField } from '../components/DashCash';
+import { beOf, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
+import { thisQuarter } from '../lib/dateRange';
+import { payIn, payMonthCounts } from '../lib/cashUi';
+// joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
+import { customersOf, jointAttr, jointCashLines, jointRole } from '../lib/sales';
+import { shareOf } from '../lib/joint';
+// units, % contribution and commission (package dash, items 8 and 9b)
+import { commPeriod0, unitQuarters, unitsOf, type CommPeriod } from '../lib/contrib';
+import { CommCard } from '../components/CommCard';
+import { UnitsDialog } from '../components/UnitsDialog';
+import { unitCls } from '../components/UnitBits';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -112,24 +127,59 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const [hover, setHover] = useState<number | null>(null);
   const [wk, setWk] = useState(0); // weeks from this one, for the appointments
   const [evTip, setEvTip] = useState<string | null>(null);
+  const [unitsDlg, setUnitsDlg] = useState(false);
   const nextRef = useRef<HTMLButtonElement>(null);
-  const F = normSalesFilter({ year, ...f });
+  // the revenue split and commission: for ดูค่าคอมมิชชั่น / สัดส่วนรายได้ only (the script sends the splits and
+  // rates to those alone); the หน่วยงาน filter, the quarter card's unit split and the commission card. A
+  // หน่วยงาน filter left from before the capability went no longer applies (its field is gone too).
+  const comm = e.seesComm();
+  const F = normSalesFilter({ year, ...f, ...(comm ? {} : { unit: undefined }) });
   const list = filterDeals(S, F, today);
-  const st = salesStats(S, list, today);
+  // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts a joint quotation by the parts of its companies listed
+  const attr = jointAttr(F);
+  const st = salesStats(S, list, today, attr);
   const me = e.me();
   const ver = useEngineVersion();
   const key = JSON.stringify(f);
+  const uctx = e.unitCtx(), uAll = unitsOf(uctx, true);
   // the Dashboard reports results: no ผลการขาย; the rest in the table's order (one menu on both tabs)
-  const fields = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true }), [ver, key, year, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fields0 = useMemo(() => trackerFields(S, F, { yearDeals: deals, job: '', me, today, dash: true, units: comm && uAll.length ? uAll.map((u) => ({ id: u.id, n: u.n, off: u.off })) : undefined }), [ver, key, year, me, today, comm]); // eslint-disable-line react-hooks/exhaustive-deps
   const up = (p: Partial<SalesFilter>) => {
     const { year: _y, ...rest } = normSalesFilter({ ...F, ...p });
+    // การรับเงิน reads a range on the money's own dates: the date filter says so (รับเงิน / ครบกำหนด)
+    if (rest.pay && rest.date) rest.date = { ...rest.date, basis: payBasis(rest.pay) };
     setF(rest);
   };
   const date = F.date ? { f: F.date, r: resolveDate(F.date, year, today) } : null;
+  // the money of the period (dash impl-note §4): every deal passing the other filters whose money falls in
+  // the year, any deal year; the range is the date filter's, else the whole year
+  const moneyDeals = filterDeals(S, { ...F, date: null, pay: undefined, money: 'cash' }, today);
+  const lines = jointCashLines(S, moneyDeals, today, attr);
+  const Y = cashYear(lines, year);
+  const yr = { from: `${+year - 543}-01-01`, to: `${+year - 543}-12-31` };
+  const moneyR = date ? date.r : yr;
+  const qPick = F.date && /^q[1-4]$/.test(F.date.preset) ? +F.date.preset.slice(1) : F.date?.preset === 'quarter' ? thisQuarter(year, today) : 0;
+  // the commission card's period: the latest ended quarter (the whole year for another year); a quarter
+  // picked in ช่วงเวลา moves it there
+  const cqKey = `${year}|${qPick}`;
+  const [cqAt, setCqAt] = useState(cqKey);
+  const [cq, setCq] = useState<CommPeriod>(() => (qPick ? qPick - 1 : commPeriod0(year, today)));
+  if (cqAt !== cqKey) {
+    setCqAt(cqKey);
+    setCq(qPick ? qPick - 1 : commPeriod0(year, today));
+  }
+  const payCount = (p: PayF) => customersOf(S, filterDeals(S, { ...F, quick: '', pay: p || undefined }, today)).length;
+  // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
+  const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
+  // การรับเงิน, pinned after ผู้รับผิดชอบ: its choices count the money of the range
+  // without ดูยอดเงิน (the script sends no amounts) the money widgets go: the payment filter, the money
+  // card, the money summaries and the quarter card
+  const money = e.can('view.money');
+  const fields = [...fields0.filter((x) => x.pinned), ...(money ? [payField(lines, moneyR, date ? rangeTh(moneyR) : `ทั้งปี ${year}`, undated, payCount)] : []), ...fields0.filter((x) => !x.pinned)];
 
   // top sellers: actual first, then forecast; closed deals per person
   const yesBy: Record<string, number> = {};
-  list.forEach((d) => dealResult(S, d) === 'YES' && (yesBy[d.resp || '(ไม่ระบุ)'] = (yesBy[d.resp || '(ไม่ระบุ)'] || 0) + 1));
+  list.forEach((d) => dealResult(S, d) === 'YES' && jointRole(S, d) !== 'header' && (yesBy[d.resp || '(ไม่ระบุ)'] = (yesBy[d.resp || '(ไม่ระบุ)'] || 0) + 1));
   const sellers = Object.entries(st.byResp)
     .filter(([k]) => k !== '(ไม่ระบุ)')
     .sort((a, b) => b[1].actual - a[1].actual || b[1].forecast - a[1].forecast || b[1].n - a[1].n);
@@ -156,7 +206,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   // follow-ups: open jobs not decided yet, and any open job overdue (the headline count);
   // overdue first, then the longest without contact
   const follow = list
-    .filter((d) => d.jobStatus === 'open' && (!['YES', 'NO'].includes(dealResult(S, d)) || overdueDays(S, d, today) != null))
+    .filter((d) => d.jobStatus === 'open' && jointRole(S, d) !== 'header' && (!['YES', 'NO'].includes(dealResult(S, d)) || overdueDays(S, d, today) != null))
     .sort((a, b) => (overdueDays(S, b, today) ?? -1) - (overdueDays(S, a, today) ?? -1) || (lastContact(S, a, today) || '0').localeCompare(lastContact(S, b, today) || '0'));
   const overdueN = follow.filter((d) => overdueDays(S, d, today) != null).length;
 
@@ -164,9 +214,10 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const wMon = addDays(mon, wk * 7);
   const wDays = Array.from({ length: 7 }, (_, i) => addDays(wMon, i));
   // with a filter set, only the filtered customers' appointments (and, for an owner, the companies they own)
-  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section);
-  const gids = new Set(list.filter((d) => d.gid != null).map((d) => e.canonical(d.gid as number)));
-  const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section;
+  const filtered = !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.pay || F.unit);
+  // (a joint quotation's header is the payer's row, not a customer of the filter)
+  const gids = new Set(list.filter((d) => d.gid != null && jointRole(S, d) !== 'header').map((d) => e.canonical(d.gid as number)));
+  const onlyResp = !!F.resp && !F.resp.not && !F.date && !F.source && !F.service && !F.referral && !F.section && !F.unit;
   const inScope = (t: Task) => !filtered || gids.has(e.canonical(t.gid)) || (onlyResp && F.resp!.v.includes(e.crm.owners[e.canonical(t.gid)]));
   const tasks = e.crm.tasks.filter((t) => t.date >= wDays[0] && t.date <= wDays[6] && inScope(t));
   const m0 = +wDays[0].slice(5, 7), m6 = +wDays[6].slice(5, 7), y0 = +wDays[0].slice(0, 4) + 543, y6 = +wDays[6].slice(0, 4) + 543;
@@ -189,9 +240,11 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   const srcRows = Object.entries(st.bySource);
   // the latest wins: deals marked YES, newest result date first
   const wins = list
-    .filter((d) => dealResult(S, d) === 'YES')
+    .filter((d) => dealResult(S, d) === 'YES' && jointRole(S, d) !== 'header')
     .map((d) => {
-      const m = dealMoney(S, d);
+      // a joint quotation's member: its part of the quotation (the money itself counts once, on the header)
+      const sh = jointRole(S, d) === 'member' ? shareOf(S, d) : null;
+      const m = sh ? { actual: null, forecast: sh.amt } : dealMoney(S, d);
       return { d, at: stepOf(S, d.id, DEAL_STAGE).d || d.closedDate || '', amt: m.actual || m.forecast || 0, fc: !m.actual };
     })
     .sort((a, b) => b.at.localeCompare(a.at))
@@ -216,14 +269,15 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               <small>{sub2}</small>
             </div>
           ))}
+          {money && <CashStat lines={lines} pay={F.pay || ''} r={moneyR} ranged={!!date} when={qPick ? ` · ไตรมาส ${qPick}` : date ? ' · ในช่วงนี้' : ''} />}
         </div>
       </div>
 
       <div className="sd-filters">
         <FilterBar
           fields={fields}
-          value={{ resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section } as Record<string, FVal | undefined>}
-          onChange={(k, v) => up({ [k]: v || undefined })}
+          value={{ resp: F.resp, pay: F.pay ? { v: [F.pay] } : undefined, source: F.source, service: F.service, referral: F.referral, section: F.section, unit: F.unit } as Record<string, FVal | undefined>}
+          onChange={(k, v) => up(k === 'pay' ? { pay: (v?.v[0] || '') as PayF } : { [k]: v || undefined })}
           lead={
             <DateFilter
               value={F.date}
@@ -231,14 +285,21 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               year={year}
               today={today}
               count={(draft) => liveCount(S, F, 'date', draft, '', today)}
-              monthCounts={(basis, y) => monthCounts(S, F, basis, y, '', today)}
+              // with การรับเงิน the months count deals by their money's own dates, as the filter and its footer do
+              monthCounts={(basis, y) => (F.pay ? payMonthCounts(lines, F.pay, y) : monthCounts(S, F, basis, y, '', today))}
               unit="ราย"
+              lock={F.pay ? { basis: payBasis(F.pay), hint: F.pay === 'got' ? 'นับงวดที่รับเงินแล้วตามวันที่รับ การ์ดเงินจะนับเฉพาะเงินที่รับในช่วงนี้' : 'นับงวดที่ยังไม่ได้รับตามวันครบกำหนด การ์ดเงินจะนับเฉพาะงวดที่ครบกำหนดในช่วงนี้' } : undefined}
+              // on the money's own dates the footer adds the money of the draft range (the stat will show it)
+              money={(draft) => {
+                const p = draft.basis === 'paid' ? 'got' : draft.basis === 'due' ? (F.pay === 'late' ? 'late' : 'owed') : null;
+                return p && `${p === 'got' ? 'รับในช่วงนี้' : p === 'late' ? 'เลยกำหนดในช่วงนี้' : 'ค้างรับในช่วงนี้'} ${fmtMoney(payIn(lines, p, resolveDate(draft, year, today)).amt) || '0'} บาท`;
+              }}
             />
           }
           anySet={filtered}
           onClearAll={() => setF({})}
           count={filtered ? { shown: list.length, total: deals.length } : null}
-          liveCount={(k, d) => liveCount(S, F, k, d, '', today)}
+          liveCount={(k, d) => (k === 'pay' ? payCount((d?.v[0] || '') as PayF) : liveCount(S, F, k, d, '', today))}
           // the cards count customers in ราย ("ลูกค้า 25 ราย"): the row says it the same way
           unit="ราย"
         />
@@ -256,7 +317,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         })}
       </div>
 
-      <div className="sd-grid">
+      <div className={'sd-grid' + (money ? '' : ' sd-nomoney')}>
         <section className="sd-card sd-top hero" style={{ background: heroGrad }} aria-label="ผู้ทำยอดสูงสุด">
           <span className="sd-card-t">ผู้ทำยอดสูงสุด</span>
           {top ? (
@@ -266,11 +327,11 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                 <b>{top[0]}</b>
                 <span>{`ลูกค้า ${fmtN(top[1].n)} ราย · ปิดได้ ${fmtN(yesBy[top[0]] || 0)}`}</span>
               </div>
-              <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ${baht(top[1].actual)} บาท` : `Forecast ${baht(top[1].forecast)} บาท`}</span>
+              {money && <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ${baht(top[1].actual)} บาท` : `Forecast ${baht(top[1].forecast)} บาท`}</span>}
               {sellers.length > 1 && (
                 <div className="sd-runners">
                   {sellers.slice(1, 4).map(([k, v], i) => (
-                    <span key={k} title={`${k}: Actual ${fmtMoney(v.actual) || 0} · Forecast ${fmtMoney(v.forecast) || 0}`}>
+                    <span key={k} title={money ? `${k}: Actual ${fmtMoney(v.actual) || 0} · Forecast ${fmtMoney(v.forecast) || 0}` : k}>
                       <i>{i + 2}</i>
                       {k}
                     </span>
@@ -307,7 +368,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           </div>
         </section>
 
-        <section className="sd-card sd-ring" aria-label="ยอดขายเทียบ Forecast">
+        {/* without ดูยอดเงิน there is nothing to compare: ผลการขาย takes this place (roles.css) */}
+        {money && <section className="sd-card sd-ring" aria-label="ยอดขายเทียบ Forecast">
           <div className="sd-card-h">
             <span className="sd-card-t">ยอดขายเทียบ Forecast</span>
           </div>
@@ -326,7 +388,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             <span><i className="fc" />Forecast <b>{fmtMoney(st.forecast) || 0} บาท</b></span>
             <small>{`ยืนยันด้วยเอกสาร: Actual ${fmtMoney(st.acConfirmed) || 0} · Forecast ${fmtMoney(st.fcConfirmed) || 0} บาท`}</small>
           </div>
-        </section>
+        </section>}
 
         <section className="sd-card sd-win" aria-label="ผลการขาย">
           <div className="sd-card-h">
@@ -341,7 +403,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               const c = d.gid != null ? e.company(d.gid) : undefined;
               return (
                 <button key={d.id} className="sd-win-i" title={d.client} onClick={() => set({ deal: d.id })}>
-                  <CoAvatar colored name={d.client} web={c?.web} set={c?.set} size={32} />
+                  <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={32} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
@@ -409,12 +471,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                         return (
                           <button key={t.id} className={'sd-ev' + (t.done ? ' done' : '')} style={{ boxShadow: `0 0 0 2px ${ty[2]}, 0 0 0 4px #F7F9FE` }} onClick={() => open(t.gid)} title={label} aria-label={label}
                             onMouseEnter={() => setEvTip(label)} onMouseLeave={() => setEvTip(null)} onFocus={() => setEvTip(label)} onBlur={() => setEvTip(null)}>
-                            <CoAvatar colored name={c ? c.name : t.title} web={c?.web} set={c?.set} size={24} />
+                            <CoAvatar colored ckey={custKey(e, t.gid, t.title)} name={c ? c.name : t.title} web={c?.web} set={c?.set} size={24} />
                           </button>
                         );
                       })}
                       {ts.length > 3 && (
-                        <button className="sd-ev more" onClick={() => set({ tab: 'plan', calM: d.slice(0, 7), calDay: d })} aria-label={`อีก ${ts.length - 3} นัด ${isoTh(d)} (เปิดแผนติดต่อ)`}>+{ts.length - 3}</button>
+                        <button className="sd-ev more" onClick={() => set(planDayLink(d))} aria-label={`อีก ${ts.length - 3} นัด ${isoTh(d)} (เปิดแผนติดต่อ)`}>+{ts.length - 3}</button>
                       )}
                     </span>
                   );
@@ -441,7 +503,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                 const name = c ? c.name : t.title;
                 return (
                   <button key={t.id} className="sd-win-i" title={name} onClick={() => open(t.gid)}>
-                    <CoAvatar colored name={name} web={c?.web} set={c?.set} size={30} ring={ty[2]} />
+                    <CoAvatar colored ckey={custKey(e, t.gid, t.title)} name={name} web={c?.web} set={c?.set} size={30} ring={ty[2]} />
                     <span className="sd-fi-t">
                       <b>{coreName(name) || name}</b>
                       <small>{`${ty[1]} · ${t.date === today ? 'วันนี้' : `${WD_LONG[dow(t.date)]} ${short(t.date)}`}${t.time ? ' ' + t.time : ''}`}</small>
@@ -468,7 +530,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               const when = lc ? 'ติดต่อล่าสุด ' + (lc.slice(0, 4) === today.slice(0, 4) ? short(lc) : isoTh(lc)) : 'ยังไม่ระบุวันที่ติดต่อ';
               return (
                 <button key={d.id} className="sd-fi" title={d.client} onClick={() => set({ deal: d.id })}>
-                  <CoAvatar colored name={d.client} web={c?.web} set={c?.set} size={34} />
+                  <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={34} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
                     <small>{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
@@ -482,18 +544,18 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </section>
 
         <section className="sd-card sd-acc-card" aria-label="รายละเอียด">
-          <Acc title="สรุปยอดตามผู้รับผิดชอบ" open={!!acc.resp} onToggle={() => setAcc({ ...acc, resp: !acc.resp })}>
+          {money && <Acc title="สรุปยอดตามผู้รับผิดชอบ" open={!!acc.resp} onToggle={() => setAcc({ ...acc, resp: !acc.resp })}>
             <GroupTable rows={Object.entries(st.byResp).sort((a, b) => b[1].forecast - a[1].forecast)} />
-          </Acc>
-          <Acc title="สรุปยอดตามแหล่งที่มา" open={!!acc.ref} onToggle={() => setAcc({ ...acc, ref: !acc.ref })}>
+          </Acc>}
+          {money && <Acc title="สรุปยอดตามแหล่งที่มา" open={!!acc.ref} onToggle={() => setAcc({ ...acc, ref: !acc.ref })}>
             <GroupTable rows={Object.entries(st.byReferral).sort((a, b) => b[1].forecast - a[1].forecast)} />
-          </Acc>
+          </Acc>}
           <Acc title="ลูกค้าตามช่องทาง" sub="SOURCE · ลูกค้าหลายช่องทางนับในทุกช่องทาง" open={!!acc.src} onToggle={() => setAcc({ ...acc, src: !acc.src })}>
             <Bars items={srcRows.map(([k, x]) => [k, x.n])} />
           </Acc>
-          <Acc title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ" open={!!acc.fsrc} onToggle={() => setAcc({ ...acc, fsrc: !acc.fsrc })}>
+          {money && <Acc title="Forecast ตามช่องทาง" sub="บาท · ลูกค้าหลายช่องทางนับซ้ำ" open={!!acc.fsrc} onToggle={() => setAcc({ ...acc, fsrc: !acc.fsrc })}>
             <Bars items={srcRows.map(([k, x]) => [k, x.forecast])} fmt={(n) => fmtMoney(n)} />
-          </Acc>
+          </Acc>}
           <Acc title="Win rate ตามช่องทาง" sub="ปิดได้ ÷ รู้ผลแล้ว" open={!!acc.wsrc} onToggle={() => setAcc({ ...acc, wsrc: !acc.wsrc })}>
             <Bars items={winRateBySource(st.bySource)} unit="%" keepZero />
           </Acc>
@@ -505,6 +567,29 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           </Acc>
         </section>
       </div>
+
+      {/* added under the original grid: the year's money by quarter (by unit with ดูค่าคอมมิชชั่น) and, beside
+          it, % Contribution and commission */}
+      {money && <div className={'sd-grid2' + (comm ? '' : ' one')}>
+        <QuarterCard
+          split={(() => {
+            if (!comm || !uAll.length) return null;
+            const uq = unitQuarters(uctx, lines, year);
+            const live = [...uAll.map((u) => u.id), ''].filter((id) => (uq.year[id] || 0) > 0);
+            return { units: live.map((id) => ({ id, n: uctx.units[id]?.n || 'ยังไม่ระบุหน่วยงาน', cls: unitCls(uctx, id) })), q: uq.q, year: uq.year };
+          })()}
+          Y={Y}
+          year={year}
+          now={beOf(today) === year ? quarterOf(today) : -1}
+          pick={qPick - 1}
+          canPlan={e.can('edit.pay')}
+          // the Cashflow tab is there only with ดู Cashflow: without it no link to it, and the plan to set opens on its deal
+          onCashTab={e.can('view.cash') ? () => set({ slView: 'cash', slCashShow: '', slCashPick: null }) : undefined}
+          onPlan={(id) => (id ? set({ deal: id, dpPlan: 'edit' }) : set({ slView: 'cash', slCashShow: 'undated', slCashPick: null }))}
+        />
+        {comm && <CommCard ctx={uctx} lines={lines} year={year} cq={cq} onCq={setCq} onSetup={e.can('set.units') ? () => setUnitsDlg(true) : undefined} />}
+      </div>}
+      {unitsDlg && <UnitsDialog onClose={() => setUnitsDlg(false)} />}
     </div>
   );
 }

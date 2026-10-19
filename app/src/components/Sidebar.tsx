@@ -7,9 +7,12 @@ import mark from '../assets/gcc-mark.png';
 import { useSlide } from './useSlide';
 import { RoleChip, nameLetter } from './Login';
 import { menuKeys, usePopover } from './usePopover';
+import type { GccEngine } from '../lib/engine';
+import type { CapId } from '../lib/caps';
 
-/** `admin`: shown only to an admin of a team that signs in with accounts. */
-export interface NavItem { key: Tab; label: string; icon: IconName; admin?: boolean }
+/** `cap`: shown only to an account holding it (lib/caps.ts); `accounts`: only in a team that signs in
+ *  with accounts. The registry's pages (ภาพรวม ค้นหา ติดตาม แผนที่ หมายเหตุ) are public data: always there. */
+export interface NavItem { key: Tab; label: string; icon: IconName; cap?: CapId; accounts?: boolean }
 
 /**
  * Main navigation, grouped like a CRM sidebar. To add a feature: add its key to `Tab` (state.tsx),
@@ -21,11 +24,11 @@ export const NAV: { title: string; items: NavItem[] }[] = [
     title: 'งานขาย',
     items: [
       { key: 'overview', label: 'ภาพรวม', icon: 'overview' },
-      { key: 'sales', label: 'Sales Tracker', icon: 'sales' },
-      { key: 'people', label: 'ผู้ติดต่อ', icon: 'people' },
+      { key: 'sales', label: 'Sales Tracker', icon: 'sales', cap: 'view.sales' },
+      { key: 'people', label: 'ผู้ติดต่อ', icon: 'people', cap: 'view.sales' },
       { key: 'search', label: 'ค้นหา', icon: 'search' },
       { key: 'track', label: 'ติดตาม', icon: 'track' },
-      { key: 'plan', label: 'แผนติดต่อ', icon: 'plan' },
+      { key: 'plan', label: 'แผนติดต่อ', icon: 'plan', cap: 'view.plan' },
       { key: 'map', label: 'แผนที่', icon: 'map' },
     ],
   },
@@ -35,12 +38,20 @@ export const NAV: { title: string; items: NavItem[] }[] = [
       { key: 'dedup', label: 'ตรวจข้อมูลซ้ำ', icon: 'dedup' },
       { key: 'update', label: 'อัปเดตข้อมูล', icon: 'update' },
       { key: 'notes', label: 'หมายเหตุ', icon: 'notes' },
-      { key: 'users', label: 'ผู้ใช้และสิทธิ์', icon: 'shield', admin: true },
+      { key: 'users', label: 'ผู้ใช้และสิทธิ์', icon: 'shield', cap: 'set.users', accounts: true },
     ],
   },
   { title: '', items: [{ key: 'help', label: 'คู่มือการใช้งาน', icon: 'info' }] },
 ];
 export const TABS: [Tab, string][] = NAV.flatMap((g) => g.items.map((i): [Tab, string] => [i.key, i.label]));
+const ITEM = new Map(NAV.flatMap((g) => g.items.map((i): [Tab, NavItem] => [i.key, i])));
+/** May this account open page `t`? (the menu shows it, App renders it, the help center links to it) */
+export function pageOk(e: Pick<GccEngine, 'can' | 'role'>, t: Tab) {
+  const it = ITEM.get(t);
+  if (!it) return true;
+  if (it.accounts && e.role() == null) return false;
+  return !it.cap || e.can(it.cap);
+}
 
 /** Matches the CSS breakpoint where the sidebar becomes a slide-out drawer. */
 export const MOBILE_NAV = '(max-width: 900px)';
@@ -83,18 +94,22 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
   // the open page's tab slides to the page chosen (folding the menu just moves it, see useSlide)
   const navRef = useRef<HTMLElement>(null);
   const role = e.role();
-  const admin = role === 'admin';
-  // (the admin's extra item moves nothing above it, but the highlight is placed again when it comes or goes)
-  useSlide(navRef, '.side-item[aria-current=page]', ready ? ui.tab + (admin ? '|a' : '') : '');
+  // the pages this account has (an item that comes or goes places the highlight again)
+  const items = (it: NavItem) => pageOk(e, it.key);
+  const shown = NAV.flatMap((g) => g.items.filter(items).map((i) => i.key)).join(',');
+  useSlide(navRef, '.side-item[aria-current=page]', ready ? ui.tab + '|' + shown : '');
   const s = e.session;
 
-  // one badge in the whole menu: the Sales Tracker's overdue follow-ups (say it once)
+  // the Sales Tracker's overdue follow-ups (red), and for whoever approves them the permission requests
+  // waiting (brand ink: information, not something late)
   const badges: Partial<Record<Tab, number>> = {};
   if (ready) {
     const today = todayISO();
     const yearDeals = Object.values(e.sales.deals).filter((d) => d.year === ui.slYear);
     badges.sales = yearDeals.filter((d) => overdueDays(e.sales, d, today) != null).length;
   }
+  if (s && e.can('set.users')) badges.users = s.rq || 0;
+  const addCo = e.can('edit.cust') || e.can('edit.deal');
 
   // open menu: Escape folds it and focus returns to the button that opened it;
   // on phones focus also moves into the drawer
@@ -119,7 +134,7 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
         <div className="side-brand">
           <img className="side-mark" src={mark} alt="Global Carbon Corporation" width={36} height={36} />
           <span className="side-brand-text lbl">
-            <b className="brand-word">Global Carbon</b>
+            <b className="brand-word"><span className="bw">Global Carbon</span> <span className="bw">Corporation</span></b>
             <small>ฐานข้อมูลลูกค้า GCC</small>
           </span>
           <button ref={closeRef} className="side-close" onClick={onClose} aria-label="ปิดเมนู">
@@ -127,31 +142,33 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
           </button>
         </div>
         <div className="side-cta">
-          {role === 'viewer' ? (
+          {addCo ? (
+            <AddMenu rail={rail} ready={ready} onDone={onClose} />
+          ) : !e.canWrite() ? (
             // a view-only account adds nothing: say so where the add button would be
             <span className="side-ro" title="บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้" aria-label={rail ? 'ดูอย่างเดียว: บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้' : undefined} role={rail ? 'img' : undefined}>
               <Icon name="eye" />
               <span className="lbl">ดูอย่างเดียว</span>
             </span>
-          ) : (
-            <AddMenu rail={rail} ready={ready} onDone={onClose} />
-          )}
+          ) : null}
         </div>
         <nav className="side-nav" ref={navRef}>
           <span className="slide-ind" aria-hidden="true" />
           {NAV.map((g, gi) => (
             <div key={g.title || gi} className={'side-group' + (g.title ? '' : ' foot')} role={g.title ? 'group' : undefined} aria-label={g.title || undefined}>
               {g.title && <span className="side-group-title lbl" aria-hidden="true">{g.title}</span>}
-              {g.items.filter((it) => !it.admin || admin).map((it) => {
+              {g.items.filter(items).map((it) => {
                 const on = ready && ui.tab === it.key;
                 const b = badges[it.key] || 0;
+                const rq = it.key === 'users';
+                const bWord = rq ? `คำขอสิทธิ์รออนุมัติ ${fmtN(b)}` : `ค้างติดตาม ${fmtN(b)} ราย`;
                 return (
                   <button
                     key={it.key}
                     className="side-item"
                     aria-current={on ? 'page' : undefined}
-                    title={rail ? it.label + (b ? ` (ค้างติดตาม ${fmtN(b)})` : '') : undefined}
-                    aria-label={rail ? it.label + (b ? ` ค้างติดตาม ${fmtN(b)} ราย` : '') : undefined}
+                    title={rail ? it.label + (b ? ` (${bWord})` : '') : undefined}
+                    aria-label={rail ? it.label + (b ? ` ${bWord}` : '') : b ? `${it.label} ${bWord}` : undefined}
                     onClick={() => {
                       if (ready) go(it.key);
                       onClose();
@@ -159,10 +176,10 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                   >
                     <span className="side-ico">
                       <Icon name={it.icon} />
-                      {rail && b > 0 && <span className="side-dot">{b > 99 ? '99+' : fmtN(b)}</span>}
+                      {rail && b > 0 && <span className={'side-dot' + (rq ? ' rq' : '')}>{b > 99 ? '99+' : fmtN(b)}</span>}
                     </span>
                     <span className="side-label lbl">{it.label}</span>
-                    {!rail && b > 0 && <span className="side-badge" title={`ค้างติดตาม ${fmtN(b)} ราย`}>{fmtN(b)}</span>}
+                    {!rail && b > 0 && <span className={'side-badge' + (rq ? ' rq' : '')} title={bWord} aria-hidden="true">{fmtN(b)}</span>}
                   </button>
                 );
               })}
@@ -178,9 +195,29 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
                 <b>{s.name}</b>
                 <small>@{s.u}</small>
               </span>
-              <RoleChip role={role} />
+              <RoleChip name={e.roleName()} admin={e.can('set.users')} />
             </div>
             <div className="side-acct-btns">
+              <button
+                className="rl-side-my"
+                onClick={() => {
+                  onClose();
+                  document.getElementById('menu-btn')?.focus();
+                  set({ acctDlg: 'perms' });
+                }}
+              >
+                สิทธิ์ของฉัน
+              </button>
+              <button
+                className="rl-side-my"
+                onClick={() => {
+                  onClose();
+                  document.getElementById('menu-btn')?.focus();
+                  set({ acctDlg: 'notify' });
+                }}
+              >
+                การแจ้งเตือนของฉัน
+              </button>
               <button
                 onClick={() => {
                   onClose();
@@ -213,7 +250,7 @@ export function Sidebar({ open, docked, mobile, onClose }: { open: boolean; dock
  * customer, the same as the Sales Tracker's. Placed beside the button, so the icon rail doesn't clip it.
  */
 function AddMenu({ rail, ready, onDone }: { rail: boolean; ready: boolean; onDone: () => void }) {
-  const { set, go } = useApp();
+  const { engine: e, set, go } = useApp();
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState({ left: 0, top: 0 });
   const btn = useRef<HTMLButtonElement>(null);
@@ -247,12 +284,16 @@ function AddMenu({ rail, ready, onDone }: { rail: boolean; ready: boolean; onDon
       </button>
       {open && (
         <div ref={pop} role="menu" aria-label="เพิ่มลูกค้าใหม่" className="menu side-addmenu" style={at} onKeyDown={menuKeys}>
-          <button role="menuitem" className="menu-i" onClick={() => pick(() => { go('search'); setTimeout(() => document.getElementById('search-q')?.focus(), 60); })}>
-            ค้นหาบริษัทในทะเบียน<small>แล้วส่งเข้า Sales Tracker</small>
-          </button>
-          <button role="menuitem" className="menu-i" onClick={() => pick(() => set({ addCust: { deal: false } }))}>
-            ลูกค้าใหม่ (ไม่มีในทะเบียน)<small>กรอกข้อมูลเอง</small>
-          </button>
+          {e.can('edit.deal') && (
+            <button role="menuitem" className="menu-i" onClick={() => pick(() => { go('search'); setTimeout(() => document.getElementById('search-q')?.focus(), 60); })}>
+              ค้นหาบริษัทในทะเบียน<small>แล้วส่งเข้า Sales Tracker</small>
+            </button>
+          )}
+          {e.can('edit.cust') && (
+            <button role="menuitem" className="menu-i" onClick={() => pick(() => set({ addCust: { deal: false } }))}>
+              ลูกค้าใหม่ (ไม่มีในทะเบียน)<small>กรอกข้อมูลเอง</small>
+            </button>
+          )}
         </div>
       )}
     </>

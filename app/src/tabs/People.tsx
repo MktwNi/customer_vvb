@@ -3,8 +3,9 @@ import { useApp, useEngineVersion } from '../state';
 import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
-import { KIND_TH, docsOf, fmtMoney, dealMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
+import { KIND_TH, docsOf, fmtMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
+import { moneyWords } from '../lib/joint';
 import type { Company, LogEntry, Person, Task } from '../lib/types';
 import { CoAvatar, monoSize } from '../components/CoAvatar';
 import { Modal } from '../components/Dialog';
@@ -125,9 +126,9 @@ function PeopleList() {
       <PageHead
         title="ผู้ติดต่อ"
         sub={all.length ? `${fmtN(active.length)} คน · จาก ${fmtN(cos)} บริษัท · ทั้งทีมเห็นข้อมูลเดียวกัน` : 'บันทึกคนที่คุยด้วยในแต่ละบริษัท พร้อมประวัติการติดต่อ นัด และโน้ต'}
-        right={e.can('edit') ? <button onClick={() => set({ addPerson: {} })} className="btn pri">เพิ่มผู้ติดต่อ</button> : undefined}
+        right={e.can('edit.cust') ? <button onClick={() => set({ addPerson: {} })} className="btn pri">เพิ่มผู้ติดต่อ</button> : undefined}
       />
-      {sugg.length > 0 && e.can('edit') && (
+      {sugg.length > 0 && e.can('edit.cust') && (
         <div className="pe-sugg">
           <div className="note">
             <span>พบชื่อผู้ติดต่อใน Sales Tracker ที่ยังไม่ได้บันทึก {fmtN(sugg.length)} คน</span>
@@ -170,7 +171,7 @@ function PeopleList() {
         {!all.length ? (
           <div className="pe-empty">
             <span>ยังไม่มีรายชื่อผู้ติดต่อ · บันทึกคนที่คุยด้วยในแต่ละบริษัท ทั้งทีมเห็นเหมือนกัน</span>
-            {sugg.length > 0 && e.can('edit') && <button onClick={() => setShowSugg(true)} className="lnk">นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
+            {sugg.length > 0 && e.can('edit.cust') && <button onClick={() => setShowSugg(true)} className="lnk">นำเข้าจาก Sales Tracker ({fmtN(sugg.length)})</button>}
           </div>
         ) : !list.length ? (
           <div className="pe-empty">
@@ -245,8 +246,8 @@ function PersonPage({ id }: { id: string }) {
   const today = todayISO();
   const back = () => set({ person: null });
   // an account that can only read changes nothing; a call or note is deleted by an admin or its author
-  const ro = !e.can('edit');
-  const mayDel = (l: LogEntry) => e.can('admin') || (!ro && l.by === e.me());
+  const ro = !e.can('edit.cust');
+  const mayDel = (l: LogEntry) => e.can('del.log', l.by || '');
   if (!p)
     return (
       <div className="pe-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
@@ -392,8 +393,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
   contacts: { l: LogEntry; key: string }[]; upcoming: Task[]; doneTasks: Task[]; deals: Deal[]; today: string;
 }) {
   const { engine: e, set, openSched } = useApp();
-  const ro = !e.can('edit');
-  const mayDel = (l: LogEntry) => e.can('admin') || (!ro && l.by === e.me());
+  const ro = !e.can('edit.cust');
+  const mayDel = (l: LogEntry) => e.can('del.log', l.by || '');
   return (
     <section className="pe-card pe-tabs" aria-label="ประวัติและนัดหมาย">
       <div role="tablist" className="utabs">
@@ -465,7 +466,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
           {c && !deals.length && (
             <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="empty">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
-              {!ro && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
+              {/* a new deal is ดีลและขั้นตอน's, not the person record's (as CompanyDrawer's SalesBox) */}
+              {e.can('edit.deal') && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
             </span>
           )}
           {deals.map((d) => (
@@ -587,7 +589,7 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
 
 function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
   const { engine: e, openSched } = useApp();
-  const ro = !e.can('edit');
+  const ro = !e.can('edit.cust');
   const ti = taskInfo(e, t);
   const ty = TT.find((x) => x[0] === t.type) || TT[0];
   const over = !t.done && t.date < today;
@@ -626,7 +628,6 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
   const { engine: e, set } = useApp();
   const S = e.sales;
   const tr = stageTrack(S, d, todayISO());
-  const m = dealMoney(S, d);
   const mine = !!d.contactName && nameKey(d.contactName) === nameKey(p.name);
   return (
     <button className="pe-deal" onClick={() => set({ deal: d.id })}>
@@ -638,7 +639,8 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
         {S.cfg.stages.map((s) => <i key={s} className={'s-' + tr.states[s]} title={s} />)}
       </span>
       <span className="pe-sub">
-        {[m.forecast != null ? 'Forecast ' + fmtMoney(m.forecast) : '', m.actual != null ? 'Actual ' + fmtMoney(m.actual) : '', d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : ''].filter(Boolean).join(' · ')}
+        {/* (a joint quotation's member: its part, never its own typed figures, which count nowhere) */}
+        {[...moneyWords(S, d, e.can('view.money')), d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : ''].filter(Boolean).join(' · ')}
       </span>
     </button>
   );
@@ -690,7 +692,7 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
         <textarea value={f.note} onChange={up('note')} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ช่วงเวลาที่สะดวก ความสนใจ" className="pe-ta" />
       </label>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        {e.can('delete') ? <button type="button" onClick={del} className="quiet" style={{ marginRight: 'auto' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
+        {e.can('del.rec') ? <button type="button" onClick={del} className="quiet" style={{ marginRight: 'auto' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
         <button type="button" onClick={onDone} className="quiet">ยกเลิก</button>
         <button type="submit" className="btn pri">บันทึก</button>
       </div>
@@ -833,9 +835,9 @@ export function CompanyPeople({ c }: { c: Company }) {
     <div style={box}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
         <h3 className="card-t">ผู้ติดต่อ{list.length ? ` (${fmtN(list.length)})` : ''}</h3>
-        {e.can('edit') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="lnk">เพิ่มผู้ติดต่อ</button>}
+        {e.can('edit.cust') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="lnk">เพิ่มผู้ติดต่อ</button>}
       </div>
-      {!list.length && <span className="empty">{e.can('edit') ? 'ยังไม่มี · บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติ' : 'ยังไม่มีผู้ติดต่อ'}</span>}
+      {!list.length && <span className="empty">{e.can('edit.cust') ? 'ยังไม่มี · บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติ' : 'ยังไม่มีผู้ติดต่อ'}</span>}
       {list.map((p) => (
         <button key={p.id} className="pe-other" onClick={() => openPerson(p.id)}>
           <PersonAvatar p={p} size={32} />

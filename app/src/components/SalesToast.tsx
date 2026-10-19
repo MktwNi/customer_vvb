@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { todayISO } from '../lib/format';
-import { closeReady, dealResult, hasPlan, planOf, type Deal } from '../lib/sales';
+import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
+import { errText } from '../lib/teamSync';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -30,15 +31,19 @@ export function useSalesActs() {
     const today = todayISO();
     if (!wasReady && closeReady(e.sales, d, today)) return prompt(d, 'result');
     if (dealResult(e.sales, d) !== 'YES') return;
+    // a company in a joint quotation has no plan of its own: the payer pays the whole quotation
+    if (jointRole(e.sales, d) === 'member') return say('ได้งานแล้ว · การชำระเงินอยู่ที่ใบเสนอราคาร่วม (ผู้จ่ายชำระทั้งใบ)');
     if (!hasPlan(e.sales, d.id)) {
-      if (!e.can('edit')) return;
+      if (!e.canDeal('edit.pay', d)) return;
       say('ได้งานแล้ว ตั้งแผนชำระเลยไหม? (ผลการขายยังไม่ใช่การปิดงาน)', { ms: 0, acts: [{ label: 'ตั้งแผนชำระ', act: 'plan', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     } else say(`ได้งานแล้ว · แผนชำระ ${planOf(e.sales, d, today)?.n} งวดเริ่มนับวันครบกำหนดจากวันนี้`);
   };
-  /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. */
+  /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. A joint quotation
+   *  always asks: it closes its companies too (components/JointQt.tsx JointClose). */
   const close = (id: string) => {
     const d = e.sales.deals[id];
-    if (!d || !e.can('edit')) return;
+    if (!d || !e.canDeal('edit.deal', d)) return;
+    if (jointRole(e.sales, d) === 'header') return set({ jqDlg: { k: 'close', hid: id }, slPrompt: null, slToast: null });
     if (closeReady(e.sales, d, todayISO())) closeNow(id);
     else set({ slConfirm: id });
   };
@@ -82,6 +87,26 @@ export function SalesMessages() {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });
+    // a quotation check taken back (the script allows it for 10 minutes, for the checker's own latest)
+    if (a.act === 'qtUndo' && a.k) {
+      const doc = e.sales.docs[a.k];
+      set({ slToast: null });
+      if (doc)
+        e.qtCheck(doc, 'undo').then(
+          () => acts.say(`เลิกทำแล้ว ${doc.docNo || 'ใบเสนอราคา'} กลับเป็น “รอตรวจ”`, { ms: 4000 }),
+          (x) => acts.say('เลิกทำไม่สำเร็จ: ' + errText(x, 'connect'), { ms: 6000 }),
+        );
+      return;
+    }
+    if (a.act === 'jqUndo' && a.deal) {
+      e.reopenJoint(a.deal);
+      return acts.say('เปิดใบเสนอราคาร่วมและบริษัทที่ปิดพร้อมกันอีกครั้งแล้ว', { ms: 3000 });
+    }
+    // the month check: this account's checks just made (engine.lastPayChecks), for 10 minutes
+    if (a.act === 'payUndo') {
+      const n = e.lastPayChecks ? e.undoPayChecks(e.lastPayChecks.keys) : 0;
+      return acts.say(n ? `เลิกทำแล้ว ${n} รายการกลับเป็น “รอตรวจ”` : 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะรายการที่คุณตรวจเอง', { ms: 4000 });
+    }
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });
       const d = e.sales.deals[a.deal];

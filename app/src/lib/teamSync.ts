@@ -9,7 +9,11 @@
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
 import { toPerson } from './people';
-import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
+import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
+import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
+import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
+import { applyUnitRow, unitRecords } from './contrib';
+import { parsePayChkCfg, toMonthClose, toPayCheck } from './payCheck';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -37,13 +41,47 @@ export interface SyncRow { seq: number; k: string; v: unknown; del: boolean; by:
 /** `mode: 'accounts'`: the team signs in with personal accounts (then `key` is unused and `u` is the
  *  signed-in username, kept in memory only); otherwise the shared team code in `key`. */
 export interface TeamCfg { url: string; key: string; seq: number; seeded?: boolean; mode?: 'accounts'; u?: string }
-export type Role = 'admin' | 'sales' | 'viewer';
+/** A role id: the built-in admin / sales / viewer, or one an admin made (lib/caps.ts). */
+export type Role = string;
 /** What a request is signed with: the team code (legacy), a session token, or nothing (hello / login). */
 export type Cred = string | { tok: string } | null;
-/** A signed-in account on this browser (PREF.session). */
-export interface Session { url: string; u: string; name: string; role: Role; tok: string; exp: number; rm: boolean; mc?: boolean }
-/** What the team script supports (from `hello`): v2 = the team code only; v3 = accounts possible. */
-export interface Caps { v: 2 | 3; mode?: 'legacy' | 'setup' | 'accounts'; tid?: string; it?: number; files?: boolean }
+/**
+ * A signed-in account on this browser (PREF.session). `role` is what the script reports as me.role (the
+ * built-in word: admin / sales / viewer, which a script with configurable roles maps from the account's
+ * capabilities). From a script with configurable roles (Code.gs v4) also: `rid` the role's id, `rn` its
+ * name, `caps` what the account may do, `rq` requests waiting (admins), `req` the account's own pending
+ * request or unread result, and (optional) `g` its extras and temporary role with their dates. A script
+ * without them leaves them out (lib/caps.ts capsOf falls back). A script with notifications also sends
+ * `nf`: the account's own notification settings (me.notify: address, confirmed, e-mails wanted, time, scope).
+ */
+export interface Session { url: string; u: string; name: string; role: Role; tok: string; exp: number; rm: boolean; mc?: boolean; rid?: string; rn?: string; caps?: CapSet; rq?: number; req?: MyReq | null; g?: Grants; nf?: MyNotify | null }
+/** The account fields of a script's `me` (login, claim, and every reply with a token). Only the fields
+ *  the script sent: an older script's me (u, name, role) leaves the rest undefined. */
+export function parseMe(me: unknown): Partial<Pick<Session, 'name' | 'role' | 'rid' | 'rn' | 'caps' | 'rq' | 'req' | 'g' | 'nf'>> & { u?: string } {
+  if (!me || typeof me !== 'object') return {};
+  const m = me as Record<string, unknown>;
+  const out: ReturnType<typeof parseMe> = {};
+  if (typeof m.u === 'string') out.u = m.u;
+  if (typeof m.name === 'string' && m.name) out.name = m.name;
+  if (typeof m.role === 'string' && m.role) out.role = m.role;
+  if (typeof m.rid === 'string' && m.rid) out.rid = m.rid;
+  if (typeof m.rn === 'string' && m.rn) out.rn = m.rn;
+  if ('caps' in m) {
+    const c = parseCaps(m.caps);
+    if (c) out.caps = c;
+  }
+  if ('rq' in m) out.rq = Math.max(0, Number(m.rq) || 0);
+  // a script with capabilities leaves req and grants out when the account has none
+  if ('req' in m) out.req = parseMyReq(m.req);
+  else if (out.caps) out.req = null;
+  if ('grants' in m) out.g = parseGrants({ me: m.grants }).me || {};
+  else if (out.caps) out.g = {};
+  if ('notify' in m) out.nf = parseMyNotify(m.notify);
+  return out;
+}
+/** What the team script supports (from `hello`): v2 = the team code only; v3 = accounts possible.
+ *  `nf`: notifications (a script with them says `notify`; null = a script without). */
+export interface Caps { v: 2 | 3; mode?: 'legacy' | 'setup' | 'accounts'; tid?: string; it?: number; files?: boolean; nf?: NotifyLive | null }
 export type TeamStatus = 'off' | 'connecting' | 'syncing' | 'ok' | 'error' | 'offline';
 export interface TeamState { status: TeamStatus; msg: string; last: string }
 
@@ -95,8 +133,49 @@ const ERR_TH: Record<string, string> = {
   not_self: 'เปลี่ยนบทบาทหรือปิดบัญชีของตัวเองไม่ได้',
   last_admin: 'ต้องมีผู้ดูแลระบบอย่างน้อย 1 คน',
   name_locked: 'แก้ชื่อที่แสดงได้เฉพาะก่อนเข้าสู่ระบบครั้งแรก',
-  bad_role: 'เลือกบทบาทของบัญชี (ผู้ดูแลระบบ / พนักงานขาย / ดูอย่างเดียว)',
+  bad_role: 'บทบาทนี้ไม่มีแล้ว',
+  // configurable roles and permission requests (Code.gs v4)
+  role_in_use: 'บทบาทนี้ยังมีผู้ใช้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อนลบ',
+  role_locked: 'บทบาทนี้แก้หรือลบไม่ได้',
+  bad_cap: 'มีสิทธิ์ที่ระบบไม่รู้จัก ลองรีเฟรชหน้าเว็บ (F5)',
+  cap_held: 'คุณมีสิทธิ์นี้อยู่แล้ว',
+  too_many_roles: 'มีบทบาทครบ 10 บทบาทแล้ว ลบบทบาทที่ไม่ใช้ก่อน',
+  req_note: 'ใส่เหตุผลของคำขอ (ไม่เกิน 300 ตัวอักษร)',
+  retry: 'เซิร์ฟเวอร์ยังตรวจสิทธิ์ไม่ได้ตอนนี้ จะลองใหม่อัตโนมัติ',
+  name_dup: 'มีบทบาทชื่อนี้แล้ว',
+  role_name: 'ชื่อบทบาทต้องยาว 1–30 ตัวอักษร',
+  grant_held: 'บัญชีนี้มีสิทธิ์นี้จากบทบาทอยู่แล้ว (ผู้ดูแลระบบมีทุกสิทธิ์อยู่แล้ว)',
+  bad_until: 'วันที่สิ้นสุดต้องเป็นวันนี้หรือหลังจากนี้',
+  bad_req: 'คำขอไม่ครบ ลองรีเฟรชหน้าเว็บ (F5) แล้วส่งใหม่',
+  no_request: 'ไม่มีคำขอนี้แล้ว (อาจถูกยกเลิกหรือตัดสินไปแล้ว)',
+  req_changed: 'ผู้ขอเพิ่งแก้คำขอนี้ ระบบโหลดคำขอล่าสุดแล้ว ตรวจอีกครั้งก่อนตัดสิน',
+  too_many_reqs: 'มีคำขอรอผู้ดูแลระบบอยู่มากเกินไป ให้ผู้ดูแลระบบตัดสินคำขอที่ค้างก่อน',
+  too_many_grants: 'สิทธิ์เพิ่มของทีมมีมากเกินที่เก็บได้ เอาสิทธิ์เพิ่มที่ไม่ใช้แล้วออกก่อน',
+  // the quotation check and notifications (package notify)
+  changed: 'ใบเสนอราคานี้เพิ่งถูกแก้ไขหรือแนบฉบับใหม่ ระบบโหลดข้อมูลล่าสุดแล้ว ตรวจอีกครั้ง',
+  self_check: 'ใบเสนอราคาที่คุณแนบหรือแก้เอง ให้ผู้ตรวจคนอื่นตรวจ',
+  note_required: 'ใส่ข้อความบอกว่าต้องแก้อะไร',
+  too_late: 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะผลที่คุณตรวจเองล่าสุด',
+  bad_email: 'อีเมลไม่ถูกต้อง',
+  too_many_codes: 'ขอรหัสยืนยันบ่อยเกินไป ลองใหม่ในอีก 1 ชั่วโมง',
+  too_many_tests: 'ส่งอีเมลทดสอบได้ชั่วโมงละ 3 ครั้ง และวันละไม่เกิน 6 ครั้ง ลองใหม่ภายหลัง',
+  code_wrong: 'รหัสยืนยันไม่ถูกต้อง',
+  code_expired: 'รหัสยืนยันหมดอายุ กด “ส่งรหัสใหม่”',
+  code_tries: 'ใส่รหัสผิดหลายครั้ง กด “ส่งรหัสใหม่”',
+  no_email: 'ยังไม่มีอีเมลที่ยืนยันแล้ว ใส่และยืนยันอีเมลก่อน',
+  quota: 'วันนี้ส่งอีเมลครบโควตาของบัญชี Google เจ้าของสคริปต์แล้ว ลองใหม่พรุ่งนี้',
+  no_quota: 'วันนี้ส่งอีเมลครบโควตาของบัญชี Google เจ้าของสคริปต์แล้ว ลองใหม่พรุ่งนี้',
+  mail_failed: 'ส่งอีเมลไม่สำเร็จ ลองใหม่ภายหลัง ถ้ายังไม่ได้ ให้เจ้าของสคริปต์ดูหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน',
+  bad_notify: 'การตั้งค่าการแจ้งเตือนไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ (F5)',
+  notify_off: 'ระบบส่งอีเมลยังไม่เปิดใช้ ให้เจ้าของสคริปต์ทำตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน',
+  // a build older than the script (the version gate: cv below 4); the script sends this sentence itself
+  'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)': 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)',
 };
+/** The client version every request says it is: 4 = configurable roles (the script refuses writes from
+ *  an older build with "มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)"; pulls stay open to it). */
+export const CV = 4;
+/** The error the script would answer with `code`, in its Thai words (for an engine that re-words a reply). */
+export const codeError = (code: string, extra: Record<string, unknown> = {}) => new TeamSyncError(ERR_TH[code] || code, code, extra);
 /**
  * User-facing message. `connect` = a one-shot connect / key change (nothing retries by itself, and
  * a network error usually means a deployment setting); `home` = the same with the site's built-in
@@ -151,11 +230,12 @@ export const fetchTransport: Transport = async (url, body) => {
 };
 
 /** Call the server and unwrap {ok:false,error} into a TeamSyncError. Every request says it comes
- *  from this client version (`cv: 3`), so an accounts-mode script answers `login_required` to a
- *  team-code request instead of the message meant for old app builds. */
+ *  from this client version (`cv`, CV), so an accounts-mode script answers `login_required` to a
+ *  team-code request instead of the message meant for old app builds, and a script with configurable
+ *  roles knows this build sends no stale fields. */
 export async function call<T extends Record<string, unknown>>(t: Transport, url: string, cred: Cred, body: Record<string, unknown>): Promise<T> {
   const auth = cred == null ? {} : typeof cred === 'string' ? { key: cred } : { tok: cred.tok };
-  const r = await t(url, { ...body, cv: 3, ...auth });
+  const r = await t(url, { ...body, cv: CV, ...auth });
   if (!r || r.ok !== true) {
     const code = String((r && r.error) || 'unknown');
     throw new TeamSyncError(ERR_TH[code] || 'ซิงก์ไม่สำเร็จ: ' + code, code, r || {});
@@ -167,10 +247,10 @@ export async function call<T extends Record<string, unknown>>(t: Transport, url:
  *  `unauthorized` / `no_team_key` (or `unknown_action`); a v3 one says its mode and the public
  *  values the browser needs to hash a password (`tid`, `it`). */
 export async function hello(t: Transport, url: string): Promise<Caps> {
-  const r = await t(url, { action: 'hello', cv: 3 });
+  const r = await t(url, { action: 'hello', cv: CV });
   if (r && r.ok === true && Number(r.v) >= 3) {
     const mode = r.mode === 'accounts' || r.mode === 'setup' ? r.mode : 'legacy';
-    return { v: 3, mode, tid: String(r.tid || ''), it: Number(r.it) || 0, files: !!r.files };
+    return { v: 3, mode, tid: String(r.tid || ''), it: Number(r.it) || 0, files: !!r.files, ...('notify' in r ? { nf: parseNotifyFlag(r.notify) } : {}) };
   }
   const code = String((r && r.error) || 'unknown');
   if (['unauthorized', 'no_team_key', 'unknown_action'].includes(code)) return { v: 2 };
@@ -214,6 +294,13 @@ export const keyOf = {
   person: (id: string) => `person/${id}`,
   /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
   dundo: (id: string) => `dundo/${id}`,
+  /** a joint quotation's mark on its header deal, and one member company of it (lib/sales.ts jointOf) */
+  jqt: (hid: string) => `jqt/${hid}`,
+  jqm: (hid: string, dealId: string) => `jqm/${hid}/${dealId}`,
+  /** a unit, who is in which (by staffKey), a deal's revenue split (package dash, lib/contrib.ts) */
+  unit: (id: string) => `scfg/unit.${id}`,
+  unitm: (k: string) => `scfg/unitm.${k}`,
+  dshare: (id: string) => `dshare/${id}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -275,8 +362,16 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.values(S.acts || {}).forEach(({ deal, id, ...v }) => m.set(keyOf.dact(deal, id), v));
     Object.entries(S.log || {}).forEach(([k, v]) => m.set(keyOf.dlog(k), { ...v }));
     Object.entries(S.undone || {}).forEach(([id, at]) => m.set(keyOf.dundo(id), at));
+    Object.entries(S.jqt || {}).forEach(([id, v]) => m.set(keyOf.jqt(id), { ...v }));
+    Object.entries(S.jqm || {}).forEach(([k, v]) => m.set('jqm/' + k, { ...v }));
+    // the month check (lib/payCheck.ts): whole records, sent only by an account that may check
+    Object.entries(S.pchk || {}).forEach(([k, v]) => m.set('dchk/' + k, { ...v }));
+    Object.entries(S.mclose || {}).forEach(([k, v]) => m.set('mclose/' + k, { ...v }));
+    if (S.pcfg) m.set('scfg/paychk.cfg', { ...S.pcfg });
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
+    // units, their members and the revenue splits (set up before connecting: uploaded like the lists)
+    unitRecords(S).forEach(([k, v]) => m.set(k, v));
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
@@ -426,7 +521,81 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.sales = true;
       break;
     }
+    case 'jqt':
+    case 'jqm': {
+      // a joint quotation (package quotes): older builds skip both prefixes, so they never send or delete one
+      const jm = type === 'jqm';
+      const B = (jm ? s.sales.jqm || (s.sales.jqm = {}) : s.sales.jqt || (s.sales.jqt = {})) as Record<string, unknown>;
+      const j = rest.indexOf('/');
+      if (!rest || (jm ? j <= 0 || j === rest.length - 1 : j >= 0)) return;
+      if (del) {
+        if (!(rest in B)) return;
+        delete B[rest];
+      } else {
+        const v = jm ? toJqm(row.v) : toJqt(row.v);
+        if (!v) return;
+        B[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
+    case 'qchk': {
+      // the check of a quotation (written by the script's qt_check only): older builds skip the prefix
+      const Q = s.sales.qchk || (s.sales.qchk = {});
+      if (!rest || rest.includes('/')) return;
+      if (del) {
+        if (!(rest in Q)) return;
+        delete Q[rest];
+      } else {
+        const v = toQtCheck(row.v);
+        if (!v) return;
+        Q[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
+    case 'dshare':
+      // a deal's revenue split (package dash): older builds skip the prefix; without ดูค่าคอมมิชชั่น the
+      // script sends it as a deletion
+      if (applyUnitRow(s.sales, rest, del, row.v, true)) fx.sales = true;
+      break;
+    case 'dchk':
+    case 'mclose': {
+      // the month check (lib/payCheck.ts): a received line checked, a month closed; whole records, last
+      // write wins (not MERGED); older builds skip both prefixes
+      const bag = (type === 'dchk' ? s.sales.pchk || (s.sales.pchk = {}) : s.sales.mclose || (s.sales.mclose = {})) as Record<string, unknown>;
+      if (!rest || (type === 'dchk' ? rest.indexOf('/') <= 0 : !/^\d{4}-\d\d$/.test(rest))) return;
+      if (del) {
+        if (!(rest in bag)) return;
+        delete bag[rest];
+      } else {
+        const v = type === 'dchk' ? toPayCheck(row.v) : toMonthClose(row.v);
+        if (!v) return;
+        bag[rest] = v;
+      }
+      fx.sales = true;
+      break;
+    }
     case 'scfg':
+      // units and who is in which (package dash): older builds skip these names
+      if (/^unitm?\./.test(rest)) {
+        if (applyUnitRow(s.sales, rest, del, row.v)) fx.sales = true;
+        return;
+      }
+      // the team's notification rules (an admin's, one record; older builds skip it)
+      if (rest === 'notify.cfg') {
+        if (del) delete s.sales.ncfg;
+        else s.sales.ncfg = parseNotifyCfg(row.v);
+        fx.sales = true;
+        return;
+      }
+      // the first month the accounting check covers (an admin's)
+      if (rest === 'paychk.cfg') {
+        if (del) delete s.sales.pcfg;
+        else s.sales.pcfg = parsePayChkCfg(row.v);
+        fx.sales = true;
+        return;
+      }
       if (!CFG_KEYS.includes(rest) || del || !Array.isArray(row.v)) return;
       s.sales.cfg[rest as keyof SalesCfg] = (row.v as unknown[]).map(String);
       fx.sales = true;
@@ -459,7 +628,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(deal|ddoc|cust|contact|task|dstep|dpay|person)\//;
+const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|person|jqt|jqm)\/|scfg\/unit\.)/;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.

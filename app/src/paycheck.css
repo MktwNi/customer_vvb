@@ -1,0 +1,160 @@
+/* ---- the month check for accounting ("ตรวจรับเงินรายเดือน", package cash; components/MonthCheck.tsx):
+   the month card under the Cashflow chart, the year table "สรุปรายเดือน", the return and Excel dialogs, the
+   deal panel's chip per received line and its confirm. The app's tokens and classes only (.cf-card,
+   .cf-list, .seg, .chip, .ckb, .btn, .lnk, .dlg); the chips are the quotation check's (neutral / info, never
+   red, amber or green); a band name is an .sl-sec-name band (600 there). */
+.mc-card{scroll-margin-top:16px}
+.mc-tools-r{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mc-figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:16px;border-top:1px solid var(--divider);border-bottom:1px solid var(--divider)}
+.mc-fig{padding:14px 20px 14px 0;display:flex;flex-direction:column;gap:2px;min-width:0}
+.mc-fig+.mc-fig{padding-left:20px;border-left:1px solid var(--divider)}
+.mc-fig-l{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.mc-fig-v{font-size:var(--fs-title);font-weight:500;color:var(--ink);line-height:1.3;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mc-fig-v small{font-size:var(--fs-body);font-weight:400;color:var(--muted);margin-left:6px}
+.mc-fig-v.bad{color:var(--bad)}
+.mc-fig-v.zero{color:var(--muted);font-weight:400}
+.mc-fig-f{font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.mc-fig-f .lnk{font-size:var(--fs-meta)}
+.mc-prog{margin-top:16px;padding:14px 18px;border-radius:var(--r-inner);background:var(--tint);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 24px;align-items:center}
+.mc-prog-t{font-size:var(--fs-body);color:var(--ink);line-height:1.5}
+.mc-prog-t b{font-weight:500}
+.mc-nw{white-space:nowrap}
+.mc-pb{grid-column:1;height:8px;border-radius:999px;background:#fff;overflow:hidden;display:flex;box-shadow:inset 0 0 0 1px var(--tint-line)}
+.mc-pb i{display:block;height:100%;background:var(--bar);border-radius:999px}
+.mc-prog-r{grid-column:2;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:var(--fs-sec);color:var(--ink-2);text-align:right}
+.mc-prog-r .lnk{font-size:var(--fs-sec);text-align:right}
+.mc-prog-n{grid-column:1 / -1;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.mc-ro{font-size:var(--fs-sec);color:var(--muted);line-height:1.5}
+.mc-tools{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;margin-top:16px}
+.mc-tools .seg{flex-wrap:wrap}
+
+/* the line list: the Cashflow list's table, a tick column and a status column more */
+.cf-list.mc-list col.c-cb{width:46px}.cf-list.mc-list col.c-inst{width:100px}.cf-list.mc-list col.c-amt{width:108px}
+.cf-list.mc-list col.c-date{width:158px}.cf-list.mc-list col.c-ev{width:140px}.cf-list.mc-list col.c-st{width:190px}
+.cf-list.mc-list td:nth-child(4),.cf-list.mc-list th:nth-child(4){padding-left:10px}
+.cf-list.mc-list td.mc-dt,.cf-list.mc-list th.mc-dt{padding-left:22px}
+.cf-list.mc-list td.mc-dt .cf-cell>span:first-child{white-space:nowrap}
+.cf-list.mc-list.ro col.c-cb{width:14px}
+.cf-list.mc-list.ro tr.cf-row>td:first-child,.cf-list.mc-list.ro thead th:first-child,.cf-list.mc-list.ro tr.mc-note>td:first-child{padding:0}
+/* a row opens nothing by itself (its name does): ticking and checking happen in it */
+.cf-list.mc-list tr.cf-row{cursor:default}
+.cf-list.mc-list tr.cf-row>*{height:64px;padding-top:8px;padding-bottom:8px}
+.mc-list .cf-band>:first-child{padding-left:18px}
+.mc-list td.mc-cbc,.mc-list th.mc-cbc{padding:0 0 0 12px}
+.mc-list tr.mc-sel>*{background:var(--tint-2)}
+@media (hover:hover){.cf-list.mc-list tr.mc-sel:hover>*{background:var(--tint-2)}}
+.mc-cb{vertical-align:middle}
+.mc-cb:disabled{opacity:.45}
+.mc-amt{align-items:flex-end}
+.mc-st{display:flex;flex-direction:column;gap:5px;align-items:flex-start;min-width:0}
+.mc-chk{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mc-meta{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap}
+.mc-acts{display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap}
+.mc-acts .btn.xs{height:28px;padding:0 12px}
+.mc-acts .lnk,.mc-ev .lnk{font-size:var(--fs-sec)}
+.mc-ev{display:flex;flex-direction:column;align-items:flex-start;line-height:1.45;min-width:0}
+.mc-ev small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap}
+.mc-orph .cf-amt{color:var(--ink-2);font-weight:400}
+.cf-list.mc-list tr.mc-note>td{height:auto;padding:0 10px 14px;border-top:0}
+.cf-list.mc-list tr.mc-note+tr.cf-row>*{border-top:1px solid var(--divider)}
+.mc-nbox{padding:10px 14px;border-radius:var(--r-inner);background:var(--neutral-bg);display:flex;flex-direction:column;gap:2px}
+.mc-nh{font-size:var(--fs-meta);color:var(--ink-2);line-height:1.5}
+.mc-nbox p{margin:0;font-size:var(--fs-sec);color:var(--ink);line-height:1.55;overflow-wrap:anywhere}
+.mc-nbox .lnk{font-size:var(--fs-sec);align-self:flex-start;margin-top:2px}
+.mc-bulk{margin-top:12px;display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:10px 12px 10px 18px;border-radius:var(--r-inner);background:var(--tint-2);border:1px solid var(--tint-line)}
+.mc-bulk-t{font-size:var(--fs-body);color:var(--ink)}
+.mc-bulk-t b{font-weight:500}
+.mc-bulk .sp{flex:1}
+.mc-bulk .btn.sm{height:36px}
+.mc-closed{margin-top:16px;display:flex;flex-direction:column;gap:4px;padding:12px 18px;border-radius:var(--r-inner);background:var(--neutral-bg);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.55}
+.mc-closed-1{display:flex;gap:6px 16px;align-items:center;flex-wrap:wrap}
+.mc-closed b{font-weight:500;color:var(--ink)}
+.mc-closed .lnk{font-size:var(--fs-sec)}
+.mc-closed .sp{flex:1}
+
+/* the year table */
+.cf-list.mc-yt col.y-m{width:auto}.cf-list.mc-yt col.y-n{width:136px}.cf-list.mc-yt col.y-c{width:230px}.cf-list.mc-yt col.y-x{width:196px}
+.cf-list.mc-yt td:nth-child(4),.cf-list.mc-yt th:nth-child(4){padding-left:10px}
+.cf-list.mc-yt tr.cf-row>*{height:52px}
+.cf-list.mc-yt tr.cf-row.mc-empty>*{height:40px;color:var(--muted)}
+.cf-list.mc-yt tr.cf-row.mc-empty{cursor:default}
+@media (hover:hover){.cf-list.mc-yt tr.cf-row.mc-empty:hover>*{background:transparent}}
+.cf-list.mc-yt td.r,.cf-list.mc-yt th.r{font-variant-numeric:tabular-nums}
+.cf-list.mc-yt tr.cf-row.mc-cur>*{background:var(--tint-2)}
+.mc-mo{cursor:pointer;border:0;padding:0 4px;margin-left:-4px;font:inherit;font-weight:500;color:var(--ink);text-align:left}
+.mc-mo small{margin-left:8px;font-size:var(--fs-meta);font-weight:400;color:var(--muted)}
+.mc-yt .bad{color:var(--bad)}
+.mc-yt tfoot td{height:56px;padding:0 10px;background:var(--band);font-weight:500;font-variant-numeric:tabular-nums}
+.mc-yt tfoot td:first-child{border-radius:var(--r-band) 0 0 var(--r-band);padding-left:18px;box-shadow:inset 4px 0 0 var(--brand)}
+.mc-yt tfoot td:last-child{border-radius:0 var(--r-band) var(--r-band) 0}
+.mc-yt tfoot tr.cf-gap td{height:12px;background:none;box-shadow:none}
+.mc-yt tfoot .mc-meta{font-weight:400}
+
+/* the year on a phone: one row per month */
+.mc-yl{display:flex;flex-direction:column;margin-top:10px}
+.mc-yl-r{display:flex;flex-direction:column;gap:6px;padding:10px 4px;border-bottom:1px solid var(--divider)}
+.mc-yl-r.cur{background:var(--tint-2);border-radius:10px;padding:10px 8px;margin:0 -4px}
+.mc-yl-r.empty .mc-yl-1{color:var(--muted)}
+.mc-yl-r.tot{border-bottom:0;margin-top:10px;padding:12px 14px;background:var(--band);border-radius:var(--r-band);box-shadow:inset 4px 0 0 var(--brand)}
+.mc-yl-b{cursor:pointer;display:flex;flex-direction:column;gap:2px;border:0;padding:0;background:none;font:inherit;color:inherit;text-align:left;width:100%}
+.mc-yl-b:disabled{cursor:default}
+.mc-yl-1{display:flex;justify-content:space-between;gap:10px;font-size:var(--fs-body);color:var(--ink);font-variant-numeric:tabular-nums}
+.mc-yl-1 b{font-weight:500}
+.mc-yl-2{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.mc-yl-3{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:var(--fs-sec)}
+
+/* the return dialog */
+.mc-dl{margin:0;display:grid;grid-template-columns:112px minmax(0,1fr);border-top:1px solid var(--divider)}
+.mc-dl dt,.mc-dl dd{margin:0;padding:9px 0;border-bottom:1px solid var(--divider);line-height:1.45}
+.mc-dl dt{font-size:var(--fs-sec);color:var(--ink-2)}
+.mc-dl dd{font-size:var(--fs-body);color:var(--ink);display:flex;flex-direction:column;gap:1px;min-width:0}
+.mc-dl dd small{font-size:var(--fs-meta);color:var(--muted)}
+.mc-ret{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-sec);color:var(--ink-2)}
+.mc-ret textarea{width:100%;min-height:96px;padding:10px 12px;resize:vertical;font:inherit;font-size:var(--fs-body);line-height:1.6;color:var(--ink);border:1px solid var(--field);border-radius:var(--r-field);background:#fff}
+.mc-ret textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,91,216,.15)}
+.mc-ret small{font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+/* the Excel dialog */
+.mc-xl{display:flex;flex-direction:column;gap:14px}
+.mc-xl-t{font-size:var(--fs-body);line-height:1.6;color:var(--ink)}
+.mc-xl-t b{font-weight:500}
+/* the preview fits the dialog: the client's name wraps between words, the short columns stay on one line
+   (a phone scrolls the preview box, never the page) */
+.cf-prev.mc-prev td{vertical-align:top;line-height:1.45}
+.cf-prev.mc-prev td.wr{white-space:normal;min-width:96px}
+
+/* the deal panel: the check of a received installment, the plan's summary, the confirm before changing it */
+.sl-pr .c-stat .mc-chk{margin-top:4px}
+.mc-pc-n{font-size:var(--fs-sec);color:var(--ink-2)}
+.sl-pr .mc-nbox{grid-column:2/-1}
+.dp-strip .mc-chk{margin-top:4px}
+.dp-strip .mc-chk .chip{height:20px}
+.mc-np{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.mc-np-r{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:var(--fs-sec);color:var(--ink-2)}
+.mc-np-r b{font-weight:500;color:var(--ink)}
+.mc-cf{display:flex;flex-direction:column;gap:12px}
+.mc-cf p{margin:0;line-height:1.6}
+.mc-cf .mc-nbox p{font-size:var(--fs-sec)}
+
+/* a phone: the figures as rows, the month and the filter as select chips, one card per line */
+.mc-ph .mc-figs{grid-template-columns:1fr;border-bottom:0}
+.mc-ph .mc-fig{padding:12px 0;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:baseline}
+.mc-ph .mc-fig+.mc-fig{padding-left:0;border-left:0;border-top:1px solid var(--divider)}
+.mc-ph .mc-fig-l{grid-column:1;grid-row:1}
+.mc-ph .mc-fig-v{grid-column:2;grid-row:1;font-size:var(--fs-section);text-align:right}
+.mc-ph .mc-fig-v small{font-size:var(--fs-sec)}
+.mc-ph .mc-fig-f{grid-column:1 / -1}
+.mc-ph .mc-prog{grid-template-columns:1fr;padding:12px 14px;margin-top:6px}
+.mc-ph .mc-prog-r{grid-column:1;grid-row:auto;align-items:flex-start;text-align:left}
+.mc-ph .mc-prog-r .lnk{text-align:left}
+.mc-ph .cf-mband{margin-top:14px}
+.mc-phl{display:flex;flex-direction:column}
+.mc-mi{display:flex;flex-direction:column;gap:4px;padding:12px 4px;border-bottom:1px solid var(--divider)}
+.mc-mi:last-child{border-bottom:0}
+.mc-mi .mc-st{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.mc-mi .mc-nbox{margin-top:4px}
+.mc-ph-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.mc-ph-row>*{flex:1 1 auto;min-width:0}
+.mc-ph-sel{width:100%}
+.mc-ph-x{width:100%}
+/* the cross-year chip leads the second line (the name keeps the first line whole) */
+.mc-list .cf-nm-s .chip.cf-tag{height:18px;padding:0 8px;margin-right:6px;vertical-align:1px}

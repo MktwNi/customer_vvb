@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   PLAN_FIELDS, attachPreview, attachStage, closeReady, countedAt, dealMoney, dueOf, emptySales, filterDeals, hasPlan, isExtraPay, kindForStage, lastContactInfo, lineView, newDeal, overdueDays,
-  payDue, payStageFor, payStages, payState, planCsv, planLines, planOf, quickMatch, receivables, salesStats, splitAmounts, stageDocs, stageTh, stageTrack, targetForStage, toPay,
-  trackerStatus, whtRate, wonDate, type DealDoc, type PayLine, type SalesState,
+  moneyHidden, payDue, payStageFor, payStages, payState, planCsv, planLines, planOf, quickMatch, receivables, salesStats, setMoneyHidden, splitAmounts, stageDocs, stageTh, stageTrack,
+  targetForStage, toPay, trackerStatus, whtRate, wonDate, type DealDoc, type PayLine, type SalesState,
 } from './sales';
 import { applyRow, isLocalOnly, keyOf, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
@@ -209,6 +209,35 @@ describe('paid stages and ready to close', () => {
     expect(closeReady(n.s, n.d, TODAY)).toBe(true);
   });
 
+  it('a tracker without ดูยอดเงิน (amounts came as null): no plan; received from the receipt date, the stage or a receipt; nothing late', () => {
+    // as pulled without view.money: amounts null, the documents' targets dropped with their amounts
+    const a = mk({
+      steps: YES,
+      pays: { PAY1: { amt: null, due: '2026-09-01', rcv: '2026-09-02' }, PAY2: { amt: null, due: '2026-09-15' }, PAY3: { amt: null, due: '2026-10-30' } },
+      docs: [{ stage: 'PAY2', kind: 'receipt', amount: null, target: 'none' }],
+    });
+    // with the amounts unknown the plan would read every line as late
+    expect(planOf(a.s, a.d, TODAY)!.late.map((l) => l.stage)).toEqual(['PAY1', 'PAY2']);
+    expect(moneyHidden(a.s)).toBe(false);
+    setMoneyHidden(a.s, true);
+    expect(moneyHidden(a.s)).toBe(true);
+    expect(planLines(a.s, a.d)).toBeNull();
+    expect(planOf(a.s, a.d, TODAY)).toBeNull();
+    expect(payState(a.s, a.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2', 'PAY3'], paid: ['PAY1', 'PAY2'], left: ['PAY3'], plan: null });
+    expect(quickMatch(a.s, a.d, 'paylate', TODAY)).toBe(false);
+    expect(payDue(a.s, [a.d], '', '9999-12-31', TODAY)).toEqual([]);
+    expect(trackerStatus(a.s, a.d, TODAY)).toBe('ได้งาน');
+    // "ถือว่ารับครบ" counts as received too; without a plan the list's PAY stages and their steps, as before
+    a.s.pays['x/PAY3'] = L({ full: true });
+    expect(closeReady(a.s, a.d, TODAY)).toBe(true);
+    const b = mk({ steps: { ...YES, PAY1: '2026-09-01' } });
+    setMoneyHidden(b.s, true);
+    expect(payState(b.s, b.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1'], left: ['PAY2'] });
+    // marked per state: another tracker, and this one unmarked, work the plan out again
+    setMoneyHidden(a.s, false);
+    expect(planOf(a.s, a.d, TODAY)).not.toBeNull();
+  });
+
   it('NO is ready; WAIT and no result are not; YES with no PAY stage is', () => {
     expect(closeReady(mk({ steps: { 'CLOSED DEAL': ['2026-09-01', 'NO'] } }).s, mk().d, TODAY)).toBe(true);
     const w = mk({ steps: { 'CLOSED DEAL': ['2026-09-01', 'รอผู้บริหาร'] } });
@@ -366,10 +395,15 @@ describe('money owed (KPI ค้างรับ), the calendar, the CSV', () => 
     expect(salesStats(s, deals, TODAY)).toMatchObject({ receivable: 147000, late: 57000, dueMonth: 20000 });
     s.deals.x.jobStatus = 'closed';
     expect(receivables(s, deals, TODAY).receivable).toBe(60000);
-    // the calendar: installments to receive in a range (late ones with from = '')
+    // the calendar: installments to receive in a range (late ones with from = ''); a closed job still
+    // owing is followed until the money comes in (Cashflow counts it too), while the KPI above leaves it out
+    expect(payDue(s, deals, '2026-10-01', '2026-10-31', TODAY).map((x) => x.line.stage)).toEqual(['PAY2', 'PAY3']);
     s.deals.x.jobStatus = 'open';
     expect(payDue(s, deals, '2026-10-01', '2026-10-31', TODAY).map((x) => x.line.stage)).toEqual(['PAY2', 'PAY3']);
     expect(payDue(s, deals, '', '2026-10-31', TODAY).map((x) => x.line.stage)).toEqual(['PAY1', 'PAY2', 'PAY3']);
+    // not won (z's plan typed before YES): never in the calendar, open or closed
+    s.deals.z.jobStatus = 'closed';
+    expect(payDue(s, deals, '', '2026-12-31', TODAY).some((x) => x.deal.id === 'z')).toBe(false);
   });
 
   it('one CSV cell lists the plan', () => {

@@ -17,7 +17,7 @@ export const dedupFilter = (k: F) => (g: DupGroup) =>
 export function Dedup() {
   const { engine: e, ui, set, open, go } = useApp();
   // deciding what is a duplicate changes every company list of the team: the admin's job
-  const admin = e.can('admin');
+  const admin = e.can('set.dedup');
   useEngineVersion();
   const G = e.B.groups, D = e.B.D;
   const list = G.filter(dedupFilter(ui.ddF));
