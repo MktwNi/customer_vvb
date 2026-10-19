@@ -466,7 +466,7 @@ function useHeadCheck(S: SalesState, g: JointGroup) {
   const doc = qtView(S, g.head).head?.doc;
   const cv = doc ? e.qtCheckFor(doc) : null;
   // while it waits: who the team script told (as this browser heard it), else since when
-  return doc && cv ? { doc, cv, short: waitShort(e.qtSentFor(doc), doc, e.can('set.users')) } : null;
+  return doc && cv ? { doc, cv, short: waitShort(e.qtSentFor(doc), doc, e.qtSentCtx()) } : null;
 }
 /** What the band's and the card's status cell says: the quotation's check, else the payer's state. */
 function HeadState({ S, g, compact }: { S: SalesState; g: JointGroup; compact?: boolean }) {

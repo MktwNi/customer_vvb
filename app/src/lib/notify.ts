@@ -18,7 +18,7 @@
 import { DUE_SOON, QUOTE_STAGE, fmtMoney, payDue, type Deal, type DealDoc, type SalesState } from './sales';
 import { TT } from './constants';
 import { addDays, daysBetween, dmTh, localDay, pad } from './format';
-import { can, sameName, type CapId, type CapSet } from './caps';
+import { BUILTIN, can, resolveCaps, sameName, type CapId, type CapSet, type Grants } from './caps';
 import type { Task } from './types';
 
 // ------------------------------------------------------------------ the check record
@@ -216,13 +216,15 @@ export function wantsLine(p: MyNotify, checker: boolean) {
 
 /**
  * Why a quotation reached no checker by e-mail yet, or why it waits. From the script's push reply (`qt[].why`):
- * 'nochk' no other account checks quotations; 'nomail' the checkers can't get mail (see `skip`); 'file' the
- * file is not in the team's Drive yet; 'quota' the day's mail is used up; 'timer' the script mails with its
- * timer only; 'old' not news (attached days ago); 'bulk' an import; 'err' the mail failed (tried again). This
- * browser's own word when the script says nothing (`local`): 'script' a script without notifications, 'off'
- * notifications not set up, 'timer' a script that mails only with its timer.
+ * 'nochk' no other account checks quotations; 'self' none either, but the team lets whoever attached or changed it
+ * check their own; 'nomail' the checkers can't get mail (see `skip`); 'file' the file is not in the team's Drive
+ * yet; 'quota' the day's mail is used up (`later` waits for it); 'timer' the script mails `later` with its timer
+ * only; 'old' not news (attached days ago); 'bulk' an import; 'err' the mail failed (tried again). This browser's
+ * own word when the script says nothing (`local`): 'script' a script without notifications, 'off' notifications
+ * not set up, 'tick' the release before immediate mail (its timer mails the other checkers it can, unnamed here);
+ * for an admin, who that timer mails or why nobody, from the team's accounts (qtLocalOutcome).
  */
-export type QtWhy = '' | 'nochk' | 'nomail' | 'file' | 'quota' | 'timer' | 'old' | 'bulk' | 'err' | 'script' | 'off';
+export type QtWhy = '' | 'nochk' | 'self' | 'nomail' | 'file' | 'quota' | 'timer' | 'old' | 'bulk' | 'err' | 'script' | 'off' | 'tick';
 /** Why one checker gets no mail: a role without e-mail, no address, not confirmed, quotation mails off. */
 export type QtSkip = 'role' | 'noem' | 'unverified' | 'off';
 export interface QtSent {
@@ -246,7 +248,7 @@ export interface QtSent {
 }
 /** The version key of a document for QtSent.fp (what a check compares, as text). */
 export const qtFpKey = (doc: Pick<DealDoc, 'amount' | 'docNo' | 'docDate' | 'name' | 'size'>) => JSON.stringify(fpOf(doc));
-const WHYS: QtWhy[] = ['', 'nochk', 'nomail', 'file', 'quota', 'timer', 'old', 'bulk', 'err', 'script', 'off'];
+const WHYS: QtWhy[] = ['', 'nochk', 'self', 'nomail', 'file', 'quota', 'timer', 'old', 'bulk', 'err', 'script', 'off', 'tick'];
 const SKIPS: QtSkip[] = ['role', 'noem', 'unverified', 'off'];
 const names = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()).map((x) => x.slice(0, 60)).slice(0, 25) : []);
 /** One item of a push reply's `qt` (see Code.gs "E-mail"): { k: the document's key, and the outcome }; null
@@ -294,29 +296,44 @@ export interface QtSentView {
   /** something this account can fix (counted in the bell) */
   count: boolean;
 }
+/** Who heard of a quotation, as the viewer sees it: `admin` = manages users (can fix what is missing); `checker` =
+ *  holds ตรวจ/อนุมัติใบเสนอราคา itself; `self` = the team lets whoever attached or changed a quotation check it
+ *  (scfg/notify.cfg self; left out: as the script said). */
+export interface QtSentCtx { admin: boolean; checker?: boolean; self?: boolean }
 /**
  * In words, what happened to a quotation this account attached or edited (the bell's ใบเสนอราคาของฉัน, the card,
- * the message after attaching). `admin` = manages users (can fix what is missing); `checker` = holds ตรวจ/อนุมัติ
- * ใบเสนอราคา itself.
+ * the message after attaching).
  */
-export function qtSentView(o: QtSent | null | undefined, ctx: { admin: boolean; checker?: boolean }): QtSentView {
+export function qtSentView(o: QtSent | null | undefined, ctx: QtSentCtx): QtSentView {
   const admin = ctx.admin;
   const v = (state: QtSentView['state'], text: string, short: string, fix: QtSentView['fix'] = '', count = false): QtSentView => ({ state, text, short, fix, count });
   if (!o) return v('wait', 'รอผู้ตรวจ', 'รอผู้ตรวจ');
   if (o.to.length) {
-    const more = o.later.length ? ` · ${nameList(o.later)} จะได้ภายใน 10 นาที` : '';
+    const more = !o.later.length ? '' : o.why === 'quota' ? ` · ${nameList(o.later)} รอโควตาอีเมลของวันนี้ ส่งเองเมื่อโควตากลับมา` : ` · ${nameList(o.later)} จะได้ภายใน 10 นาที`;
     return v('sent', `ส่งให้ผู้ตรวจแล้ว: ${nameList(o.to)}${more}`, `ส่งให้ ${nameList(o.to)} แล้ว`);
   }
-  if (o.later.length || o.why === 'timer') {
+  // the release before immediate mail: its timer mails the other checkers it can, and says nothing of whom
+  if (o.why === 'tick' || (o.why === 'timer' && !o.later.length))
+    return v(
+      'later',
+      'สคริปต์ของทีมรุ่นนี้ส่งอีเมลตามรอบทุก 10 นาที ถึงผู้ตรวจคนอื่นที่ยืนยันอีเมลแล้ว (ถ้ามี)' + (admin ? ' · อัปเดตสคริปต์เพื่อส่งทันทีและดูว่าส่งถึงใคร' : ''),
+      'ส่งตามรอบ 10 นาที',
+      admin ? 'setup' : '',
+    );
+  if (o.later.length) {
     if (o.why === 'file') return v('later', 'รออัปโหลดไฟล์ขึ้น Drive ของทีม แล้วจะส่งให้ผู้ตรวจทันที', 'รออัปโหลดไฟล์');
     if (o.why === 'quota') return v('later', `วันนี้ส่งอีเมลครบโควตาแล้ว จะส่งให้${o.later.length ? ' ' + nameList(o.later) + ' ' : 'ผู้ตรวจ'}เมื่อโควตากลับมา · ผู้ตรวจเห็นในกระดิ่งแล้ว`, 'รอโควตาอีเมล');
     const who = o.later.length ? `: ${nameList(o.later)}` : '';
     return v('later', `จะส่งอีเมลให้ผู้ตรวจภายใน 10 นาที${who}`, 'ส่งภายใน 10 นาที');
   }
-  switch (o.why) {
+  // no other checker: with self-check on (as the team has it now) whoever attached or changed it checks it
+  const why = (o.why === 'nochk' || o.why === 'self') && ctx.self !== undefined ? (ctx.self && (o.why === 'self' || ctx.checker) ? 'self' : 'nochk') : o.why;
+  switch (why) {
+    case 'self':
+      return v('none', ctx.checker ? 'ไม่มีผู้ตรวจคนอื่นได้อีเมล · คุณตรวจใบนี้เองได้' : 'ไม่มีผู้ตรวจคนอื่นได้อีเมล · ผู้แนบตรวจใบนี้เองได้', 'ตรวจเองได้');
     case 'nochk':
       return admin
-        ? v('none', ctx.checker ? 'รอผู้ตรวจคนอื่น: ยังไม่มีบัญชีอื่นที่ตรวจใบเสนอราคาได้ ใบที่คุณแนบเองจึงไม่ได้ส่งให้ใคร' : 'ยังไม่มีบัญชีที่ตรวจใบเสนอราคาได้ ใบนี้จึงไม่ได้ส่งให้ใคร', 'รอผู้ตรวจคนอื่น', 'checker', true)
+        ? v('none', ctx.checker ? `รอผู้ตรวจคนอื่น: ยังไม่มีบัญชีอื่นที่ตรวจใบเสนอราคาได้ ${o.what === 'edit' ? 'ใบที่คุณแก้' : 'ใบที่คุณแนบเอง'}จึงไม่ได้ส่งให้ใคร` : 'ยังไม่มีบัญชีที่ตรวจใบเสนอราคาได้ ใบนี้จึงไม่ได้ส่งให้ใคร', 'รอผู้ตรวจคนอื่น', 'checker', true)
         : v('none', 'ยังไม่มีผู้ตรวจคนอื่น ใบนี้จึงไม่ได้ส่งให้ใคร แจ้งผู้ดูแลระบบให้ตั้งผู้ตรวจ', 'ยังไม่มีผู้ตรวจ');
     case 'nomail': {
       const why = skipLine(o.skip);
@@ -338,8 +355,8 @@ export function qtSentView(o: QtSent | null | undefined, ctx: { admin: boolean; 
 }
 /** The card's few words while a quotation waits: who was told (as this browser heard it), else since when;
  *  `stale` = it changed after a check. */
-export function waitShort(o: QtSent | null | undefined, doc: Pick<DealDoc, 'cAt' | 'at'>, admin: boolean, stale = false) {
-  const w = o ? qtSentView(o, { admin }).short : '';
+export function waitShort(o: QtSent | null | undefined, doc: Pick<DealDoc, 'cAt' | 'at'>, ctx: QtSentCtx, stale = false) {
+  const w = o ? qtSentView(o, ctx).short : '';
   if (stale) return w ? `แก้หลังตรวจ · ${w}` : 'แก้หลังตรวจ รอตรวจอีกครั้ง';
   return w || `รอผู้ตรวจ ตั้งแต่ ${dmTh(qtDayOf(doc))}`;
 }
@@ -350,6 +367,42 @@ export function qtSentNews(was: QtSent | null | undefined, now: QtSent) {
   if (!was || was.fp !== now.fp) return true;
   if (now.to.some((n) => !was.to.includes(n))) return true;
   return !now.to.length && !was.to.length && (now.why !== was.why || now.later.length !== was.later.length);
+}
+
+/** The team's accounts as an admin reads them (engine TeamDir): enough to know who checks and who gets mail. */
+export interface DirLike {
+  users: { u: string; name: string; role: string; on: number | boolean; em?: string; ok?: number | boolean; notify?: unknown }[];
+  roles: { id: string; c: CapSet }[];
+  grants: Record<string, Grants>;
+  /** the script has configurable roles (else the built-in ones stand in) */
+  v4: boolean;
+}
+/** The active accounts of a directory, with what each may do today and gets by e-mail (the admin page's people). */
+export function dirPeople(dir: DirLike, today: string): MailPerson[] {
+  const roles = Object.fromEntries((dir.v4 ? dir.roles : Object.values(BUILTIN)).map((r) => [r.id, r.c]));
+  return dir.users
+    .filter((u) => u.on === 1 || u.on === true)
+    .map((u) => {
+      const caps = resolveCaps(u.role, roles, dir.grants[u.u], today);
+      return { u: u.u, name: u.name, caps, em: u.em || '', ok: u.ok === 1 || u.ok === true, nf: parseMyNotify(u.notify, can(caps, 'set.users')) };
+    });
+}
+/**
+ * What a script of the release before immediate mail (its timer mails the quotation, its push says nothing) will
+ * do about a quotation `me` attached or changed (`by` = who attached it), from the team's active accounts: the
+ * other checkers its timer mails ('timer', `later`), or why nobody ('nomail' with `skip`, 'self', 'nochk'), as the
+ * script of this release words it. Never `me` or `by` (they know).
+ */
+export function qtLocalOutcome(x: { people: MailPerson[]; me: string; by: string; self: boolean }): Pick<QtSent, 'to' | 'later' | 'bell' | 'skip' | 'why'> {
+  const chk = (p: MailPerson) => can(p.caps, 'qt.check') && can(p.caps, 'view.sales');
+  const others = x.people.filter((p) => chk(p) && !sameName(p.name, x.by) && !sameName(p.name, x.me));
+  const skip = others.map((p) => ({ n: p.name, r: personSkip(p) })).filter((y): y is { n: string; r: QtSkip } => !!y.r);
+  const later = others.filter((p) => !personSkip(p)).map((p) => p.name);
+  const bell = others.map((p) => p.name);
+  if (later.length) return { to: [], later, bell, skip, why: 'timer' };
+  if (others.length) return { to: [], later: [], bell, skip, why: 'nomail' };
+  const own = x.self && x.people.some((p) => chk(p) && (sameName(p.name, x.by) || sameName(p.name, x.me)));
+  return { to: [], later: [], bell: [], skip: [], why: own ? 'self' : 'nochk' };
 }
 
 // ------------------------------------------------------------------ why mail does not arrive (diagnosis)
@@ -383,13 +436,23 @@ export function mailIssues(x: { live: NotifyLive | null; st: NotifyStatus | null
       fix: (live.now ? 'อีเมลใบเสนอราคาใหม่ยังส่งทันทีตอนแนบ แต่สรุปวันนี้ ผลตรวจ และอีเมลที่ส่งไม่ทันจะไม่ออก · ' : 'ตอนนี้ไม่มีอีเมลออกเลย · ') + 'เจ้าของสคริปต์เลือก “setupNotify” แล้วกด Run อีกครั้ง',
     });
   if (live.now === false || st?.now === false)
-    out.push({ k: 'now', tone: 'info', text: 'อีเมลใบเสนอราคาใหม่ส่งตามรอบทุก 10 นาที ไม่ได้ส่งทันทีที่แนบ', fix: 'วางโค้ด Code.gs รุ่นล่าสุดแล้ว Deploy เป็น New version (หรือลบ NOTIFY_NOW ใน Script properties ถ้าตั้งเป็น 0 ไว้)' });
+    out.push({ k: 'now', tone: 'info', text: 'อีเมลใบเสนอราคาใหม่ส่งตามรอบทุก 10 นาที ไม่ได้ส่งทันทีที่แนบ', fix: 'เจ้าของสคริปต์ลบ NOTIFY_NOW ใน Script properties (ตั้งเป็น 0 ไว้) แล้วจะส่งทันทีที่แนบ' });
+  else if (live.now === undefined && (st?.now ?? null) === null)
+    out.push({
+      k: 'tick', tone: 'warn', text: 'สคริปต์ของทีมยังเป็นรุ่นก่อน อีเมลใบเสนอราคาใหม่จึงส่งตามรอบทุก 10 นาที ไม่ได้ส่งทันทีที่แนบ และคนแนบไม่เห็นว่าส่งถึงใคร',
+      fix: 'เจ้าของสคริปต์วางโค้ด Code.gs รุ่นล่าสุดทับ (เก็บบรรทัด TEAM_KEY เดิมไว้) แล้วกด Deploy › Manage deployments › Edit › New version',
+    });
   const checkers = x.people.filter((p) => can(p.caps, 'qt.check'));
   if (!checkers.length) out.push({ k: 'nochk', tone: 'bad', text: 'ยังไม่มีใครตรวจใบเสนอราคาได้ ใบที่แนบจึงไม่ส่งให้ใคร', fix: 'ให้สิทธิ์ “ตรวจ/อนุมัติใบเสนอราคา” กับบทบาทหรือผู้ใช้ที่ตรวจ ที่ บทบาทและสิทธิ์' });
   else if (checkers.length === 1 && !x.self)
     out.push({
       k: 'solo', tone: 'warn', text: `มีผู้ตรวจคนเดียวคือ ${checkers[0].name} ใบที่ ${checkers[0].name} แนบหรือแก้เองจึงไม่มีใครได้อีเมล`,
       fix: 'ให้สิทธิ์ “ตรวจ/อนุมัติใบเสนอราคา” กับอีกคน หรือเปิด “ผู้แนบตรวจใบของตัวเองได้” ด้านล่าง',
+    });
+  else if (checkers.length === 1)
+    out.push({
+      k: 'solo', tone: 'info', text: `มีผู้ตรวจคนเดียวคือ ${checkers[0].name} ใบที่ ${checkers[0].name} แนบหรือแก้เองไม่มีอีเมลถึงใคร ${checkers[0].name} ตรวจเองในเว็บได้ (เปิด “ผู้แนบตรวจใบของตัวเองได้” ไว้)`,
+      fix: 'ถ้าต้องการคนตรวจคนที่สอง ให้สิทธิ์ “ตรวจ/อนุมัติใบเสนอราคา” กับอีกคน',
     });
   const blocked = checkers.map((p) => ({ p, r: personSkip(p) })).filter((y) => y.r);
   if (checkers.length && blocked.length) {
@@ -407,7 +470,7 @@ export function mailIssues(x: { live: NotifyLive | null; st: NotifyStatus | null
 }
 /** The latest quotations the script decided about (notify_status `recent`, newest first), one line each:
  *  who got the mail, who waits for it, or why nobody did. `nameOf` = an account's display name. */
-export interface RecentQt { doc: string; at: string; sent: string[]; later: string[]; none: '' | 'nochk' | 'nomail' | 'old' | 'bulk'; err: boolean }
+export interface RecentQt { doc: string; at: string; sent: string[]; later: string[]; none: '' | 'nochk' | 'nomail' | 'self' | 'old' | 'bulk'; err: boolean }
 export function recentQts(recent: NotifyStatus['recent'], nameOf: (u: string) => string, max = 5): RecentQt[] {
   const out: RecentQt[] = [];
   const by = new Map<string, RecentQt>();
@@ -425,7 +488,7 @@ export function recentQts(recent: NotifyStatus['recent'], nameOf: (u: string) =>
     if (r.result === 'sent' && n && !said) q.sent.push(n);
     else if (r.result === 'retry' && n && !said) q.later.push(n);
     else if (r.result === 'error') q.err = true;
-    else if (/^none:(nochk|nomail)$/.test(r.result) && !q.none) q.none = r.result.slice(5) as 'nochk' | 'nomail';
+    else if (/^none:(nochk|nomail|self)$/.test(r.result) && !q.none) q.none = r.result.slice(5) as 'nochk' | 'nomail' | 'self';
     else if (r.result === 'skipped-old' && !q.none) q.none = 'old';
     else if (r.result === 'skipped-bulk' && !q.none) q.none = 'bulk';
   }
@@ -437,6 +500,7 @@ export function recentLine(q: RecentQt) {
   if (q.later.length) return `รอส่ง ${nameList(q.later)}`;
   if (q.none === 'nochk') return 'ไม่ได้ส่ง: ไม่มีผู้ตรวจคนอื่น (คนแนบตรวจเองไม่ได้)';
   if (q.none === 'nomail') return 'ไม่ได้ส่ง: ผู้ตรวจยังรับอีเมลไม่ได้ (เห็นในกระดิ่ง)';
+  if (q.none === 'self') return 'ไม่ได้ส่ง: ไม่มีผู้ตรวจคนอื่น (คนแนบตรวจเองได้)';
   if (q.none === 'old') return 'ไม่ได้ส่ง: แนบไว้เกิน 2 วันแล้ว';
   if (q.none === 'bulk') return 'ไม่ได้ส่ง: นำเข้าหลายใบพร้อมกัน';
   return q.err ? 'ส่งไม่สำเร็จ' : 'กำลังส่ง';
@@ -453,6 +517,8 @@ export function myMailIssues(x: { live: NotifyLive | null; mail: boolean; nf: My
   if (!x.nf.em) out.push({ k: 'noem', tone: 'warn', text: 'ยังไม่ได้ใส่อีเมล จึงยังไม่มีอีเมลถึงคุณ', fix: 'ใส่อีเมลด้านล่าง กดบันทึก แล้วใส่รหัส 6 หลักที่ส่งไป' });
   else if (!x.nf.ok) out.push({ k: 'unverified', tone: 'warn', text: 'อีเมลยังไม่ได้ยืนยัน จึงยังไม่ส่ง', fix: 'ใส่รหัส 6 หลักจากอีเมล หรือกด “ส่งรหัสใหม่”' });
   if (x.checker && !x.nf.on.qt) out.push({ k: 'off', tone: 'info', text: 'ปิด “ใบเสนอราคาใหม่รอตรวจ” ไว้ จะไม่ได้อีเมลเมื่อมีคนแนบ', fix: 'ติ๊กด้านล่างแล้วกดบันทึก · ใบที่รอตรวจยังขึ้นในกระดิ่ง' });
+  else if (x.checker && x.live.on && x.live.now === undefined)
+    out.push({ k: 'tick', tone: 'info', text: 'อีเมลใบเสนอราคาใหม่มาตามรอบทุก 10 นาที ยังไม่ได้มาทันทีที่แนบ', fix: 'ผู้ดูแลระบบอัปเดตสคริปต์ของทีมเป็นรุ่นล่าสุดเพื่อให้ส่งทันที · ใบที่รอตรวจขึ้นในกระดิ่งทันทีที่ซิงก์' });
   return out;
 }
 
@@ -562,7 +628,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
   const admin = !all && can(caps, 'set.users');
   const inChk = cfg.self && may('qt.check'); // my own waiting ones are in my รอตรวจ instead
   const waitRow = (doc: DealDoc, o: QtSent | null, stale = false): BellRow => {
-    const w = qtSentView(o, { admin, checker: may('qt.check') });
+    const w = qtSentView(o, { admin, checker: may('qt.check'), self: cfg.self });
     return {
       key: 'w:' + doc.id,
       kind: 'mine',
@@ -573,7 +639,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
       count: w.count,
       go: { deal: doc.deal, doc: doc.id },
       wrap: w.state !== 'wait',
-      ...(w.fix && admin ? { act: { label: w.fix === 'checker' ? 'ตั้งผู้ตรวจ' : w.fix === 'email' ? 'ดูผู้รับอีเมล' : 'ดูวิธีเปิดการแจ้งเตือน', to: 'notify' as const } } : {}),
+      ...(w.fix && admin ? { act: { label: w.fix === 'checker' ? 'ตั้งผู้ตรวจ' : w.fix === 'email' ? 'ดูผู้รับอีเมล' : o?.why === 'tick' ? 'ดูวิธีอัปเดตสคริปต์' : 'ดูวิธีเปิดการแจ้งเตือน', to: 'notify' as const } } : {}),
     };
   };
   const recent = (o: QtSent) => localDay(o.at) >= week;

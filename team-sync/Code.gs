@@ -56,7 +56,8 @@
  *     em: the account's notification address, stored unverified; the code goes to that address (as notify_me)
  *   { action: 'notify_status', tok }             -> { ok, on, since, last, quotaLeft, sentToday, triggers, every, now, recent }
  *     now: pushes mail new quotations themselves; recent: the last quotation mails and decisions, newest first
- *     [{ at, doc, u, result }] (result 'sent' | 'retry' | 'error' | 'none:nochk' | 'none:nomail' | 'skipped-…' | 'checked')
+ *     [{ at, doc, u, result }] (result 'sent' | 'retry' | 'error' | 'none:nochk' | 'none:nomail' | 'none:self' | 'skipped-…' |
+ *     'checked')
  *   { action: 'role_save', tok, id?, n, d?, c?, from?, o? }  -> { ok, id, roles, grants, reqs }
  *     a `c` that does not name a capability of LATE_CAPS_ (view.exp, edit.exp) keeps what the role has there
  *     (a new role: what the `from` role has): builds before them cannot show them, so their save must not take
@@ -105,8 +106,10 @@
  *   Its reply then has qt: [{ id, k, fp, what: 'new'|'rev'|'edit', to: [names mailed, now or before], later: [names
  *   notifyTick mails], bell: [checkers who see it in the web app's bell], skip: [{ n, r: 'role'|'noem'|'unverified'|
  *   'off' }] (checkers who get no mail, and why), why }] per quotation; why = '' or the reason: 'nochk' (no other
- *   checker), 'nomail' (no checker can get mail), 'file' (waits for its file to reach Drive), 'quota', 'timer'
- *   (NOTIFY_NOW is '0': only notifyTick mails), 'old' (not news), 'bulk' (an import), 'err' (the mail failed: retried).
+ *   checker), 'self' (no other checker, and the team lets whoever attached or changed it check their own),
+ *   'nomail' (no checker can get mail), 'file' (waits for its file to reach Drive), 'quota' (the day's mail is used
+ *   up: `later` waits for it), 'timer' (NOTIFY_NOW is '0': only notifyTick mails), 'old' (not news), 'bulk' (an
+ *   import), 'err' (the mail failed: retried). Whoever attached it or changed it is never mailed about it.
  *   hello's notify has now: 1 when pushes mail this way (Script Property NOTIFY_NOW '0' turns it off).
  * Capabilities (CAPS_, the same catalogue as the web app's lib/caps.ts): what a key needs is in KEY_CAP
  * (default deny: an unknown prefix needs set.users, qchk/ is never pushed). A refused op is listed in
@@ -218,6 +221,7 @@ const NTICK_S = 330; // a run still going (Apps Script stops a run after 6 minut
 const QT_NOW_MAX = 3; // quotation mails a push sends itself right after saving (the rest go with notifyTick)
 const QT_NOW_MS = 6000; // … and only while the request has taken less than this (its reply waits for them)
 const CLAIM_MS = 15 * 60000; // a mail an execution claimed in the log and never reported is tried again after this
+const PEND_PRE = 'NOTIFY_PEND_'; // + an id: a push's mail results waiting for the log (qtNowLog_)
 const LIST_MAX = 20; // rows per list in a digest
 const MAIL_SENDER = 'GCC Sales Tracker';
 const EMAIL_RE = /^[^\s@<>()"',;:\\[\]]+@[^\s@<>()"',;:\\[\]]+\.[^\s@<>()"',;:\\[\]]+$/;
@@ -3063,10 +3067,11 @@ function notifyRun_(now) {
   // what an earlier run sent but could not write to the notify tab (see below): written now, and in any
   // case never sent again
   let pend = pendOf_(p);
+  const pendKeys = pendKeys_(p); // the pushes' rows read here: removed once logged
   if (pend.length) {
     try {
       logNotify_(pend);
-      clearPend_(props);
+      clearPend_(props, pendKeys);
       pend = [];
     } catch (err) {
       if (!(err && err.busy)) throw err;
@@ -3158,7 +3163,7 @@ function notifyRun_(now) {
     for (;;) {
       try {
         logNotify_(rows);
-        if (pend.length) clearPend_(props);
+        if (pend.length) clearPend_(props, pendKeys);
         break;
       } catch (err) {
         if (!(err && err.busy)) throw err;
@@ -3182,7 +3187,8 @@ function saveLast_(props, last) {
   return last;
 }
 
-/** Log rows [kind, u, key, fp, result] a run sent but could not write yet (NOTIFY_PEND and the cache). */
+/** Log rows [kind, u, key, fp, result] a run sent but could not write yet (NOTIFY_PEND and the cache), and a
+ *  push's (NOTIFY_PEND_<id>, see qtNowLog_). */
 function pendOf_(p) {
   const out = [], keys = {};
   const add = (s) => {
@@ -3204,7 +3210,13 @@ function pendOf_(p) {
   } catch (err) {
     // the property alone
   }
+  pendKeys_(p).forEach((k) => add(p[k]));
   return out;
+}
+
+/** The NOTIFY_PEND_<id> properties pushes left (see qtNowLog_). */
+function pendKeys_(p) {
+  return Object.keys(p).filter((k) => k.indexOf(PEND_PRE) === 0).sort();
 }
 
 /** Keep log rows for the next run: all of them in the cache, and in Script Properties as many as fit
@@ -3217,8 +3229,11 @@ function savePend_(props, rows) {
   props.setProperty('NOTIFY_PEND', JSON.stringify(keep));
 }
 
-function clearPend_(props) {
+/** Drop what a run has logged: its own NOTIFY_PEND, and the pushes' NOTIFY_PEND_<id> it read (keys; one
+ *  written since stays for the next run). */
+function clearPend_(props, keys) {
   props.deleteProperty('NOTIFY_PEND');
+  (keys || []).forEach((k) => props.deleteProperty(k));
   try {
     CacheService.getScriptCache().remove('NPEND');
   } catch (err) {
@@ -3298,9 +3313,12 @@ function readNew_(since, full, tasks) {
   return { rows: all.filter((r) => r.seq > since), all: all, seq: seq };
 }
 
-/** Active checkers who get a mail about this quotation: never whoever attached it or wrote it last. */
+/**
+ * Active checkers who get a mail about this quotation: never whoever attached it or wrote it last, even when the
+ * team lets them check their own (scfg/notify.cfg self decides who may check, not who hears of their own change).
+ */
 function checkersOf_(c, doc, lastBy) {
-  return c.people.filter((x) => x.mail && x.caps['qt.check'] && x.nf.on.qt && !sameName_(x.n, doc.by) && (c.cfg.self || !sameName_(x.n, lastBy)));
+  return bellOf_(c, doc, lastBy).filter((x) => x.mail && x.nf.on.qt);
 }
 
 /** The account whose display name is `name`, or null. */
@@ -3337,7 +3355,7 @@ function qtMails_(c, rows, all) {
     // what it is to its checkers: the record before this row, a record the same push deleted (another file), the
     // deal's other versions
     const gone = rows.filter((x) => x.del && x.at === r.at && x.k.indexOf('ddoc/' + doc.deal + '/') === 0).map((x) => toDoc_(valBefore_(all, x.k, x.seq), doc.deal, docIdOf_(x.k)));
-    const prev = qtPrev_(doc, toDoc_(valBefore_(all, r.k, r.seq), doc.deal, doc.id), gone, (c.S.docsBy[doc.deal] || []));
+    const prev = qtPrev_(doc, toDoc_(valBefore_(all, r.k, r.seq), doc.deal, doc.id), gone, (c.S.docsBy[doc.deal] || []), deal, since);
     if (!qtNews_(c, doc, deal, prev)) {
       c.logs.push(['qt', '', dk, fph, 'skipped-old']);
       return;
@@ -3350,7 +3368,7 @@ function qtMails_(c, rows, all) {
     const to = mailed.filter((x) => !doneIn_(c, dk + ':' + x.u));
     // one going out from another execution right now: looked at again on a later run (in case it never reports)
     if (mailed.some((x) => c.seen[dk + ':' + x.u] === 'claim')) c.hold = Math.min(c.hold, r.seq);
-    const none = mailed.length ? '' : bellOf_(c, doc, cur.by).length ? 'nomail' : 'nochk';
+    const none = mailed.length ? '' : noneWhy_(c, doc, cur.by, bellOf_(c, doc, cur.by));
     if (to.length || none) cands.push({ doc: doc, deal: deal, fph: fph, dk: dk, all: mailed, to: to, seq: r.seq, what: prev.what, prev: prev.doc, by: cur.by, at: r.at, none: none });
   });
   if (cands.length > NOTIFY_BULK) {
@@ -3374,14 +3392,15 @@ function valBefore_(all, k, seq) {
 /**
  * What a quotation is to its checkers: an edit of one they know ('edit': the same record before with other
  * figures, b; or the record that another file replaced, "เปลี่ยนไฟล์": deleted by the same change, gone, with the
- * same attach and confirm times), a revision ('rev': with the newest earlier version of the deal's quotation among
- * vers), or 'new'. { what, doc: the one before, or null }.
+ * same attach and confirm times; either one in the check then, qtNeeds_ with the deal and the go-live day
+ * `since`: one confirmed only now is new to them), a revision ('rev': with the newest earlier version of the
+ * deal's quotation among vers), or 'new'. { what, doc: the one before, or null }.
  */
-function qtPrev_(doc, b, gone, vers) {
-  if (b && !fpSame_(fpOf_(b), fpOf_(doc))) return { what: 'edit', doc: b };
+function qtPrev_(doc, b, gone, vers, deal, since) {
+  if (b && !fpSame_(fpOf_(b), fpOf_(doc)) && qtNeeds_(b, deal, since)) return { what: 'edit', doc: b };
   for (let i = 0; i < gone.length; i++) {
     const g = gone[i];
-    if (g && g.id !== doc.id && g.kind === 'quotation' && g.at === doc.at && (g.cAt || '') === (doc.cAt || '')) return { what: 'edit', doc: g };
+    if (g && g.id !== doc.id && g.kind === 'quotation' && g.at === doc.at && (g.cAt || '') === (doc.cAt || '') && qtNeeds_(g, deal, since)) return { what: 'edit', doc: g };
   }
   const older = vers
     .filter((v) => v && v.id !== doc.id && v.kind === 'quotation' && v.stage === QUOTE_STAGE && (v.at || '') < (doc.at || ''))
@@ -3408,10 +3427,22 @@ function qtChanges_(a, b) {
   return out;
 }
 
-/** Active checkers who see the quotation in the web app's bell (the holders of qt.check who see the tracker),
- *  mailed or not: never whoever attached it, nor whoever wrote it last unless the team allows it. */
+/** The other checkers, who see the quotation in the web app's bell (the holders of qt.check who see the
+ *  tracker), mailed or not: never whoever attached it or wrote it last (they know; with self on, they see their
+ *  own in the bell too). */
 function bellOf_(c, doc, lastBy) {
-  return c.people.filter((x) => x.caps['qt.check'] && x.caps['view.sales'] && !sameName_(x.n, doc.by) && (c.cfg.self || !sameName_(x.n, lastBy)));
+  return c.people.filter((x) => x.caps['qt.check'] && x.caps['view.sales'] && !sameName_(x.n, doc.by) && !sameName_(x.n, lastBy));
+}
+
+/**
+ * Why nobody is mailed about a quotation (no checker to mail; bell = bellOf_): 'nomail' (other checkers see it in
+ * the bell, none can get mail), 'self' (no other checker, but the team lets whoever attached it or wrote it last
+ * check their own, and one of them holds qt.check), else 'nochk'.
+ */
+function noneWhy_(c, doc, lastBy, bell) {
+  if (bell.length) return 'nomail';
+  const own = c.cfg.self && c.people.some((x) => x.caps['qt.check'] && x.caps['view.sales'] && (sameName_(x.n, doc.by) || sameName_(x.n, lastBy)));
+  return own ? 'self' : 'nochk';
 }
 
 /** Why a checker gets no quotation mail: 'role' (no notify.mail), 'noem' (no address), 'unverified', 'off'
@@ -3511,13 +3542,14 @@ function qtNowPlan_(props, got, actor, now) {
   }
   const off = p.NOTIFY_NOW === '0';
   let budget = off || left == null ? 0 : Math.max(0, Math.min(QT_NOW_MAX, left));
+  let used = 0; // mails this push claimed
   keys.forEach((k) => {
     const doc = toDoc_(got[k].v, dealOf_(k), docIdOf_(k));
     const deal = c.S.deals[doc.deal];
     if (!qtNeeds_(doc, deal, since) || checkOf_(L, doc) !== 'wait') return;
     const fph = fpHash_(fpOf_(doc)), dk = 'qt:' + doc.id + ':' + fph;
     const vers = Object.keys(L).filter((x) => x !== k && x.indexOf('ddoc/' + doc.deal + '/') === 0).map((x) => toDoc_(rowVal_(L[x]), doc.deal, docIdOf_(x)));
-    const prev = qtPrev_(doc, toDoc_(rowVal_(L0[k]), doc.deal, doc.id), gone, vers);
+    const prev = qtPrev_(doc, toDoc_(rowVal_(L0[k]), doc.deal, doc.id), gone, vers, deal, since);
     const o = qtOut0_(doc.id, k, fph, prev.what, '');
     qn.out.push(o);
     const dec = has_(c.seen, dk) ? String(c.seen[dk]) : '';
@@ -3528,7 +3560,7 @@ function qtNowPlan_(props, got, actor, now) {
     o.skip = bell.filter((x) => mailWhy_(x)).map((x) => ({ n: x.n, r: mailWhy_(x) }));
     const mailed = checkersOf_(c, doc, name);
     if (!mailed.length) {
-      o.why = bell.length ? 'nomail' : 'nochk';
+      o.why = noneWhy_(c, doc, name, bell);
       if (!has_(c.seen, dk + ':none')) qn.log.push(['qt', '', dk + ':none', fph, 'none:' + o.why]);
       return;
     }
@@ -3536,13 +3568,15 @@ function qtNowPlan_(props, got, actor, now) {
     mailed.forEach((x) => {
       const key = dk + ':' + x.u;
       if (doneIn_(c, key)) return void o.to.push(x.n); // mailed already (this version, an earlier push), or going out now
-      // the file first: the checker compares the figures with it (the push that brings its Drive id mails)
-      if (!doc.fileId || off || left == null || left <= 0 || budget <= 0) {
+      // the file first: the checker compares the figures with it (the push that brings its Drive id mails). The
+      // day's quota used up (before this push, or by its own mails): notifyTick sends them once it is back
+      if (!doc.fileId || off || left == null || left - used <= 0 || budget <= 0) {
         o.later.push(x.n);
-        if (!o.why) o.why = !doc.fileId ? 'file' : off ? 'timer' : left == null ? 'err' : left <= 0 ? 'quota' : '';
+        if (!o.why) o.why = !doc.fileId ? 'file' : off ? 'timer' : left == null ? 'err' : left - used <= 0 ? 'quota' : '';
         return;
       }
       budget--;
+      used++;
       qn.log.push(['qt', x.u, key, fph, 'claim']);
       qn.send.push({ o: o, x: x, key: key, fph: fph, seq: got[k].seq, q: q });
     });
@@ -3598,7 +3632,9 @@ function qtNowSend_(out, t0) {
 
 /**
  * A push's mail results into the log, waiting for the lock only briefly (the reply waits): with the lock busy they
- * go to NOTIFY_PEND, which notifyTick reads as written. redo = the earliest row notifyTick must read again.
+ * go to a Script Property of their own, NOTIFY_PEND_<id> (written once, never read and rewritten, so a run that
+ * clears what it logged cannot drop them), which notifyTick reads as written and removes once logged. redo = the
+ * earliest row notifyTick must read again.
  */
 function qtNowLog_(logs, redo) {
   const props = PropertiesService.getScriptProperties();
@@ -3613,7 +3649,7 @@ function qtNowLog_(logs, redo) {
       lock.releaseLock();
     }
   }
-  savePend_(props, pendOf_(props.getProperties()).concat(logs));
+  props.setProperty(PEND_PRE + Utilities.getUuid().replace(/-/g, '').slice(0, 16), JSON.stringify(logs));
   if (redo) qtRedo_(props, redo);
 }
 

@@ -737,6 +737,12 @@ type QtOut = { id: string; k: string; fp: string; what: string; to: string[]; la
 const qtOf = (r: Record<string, unknown>) => (r.qt || []) as QtOut[];
 const fpH = (s: GasSim, o: Record<string, unknown> = {}) => s.run<string>('fpHash_', fp(o));
 const subjects = (s: GasSim, from = 0) => s.mail.sent.slice(from).map((m) => m.subject);
+/** The log rows pushes left in NOTIFY_PEND_<id> (the lock was busy), in key order. */
+const pushPend = (s: GasSim) =>
+  Object.keys(s.props)
+    .filter((k) => k.startsWith('NOTIFY_PEND_'))
+    .sort()
+    .flatMap((k) => JSON.parse(s.props[k]) as string[][]);
 
 describe('a push mails a new quotation\'s checkers at once (the timer is the safety net)', () => {
   it('right after saving, outside the lock: every checker but the attacher; the reply says who; notifyTick sends nothing more', () => {
@@ -888,6 +894,22 @@ describe('a push mails a new quotation\'s checkers at once (the timer is the saf
     expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
   });
 
+  it('the day\'s quota runs out within the push: the rest wait for the quota, and the reply says so', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    t.s.mail.quota = 1;
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า'], later: ['มินท์', 'ฝน'], why: 'quota' }]);
+    expect(sentTo(t.s)).toEqual(['lead@example.com']);
+    // with quota to spare and more checkers than one push sends, the rest are not "quota"
+    const u = crew({ now: true });
+    const head = String(call(u.s, u.lead, 'role_save', { n: 'ผู้ตรวจ', c: HEAD }).id);
+    verify(u.s, member(u.s, u.lead, 'nok', 'นก', head), 'nok@example.com');
+    push(u.s, u.lead, [deal('d1')]);
+    u.s.mail.quota = 50;
+    expect(qtOf(push(u.s, u.ek, [qt('d1', 'q1')]))).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'], later: ['นก'], why: '' }]);
+  });
+
   it('no quota left: the push sends nothing and says so; notifyTick sends once the quota is back', () => {
     const t = crew({ now: true });
     push(t.s, t.lead, [deal('d1')]);
@@ -967,12 +989,42 @@ describe('a push mails a new quotation\'s checkers at once (the timer is the saf
     // (the first mail went with the lock free; the others while the other execution held it)
     expect(t.s.mail.calls[0].locked).toBe(false);
     expect(rowsOf(t.s, t.lead).some((x) => x.k === 'stage/9')).toBe(true);
-    // the results wait in NOTIFY_PEND; the next run writes them and sends nothing again
-    expect((JSON.parse(t.s.props.NOTIFY_PEND) as string[][]).map((x) => x[4])).toEqual(['sent', 'sent', 'sent']);
+    // the results wait in a Script Property of their own (NOTIFY_PEND_<id>); the next run writes them, removes
+    // it and sends nothing again
+    expect(pushPend(t.s).map((x) => x[4])).toEqual(['sent', 'sent', 'sent']);
+    expect(t.s.props.NOTIFY_PEND).toBeUndefined();
     at(20 * MIN);
     expect(tick(t.s)).toMatchObject({ sent: 0 });
     expect(logOf(t.s).filter((x) => x.kind === 'qt' && x.result === 'sent')).toHaveLength(3);
     expect(t.s.mail.sent).toHaveLength(3);
+    expect(pushPend(t.s)).toEqual([]);
+  });
+
+  it('a push\'s results waiting for the log survive a run that clears its own: a run that read none of them leaves them, nobody is mailed twice', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1'), deal('d2')]);
+    // an earlier run's rows wait in NOTIFY_PEND (the lock was busy for its log)
+    t.s.props.NOTIFY_PEND = JSON.stringify([['qt', 'x', 'qt:old:1:x', '1', 'sent']]);
+    // the run has read the Script Properties; before it takes the lock to write that pend, a push mails a quotation
+    // while another execution holds the lock, so the push's results wait too
+    t.s.beforeLock(() => {
+      let release: (() => void) | null = null;
+      t.s.mail.log = () => void (release ||= t.s.holdLock());
+      expect(qtOf(push(t.s, t.ek, [qt('d2', 'q2')]))).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+      t.s.mail.log = null;
+      release!();
+    });
+    tick(t.s);
+    // the run cleared what it logged (NOTIFY_PEND), not the push's rows it never read
+    expect(t.s.props.NOTIFY_PEND).toBeUndefined();
+    expect(pushPend(t.s).map((x) => [x[1], x[4]])).toEqual([['lead', 'sent'], ['mint', 'sent'], ['fon', 'sent']]);
+    for (const m of [10, 20, 30, 40]) {
+      at(m * MIN);
+      tick(t.s);
+    }
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+    expect(logOf(t.s).filter((x) => x.key.startsWith('qt:q2:')).map((x) => [x.u, x.result])).toEqual([['lead', 'claim'], ['mint', 'claim'], ['fon', 'claim'], ['lead', 'sent'], ['mint', 'sent'], ['fon', 'sent']]);
+    expect(pushPend(t.s)).toEqual([]);
   });
 
   it('only what the account may store, and only quotations in the check: refused ops, a viewer, the team code, other documents, an import', () => {
@@ -1005,6 +1057,70 @@ describe('a push mails a new quotation\'s checkers at once (the timer is the saf
     expect(lr).toMatchObject({ ok: true });
     expect(lr.qt).toBeUndefined();
     expect(legacy.mail.sent).toEqual([]);
+  });
+
+  it('a quotation that enters the check only now (its amount confirmed later) is new to the checkers, not an edit', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    expect(push(t.s, t.ek, [qt('d1', 'q1', { amount: null, target: 'none' })]).qt).toBeUndefined();
+    at(5 * MIN);
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ what: 'new', to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+    expect(subjects(t.s)).toEqual(Array(3).fill('ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 101,650 บาท'));
+    expect(t.s.mail.sent[0].body).not.toContain('แก้');
+    // the timer words it the same way
+    const u = crew();
+    push(u.s, u.lead, [deal('d1')]);
+    push(u.s, u.ek, [qt('d1', 'q1', { amount: null, target: 'none' })]);
+    tick(u.s);
+    at(5 * MIN);
+    push(u.s, u.ek, [qt('d1', 'q1')]);
+    at(10 * MIN);
+    tick(u.s);
+    expect(subjects(u.s)).toEqual(Array(3).fill('ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 101,650 บาท'));
+  });
+
+  it('with "the attacher may check their own" on: nobody else to mail is "self", not "nochk"; whoever changed it is never mailed about it', () => {
+    at(0);
+    const s = mk();
+    const lead = s.bootstrapAdmin({ u: 'mkorn', name: 'มกร', pw: 'lead-password-1' });
+    const ek = member(s, lead, 'eak', 'เอก', 'sales');
+    verify(s, lead, 'owner2@example.com');
+    push(s, lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: true } }, deal('d1'), deal('d2')]);
+    s.mail.sent.length = 0;
+    // the admin, the only checker, attaches: he may check it himself
+    const r = push(s, lead, [qt('d1', 'q1', { by: 'มกร' })]);
+    expect(qtOf(r)).toMatchObject([{ to: [], bell: [], why: 'self' }]);
+    expect(call(s, lead, 'qt_check', { k: 'ddoc/d1/q1', st: 'ok', fp: fp() })).toMatchObject({ ok: true });
+    // sales edits the admin's quotation: the admin (who attached it) may check it; no mail to anyone
+    at(MIN);
+    push(s, lead, [qt('d2', 'q2', { by: 'มกร', docNo: 'QT-2' })]);
+    at(2 * MIN);
+    expect(qtOf(push(s, ek, [qt('d2', 'q2', { by: 'มกร', docNo: 'QT-2', amount: 9000 })]))).toMatchObject([{ what: 'edit', to: [], why: 'self' }]);
+    // the timer logs the same reason, and mails nobody
+    at(10 * MIN);
+    tick(s);
+    expect(s.mail.sent).toEqual([]);
+    expect(logOf(s).filter((x) => x.result.startsWith('none:')).map((x) => x.result)).toEqual(['none:self', 'none:self', 'none:self']); // q1, q2, q2 as edited
+    // turned off: the same case is "nochk" again
+    push(s, lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: false } }]);
+    at(11 * MIN);
+    expect(qtOf(push(s, lead, [qt('d1', 'q3', { by: 'มกร', docNo: 'QT-3' })]))).toMatchObject([{ why: 'nochk' }]);
+    // a checker who corrects someone else's quotation is not mailed about it, now or by the timer (self on)
+    const t = crew({ now: true });
+    push(t.s, t.lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: true } }, deal('d1')]);
+    push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0) })]);
+    at(20 * MIN);
+    const n = t.s.mail.sent.length;
+    const e = push(t.s, t.mint, [qt('d1', 'q1', { at: iso(0), cAt: iso(20 * MIN), amount: 95000 })]);
+    expect(qtOf(e)).toMatchObject([{ what: 'edit', to: ['หัวหน้า', 'ฝน'], bell: ['หัวหน้า', 'ฝน'] }]);
+    expect(sentTo(t.s).slice(n)).toEqual(['lead@example.com', 'fon@example.com']);
+    const v = crew();
+    push(v.s, v.lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: true } }, deal('d1')]);
+    push(v.s, v.mint, [qt('d1', 'q1', { by: 'เอก' })]);
+    at(25 * MIN);
+    tick(v.s);
+    expect(sentTo(v.s).sort()).toEqual(['fon@example.com', 'lead@example.com']);
   });
 
   it('an edit of a quotation in the check is news even days later; NOTIFY_NOW "0" leaves the mail to the timer', () => {

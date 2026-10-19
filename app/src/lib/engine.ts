@@ -38,8 +38,8 @@ import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, type JointGroup } from './sales';
 import { canMergeFrom, isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
 import {
-  QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtSentNews, toQtCheck,
-  type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type Scope,
+  QT_NOTE_MAX, dirPeople, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, toQtCheck,
+  type MailPerson, type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type QtSentCtx, type Scope,
 } from './notify';
 import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, teamMonth, toMonthClose, toPayCheck, ymTh, type ChkRow, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
 // the month check of money out (job expenses in the money views)
@@ -4874,6 +4874,7 @@ export class GccEngine {
     prefs.del(PREF.peopleHide);
     prefs.del(PREF.peopleGone);
     prefs.del(PREF.qtSent);
+    this.dirMemo = null;
     if (dropUnsent) {
       await this.store.del(this.qk(cfg)).catch(() => {});
       await this.store.del(pendKey(cfg.url)).catch(() => {});
@@ -4945,6 +4946,8 @@ export class GccEngine {
     const s = this.session, cfg = this.teamCfg;
     if (!s || !cfg || cfg.mode !== 'accounts') throw new Error('ยังไม่ได้เข้าสู่ระบบ');
     let r: Record<string, unknown>;
+    // a change to the accounts: who checks and gets mail is read again when next needed (heardQt)
+    if (/^(user_save|role_save|role_del|grant_save|grant_del|req_decide)$/.test(String(body.action))) this.dirMemo = null;
     try {
       r = await call<Record<string, unknown>>(this.transport, cfg.url, { tok: s.tok }, body);
     } catch (x) {
@@ -4966,7 +4969,7 @@ export class GccEngine {
       this.knownRoles = parseRoles(r.roles);
       this.noteRoles(r.roles);
     }
-    return {
+    const dir: TeamDir = {
       users: (Array.isArray(r.users) ? r.users : []) as TeamUser[],
       roles: parseRoles(r.roles),
       grants: parseGrants(r.grants),
@@ -4974,6 +4977,9 @@ export class GccEngine {
       audit: parseAudit(r.audit),
       v4,
     };
+    // who checks and gets mail, for what attaching tells an admin (heardQt)
+    this.dirMemo = { key: (this.teamCfg?.url || '') + '|' + (this.session?.u || ''), at: Date.now(), people: dirPeople(dir, todayISO()) };
+    return dir;
   }
   /** A new account with a temporary password made here (shown once to the admin, never stored).
    *  `em`: its notification e-mail (a script with notifications sends it a code to confirm). */
@@ -5151,10 +5157,18 @@ export class GccEngine {
   }
   /** The latest outcome worth the bottom message after attaching or editing (SalesMessages shows it once). */
   qtFresh: { id: string; n: number } | null = null;
+  /** How this account reads who heard of a quotation (lib/notify.ts qtSentView): it manages users, it checks
+   *  quotations, the team lets whoever attached or changed one check it. */
+  qtSentCtx(): QtSentCtx {
+    return { admin: this.can('set.users'), checker: this.can('qt.check'), self: this.notifyCfg().self };
+  }
   /**
    * A push reply: what the script did about the quotations the push carried (`qt`, see Code.gs "E-mail"). A
-   * script that says nothing (before this release) gets this browser's own word for a quotation that just entered
-   * the check: no notifications in the script, not set up, or its timer mails it within 10 minutes.
+   * script that says nothing gets this browser's own word for a quotation that just entered the check: no
+   * notifications in the script ('script'), not set up ('off'), or the release before immediate mail (hello has
+   * no `now`): its timer mails the other checkers it can, which this browser cannot name ('tick'), except for an
+   * admin, who reads the team's accounts (qtLocalOutcome: who it mails, or why nobody). A script that does say
+   * `now` and said nothing about a quotation had none of them in its check.
    */
   private heardQt(r: { qt?: unknown }, batch: SyncOp[]) {
     const cfg = this.teamCfg, s = this.session;
@@ -5167,16 +5181,40 @@ export class GccEngine {
         const p = parseQtOut(x), v = p && pushed.get(p.k);
         if (p && v) outs.push({ ...p.o, fp: qtFpKey(v), at });
       }
-    } else {
-      const live = this.notifyLive;
-      pushed.forEach((v, k) => {
-        const doc = this.sales.docs[k.slice(5)];
-        // only one that is news: confirmed in the last 2 days (as the script decides), as it is here now
-        const t = Date.parse(doc?.cAt || doc?.at || '') || 0;
-        if (!doc || qtFpKey(doc) !== qtFpKey(v) || Date.now() - t > 2 * DAY || !needsCheck(this.sales, doc, live?.since || '') || qtCheckOf(this.checks()[doc.id], doc).status !== 'wait') return;
-        outs.push({ id: doc.id, fp: qtFpKey(v), at, what: 'new', to: [], later: [], bell: [], skip: [], why: !live ? 'script' : !live.on ? 'off' : 'timer', local: true });
-      });
+      return this.noteQtSent(outs);
     }
+    const live = this.notifyLive;
+    if (live?.on && live.now !== undefined) return;
+    const docs: DealDoc[] = [];
+    pushed.forEach((v, k) => {
+      const doc = this.sales.docs[k.slice(5)];
+      // only one that is news: confirmed in the last 2 days (as the script decides), as it is here now
+      const t = Date.parse(doc?.cAt || doc?.at || '') || 0;
+      if (!doc || qtFpKey(doc) !== qtFpKey(v) || Date.now() - t > 2 * DAY || !needsCheck(this.sales, doc, live?.since || '') || qtCheckOf(this.checks()[doc.id], doc).status !== 'wait') return;
+      docs.push(doc);
+    });
+    if (!docs.length) return;
+    const local = (doc: DealDoc, o: Pick<QtSent, 'to' | 'later' | 'bell' | 'skip' | 'why'>): QtSent => ({ id: doc.id, fp: qtFpKey(doc), at, what: sameName(doc.by, s.name) ? 'new' : 'edit', ...o, local: true });
+    const none = (why: QtSent['why']) => ({ to: [], later: [], bell: [], skip: [], why });
+    if (!live || !live.on || !this.can('set.users')) return this.noteQtSent(docs.map((doc) => local(doc, none(!live ? 'script' : !live.on ? 'off' : 'tick'))));
+    // an admin: who that timer mails, from the team's accounts (read once in a while; offline: 'tick')
+    const key = this.qtSentM?.key, me = s.name, self = this.notifyCfg().self;
+    this.teamPeople().then(
+      (people) => this.qtSentM?.key === key && this.noteQtSent(docs.map((doc) => local(doc, qtLocalOutcome({ people, me, by: doc.by, self })))),
+      () => this.qtSentM?.key === key && this.noteQtSent(docs.map((doc) => local(doc, none('tick')))),
+    );
+  }
+  /** The team's active accounts as this admin last read them (adminDir), at most a few minutes old. */
+  private async teamPeople(): Promise<MailPerson[]> {
+    const key = (this.teamCfg?.url || '') + '|' + (this.session?.u || '');
+    const m = this.dirMemo;
+    if (m && m.key === key && Date.now() - m.at < 5 * 60000) return m.people;
+    await this.adminDir();
+    return this.dirMemo?.key === key ? this.dirMemo.people : [];
+  }
+  private dirMemo: { key: string; at: number; people: MailPerson[] } | null = null;
+  /** Keep what heardQt said, per document (the same version pushed again keeps who was told). */
+  private noteQtSent(outs: QtSent[]) {
     if (!outs.length) return;
     const M = this.qtSentAll();
     let fresh = '';
@@ -5590,7 +5628,7 @@ export class GccEngine {
       window.addEventListener('focus', this.teamWake);
       window.addEventListener('online', this.teamWake);
     }
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.teamWake);
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', this.teamWake);
     if (now) this.teamSync();
   }
   private stopTeam() {
@@ -5602,7 +5640,7 @@ export class GccEngine {
       window.removeEventListener('focus', this.teamWake);
       window.removeEventListener('online', this.teamWake);
     }
-    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.teamWake);
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', this.teamWake);
   }
 
   // ---- details

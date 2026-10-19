@@ -84,8 +84,8 @@ export function SalesMessages() {
     if (!fresh) return;
     const doc = docById(e.sales, fresh.id), o = doc && e.qtSentFor(doc);
     if (!doc || !o || (ui.slToast && !ui.slToast.ms)) return;
-    const admin = e.can('set.users');
-    const w = qtSentView(o, { admin, checker: e.can('qt.check') });
+    const ctx = e.qtSentCtx(), admin = ctx.admin;
+    const w = qtSentView(o, ctx);
     acts.say(`${doc.docNo || 'ใบเสนอราคา'} · ${w.text}`, { ms: 9000, ...(w.fix && admin ? { acts: [{ label: w.fix === 'checker' ? 'ตั้งผู้ตรวจ' : 'ดูการแจ้งเตือน', act: 'notify' as const }, { label: 'ปิด', act: 'dismiss' as const }] } : {}) });
   }, [fresh?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves)

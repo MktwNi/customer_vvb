@@ -3,6 +3,9 @@
  * script in the simulator:
  * - against the script deployed before this release (team-sync/fixtures/Code.v3.gs: no `notify` in hello,
  *   no qt_check / notify_* actions): the setup state, the bell with payments and appointments only;
+ * - against the script with notifications from before a push mailed quotations itself (team-sync/fixtures/
+ *   Code.v4-timer.gs: notifyTick only, nothing about the push in its reply): what attaching tells the uploader
+ *   and an admin, and that it is true (who the timer mails, or nobody);
  * - against this release's script (team-sync/Code.gs, set up with its e-mail trigger): a quotation attached
  *   by one account waits in a checker's bell, is approved (the record and its history line reach everyone),
  *   waits again after an edit or a revision; sent back with a note; undone; the self-check rule; the team's
@@ -27,6 +30,8 @@ const DATA = join(ROOT, 'project', 'data');
 const json = (f: string) => JSON.parse(readFileSync(DATA + '/' + f, 'utf8'));
 /** The team script deployed before this release (no notifications). */
 const V3 = readFileSync(join(ROOT, 'team-sync', 'fixtures', 'Code.v3.gs'), 'utf8');
+/** The team script with notifications whose push said nothing about quotations (only its timer mailed them). */
+const V4T = readFileSync(join(ROOT, 'team-sync', 'fixtures', 'Code.v4-timer.gs'), 'utf8');
 
 const LS = new Map<string, Map<string, string>>();
 let cur = '';
@@ -54,14 +59,12 @@ afterAll(() => {
 });
 
 const sent: Record<string, unknown>[] = [];
-let silent = false;
 interface Tab { e: GccEngine; browser: string }
 const tabs: Tab[] = [];
 afterEach(() => {
   tabs.splice(0).forEach((t) => t.e.dispose());
   LS.clear();
   sent.length = 0;
-  silent = false;
   vi.setSystemTime(T0);
 });
 
@@ -76,10 +79,7 @@ function mk(browser: string): Tab {
   raw.loading = false;
   const post = async (_u: string, body: Record<string, unknown>) => {
     sent.push(body);
-    const r = sim.post(body) as Record<string, unknown>;
-    // a script before this release says nothing about who a push mailed
-    if (silent && body.action === 'push') delete r.qt;
-    return r;
+    return sim.post(body) as Record<string, unknown>;
   };
   raw.transport = post;
   raw.fileTransport = post;
@@ -163,6 +163,80 @@ describe('against the team script deployed before this release (no notifications
     S.e.setBellScope('team');
     expect(S.e.bellScope()).toBe('team');
     expect(L.e.bellScope()).toBe('team');
+  });
+});
+
+describe('against the team script from before a push mailed quotations itself (its timer only)', () => {
+  it('the owner\'s case: an admin who is the only checker attaches it: no mail ever comes, and he is told so (counted, with the link), not promised one', async () => {
+    const L = await lead(V4T);
+    await verify(L, 'mew@example.com');
+    const S = await member(L, 'ekk', 'เอก', 'sales');
+    await settle(L, S);
+    expect(L.e.notifyLive).toEqual({ on: true, since: '2026-10-12' });
+    const d = L.e.addDeal({ client: 'บริษัท ของหมิว จำกัด' });
+    const n0 = sim.mail.sent.length;
+    const own = await L.e.attachDoc(d.id, pdf('QT-9.pdf'), qt(5000, 'QT-9'));
+    await settle(L);
+    // the script's reply says nothing; the admin's browser reads the team's accounts: nobody else checks
+    expect(sent.filter((b) => b.action === 'push').length).toBeGreaterThan(0);
+    expect(L.e.qtSentFor(own)).toMatchObject({ to: [], later: [], why: 'nochk', local: true });
+    expect(L.e.qtFresh?.id).toBe(own.id);
+    expect(mineRows(L, 'หมิว')).toMatchObject([{ key: 'w:' + own.id, count: true, act: { label: 'ตั้งผู้ตรวจ', to: 'notify' }, sub: expect.stringContaining('รอผู้ตรวจคนอื่น') }]);
+    // and that is true: the timer mails nobody
+    later(10 * 60000);
+    sim.run('notifyTick');
+    later(10 * 60000);
+    sim.run('notifyTick');
+    expect(sim.mail.sent.slice(n0).filter((m) => /^ใบเสนอราคา/.test(m.subject))).toEqual([]);
+  });
+
+  it('sales attaches: the uploader is not promised names; the admin (verified) gets the mail from the timer and sees it in the bell after one pull', async () => {
+    const L = await lead(V4T);
+    await verify(L, 'mew@example.com');
+    const S = await member(L, 'ekk', 'เอก', 'sales');
+    await settle(L, S);
+    const d = S.e.addDeal({ client: 'บริษัท ดูราฟลอร์ จำกัด' });
+    const n0 = sim.mail.sent.length;
+    const doc = await S.e.attachDoc(d.id, pdf('QT-2569-021.pdf'), qt(101650));
+    await settle(S);
+    expect(S.e.qtSentFor(docIn(S, doc))).toMatchObject({ to: [], later: [], why: 'tick', local: true });
+    expect(mineRows(S, 'เอก')).toMatchObject([{ count: false, sub: 'QT-2569-021 · สคริปต์ของทีมรุ่นนี้ส่งอีเมลตามรอบทุก 10 นาที ถึงผู้ตรวจคนอื่นที่ยืนยันอีเมลแล้ว (ถ้ามี)' }]);
+    // another push of the same version (its Drive id, a stage note) says nothing new
+    const n = S.e.qtFresh!.n;
+    S.e.updateDoc(d.id, doc.id, { kind: 'quotation' }, { confirm: true });
+    await settle(S);
+    expect(S.e.qtFresh!.n).toBe(n);
+    // nothing at once (that script mails with its timer only); the timer mails the admin
+    expect(sim.mail.sent.slice(n0)).toEqual([]);
+    L.e.teamPoke();
+    await settle(L);
+    expect(chkRows(L, 'หมิว').map((r) => r.key)).toEqual(['q:' + doc.id]);
+    later(10 * 60000);
+    sim.run('notifyTick');
+    expect(sim.mail.sent.slice(n0).filter((m) => /^ใบเสนอราคา/.test(m.subject)).map((m) => [m.to, m.subject])).toEqual([['mew@example.com', 'ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 101,650 บาท']]);
+  });
+
+  it('an admin with another checker: told who the timer mails, or that the other checker has no confirmed address yet', async () => {
+    const L = await lead(V4T);
+    await verify(L, 'mew@example.com');
+    const C = await member(L, 'mint', 'มินท์', 'admin');
+    await settle(L, C);
+    const d = L.e.addDeal({ client: 'บริษัท ของหมิว จำกัด' });
+    const a = await L.e.attachDoc(d.id, pdf('QT-1.pdf'), qt(5000, 'QT-1'));
+    await settle(L);
+    expect(L.e.qtSentFor(a)).toMatchObject({ to: [], later: [], bell: ['มินท์'], skip: [{ n: 'มินท์', r: 'noem' }], why: 'nomail' });
+    // มินท์ confirms her address; the admin's next quotation names her (the accounts are read again after a while)
+    await verify(C, 'mint@example.com');
+    later(6 * 60000);
+    const n0 = sim.mail.sent.length;
+    const b = await L.e.attachDoc(d.id, pdf('QT-2.pdf'), qt(6000, 'QT-2'));
+    await settle(L);
+    expect(L.e.qtSentFor(b)).toMatchObject({ to: [], later: ['มินท์'], why: 'timer' });
+    expect(mineRows(L, 'หมิว').find((r) => r.key === 'w:' + b.id)).toMatchObject({ count: false, sub: 'QT-2 · จะส่งอีเมลให้ผู้ตรวจภายใน 10 นาที: มินท์' });
+    later(10 * 60000);
+    sim.run('notifyTick');
+    // (the first one too, now that she can get mail)
+    expect(sim.mail.sent.slice(n0).filter((m) => /^ใบเสนอราคา/.test(m.subject)).map((m) => [m.to, m.subject.split(' · ')[1]]).sort()).toEqual([['mint@example.com', 'QT-1'], ['mint@example.com', 'QT-2']]);
   });
 });
 
@@ -397,19 +471,19 @@ describe('against the team script of this release (notifications set up)', () =>
     expect(mineRows(S, 'เอก')).toMatchObject([{ sub: expect.stringContaining('ยังไม่ได้เปิดการส่งอีเมล') }]);
   });
 
-  it('a script that says nothing about the push (the release before this one): the timer mails it, within 10 minutes', async () => {
+  it('with "the attacher may check their own" on, an admin who is the only checker hears he may check it himself: nothing counted, nothing to set up', async () => {
     const L = await lead();
-    const S = await member(L, 'ekk', 'เอก', 'sales');
-    silent = true;
-    const d = S.e.addDeal({ client: 'บริษัท ดูราฟลอร์ จำกัด' });
-    const doc = await S.e.attachDoc(d.id, pdf('QT-1.pdf'), qt(1000, 'QT-1'));
-    await settle(S);
-    expect(S.e.qtSentFor(docIn(S, doc))).toMatchObject({ why: 'timer', local: true });
-    expect(mineRows(S, 'เอก')).toMatchObject([{ sub: 'QT-1 · จะส่งอีเมลให้ผู้ตรวจภายใน 10 นาที' }]);
-    // another push of the same version (its Drive id, a stage note) says nothing new
-    const n = S.e.qtFresh!.n;
-    S.e.updateDoc(d.id, doc.id, { kind: 'quotation' }, { confirm: true });
-    await settle(S);
-    expect(S.e.qtFresh!.n).toBe(n);
+    await verify(L, 'mew@example.com');
+    L.e.saveNotifyCfg({ ...NOTIFY_CFG0, self: true });
+    await settle(L);
+    const d = L.e.addDeal({ client: 'บริษัท ของหมิว จำกัด' });
+    const own = await L.e.attachDoc(d.id, pdf('QT-9.pdf'), qt(5000, 'QT-9'));
+    await settle(L);
+    expect(L.e.qtSentFor(own)).toMatchObject({ to: [], why: 'self' });
+    expect(L.e.qtSentCtx()).toEqual({ admin: true, checker: true, self: true });
+    // its own waiting quotation is in his รอตรวจ, not in ใบเสนอราคาของฉัน
+    expect(chkRows(L, 'หมิว').map((r) => r.key)).toEqual(['q:' + own.id]);
+    expect(mineRows(L, 'หมิว')).toEqual([]);
+    expect((await L.e.notifyStatus()).recent).toMatchObject([{ doc: own.id, result: 'none:self' }]);
   });
 });

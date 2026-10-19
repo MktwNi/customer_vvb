@@ -88,7 +88,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
               <span className="qt-v">· ฉบับที่ {h.n}</span>
             </span>
             <small>{meta}</small>
-            {cv && <QtCheckLine doc={doc} v={cv} onCheck={check} sent={e.qtSentFor(doc)} admin={e.can('set.users')} />}
+            {cv && <QtCheckLine doc={doc} v={cv} onCheck={check} sent={e.qtSentFor(doc)} ctx={e.qtSentCtx()} />}
           </span>
           {money && (
             <span className="sl-docc-a">
