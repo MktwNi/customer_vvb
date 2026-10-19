@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import { useApp, useEngineVersion, useNarrow } from '../state';
 import { todayISO } from '../lib/format';
 import { bellEmpty, bellItems, dayTh, type BellRow } from '../lib/notify';
+import { planDayLink } from '../lib/planCal';
 import type { GccEngine } from '../lib/engine';
 import { payBackBell, returnedTo } from '../lib/payCheck';
 import { expBackBell } from '../lib/expenseMoney';
@@ -61,7 +62,8 @@ export function Bell() {
   }, [open]);
   const pick = (row: BellRow) => {
     btn.current?.focus();
-    if (row.go.day) return go('plan', { calDay: row.go.day, calM: row.go.day.slice(0, 7), bell: false });
+    // the day with every customer and type shown: a legend filter pressed earlier would hide the row's entry
+    if (row.go.day) return go('plan', { ...planDayLink(row.go.day), bell: false });
     // a quotation to check opens over its deal; mine sent back opens the deal (the note is on its card)
     set({ bell: false, deal: row.go.deal || null, ...(row.kind === 'chk' && row.go.doc ? { qtCheck: row.go.doc, qtSig: '' } : {}) });
   };

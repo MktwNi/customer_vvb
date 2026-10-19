@@ -591,6 +591,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
   .plan-row>:nth-child(2),.plan-row>:nth-child(3){grid-column:2/4}
   .plan-row>:nth-child(4){grid-column:2}
   .plan-row>:nth-child(5){grid-column:3}
+  .plan-row>.ckb{align-self:start;margin-top:2px}
 }
 
 /* ---- search page (tabs/Search.tsx): a white search band, quiet group tiles, folded filters, flat results */
@@ -732,6 +733,22 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .pl-up{align-items:center}
 /* the stage in the list: a cell picker that reads as plain text until the pointer is on it */
 .sel-btn.cell.pl-stage{font-size:var(--fs-sec);color:var(--ink-2);margin-left:0;max-width:100%}
+/* "รายชื่อที่ต้องติดต่อ" (lib/planList.ts): the name, then where it comes from as calm tags (ติดตาม, the tracker
+   job's next step, which opens the job), what is late in words, and the grey context */
+.pl-who{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.pl-who>:first-child{margin-top:1px}
+.pl-who-t{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pl-who-n{cursor:pointer;border:0;padding:0;text-align:left;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);line-height:1.45;align-self:flex-start;max-width:100%;overflow-wrap:anywhere}
+.pl-src{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.4}
+.pl-src .chip{flex:none}
+.pl-src .pl-tag{cursor:pointer;border:0;border-radius:11px;font:inherit;font-size:var(--fs-meta);color:var(--neutral);height:auto;min-height:22px;padding:3px 10px;line-height:1.35;white-space:normal;text-align:left;flex:0 1 auto;max-width:100%}
+.pl-warn{color:var(--warn)}
+.pl-meta{min-width:0}
+/* in the stage column: its text starts where a cell picker's does (its 1px border and 6px padding) */
+.pl-nolink{font-size:var(--fs-sec);color:var(--muted);padding-left:7px}
+.pl-none{display:flex;flex-direction:column;gap:6px;padding:16px 0 4px;border-top:1px solid var(--divider);font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
+.pl-none b{font-size:var(--fs-card);font-weight:500;color:var(--ink)}
+.pl-none-a{display:flex;flex-wrap:wrap;gap:6px 20px}
 @media (max-width:760px){
   .pl-sum{gap:12px 0}
   .pl-segs{flex-wrap:wrap;flex-basis:100%}
