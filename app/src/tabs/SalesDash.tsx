@@ -26,6 +26,9 @@ import { commPeriod0, unitQuarters, unitsOf, type CommPeriod } from '../lib/cont
 import { CommCard } from '../components/CommCard';
 import { UnitsDialog } from '../components/UnitsDialog';
 import { unitCls } from '../components/UnitBits';
+// job expenses (for those who see them): one more card under the others, "ค่าใช้จ่ายและคงเหลือ"
+import { ExpNetCard } from '../components/ExpDash';
+import { seesExp } from '../components/ExpCash';
 
 const TH_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const TH_MONTH = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -589,6 +592,21 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         />
         {comm && <CommCard ctx={uctx} lines={lines} year={year} cq={cq} onCq={setCq} onSetup={e.can('set.units') ? () => setUnitsDlg(true) : undefined} />}
       </div>}
+      {money && seesExp(e) && (
+        <ExpNetCard
+          S={S}
+          lines={lines}
+          Y={Y}
+          F={{ ...F, date: null, pay: undefined }}
+          year={year}
+          today={today}
+          now={beOf(today) === year ? quarterOf(today) : -1}
+          pick={qPick - 1}
+          ctx={uctx}
+          units={comm}
+          onCashTab={e.can('view.cash') ? () => set({ slView: 'cash', slCashShow: '', slCashPick: null, slChkSide: 'out', slChkM: 'y', slXchkF: 'all' }) : undefined}
+        />
+      )}
       {unitsDlg && <UnitsDialog onClose={() => setUnitsDlg(false)} />}
     </div>
   );

@@ -28,7 +28,8 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
-import { purgeExpenses, toExpense } from './expense';
+import { expDocId, purgeExpenses, toExpense, type DealExp, type JobExp } from './expense';
+import { expChanged, type ExpInput, type ExpKey } from './expenseJob';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
@@ -41,6 +42,8 @@ import {
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
 } from './notify';
 import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, teamMonth, toMonthClose, toPayCheck, ymTh, type ChkRow, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
+// the month check of money out (job expenses in the money views)
+import { expTeamMonth, expWhat, rowWhat, type XRow } from './expenseMoney';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -84,6 +87,9 @@ export interface RoundInfo { key: string; r?: Round; ideal?: string | null; laps
 export interface UploadState { status?: 'busy' | 'error' | 'done' | 'preview'; msg?: string; head?: string; preview?: { k: string; v: string }[] }
 export interface SyncState { status?: 'running' | 'error' | 'done' | 'ready' | ''; msg?: string }
 export interface PendingSync extends TGOSync.TgoResult { nw: (TGOSync.TgoItem & { gid: number | null })[]; at: string }
+
+/** An expense's bill kept in this browser (GccEngine.billKey). */
+interface BillBlob { name: string; mime: string; data: ArrayBuffer; by: string; fid?: string }
 
 const emptyCrm = (): Crm => ({ stages: {}, notes: {}, tasks: [], watch: [], owners: {}, team: [], log: {} });
 
@@ -1723,8 +1729,11 @@ export class GccEngine {
     // of them stay, as checks of income do
     Object.keys(S.exp || {}).forEach((k) => {
       if (!k.startsWith(id + '/')) return;
+      const x = S.exp![k];
       delete S.exp![k];
       if (this.canWriteKey('dexp/' + k, true)) this.op('dexp/' + k);
+      // and its bill, as a document's file (the team's copy to the Drive trash when this account may)
+      this.dropBill(k.slice(id.length + 1), x.file);
     });
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
@@ -2574,18 +2583,25 @@ export class GccEngine {
   private dropDriveFile(fileId: string) {
     const cfg = this.teamCfg;
     const later = () => this.store.update<string[]>('docDelQueue', (q) => [...new Set([...(q || []), fileId])]).catch(() => {});
-    if (!cfg || !this.can('docs.up')) return void later();
+    // (an expense's bill is trashed with บันทึกค่าใช้จ่ายของงาน too: Code.gs expBill_)
+    if (!cfg || !this.filesUp()) return void later();
     deleteDocFile(this.fileTransport, cfg.url, this.cred(cfg), fileId).catch(later);
   }
+  /** May this account upload or trash files at all: documents (แนบเอกสาร), or expenses' bills. */
+  private filesUp() {
+    return this.can('docs.up') || this.can('edit.exp');
+  }
   private async flushDocDeletes(cfg: TeamCfg) {
-    if (!this.can('docs.up')) return;
+    if (!this.filesUp()) return;
     const q = (await this.store.get<string[]>('docDelQueue').catch(() => null)) || [];
     for (const fileId of q) {
       if (this.teamCfg !== cfg) return;
       try {
         await deleteDocFile(this.fileTransport, cfg.url, this.cred(cfg), fileId);
-      } catch {
-        return; // still failing: try again after the next sync
+      } catch (e) {
+        // gone already, or never this account's to trash (a bill of another person's deal): not retried, so
+        // it never holds back the files after it
+        if (!(e instanceof TeamSyncError && ['not_found', 'forbidden'].includes(e.code ?? ''))) return; // still failing: try again after the next sync
       }
       await this.store.update<string[]>('docDelQueue', (cur) => (cur || []).filter((x) => x !== fileId)).catch(() => {});
     }
@@ -2621,7 +2637,9 @@ export class GccEngine {
    *  team's Drive yet): the sign-out dialog counts them with the unsent edits. */
   get docsUnsent() {
     const cfg = this.teamCfg;
-    return Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docsAway.has(d.id) && (!cfg || this.docMine(cfg, d))).length;
+    const docs = Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docsAway.has(d.id) && (!cfg || this.docMine(cfg, d))).length;
+    // and expenses' bills attached here and not uploaded yet (lib/expense.ts)
+    return docs + this.billsWaiting(cfg).length;
   }
   /** Whose file this browser uploads: with accounts, this account's, and those attached here with the
    *  team code (by a name that is not another account's of this browser), as its queue was taken over. */
@@ -2641,7 +2659,7 @@ export class GccEngine {
   private docRun: Promise<void> | null = null;
   async uploadDocs() {
     const cfg = this.teamCfg;
-    if (!cfg || !this.can('docs.up')) return;
+    if (!cfg || !this.filesUp()) return;
     if (this.docRun) return this.docRun;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
@@ -2661,8 +2679,10 @@ export class GccEngine {
       await this.flushDocDeletes(cfg);
       // only documents of deals that still exist, and that this browser has the file of
       // with accounts, only this account's files: another person's unsent file on a shared browser is theirs to send
-      const todo = Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
-      if (!todo.length || Date.now() < this.docRetryAt) return;
+      const todo = !this.can('docs.up') ? [] : Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
+      // expenses' bills attached here go up the same way (docId exp_<expId>, uploadBills)
+      const bills = this.billsWaiting(cfg).filter((x) => !this.docRefused.has(expDocId(x.id)));
+      if ((!todo.length && !bills.length) || Date.now() < this.docRetryAt) return;
       // "old script" is checked again every 10 minutes: the lead may deploy the new one meanwhile
       if (this.teamFiles === false && Date.now() - this.teamFilesAt > 10 * 60000) this.teamFiles = null;
       if (this.teamFiles == null) {
@@ -2702,6 +2722,7 @@ export class GccEngine {
         this.op(keyOf.ddoc(doc.deal, doc.id), { ...this.sales.docs[k] }, { f: ['fileId'] });
         this.saveSales();
       }
+      await this.uploadBills(cfg, bills, failed);
       this.docFails = 0;
       this.docRetryAt = 0;
       this.docMsg = failed.length ? 'อัปโหลดเอกสารขึ้น Drive ไม่ได้ — ' + failed.join(' · ') + ' (ไฟล์ยังอยู่ในเครื่องนี้ ลบแล้วแนบไฟล์ใหม่)' : '';
@@ -2714,6 +2735,315 @@ export class GccEngine {
       this.docUploading = false;
       this.emit();
     }
+  }
+
+  // ---- job expenses (ค่าใช้จ่ายของงาน: the records lib/expense.ts, the screens' helpers lib/expenseJob.ts)
+  /** This browser's copy of an expense's bill (one per expense): the file, who attached it here, and the
+   *  Drive file it is once uploaded or downloaded (`fid`). A bill not uploaded yet is the record's file with
+   *  id '' (as a document's fileId ''), its only copy here; it goes up after a sync (uploadBills). */
+  private billKey = (expId: string) => 'expblob:' + expId;
+  /**
+   * The bills attached in this browser and not in the team's Drive yet (expId → its deal and who attached
+   * it): only these are this browser's to upload, and only these count as unsent at signing out. A
+   * teammate's bill still waiting on their own computer is never this browser's, whatever it can do. Kept
+   * in localStorage (read at once by the sign-out dialog, shared by this browser's tabs); an entry goes once
+   * the record names the uploaded file, or the bill is taken off, replaced or deleted.
+   */
+  private billsHereKey = 'gcc-exp-bills-here';
+  private billsHere(): Record<string, { deal: string; by: string }> {
+    const v = prefs.get<unknown>(this.billsHereKey, null);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    const out: Record<string, { deal: string; by: string }> = {};
+    for (const [id, h] of Object.entries(v as Record<string, unknown>)) {
+      const x = h as { deal?: unknown; by?: unknown } | null;
+      if (x && typeof x.deal === 'string' && x.deal) out[id] = { deal: x.deal, by: typeof x.by === 'string' ? x.by : '' };
+    }
+    return out;
+  }
+  /** Mark expense `expId`'s bill as attached here and waiting (`h`), or no longer (null). */
+  private billHere(expId: string, h: { deal: string; by: string } | null) {
+    const all = this.billsHere();
+    if (h) all[expId] = h;
+    else if (all[expId]) delete all[expId];
+    else return;
+    if (Object.keys(all).length) prefs.set(this.billsHereKey, all);
+    else prefs.del(this.billsHereKey);
+  }
+  /**
+   * May this account record expenses on deal `d` (add, change, delete them, attach a bill)? It must see them
+   * (ดูค่าใช้จ่ายและกำไรของงาน) and hold บันทึกค่าใช้จ่ายของงาน: for its own work only, on a deal whose ผู้รับผิดชอบ it
+   * is (keyRule dexp/, as the team script decides). With no accounts: always.
+   */
+  canExp(d: Pick<Deal, 'id'> | null | undefined): boolean {
+    if (!d || !this.sales.deals[d.id] || !this.can('view.exp')) return false;
+    return this.canWriteKey(keyOf.dexp(d.id, 'x'), false);
+  }
+  /** A history line of a deal's expenses: a key of its own (dlog/exp.<id>), which the script leaves out for an
+   *  account without ดูค่าใช้จ่าย, so it may name the amounts. */
+  private expLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail: string) {
+    const h = uid(), id = 'exp.' + h;
+    const L: DealLog = { id, at: new Date().toISOString(), by: this.me(), action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
+    this.sales.log[id] = L;
+    this.op(keyOf.dlogExp(h), { ...L });
+  }
+  /** "ค่าเดินทาง · 3,500 บาท · จ่ายแล้ว 6 ต.ค. 2569" (the history's words for an expense). */
+  private expWords(x: Pick<JobExp, 'c' | 'amt' | 'paid'>) {
+    return `${x.c} · ${fmtMoney(x.amt)} บาท · ${x.paid ? 'จ่ายแล้ว ' + isoTh(x.paid) : 'ค้างจ่าย'}`;
+  }
+  /** A record as typed (lib/expenseJob readExpForm), checked as a pulled one is; null when it is not one
+   *  (no category, an amount that is not more than 0, no bill date). */
+  private expOf(v: ExpInput, keep?: JobExp['file']): JobExp | null {
+    const x = toExpense({ c: v.c, n: v.n, amt: v.amt, d: v.d, paid: v.paid, file: keep, by: this.me(), at: new Date().toISOString() });
+    return x && x.c && x.amt > 0 && x.d ? x : null;
+  }
+  /** Record an expense on a deal (a new record dexp/<dealId>/<expId> and its history line). */
+  addExpense(dealId: string, v: ExpInput): DealExp | null {
+    const S = this.sales, d = S.deals[dealId];
+    if (!d) return null;
+    if (!this.canExp(d)) return this.deny(), null;
+    const x = this.expOf(v);
+    if (!x) return null;
+    const id = uid();
+    this.batchOps(() => {
+      (S.exp || (S.exp = {}))[`${dealId}/${id}`] = x;
+      this.op(keyOf.dexp(dealId, id), { ...x });
+      this.expLog(d, 'บันทึกค่าใช้จ่าย', this.expWords(x));
+    });
+    this.saveSales();
+    return { ...x, id, deal: dealId };
+  }
+  /** Change an expense's category, description, amount, bill date or paid date (its bill stays): only the
+   *  fields changed are sent, so a teammate's change of another field meanwhile is kept (rebaseOp). `only`:
+   *  the fields the person changed (the dialog, lib/expenseJob expTouched); every other field keeps the
+   *  record's value as it is now, so a teammate's change that came in while the dialog was open is not
+   *  written back with the value it had when the dialog opened. */
+  updateExpense(dealId: string, expId: string, v: ExpInput, only?: ExpKey[]): boolean {
+    const S = this.sales, d = S.deals[dealId], k = `${dealId}/${expId}`, cur = S.exp?.[k];
+    if (!d || !cur) return false;
+    if (!this.canExp(d)) return this.deny(), false;
+    const src: ExpInput = only ? { c: cur.c, n: cur.n, amt: cur.amt, d: cur.d, paid: cur.paid } : v;
+    if (only) for (const f of only) (src as Record<ExpKey, unknown>)[f] = v[f];
+    const x = this.expOf(src, cur.file);
+    if (!x) return false;
+    const f = expChanged(cur, x);
+    if (!f.length) return true;
+    this.batchOps(() => {
+      S.exp![k] = x;
+      this.op(keyOf.dexp(dealId, expId), { ...x }, { f: [...f, 'by', 'at'] });
+      this.expLog(d, 'แก้ค่าใช้จ่าย', this.expWords(x));
+    });
+    this.saveSales();
+    return true;
+  }
+  /** Delete an expense: its record, and its bill (this browser's copy, and the team's Drive file to the
+   *  trash). Accounting's check of it stays, as a check of income does (it shows the line went). */
+  deleteExpense(dealId: string, expId: string): boolean {
+    const S = this.sales, d = S.deals[dealId], k = `${dealId}/${expId}`, cur = S.exp?.[k];
+    if (!d || !cur) return false;
+    if (!this.canExp(d)) return this.deny(), false;
+    this.batchOps(() => {
+      delete S.exp![k];
+      this.op(keyOf.dexp(dealId, expId));
+      this.expLog(d, 'ลบค่าใช้จ่าย', this.expWords(cur));
+    });
+    this.dropBill(expId, cur.file);
+    this.saveSales();
+    return true;
+  }
+  /**
+   * Attach (or replace) an expense's bill or receipt: a PDF or a picture up to 10 MB. It is kept in this
+   * browser first and uploaded to the team's Drive after the next sync, under docId exp_<expId> (the script
+   * lets บันทึกค่าใช้จ่ายของงาน upload it without แนบเอกสาร); a bill it replaces goes to the Drive trash.
+   */
+  async attachExpenseBill(dealId: string, expId: string, file: Blob & { name: string }): Promise<DealExp> {
+    const S = this.sales, k = `${dealId}/${expId}`;
+    if (!S.deals[dealId] || !S.exp?.[k]) throw new Error('ไม่พบรายการนี้แล้ว');
+    if (!this.canExp(S.deals[dealId])) throw new Error('บัญชีของคุณแนบบิลของงานนี้ไม่ได้');
+    if (file.size > DOC_MAX_BYTES) throw new Error('ไฟล์ใหญ่เกิน 10 MB');
+    if (!file.size) throw new Error('ไฟล์ว่างเปล่า');
+    const mime = docMime({ name: file.name || '', type: file.type || '' });
+    if (!mime) throw new Error('รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)');
+    const name = (file.name || 'บิล').slice(0, 150);
+    let fid = '';
+    try {
+      await this.store.set(this.billKey(expId), { name, mime, data: await file.arrayBuffer(), by: this.me() });
+    } catch {
+      if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
+      fid = (await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: expDocId(expId), name, mime, blob: file })).fileId;
+    }
+    // as it is now (a teammate may have deleted it while the file was stored)
+    const cur = S.exp?.[k], d = S.deals[dealId];
+    if (!cur || !d) {
+      this.store.del(this.billKey(expId)).catch(() => {});
+      if (fid) this.dropDriveFile(fid);
+      throw new Error('ไม่พบรายการนี้แล้ว (มีคนลบไประหว่างนี้)');
+    }
+    const old = cur.file;
+    const x: JobExp = { ...cur, file: { id: fid, name, mime, size: file.size }, by: this.me(), at: new Date().toISOString() };
+    this.batchOps(() => {
+      S.exp![k] = x;
+      this.op(keyOf.dexp(dealId, expId), { ...x }, { f: ['file', 'by', 'at'] });
+      this.expLog(d, old ? 'เปลี่ยนบิลของค่าใช้จ่าย' : 'แนบบิลของค่าใช้จ่าย', `${x.c} · ${name}`);
+    });
+    if (old?.id && old.id !== fid) this.dropDriveFile(old.id);
+    // kept here: this browser's to upload (uploaded at once: nothing waits)
+    this.billHere(expId, fid ? null : { deal: dealId, by: this.me() });
+    this.docRefused.delete(expDocId(expId));
+    this.saveSales();
+    this.uploadDocs();
+    return { ...x, id: expId, deal: dealId };
+  }
+  /** Take an expense's bill off (the expense stays): this browser's copy goes, the team's file to the trash. */
+  removeExpenseBill(dealId: string, expId: string): boolean {
+    const S = this.sales, d = S.deals[dealId], k = `${dealId}/${expId}`, cur = S.exp?.[k];
+    if (!d || !cur?.file) return false;
+    if (!this.canExp(d)) return this.deny(), false;
+    const { file, ...rest } = cur;
+    const x: JobExp = { ...rest, by: this.me(), at: new Date().toISOString() };
+    this.batchOps(() => {
+      S.exp![k] = x;
+      this.op(keyOf.dexp(dealId, expId), { ...x }, { f: ['file', 'by', 'at'] });
+      this.expLog(d, 'เอาบิลของค่าใช้จ่ายออก', `${x.c} · ${file.name}`);
+    });
+    this.dropBill(expId, file);
+    this.saveSales();
+    return true;
+  }
+  /** An expense's bill goes: this browser's copy, and the team's file (to the Drive trash, retried later
+   *  when that can't be done now). */
+  private dropBill(expId: string, file: JobExp['file']) {
+    this.store.del(this.billKey(expId)).catch(() => {});
+    this.billHere(expId, null);
+    if (file?.id) this.dropDriveFile(file.id);
+  }
+  /** The bill of an expense: this browser's copy (the one attached here, or downloaded before), else
+   *  downloaded from the team's Drive (and kept). Opening the team's copy needs เปิดเอกสารแนบ: a copy
+   *  downloaded before is not opened without it either (the one attached here is this person's own file). */
+  async expBill(x: Pick<DealExp, 'id' | 'file'>): Promise<Blob> {
+    const f = x.file;
+    if (!f) throw new Error('รายการนี้ยังไม่มีบิล');
+    const b = await this.store.get<BillBlob>(this.billKey(x.id)).catch(() => null);
+    const open = this.can('docs.open');
+    // a copy of this very file (a bill replaced on another device is another file); a downloaded one
+    // (no one attached it here) only with เปิดเอกสารแนบ, and it goes when that is gone (purgeBillCopies)
+    if (b && (b.fid ? b.fid === f.id : b.name === f.name && b.data.byteLength === f.size)) {
+      if (b.by || open) return new Blob([b.data], { type: b.mime || f.mime });
+      this.store.del(this.billKey(x.id)).catch(() => {});
+    }
+    if (!f.id) throw new Error('บิลนี้ยังอยู่ในเครื่องของคนที่บันทึก ยังไม่ได้อัปโหลดขึ้น Drive ของทีม');
+    const cfg = this.teamCfg;
+    if (!open) throw new Error('บัญชีของคุณเปิดไฟล์แนบไม่ได้ (ขอสิทธิ์ “เปิดเอกสารแนบ” ได้ที่ สิทธิ์ของฉัน)');
+    if (!cfg) throw new Error('เชื่อมต่อทีม (แท็บอัปเดตข้อมูล) ก่อน จึงจะเปิดไฟล์ใน Drive ของทีมได้');
+    let r: Awaited<ReturnType<typeof downloadDocFile>>;
+    try {
+      r = await downloadDocFile(this.fileTransport, cfg.url, this.cred(cfg), f.id);
+    } catch (e) {
+      throw new Error('เปิดไฟล์จาก Drive ของทีมไม่ได้: ' + fileErrText(e));
+    }
+    this.store.set(this.billKey(x.id), { name: f.name, mime: r.mime || f.mime, data: await r.blob.arrayBuffer(), by: '', fid: f.id }).catch(() => {});
+    return r.blob;
+  }
+  /** Expenses whose bill was attached in this browser and is waiting to go up (billsHere: never a teammate's
+   *  waiting on their own computer); with accounts only those this account (or the team code) attached, as a
+   *  document's file. */
+  private billsWaiting(cfg: TeamCfg | null): DealExp[] {
+    const S = this.sales;
+    return Object.entries(this.billsHere()).flatMap(([id, h]) => {
+      const x = S.exp?.[`${h.deal}/${id}`];
+      if (!x?.file || x.file.id || !S.deals[h.deal]) return [];
+      if (cfg && cfg.mode === 'accounts' && h.by !== this.me() && this.others.some((a) => a.name === h.by)) return [];
+      return [{ ...x, id, deal: h.deal }];
+    });
+  }
+  /**
+   * Bills attached in this browser that can't go up to the team's Drive: the expense is no longer this
+   * account's to record (the job handed to someone else, or บันทึกค่าใช้จ่ายของงาน taken away), so the team would
+   * refuse to link the file. Each stays here, its only copy, until the job comes back or the bill is
+   * attached again by whoever records the job now (the deal card and the Sales tab say so).
+   */
+  billsStuck(): DealExp[] {
+    const cfg = this.teamCfg;
+    return cfg ? this.billsWaiting(cfg).filter((x) => !this.canExp(this.sales.deals[x.deal])) : [];
+  }
+  /** Upload the bills waiting here (uploadDocsNow, after the documents): each under docId exp_<expId>; the
+   *  record then names the Drive file (only its `file`, so a teammate's edit meanwhile is kept). A bill
+   *  taken off, replaced or deleted before it went up is not sent (and this copy goes); one replaced or
+   *  taken off while it went up goes to the trash. A bill of an expense this account may no longer write
+   *  (the job handed to someone else, บันทึกค่าใช้จ่ายของงาน taken away) is not sent either: the team would
+   *  refuse to link it and the file would be left in Drive with nothing pointing at it. It stays here, the
+   *  only copy, and the message says so; it goes up if the job comes back. */
+  private async uploadBills(cfg: TeamCfg, bills: DealExp[], failed: string[]) {
+    if (!this.filesUp()) return;
+    // entries done with: the record names a file in the team's Drive now (its link sent and not refused:
+    // a refused one comes back as '' and is handled below), or has no bill any more (taken off: this copy
+    // goes too). A record not here (deleted, or a deal this account no longer sees) is left as it is.
+    if (this.can('view.exp'))
+      for (const [id, h] of Object.entries(this.billsHere())) {
+        const r = this.sales.exp?.[`${h.deal}/${id}`], key = keyOf.dexp(h.deal, id);
+        if (!r || (r.file && (!r.file.id || this.pending.has(key) || this.revert.has(key)))) continue;
+        this.billHere(id, null);
+        if (!r.file) this.store.del(this.billKey(id)).catch(() => {});
+      }
+    for (const x of bills) {
+      if (this.teamCfg !== cfg) return;
+      const b = await this.store.get<BillBlob>(this.billKey(x.id)).catch(() => null);
+      if (!b) {
+        this.billHere(x.id, null); // this browser's copy is gone (its site data cleared): nothing to send
+        continue;
+      }
+      // another account of this browser attached it: theirs to send (at their next sign-in)
+      if (cfg.mode === 'accounts' && b.by && b.by !== this.me() && this.others.some((a) => a.name === b.by)) continue;
+      const k = `${x.deal}/${x.id}`, now = this.sales.exp?.[k];
+      if (b.fid && now?.file?.id === b.fid) {
+        this.billHere(x.id, null); // linked meanwhile (another tab of this browser)
+        continue;
+      }
+      if (!now?.file || now.file.id || now.file.name !== b.name || now.file.size !== b.data.byteLength) {
+        // replaced meanwhile by a file from another browser: this copy is not the bill any more
+        this.store.del(this.billKey(x.id)).catch(() => {});
+        this.billHere(x.id, null);
+        if (b.fid) this.dropDriveFile(b.fid);
+        continue;
+      }
+      if (!this.canExp(this.sales.deals[x.deal])) {
+        // not sent (billsStuck). Uploaded before and its link refused (the job changed hands in between):
+        // that file goes to the trash (where this account may), and a later upload is a new one
+        if (b.fid) {
+          this.dropDriveFile(b.fid);
+          const { fid: _f, ...rest } = b;
+          await this.store.set(this.billKey(x.id), rest).catch(() => {});
+        }
+        continue;
+      }
+      let fileId = b.fid || '';
+      if (!fileId) {
+        try {
+          fileId = (await uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: expDocId(x.id), name: b.name, mime: b.mime, blob: new Blob([b.data], { type: b.mime }) })).fileId;
+        } catch (e) {
+          if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data', 'forbidden'].includes(e.code ?? '')) {
+            failed.push(`บิล ${x.c}: ${fileErrText(e)}`);
+            this.docRefused.add(expDocId(x.id));
+            continue;
+          }
+          throw e;
+        }
+      }
+      const cur = this.sales.exp?.[k];
+      if (!cur?.file || cur.file.id || cur.file.name !== b.name || cur.file.size !== b.data.byteLength) {
+        if (!b.fid) this.dropDriveFile(fileId); // deleted, taken off or replaced meanwhile
+        continue;
+      }
+      this.sales.exp![k] = { ...cur, file: { ...cur.file, id: fileId } };
+      this.op(keyOf.dexp(x.deal, x.id), { ...this.sales.exp![k] }, { f: ['file'] });
+      await this.store.set(this.billKey(x.id), { ...b, fid: fileId }).catch(() => {});
+      this.saveSales();
+    }
+  }
+  /** Copies of the team's bills kept in this browser (those in the team's Drive: one not uploaded yet is
+   *  someone's only copy and stays), when this account may no longer see expenses or open attached files
+   *  (เปิดเอกสารแนบ, as the documents' copies). */
+  private purgeBillCopies() {
+    Object.entries(this.sales.exp || {}).forEach(([k, x]) => x.file?.id && this.store.del(this.billKey(k.slice(k.indexOf('/') + 1))).catch(() => {}));
   }
 
   // ---- import / export
@@ -3517,9 +3847,15 @@ export class GccEngine {
       this.repull = true;
       this.flushSoon();
     }
-    if ((before['docs.open'] && !after['docs.open']) || (before['view.money'] && !after['view.money'])) this.purgeDocCopies();
+    if ((before['docs.open'] && !after['docs.open']) || (before['view.money'] && !after['view.money'])) {
+      this.purgeDocCopies();
+      this.purgeBillCopies(); // the bills' copies the same way (they are attached files too)
+    }
     // the job expenses go at once (the pull that follows brings them as deletions anyway)
-    if (before['view.exp'] && !after['view.exp'] && purgeExpenses(this.sales)) this.saveSales();
+    if (before['view.exp'] && !after['view.exp']) {
+      this.purgeBillCopies();
+      if (purgeExpenses(this.sales)) this.saveSales();
+    }
     return true;
   }
   /** The account's capabilities changed what the script sends it: pull everything again (adoptMe). */
@@ -4525,6 +4861,15 @@ export class GccEngine {
     const others = (await this.accts(cfg.url)).filter((a) => a.u !== s?.u);
     const mine = (d: DealDoc) => d.by === s?.name || !others.some((a) => a.name === d.by);
     for (const d of Object.values(this.sales.docs)) if (d.fileId || (dropUnsent && mine(d))) await this.store.del(this.docBlobKey(d.id)).catch(() => {});
+    // expenses' bills the same way: the team's copies go; one attached here and not uploaded yet stays
+    // unless asked (whose it is: who attached it here, billsHere)
+    for (const [k, x] of Object.entries(this.sales.exp || {})) if (x.file?.id) await this.store.del(this.billKey(k.slice(k.indexOf('/') + 1))).catch(() => {});
+    if (dropUnsent)
+      for (const [id, h] of Object.entries(this.billsHere()))
+        if (mine({ by: h.by } as DealDoc)) {
+          await this.store.del(this.billKey(id)).catch(() => {});
+          this.billHere(id, null);
+        }
     prefs.del(PREF.peopleHide);
     prefs.del(PREF.peopleGone);
     if (dropUnsent) {
@@ -4974,6 +5319,128 @@ export class GccEngine {
     this.batchOps(() => {
       this.op('mclose/' + ym);
       this.salesLog({ id: '', client: '' }, 'เปิดเดือนตรวจรับเงินอีกครั้ง', ymTh(ym));
+    });
+    this.saveSales();
+  }
+  // ---- the month check of money out (job expenses, lib/expenseMoney.ts): the income check's rules on paid
+  //      expenses, `dchk/<dealId>/exp.<expId>` and `mclose/<YYYY-MM>/out`, for accounts that see expenses
+  /** Every check of a paid expense this browser holds (`<dealId>/<expId>` → record). */
+  expChecks(): Record<string, PayCheck> {
+    return this.sales.xchk || {};
+  }
+  /** The months whose money out is closed ('YYYY-MM' → record). */
+  monthClosesOut(): Record<string, MonthClose> {
+    return this.sales.mcloseOut || {};
+  }
+  /** Why this account can't check money out ('' = it can): ดูค่าใช้จ่ายและกำไรของงาน is needed besides
+   *  ตรวจยืนยันรับเงิน; the rest is payCheckBlock (a name to sign with; not an expense it recorded itself). */
+  expCheckBlock(r?: Pick<ChkRow, 'by'>): '' | 'cap' | 'name' | 'self' {
+    if (!this.can('view.exp')) return 'cap';
+    return this.payCheckBlock(r);
+  }
+  /** The checks of money out made last: the toast's เลิกทำ takes them back. */
+  lastExpChecks: { keys: string[]; at: number } | null = null;
+  private putExpCheck(key: string, v: PayCheck | null) {
+    const X = this.sales.xchk || (this.sales.xchk = {});
+    if (v) X[key] = v;
+    else delete X[key];
+    const { dealId, lineId } = splitKey(key);
+    this.op(keyOf.dchkExp(dealId, lineId), v ? { ...v } : undefined);
+  }
+  /** A history row about money out, under `dlog/exp.<id>` (the team script sends those only to accounts that
+   *  see expenses). */
+  private expCheckLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail = '') {
+    const id = uid(), L: DealLog = { id: 'exp.' + id, at: new Date().toISOString(), by: this.me(), action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
+    this.sales.log[L.id] = L;
+    this.op(keyOf.dlogExp(id), { ...L });
+  }
+  /** "ตรวจแล้ว" on paid expenses, in one sync round, each with a history row ("ตรวจเงินออก ค่าเดินทาง").
+   *  Rows this account may not check (its own, already checked, before the first month checked) are left
+   *  out. Returns the keys written. */
+  checkExps(rows: XRow[]): string[] {
+    if (this.expCheckBlock()) return this.deny(), [];
+    const ok = rows.filter((r) => r.kind === 'got' && r.fp && r.deal && r.state !== 'none' && r.state !== 'ok' && !this.expCheckBlock(r));
+    if (!ok.length) return [];
+    const at = new Date().toISOString(), by = this.me();
+    this.batchOps(() =>
+      ok.forEach((r) => {
+        const fp = r.fp!;
+        this.putExpCheck(r.key, { s: 'ok', by, at, amt: fp.amt, d: fp.d, f: fp.f });
+        this.expCheckLog(r.deal!, 'ตรวจเงินออก ' + rowWhat(r), `${fmtMoney(fp.amt)} บาท · จ่าย ${isoTh(fp.d)}`);
+      }),
+    );
+    this.lastExpChecks = { keys: ok.map((r) => r.key), at: Date.now() };
+    this.saveSales();
+    return this.lastExpChecks.keys;
+  }
+  /** "ส่งกลับแก้ไข": the expense goes back to whoever recorded it with what to fix; it still counts as paid. */
+  returnExp(r: XRow, note: string): boolean {
+    const n = note.trim().slice(0, PAY_NOTE_MAX);
+    if (this.expCheckBlock()) return this.deny(), false;
+    if (!n || r.kind !== 'got' || !r.fp || !r.deal || r.state === 'none' || this.expCheckBlock(r)) return false;
+    const fp = r.fp;
+    this.batchOps(() => {
+      this.putExpCheck(r.key, { s: 'back', by: this.me(), at: new Date().toISOString(), amt: fp.amt, d: fp.d, f: fp.f, note: n });
+      this.expCheckLog(r.deal!, 'ส่งเงินออกกลับแก้ไข ' + rowWhat(r), `${fmtMoney(fp.amt)} บาท · ${n}`);
+    });
+    this.lastExpChecks = null;
+    this.saveSales();
+    return true;
+  }
+  /** "เลิกทำ": this account's own checks of money out of the last 10 minutes are taken back. */
+  undoExpChecks(keys: string[]): number {
+    if (this.expCheckBlock()) return this.deny(), 0;
+    const X = this.expChecks(), me = this.me(), now = Date.now();
+    const ks = keys.filter((k) => canUndo(X[k], me, now));
+    this.batchOps(() =>
+      ks.forEach((k) => {
+        const { dealId, lineId } = splitKey(k);
+        const e = this.sales.exp?.[k];
+        this.putExpCheck(k, null);
+        this.expCheckLog(this.sales.deals[dealId] || { id: dealId, client: '' }, 'เลิกตรวจเงินออก ' + expWhat(e || { c: '', n: lineId }));
+      }),
+    );
+    this.lastExpChecks = null;
+    if (ks.length) this.saveSales();
+    return ks.length;
+  }
+  /** "รับทราบ" on money out cancelled after its check (the expense deleted, or no longer paid): the record goes. */
+  ackExpOrphan(r: XRow) {
+    if (!this.can('pay.check') || !this.can('view.exp')) return this.deny();
+    if (r.kind !== 'orphan' || !this.expChecks()[r.key]) return;
+    this.batchOps(() => {
+      this.putExpCheck(r.key, null);
+      this.expCheckLog(r.deal || { id: r.dealId, client: '' }, 'รับทราบเงินออกยกเลิกหลังตรวจ ' + rowWhat(r), r.rec?.amt != null ? fmtMoney(r.rec.amt) + ' บาท' : '');
+    });
+    this.saveSales();
+  }
+  /** "ปิดเดือน" of money out: the whole month, every deal's paid expenses, worked out here; only once it has
+   *  ended and every one of them is checked. Returns the record, or null when it may not be closed. */
+  closeMonthOut(ym: string): MonthClose | null {
+    if (this.expCheckBlock()) return this.deny(), null;
+    if (!/^\d{4}-\d\d$/.test(ym)) return null;
+    const today = todayISO();
+    const c = expTeamMonth(this.sales, this.expChecks(), this.payChkCfg().since, ym);
+    if (!canClose(c, ym, today)) return null;
+    const v = closeRecord(c, this.me(), new Date().toISOString());
+    const M = this.sales.mcloseOut || (this.sales.mcloseOut = {});
+    M[ym] = v;
+    this.batchOps(() => {
+      this.op(keyOf.mcloseOut(ym), { ...v });
+      this.expCheckLog({ id: '', client: '' }, 'ปิดเดือนตรวจเงินออก', `${ymTh(ym)} · ${v.n} รายการ · ${fmtMoney(v.amt ?? 0)} บาท`);
+    });
+    this.saveSales();
+    return v;
+  }
+  /** "เปิดเดือนอีกครั้ง" of money out. */
+  reopenMonthOut(ym: string) {
+    if (this.expCheckBlock()) return this.deny();
+    const M = this.sales.mcloseOut || {};
+    if (!M[ym]) return;
+    delete M[ym];
+    this.batchOps(() => {
+      this.op(keyOf.mcloseOut(ym));
+      this.expCheckLog({ id: '', client: '' }, 'เปิดเดือนตรวจเงินออกอีกครั้ง', ymTh(ym));
     });
     this.saveSales();
   }

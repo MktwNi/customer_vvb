@@ -29,6 +29,7 @@ import { RequestDialog } from './components/RequestDialog';
 import { NotifySettings } from './components/NotifySettings';
 import { QtCheckSheet } from './components/QtCheckSheet';
 import { JointDialogs } from './components/JointQt';
+import { ExpDialogHost } from './components/ExpCard';
 import { commitFocus } from './components/useDialog';
 import { isChkF } from './lib/payCheck';
 import { docById, parseGo } from './lib/notify';
@@ -292,6 +293,12 @@ export default function App() {
       {ready && ui.jqDlg && (
         <ErrorBoundary resetKey="jq">
           <JointDialogs />
+        </ErrorBoundary>
+      )}
+      {/* ค่าใช้จ่ายของงาน: the dialog that records one (the panel, the table's menu, the phone card) */}
+      {ready && e.can('view.exp') && (
+        <ErrorBoundary resetKey="exp">
+          <ExpDialogHost />
         </ErrorBoundary>
       )}
       {/* the session ended: sign in again over the app (open panels and typed text stay) */}

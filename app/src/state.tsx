@@ -39,6 +39,9 @@ export interface UIState {
    *  'y' the whole year, null = the default (this month in this year, else the first month with money);
    *  and its filter chip. This browser only. */
   slChkM: number | 'y' | null; slChkF: 'all' | 'wait' | 'ok' | 'back' | 'owed' | 'late';
+  /** The month check's side for those who see job expenses: money in (เงินเข้า) or money out (เงินออก,
+   *  lib/expenseMoney.ts), and the out side's filter chip. This browser only. */
+  slChkSide: 'in' | 'out'; slXchkF: 'all' | 'wait' | 'ok' | 'back' | 'owed';
   /** Deals whose stages are open under their row; deals whose done stages are unfolded ("แสดง"); the
    *  one stage editor open in the table. This browser only, never synced. */
   slOpen: Record<string, 1>; slShowAll: Record<string, 1>;
@@ -86,7 +89,7 @@ export interface UIState {
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
  *  (components/SalesToast.tsx). */
-export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
+export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
@@ -104,7 +107,7 @@ const initial = (): UIState => {
     calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60, plCust: '',
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
-    slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all',
+    slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
     deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
     bell: false, qtCheck: null, qtSig: '', jqDlg: null,
