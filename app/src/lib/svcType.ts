@@ -13,7 +13,8 @@
  * its row in the contact list always read the same types.
  *
  * Colours: ink on tint for the chip (the word is always written, so colour is never the only cue), the mark
- * for a bar, a stripe or a dot. None is amber, orange or red, so a type never reads as a status.
+ * for a bar, a stripe or a dot. None is amber, orange or red, so a type never reads as an installment's due
+ * (amber) or late (red) outline, the only status colours on the plan page (tested as a perceptual distance).
  * Pure functions only (no engine, no DOM).
  */
 import type { CSSProperties } from 'react';

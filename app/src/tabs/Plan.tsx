@@ -405,7 +405,6 @@ export function Plan() {
           </div>
           <div className="pl-tools">
             <Select variant="tool" prefix="รายการ" label="รายการ" value={src} onChange={(x) => set({ plFeed: x, picked: {}, plLim: 60 })} options={srcOpts} search={false} width={320} />
-            {/* two filters, always shown as pills (no field menu) */}
             {/* the filters, always shown as pills (no field menu): ประเภทบริการ for an account that sees the tracker */}
             <FilterBar
               fields={[

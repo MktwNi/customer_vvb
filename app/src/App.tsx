@@ -33,6 +33,7 @@ import { ExpDialogHost } from './components/ExpCard';
 import { commitFocus } from './components/useDialog';
 import { isChkF } from './lib/payCheck';
 import { docById, parseGo } from './lib/notify';
+import { planDayLink } from './lib/planCal';
 
 /** A link from an e-mail (#go=…) waiting to be opened: kept through signing in, in this tab only. */
 const GO_KEY = 'gcc-go';
@@ -161,7 +162,8 @@ export default function App() {
       return;
     }
     goDone();
-    if (g.go === 'plan') go('plan', g.d ? { calDay: g.d, calM: g.d.slice(0, 7) } : {});
+    // a day from an e-mail opens with every customer and type shown (no legend filter left from before)
+    if (g.go === 'plan') go('plan', g.d ? planDayLink(g.d) : {});
     else if (g.go === 'notify') e.session && set({ acctDlg: 'notify' });
     else if (g.go === 'reqs') e.can('set.users') && go('users', { usersSec: 'req' });
     // a month of the accounting check (#go=cash&m=2026-10&f=wait): its year, the month open, the filter

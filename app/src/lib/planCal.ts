@@ -68,7 +68,7 @@ export function activeCust(only: string, keys: Iterable<string>): string {
   return '';
 }
 /** The UI keys that open แผนติดต่อ on day `d` ('YYYY-MM-DD') with every customer shown: a link from
- *  another page (the Dashboard's "อีก N นัด", later the bell's rows) never lands on a day filtered to
+ *  another page (the Dashboard's "อีก N นัด", the bell's rows, an e-mail's #go=plan&d=) never lands on a day filtered to
  *  the one customer (or the one service type) pressed in the legend earlier in the session, which would
  *  hide what it promised. */
 export const planDayLink = (d: string) => ({ tab: 'plan' as const, calM: d.slice(0, 7), calDay: d, plCust: '', plOnlyT: '' });

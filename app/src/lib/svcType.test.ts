@@ -2,6 +2,8 @@
  * Service types on แผนติดต่อ (lib/svcType.ts): which of our services a company being contacted is about, read
  * from the Services of its Sales Tracker jobs, never stored. Mon 12 Oct 2569, tracker year 2569.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { custKey, dealKey, type CustLookup } from './custColor';
 import { openJob, planRows, type PlanCo } from './planList';
@@ -89,8 +91,28 @@ describe('the type colours', () => {
       expect(cr('#0E1430', t.tint)).toBeGreaterThanOrEqual(14);
     }
     expect(new Set(SVC_TYPES.map((t) => t.mark)).size).toBe(SVC_TYPES.length);
-    // no status colour (late red, due amber, paid green) is a type's mark
-    for (const st of ['#C4501A', '#B7791F', '#14833F']) expect(SVC_TYPES.some((t) => t.mark === st)).toBe(false);
+  });
+  it("never look like the plan's installment outlines (due amber, late red)", () => {
+    // The plan page marks an installment with an amber (due) or red (late) outline: no type's mark may be
+    // near either, measured as CIELAB ΔE76 against the live tokens in index.css. (T-VER's mark is the
+    // validated green, close to the paid green --mark-yes, and CFO's blue is close to --mark-done: the plan
+    // page shows neither, so they are not checked; the palette is the owner's and stays.)
+    const css = readFileSync(fileURLToPath(new URL('../index.css', import.meta.url)), 'utf8');
+    const tok = (n: string) => css.match(new RegExp(`--${n}:\\s*(#[0-9A-Fa-f]{6})`))?.[1] || '';
+    const lab = (h: string) => {
+      const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      const f = (t: number) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+      const [x, y, z] = [(0.4124 * c[0] + 0.3576 * c[1] + 0.1805 * c[2]) / 0.95047, 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2], (0.0193 * c[0] + 0.1192 * c[1] + 0.9505 * c[2]) / 1.08883];
+      return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+    };
+    const dE = (a: string, b: string) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
+    const status = ['mark-wait', 'mark-no'].map(tok);
+    expect(status).toEqual(['#B7791F', '#C4501A']);
+    const near = SVC_TYPES.flatMap((t) => status.filter((st) => dE(t.mark, st) < 40).map((st) => `${t.n} ${t.mark} ~ ${st} ΔE ${dE(t.mark, st).toFixed(1)}`));
+    expect(near).toEqual([]);
+    // the check itself tells near from far: the amber is near an orange, far from the CFO blue
+    expect(dE('#B7791F', '#C4801A')).toBeLessThan(10);
+    expect(dE('#B7791F', '#2F6BD6')).toBeGreaterThan(100);
   });
 });
 

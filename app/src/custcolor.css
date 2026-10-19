@@ -89,8 +89,9 @@
 .pl-nm-row,.pl-up-n{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0}
 .pl-pay-t .svts{margin-left:8px}
 @media (max-width:760px){
-  /* phones: the month and the colour toggle share the first line, the month's buttons the next */
-  .pl-colorby-l{display:none}
+  /* phones: the month and its buttons first; "แยกสีตาม" with its toggle on a line of its own under them, the
+     label kept so the toggle reads as a choice of colour, not a filter */
+  .pl-colorby{order:3;flex-basis:100%;margin-right:0}
 }
 
 /* high contrast: the marks become outlines and the names carry the meaning */
