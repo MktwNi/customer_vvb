@@ -7,6 +7,9 @@ import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
 import { customersOf, jointRole, payerDeal } from '../lib/sales';
+import { fmtN } from '../lib/format';
+import { BIG, trackerNote, trackerWarn } from '../lib/bulk';
+import { useSalesActs } from './SalesToast';
 
 /** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
  *  not one, its members count in the header's หมวด (where the table draws them), as the table counts them. */
@@ -148,26 +151,41 @@ export function AddCustomer() {
   );
 }
 
-/** Send companies (one from its page, or the starred ones) to the Sales Tracker. */
+/** How many companies the list shows at first: a selection of thousands (the search page) lists the rest
+ *  on request, so the dialog opens at once. */
+const LIST_FIRST = 150;
+
+/** Send companies (one from its page, the starred ones, or the search page's selection) to the Sales Tracker. */
 export function SendToTracker() {
   const { engine: e, ui, set } = useApp();
-  useEngineVersion();
+  const ver = useEngineVersion();
+  const { say } = useSalesActs();
   // teammates' latest first: a company one of them sent a moment ago shows as already in the table
   useEffect(() => void e.teamSyncNow(), [e]);
   const ro = !e.can('edit.deal');
-  const ids = ui.sendIds || [];
-  const cos = ids.map((id) => e.company(id)).filter(Boolean) as Company[];
+  const cos = useMemo(() => (ui.sendIds || []).map((id) => e.company(id)).filter(Boolean) as Company[], [ui.sendIds, e, ver]);
   const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));
   // several companies: by default each goes to the section of where it was found (TGO, SET/mai…)
   const AUTO = '\u0000auto';
   const [section, setSection] = useState(() => (cos.length > 1 ? AUTO : e.suggestSection(cos[0]) || e.sales.cfg.sections[0] || ''));
   const [year, setYear] = useState(ui.slYear || beYear());
+  const [all, setAll] = useState(false);
   const close = () => set({ sendIds: null });
   const chosen = cos.filter((c) => pick[c.id]);
-  const has = (c: Company) => e.dealsOf(c.id).some((d) => d.year === year && jointRole(e.sales, d) !== 'header');
+  // the year's table once, not once per company
+  const has = useMemo(() => e.trackedIn(year), [e, year, ver]);
+  const inYear = useMemo(() => cos.filter((c) => has(c)).length, [cos, has]);
+  const toAdd = chosen.filter((c) => !has(c)).length;
+  const shown = all ? cos : cos.slice(0, LIST_FIRST);
   const send = () => {
     const r = e.addDealsFromCompanies(chosen.map((c) => c.id), section === AUTO ? { year } : { section, year });
     const note = `ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`;
+    if (ui.sendStay) {
+      // from the search page's selection: stay there, say what was sent, link to the table
+      set({ sendIds: null });
+      say(trackerNote(r.added, r.skipped, year), { ms: 8000, acts: r.added ? [{ label: `ดูตารางปี ${year}`, act: 'goSales', year, primary: true }] : undefined });
+      return;
+    }
     if (cos.length === 1) {
       const d = e.dealsOf(cos[0].id).find((x) => x.year === year && jointRole(e.sales, x) !== 'header');
       set({ sendIds: null, sel: null, deal: d ? d.id : null, slYear: year });
@@ -179,6 +197,8 @@ export function SendToTracker() {
   return (
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
       {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ</span>}
+      {/* many at once: how many rows the team's table gets, before sending */}
+      {!ro && toAdd > BIG && <Notice kind="warn">{trackerWarn(toAdd, year)}</Notice>}
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* (minmax: the long "อัตโนมัติ — …" choice must not widen the column past the dialog) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 120px', gap: 10 }}>
@@ -192,20 +212,31 @@ export function SendToTracker() {
         />
         <SelField style={labelCol} text="ปี (พ.ศ.)" value={year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
       </div>
+      {cos.length > 1 && (
+        <span className="t-meta">
+          {`${fmtN(cos.length)} บริษัท`}
+          {inYear ? ` · มีในตารางปี ${year} แล้ว ${fmtN(inYear)} บริษัท จะข้ามไป` : ''}
+        </span>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
-        {cos.map((c) => (
+        {shown.map((c) => (
           <label key={c.id} className={has(c) ? undefined : 'hv'} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, padding: '6px 4px', borderTop: '1px solid var(--divider)', cursor: has(c) ? 'default' : 'pointer', color: has(c) ? 'var(--muted)' : undefined }}>
             <input type="checkbox" checked={!!pick[c.id] && !has(c)} disabled={has(c)} onChange={(ev) => setPick({ ...pick, [c.id]: ev.target.checked })} style={{ accentColor: 'var(--brand)' }} />
             <span style={{ flex: 1 }}>{c.name}</span>
             <span className="t-meta">{has(c) ? `มีในตารางปี ${year} แล้ว` : c.phone || 'ยังไม่มีเบอร์'}</span>
           </label>
         ))}
+        {shown.length < cos.length && (
+          <button type="button" className="lnk" style={{ alignSelf: 'flex-start', fontSize: 13, padding: '8px 4px', borderTop: '1px solid var(--divider)' }} onClick={() => setAll(true)}>
+            {`แสดงอีก ${fmtN(cos.length - shown.length)} บริษัท`}
+          </button>
+        )}
       </div>
       </ReadOnly>
       <div className="dlg-act">
         <button onClick={close} className="quiet">ยกเลิก</button>
-        {!ro && chosen.some((c) => !has(c)) && <button onClick={send} className="btn pri">
-          ส่ง {chosen.filter((c) => !has(c)).length} รายการ
+        {!ro && toAdd > 0 && <button onClick={send} className="btn pri">
+          ส่ง {fmtN(toAdd)} รายการ
         </button>}
       </div>
     </Modal>

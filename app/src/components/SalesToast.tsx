@@ -86,6 +86,10 @@ export function SalesMessages() {
   const run = (a: ToastAct) => {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
+    // the search page's bulk actions: where the companies went
+    if (a.act === 'goTrack') return go('track', { slToast: null, sel: null });
+    if (a.act === 'goSales') return go('sales', { slView: 'table', ...(a.year ? { slYear: a.year } : {}), slToast: null, sel: null });
+    if (a.act === 'goPlan') return go('plan', { ...(a.day ? { calDay: a.day, calM: a.day.slice(0, 7) } : {}), slToast: null, sel: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });
     // a quotation check taken back (the script allows it for 10 minutes, for the checker's own latest)
     if (a.act === 'qtUndo' && a.k) {

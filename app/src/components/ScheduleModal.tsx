@@ -1,11 +1,14 @@
-import { useState, type CSSProperties, type FormEvent } from 'react';
+import { useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { useApp } from '../state';
 import { TT } from '../lib/constants';
-import { addDays, fmtN, nextWork, todayISO } from '../lib/format';
+import { addDays, fmtN, isoTh, nextWork, todayISO } from '../lib/format';
 import type { TaskForm, TaskType } from '../lib/types';
-import { DateField } from './ui';
+import { BIG, planNote, spread as spreadOf } from '../lib/bulk';
+import { pageOk } from './Sidebar';
+import { DateField, Notice } from './ui';
 import { Modal } from './Dialog';
 import { SelField } from './Select';
+import { useSalesActs } from './SalesToast';
 
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
 
@@ -26,6 +29,17 @@ function ScheduleForm() {
   const isMulti = !o.taskId && o.ids.length > 1;
   const gone = !!o.taskId && !t; // a teammate deleted it while the form was open
   const [date, setDate] = useState(() => (init ? init.date : nextWork(addDays(todayISO(), 1))));
+  const [perDay, setPerDay] = useState('5');
+  const { say } = useSalesActs();
+  // several companies: those with an appointment not done yet can be left out (on by default)
+  const planned = useMemo(() => {
+    if (!isMulti) return new Set<number>();
+    const open = new Set(e.crm.tasks.filter((x) => !x.done).map((x) => e.canonical(x.gid)));
+    return new Set(o.ids.filter((id) => open.has(e.canonical(id))));
+  }, [e, isMulti, o.ids]);
+  const [skip, setSkip] = useState(true);
+  const ids = isMulti && skip && planned.size ? o.ids.filter((id) => !planned.has(id)) : o.ids;
+  const sp = isMulti ? spreadOf(date, ids.length, +perDay) : null;
   const cancel = () => set({ sched: null });
   const save = (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -34,7 +48,11 @@ function ScheduleForm() {
     const p = { type: (g('type') || 'call') as TaskType, date: g('date') || todayISO(), time: g('time'), note: g('note') };
     if (o.taskId) {
       if (t) e.updateTask(t.id, p, init); // gone: a teammate deleted it meanwhile, and that stands (see `gone`)
-    } else e.addTasks(o.ids, p, +(g('spread') || 0), o.pid);
+    } else if (ids.length) {
+      const r = e.addTasks(ids, p, isMulti ? +perDay : 0, o.pid);
+      // from the search page's selection: say what was made and where to see it
+      if (o.stay && r.n) say(planNote(r.n, r.first, r.last) + (ids.length < o.ids.length ? ` (ข้าม ${fmtN(o.ids.length - ids.length)} บริษัทที่มีนัดอยู่แล้ว)` : ''), { ms: 8000, acts: pageOk(e, 'plan') ? [{ label: 'ดูแผนติดต่อ', act: 'goPlan', day: r.first, primary: true }] : undefined });
+    }
     set({ sched: null, picked: {} });
   };
 
@@ -52,16 +70,30 @@ function ScheduleForm() {
           <SelField
             style={field}
             text="กระจายนัด"
-            name="spread"
-            defaultValue="5"
-            options={[{ v: '0', label: 'ทั้งหมดในวันเดียว' }, { v: '3', label: 'วันละ 3 ราย (วันทำการ)' }, { v: '5', label: 'วันละ 5 ราย (วันทำการ)' }, { v: '10', label: 'วันละ 10 ราย (วันทำการ)' }]}
+            value={perDay}
+            onChange={setPerDay}
+            options={[{ v: '0', label: 'ทั้งหมดในวันเดียว' }, { v: '3', label: 'วันละ 3 ราย (วันทำการ)' }, { v: '5', label: 'วันละ 5 ราย (วันทำการ)' }, { v: '10', label: 'วันละ 10 ราย (วันทำการ)' }, { v: '20', label: 'วันละ 20 ราย (วันทำการ)' }]}
           />
         )}
+        {isMulti && planned.size > 0 && (
+          <label className="hv" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer', padding: '4px 2px', borderRadius: 8 }}>
+            <input type="checkbox" checked={skip} onChange={(ev) => setSkip(ev.target.checked)} style={{ accentColor: 'var(--brand)' }} />
+            {`ข้าม ${fmtN(planned.size)} บริษัทที่มีนัดที่ยังไม่ทำอยู่แล้ว`}
+          </label>
+        )}
+        {/* the spread before saving: how many, until when (thousands at 5 a day run for months) */}
+        {sp && ids.length > 0 && (
+          <span className="t-meta">
+            {`จะนัด ${fmtN(ids.length)} บริษัท ` + (sp.first === sp.last ? `วันที่ ${isoTh(sp.first)}` : `${isoTh(sp.first)} ถึง ${isoTh(sp.last)} (${fmtN(sp.days)} วันทำการ)`)}
+          </span>
+        )}
+        {isMulti && ids.length > BIG && <Notice kind="warn">{`จะสร้าง ${fmtN(ids.length)} นัดในแผนติดต่อของทีม ทุกคนในทีมเห็นนัดเหล่านี้`}</Notice>}
+        {isMulti && !ids.length && <Notice kind="info">ทุกบริษัทที่เลือกมีนัดอยู่แล้ว</Notice>}
         <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} className="fld" /></label>
         {gone && <span role="alert" className="note err">คนในทีมลบนัดนี้ไปแล้วระหว่างที่เปิดอยู่ จึงบันทึกไม่ได้ กดยกเลิก แล้วเพิ่มนัดใหม่ถ้ายังต้องการ</span>}
         <div className="dlg-act">
           <button type="button" onClick={cancel} className="quiet">ยกเลิก</button>
-          {!gone && <button type="submit" className="btn pri">บันทึกนัด</button>}
+          {!gone && !(isMulti && !ids.length) && <button type="submit" className="btn pri">{isMulti ? `บันทึก ${fmtN(ids.length)} นัด` : 'บันทึกนัด'}</button>}
         </div>
       </form>
     </Modal>

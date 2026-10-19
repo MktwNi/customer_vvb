@@ -8,8 +8,9 @@ import { withoutDate } from './lib/salesUi';
 
 export type Tab = 'overview' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users' | 'help';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
-/** `pid`: made from a person's page (the appointment is with them). */
-export interface SchedReq { ids: number[]; taskId?: string; pid?: string }
+/** `pid`: made from a person's page (the appointment is with them). `stay`: made from the search page's
+ *  selection: saving stays on that page and says what was made (with a link to แผนติดต่อ). */
+export interface SchedReq { ids: number[]; taskId?: string; pid?: string; stay?: boolean }
 
 export interface UIState {
   tab: Tab;
@@ -60,6 +61,9 @@ export interface UIState {
   addCust: { deal: boolean; section?: string; name?: string; link?: string; edit?: number } | null;
   /** "Send to Sales Tracker" dialog for these company ids. */
   sendIds: number[] | null;
+  /** That dialog was opened from the search page's selection: sending stays there and says what was sent
+   *  (with a link to the table) instead of opening the Sales Tracker. Set together with sendIds only. */
+  sendStay: boolean;
   /** One-line result shown at the top of the Sales Tracker (e.g. after sending companies to it). */
   slNote: string;
   /** People (ผู้ติดต่อ): the person whose page is open, list search / view / page. */
@@ -89,7 +93,13 @@ export interface UIState {
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
  *  (components/SalesToast.tsx). */
-export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
+export interface ToastAct {
+  label: string;
+  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'goTrack' | 'goSales' | 'goPlan';
+  deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string;
+  /** goSales: the table's year; goPlan: the day the calendar opens at */
+  year?: string; day?: string;
+}
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
@@ -108,7 +118,7 @@ const initial = (): UIState => {
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
-    deal: null, dpPlan: '', addCust: null, sendIds: null, slNote: '',
+    deal: null, dpPlan: '', addCust: null, sendIds: null, sendStay: false, slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
     bell: false, qtCheck: null, qtSig: '', jqDlg: null,
   };
@@ -155,6 +165,8 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
           }
         }
         if (n.person && n.person !== s.person) n.last = { ...n.last, person: n.person };
+        // the send dialog stays on the search page only when opened from there (sendStay with sendIds)
+        if ('sendIds' in patch && !('sendStay' in patch)) n.sendStay = false;
         // another year of the tracker (the year picker, ส่งเข้า Sales Tracker, an import's "ดูตารางปี"): a date
         // range goes back to the whole year, the other filters stay (filters spec §7.6)
         if (n.slYear !== s.slYear) n.slF = withoutDate(n.slF);
