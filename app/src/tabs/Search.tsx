@@ -145,7 +145,9 @@ export function Search() {
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
 
   // following a company (the team's watch list): on its page, or many at once with the bar; a followed row says so in grey
-  const watched = (id: number) => C.watch.includes(id);
+  // (followed by any of its ids: a follow made on a row since merged into it is the company's, lib/follow.ts)
+  const watchSet = useMemo(() => new Set(C.watch.map((id) => e.canonical(id))), [e, v]); // eslint-disable-line react-hooks/exhaustive-deps
+  const watched = (id: number) => watchSet.has(e.canonical(id));
   const cfoView = (c: Company) => ({ st: c.cfoSt, t: CST[c.cfoSt][0], sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' });
   const rndText = (c: Company) => (c.rnd ? (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd : '');
   /** A click anywhere on a result row opens the company (not on its buttons, nor when text was selected). */

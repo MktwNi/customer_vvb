@@ -138,7 +138,7 @@ export const clearedWord = (n: number, view: 'co' | 'cert') => `ล้างท�
 export const followNote = (added: number, already: number) =>
   added ? `ติดตามเพิ่ม ${fmtN(added)} บริษัท${already ? ` (ติดตามอยู่แล้ว ${fmtN(already)})` : ''}` : `ติดตามอยู่แล้วทั้ง ${fmtN(already)} บริษัท`;
 export const unfollowNote = (removed: number, notOn: number) =>
-  removed ? `เลิกติดตาม ${fmtN(removed)} บริษัท${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : 'บริษัทที่เลือกไม่ได้อยู่ในรายการติดตาม';
+  removed ? `เลิกติดตาม ${fmtN(removed)} บริษัท${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : 'บริษัทที่เลือกไม่ได้อยู่ใน “บริษัทที่ติดตาม”';
 export const trackerNote = (added: number, skipped: number, year: string) =>
   added ? `ส่งเข้า Sales Tracker ${fmtN(added)} ราย${skipped ? ` (ข้าม ${fmtN(skipped)} รายที่มีในปี ${year} แล้ว)` : ''}` : `ทุกบริษัทที่เลือกมีในตารางปี ${year} แล้ว`;
 export function ownerNote(name: string, r: { changed: number; same: number; kept: number }) {
@@ -160,8 +160,8 @@ export const hintWord = (view: 'co' | 'cert', csvOnly: boolean) =>
  */
 export function confirmWords(act: 'follow' | 'unfollow', n: number, skip: number, team: boolean) {
   return act === 'follow'
-    ? { title: `ติดตาม ${fmtN(n)} บริษัท?`, body: (team ? 'บริษัทที่เลือกจะเข้ารายการติดตามของทีม ทุกคนในทีมเห็นรายการนี้' : 'บริษัทที่เลือกจะเข้ารายการติดตาม') + (skip ? ` (ติดตามอยู่แล้ว ${fmtN(skip)} บริษัท จะข้ามไป)` : ''), ok: `ติดตาม ${fmtN(n)} บริษัท` }
-    : { title: `เลิกติดตาม ${fmtN(n)} บริษัท?`, body: team ? 'บริษัทที่เลือกจะออกจากรายการติดตามของทีม ทุกคนในทีมจะไม่เห็นในรายการนี้อีก' : 'บริษัทที่เลือกจะออกจากรายการติดตาม', ok: `เลิกติดตาม ${fmtN(n)} บริษัท` };
+    ? { title: `ติดตาม ${fmtN(n)} บริษัท?`, body: (team ? 'บริษัทที่เลือกจะขึ้นใน “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมเห็นรายชื่อนี้' : 'บริษัทที่เลือกจะขึ้นใน “บริษัทที่ติดตาม”') + (skip ? ` (ติดตามอยู่แล้ว ${fmtN(skip)} บริษัท จะข้ามไป)` : ''), ok: `ติดตาม ${fmtN(n)} บริษัท` }
+    : { title: `เลิกติดตาม ${fmtN(n)} บริษัท?`, body: team ? 'บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมจะไม่เห็นในรายชื่อนี้อีก' : 'บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม”', ok: `เลิกติดตาม ${fmtN(n)} บริษัท` };
 }
 /** The Sales Tracker dialog's warning for many rows: "จะเพิ่ม 250 แถวในตารางปี 2569". */
 export const trackerWarn = (n: number, year: string, team: boolean) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year}${team ? ' ของทั้งทีม' : ''} ตรวจหมวดและปีให้ถูกก่อนส่ง`;

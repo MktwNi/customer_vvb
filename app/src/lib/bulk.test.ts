@@ -135,7 +135,7 @@ describe('words', () => {
     expect(followNote(15, 0)).toBe('ติดตามเพิ่ม 15 บริษัท');
     expect(followNote(0, 4)).toBe('ติดตามอยู่แล้วทั้ง 4 บริษัท');
     expect(unfollowNote(2, 1)).toBe('เลิกติดตาม 2 บริษัท (ไม่ได้ติดตามอยู่ 1)');
-    expect(unfollowNote(0, 3)).toBe('บริษัทที่เลือกไม่ได้อยู่ในรายการติดตาม');
+    expect(unfollowNote(0, 3)).toBe('บริษัทที่เลือกไม่ได้อยู่ใน “บริษัทที่ติดตาม”');
     expect(trackerNote(15, 2, '2569')).toBe('ส่งเข้า Sales Tracker 15 ราย (ข้าม 2 รายที่มีในปี 2569 แล้ว)');
     expect(trackerNote(1200, 0, '2569')).toBe('ส่งเข้า Sales Tracker 1,200 ราย');
     expect(trackerNote(0, 3, '2569')).toBe('ทุกบริษัทที่เลือกมีในตารางปี 2569 แล้ว');
@@ -152,9 +152,11 @@ describe('words', () => {
     expect(trackerWarn(250, '2569', true)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ของทั้งทีม ตรวจหมวดและปีให้ถูกก่อนส่ง');
   });
   it('speaks of the team only when one is connected (review: the words said so with no team at all)', () => {
-    expect(confirmWords('follow', 2228, 0, true).body).toBe('บริษัทที่เลือกจะเข้ารายการติดตามของทีม ทุกคนในทีมเห็นรายการนี้');
-    expect(confirmWords('follow', 2228, 0, false).body).toBe('บริษัทที่เลือกจะเข้ารายการติดตาม');
-    expect(confirmWords('unfollow', 300, 0, false).body).toBe('บริษัทที่เลือกจะออกจากรายการติดตาม');
+    // (the list is named as the ติดตาม page names it: บริษัทที่ติดตาม, tabs/TrackFollow.tsx)
+    expect(confirmWords('follow', 2228, 0, true).body).toBe('บริษัทที่เลือกจะขึ้นใน “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมเห็นรายชื่อนี้');
+    expect(confirmWords('follow', 2228, 0, false).body).toBe('บริษัทที่เลือกจะขึ้นใน “บริษัทที่ติดตาม”');
+    expect(confirmWords('unfollow', 300, 0, true).body).toBe('บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมจะไม่เห็นในรายชื่อนี้อีก');
+    expect(confirmWords('unfollow', 300, 0, false).body).toBe('บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม”');
     expect(trackerWarn(250, '2569', false)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ตรวจหมวดและปีให้ถูกก่อนส่ง');
     expect(ownerSub(12, true)).toBe('ให้ 12 บริษัทที่เลือก · ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท และใช้กรองได้');
     expect(ownerSub(12, false)).toBe('ให้ 12 บริษัทที่เลือก · ชื่อนี้ขึ้นในหน้าบริษัท และใช้กรองได้');

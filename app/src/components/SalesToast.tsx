@@ -6,6 +6,7 @@ import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
 import { docById, qtSentView } from '../lib/notify';
 import { undoSentNote } from '../lib/bulk';
+import { planDayLink } from '../lib/planCal';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -91,7 +92,7 @@ export function SalesMessages() {
   }, [fresh?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves). Asked
   // of the message itself at each tick: a flag set on mouseenter / focus would stay set when the message is
-  // removed under the pointer (its link clicked: ดูรายการติดตาม, ดูตารางปี …), and hold every later one.
+  // removed under the pointer (its link clicked: ดูบริษัทที่ติดตาม, ดูตารางปี …), and hold every later one.
   useEffect(() => {
     if (!t || !t.ms) return;
     const n = t.n;
@@ -102,7 +103,8 @@ export function SalesMessages() {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
     // the search page's bulk actions: where the companies went
-    // (the followed companies' list, wherever the ติดตาม page has it: id track-watch)
+    // (บริษัทที่ติดตาม, first on the ติดตาม page: tabs/TrackFollow.tsx, id track-watch; a day of แผนติดต่อ with
+    // every customer and type shown, lib/planCal.ts planDayLink)
     if (a.act === 'goTrack') {
       go('track', { slToast: null, sel: null });
       return void requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('track-watch')?.scrollIntoView({ block: 'start' })));
@@ -110,7 +112,7 @@ export function SalesMessages() {
     // a send just made, taken back (engine.undoSent: within 10 minutes, rows nobody has worked on since)
     if (a.act === 'sendUndo' && a.k) return acts.say(undoSentNote(e.undoSent(a.k)), { ms: 6000 });
     if (a.act === 'goSales') return go('sales', { slView: 'table', ...(a.year ? { slYear: a.year } : {}), slToast: null, sel: null });
-    if (a.act === 'goPlan') return go('plan', { ...(a.day ? { calDay: a.day, calM: a.day.slice(0, 7) } : {}), slToast: null, sel: null });
+    if (a.act === 'goPlan') return go('plan', { ...(a.day ? planDayLink(a.day) : {}), slToast: null, sel: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });
     // nobody could be told about a quotation: the admin's page says why, and who checks
     if (a.act === 'notify') return go('users', { usersSec: 'notify', slToast: null, deal: null });

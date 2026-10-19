@@ -88,8 +88,9 @@ export function FollowList() {
 
   return (
     <>
-      {/* (its name stays on a phone, where page titles give way to the top bar's: this is a section of ติดตาม) */}
-      <div className="fw-head">
+      {/* (its name stays on a phone, where page titles give way to the top bar's: this is a section of ติดตาม;
+          track-watch: where the search page's "ดูบริษัทที่ติดตาม" lands, components/SalesToast.tsx goTrack) */}
+      <div className="fw-head" id="track-watch">
       <PageHead
         title="บริษัทที่ติดตาม"
         sub={`${rows.length ? fmtN(rows.length) + ' บริษัท · ' : ''}${team ? 'รายชื่อเดียวกันทั้งทีม' + (localN ? ` ยกเว้น ${fmtN(localN)} บริษัทที่${LOCAL_ONLY}` : '') : 'บันทึกในเครื่องนี้'}`}
@@ -120,7 +121,7 @@ export function FollowList() {
             <span className="card-t">ยังไม่ได้ติดตามบริษัท</span>
             {canCust ? (
               <>
-                <span className="t-sec">เปิดหน้าบริษัทแล้วกด “ติดตาม” บริษัทจะขึ้นที่นี่ พร้อมนัดถัดไปและสถานะใน Sales Tracker</span>
+                <span className="t-sec">เปิดหน้าบริษัทแล้วกด “ติดตาม” หรือในหน้าค้นหา กด “เลือกทั้งหมด” หรือติ๊กหลายบริษัท แล้วกด “ติดตาม” บริษัทจะขึ้นที่นี่ พร้อมนัดถัดไปและสถานะใน Sales Tracker</span>
                 <button onClick={toSearch} className="lnk">เลือกบริษัทจากหน้าค้นหา</button>
               </>
             ) : (

@@ -46,6 +46,8 @@ import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg
 import { expTeamMonth, expWhat, rowWhat, type XRow } from './expenseMoney';
 // many companies at once (the search page's selection)
 import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
+// บริษัทที่ติดตาม: a follow on any id of a company is the company's
+import { followIdsOf } from './follow';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -978,13 +980,15 @@ export class GccEngine {
     this.saveCrm();
   }
   /** Follow (or stop following) many companies at once (the search page's selection): one batch, each
-   *  company once; those already so are left as they are and counted. */
+   *  company once; those already so are left as they are and counted. A follow made on a row since merged
+   *  into a company is that company's (lib/follow.ts followIdsOf, as บริษัทที่ติดตาม and toggleWatch read it):
+   *  it counts as followed, and stopping removes every id of it. */
   setWatchMany(ids: readonly number[], on: boolean) {
     if (!this.can('edit.cust')) {
       this.deny();
       return { changed: 0, same: 0, local: 0 };
     }
-    const W = this.crm.watch, has = new Set(W), done = new Set<number>(), gone = new Set<number>();
+    const W = this.crm.watch, has = new Set(W.map((id) => this.canonical(id))), done = new Set<number>(), gone = new Set<number>();
     let changed = 0, same = 0, local = 0;
     this.bulk(() => {
       ids.forEach((id0) => {
@@ -992,9 +996,14 @@ export class GccEngine {
         if (!c || done.has(c.id)) return;
         done.add(c.id);
         if (has.has(c.id) === on) return void same++;
-        if (on) W.push(c.id);
-        else gone.add(c.id);
-        this.op(keyOf.watch(c.id), on ? 1 : undefined);
+        if (on) {
+          W.push(c.id);
+          this.op(keyOf.watch(c.id), 1);
+        } else
+          followIdsOf(W, c.id, (id) => this.canonical(id)).forEach((id) => {
+            gone.add(id);
+            this.op(keyOf.watch(id), undefined);
+          });
         c.fl.watch = on;
         changed++;
         if (this.staysHere(c.id)) local++;

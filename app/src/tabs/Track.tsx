@@ -17,7 +17,7 @@ const panelT: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 500 };
 const pairGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,400px),1fr))', gap: 16, alignItems: 'stretch' };
 
 export function Track() {
-  const { engine: e, ui, set, setF, go, open } = useApp();
+  const { engine: e, ui, set, setF, open } = useApp();
   const v = useEngineVersion();
   const { oInd, oProv, oExpM, oFy, oSt } = ui;
   const CD = e.B.CD, D = e.B.D, W = e.W;
@@ -119,12 +119,17 @@ export function Track() {
   const goTable = () => setF({ view: 'cert', tgt: '', cfo: oSt, expM: oExpM, cInd: oInd, cFy: oFy, cProv: oProv, sort: oExpM || oSt === 'soon' ? 'exp' : 'ap' });
   const goSoon = () => setF({ view: 'cert', tgt: '', cfo: 'soon', expM: '', cInd: oInd, cFy: oFy, cProv: oProv, sort: 'exp' });
 
-  // ---- company-level feeds from the registry (the companies followed have their own list, on top)
+  // ---- company-level feeds from the registry (the companies followed have their own list, on top:
+  // tabs/TrackFollow.tsx, so the watch feed is not one of these cards)
   const feeds = useMemo(
     () => FEEDS.filter(([k]) => k !== 'watch').map(([k, label, , desc]) => ({ k, label, desc, all: e.feedItems(k) })),
     [e, v],
   );
   const mon = e.monCfg();
+  // what a registry card's ดูทั้งหมด leads to: the list in ค้นหา, where the select-all bar follows its companies
+  // or sends them to the tracker (lib/bulk.ts bulkActs: the same capabilities), which puts them in แผนติดต่อ
+  const pickActs = [e.can('edit.cust') && 'ติดตาม', e.can('edit.deal') && e.can('view.sales') && 'ส่งเข้า Sales Tracker'].filter(Boolean).join(' หรือ ');
+  const pickHint = pickActs ? `เปิดรายชื่อในหน้าค้นหา กด เลือกทั้งหมด หรือติ๊กบางบริษัท แล้วกด ${pickActs} ที่แถบเหนือรายการ จึงจะขึ้นในแผนติดต่อ` : undefined;
 
   return (
     <>
@@ -302,15 +307,14 @@ export function Track() {
                     <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{feedLine(D, k, c)}</span>
                   </button>
                 ))}
-                {!all.length && <span className="empty" style={{ borderTop: '1px solid var(--divider)', paddingTop: 9 }}>{k === 'watch' ? 'กด ติดตาม ในหน้าบริษัทเพื่อเพิ่ม' : k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
+                {!all.length && <span className="empty" style={{ borderTop: '1px solid var(--divider)', paddingTop: 9 }}>{k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
               </div>
               {all.length > 0 && (
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 4 }}>
                   {/* แผนติดต่อ lists only what the team works on: the followed companies go there; a registry list is
-                      opened in ค้นหา, where its companies are followed or sent to the tracker first (one link) */}
-                  <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="lnk" title={k === 'watch' || !e.can('edit.cust') ? undefined : `เปิดรายชื่อในหน้าค้นหา เลือกบริษัทแล้วกด ติดตาม${e.can('edit.deal') && e.can('view.sales') ? ' หรือ ส่งเข้า Sales Tracker' : ''} จึงจะขึ้นในแผนติดต่อ`}>ดูทั้งหมด {fmtN(all.length)}</button>
-                  {k === 'watch' && <button onClick={() => go('plan', { plFeed: 'watch', picked: {}, plLim: 60 })} className="lnk">วางแผนติดต่อ</button>}
-                  {k === 'watch' && e.can('edit.deal') && e.can('view.sales') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="lnk">ส่งเข้า Sales Tracker</button>}
+                      opened in ค้นหา (one link), where เลือกทั้งหมด or a few ticks, then ติดตาม or ส่งเข้า Sales Tracker on the
+                      bar over the list, put its companies there */}
+                  <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="lnk" title={pickHint}>ดูทั้งหมด {fmtN(all.length)}</button>
                 </div>
               )}
             </div>

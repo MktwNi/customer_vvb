@@ -39,8 +39,9 @@ export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: rea
   const { say } = useSalesActs();
   const idle = n === 0;
   const cos = useMemo(() => (idle ? [] : pickedCos(sel, rows)), [idle, sel, rows]);
-  const watch = useMemo(() => new Set(e.crm.watch), [e, ver]);
-  const fs = followSplit(cos, watch);
+  // followed by any of its ids (a follow made on a row since merged into it: lib/follow.ts followIdsOf)
+  const watch = useMemo(() => new Set(e.crm.watch.map((id) => e.canonical(id))), [e, ver]);
+  const fs = followSplit(cos.map((id) => e.canonical(id)), watch);
   const can = (c: Parameters<typeof e.can>[0]) => e.can(c);
   const acts = bulkActs(can, fs.on, cos.length);
   const team = !!e.teamCfg;
@@ -53,7 +54,7 @@ export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: rea
   const follow = (on: boolean) => {
     setAsk(null);
     const r = e.setWatchMany(cos, on);
-    if (on) say(followNote(r.changed, r.same) + localWord(r.local), { ms: 8000, acts: r.changed ? [{ label: 'ดูรายการติดตาม', act: 'goTrack', primary: true }] : undefined });
+    if (on) say(followNote(r.changed, r.same) + localWord(r.local), { ms: 8000, acts: r.changed ? [{ label: 'ดูบริษัทที่ติดตาม', act: 'goTrack', primary: true }] : undefined });
     else say(unfollowNote(r.changed, r.same) + localWord(r.local), { ms: 6000 });
   };
   const run = (a: Act) => {
