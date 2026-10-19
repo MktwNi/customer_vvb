@@ -1,8 +1,8 @@
 import { useId, useState, type FormEvent } from 'react';
 import { useApp } from '../../state';
 import type { TeamDir, TeamUser } from '../../lib/engine';
-import { CAP, CAPS, LOCKED_CAP, closeNeeds, hasWrite, needsChain, resolveCaps, roleLine, unionCaps, type CapGrant, type CapId, type CapSet } from '../../lib/caps';
-import { addDays, isoTh, todayISO } from '../../lib/format';
+import { CAP, LOCKED_CAP, closeNeeds, hasWrite, needsChain, resolveCaps, roleLine, unionCaps, type CapGrant, type CapId, type CapSet } from '../../lib/caps';
+import { addDays, isoTh, stampTh, todayISO } from '../../lib/format';
 import { Modal } from '../../components/Dialog';
 import { Select } from '../../components/Select';
 import { DateField, Notice } from '../../components/ui';
@@ -42,7 +42,7 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
   // what this person has now with the role picked and the extras kept: what can still be given
   const keep = extras.filter((x) => !drop.includes(x.k));
   const now = resolveCaps(role, Object.fromEntries(dir.roles.map((x) => [x.id, x.c])), { c: [...keep, ...add].map((x) => ({ ...x, until: x.until || undefined })) }, today);
-  const givable = CAPS.filter((c) => c.id !== LOCKED_CAP && !now[c.id]);
+  const givable = e.capsShown().filter((c) => c.id !== LOCKED_CAP && !now[c.id]);
   const nameOk = !u.ll; // the display name is fixed once the account has signed in
   const emailChanged = em.trim() !== (u.em || '');
   const verified = !!u.em && !emailChanged && (u.ok === 1 || u.ok === true);
@@ -158,7 +158,7 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
                 <div className={'rl-extra rl-extra-r' + (drop.includes('role') ? ' gone' : '')}>
                   <span>
                     <span>บทบาทชั่วคราว {roleOf(dir.roles, tmpRole.id).n}{tmpRole.until ? ` · ถึง ${isoTh(tmpRole.until)}` : ''}</span>
-                    <small>{tmpRole.by ? `อนุมัติโดย ${userName(dir, tmpRole.by)}` : ''}{tmpRole.at ? ` เมื่อ ${isoTh(tmpRole.at)}` : ''}</small>
+                    <small>{tmpRole.by ? `อนุมัติโดย ${userName(dir, tmpRole.by)}` : ''}{tmpRole.at ? ` เมื่อ ${stampTh(tmpRole.at)}` : ''}</small>
                   </span>
                   <button type="button" className="quiet" onClick={() => setDrop((d) => (d.includes('role') ? d.filter((x) => x !== 'role') : [...d, 'role']))}>{drop.includes('role') ? 'คงไว้' : 'เอาออก'}</button>
                 </div>
@@ -167,7 +167,7 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
                 <div key={x.k} className={'rl-extra rl-extra-r' + (drop.includes(x.k) ? ' gone' : '')}>
                   <span>
                     <span>{CAP[x.k as CapId]?.label || x.k}{x.until ? ` · ถึง ${isoTh(x.until)}` : ''}</span>
-                    <small>{x.by ? `ให้โดย ${userName(dir, x.by)}` : ''}{x.at ? ` เมื่อ ${isoTh(x.at)}` : ''}</small>
+                    <small>{x.by ? `ให้โดย ${userName(dir, x.by)}` : ''}{x.at ? ` เมื่อ ${stampTh(x.at)}` : ''}</small>
                   </span>
                   <button type="button" className="quiet" onClick={() => setDrop((d) => (d.includes(x.k) ? d.filter((y) => y !== x.k) : [...d, x.k]))}>{drop.includes(x.k) ? 'คงไว้' : 'เอาออก'}</button>
                 </div>

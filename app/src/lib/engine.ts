@@ -19,8 +19,8 @@ import {
 } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
 import {
-  BUILTIN, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, parseAudit, parseGrants, parseReqs, parseRoles, sameName, capsWire,
-  type AuditRow, type CapAsk, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
+  BUILTIN, CAPS, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, lateUnknown, parseAudit, parseGrants, parseReqs, parseRoles, sameName, roleWire,
+  type AuditRow, type CapAsk, type CapDef, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
 } from './caps';
 import {
   ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
@@ -28,6 +28,7 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
+import { purgeExpenses, toExpense } from './expense';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
@@ -860,8 +861,19 @@ export class GccEngine {
   async teamRoles(): Promise<RoleDef[]> {
     const r = await this.adminCall<Record<string, unknown>>({ action: 'me' });
     this.knownRoles = parseRoles(r.roles);
+    this.noteRoles(r.roles);
     this.emit();
     return this.knownRoles;
+  }
+  /** Capabilities of this build the team script does not know (lateUnknown), from the last roles it sent. */
+  private lateOff: CapId[] = [];
+  private noteRoles(x: unknown) {
+    if (x && typeof x === 'object') this.lateOff = lateUnknown(x);
+  }
+  /** The capabilities the role editor, extras, requests and สิทธิ์ของฉัน offer: the catalogue, less any the
+   *  team script would refuse ('bad_cap': a script with roles deployed before job expenses). */
+  capsShown(): CapDef[] {
+    return this.lateOff.length ? CAPS.filter((c) => !this.lateOff.includes(c.id)) : CAPS;
   }
   /**
    * May this account do `cap`? `owner`: whose record it is (a deal's ผู้รับผิดชอบ, a record's writer),
@@ -895,6 +907,8 @@ export class GccEngine {
       const me = this.me();
       const [type, id, rest] = k.split('/');
       if (rule.own === 'resp') {
+        // the script also wants the deal to have been the account's before the push this goes in (Code.gs
+        // opGate_): a deal taken over and written to before one push is refused there (denied → team value)
         const d = this.sales.deals[id];
         const nv = type === 'deal' && v && typeof v === 'object' ? (v as { resp?: string }).resp : undefined;
         own = !!d && sameName(d.resp, me) && (type !== 'deal' || del || sameName(nv ?? d.resp, me));
@@ -1200,6 +1214,21 @@ export class GccEngine {
         const c = toMonthClose(v), M = S.mclose || (S.mclose = {});
         if (c && /^\d{4}-\d\d$/.test(k) && !(k in M)) M[k] = c;
       });
+      // job expenses (lib/expense.ts), only for an account that sees them (as the script would send them)
+      if (this.can('view.exp')) {
+        Object.entries((IS.exp || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const x = toExpense(v), E = S.exp || (S.exp = {}), j = k.indexOf('/');
+          if (x && j > 0 && j < k.length - 1 && !k.includes('/', j + 1) && S.deals[k.slice(0, j)] && !(k in E)) E[k] = x;
+        });
+        Object.entries((IS.xchk || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const c = toPayCheck(v), X = S.xchk || (S.xchk = {}), j = k.indexOf('/');
+          if (c && j > 0 && j < k.length - 1 && !k.includes('/', j + 1) && !(k in X)) X[k] = c;
+        });
+        Object.entries((IS.mcloseOut || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const c = toMonthClose(v), M = S.mcloseOut || (S.mcloseOut = {});
+          if (c && /^\d{4}-\d\d$/.test(k) && !(k in M)) M[k] = c;
+        });
+      }
       // joint quotations: the header's mark and each membership (else the header turns into a plain customer
       // and the members' own typed figures count again); only for deals this browser has
       Object.entries(IS.jqt || {}).forEach(([k, v]) => {
@@ -1690,6 +1719,13 @@ export class GccEngine {
       delete S.shares[id];
       if (this.canWriteKey(keyOf.dshare(id), true)) this.op(keyOf.dshare(id));
     }
+    // its job expenses: the same (the script deletes them with the deal for an account); accounting's checks
+    // of them stay, as checks of income do
+    Object.keys(S.exp || {}).forEach((k) => {
+      if (!k.startsWith(id + '/')) return;
+      delete S.exp![k];
+      if (this.canWriteKey('dexp/' + k, true)) this.op('dexp/' + k);
+    });
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
   setSalesList(name: keyof SalesCfg, items: string[]) {
@@ -3388,7 +3424,8 @@ export class GccEngine {
   private async pullFrom(cfg: TeamCfg, since: number) {
     const rows: SyncRow[] = [];
     for (;;) {
-      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, this.cred(cfg), { action: 'pull', since });
+      // xp: this build knows job expenses (an older one would get an expense's month check as a deletion)
+      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, this.cred(cfg), { action: 'pull', since, xp: 1 });
       this.meta(cfg, r);
       rows.push(...r.rows);
       if (r.rows.length) since = r.rows[r.rows.length - 1].seq;
@@ -3425,9 +3462,10 @@ export class GccEngine {
 
   /**
    * The account as the script describes it now (name, role, capabilities, requests). Returns whether
-   * anything changed. A role that gains or loses what the script hides from it (money, commission)
-   * pulls everything again — the rows it holds were sent without those fields, or with them — and one
-   * that may no longer open documents drops the copies kept in this browser.
+   * anything changed. A role that gains or loses what the script hides from it (money, commission, job
+   * expenses) pulls everything again — the rows it holds were sent without those fields, or with them — one
+   * that may no longer open documents drops the copies kept in this browser, and one that may no longer see
+   * job expenses drops them at once.
    */
   private adoptMe(s: Session, me: ReturnType<typeof parseMe>) {
     const before = capsOf(s) || {};
@@ -3470,8 +3508,8 @@ export class GccEngine {
       // the same role, other capabilities: the role was edited, or an extra was added or ran out
       this.teamNote = ranOut ? 'สิทธิ์เพิ่มชั่วคราวหมดอายุแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี' : 'สิทธิ์ของคุณเปลี่ยนแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี';
     }
-    // what the script leaves out depends on these two: the rows held here were sent for the old set
-    const real = (c: CapSet) => `${!!c['view.money']}|${!!c['view.comm']}`;
+    // what the script leaves out depends on these three: the rows held here were sent for the old set
+    const real = (c: CapSet) => `${!!c['view.money']}|${!!c['view.comm']}|${!!c['view.exp']}`;
     const cfg = this.teamCfg;
     if (real(before) !== real(after) && cfg && cfg.mode === 'accounts' && cfg.u === s.u) {
       // the next round pulls every row again (each record is replaced whole); set after this round ends,
@@ -3480,6 +3518,8 @@ export class GccEngine {
       this.flushSoon();
     }
     if ((before['docs.open'] && !after['docs.open']) || (before['view.money'] && !after['view.money'])) this.purgeDocCopies();
+    // the job expenses go at once (the pull that follows brings them as deletions anyway)
+    if (before['view.exp'] && !after['view.exp'] && purgeExpenses(this.sales)) this.saveSales();
     return true;
   }
   /** The account's capabilities changed what the script sends it: pull everything again (adoptMe). */
@@ -4575,7 +4615,10 @@ export class GccEngine {
   async adminDir(): Promise<TeamDir> {
     const r = await this.adminCall<Record<string, unknown>>({ action: 'users' });
     const v4 = 'roles' in r;
-    if (v4) this.knownRoles = parseRoles(r.roles);
+    if (v4) {
+      this.knownRoles = parseRoles(r.roles);
+      this.noteRoles(r.roles);
+    }
     return {
       users: (Array.isArray(r.users) ? r.users : []) as TeamUser[],
       roles: parseRoles(r.roles),
@@ -4602,15 +4645,17 @@ export class GccEngine {
   /** Create (no id) or change a role: name, description, capabilities. `from`: the role it was copied
    *  from (the audit trail says so). Returns the roles as they are now. */
   async roleSave(r: { id?: string; n: string; d: string; c: CapSet; from?: string }) {
-    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: capsWire(r.c), ...(r.from ? { from: r.from } : {}) }).catch((e) => {
+    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: roleWire(r.c), ...(r.from ? { from: r.from } : {}) }).catch((e) => {
       // the script shares these codes with accounts: say them about a role
       throw e instanceof TeamSyncError && e.code === 'name_taken' ? codeError('name_dup', e.extra) : e instanceof TeamSyncError && e.code === 'bad_name' ? codeError('role_name', e.extra) : e;
     });
+    this.noteRoles(x.roles);
     return { id: typeof x.id === 'string' ? x.id : r.id || '', roles: 'roles' in x ? parseRoles(x.roles) : null };
   }
   /** Delete a role made by an admin; its accounts (and temporary grants of it) move to `to`. */
   async roleDel(id: string, to: string) {
     const x = await this.adminCall<Record<string, unknown>>({ action: 'role_del', id, to });
+    this.noteRoles(x.roles);
     return 'roles' in x ? parseRoles(x.roles) : null;
   }
   /** Extras for one account beyond its role (until a date, or for good). */

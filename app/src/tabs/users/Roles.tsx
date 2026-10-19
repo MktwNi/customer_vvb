@@ -168,6 +168,8 @@ function SaveWords({ from, to }: { from: CapSet; to: CapSet }) {
 
 /** The capabilities of one role, ticked or not, in their three groups. */
 function Editor({ r, cur, locked, onChange }: { r: RoleDef; cur: CapSet; locked: boolean; onChange: (c: CapSet) => void }) {
+  const { engine: e } = useApp();
+  const shown = e.capsShown(); // less what the team script does not know yet
   const toggle = (k: CapId) => {
     const n: CapSet = { ...cur };
     if (n[k]) {
@@ -184,7 +186,7 @@ function Editor({ r, cur, locked, onChange }: { r: RoleDef; cur: CapSet; locked:
             <h4 id={'rl-g-' + g.id}>{g.title}</h4>
             <span>{g.note}</span>
           </div>
-          {CAPS.filter((c) => c.g === g.id).map((c) => (
+          {shown.filter((c) => c.g === g.id).map((c) => (
             <CapRow key={c.id} c={c} cur={cur} saved={r.c} locked={locked || c.id === LOCKED_CAP} onToggle={() => toggle(c.id)} onScope={(s) => scope(c.id, s)} />
           ))}
           {g.id === 'v' && <p className="rl-foot">หน้าทะเบียนบริษัท (ภาพรวม ค้นหา ติดตาม แผนที่ หมายเหตุ) ทุกบทบาทเห็นเสมอ เพราะเป็นข้อมูลสาธารณะ</p>}
@@ -230,6 +232,8 @@ function CapRow({ c, cur, saved, locked, onToggle, onScope }: { c: CapDef; cur: 
 
 /** เทียบทุกบทบาท: one read-only table, a row per capability, a column per role. */
 function Matrix({ dir }: { dir: TeamDir }) {
+  const { engine: e } = useApp();
+  const shown = e.capsShown();
   const roles = dir.roles;
   return (
     <section className="us-card rl-ed rl-mx" style={{ padding: 0 }} aria-labelledby="rl-mx-h">
@@ -258,7 +262,7 @@ function Matrix({ dir }: { dir: TeamDir }) {
               <tr className="rl-mx-g">
                 <th scope="rowgroup" colSpan={roles.length + 1}>{g.title}</th>
               </tr>
-              {CAPS.filter((c) => c.g === g.id).map((c) => (
+              {shown.filter((c) => c.g === g.id).map((c) => (
                 <tr key={c.id}>
                   <th scope="row">
                     <span className="rl-mx-t">

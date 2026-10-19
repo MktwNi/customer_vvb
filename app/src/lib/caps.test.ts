@@ -1,8 +1,8 @@
 /** The capability catalogue, the built-in roles and the rules built on them (lib/caps.ts). */
 import { describe, expect, it } from 'vitest';
 import {
-  ALL_CAPS, BUILTIN, CAP, CAPS, CAP_IDS, GROUPS, KNOWN_PREFIXES, LOCKED_CAP, SERVER_ONLY, WRITE_CAPS, can, canWriteKey, capsOf, capsWire, closeNeeds, gained,
-  hasWrite, keyRule, legacyRole, listWords, lost, needsChain, parseAudit, parseCaps, parseGrants, parseMyReq, parseReqs, parseRoles, resolveCaps, roleLine,
+  ALL_CAPS, BUILTIN, CAP, CAPS, CAP_IDS, GROUPS, KNOWN_PREFIXES, LATE_CAPS, LOCKED_CAP, SERVER_ONLY, WRITE_CAPS, can, canWriteKey, capsOf, capsWire, closeNeeds, gained,
+  hasWrite, keyRule, lateUnknown, legacyRole, listWords, lost, needsChain, parseAudit, parseCaps, parseGrants, parseMyReq, parseReqs, parseRoles, resolveCaps, roleLine, roleWire,
   sameCaps, sameName, summarize, type CapId, type CapSet,
 } from './caps';
 import { canWriteKey as legacyWrite } from './auth';
@@ -13,21 +13,26 @@ const HEAD: CapSet = { ...BUILTIN.sales.c, 'view.comm': 'all', 'edit.share': 'al
 const ACCT: CapSet = Object.fromEntries((['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.pay', 'docs.up', 'qt.check', 'pay.check', 'notify.mail', 'set.units'] as CapId[]).map((k) => [k, 'all']));
 
 describe('the catalogue', () => {
-  it('has the 24 ids of the shared contract, unique, in their groups', () => {
+  it('has the 26 ids of the shared contract, unique, in their groups', () => {
     expect(CAP_IDS).toEqual([
-      'view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open',
-      'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log',
+      'view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'view.exp', 'docs.open',
+      'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'edit.exp', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log',
       'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users',
     ]);
     expect(new Set(CAP_IDS).size).toBe(CAP_IDS.length);
     expect(CAPS.every((c) => GROUPS.some((g) => g.id === c.g))).toBe(true);
     expect(GROUPS.map((g) => g.title)).toEqual(['ดูได้', 'แก้ไขได้', 'เข้าถึงและจัดการ']);
   });
-  it('every `needs` is a capability; the "ดู" labels start with ดู; two are real redaction', () => {
+  it('every `needs` is a capability; the "ดู" labels start with ดู; three are real redaction', () => {
     CAPS.forEach((c) => c.needs && expect(CAP_IDS).toContain(c.needs));
     CAPS.filter((c) => c.id.startsWith('view.')).forEach((c) => expect(c.label.startsWith('ดู')).toBe(true));
-    expect(CAPS.filter((c) => c.real).map((c) => c.id)).toEqual(['view.money', 'view.comm']);
-    expect(CAPS.filter((c) => c.scope).map((c) => c.id)).toEqual(['edit.deal', 'edit.pay', 'del.log']);
+    expect(CAPS.filter((c) => c.real).map((c) => c.id)).toEqual(['view.money', 'view.comm', 'view.exp']);
+    expect(CAPS.filter((c) => c.scope).map((c) => c.id)).toEqual(['edit.deal', 'edit.pay', 'edit.exp', 'del.log']);
+    // job expenses: who sees them and who records them are set apart in the role editor
+    expect([CAP['view.exp'].g, CAP['view.exp'].label, CAP['view.exp'].needs]).toEqual(['v', 'ดูค่าใช้จ่ายและกำไรของงาน', 'view.money']);
+    expect([CAP['edit.exp'].g, CAP['edit.exp'].label, CAP['edit.exp'].needs]).toEqual(['e', 'บันทึกค่าใช้จ่ายของงาน', 'view.exp']);
+    expect(CAP['view.exp'].desc && CAP['edit.exp'].desc).toBeTruthy();
+    expect(needsChain('edit.exp', {})).toEqual(['view.exp', 'view.money']);
     expect(CAP['pay.check'].needs).toBe('view.cash');
     expect(CAP['view.cash'].needs).toBe('view.money');
     expect(CAP['edit.share'].needs).toBe('view.comm');
@@ -37,8 +42,11 @@ describe('the catalogue', () => {
 describe('built-in roles', () => {
   it('admin is everything; sales and viewer see money and Cashflow but not commission', () => {
     expect(sameCaps(BUILTIN.admin.c, ALL_CAPS)).toBe(true);
-    expect(ids(BUILTIN.sales.c)).toEqual(['del.log', 'docs.open', 'docs.up', 'edit.ctag', 'edit.cust', 'edit.deal', 'edit.jqt', 'edit.pay', 'edit.task', 'notify.mail', 'view.cash', 'view.money', 'view.plan', 'view.sales']);
+    expect(ids(BUILTIN.sales.c)).toEqual(['del.log', 'docs.open', 'docs.up', 'edit.ctag', 'edit.cust', 'edit.deal', 'edit.exp', 'edit.jqt', 'edit.pay', 'edit.task', 'notify.mail', 'view.cash', 'view.exp', 'view.money', 'view.plan', 'view.sales']);
     expect(BUILTIN.sales.c['del.log']).toBe('own');
+    // job expenses: sales sees every deal's and records its own deals'; the viewer sees none
+    expect([BUILTIN.sales.c['view.exp'], BUILTIN.sales.c['edit.exp']]).toEqual(['all', 'own']);
+    expect([BUILTIN.viewer.c['view.exp'], BUILTIN.viewer.c['edit.exp']]).toEqual([undefined, undefined]);
     expect(ids(BUILTIN.viewer.c)).toEqual(['docs.open', 'view.cash', 'view.money', 'view.plan', 'view.sales']);
     for (const r of [BUILTIN.sales, BUILTIN.viewer]) {
       expect(r.c['view.comm']).toBeUndefined();
@@ -65,9 +73,13 @@ describe('built-in roles', () => {
   });
   it('summaries read as the screens say them', () => {
     expect(summarize(BUILTIN.viewer.c)).toBe('ดูได้ทุกหน้า รวมยอดเงินและ Cashflow แก้ไขไม่ได้');
-    expect(summarize(BUILTIN.sales.c)).toBe('เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร ลบได้เฉพาะบันทึกของตัวเอง');
+    expect(summarize(BUILTIN.sales.c)).toBe('เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร บันทึกค่าใช้จ่ายของงานตัวเอง ลบได้เฉพาะบันทึกของตัวเอง');
+    expect(summarize(BUILTIN.sales.c)).toBe(BUILTIN.sales.d);
     expect(summarize(ALL_CAPS)).toBe('ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และสิทธิ์');
-    expect(summarize(HEAD)).toBe('เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร ลบดีล ลูกค้า และผู้ติดต่อได้ เห็นค่าคอมมิชชั่นและแบ่งสัดส่วนงาน ตรวจใบเสนอราคา');
+    expect(summarize(HEAD)).toBe('เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร บันทึกค่าใช้จ่ายของงานตัวเอง ลบดีล ลูกค้า และผู้ติดต่อได้ เห็นค่าคอมมิชชั่นและแบ่งสัดส่วนงาน ตรวจใบเสนอราคา');
+    // a role that only records expenses, and one that only looks at them, still read as something
+    expect(summarize({ 'view.money': 'all', 'view.exp': 'all', 'edit.exp': 'all' })).toBe('บันทึกค่าใช้จ่ายของงาน');
+    expect(summarize({ ...BUILTIN.viewer.c, 'view.exp': 'all' })).toBe('ดูได้ทุกหน้า รวมยอดเงินและ Cashflow และค่าใช้จ่ายของงาน แก้ไขไม่ได้');
     expect(summarize(ACCT)).toBe('เพิ่มและแก้แผนชำระ และแนบเอกสาร เห็นค่าคอมมิชชั่น ตรวจใบเสนอราคา ตรวจยืนยันรับเงิน ตั้งค่าหน่วยงาน');
     expect(summarize({})).toBe('ยังไม่มีสิทธิ์ใดเลย นอกจากหน้าทะเบียนบริษัท');
     expect(summarize({ 'view.sales': 'all' })).toBe('ดู Sales Tracker และผู้ติดต่อ ไม่เห็นยอดเงิน แก้ไขไม่ได้');
@@ -93,6 +105,17 @@ describe('needs, scopes and resolving', () => {
     expect(parseCaps(null)).toBeNull();
     expect(parseCaps('x')).toBeNull();
     expect(capsWire({ 'del.log': 'own', 'view.sales': 'all', 'edit.cust': undefined })).toEqual({ 'del.log': 'own', 'view.sales': 1 });
+    // role_save names the job-expense capabilities, 0 when off (the script keeps them for a save that does not)
+    expect(roleWire({ 'view.sales': 'all' })).toEqual({ 'view.sales': 1, 'view.exp': 0, 'edit.exp': 0 });
+    expect(roleWire(BUILTIN.sales.c)).toMatchObject({ 'view.exp': 1, 'edit.exp': 'own' });
+  });
+  it('lateUnknown: the job-expense capabilities a script\'s ผู้ดูแลระบบ lacks (a script from before them); none when it can\'t tell', () => {
+    const all = Object.fromEntries(CAP_IDS.map((k) => [k, 1]));
+    const { 'view.exp': _v, 'edit.exp': _e, ...before } = all;
+    expect(lateUnknown({ admin: { n: 'ผู้ดูแลระบบ', c: all }, sales: { c: {} } })).toEqual([]);
+    expect(lateUnknown({ admin: { c: before } })).toEqual(['view.exp', 'edit.exp']);
+    expect(lateUnknown({ roles: { admin: { c: { ...before, 'edit.exp': 1 } } } })).toEqual(['view.exp']);
+    for (const x of [undefined, null, {}, { admin: {} }, { admin: { c: ['view.exp'] } }, 'x']) expect(lateUnknown(x)).toEqual([]);
   });
   it('resolveCaps: the role, unexpired extras (until is inclusive), a temporary role; admin everything, unknown nothing', () => {
     const roles = { sales: BUILTIN.sales.c, viewer: BUILTIN.viewer.c, head: HEAD };
@@ -115,11 +138,20 @@ describe('needs, scopes and resolving', () => {
     // an own extra on a role holding it for all stays all
     expect(resolveCaps('head', roles, { c: [{ k: 'del.log', s: 'own' }] }, '2026-10-15')['del.log']).toBe('all');
   });
-  it('capsOf: the script\'s me.caps; without them the built-in caps of me.role (the deployed script); unknown role nothing', () => {
+  it('capsOf: the script\'s me.caps; without them the built-in caps of me.role (the deployed script) less job expenses; unknown role nothing', () => {
     expect(capsOf(null)).toBeNull();
-    expect(capsOf({ role: 'sales' })).toEqual(BUILTIN.sales.c);
+    const less = (c: CapSet) => Object.fromEntries(Object.entries(c).filter(([k]) => !LATE_CAPS.includes(k as CapId)));
+    expect(LATE_CAPS).toEqual(['view.exp', 'edit.exp']);
+    // a script before capabilities neither hides nor guards job expenses: no account gets them from it
+    expect(capsOf({ role: 'sales' })).toEqual(less(BUILTIN.sales.c));
     expect(capsOf({ role: 'viewer' })).toEqual(BUILTIN.viewer.c);
-    expect(capsOf({ role: 'admin' })).toEqual(ALL_CAPS);
+    expect(capsOf({ role: 'admin' })).toEqual(less(ALL_CAPS));
+    expect(capsOf({ role: 'admin' })!['view.exp']).toBeUndefined();
+    // a script with capabilities but none for expenses (the one before them): no access either
+    expect(capsOf({ role: 'admin', caps: capsOf({ role: 'admin' }) })!['edit.exp']).toBeUndefined();
+    // this one: what it says
+    expect(capsOf({ role: 'sales', caps: { 'view.money': 'all', 'view.exp': 'all', 'edit.exp': 'own' } })).toEqual({ 'view.money': 'all', 'view.exp': 'all', 'edit.exp': 'own' });
+    expect(capsOf({ role: 'sales', caps: { 'view.money': 'all', 'edit.exp': 'all' } })).toEqual({ 'view.money': 'all' });
     expect(capsOf({ role: 'acct' })).toEqual({});
     expect(capsOf({ role: 'sales', caps: { 'view.sales': 'all', 'pay.check': 'all' } })).toEqual({ 'view.sales': 'all' });
   });
@@ -150,7 +182,8 @@ describe('needs, scopes and resolving', () => {
 describe('the allow-list (KEY_CAP)', () => {
   it('covers every record the app writes and the other packages\' prefixes', () => {
     const app = [keyOf.stage(1), keyOf.owner(1), keyOf.watch(1), keyOf.team('x'), keyOf.task('t'), keyOf.log(1, 'a'), keyOf.contact(1), keyOf.dedup('k'), keyOf.deal('d'), keyOf.dstep('d', 's'), keyOf.ddoc('d', 'x'), keyOf.dpay('d', 'P'), keyOf.dact('d', 'a'), keyOf.dlog('l'), keyOf.scfg('stages'), keyOf.cust(1), keyOf.person('p'), keyOf.dundo('d')];
-    const other = ['jqt/h', 'jqm/h/d', 'dshare/d', 'ccol/k', 'qchk/doc', 'dchk/d/PAY1', 'mclose/2026-10', 'ctag/k', 'scfg/unit.a', 'scfg/unitm.ฝน', 'scfg/notify.cfg', 'scfg/paychk.cfg', 'scfg/ct.cfo', 'scfg/cc.k'];
+    const other = ['jqt/h', 'jqm/h/d', 'dshare/d', 'ccol/k', 'qchk/doc', 'dchk/d/PAY1', 'mclose/2026-10', 'ctag/k', 'scfg/unit.a', 'scfg/unitm.ฝน', 'scfg/notify.cfg', 'scfg/paychk.cfg', 'scfg/ct.cfo', 'scfg/cc.k',
+      keyOf.dexp('d', 'e1'), keyOf.dlogExp('l1'), keyOf.dchkExp('d', 'e1'), keyOf.mcloseOut('2026-10')];
     for (const k of [...app, ...other]) {
       expect([k, keyRule(k, false)]).not.toEqual([k, null]);
       expect(KNOWN_PREFIXES).toContain(k.slice(0, k.indexOf('/') + 1));
@@ -164,6 +197,7 @@ describe('the allow-list (KEY_CAP)', () => {
       ['deal/d', 'edit.deal', 'del.rec'], ['dstep/d/s', 'edit.deal', 'edit.deal'], ['ddoc/d/x', 'docs.up', 'docs.up'], ['dpay/d/P', 'edit.pay', 'edit.pay'],
       ['ctag/k', 'edit.ctag', 'edit.ctag'], ['jqt/h', 'edit.jqt', 'del.rec'], ['jqm/h/d', 'edit.jqt', 'edit.jqt'], ['dshare/d', 'edit.share', 'edit.share'],
       ['ccol/k', 'edit.cust', 'edit.cust'], ['dchk/d/PAY1', 'pay.check', 'pay.check'], ['mclose/2026-10', 'pay.check', 'pay.check'],
+      ['dexp/d/e1', 'edit.exp', 'edit.exp'], ['dchk/d/exp.e1', 'pay.check', 'pay.check'], ['mclose/2026-10/out', 'pay.check', 'pay.check'],
       ['scfg/paychk.cfg', 'set.users', 'set.users'], ['scfg/stages', 'set.lists', 'set.lists'], ['scfg/ct.cfo', 'set.lists', 'set.lists'], ['scfg/cc.k', 'set.lists', 'set.lists'],
       ['scfg/unit.a', 'set.units', 'set.units'], ['scfg/unitm.ฝน', 'set.units', 'set.units'], ['scfg/notify.cfg', 'set.users', 'set.users'],
       ['dedup/k', 'set.dedup', 'set.dedup'], ['team/x', 'set.users', 'set.users'], ['dundo/d', 'set.data', 'set.data'],
@@ -180,6 +214,11 @@ describe('the allow-list (KEY_CAP)', () => {
     expect(canWriteKey({ 'edit.cust': 'all' }, 'dlog/x', false)).toBe(false);
     expect(canWriteKey({ ...BUILTIN.sales.c }, 'dlog/x', true)).toBe(false);
     expect(canWriteKey(ALL_CAPS, 'dlog/x', true)).toBe(true);
+    // the history of the expenses: whoever records them, and accounting (checks); nobody else
+    for (const c of ['edit.exp', 'pay.check'] as CapId[]) expect(canWriteKey({ [c]: 'all' }, 'dlog/exp.x', false)).toBe(true);
+    for (const c of ['edit.deal', 'edit.pay', 'docs.up', 'edit.jqt', 'edit.share'] as CapId[]) expect(canWriteKey({ [c]: 'all' }, 'dlog/exp.x', false)).toBe(false);
+    expect(canWriteKey({ 'edit.exp': 'own' }, 'dlog/exp.x', false)).toBe(true);
+    expect(canWriteKey({ ...BUILTIN.sales.c }, 'dlog/exp.x', true)).toBe(false);
   });
   it('qchk/ never by a push, not even an admin; unknown prefixes only for whoever manages users', () => {
     expect(SERVER_ONLY).toEqual(['qchk/']);
@@ -198,13 +237,20 @@ describe('the allow-list (KEY_CAP)', () => {
     expect(canWriteKey(own, 'dact/d/a', false, true)).toBe(true);
     expect(canWriteKey(own, 'dact/d/a', true, false)).toBe(false);
     expect(canWriteKey(own, 'log/1/a', true)).toBe(false); // not known: counted as not its own
+    // an expense is the deal's: its ผู้รับผิดชอบ, to write and to delete (as a payment line)
+    expect(keyRule('dexp/d/e1', false)).toEqual({ caps: ['edit.exp'], own: 'resp' });
+    expect(keyRule('dexp/d/e1', true)).toEqual({ caps: ['edit.exp'], own: 'resp' });
+    const sales = { ...BUILTIN.sales.c };
+    expect([canWriteKey(sales, 'dexp/d/e1', false, true), canWriteKey(sales, 'dexp/d/e1', false, false), canWriteKey(sales, 'dexp/d/e1', true, false)]).toEqual([true, false, false]);
+    expect(canWriteKey(BUILTIN.viewer.c, 'dexp/d/e1', false, true)).toBe(false);
   });
 });
 
 describe('words', () => {
   it('what a role adds over another (request cards, role mode of the request dialog)', () => {
     expect(gained(BUILTIN.sales.c, HEAD)).toEqual(['ดูค่าคอมมิชชั่น / สัดส่วนรายได้', 'แก้สัดส่วน % ของงาน', 'ลบดีล ลูกค้า และผู้ติดต่อ', 'ลบบันทึกการติดต่อของทุกคน', 'ตรวจ/อนุมัติใบเสนอราคา']);
-    expect(lost(BUILTIN.sales.c, ACCT)).toEqual(['แก้ไขลูกค้าและผู้ติดต่อ', 'แก้ไขดีลและขั้นตอน', 'แก้ไขนัดหมาย', 'ติดประเภทลูกค้า', 'สร้างใบเสนอราคาร่วม', 'ลบบันทึกการติดต่อ']);
+    expect(lost(BUILTIN.sales.c, ACCT)).toEqual(['ดูค่าใช้จ่ายและกำไรของงาน', 'แก้ไขลูกค้าและผู้ติดต่อ', 'แก้ไขดีลและขั้นตอน', 'แก้ไขนัดหมาย', 'บันทึกค่าใช้จ่ายของงาน', 'ติดประเภทลูกค้า', 'สร้างใบเสนอราคาร่วม', 'ลบบันทึกการติดต่อ']);
+    expect(gained(BUILTIN.viewer.c, { ...BUILTIN.viewer.c, 'view.exp': 'all', 'edit.exp': 'own' })).toEqual(['ดูค่าใช้จ่ายและกำไรของงาน', 'บันทึกค่าใช้จ่ายของงาน (เฉพาะงานของตัวเอง)']);
     // a scope narrowed to own work is lost too: other people's deals and payment plans
     const ownOnly: CapSet = { ...BUILTIN.sales.c, 'edit.deal': 'own', 'edit.pay': 'own' };
     expect(lost(BUILTIN.sales.c, ownOnly)).toEqual(['แก้ไขดีลและขั้นตอนของคนอื่น', 'แก้ไขแผนชำระเงินและการรับเงินของคนอื่น']);

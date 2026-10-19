@@ -19,16 +19,17 @@ const REFRESH = 'มีเวอร์ชันใหม่ กรุณาร�
 
 // ------------------------------------------------------------------ the catalogue as designed
 
-const IDS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users'];
-const NEEDS: Record<string, string> = { 'view.cash': 'view.money', 'view.comm': 'view.money', 'docs.open': 'view.money', 'edit.deal': 'view.money', 'edit.pay': 'view.money', 'docs.up': 'view.money', 'edit.jqt': 'view.money', 'edit.share': 'view.comm', 'qt.check': 'view.money', 'pay.check': 'view.cash', 'set.units': 'view.comm' };
-const SCOPED = ['edit.deal', 'edit.pay', 'del.log'];
-const REAL = ['view.money', 'view.comm'];
+const IDS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'view.exp', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'edit.exp', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users'];
+const NEEDS: Record<string, string> = { 'view.cash': 'view.money', 'view.comm': 'view.money', 'view.exp': 'view.money', 'docs.open': 'view.money', 'edit.deal': 'view.money', 'edit.pay': 'view.money', 'edit.exp': 'view.exp', 'docs.up': 'view.money', 'edit.jqt': 'view.money', 'edit.share': 'view.comm', 'qt.check': 'view.money', 'pay.check': 'view.cash', 'set.units': 'view.comm' };
+const SCOPED = ['edit.deal', 'edit.pay', 'edit.exp', 'del.log'];
+const REAL = ['view.money', 'view.comm', 'view.exp'];
 const ones = (l: string[]): Caps => Object.fromEntries(l.map((c) => [c, 1]));
 const VIEW = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'docs.open'];
-const SALES = [...VIEW, 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail'];
-const BUILT: Record<string, Caps> = { admin: ones(IDS), sales: { ...ones(SALES), 'del.log': 'own' }, viewer: ones(VIEW) };
-// the custom roles of the mockups
-const HEAD: Caps = { ...ones(SALES), 'view.comm': 1, 'edit.share': 1, 'del.rec': 1, 'del.log': 1, 'qt.check': 1 };
+// job expenses (the owner's decision): sales sees them and records them on its own deals; the viewer neither
+const SALES = [...VIEW, 'view.exp', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail'];
+const BUILT: Record<string, Caps> = { admin: ones(IDS), sales: { ...ones(SALES), 'edit.exp': 'own', 'del.log': 'own' }, viewer: ones(VIEW) };
+// the custom roles of the mockups (a sales head records the expenses of every deal)
+const HEAD: Caps = { ...ones(SALES), 'edit.exp': 1, 'view.comm': 1, 'edit.share': 1, 'del.rec': 1, 'del.log': 1, 'qt.check': 1 };
 const ACCT: Caps = ones(['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.pay', 'docs.up', 'qt.check', 'pay.check', 'notify.mail', 'set.units']);
 
 /**
@@ -47,9 +48,11 @@ const TABLE: [string, string | string[] | null, string | string[] | null][] = [
   ['deal/', 'edit.deal', 'del.rec'],
   ['dstep/', 'edit.deal', 'edit.deal'],
   ['dact/', 'edit.deal', 'del.log'],
+  ['dlog/exp.', ['edit.exp', 'pay.check'], 'set.users'],
   ['dlog/', ['edit.deal', 'edit.pay', 'docs.up', 'edit.jqt', 'edit.share', 'pay.check'], 'set.users'],
   ['ddoc/', 'docs.up', 'docs.up'],
   ['dpay/', 'edit.pay', 'edit.pay'],
+  ['dexp/', 'edit.exp', 'edit.exp'],
   ['ctag/', 'edit.ctag', 'edit.ctag'],
   ['jqt/', 'edit.jqt', 'del.rec'],
   ['jqm/', 'edit.jqt', 'edit.jqt'],
@@ -68,12 +71,16 @@ const TABLE: [string, string | string[] | null, string | string[] | null][] = [
   ['team/', 'set.users', 'set.users'],
   ['dundo/', 'set.data', 'set.data'],
 ];
-/** What the table gives `caps` for key k (own-work capabilities count, the records here are nobody's yet). */
+/** Records whose own work is the deal's ผู้รับผิดชอบ (deal/ by the new value too), to write and to delete. */
+const DEAL_OWN = { w: ['deal/', 'dstep/', 'dact/', 'dpay/', 'dexp/'], d: ['dstep/', 'dpay/', 'dexp/'] };
+/** What the table gives `caps` for key k. The records here are nobody's yet: an own-work capability counts
+ *  for a record of its writer (never written: it may), not for a deal's (there is no such deal). */
 function model(caps: Caps, k: string, del: boolean) {
   const row = TABLE.find(([p]) => k.startsWith(p));
   const need = row ? (del ? row[2] : row[1]) : /^scfg\/[^.]*$/.test(k) ? 'set.lists' : 'set.users';
   if (need === null) return false;
-  return (Array.isArray(need) ? need : [need]).some((c) => !!caps[c]);
+  const dealOwn = !!row && (del ? DEAL_OWN.d : DEAL_OWN.w).includes(row[0]);
+  return (Array.isArray(need) ? need : [need]).some((c) => caps[c] === 1 || (caps[c] === 'own' && !dealOwn));
 }
 
 // ------------------------------------------------------------------ helpers
@@ -138,7 +145,7 @@ afterEach(() => {
 describe('the capability catalogue (CAPS_)', () => {
   const { CAPS_, KEY_CAP, BUILTIN_ROLES } = mk().consts;
 
-  it('has exactly the 24 designed ids, in the designed order, with their needs, scopes and real redaction', () => {
+  it('has exactly the 26 designed ids, in the designed order, with their needs, scopes and real redaction', () => {
     expect(CAPS_!.map((c) => c.id)).toEqual(IDS);
     for (const c of CAPS_!) {
       expect([c.id, c.needs ?? null]).toEqual([c.id, NEEDS[c.id] ?? null]);
@@ -149,7 +156,9 @@ describe('the capability catalogue (CAPS_)', () => {
       if (c.needs) expect(IDS).toContain(c.needs);
     }
     // the ดูได้ group reads "ดู…", as the other packages name them
-    for (const id of ['view.money', 'view.cash', 'view.comm']) expect(CAPS_!.find((c) => c.id === id)!.th.startsWith('ดู')).toBe(true);
+    for (const id of ['view.money', 'view.cash', 'view.comm', 'view.exp']) expect(CAPS_!.find((c) => c.id === id)!.th.startsWith('ดู')).toBe(true);
+    // the owner's words for the two job-expense capabilities
+    expect(CAPS_!.filter((c) => c.id.endsWith('.exp')).map((c) => [c.id, c.g, c.th])).toEqual([['view.exp', 'v', 'ดูค่าใช้จ่ายและกำไรของงาน'], ['edit.exp', 'e', 'บันทึกค่าใช้จ่ายของงาน']]);
   });
 
   it('the built-in roles reproduce the designed defaults; set.users is admin only', () => {
@@ -175,6 +184,7 @@ describe('the capability catalogue (CAPS_)', () => {
       ['dstep/', 'resp', 'resp'],
       ['dact/', 'resp', 'by'],
       ['dpay/', 'resp', 'resp'],
+      ['dexp/', 'resp', 'resp'],
     ]);
   });
 });
@@ -214,8 +224,12 @@ describe('what each role may push: the script equals the allow-list, prefix by p
     // the special rows of plan.md §5
     expect(allowed.filter((k) => k.startsWith('qchk/'))).toEqual([]);
     expect(allowed.some((k) => k.startsWith('zzz/') || k.startsWith('scfg/zzz.'))).toBe(name === 'admin');
-    if (['รับเงินอย่างเดียว', 'ตรวจรับเงินอย่างเดียว'].includes(name)) expect(allowed.filter((k) => k.startsWith('dlog/'))).toEqual(['dlog/w11']);
-    expect(allowed.includes('dchk/w20')).toBe(['admin', 'บัญชี/การเงิน', 'ตรวจรับเงินอย่างเดียว'].includes(name));
+    // the history of money received is any money writer's; that of the expenses, theirs and accounting's
+    if (name === 'รับเงินอย่างเดียว') expect(allowed.filter((k) => k.startsWith('dlog/'))).toEqual(['dlog/w12']);
+    if (name === 'ตรวจรับเงินอย่างเดียว') expect(allowed.filter((k) => k.startsWith('dlog/'))).toEqual(['dlog/exp.w11', 'dlog/w12']);
+    expect(allowed.includes('dchk/w22')).toBe(['admin', 'บัญชี/การเงิน', 'ตรวจรับเงินอย่างเดียว'].includes(name));
+    // expenses: whoever records them for every deal (sales only on its own deals: none here)
+    expect(allowed.includes('dexp/w15')).toBe(['admin', 'หัวหน้าฝ่ายขาย'].includes(name));
   });
 
   it('viewer, and a role with read capabilities only: no push at all (forbidden), nothing stored', () => {
@@ -941,6 +955,26 @@ describe('going back to the script before capabilities (prepareRollback, README 
     expect(call(s, admin, 'role_save', { id: 'sales', c: { ...BUILT.sales, 'edit.pay': 0 } })).toMatchObject({ ok: true });
     expect(s.run<{ u: string }[]>('prepareRollback').map((x) => x.u)).toEqual(['somchai']);
     expect(usersOf(s)).toMatchObject({ lead: { r: 'admin' }, boss2: { r: 'admin' }, somchai: { r: 'viewer' } });
+  });
+
+  it('the job-expense capabilities do not count: the old script neither hides nor guards expenses, so turning them off moves nobody', () => {
+    const { s, admin } = team();
+    member(s, admin, 'somchai', 'สมชาย', 'sales');
+    // the mockups' หัวหน้าฝ่ายขาย as a build before expenses made it (no view.exp / edit.exp, no `from`)
+    const { 'view.exp': _v, 'edit.exp': _e, ...headBefore } = HEAD;
+    const head = role(s, admin, 'หัวหน้าฝ่ายขาย', headBefore);
+    expect(props(s, 'ROLES').roles[head].c).not.toHaveProperty('view.exp');
+    member(s, admin, 'mint', 'มินท์', head);
+    // the admin turned expenses off for พนักงานขาย (who sees them is the owner's choice)
+    expect(call(s, admin, 'role_save', { id: 'sales', c: { ...BUILT.sales, 'view.exp': 0, 'edit.exp': 0 } })).toMatchObject({ ok: true });
+    const moved = s.run<{ u: string; from: string; to: string }[]>('prepareRollback');
+    expect(moved.map((x) => [x.u, x.from, x.to])).toEqual([['mint', head, 'sales']]);
+    expect(usersOf(s)).toMatchObject({ somchai: { r: 'sales' }, mint: { r: 'sales' } });
+    // anything else the original พนักงานขาย had still counts
+    const { 'edit.task': _t, ...noTask } = headBefore;
+    const narrow = role(s, admin, 'ไม่มีนัดหมาย', noTask);
+    member(s, admin, 'kai', 'ไก่', narrow);
+    expect(s.run<{ u: string; to: string }[]>('prepareRollback').map((x) => [x.u, x.to])).toEqual([['kai', 'viewer']]);
   });
 });
 

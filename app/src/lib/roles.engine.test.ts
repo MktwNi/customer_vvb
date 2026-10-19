@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { BUILTIN, type CapSet } from './caps';
+import { BUILTIN, LATE_CAPS, type CapSet } from './caps';
 import { histLine } from './reqText';
 import { payState, planOf, quickMatch, trackerStatus } from './sales';
 import { nextStepView, statusView } from './salesUi';
@@ -126,16 +126,21 @@ const pulls = () => sent.filter((b) => b.action === 'pull').map((b) => Number(b.
 /** What the script stored for key k (as an admin pulls it). */
 const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
 const SALES = BUILTIN.sales.c;
+/** A built-in role as a script before capabilities gives it: without job expenses, which only a script that
+ *  hides and guards them gives (lib/caps.ts LATE_CAPS). */
+const before = (c: CapSet) => Object.fromEntries(Object.entries(c).filter(([k]) => !(LATE_CAPS as string[]).includes(k))) as CapSet;
 
 describe('against the team script deployed before configurable roles (no me.caps)', () => {
   it('each account works by its role\'s built-in capabilities; cv 4 is accepted; roles and requests are not there yet', async () => {
     const L = await lead(V3);
-    expect(L.e.myCaps()).toEqual(BUILTIN.admin.c);
+    expect(L.e.myCaps()).toEqual(before(BUILTIN.admin.c));
+    expect(L.e.can('view.exp')).toBe(false); // no job expenses: that script neither hides nor guards them
     expect(L.e.rolesLive).toBe(false);
     expect(L.e.roleName()).toBe('ผู้ดูแลระบบ');
     const S = await member(L, 'aek', 'เอก', 'sales');
     const V = await member(L, 'pla', 'ปลา', 'viewer');
-    expect(S.e.myCaps()).toEqual(SALES);
+    expect(S.e.myCaps()).toEqual(before(SALES));
+    expect([S.e.can('view.exp'), S.e.can('edit.exp'), S.e.canWriteKey('dexp/d1/e1', false)]).toEqual([false, false, false]);
     expect(S.e.can('view.comm')).toBe(false);
     expect(S.e.can('del.rec')).toBe(false);
     expect(S.e.can('del.log', 'เอก')).toBe(true);

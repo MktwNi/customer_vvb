@@ -61,6 +61,9 @@ export const localDay = (iso: string) => {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? String(iso || '').slice(0, 10) : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
+/** ISO timestamp (or a day) → "6 ต.ค. 2569" in local time: isoTh reads only a day ('YYYY-MM-DD'), so a
+ *  timestamp such as a grant's `at` would come out as "NaN ต.ค. 2569". */
+export const stampTh = (iso?: string | null) => (iso ? isoTh(localDay(iso)) : '—');
 /** ISO timestamp → "6 ต.ค. 2569 14:05 น." in local time */
 export const dtTh = (iso: string) => {
   const d = new Date(iso);
