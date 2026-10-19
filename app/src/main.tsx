@@ -23,6 +23,8 @@ import './joint.css';
 import './units.css';
 // the month check for accounting: the month card and year table under the Cashflow chart, the deal panel's chip
 import './paycheck.css';
+// job expenses where a job is worked on: the deal panel's ค่าใช้จ่ายของงาน, its dialog, the phone card's row
+import './expense.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

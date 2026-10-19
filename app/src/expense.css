@@ -1,0 +1,116 @@
+/* Job expenses where a job is worked on (ค่าใช้จ่ายของงาน; components/ExpCard.tsx): the deal panel's card after
+   the payment plan, the phone card's row, and the dialog that records one. The app's tokens and classes
+   (.dp-card, .sl-drop, .sl-opt, .fck, .st, .chip, .btn, .lnk, .quiet, .dlg); money going out has one calm colour
+   of its own (never red, amber or green: red is late) and always its words, เงินออก / ค่าใช้จ่าย. */
+/* the same money-out colour as Cashflow and the Dashboard (--cash-out, with this value where those are not
+   loaded); its text is a darker step of it, for 4.5:1 on white */
+:root{--out:#00706F;--out-bar:var(--cash-out,#009494);--out-left:var(--bar)}
+
+/* ---- the card */
+.xp-card{container:xp/inline-size}
+.xp-h{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;min-height:32px}
+.xp-h h3{margin:0;font-size:var(--fs-card);font-weight:500;color:var(--ink);line-height:1.4}
+.xp-h>.btn{margin-left:auto}
+.xp-note{margin:0;padding:8px 12px;border-radius:12px;background:var(--frame);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.55}
+.xp-note .lnk{font-size:var(--fs-sec)}
+.xp-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:10px 14px;border:1px dashed var(--field);border-radius:var(--r-inner);font-size:var(--fs-body);color:var(--ink-2);line-height:1.55;flex-wrap:wrap}
+.xp-empty>span{flex:1 1 280px;min-width:0}
+.xp-ro{margin:0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+/* a bill attached here that can't go up any more (engine.billsStuck): the card's line, and the Sales tab's
+   note over the table; amber with its words, as a payment still owed (never red) */
+.xp-ro.t-warn{color:var(--warn)}
+.xp-stuck{display:block;margin:0 0 12px;font-size:var(--fs-sec);line-height:1.6;color:var(--warn);overflow-wrap:anywhere}
+.xp-stuck .lnk{font-size:var(--fs-sec)}
+/* the dialog: a teammate changed the record while it was open */
+.xp-moved{margin:0}
+
+/* the summary: "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)", a slim bar, the calmer lines under it */
+.xp-sum{display:flex;flex-direction:column;gap:6px}
+.xp-line{margin:0;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6;font-variant-numeric:tabular-nums}
+.xp-line b{font-weight:500;color:var(--ink)}
+.xp-line b.xp-out,.xp-out{color:var(--out)}
+.xp-unpaid{color:var(--ink-2)}
+.xp-sub{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.55;font-variant-numeric:tabular-nums}
+.xp-sub b{font-weight:500;color:var(--ink)}
+.xp-bar{display:flex;gap:2px;height:8px;border-radius:999px;overflow:hidden;background:var(--bar-track)}
+.xp-bar i{display:block;height:100%}
+.xp-bar i.out{background:var(--out-bar);min-width:3px}
+.xp-bar i.left{flex:1;background:var(--out-left)}
+
+/* the lines: a light table, a line per expense (as the payment plan's) */
+.xp-t{display:flex;flex-direction:column}
+.xp-r{display:grid;grid-template-columns:minmax(0,1fr) 104px 176px;column-gap:14px;row-gap:4px;align-items:start;padding:12px 0;border-top:1px solid var(--divider)}
+.xp-r.ph{padding:0 0 8px;border-top:0;font-size:var(--fs-meta);color:var(--muted);align-items:end}
+.xp-r .r{text-align:right}
+.xp-r>span{min-width:0;display:flex;flex-direction:column;gap:2px;font-size:var(--fs-body);color:var(--ink);line-height:1.45}
+.xp-r small{font-size:var(--fs-meta);color:var(--muted);line-height:1.45}
+.xp-r .c-cat b{font-size:var(--fs-body);font-weight:500;color:var(--ink);overflow-wrap:anywhere}
+.xp-r .c-cat small{overflow-wrap:anywhere}
+.xp-r .c-amt{align-items:flex-end;white-space:nowrap;font-variant-numeric:tabular-nums}
+.xp-r .c-st{align-items:flex-start}
+.xp-r .c-st .st{white-space:normal}
+.xp-r .c-meta{grid-column:1/-1;flex-direction:row;justify-content:space-between;align-items:baseline;gap:4px 12px;flex-wrap:wrap;font-size:var(--fs-meta);color:var(--muted)}
+.xp-r .c-meta .lnk{font-size:var(--fs-meta)}
+.xp-acts{display:inline-flex;gap:10px;align-items:baseline;margin-left:auto}
+.xp-acts .lnk{font-size:var(--fs-sec)}
+.xp-nobill{color:var(--muted)}
+/* a member company of a joint quotation (its own panel holds its lines) */
+.xp-co{border:0;padding:0;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the commission computed from units: not a recorded line, set apart */
+.xp-r.comp{border-top:1px dashed var(--field)}
+.xp-r.comp .c-cat b{font-weight:400;color:var(--ink-2)}
+.xp-r.comp .c-amt{color:var(--ink-2)}
+.xp-f{display:flex;align-items:baseline;justify-content:space-between;gap:4px 14px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--line);font-size:var(--fs-sec);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.xp-f b{font-weight:500;color:var(--ink)}
+.xp-f>span:last-child:not(:first-child){font-size:var(--fs-meta);color:var(--muted)}
+
+/* a narrow panel (a phone): amount beside the category, the state and the bill under them */
+@container xp (max-width:520px){
+  .xp-r{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}
+  .xp-r.ph{display:none}
+  .xp-r .c-st{grid-column:1/-1;flex-direction:row}
+  .xp-acts{margin-left:0}
+}
+
+/* ---- the phone card's row */
+.xp-dot{background:var(--out-bar)}
+.xp-mk .sl-mk-t{gap:6px;align-items:stretch}
+.xp-mk .sl-mk-t>.xp-sum{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:6px}
+.xp-mk .xp-line{font-size:var(--fs-sec)}
+.xp-mk .xp-sub{font-size:var(--fs-meta);color:var(--muted)}
+.xp-ml{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.xp-ml li{display:grid;grid-template-columns:minmax(0,1fr) auto 64px;gap:8px;align-items:baseline;font-size:var(--fs-sec);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.xp-ml li>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xp-ml li b{font-weight:400;color:var(--ink)}
+.xp-ml li small{font-size:var(--fs-meta);color:var(--muted);text-align:right}
+.xp-ml li small.t-warn{color:var(--warn)}
+.xp-ma{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:2px}
+.xp-ma .lnk{font-size:var(--fs-sec)}
+
+/* ---- the dialog */
+.xp-form{display:flex;flex-direction:column;gap:14px}
+.xp-for{margin:-6px 0 0;font-size:var(--fs-sec);color:var(--ink-2)}
+.xp-fld{display:flex;flex-direction:column;gap:6px;min-width:0}
+.xp-fld>label,.xp-lbl{font-size:var(--fs-sec);color:var(--ink-2)}
+.xp-fld .fld{width:100%;min-width:0}
+.xp-fld .fld::placeholder{color:var(--muted)}
+.xp-opt{color:var(--muted)}
+.xp-hint{font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+.xp-err{font-size:var(--fs-meta);color:var(--bad);line-height:1.5}
+.xp-fld .fld[aria-invalid=true]{--bd:var(--bad)}
+.xp-sugg{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.xp-sugg>span{font-size:var(--fs-meta);color:var(--muted);margin-right:2px}
+.xp-sugg .sl-opt{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xp-g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.xp-g2 .dfld{display:flex}
+.xp-g2 .dfld .fld{width:100%}
+.xp-paid{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;min-height:40px}
+.xp-paid .fck{padding-left:0;flex:none}
+.xp-paid-d{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
+.xp-drop .sl-drop-t>span{overflow-wrap:anywhere}
+.xp-drop .sl-drop-b{align-items:center}
+.xp-del{margin-right:auto}
+.xp-last{margin:-4px 0 0;font-size:var(--fs-meta);color:var(--muted);text-align:right}
+@media (max-width:520px){
+  .xp-g2{grid-template-columns:1fr}
+}
