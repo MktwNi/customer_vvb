@@ -11,6 +11,10 @@ import {
   type ExpField, type ExpForm, type ExpKey, type JobSum,
 } from '../lib/expenseJob';
 import { DOC_ACCEPT } from '../lib/teamFiles';
+// the month check of money out (accounting's check of a paid expense): its chip and note on each line, and the
+// question before a checked line (or one of a closed month) changes; the same bar figures as Cashflow
+import { dealExpChecks, expGoneCheckWords, expGuard, expGuardText, expNoteOf, netSplit, type XRow } from '../lib/expenseMoney';
+import { chipOf, type PayFp } from '../lib/payCheck';
 import { Modal } from './Dialog';
 import { SHOWABLE } from './DocAttach';
 import { Check } from './Pop';
@@ -113,25 +117,32 @@ export function BillsStuckNote() {
 
 // ------------------------------------------------------------------ the summary
 
-/** "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)", the Forecast line under it, and (with
- *  ดูค่าคอมมิชชั่น and units) what is left after the computed commission. `jr`: a joint quotation's header
- *  counts the whole quotation, a member company its part. */
+/** "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)": คงเหลือ is the money received less the expenses
+ *  PAID, as Cashflow and the Dashboard count it; bills not paid yet say "ค้างจ่ายอีก …" with what is left once
+ *  paid. Then the Forecast line, and (with ดูค่าคอมมิชชั่น and units) what is left after the computed
+ *  commission. `jr`: a joint quotation's header counts the whole quotation, a member company its part. */
 function Summary({ j, comm, jr }: { j: JobSum; comm: number | null; jr: 'plain' | 'header' | 'member' }) {
   const t = j.t;
-  const share = j.inc > 0 ? Math.min(100, Math.round((t.out / j.inc) * 100)) : 0;
+  // one rounded figure for the words and the bar (lib/expenseMoney netSplit, as Cashflow's card)
+  const B = netSplit(j.inc, t.paid);
   return (
     <div className="xp-sum">
       <p className="xp-line">
         {j.inc > 0 ? <>เงินเข้า <b>{m0(j.inc)}</b></> : <span className="t-muted">ยังไม่มีเงินเข้า</span>}
-        {' · '}ค่าใช้จ่าย <b className="xp-out">{m0(t.out)}</b>
-        {t.unpaid > 0 && <span className="xp-unpaid"> (ค้างจ่าย {m0(t.unpaid)})</span>}
+        {' · '}{t.unpaid > 0 ? 'จ่ายแล้ว' : 'ค่าใช้จ่าย'} <b className="xp-out">{m0(t.paid)}</b>
         {j.inc > 0 && <> · คงเหลือ <b>{m0(j.left)}</b>{pctWord(j.pct)}</>}
       </p>
-      {j.inc > 0 && (
-        <span className={'xp-bar' + (j.left < 0 ? ' over' : '')} role="img" aria-label={`ค่าใช้จ่าย ${share}% ของเงินเข้า`}>
-          <i className="out" style={{ width: share + '%' }} />
-          {share < 100 && <i className="left" />}
+      {B && (
+        <span className={'xp-bar' + (j.left < 0 ? ' over' : '')} role="img" aria-label={`ค่าใช้จ่ายที่จ่ายแล้ว ${B.ex}% · คงเหลือ ${B.left}% ของเงินเข้า`}>
+          {B.exW > 0 && <i className="out" style={{ width: B.exW + '%' }} />}
+          {B.leftW > 0 && <i className="left" />}
         </span>
+      )}
+      {t.unpaid > 0 && (
+        <p className="xp-sub">
+          <span className="xp-unpaid">ค้างจ่ายอีก {m0(t.unpaid)} ยังไม่หัก</span>
+          {j.inc > 0 && <> · ถ้าจ่ายครบ คงเหลือ <b>{m0(j.after)}</b>{pctWord(j.afterPct)}</>}
+        </p>
       )}
       {j.fc != null && j.fc > 0 && j.fc !== j.inc && (
         <p className="xp-sub">ถ้ารับครบตาม Forecast {m0(j.fc)}{jr === 'header' ? ' (ทั้งใบ)' : jr === 'member' ? ' (ส่วนแบ่ง)' : ''}: คงเหลือ <b>{m0(j.fcLeft!)}</b>{pctWord(j.fcPct)}</p>
@@ -145,12 +156,55 @@ function Summary({ j, comm, jr }: { j: JobSum; comm: number | null; jr: 'plain' 
 
 // ------------------------------------------------------------------ the deal panel's card
 
-/** One expense: category and description, amount, paid or ค้างจ่าย, the bill, who recorded it; แก้ไข / ลบ. */
-function ExpRow({ x, can, stuck }: { x: DealExp; can: boolean; stuck?: boolean }) {
+/** An expense's money as accounting's check reads it: the amount, the paid date ('' not paid) and the bill's
+ *  file (a file chosen now, not uploaded yet, is another bill). */
+const fpOf = (v: { amt: number; paid?: string }, f: string): PayFp => ({ amt: Math.round(v.amt * 100) / 100, d: v.paid || '', f });
+const NEW_BILL = '\u0000new';
+/** The out side's row of each line of this deal (paid ones and checks whose expense is gone), by expense id. */
+function expChecksOf(e: GccEngine, dealId: string): Map<string, XRow> {
+  return new Map(dealExpChecks(e.sales, dealId, e.expChecks(), e.payChkCfg().since).map((r) => [r.lineId.replace(/^exp\./, ''), r]));
+}
+/** Ask before a change that touches accounting's check of money out (lib/expenseMoney expGuard): `verb` what
+ *  the change does ("แก้", "ลบ"), `act` the button it goes ahead with; `plain` is asked as before when the
+ *  check says nothing. true: go ahead. */
+function askExp(e: GccEngine, title: string, verb: string, before: XRow | undefined, next: PayFp | null, plain?: string, act = verb): boolean {
+  const g = expGuard(before, next, e.monthClosesOut(), e.payChkCfg().since, verb);
+  if (!g) return !plain || window.confirm(plain);
+  return window.confirm(expGuardText(plain || title, g, act));
+}
+
+/** "ตรวจแล้ว · ฝน 8 ต.ค." / "รอตรวจ" / "ส่งกลับแก้ไข" of a paid expense (the month check's chip); nothing before the
+ *  first month checked, or for a bill not paid yet. */
+function ExpChip({ r }: { r: XRow | undefined }) {
+  const c = r && chipOf(r);
+  if (!c) return null;
+  return (
+    <span className="mc-chk">
+      <span className={c.cls}>{c.word}</span>
+      {c.meta && <span className="mc-meta">{c.meta}</span>}
+    </span>
+  );
+}
+/** What accounting asked to fix, what changed after its check, or that a checked expense no longer counts. */
+function ExpNote({ r }: { r: XRow | undefined }) {
+  const n = r && expNoteOf(r);
+  if (!n) return null;
+  return (
+    <div className="mc-nbox xp-nbox">
+      <span className="mc-nh">{n.head}</span>
+      {n.body && <p>{n.body}</p>}
+    </div>
+  );
+}
+
+/** One expense: category and description, amount, paid or ค้างจ่าย (and accounting's check), the bill, who
+ *  recorded it; แก้ไข / ลบ. */
+function ExpRow({ x, can, stuck, chk }: { x: DealExp; can: boolean; stuck?: boolean; chk?: XRow }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const del = () => {
-    if (!window.confirm(`ลบค่าใช้จ่าย "${x.c}" ${m0(x.amt)} บาท?${x.file ? ' (บิลที่แนบไปถังขยะของ Drive ทีม)' : ''}`)) return;
+    const plain = `ลบค่าใช้จ่าย "${x.c}" ${m0(x.amt)} บาท?${x.file ? ' (บิลที่แนบไปถังขยะของ Drive ทีม)' : ''}`;
+    if (!askExp(e, `ลบค่าใช้จ่าย ${x.c}`, 'ลบ', chk, null, plain)) return;
     if (e.deleteExpense(x.deal, x.id)) acts.say(`ลบค่าใช้จ่าย ${x.c} แล้ว`);
   };
   return (
@@ -162,6 +216,7 @@ function ExpRow({ x, can, stuck }: { x: DealExp; can: boolean; stuck?: boolean }
       <span className="c-amt" role="cell">{m0(x.amt)}</span>
       <span className="c-st" role="cell">
         {x.paid ? <Status kind="neutral">จ่ายแล้ว {isoTh(x.paid)}</Status> : <Status kind="warn">ค้างจ่าย</Status>}
+        <ExpChip r={chk} />
       </span>
       <span className="c-meta" role="cell">
         <span>บิล {x.d ? isoTh(x.d) : 'ไม่ระบุวันที่'} · <BillLink x={x} stuck={stuck} /> · บันทึกโดย {x.by || 'ไม่ระบุ'}{x.at ? ' ' + dtTh(x.at) : ''}</span>
@@ -172,6 +227,7 @@ function ExpRow({ x, can, stuck }: { x: DealExp; can: boolean; stuck?: boolean }
           </span>
         )}
       </span>
+      {chk && expNoteOf(chk) && <span className="c-note" role="cell"><ExpNote r={chk} /></span>}
     </div>
   );
 }
@@ -192,7 +248,10 @@ export function ExpCard({ d }: { d: Deal }) {
   const jr = jointRole(S, d);
   const comm = e.seesComm() && unitsOf(unitCtx(S), true).length ? jobComm(e.unitCtx(), S, d, today) : null;
   const g = jr === 'member' ? jointOf(S, d) : null;
-  const empty = !list.length && !j.members.length;
+  const empty = !list.length && !j.members.length && !j.head;
+  // accounting's check of each paid line, and checks whose expense was deleted ("ยกเลิกหลังตรวจ")
+  const chk = expChecksOf(e, d.id);
+  const gone = [...chk.values()].filter((r) => r.kind === 'orphan' && !r.x);
   // bills attached in this browser that can't go up any more (the job is no longer this account's)
   const stuck = new Set(e.billsStuck().filter((x) => x.deal === d.id).map((x) => x.id));
   const add = can && <button type="button" className="btn xs" onClick={() => openExp(d.id)}>บันทึกค่าใช้จ่าย</button>;
@@ -204,7 +263,7 @@ export function ExpCard({ d }: { d: Deal }) {
       </div>
       {g && (
         <p className="xp-note">
-          เงินเข้าเป็นส่วนแบ่งของบริษัทนี้ในใบเสนอราคาร่วม · ค่าใช้จ่ายรวมทุกบริษัทดูที่ <button type="button" className="lnk" onClick={() => set({ deal: g.head.id })}>ใบเสนอราคาร่วม</button>
+          เงินเข้าเป็นส่วนแบ่งของบริษัทนี้ในใบเสนอราคาร่วม{j.head ? ' ค่าใช้จ่ายที่บันทึกที่ใบเสนอราคาร่วมนับส่วนแบ่งเดียวกัน' : ''} · ค่าใช้จ่ายรวมทุกบริษัทดูที่ <button type="button" className="lnk" onClick={() => set({ deal: g.head.id })}>ใบเสนอราคาร่วม</button>
         </p>
       )}
       {empty ? (
@@ -223,7 +282,25 @@ export function ExpCard({ d }: { d: Deal }) {
               <span role="columnheader" className="r">ยอด (บาท)</span>
               <span role="columnheader">การจ่าย</span>
             </div>
-            {list.map((x) => <ExpRow key={x.id} x={x} can={can} stuck={stuck.has(x.id)} />)}
+            {list.map((x) => <ExpRow key={x.id} x={x} can={can} stuck={stuck.has(x.id)} chk={chk.get(x.id)} />)}
+            {gone.map((r) => (
+              <div key={r.key} className="xp-r gone" role="row">
+                <span className="c-cat" role="cell"><b>รายการที่ลบแล้ว</b><small>บัญชีตรวจไว้ก่อนลบ · ไม่นับเป็นเงินออกแล้ว</small></span>
+                <span className="c-amt" role="cell">{m0(r.amt)}</span>
+                <span className="c-st" role="cell"><ExpChip r={r} /></span>
+                <span className="c-note" role="cell"><ExpNote r={r} /></span>
+              </div>
+            ))}
+            {j.head && g && (
+              <div className="xp-r mem" role="row">
+                <span className="c-cat" role="cell">
+                  <button type="button" className="hv-tx xp-co" onClick={() => set({ deal: g.head.id })} title="เปิดใบเสนอราคาร่วม">ส่วนแบ่งจากใบเสนอราคาร่วม</button>
+                  <small>{j.head.t.n} รายการ · {[...new Set(j.head.list.map((x) => x.c))].join(', ')} · แบ่งตามสัดส่วนเดียวกับเงินเข้า</small>
+                </span>
+                <span className="c-amt" role="cell">{m0(j.head.t.out)}</span>
+                <span className="c-st" role="cell">{j.head.t.nUnpaid ? <Status kind="warn">ค้างจ่าย {j.head.t.nUnpaid} รายการ</Status> : <Status kind="neutral">จ่ายแล้วทั้งหมด</Status>}</span>
+              </div>
+            )}
             {j.members.map((m) => (
               <div key={m.deal.id} className="xp-r mem" role="row">
                 <span className="c-cat" role="cell">
@@ -251,6 +328,7 @@ export function ExpCard({ d }: { d: Deal }) {
               {j.t.nUnpaid > 0 ? ` · ค้างจ่าย ${j.t.nUnpaid} รายการ ${m0(j.t.unpaid)}` : ' · จ่ายครบแล้ว'}
             </span>
             {j.members.length > 0 && <span>ของใบนี้เอง {m0(j.own.out)} · บริษัทในใบ {m0(j.t.out - j.own.out)}</span>}
+            {j.head && <span>ของบริษัทนี้เอง {m0(j.own.out)} · ส่วนแบ่งจากใบเสนอราคาร่วม {m0(j.head.t.out)}</span>}
           </div>
         </>
       )}
@@ -274,7 +352,7 @@ export function ExpMini({ d, onOpen }: { d: Deal; onOpen: () => void }) {
   const can = e.canExp(d);
   const list = expensesOf(S, d.id);
   const j = jobSum(S, d, today);
-  if (!can && !list.length && !j.members.length) return null;
+  if (!can && !list.length && !j.members.length && !j.head) return null;
   const last = [...list].sort((a, b) => (b.d || '').localeCompare(a.d || '') || b.at.localeCompare(a.at)).slice(0, 3);
   return (
     <div className="sl-mk xp-mk" role="listitem">
@@ -295,7 +373,7 @@ export function ExpMini({ d, onOpen }: { d: Deal; onOpen: () => void }) {
         )}
         <span className="xp-ma">
           {can && <button type="button" className="btn xs" onClick={() => openExp(d.id)}>บันทึกค่าใช้จ่าย</button>}
-          {(list.length > 0 || j.members.length > 0) && <button type="button" className="lnk" onClick={onOpen}>ดูทั้งหมด</button>}
+          {(list.length > 0 || j.members.length > 0 || !!j.head) && <button type="button" className="lnk" onClick={onOpen}>ดูทั้งหมด</button>}
         </span>
       </div>
     </div>
@@ -313,6 +391,8 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
   const S = e.sales, today = todayISO();
   const d = S.deals[dealId];
   const x = expId ? expensesOf(S, dealId).find((y) => y.id === expId) || null : null;
+  // accounting's check of this expense (asked about before a change to its amount, paid date or bill)
+  const chk = expChecksOf(e, dealId).get(expId || '');
   // the form, and the record as it holds it untouched (`init`): a teammate's change that comes in while the
   // dialog is open moves every field the person has not changed (expFollow); saving writes only the fields
   // they changed, and asks first over a field the teammate changed too (expClash)
@@ -381,6 +461,10 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
       if ((file || dropBill) && billAt && !sameBill(billAt.f, x.file)) clash.push('file');
       if (clash.length && !window.confirm(`มีคนแก้รายการนี้ระหว่างที่เปิดอยู่${x.by ? ` (${x.by})` : ''}:\n${clash.map((k) => expFieldWords(k, x)).join('\n')}\n\nบันทึกของคุณทับหรือไม่?`)) return;
     }
+    // the month check of money out: a checked (or sent back) paid expense whose amount, paid date or bill
+    // changes, or money leaving or landing in a closed month, asks first (as a received line does)
+    const fNext = file ? NEW_BILL : dropBill ? '' : x?.file?.id || '';
+    if (!askExp(e, `${title} ${r.v.c}`, 'แก้', chk, fpOf(r.v, fNext), undefined, 'บันทึก')) return;
     setBusy(true);
     setMsg('');
     try {
@@ -410,7 +494,7 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
     }
   };
   const remove = () => {
-    if (!x || !window.confirm(`ลบค่าใช้จ่าย "${x.c}" ${m0(x.amt)} บาท?${x.file ? ' (บิลที่แนบไปถังขยะของ Drive ทีม)' : ''}`)) return;
+    if (!x || !askExp(e, `ลบค่าใช้จ่าย ${x.c}`, 'ลบ', chk, null, `ลบค่าใช้จ่าย "${x.c}" ${m0(x.amt)} บาท?${x.file ? ' (บิลที่แนบไปถังขยะของ Drive ทีม)' : ''}`)) return;
     if (e.deleteExpense(dealId, x.id)) acts.say(`ลบค่าใช้จ่าย ${x.c} แล้ว`);
     onClose();
   };
@@ -554,7 +638,14 @@ export function cancelExpWords(e: GccEngine, hid: string): string {
   if (!w) return '';
   const g = jointOf(S, { id: hid });
   const kept = !!g && g.members.some((m) => expensesOf(S, m.deal.id).length > 0);
-  return `\n\n${w} (ถ้าจะเก็บไว้ ให้บันทึกที่แถวของบริษัทก่อนยกเลิก)${kept ? ' ค่าใช้จ่ายที่บันทึกที่แถวของแต่ละบริษัทยังอยู่ตามเดิม' : ''}`;
+  const chk = dealGoneCheckWords(e, hid);
+  return `\n\n${w} (ถ้าจะเก็บไว้ ให้บันทึกที่แถวของบริษัทก่อนยกเลิก)${kept ? ' ค่าใช้จ่ายที่บันทึกที่แถวของแต่ละบริษัทยังอยู่ตามเดิม' : ''}${chk ? ' · ' + chk : ''}`;
+}
+/** Deleting a job: what becomes of accounting's check of its paid expenses (lib/expenseMoney
+ *  expGoneCheckWords), for the delete question; '' without ดูค่าใช้จ่าย or with nothing checked. */
+export function dealGoneCheckWords(e: GccEngine, dealId: string): string {
+  if (!e.can('view.exp')) return '';
+  return expGoneCheckWords(dealExpChecks(e.sales, dealId, e.expChecks(), e.payChkCfg().since), e.monthClosesOut());
 }
 
 /** A note for a member company's row in the table menu: how its expenses relate to the joint quotation. */

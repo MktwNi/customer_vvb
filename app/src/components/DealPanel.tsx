@@ -33,7 +33,7 @@ import { ShareCard } from './ShareCard';
 import { PayChip, PayNoPlan, PayNote, PayStripChip, askPay, useDealChecks, usePayGuard } from './PayChk';
 import { attachLines, invoiceOnly, planCheckWords, previewOf } from '../lib/payCheck';
 // ค่าใช้จ่ายของงาน (job expenses), after the payment plan: only with ดูค่าใช้จ่ายและกำไรของงาน
-import { ExpCard } from './ExpCard';
+import { ExpCard, dealGoneCheckWords } from './ExpCard';
 import { expensesOf } from '../lib/expense';
 
 /** A stage's Thai name (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
@@ -454,7 +454,7 @@ export function DealPanel() {
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />
           {e.can('del.rec') && (
-            <button type="button" onClick={() => guard.ask({ d, after: previewOf.noDeal(S, d.id), kind: 'delete', title: `ลบ ${shortName(d.client)}`, verb: 'ลบรายการ', plain: `ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ${e.can('view.exp') && expensesOf(S, d.id).length ? ' รวมค่าใช้จ่ายของงานและบิล' : ''} ทุกเครื่องในทีม)`, run: () => (e.deleteDeal(d.id), close()) })} className="quiet dp-del">
+            <button type="button" onClick={() => guard.ask({ d, after: previewOf.noDeal(S, d.id), kind: 'delete', title: `ลบ ${shortName(d.client)}`, verb: 'ลบรายการ', plain: `ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ${e.can('view.exp') && expensesOf(S, d.id).length ? ' รวมค่าใช้จ่ายของงานและบิล' : ''} ทุกเครื่องในทีม)${dealGoneCheckWords(e, d.id) ? ' · ' + dealGoneCheckWords(e, d.id) : ''}`, run: () => (e.deleteDeal(d.id), close()) })} className="quiet dp-del">
               ลบรายการนี้
             </button>
           )}

@@ -10,7 +10,7 @@ import { cashLines, cashYear, emptySales, newDeal, type Deal, type PayLine, type
 import type { JobExp } from './expense';
 import {
   NO_CAT, X_CHK_F, asCashLine, bothCsvRows, carriedOwed, expBackBell, catKey, dealExpChecks, expByCat, expByDeal, expByPerson, expByUnit, expChangeWords, expCheckRows, expChkRows, expCsvRows, expFp, expIn, expKpis,
-  expLines, expNoteOf, expOwners, expPageKeep, expRecorders, expReturnedTo, expSheets, expTeamMonth, expView, expWhat, expYear, isXChkF, netMonths, netOf, netQuarters, netSplit, pctWord, rowWhat, topCats,
+  expGoneCheckWords, expGuard, expGuardText, expLines, expNoteOf, expOwners, expPageKeep, expRecorders, expReturnedTo, expSheets, expTeamMonth, expView, expWhat, expYear, isXChkF, netMonths, netOf, netQuarters, netSplit, pctWord, rowWhat, topCats,
   unitNets, xCheckWord, xMoneyWord, xSheetLines, xSheetPreview, type XRow,
 } from './expenseMoney';
 import { canClose, canConfirm, canReturn, canTick, chipOf, chkMatch, closeRecord, sumRows, yearCheck, type PayCheck } from './payCheck';
@@ -357,6 +357,48 @@ describe('the month check of money out', () => {
     expect(expPageKeep(s, { year: '2569' }, T)).toBeNull();
     expect(expCheckRows(all, 2025, null).rows.map((r) => r.key)).toEqual(['old/o1']);
     expect(dealExpChecks(s, 'd1', { 'd1/e1': rec({ amt: 25000, d: '2026-10-06', f: 'f1' }), 'jh/h1': rec({ amt: 1, d: '2026-08-15' }) }, SINCE).map((r) => [r.key, r.state])).toEqual([['d1/e2', 'wait'], ['d1/e1', 'ok']]);
+  });
+
+  it('expGuard: the question before the deal card changes or deletes a checked expense, or money of a closed month', () => {
+    const s = world();
+    const checks = { 'd1/e1': rec({ amt: 25000, d: '2026-10-06', f: 'f1' }), 'd1/e2': rec({ s: 'back', amt: 4000, d: '2026-09-20', note: 'ขอบิล' }) };
+    const rows = dealExpChecks(s, 'd1', checks, SINCE);
+    const e1 = byKey(rows, 'd1/e1'), e2 = byKey(rows, 'd1/e2');
+    const none = {};
+    // nothing that touches the check (the description, the category): no question
+    expect(expGuard(e1, { amt: 25000, d: '2026-10-06', f: 'f1' }, none, SINCE)).toBeNull();
+    // the amount of a checked expense: it waits again, accounting sees what changed
+    const g = expGuard(e1, { amt: 26750, d: '2026-10-06', f: 'f1' }, none, SINCE)!;
+    expect(g.head).toBe('ค่าใช้จ่ายนี้บัญชีตรวจแล้ว (ฝน 8\u00a0ต.ค.) · 25,000 บาท · จ่าย 6 ต.ค. 2569');
+    expect(g.body).toBe('ถ้าแก้ ยอด วันที่จ่าย หรือบิล รายการนี้จะกลับเป็น “รอตรวจ” และ ฝน จะเห็นว่าเปลี่ยนอะไร');
+    // the bill replaced (a new file): asked too
+    expect(expGuard(e1, { amt: 25000, d: '2026-10-06', f: '\u0000new' }, none, SINCE)).not.toBeNull();
+    // deleted, or marked not paid: no longer money out, and the check shows as cancelled after it
+    expect(expGuard(e1, null, none, SINCE, 'ลบ')!.body).toBe('ถ้าลบ ค่าใช้จ่ายนี้จะไม่นับเป็นเงินออกแล้ว และ ฝน จะเห็นรายการเดิมว่า “ยกเลิกหลังตรวจ” ในหน้า Cashflow เดือนตุลาคม 2569 จนกว่าจะกดรับทราบ');
+    expect(expGuard(e1, { amt: 25000, d: '', f: 'f1' }, none, SINCE)!.body).toContain('จะไม่นับเป็นเงินออกแล้ว');
+    // one sent back says so
+    expect(expGuard(e2, { amt: 4500, d: '2026-09-20', f: '' }, none, SINCE)!.head).toBe('ค่าใช้จ่ายนี้บัญชีส่งกลับแก้ไข (ฝน 8\u00a0ต.ค.) · 4,000 บาท · จ่าย 20 ก.ย. 2569');
+    // waiting (never checked) in an open month: nothing to ask
+    const w = byKey(dealExpChecks(s, 'd1', {}, SINCE), 'd1/e1');
+    expect(expGuard(w, null, none, SINCE, 'ลบ')).toBeNull();
+    // a closed month: asked even while it waits; moving its paid date out of it says where it goes
+    const closes = { '2026-10': closeRecord({ ...sumRows([]), n: 1 } as never, 'ฝน', '2026-11-02T03:00:00.000Z'), '2026-09': { by: 'ฝน', at: '2026-10-02T03:00:00.000Z', n: 1, amt: 4000 } };
+    expect(expGuard(w, null, closes, SINCE, 'ลบ')!.body).toBe('ถ้าลบ ค่าใช้จ่ายนี้จะไม่นับเป็นเงินออกแล้ว · เดือนตุลาคม 2569 ปิดเงินออกแล้ว (ฝน 2\u00a0พ.ย.) ยอดของเดือนนั้นจะไม่เท่ากับตอนปิด');
+    expect(expGuard(w, { amt: 25000, d: '2026-11-01', f: 'f1' }, closes, SINCE)!.body).toContain('ยอดของเดือนนั้นจะไม่เท่ากับตอนปิด และรายการนี้จะไปรอตรวจในเดือนพฤศจิกายน 2569');
+    expect(expGuard(e1, { amt: 25000, d: '2026-09-30', f: 'f1' }, { '2026-09': closes['2026-09'] }, SINCE)!.body).toContain('เดือนกันยายน 2569 ปิดเงินออกแล้ว (ฝน 2\u00a0ต.ค.) เดือนนั้นจะมีรายการที่ต้องตรวจใหม่');
+    // a new expense, or one marked paid, landing in a closed month (not before the first month checked)
+    const owed = dealExpChecks(s, 'd1', {}, SINCE).find((r) => r.key === 'owed:d1/e3');
+    expect(owed).toBeUndefined(); // the card's rows are paid ones (and orphans) only
+    expect(expGuard(null, { amt: 6000, d: '2026-09-28', f: '' }, closes, SINCE)).toEqual({ head: '6,000 บาท · จ่าย 28 ก.ย. 2569', body: 'เงินนี้จะนับเป็นเงินออกเดือนกันยายน 2569 · เดือนกันยายน 2569 ปิดเงินออกแล้ว (ฝน 2\u00a0ต.ค.) บันทึกได้ แต่เดือนนั้นจะมีรายการที่ต้องตรวจใหม่' });
+    expect(expGuard(null, { amt: 6000, d: '2026-09-28', f: '' }, closes, '2026-10-01')).toBeNull();
+    expect(expGuard(null, { amt: 6000, d: '', f: '' }, closes, SINCE)).toBeNull();
+    expect(expGuard(undefined, null, closes, SINCE)).toBeNull();
+    // deleting the whole job: the checked or closed-month paid lines say what becomes of their check
+    expect(expGoneCheckWords(rows, none)).toBe('ค่าใช้จ่ายที่บัญชีตรวจแล้วหรืออยู่ในเดือนที่ปิดแล้ว 2 รายการ (29,000 บาท) จะขึ้นว่า “ยกเลิกหลังตรวจ” ในส่วนเงินออกของ Cashflow จนกว่าบัญชีจะกดรับทราบ');
+    expect(expGoneCheckWords(dealExpChecks(s, 'd1', {}, SINCE), none)).toBe('');
+    expect(expGoneCheckWords(dealExpChecks(s, 'd1', {}, SINCE), { '2026-09': closes['2026-09'] })).toContain(' 1 รายการ (4,000 บาท)');
+    // the question's text
+    expect(expGuardText('ลบค่าใช้จ่าย ผู้รับเหมา', g, 'ลบ')).toBe(`ลบค่าใช้จ่าย ผู้รับเหมา\n\n${g.head}\n${g.body}\n\nลบต่อหรือไม่?`);
   });
 
   it('"ค้างจากเดือนก่อน": unpaid bills of earlier months, last year\'s too, counted by year (as the income side\'s late money)', () => {

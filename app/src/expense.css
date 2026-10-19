@@ -64,11 +64,19 @@
 .xp-f b{font-weight:500;color:var(--ink)}
 .xp-f>span:last-child:not(:first-child){font-size:var(--fs-meta);color:var(--muted)}
 
+/* accounting's check of a paid expense (the month check's chip and note, components/PayChk's look) */
+.xp-r .c-st .mc-chk{gap:4px 8px}
+.xp-r .c-note{grid-column:1/-1}
+.xp-r .c-note .mc-nbox{padding:8px 12px}
+/* a checked expense deleted since ("ยกเลิกหลังตรวจ" until accounting acknowledges it) */
+.xp-r.gone .c-cat b{font-weight:400;color:var(--ink-2)}
+.xp-r.gone .c-amt{color:var(--ink-2);text-decoration:line-through}
+
 /* a narrow panel (a phone): amount beside the category, the state and the bill under them */
 @container xp (max-width:520px){
   .xp-r{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}
   .xp-r.ph{display:none}
-  .xp-r .c-st{grid-column:1/-1;flex-direction:row}
+  .xp-r .c-st{grid-column:1/-1;flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px 8px}
   .xp-acts{margin-left:0}
 }
 

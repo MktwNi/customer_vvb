@@ -7,10 +7,14 @@
  *   the day each came in, amounts as on the documents incl. VAT). A joint quotation's header holds the whole
  *   quotation's money; a member company holds none of its own, so its card counts its part of the header's
  *   (the split every other money view uses, holdPart).
- * - ค่าใช้จ่าย = every expense recorded on the job, paid or not (a bill not paid yet is still a cost of the job):
- *   "ค้างจ่าย" is said apart. Cashflow and the month check count an expense on its paid date instead.
+ * - ค่าใช้จ่าย = every expense recorded on the job, paid or not (a bill not paid yet is still a cost of the job),
+ *   but คงเหลือ = เงินเข้า − the expenses PAID, as Cashflow and the Dashboard count it (received − paid; a
+ *   bill not paid yet, "ค้างจ่าย", is said apart with what would be left once it is paid), so the card's
+ *   figures are the money views' for the same job and period.
  * - A joint quotation's panel adds its member companies' expenses to the header's own: each expense belongs
- *   to one deal, so a total over the header and its members counts every one once.
+ *   to one deal, so a total over the header and its members counts every one once. A member company counts
+ *   its own and its part of the header's (split as the quotation's money is, holdPart), as the money views do
+ *   under a ผู้รับผิดชอบ filter: the members' figures add up to the header's.
  * - The commission line (ค่าคอมมิชชั่น (คำนวณ), with ดูค่าคอมมิชชั่น) is computed from units (lib/contrib.ts),
  *   never stored and never part of the expense total.
  */
@@ -209,21 +213,40 @@ export function memberExps(s: SalesState, d: Deal): MemberExp[] {
   return (g?.members || []).map((x) => ({ deal: x.deal, list: expensesOf(s, x.deal.id) })).filter((x) => x.list.length).map((x) => ({ ...x, t: expTotals(x.list) }));
 }
 
+/** A member company's part of the expenses recorded on its joint quotation's header: each split the way the
+ *  quotation's money is (holdPart: its share in baht, else its %, else equal; none for one that withdrew),
+ *  as the money views count them under a ผู้รับผิดชอบ filter. `list` holds the header's expenses with a part
+ *  (`part`), `t` their parts added up. null for any other deal, or a header with no expenses. */
+export interface HeadPart { head: Deal; list: (DealExp & { part: number })[]; t: ExpTotals }
+export function headPartExps(s: SalesState, d: Deal): HeadPart | null {
+  if (jointRole(s, d) !== 'member') return null;
+  const g = jointOf(s, d), i = g ? g.members.findIndex((x) => x.deal.id === d.id) : -1;
+  if (!g || i < 0) return null;
+  const h = { d: g.head, g, keep: [i] };
+  const list = expensesOf(s, g.head.id).map((x) => ({ ...x, part: r2(holdPart(s, h, x.amt)) })).filter((x) => x.part > 0);
+  return list.length ? { head: g.head, list, t: expTotals(list.map((x) => ({ amt: x.part, paid: x.paid }))) } : null;
+}
+
 /**
- * The card's figures: เงินเข้า (inc), ค่าใช้จ่าย (`t`: this job's own expenses, and for a joint quotation's
- * header its members' too), คงเหลือ = inc − out and its % of inc (null with nothing received), and the same
- * against the Forecast "ถ้ารับครบตาม Forecast" (null without one). `own` / `members` = the header's own
- * expenses and its members' (a joint quotation only).
+ * The card's figures: เงินเข้า (inc); ค่าใช้จ่าย (`t`: this job's own expenses, for a joint quotation's header its
+ * members' too, for a member company its part of the header's); คงเหลือ = inc − the paid ones (as Cashflow and
+ * the Dashboard: received − paid) and its % of inc (null with nothing received); `after` = what is left once
+ * the bills not paid yet are paid too (inc − all of them); and the same against the Forecast "ถ้ารับครบตาม
+ * Forecast" (all of them; null without one). `own` / `members` / `head` = the job's own expenses, a header's
+ * members', a member's part of its header's.
  */
-export interface JobSum { inc: number; fc: number | null; t: ExpTotals; own: ExpTotals; members: MemberExp[]; left: number; pct: number | null; fcLeft: number | null; fcPct: number | null }
+export interface JobSum {
+  inc: number; fc: number | null; t: ExpTotals; own: ExpTotals; members: MemberExp[]; head: HeadPart | null;
+  left: number; pct: number | null; after: number; afterPct: number | null; fcLeft: number | null; fcPct: number | null;
+}
 export function jobSum(s: SalesState, d: Deal, today: string): JobSum {
   const { inc, fc } = jobIncome(s, d, today);
-  const ownList = expensesOf(s, d.id), members = memberExps(s, d);
+  const ownList = expensesOf(s, d.id), members = memberExps(s, d), head = headPartExps(s, d);
   const own = expTotals(ownList);
-  const t = expTotals([...ownList, ...members.flatMap((m) => m.list)]);
-  const left = r2(inc - t.out);
+  const t = expTotals([...ownList, ...members.flatMap((m) => m.list), ...(head ? head.list.map((x) => ({ amt: x.part, paid: x.paid })) : [])]);
+  const left = r2(inc - t.paid), after = r2(inc - t.out);
   const fcLeft = fc != null ? r2(fc - t.out) : null;
-  return { inc, fc, t, own, members, left, pct: pctOf(left, inc), fcLeft, fcPct: fc != null ? pctOf(fcLeft!, fc) : null };
+  return { inc, fc, t, own, members, head, left, pct: pctOf(left, inc), after, afterPct: pctOf(after, inc), fcLeft, fcPct: fc != null ? pctOf(fcLeft!, fc) : null };
 }
 /** `part` as a whole % of `whole` (null when there is no whole): 65000 of 100000 = 65; a loss is negative. */
 export function pctOf(part: number, whole: number): number | null {

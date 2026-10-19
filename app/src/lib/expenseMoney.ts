@@ -31,7 +31,7 @@ import { Q_TH } from './cashUi';
 import { sameName } from './caps';
 import {
   fpDiff, sameFp, splitKey, sumRows, ymTh,
-  type ChkRow, type ChkState, type ChkSum, type FpDiff, type MonthRow, type PayCheck, type PayFp, type PaySt,
+  type ChkRow, type ChkState, type ChkSum, type FpDiff, type MonthClose, type MonthRow, type PayCheck, type PayFp, type PaySt,
 } from './payCheck';
 import { QT_WORD, type BellRow } from './notify';
 import type { XCell, XSheet } from './xlsx';
@@ -480,6 +480,55 @@ export function dealExpChecks(s: SalesState, dealId: string, checks: Record<stri
   const mine = Object.fromEntries(Object.entries(checks).filter(([k]) => k.startsWith(dealId + '/')));
   return expChkRows(s, d ? expLines(s, [d]) : [], mine, since).filter((r) => r.kind === 'got' || r.kind === 'orphan');
 }
+/**
+ * What a change made where the job is worked on (the deal card, the expense dialog) does to the month check
+ * of money out, for the question asked before it (as askPay for money in): `before` the expense's row on the
+ * out side (dealExpChecks; none: a new expense or one not paid yet), `next` its money once changed (the
+ * amount, the paid date '' = not paid, the bill's file id; null = deleted), the out side's closed months and
+ * the first day checked. null when there is nothing to say: only a change to the amount, the paid date or the
+ * bill of a paid expense accounting checked or sent back, or money that leaves or lands in a closed month,
+ * asks. `head` says what the expense is now, `body` what happens to its check.
+ */
+export function expGuard(before: XRow | null | undefined, next: PayFp | null, closes: Record<string, MonthClose>, since: string, verb = 'แก้'): { head: string; body: string } | null {
+  const closed = (ym: string) => {
+    const c = closes[ym];
+    return c ? `เดือน${ymTh(ym)} ปิดเงินออกแล้ว (${c.by || 'บัญชี'} ${dayOf(c.at)})` : '';
+  };
+  const paid = before && before.kind === 'got' && before.state !== 'none' && before.fp ? before : null;
+  if (!paid) {
+    // a new or not yet paid expense paid in a closed month: that month has a line to check again
+    if (!next?.d || next.d < since || !closes[next.d.slice(0, 7)]) return null;
+    const ym = next.d.slice(0, 7);
+    return { head: `${fmtMoney(next.amt) || '0'} บาท · จ่าย ${isoTh(next.d)}`, body: `เงินนี้จะนับเป็นเงินออกเดือน${ymTh(ym)} · ${closed(ym)} บันทึกได้ แต่เดือนนั้นจะมีรายการที่ต้องตรวจใหม่` };
+  }
+  const gone = !next || !next.d;
+  if (!gone && sameFp({ amt: paid.fp!.amt, d: paid.fp!.d, f: paid.fp!.f }, next!)) return null;
+  const rec = paid.state === 'ok' || paid.state === 'back' ? paid.rec : null;
+  const ym2 = gone ? '' : next!.d.slice(0, 7);
+  const c0 = closed(paid.ym), c2 = ym2 && ym2 !== paid.ym ? closed(ym2) : '';
+  if (!rec && !c0 && !c2) return null;
+  const who = rec?.by || 'บัญชี';
+  const head = `${rec ? `ค่าใช้จ่ายนี้${rec.s === 'ok' ? 'บัญชีตรวจแล้ว' : 'บัญชีส่งกลับแก้ไข'} (${who} ${dayOf(rec.at)}) · ` : ''}${fmtMoney(paid.amt) || '0'} บาท · จ่าย ${isoTh(paid.date)}`;
+  const orphan = rec ? ` และ ${who} จะเห็นรายการเดิมว่า “ยกเลิกหลังตรวจ” ในหน้า Cashflow เดือน${ymTh(paid.ym)} จนกว่าจะกดรับทราบ` : '';
+  const body = gone
+    ? `ถ้า${verb} ค่าใช้จ่ายนี้จะไม่นับเป็นเงินออกแล้ว${orphan}${c0 ? ` · ${c0} ยอดของเดือนนั้นจะไม่เท่ากับตอนปิด` : ''}`
+    : `ถ้า${verb} ยอด วันที่จ่าย หรือบิล รายการนี้จะกลับเป็น “รอตรวจ”${rec ? ` และ ${who} จะเห็นว่าเปลี่ยนอะไร` : ''}` +
+      (c0 ? ` · ${c0} ${ym2 !== paid.ym ? `ยอดของเดือนนั้นจะไม่เท่ากับตอนปิด และรายการนี้จะไปรอตรวจในเดือน${ymTh(ym2)}` : 'เดือนนั้นจะมีรายการที่ต้องตรวจใหม่'}` : '') +
+      (c2 ? ` · ${c2} เดือนนั้นจะมีรายการที่ต้องตรวจใหม่` : '');
+  return { head, body };
+}
+/** What deleting a whole job (or cancelling a joint quotation with its expenses) does to accounting's check of
+ *  money out, for its question: its paid expenses accounting checked or sent back, or of a closed month, show
+ *  as "ยกเลิกหลังตรวจ" until acknowledged. `rows`: the job's (dealExpChecks). '' when none. */
+export function expGoneCheckWords(rows: XRow[], closes: Record<string, MonthClose>): string {
+  const hit = rows.filter((r) => r.kind === 'got' && (r.state === 'ok' || r.state === 'back' || !!closes[r.ym]));
+  if (!hit.length) return '';
+  const amt = r2(hit.reduce((a, r) => a + r.amt, 0));
+  return `ค่าใช้จ่ายที่บัญชีตรวจแล้วหรืออยู่ในเดือนที่ปิดแล้ว ${hit.length} รายการ (${fmtMoney(amt) || '0'} บาท) จะขึ้นว่า “ยกเลิกหลังตรวจ” ในส่วนเงินออกของ Cashflow จนกว่าบัญชีจะกดรับทราบ`;
+}
+/** The question's text (window.confirm) for expGuard's answer: the action, the expense, what happens. */
+export const expGuardText = (title: string, g: { head: string; body: string }, verb: string) => `${title}\n\n${g.head}\n${g.body}\n\n${verb}ต่อหรือไม่?`;
+
 /** Expenses accounting sent back that are this person's to fix (they recorded it, or the job is theirs). */
 export function expReturnedTo(rows: XRow[], me: string): XRow[] {
   if (!me.trim()) return [];

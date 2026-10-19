@@ -2,7 +2,7 @@
  *  (a plain deal, a joint quotation's header and member, the computed commission). Mon 12 Oct 2569. */
 import { describe, expect, it } from 'vitest';
 import {
-  CAT_EXAMPLES, catKey, catSuggest, expCats, expChanged, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTotals, expTouched, jobComm, jobIncome, jobSum, memberExps, pctOf,
+  CAT_EXAMPLES, catKey, catSuggest, expCats, expChanged, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTotals, expTouched, headPartExps, jobComm, jobIncome, jobSum, memberExps, pctOf,
   readExpForm, sameBill, tidyCat,
 } from './expenseJob';
 import { emptySales, newDeal, type Deal, type DealDoc, type JointMember, type PayLine, type SalesState } from './sales';
@@ -181,34 +181,61 @@ describe('one job\'s money', () => {
     expect(pctOf(100, 0)).toBeNull();
   });
 
-  it('a plain deal: received as Cashflow counts it; "เงินเข้า 50,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 15,000 (30%)"', () => {
+  it('a plain deal: received as Cashflow counts it; คงเหลือ = received − paid (as the money views), the bill not paid yet apart', () => {
     const s = world();
     expect(jobIncome(s, s.deals.p1, T)).toEqual({ inc: 50000, fc: 100000 });
     s.exp = { 'p1/e1': X({ amt: 30000, paid: '2026-10-07' }), 'p1/e2': X({ amt: 5000 }), 'n1/e3': X({ amt: 999 }) };
     const j = jobSum(s, s.deals.p1, T);
-    expect(j).toMatchObject({ inc: 50000, fc: 100000, left: 15000, pct: 30, fcLeft: 65000, fcPct: 65, members: [] });
+    // "เงินเข้า 50,000 · จ่ายแล้ว 30,000 · คงเหลือ 20,000 (40%)", "ค้างจ่ายอีก 5,000 · ถ้าจ่ายครบ คงเหลือ 15,000 (30%)"
+    expect(j).toMatchObject({ inc: 50000, fc: 100000, left: 20000, pct: 40, after: 15000, afterPct: 30, fcLeft: 65000, fcPct: 65, members: [], head: null });
     expect(j.t).toEqual({ out: 35000, paid: 30000, unpaid: 5000, n: 2, nUnpaid: 1 });
     expect(j.own).toEqual(j.t);
-    // not won: nothing received yet, the Forecast line still says what would be left
-    expect(jobSum(s, s.deals.n1, T)).toMatchObject({ inc: 0, pct: null, left: -999, fc: 80000, fcLeft: 79001, fcPct: 99 });
+    // all paid: the owner's line as it is, "เงินเข้า 50,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 15,000 (30%)"
+    s.exp['p1/e2'] = X({ amt: 5000, paid: '2026-10-08' });
+    expect(jobSum(s, s.deals.p1, T)).toMatchObject({ left: 15000, pct: 30, after: 15000, afterPct: 30 });
+    // not won: nothing received yet (nothing paid either), the Forecast line still says what would be left
+    expect(jobSum(s, s.deals.n1, T)).toMatchObject({ inc: 0, pct: null, left: 0, after: -999, afterPct: null, fc: 80000, fcLeft: 79001, fcPct: 99 });
   });
 
   it('a joint quotation: the header holds the whole quotation\'s money and every company\'s expenses, once each', () => {
     const s = world();
     s.exp = { 'h/e1': X({ amt: 100000, paid: '2026-10-10' }), 'b1/e2': X({ amt: 20000 }), 'b2/e3': X({ amt: 30000, paid: '2026-10-11' }), 'b2/e4': X({ amt: 10000 }), 'p1/e5': X({ amt: 7 }) };
     const j = jobSum(s, s.deals.h, T);
-    expect(j).toMatchObject({ inc: 600000, fc: 1200000, left: 440000, pct: 73, fcLeft: 1040000 });
+    expect(j).toMatchObject({ inc: 600000, fc: 1200000, left: 470000, pct: 78, after: 440000, afterPct: 73, fcLeft: 1040000, head: null });
     expect(j.t).toEqual({ out: 160000, paid: 130000, unpaid: 30000, n: 4, nUnpaid: 2 });
     expect(j.own).toEqual({ out: 100000, paid: 100000, unpaid: 0, n: 1, nUnpaid: 0 });
     expect(memberExps(s, s.deals.h).map((m) => [m.deal.id, m.list.map((x) => x.id), m.t.out])).toEqual([['b1', ['e2'], 20000], ['b2', ['e3', 'e4'], 40000]]);
-    // a member: its part of the money received (25% of 600,000) and of the quotation, its own expenses only
+    // a member: its part of the money received (25% of 600,000) and of the quotation, its own expenses and
+    // its part of the header's (25% of 100,000), as the money views count it under its ผู้รับผิดชอบ
     expect(jobIncome(s, s.deals.b1, T)).toEqual({ inc: 150000, fc: 300000 });
-    expect(jobSum(s, s.deals.b1, T)).toMatchObject({ inc: 150000, fc: 300000, left: 130000, pct: 87, members: [] });
-    expect(jobSum(s, s.deals.b2, T)).toMatchObject({ inc: 450000, t: { out: 40000 } });
-    // the members' parts add up to the header's money: nothing counted twice
+    const b1 = jobSum(s, s.deals.b1, T);
+    expect(b1).toMatchObject({ inc: 150000, fc: 300000, left: 125000, pct: 83, after: 105000, afterPct: 70, fcLeft: 255000, members: [] });
+    expect(b1.own).toEqual({ out: 20000, paid: 0, unpaid: 20000, n: 1, nUnpaid: 1 });
+    expect(b1.head?.list.map((x) => [x.id, x.part])).toEqual([['e1', 25000]]);
+    expect(b1.t).toEqual({ out: 45000, paid: 25000, unpaid: 20000, n: 2, nUnpaid: 1 });
+    const b2 = jobSum(s, s.deals.b2, T);
+    expect(b2).toMatchObject({ inc: 450000, t: { out: 115000, paid: 105000 }, left: 345000 });
+    // the members' parts add up to the header's money and expenses: nothing counted twice
     expect(jobIncome(s, s.deals.b1, T).inc + jobIncome(s, s.deals.b2, T).inc).toBe(jobIncome(s, s.deals.h, T).inc);
+    expect(b1.t.out + b2.t.out).toBe(j.t.out);
+    expect(b1.left + b2.left).toBe(j.left);
     expect(memberExps(s, s.deals.p1)).toEqual([]);
     expect(memberExps(s, s.deals.b1)).toEqual([]);
+  });
+
+  it('headPartExps: a member\'s part of each header expense (its share in baht, else %, else equal; none once withdrawn)', () => {
+    const s = world();
+    expect(headPartExps(s, s.deals.b1)).toBeNull(); // the header has no expenses
+    s.exp = { 'h/e1': X({ amt: 1001, paid: '2026-10-10' }), 'h/e2': X({ amt: 400 }), 'b1/e3': X({ amt: 7 }) };
+    // 25 / 75 of each bill, the rounding to the last company (apportion): 1,001 = 250 + 751
+    expect(headPartExps(s, s.deals.b1)?.list.map((x) => [x.id, x.part])).toEqual([['e1', 250], ['e2', 100]]);
+    expect(headPartExps(s, s.deals.b2)?.t).toEqual({ out: 1051, paid: 751, unpaid: 300, n: 2, nUnpaid: 1 });
+    expect(headPartExps(s, s.deals.h)).toBeNull();
+    expect(headPartExps(s, s.deals.p1)).toBeNull();
+    // b1 withdrew (NO): b2 holds the whole of each
+    s.steps['b1/CLOSED DEAL'] = { d: '2026-10-11', n: 'NO' };
+    expect(headPartExps(s, s.deals.b1)).toBeNull();
+    expect(headPartExps(s, s.deals.b2)?.t.out).toBe(1401);
   });
 
   it('jobComm: received × the job\'s unit split × the unit\'s rate on the day (computed, never stored); a member its part', () => {
