@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NOT_IN_TRACKER, apptLine, apptWhen, expiringIn, followCounts, followMatch, followRank, followRows, sortFollow, type FollowFacts, type FollowSrc } from './follow';
+import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, expiringIn, followCounts, followIdsOf, followMatch, followMeta, followRank, followRows, sortFollow, type FollowFacts, type FollowSrc } from './follow';
 import { emptySales, newDeal, type Deal } from './sales';
 import type { Company, Task } from './types';
 
@@ -155,5 +155,29 @@ describe('followRows', () => {
     expect(followMatch('กรีน ระยอง', a, 'ชลบุรี')).toBe(false);
     expect(followMatch('คุณบี', b, 'ระยอง')).toBe(true);
     expect(followMatch('คุณบี', a, 'ชลบุรี')).toBe(false);
+  });
+});
+
+describe('which followed ids are a company', () => {
+  // 19831 was merged into 19; 7 is a company of its own
+  const canon = (id: number) => (id === 19831 ? 19 : id);
+  it('its own id and a row since merged into it, nothing else', () => {
+    expect(followIdsOf([19831], 19, canon)).toEqual([19831]);
+    expect(followIdsOf([7, 19, 19831], 19, canon)).toEqual([19, 19831]);
+    expect(followIdsOf([7], 19, canon)).toEqual([]);
+    expect(followIdsOf([], 19, canon)).toEqual([]);
+  });
+});
+
+describe('the grey line under a followed company', () => {
+  it('province and code; on a connected team, a company only this device has says so', () => {
+    expect(followMeta({ id: 12, code: 'GCC-12' }, 'ชลบุรี', true)).toBe('ชลบุรี · GCC-12');
+    expect(followMeta({ id: 12, code: 'GCC-12' }, '', false)).toBe('ไม่ระบุจังหวัด · GCC-12');
+    // from the TGO website sync (900000 ≤ id < 1e12): not shared with the team
+    expect(followMeta({ id: 900004, code: 'GCC-900004' }, 'ระยอง', true)).toBe('ระยอง · GCC-900004 · ' + LOCAL_ONLY);
+    // not connected: everything is on this device, so nothing to point out
+    expect(followMeta({ id: 900004, code: 'GCC-900004' }, 'ระยอง', false)).toBe('ระยอง · GCC-900004');
+    // a customer added by hand is shared like a registry company
+    expect(followMeta({ id: 1e12 + 5, code: '' }, 'ระยอง', true)).toBe('ระยอง');
   });
 });

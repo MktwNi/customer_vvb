@@ -540,7 +540,8 @@ export class GccEngine {
     this.minYm = minYm;
     const ns = this.setSnap?.newSyms || {};
     const nsCut = addDays(todayISO(), -180);
-    const watch = new Set(this.crm.watch);
+    // followed: any of its ids (a follow made on a row since merged into it is the company's)
+    const watch = new Set(this.crm.watch.map((id) => this.canonical(id)));
     B.companies.forEach((c) => {
       status(c, T, W);
       c.code = gccCode(c.id);
@@ -966,8 +967,8 @@ export class GccEngine {
     if (i >= 0) w.splice(i, 1);
     else w.push(id);
     this.op(keyOf.watch(id), i < 0 ? 1 : undefined);
-    const c = this.B.byId.get(id);
-    if (c) c.fl.watch = i < 0;
+    const c = this.company(id);
+    if (c) c.fl.watch = w.some((x) => this.canonical(x) === c.id);
     this.saveCrm();
   }
   /** `pid`: the person (ผู้ติดต่อ) it was with. */
@@ -4255,7 +4256,7 @@ export class GccEngine {
         if (c && e) this.patchContact(c, e);
       });
       if (fx.watch.size) {
-        const w = new Set(this.crm.watch);
+        const w = new Set(this.crm.watch.map((id) => this.canonical(id)));
         this.B.companies.forEach((c) => (c.fl.watch = w.has(c.id)));
       }
     }

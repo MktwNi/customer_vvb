@@ -489,7 +489,10 @@ describe('team sync between two browsers (engines) on the real dataset', () => {
     sim.post({ action: 'push', key: KEY, ops: [{ k: `watch/${alias}`, v: 1 }] });
     await A.teamSync();
     expect(A.crm.watch).toContain(alias);
-    expect(merged.fl.watch).toBe(A.crm.watch.includes(merged.id));
+    // a follow on any of its ids is the company's, the same flag a rebuild gives (lib/follow.ts followIdsOf)
+    expect(merged.fl.watch).toBe(true);
+    A.rebuild();
+    expect(A.company(merged.id)!.fl.watch).toBe(true);
   });
 
   it('only accepts Apps Script web-app URLs and explains network failures', () => {

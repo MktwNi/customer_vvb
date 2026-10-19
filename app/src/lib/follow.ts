@@ -6,6 +6,7 @@
  */
 import { addDays, daysBetween, isoTh } from './format';
 import { TT } from './constants';
+import { isLocalId } from './teamSync';
 import { jointRole, trackerStatus, type Deal, type SalesState } from './sales';
 import type { CfoStatus, Company, Task } from './types';
 
@@ -70,6 +71,23 @@ export const apptLine = (t: Pick<Task, 'type' | 'date' | 'time'>) =>
 
 /** The words of the Sales Tracker column: the row's status in the year, or that it is not there. */
 export const NOT_IN_TRACKER = 'ยังไม่อยู่ใน Sales Tracker';
+
+/**
+ * The followed ids that are this company: its own and any of a row since merged into it (a follow made
+ * before two rows were merged into one company is that company's). Empty = not followed. Unfollowing
+ * removes them all. `resolve`: an id to the id of its company now (GccEngine.canonical).
+ */
+export const followIdsOf = (watch: readonly number[], cid: number, resolve: (id: number) => number) =>
+  watch.filter((id) => id === cid || resolve(id) === cid);
+
+/** Said under a followed company that only this device has (from the TGO website sync, on a connected
+ *  team): its follow, like its other records, is not shared, so teammates do not see it in their list. */
+export const LOCAL_ONLY = 'อยู่ในเครื่องนี้เท่านั้น';
+
+/** The grey line under a followed company's name: province, GCC code and, on a connected team, that it is
+ *  on this device only. */
+export const followMeta = (c: Pick<Company, 'id' | 'code'>, prov: string, team: boolean) =>
+  [prov || 'ไม่ระบุจังหวัด', c.code, team && isLocalId(c.id) ? LOCAL_ONLY : ''].filter(Boolean).join(' · ');
 
 /** One followed company as the list shows it. */
 export interface FollowRow extends FollowFacts {

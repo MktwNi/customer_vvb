@@ -149,7 +149,7 @@ export function Track() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>หมดอายุใน 12 เดือนข้างหน้า</h2>
-            <span className="t-meta" style={{ fontSize: 13 }} title="คลิกที่เดือนเพื่อกรองทั้งหน้า">{`${isoTh(e.ref)} ถึง ${isoTh(ob.endISO)} · สีเหลือง = ภายใน ${W} วัน`}</span>
+            <span className="t-meta" style={{ fontSize: 13 }} title="คลิกที่เดือนเพื่อกรองภาพรวมใบรับรอง">{`${isoTh(e.ref)} ถึง ${isoTh(ob.endISO)} · สีเหลือง = ภายใน ${W} วัน`}</span>
           </div>
           <div style={{ display: 'flex', gap: 28 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>

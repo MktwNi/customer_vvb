@@ -3,10 +3,11 @@ import { useApp, useEngineVersion } from '../state';
 import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { beYear } from '../lib/sales';
-import { NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followMatch, followRows, type FollowRow } from '../lib/follow';
+import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followIdsOf, followMatch, followMeta, followRows, type FollowRow } from '../lib/follow';
 import type { CfoStatus, Task } from '../lib/types';
 import { PageHead, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
+import { isLocalId } from '../lib/teamSync';
 
 /** A CFO status as on ค้นหา: dot + word; "ใกล้หมดอายุ" (needs action now) a tinted chip. */
 const cfoStatus = (st: CfoStatus) =>
@@ -41,18 +42,23 @@ export function FollowList() {
 
   const canCust = e.can('edit.cust'), canTask = e.can('edit.task');
   const seeSales = e.can('view.sales'), canSend = seeSales && e.can('edit.deal');
+  // แผนติดต่อ is a page of its own (view.plan): a role that may make appointments but not open it plans here, row by row
+  const canPlan = canTask && e.can('view.plan');
   const acts = canCust || canTask;
   const prov = (r: FollowRow) => D.prov[r.c.prov] || '';
+  const team = !!e.teamCfg;
+  // companies from the TGO website sync are this device's own: their follow is not shared with the team
+  const localN = team ? rows.filter((r) => isLocalId(r.c.id)).length : 0;
   const shownAll = q.trim() ? rows.filter((r) => followMatch(q, r, prov(r))) : rows;
   const shown = shownAll.slice(0, lim);
   const n = followCounts(rows, today);
   const notIn = rows.filter((r) => !r.deal);
-  const pageActs = (canSend && notIn.length > 0) || canTask;
+  const pageActs = (canSend && notIn.length > 0) || canPlan;
   const cols = ['minmax(0,2fr)', 'minmax(152px,1.1fr)', seeSales ? 'minmax(0,1.2fr)' : '', 'minmax(146px,1fr)', 'minmax(76px,.7fr)', acts ? '140px' : ''].filter(Boolean).join(' ');
 
-  /** Stop following: every followed id that is this company (two rows merged into one count as one). */
+  /** Stop following: every followed id that is this company (a row since merged into it counts). */
   const unfollow = (r: FollowRow) => {
-    const ids = e.crm.watch.filter((id) => e.company(id)?.id === r.c.id);
+    const ids = followIdsOf(e.crm.watch, r.c.id, (id) => e.canonical(id));
     ids.forEach((id) => e.toggleWatch(id));
     setGone({ ids, name: r.c.name });
   };
@@ -82,9 +88,11 @@ export function FollowList() {
 
   return (
     <>
+      {/* (its name stays on a phone, where page titles give way to the top bar's: this is a section of ติดตาม) */}
+      <div className="fw-head">
       <PageHead
         title="บริษัทที่ติดตาม"
-        sub={`${rows.length ? fmtN(rows.length) + ' บริษัท · ' : ''}${e.teamCfg ? 'รายชื่อเดียวกันทั้งทีม' : 'บันทึกในเครื่องนี้'}`}
+        sub={`${rows.length ? fmtN(rows.length) + ' บริษัท · ' : ''}${team ? 'รายชื่อเดียวกันทั้งทีม' + (localN ? ` ยกเว้น ${fmtN(localN)} บริษัทที่${LOCAL_ONLY}` : '') : 'บันทึกในเครื่องนี้'}`}
         right={rows.length > 0 && pageActs ? (
           <div className="fw-pacts">
             {canSend && notIn.length > 0 && (
@@ -92,10 +100,11 @@ export function FollowList() {
                 ส่งเข้า Sales Tracker ทั้งหมด ({fmtN(notIn.length)})
               </button>
             )}
-            {canTask && <button onClick={() => go('plan', { plFeed: 'watch', picked: {}, plLim: 60 })} className="btn sm pri">วางแผนติดต่อทั้งหมด</button>}
+            {canPlan && <button onClick={() => go('plan', { plFeed: 'watch', picked: {}, plLim: 60 })} className="btn sm pri">วางแผนติดต่อทั้งหมด</button>}
           </div>
         ) : undefined}
       />
+      </div>
       <section className="fw card" aria-label="บริษัทที่ติดตาม">
         {/* (the live region is always there, so the line is read out when it comes) */}
         <div role="status">
@@ -153,7 +162,7 @@ export function FollowList() {
                     <CoAvatar name={r.c.name} web={r.c.web} set={r.c.set} size={32} />
                     <span className="fw-name-t">
                       <span className="t-name">{r.c.name}</span>
-                      <span className="t-meta">{[prov(r) || 'ไม่ระบุจังหวัด', r.c.code].filter(Boolean).join(' · ')}</span>
+                      <span className="t-meta" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
                     </span>
                   </button>
                   <Cell label="CFO · GI">

@@ -3,6 +3,9 @@
 
 /* the page head's two buttons */
 .fw-pacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* its name stays on a phone, at a section's size, as the overview's below (page titles give way to the
+   top bar's there) */
+@media (max-width:900px){.fw-head .pg-h h2{display:block;font-size:var(--fs-section)}}
 
 /* the list: one card, a summary line, a light header, a row per company; the cells stack (with their
    column's name) when the card is narrow, and each company is a card of its own on a phone */
