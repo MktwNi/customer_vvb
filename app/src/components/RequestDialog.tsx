@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { CAP, CAPS, GROUPS, LOCKED_CAP, capsOf, closeNeeds, gained, listWords, lost, needsChain, type CapId, type CapSet, type RoleDef } from '../lib/caps';
+import { CAP, GROUPS, LOCKED_CAP, capsOf, closeNeeds, gained, listWords, lost, needsChain, type CapId, type CapSet, type RoleDef } from '../lib/caps';
 import { addDays, todayISO } from '../lib/format';
 import { Modal } from './Dialog';
 import { RoleChip, authError } from './Login';
@@ -117,7 +117,7 @@ export function RequestDialog({ onClose }: { onClose: () => void }) {
             <p className="rl-lbl">เลือกสิทธิ์ที่ขอเพิ่ม{picked.length ? ` · เลือกแล้ว ${picked.length} รายการ` : ''}</p>
             <div className="rl-capl">
               {GROUPS.map((g) => {
-                const items = CAPS.filter((c) => c.g === g.id && (!have[c.id] || wider(c.id)) && c.id !== LOCKED_CAP);
+                const items = e.capsShown().filter((c) => c.g === g.id && (!have[c.id] || wider(c.id)) && c.id !== LOCKED_CAP);
                 if (!items.length) return null;
                 return (
                   <div key={g.id} role="group" aria-label={g.title} style={{ display: 'contents' }}>

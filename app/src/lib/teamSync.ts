@@ -138,7 +138,8 @@ const ERR_TH: Record<string, string> = {
   // configurable roles and permission requests (Code.gs v4)
   role_in_use: 'บทบาทนี้ยังมีผู้ใช้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อนลบ',
   role_locked: 'บทบาทนี้แก้หรือลบไม่ได้',
-  bad_cap: 'มีสิทธิ์ที่ระบบไม่รู้จัก ลองรีเฟรชหน้าเว็บ (F5)',
+  // also a capability of this build that a script deployed before it does not have (job expenses)
+  bad_cap: 'มีสิทธิ์ที่สคริปต์ของทีมไม่รู้จัก ลองรีเฟรชหน้าเว็บ (F5) ถ้ายังขึ้นอีก ให้ผู้ดูแลระบบอัปเดต Code.gs เป็นเวอร์ชันล่าสุด',
   cap_held: 'คุณมีสิทธิ์นี้อยู่แล้ว',
   too_many_roles: 'มีบทบาทครบ 10 บทบาทแล้ว ลบบทบาทที่ไม่ใช้ก่อน',
   req_note: 'ใส่เหตุผลของคำขอ (ไม่เกิน 300 ตัวอักษร)',

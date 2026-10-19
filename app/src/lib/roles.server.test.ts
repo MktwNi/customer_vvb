@@ -956,6 +956,26 @@ describe('going back to the script before capabilities (prepareRollback, README 
     expect(s.run<{ u: string }[]>('prepareRollback').map((x) => x.u)).toEqual(['somchai']);
     expect(usersOf(s)).toMatchObject({ lead: { r: 'admin' }, boss2: { r: 'admin' }, somchai: { r: 'viewer' } });
   });
+
+  it('the job-expense capabilities do not count: the old script neither hides nor guards expenses, so turning them off moves nobody', () => {
+    const { s, admin } = team();
+    member(s, admin, 'somchai', 'สมชาย', 'sales');
+    // the mockups' หัวหน้าฝ่ายขาย as a build before expenses made it (no view.exp / edit.exp, no `from`)
+    const { 'view.exp': _v, 'edit.exp': _e, ...headBefore } = HEAD;
+    const head = role(s, admin, 'หัวหน้าฝ่ายขาย', headBefore);
+    expect(props(s, 'ROLES').roles[head].c).not.toHaveProperty('view.exp');
+    member(s, admin, 'mint', 'มินท์', head);
+    // the admin turned expenses off for พนักงานขาย (who sees them is the owner's choice)
+    expect(call(s, admin, 'role_save', { id: 'sales', c: { ...BUILT.sales, 'view.exp': 0, 'edit.exp': 0 } })).toMatchObject({ ok: true });
+    const moved = s.run<{ u: string; from: string; to: string }[]>('prepareRollback');
+    expect(moved.map((x) => [x.u, x.from, x.to])).toEqual([['mint', head, 'sales']]);
+    expect(usersOf(s)).toMatchObject({ somchai: { r: 'sales' }, mint: { r: 'sales' } });
+    // anything else the original พนักงานขาย had still counts
+    const { 'edit.task': _t, ...noTask } = headBefore;
+    const narrow = role(s, admin, 'ไม่มีนัดหมาย', noTask);
+    member(s, admin, 'kai', 'ไก่', narrow);
+    expect(s.run<{ u: string; to: string }[]>('prepareRollback').map((x) => [x.u, x.to])).toEqual([['kai', 'viewer']]);
+  });
 });
 
 // ------------------------------------------------------------------ 9. extras given directly

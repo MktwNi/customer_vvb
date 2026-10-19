@@ -19,8 +19,8 @@ import {
 } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
 import {
-  BUILTIN, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, parseAudit, parseGrants, parseReqs, parseRoles, sameName, roleWire,
-  type AuditRow, type CapAsk, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
+  BUILTIN, CAPS, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, lateUnknown, parseAudit, parseGrants, parseReqs, parseRoles, sameName, roleWire,
+  type AuditRow, type CapAsk, type CapDef, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
 } from './caps';
 import {
   ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
@@ -861,8 +861,19 @@ export class GccEngine {
   async teamRoles(): Promise<RoleDef[]> {
     const r = await this.adminCall<Record<string, unknown>>({ action: 'me' });
     this.knownRoles = parseRoles(r.roles);
+    this.noteRoles(r.roles);
     this.emit();
     return this.knownRoles;
+  }
+  /** Capabilities of this build the team script does not know (lateUnknown), from the last roles it sent. */
+  private lateOff: CapId[] = [];
+  private noteRoles(x: unknown) {
+    if (x && typeof x === 'object') this.lateOff = lateUnknown(x);
+  }
+  /** The capabilities the role editor, extras, requests and สิทธิ์ของฉัน offer: the catalogue, less any the
+   *  team script would refuse ('bad_cap': a script with roles deployed before job expenses). */
+  capsShown(): CapDef[] {
+    return this.lateOff.length ? CAPS.filter((c) => !this.lateOff.includes(c.id)) : CAPS;
   }
   /**
    * May this account do `cap`? `owner`: whose record it is (a deal's ผู้รับผิดชอบ, a record's writer),
@@ -896,6 +907,8 @@ export class GccEngine {
       const me = this.me();
       const [type, id, rest] = k.split('/');
       if (rule.own === 'resp') {
+        // the script also wants the deal to have been the account's before the push this goes in (Code.gs
+        // opGate_): a deal taken over and written to before one push is refused there (denied → team value)
         const d = this.sales.deals[id];
         const nv = type === 'deal' && v && typeof v === 'object' ? (v as { resp?: string }).resp : undefined;
         own = !!d && sameName(d.resp, me) && (type !== 'deal' || del || sameName(nv ?? d.resp, me));
@@ -4602,7 +4615,10 @@ export class GccEngine {
   async adminDir(): Promise<TeamDir> {
     const r = await this.adminCall<Record<string, unknown>>({ action: 'users' });
     const v4 = 'roles' in r;
-    if (v4) this.knownRoles = parseRoles(r.roles);
+    if (v4) {
+      this.knownRoles = parseRoles(r.roles);
+      this.noteRoles(r.roles);
+    }
     return {
       users: (Array.isArray(r.users) ? r.users : []) as TeamUser[],
       roles: parseRoles(r.roles),
@@ -4633,11 +4649,13 @@ export class GccEngine {
       // the script shares these codes with accounts: say them about a role
       throw e instanceof TeamSyncError && e.code === 'name_taken' ? codeError('name_dup', e.extra) : e instanceof TeamSyncError && e.code === 'bad_name' ? codeError('role_name', e.extra) : e;
     });
+    this.noteRoles(x.roles);
     return { id: typeof x.id === 'string' ? x.id : r.id || '', roles: 'roles' in x ? parseRoles(x.roles) : null };
   }
   /** Delete a role made by an admin; its accounts (and temporary grants of it) move to `to`. */
   async roleDel(id: string, to: string) {
     const x = await this.adminCall<Record<string, unknown>>({ action: 'role_del', id, to });
+    this.noteRoles(x.roles);
     return 'roles' in x ? parseRoles(x.roles) : null;
   }
   /** Extras for one account beyond its role (until a date, or for good). */

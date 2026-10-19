@@ -29,7 +29,7 @@ export function MyPerms({ onClose }: { onClose: () => void }) {
   // an extra: held now but not by the role (only when the role's capabilities are known from the script)
   const extra = (k: CapId) => grants.find((x) => x.k === k) || (role && e.rolesLive && !role.c[k] ? { k, until: '' } : null);
   const admin = !!caps[LOCKED_CAP];
-  const no = CAPS.filter((c) => !caps[c.id]);
+  const no = e.capsShown().filter((c) => !caps[c.id]);
   const mayAsk = e.rolesLive && !admin;
   const pend = s.req?.st === 'p';
   return (

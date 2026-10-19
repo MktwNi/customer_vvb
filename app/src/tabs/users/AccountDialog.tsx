@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent } from 'react';
 import { useApp } from '../../state';
 import type { TeamDir, TeamUser } from '../../lib/engine';
-import { CAP, CAPS, LOCKED_CAP, closeNeeds, hasWrite, needsChain, resolveCaps, roleLine, unionCaps, type CapGrant, type CapId, type CapSet } from '../../lib/caps';
+import { CAP, LOCKED_CAP, closeNeeds, hasWrite, needsChain, resolveCaps, roleLine, unionCaps, type CapGrant, type CapId, type CapSet } from '../../lib/caps';
 import { addDays, isoTh, todayISO } from '../../lib/format';
 import { Modal } from '../../components/Dialog';
 import { Select } from '../../components/Select';
@@ -42,7 +42,7 @@ export function AccountDialog({ u, dir, self, guard, onClose, onSaved, onRoles, 
   // what this person has now with the role picked and the extras kept: what can still be given
   const keep = extras.filter((x) => !drop.includes(x.k));
   const now = resolveCaps(role, Object.fromEntries(dir.roles.map((x) => [x.id, x.c])), { c: [...keep, ...add].map((x) => ({ ...x, until: x.until || undefined })) }, today);
-  const givable = CAPS.filter((c) => c.id !== LOCKED_CAP && !now[c.id]);
+  const givable = e.capsShown().filter((c) => c.id !== LOCKED_CAP && !now[c.id]);
   const nameOk = !u.ll; // the display name is fixed once the account has signed in
   const emailChanged = em.trim() !== (u.em || '');
   const verified = !!u.em && !emailChanged && (u.ok === 1 || u.ok === true);

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALL_CAPS, BUILTIN, CAP, CAPS, CAP_IDS, GROUPS, KNOWN_PREFIXES, LATE_CAPS, LOCKED_CAP, SERVER_ONLY, WRITE_CAPS, can, canWriteKey, capsOf, capsWire, closeNeeds, gained,
-  hasWrite, keyRule, legacyRole, listWords, lost, needsChain, parseAudit, parseCaps, parseGrants, parseMyReq, parseReqs, parseRoles, resolveCaps, roleLine, roleWire,
+  hasWrite, keyRule, lateUnknown, legacyRole, listWords, lost, needsChain, parseAudit, parseCaps, parseGrants, parseMyReq, parseReqs, parseRoles, resolveCaps, roleLine, roleWire,
   sameCaps, sameName, summarize, type CapId, type CapSet,
 } from './caps';
 import { canWriteKey as legacyWrite } from './auth';
@@ -108,6 +108,14 @@ describe('needs, scopes and resolving', () => {
     // role_save names the job-expense capabilities, 0 when off (the script keeps them for a save that does not)
     expect(roleWire({ 'view.sales': 'all' })).toEqual({ 'view.sales': 1, 'view.exp': 0, 'edit.exp': 0 });
     expect(roleWire(BUILTIN.sales.c)).toMatchObject({ 'view.exp': 1, 'edit.exp': 'own' });
+  });
+  it('lateUnknown: the job-expense capabilities a script\'s ผู้ดูแลระบบ lacks (a script from before them); none when it can\'t tell', () => {
+    const all = Object.fromEntries(CAP_IDS.map((k) => [k, 1]));
+    const { 'view.exp': _v, 'edit.exp': _e, ...before } = all;
+    expect(lateUnknown({ admin: { n: 'ผู้ดูแลระบบ', c: all }, sales: { c: {} } })).toEqual([]);
+    expect(lateUnknown({ admin: { c: before } })).toEqual(['view.exp', 'edit.exp']);
+    expect(lateUnknown({ roles: { admin: { c: { ...before, 'edit.exp': 1 } } } })).toEqual(['view.exp']);
+    for (const x of [undefined, null, {}, { admin: {} }, { admin: { c: ['view.exp'] } }, 'x']) expect(lateUnknown(x)).toEqual([]);
   });
   it('resolveCaps: the role, unexpired extras (until is inclusive), a temporary role; admin everything, unknown nothing', () => {
     const roles = { sales: BUILTIN.sales.c, viewer: BUILTIN.viewer.c, head: HEAD };

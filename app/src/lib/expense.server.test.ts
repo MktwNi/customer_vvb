@@ -4,14 +4,16 @@
  * expenses (view.exp) and who may RECORD them (edit.exp) when configuring roles; accounting checks money going
  * out as it checks money coming in. This file restates the data contract independently of the script:
  * - dexp/<dealId>/<expId> = { c, n?, amt, d, paid?, file?, by, at }: edit.exp to write and to delete, own work =
- *   the deal's ผู้รับผิดชอบ (as dpay/); by and at are the account's and the server's for every non-admin;
+ *   the deal's ผู้รับผิดชอบ (as dpay/) both before the push and at the op (a push can't hand itself a deal, write
+ *   its expenses and hand it back); by and at are the account's and the server's for every non-admin;
  * - dlog/exp.<id> (their history): edit.exp or pay.check; deleting: set.users;
  * - dchk/<dealId>/exp.<expId> (an expense checked) and mclose/<YYYY-MM>/out (a month's expenses closed):
  *   pay.check, by and at forced as for the income check;
- * - pull: without view.exp (or view.money) all four come as deletions; a build that does not say it knows
+ * - pull: without view.exp (or view.money) all four come as deletions with no author or time; a build that does not say it knows
  *   expenses (no xp) gets an expense's check as a deletion (it would read it as a cancelled income check);
  * - a deal deleted by an account takes its expenses along; their checks stay;
- * - an expense's bill (docId exp_<expId>) may be uploaded and trashed with edit.exp alone.
+ * - an expense's bill (docId exp_<expId>) may be uploaded and trashed with edit.exp alone; with edit.exp for its own
+ *   work only, trashed only when it is the bill of expenses on the account's own deals.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
@@ -161,6 +163,44 @@ describe('the key table for job expenses: prefix × capability × own / all × w
     });
     expect(r).toMatchObject({ n: 3, denied: ['dexp/d1/b'] });
   });
+
+  it('a push that hands itself someone\'s deal, writes its expenses and hands it back stores the deal changes only', () => {
+    const { s, admin } = team();
+    call(s, admin, 'push', { ops: [...DEALS, { k: 'dexp/d2/old', v: exp() }, { k: 'dpay/d2/PAY1', v: { amt: 50000 } }] });
+    // the built-in พนักงานขาย: edit.deal for every deal, edit.exp for its own
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    const before = Number(s.props.SEQ);
+    const swap = [
+      { k: 'deal/d2', v: { client: 'บริษัท ข จำกัด', resp: 'สมชาย', forecast: 50000 } },
+      { k: 'dexp/d2/new', v: exp() },
+      { k: 'dexp/d2/old', del: true },
+      { k: 'deal/d2', v: { client: 'บริษัท ข จำกัด', resp: 'คุณบี', forecast: 50000 } },
+    ];
+    expect(call(s, tok, 'push', { ops: swap })).toMatchObject({ ok: true, n: 2, denied: ['dexp/d2/new', 'dexp/d2/old'] });
+    expect(rowsOf(call(s, admin, 'pull', { since: before, xp: 1 })).map((x) => x.k)).toEqual(['deal/d2', 'deal/d2']);
+    expect(byKey(pullAll(s, admin))['dexp/d2/old']).toMatchObject({ del: false });
+    // the same for a payment plan held for its own deals only by a role that may reassign every deal
+    const pay = member(s, admin, 'kai', 'ไก่', role(s, admin, 'แก้ดีลทุกดีล แผนชำระงานตัวเอง', { ...ones(['view.sales', 'view.money', 'edit.deal']), 'edit.pay': 'own' }));
+    const r = call(s, pay, 'push', { ops: [{ k: 'deal/d2', v: { resp: 'ไก่' } }, { k: 'dpay/d2/PAY1', v: { amt: 1 } }, { k: 'dpay/d2/PAY1', del: true }, { k: 'deal/d2', v: { resp: 'คุณบี' } }] });
+    expect(r).toMatchObject({ n: 2, denied: ['dpay/d2/PAY1', 'dpay/d2/PAY1'] });
+    // its own deal: expenses before it hands the deal over in the same push are its own; after, not
+    const own = call(s, tok, 'push', { ops: [{ k: 'dexp/d1/c', v: exp() }, { k: 'deal/d1', v: { client: 'บริษัท ก จำกัด', resp: 'คุณบี' } }, { k: 'dexp/d1/d', v: exp() }] });
+    expect(own).toMatchObject({ n: 2, denied: ['dexp/d1/d'] });
+  });
+
+  it('taken over in one push, the deal is the account\'s own in the next (a change everyone sees); each expense names who recorded it', () => {
+    const { s, admin } = team();
+    call(s, admin, 'push', { ops: DEALS });
+    const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
+    expect(call(s, tok, 'push', { ops: [{ k: 'deal/d2', v: { client: 'บริษัท ข จำกัด', resp: 'สมชาย' } }] })).toMatchObject({ n: 1, denied: [] });
+    expect(call(s, tok, 'push', { ops: [{ k: 'dexp/d2/a', v: exp({ by: 'คุณบี' }) }] })).toMatchObject({ n: 1, denied: [] });
+    const g = byKey(pullAll(s, admin));
+    expect(g['deal/d2']).toMatchObject({ by: 'สมชาย', v: { resp: 'สมชาย' } });
+    expect(g['dexp/d2/a']).toMatchObject({ by: 'สมชาย', v: { by: 'สมชาย' } });
+    // a deal deleted before the push and made again by it counts as a new deal
+    call(s, admin, 'push', { ops: [{ k: 'deal/d3', v: { resp: 'คุณบี' } }, { k: 'deal/d3', del: true }] });
+    expect(call(s, tok, 'push', { ops: [{ k: 'deal/d3', v: { resp: 'สมชาย' } }, { k: 'dexp/d3/a', v: exp() }] })).toMatchObject({ n: 2, denied: [] });
+  });
 });
 
 // ------------------------------------------------------------------ 2. names and times
@@ -228,16 +268,17 @@ describe('pull: expenses reach only the accounts that may see them', () => {
     expect(full['dexp/d1/a']).toMatchObject({ del: false, v: { c: 'ผู้รับเหมา', amt: 35000 } });
   });
 
-  it('without view.exp: each expense record comes as a deletion in its place (seq, key, author, time); the income side is untouched', () => {
+  it('without view.exp: each expense record comes as a deletion in its place (seq and key), without who wrote it or when; the income side is untouched', () => {
     const { s, admin } = setup();
     const viewer = member(s, admin, 'vee', 'วี', 'viewer');
     const acctOld = member(s, admin, 'fon', 'ฝน', role(s, admin, 'บัญชี (ก่อนมีค่าใช้จ่าย)', ACCT_OLD));
     const full = pullAll(s, admin);
     for (const tok of [viewer, acctOld]) {
       const r = pullAll(s, tok);
-      expect(rowsOf(r).map((x) => [x.seq, x.k, x.by, x.at])).toEqual(rowsOf(full).map((x) => [x.seq, x.k, x.by, x.at]));
+      const exp = (k: string) => EXP_KEYS.includes(k);
+      expect(rowsOf(r).map((x) => [x.seq, x.k, x.by, x.at])).toEqual(rowsOf(full).map((x) => (exp(x.k) ? [x.seq, x.k, '', ''] : [x.seq, x.k, x.by, x.at])));
       const g = byKey(r), a = byKey(full);
-      for (const k of EXP_KEYS) expect([k, g[k].v, g[k].del]).toEqual([k, null, true]);
+      for (const k of EXP_KEYS) expect([k, g[k]]).toEqual([k, { seq: a[k].seq, k, v: null, del: true, by: '', at: '' }]);
       for (const k of ['dchk/d1/PAY1', 'mclose/2026-10', 'dlog/l1', 'deal/d1']) expect([k, g[k]]).toEqual([k, a[k]]);
       const text = JSON.stringify(r);
       for (const x of SECRET) expect(text.includes(x), x).toBe(false);
@@ -293,7 +334,31 @@ describe('pull: expenses reach only the accounts that may see them', () => {
     const v = member(s, admin, 'vee', 'วี', 'viewer');
     const page = call(s, v, 'pull', { since: 2, limit: 2, xp: 1 });
     expect(page).toMatchObject({ more: true });
-    expect(rowsOf(page).map((x) => [x.k, x.del])).toEqual([['dexp/d1/a', true], ['dexp/d2/b', true]]);
+    expect(rowsOf(page).map((x) => [x.k, x.del, x.by])).toEqual([['dexp/d1/a', true, ''], ['dexp/d2/b', true, '']]);
+  });
+
+  it('a role that sees money and commission but not expenses (accounting as the mockups drew it) still gets them as deletions; its revenue splits stay', () => {
+    const { s, admin } = setup();
+    call(s, admin, 'push', { ops: [{ k: 'dshare/d1', v: { lines: [{ u: 'u1', pct: 100 }] } }] });
+    const acct = member(s, admin, 'fon', 'ฝน', role(s, admin, 'บัญชี/การเงิน', ones(['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.pay', 'docs.up', 'pay.check'])));
+    const caps = meCaps(call(s, acct, 'me'));
+    expect([caps['view.money'], caps['view.comm'], caps['view.exp']]).toEqual([1, 1, undefined]);
+    const full = byKey(pullAll(s, admin));
+    const r = pullAll(s, acct);
+    const g = byKey(r);
+    for (const k of EXP_KEYS) expect([k, g[k].v, g[k].del, g[k].by]).toEqual([k, null, true, '']);
+    expect(g['dshare/d1']).toEqual(full['dshare/d1']);
+    for (const k of ['dchk/d1/PAY1', 'mclose/2026-10', 'deal/d1']) expect([k, g[k]]).toEqual([k, full[k]]);
+    for (const x of SECRET) expect(JSON.stringify(r).includes(x), x).toBe(false);
+    // and page by page
+    const seen: string[] = [];
+    for (let since = 0, more = true; more; ) {
+      const p = call(s, acct, 'pull', { since, limit: 3, xp: 1 });
+      rowsOf(p).forEach((x) => EXP_KEYS.includes(x.k) && seen.push(`${x.k}:${x.del}:${JSON.stringify(x.v)}`));
+      more = !!p.more;
+      since = rowsOf(p).at(-1)?.seq ?? since;
+    }
+    expect(seen).toEqual(EXP_KEYS.map((k) => `${k}:true:null`));
   });
 });
 
@@ -484,6 +549,52 @@ describe('an expense\'s bill (docId exp_<expId>)', () => {
     const sales = member(s, admin, 'somchai', 'สมชาย', 'sales');
     expect(call(s, sales, 'upload', { ...pdf, docId: 'exp_e3' })).toMatchObject({ ok: true });
     expect(s.drive.list().filter((x) => x.kind === 'file' && !x.trashed).map((x) => x.name.split('__')[0]).sort()).toEqual(['deal-1.q1', 'exp_e3']);
+  });
+
+  it('recording for its own deals only (no docs.up): trashes the bills of its own deals\' expenses, no other', () => {
+    const { s, admin } = team();
+    const up = (tok: string, id: string) => String(call(s, tok, 'upload', { ...pdf, docId: 'exp_' + id }).fileId);
+    const file = (id: string) => ({ id, name: 'บิล.pdf', mime: 'application/pdf', size: 5 });
+    const trashed = (id: string) => s.drive.list().find((x) => x.id === id)!.trashed;
+    const [F1, F2, F3, F4, F5] = ['e1', 'e2', 'e3', 'e4', 'e5'].map((id) => up(admin, id));
+    call(s, admin, 'push', {
+      ops: [
+        ...DEALS,
+        { k: 'deal/d3', v: { client: 'บริษัท ค จำกัด', resp: 'สมชาย' } },
+        { k: 'dexp/d1/e1', v: exp({ file: file(F1) }) }, // สมชาย's deal
+        { k: 'dexp/d2/e2', v: exp({ file: file(F2) }) }, // คุณบี's
+        { k: 'dexp/d1/e3', v: exp({ file: file(F3) }) },
+        { k: 'dexp/d1/e3', del: true }, // deleted since
+        { k: 'dexp/d3/e4', v: exp({ file: file(F4) }) },
+        { k: 'deal/d3', del: true }, // its deal deleted since (the expense with it)
+        { k: 'dexp/d2/e5', v: exp({ file: file(F5) }) },
+      ],
+    });
+    const own = member(s, admin, 'somchai', 'สมชาย', role(s, admin, 'บันทึกค่าใช้จ่ายงานตัวเอง', { ...SEES, 'edit.exp': 'own' }));
+    // another deal's bill: refused, also after this account points an expense of its own deal at it, or
+    // writes one under the same expense id on its own deal
+    expect(call(s, own, 'delfile', { fileId: F2 }).error).toBe('forbidden');
+    expect(call(s, own, 'push', { ops: [{ k: 'dexp/d1/x', v: exp({ file: file(F5) }) }, { k: 'dexp/d1/e2', v: exp({ file: file(F2) }) }] })).toMatchObject({ n: 2, denied: [] });
+    expect(call(s, own, 'delfile', { fileId: F5 }).error).toBe('forbidden');
+    expect(call(s, own, 'delfile', { fileId: F2 }).error).toBe('forbidden');
+    // a bill another deal's expense names under another id (uploaded as exp_g): the expense that names it counts
+    const G = up(admin, 'g');
+    call(s, admin, 'push', { ops: [{ k: 'dexp/d2/v1', v: exp({ file: file(G) }) }] });
+    expect(call(s, own, 'push', { ops: [{ k: 'dexp/d1/g', v: exp() }] })).toMatchObject({ n: 1, denied: [] });
+    expect(call(s, own, 'delfile', { fileId: G }).error).toBe('forbidden');
+    expect([trashed(F2), trashed(F5), trashed(G)]).toEqual([false, false, false]);
+    // its own deal's: live, deleted since, or of a deal deleted since that was its own
+    for (const f of [F1, F3, F4]) expect([f, call(s, own, 'delfile', { fileId: f })]).toEqual([f, expect.objectContaining({ ok: true })]);
+    expect([trashed(F1), trashed(F3), trashed(F4)]).toEqual([true, true, true]);
+    // a bill no expense names yet: whoever records for every deal (or attaches documents) trashes it
+    const loose = up(own, 'e9');
+    expect(call(s, own, 'delfile', { fileId: loose }).error).toBe('forbidden');
+    const all = member(s, admin, 'mint', 'มินท์', role(s, admin, 'บันทึกค่าใช้จ่ายทุกงาน', RECORDS));
+    expect(call(s, all, 'delfile', { fileId: loose })).toMatchObject({ ok: true });
+    expect(call(s, all, 'delfile', { fileId: F2 })).toMatchObject({ ok: true });
+    // what is not a bill stays refused, whatever the scope
+    const quote = String(call(s, admin, 'upload', { ...pdf, docId: 'deal-1.q1' }).fileId);
+    for (const tok of [own, all]) expect(call(s, tok, 'delfile', { fileId: quote }).error).toBe('forbidden');
   });
 });
 

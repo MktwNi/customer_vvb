@@ -137,6 +137,18 @@ export const capsWire = (c: CapSet) => Object.fromEntries((Object.entries(c) as 
 export const LATE_CAPS: CapId[] = ['view.exp', 'edit.exp'];
 /** A role's capabilities as role_save sends them: capsWire, plus 0 for every LATE_CAPS one that is off. */
 export const roleWire = (c: CapSet): Record<string, 1 | 'own' | 0> => ({ ...Object.fromEntries(LATE_CAPS.map((k) => [k, 0 as const])), ...(capsWire(c) as Record<string, 1 | 'own'>) });
+/**
+ * The LATE_CAPS the team script does not know, from the roles it sends (`me`, `users`, role_save): its
+ * ผู้ดูแลระบบ holds every capability it has, so one missing there is one that script would refuse to give
+ * ('bad_cap'; a script with configurable roles deployed before job expenses). [] when the reply has no
+ * roles to tell by (the screens that offer capabilities are not shown for a script without them).
+ */
+export function lateUnknown(x: unknown): CapId[] {
+  const m = (x && typeof x === 'object' && 'roles' in (x as object) ? (x as { roles: unknown }).roles : x) as Record<string, unknown> | null;
+  const a = m && typeof m === 'object' && !Array.isArray(m) && m.admin && typeof m.admin === 'object' ? (m.admin as { c?: unknown }).c : null;
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return [];
+  return LATE_CAPS.filter((k) => !(a as Record<string, unknown>)[k]);
+}
 
 /** Both sets together; the wider scope wins. */
 export function unionCaps(a: CapSet, b: CapSet): CapSet {

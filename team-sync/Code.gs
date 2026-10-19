@@ -98,15 +98,17 @@
  * Capabilities (CAPS_, the same catalogue as the web app's lib/caps.ts): what a key needs is in KEY_CAP
  * (default deny: an unknown prefix needs set.users, qchk/ is never pushed). A refused op is listed in
  * `denied` and never stored. push needs a write capability, upload and delfile docs.up (or edit.exp for an
- * expense's bill: docId exp_<expId>), file docs.open.
+ * expense's bill: docId exp_<expId>; trashing one with edit.exp 'own' only a bill of its own deals'
+ * expenses), file docs.open.
  * Accounts without set.users get by = their name in log/, dlog/, dact/ values, by + at = their name
  * and the time in dchk/, mclose/ and dexp/, and in a ddoc/ value by = whoever attached the document (the
  * account for a new one, else the attacher stored with it). pull strips money without view.money and commission without view.comm.
  * Job expenses (ค่าใช้จ่ายของงาน): dexp/<dealId>/<expId> = { c, n?, amt, d, paid?, file?: { id, name, mime, size },
- * by, at } (edit.exp; own work = the deal's resp, as dpay/), their history rows dlog/exp.<id> (edit.exp or
- * pay.check), the month check of an expense dchk/<dealId>/exp.<expId> (pay.check, d = the paid date, f = the
- * bill's file id) and of a month's expenses mclose/<YYYY-MM>/out = { by, at, n, amt } (pay.check). Without
- * view.exp (which needs view.money) pull sends all four as deletions. An account's push that deletes a deal
+ * by, at } (edit.exp; own work = the deal's resp before the push and at the op, as dpay/), their history rows
+ * dlog/exp.<id> (edit.exp or pay.check), the month check of an expense dchk/<dealId>/exp.<expId> (pay.check,
+ * d = the paid date, f = the bill's file id) and of a month's expenses mclose/<YYYY-MM>/out = { by, at, n, amt }
+ * (pay.check). Without view.exp (which needs view.money) pull sends all four as deletions with by and at
+ * blank (the key and seq stay). An account's push that deletes a deal
  * also deletes that deal's expenses (as its dshare/), whether or not the account sees them.
  * A token request from an older build (cv < 4) may still read, but push, upload and delfile answer
  * 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)', which those builds show as is (their queue is kept).
@@ -254,7 +256,8 @@ const LATE_CAPS_ = ['view.exp', 'edit.exp'];
  * a list (any one of them), or '' = nobody (qchk/: only the qt_check action writes it). ow / od: when the
  * account holds that capability for its own work only, what makes the record its own: 'deal' = the
  * deal's resp (ผู้รับผิดชอบ) is the account's display name, before and after the change; 'resp' = the
- * resp of the deal in the key is; 'by' = the account wrote the key's latest row. `scfg/<name>` without a
+ * resp of the deal in the key is, both as stored before the push and at the op (a deal the push makes
+ * counts from then on: see opGate_); 'by' = the account wrote the key's latest row. `scfg/<name>` without a
  * dot needs set.lists. Any other key (an unknown prefix or scfg kind) needs set.users: default deny.
  * The web app's lib/caps.ts has the same table (a test compares the two).
  */
@@ -438,7 +441,10 @@ function prepareRollback() {
 /** The accounts prepareRollback moves to 'viewer' (USERS changed in place): [{ u, n, from, to }]. */
 function rollbackRoles_(A, db) {
   if (A.m !== 'accounts') return [];
-  const full = roleCaps_({}, 'sales'); // the original พนักงานขาย
+  // the original พนักงานขาย: the built-in role less LATE_CAPS_ (job expenses), which the old script neither
+  // hides nor guards, so a role without them gets no more there than one with them
+  const full = roleCaps_({}, 'sales');
+  LATE_CAPS_.forEach((k) => delete full[k]);
   const covers = (rid) => {
     const c = roleCaps_(A.roles || {}, rid);
     return Object.keys(full).every((k) => c[k] === 1 || c[k] === full[k]);
@@ -505,7 +511,7 @@ function doPost(e) {
       // what the account's capabilities allow, checked here and not inside the cases below (the file
       // cases stay one block); each op of a push is checked again by its key in push_
       const need = action === 'push' ? WRITE_CAPS_ : action === 'upload' || action === 'delfile' ? ['docs.up'] : action === 'file' ? ['docs.open'] : null;
-      if (need && !need.some((c) => actor.caps[c]) && !expBill_(action, req, actor.caps)) return reply_(actor, { ok: false, error: 'forbidden' });
+      if (need && !need.some((c) => actor.caps[c]) && !expBill_(action, req, actor.caps, actor.name)) return reply_(actor, { ok: false, error: 'forbidden' });
     }
     switch (action) {
       case 'ping':
@@ -543,14 +549,63 @@ function json_(o) {
 /**
  * An account without docs.up that records job expenses (edit.exp) may still upload an expense's bill (docId
  * exp_<expId>) and move one to the trash (a file stored as "exp_<expId>__<name>"): recording an expense
- * includes its evidence. A file that is not there passes, so delfile answers not_found as for documents.
+ * includes its evidence. Trashing with edit.exp for its own work only: a bill of its own deals' expenses
+ * (billOwn_). A file that is not there passes, so delfile answers not_found as for documents.
  */
-function expBill_(action, req, caps) {
+function expBill_(action, req, caps, name) {
   if (!caps['edit.exp']) return false;
   if (action === 'upload') return /^exp_/.test(cleanId_(req.docId));
   if (action !== 'delfile') return false;
   const f = docFile_(req.fileId);
-  return !f || /^exp_/.test(f.getName());
+  if (!f) return true;
+  if (!/^exp_/.test(f.getName())) return false;
+  return caps['edit.exp'] === 1 || billOwn_(f, name);
+}
+
+/**
+ * Whether the bill in Drive file f is only ever that of expenses on deals the account `name` is the resp of:
+ * every expense key whose id the file's name was uploaded under (exp_<expId>, live or deleted) and every live
+ * expense whose file.id is f's; there must be one. A deal deleted since counts by its resp before the
+ * deletion. One read of the key, value and deleted columns, under the lock.
+ */
+function billOwn_(f, name) {
+  const fn = f.getName(), cut = fn.indexOf('__');
+  const doc = cut >= 0 ? fn.slice(0, cut) : fn, fid = f.getId();
+  return withLock_(() => {
+    if (!sheetReady_()) return false;
+    const sh = sheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return false;
+    const vals = sh.getRange(2, 2, last - 1, 3).getValues();
+    const seen = {}, deals = {}, resp = {};
+    const gone = (r) => r[2] === 1 || r[2] === true || r[2] === '1' || r[1] === '';
+    const parse = (s) => {
+      try {
+        const v = JSON.parse(s);
+        return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+      } catch (err) {
+        return null;
+      }
+    };
+    for (let i = vals.length - 1; i >= 0; i--) {
+      const k = String(vals[i][0]);
+      if (k.indexOf('deal/') === 0) {
+        // the latest value of each deal (a deletion is skipped: the resp it had before counts)
+        const id = k.slice(5);
+        if (has_(resp, id) || gone(vals[i])) continue;
+        const v = parse(vals[i][1]);
+        if (v) resp[id] = String(v.resp || '');
+        continue;
+      }
+      if (k.indexOf('dexp/') !== 0 || has_(seen, k)) continue;
+      seen[k] = 1;
+      const v = gone(vals[i]) ? null : parse(vals[i][1]);
+      const byName = cleanId_('exp_' + (k.split('/')[2] || '')) === doc;
+      if (byName || (v && v.file && typeof v.file === 'object' && String(v.file.id) === fid)) deals[dealOf_(k)] = 1;
+    }
+    const ids = Object.keys(deals);
+    return ids.length > 0 && ids.every((id) => has_(resp, id) && sameName_(resp[id], name));
+  });
 }
 
 /** Run fn under the script lock; spreadsheet writes are flushed before the lock is released. */
@@ -667,9 +722,13 @@ function pull_(since, limit, actor, xp) {
 const EXP_KEY_RE = /^(?:dexp\/|dlog\/exp\.|dchk\/[^/]+\/exp\.|mclose\/[^/]+\/)/;
 const EXP_CHK_RE = /^dchk\/[^/]+\/exp\./;
 
-/** A pulled row as a deletion (same seq, key, author and time). */
-function gone_(row) {
-  return Object.assign({}, row, { v: null, del: true });
+/**
+ * A pulled row as a deletion (same seq and key). `anon`: without its author and time too (a job expense
+ * to an account that may not see expenses: the key stays, so a browser that held it deletes it, but who
+ * recorded or checked it and when do not reach it); else they stay.
+ */
+function gone_(row, anon) {
+  return Object.assign({}, row, anon ? { v: null, del: true, by: '', at: '' } : { v: null, del: true });
 }
 
 function pullRows_(since, limit) {
@@ -1772,8 +1831,12 @@ function keyAccess_(caps, k, del) {
  * allowed.done(x, value) is called for each op stored, so later ops of the same push see it (a new deal,
  * then its steps). "Own work" is decided on the sheet: a deal record is the account's when its resp
  * (ผู้รับผิดชอบ) is the account's display name, a deal's steps, contacts and payments when that deal's
- * is, and a log entry or contact when the account wrote its latest row. With `docs` (an account whose
- * writes are stamped) allowed.attacher(k) is who attached the document of ddoc/ key k ('' for a new one).
+ * is, and a log entry or contact when the account wrote its latest row. A deal's steps, contacts,
+ * payments and expenses ('resp') must be the account's both as the sheet had them before this push and at
+ * the op: an account that may reassign every deal (edit.deal 'all') can't hand itself someone's deal, write
+ * its records and hand it back within one push; a deal that did not exist before the push (made by it)
+ * counts from the op that makes it the account's. With `docs` (an account whose writes are stamped)
+ * allowed.attacher(k) is who attached the document of ddoc/ key k ('' for a new one).
  * The sheet is read once, and only for a push that has such an op.
  */
 function opGate_(list, caps, name, docs) {
@@ -1785,12 +1848,13 @@ function opGate_(list, caps, name, docs) {
     if (docs && x.r && !x.delR && docIdOf_(x.k)) ids[docIdOf_(x.k)] = 1;
   });
   const cur = latest_(deals, keys, ids);
+  const before = Object.assign({}, cur.resp); // as stored before this push (allowed.done changes cur.resp)
   const allowed = (x) => {
     if (x.r === 1 || !x.r) return x.r === 1;
     if (x.r === 'by') return !has_(cur.by, x.k) || sameName_(cur.by[x.k], name);
     const id = dealOf_(x.k);
     const resp = has_(cur.resp, id) ? cur.resp[id] : null;
-    if (x.r === 'resp') return resp != null && sameName_(resp, name);
+    if (x.r === 'resp') return resp != null && sameName_(resp, name) && (!has_(before, id) || before[id] == null || sameName_(before[id], name));
     // 'deal': the deal itself, the account's both before and after this change
     const v = x.op.v;
     return (resp == null || sameName_(resp, name)) && !!v && typeof v === 'object' && sameName_(v.resp, name);
@@ -1931,12 +1995,12 @@ function unmoneyLog_(action, detail) {
  * money fields are null (a quotation check's fp.a too) and amounts in the app's own notes and in a check's
  * note are "…"; without view.comm a revenue split
  * (dshare/) comes as a deletion and a unit (scfg/unit.*) without its rates; without view.exp (or
- * view.money, which it needs) every job-expense record (EXP_KEY_RE) comes as a deletion. The row keeps its
- * seq. Text people typed themselves ("ราคา 350000") is theirs and stays.
+ * view.money, which it needs) every job-expense record (EXP_KEY_RE) comes as a deletion with no author or
+ * time. The row keeps its seq. Text people typed themselves ("ราคา 350000") is theirs and stays.
  */
 function redact_(row, caps) {
   const k = row.k;
-  if ((!caps['view.exp'] || !caps['view.money']) && EXP_KEY_RE.test(k)) return gone_(row);
+  if ((!caps['view.exp'] || !caps['view.money']) && EXP_KEY_RE.test(k)) return gone_(row, true);
   if (!caps['view.comm'] && k.indexOf('dshare/') === 0) return gone_(row);
   const v = row.v;
   if (!v || typeof v !== 'object' || Array.isArray(v)) return row;

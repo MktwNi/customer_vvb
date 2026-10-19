@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { BUILTIN, type CapSet } from './caps';
+import { BUILTIN, CAPS, LATE_CAPS, type CapSet } from './caps';
 import { expensesOf } from './expense';
 import { cashLines } from './sales';
 import { chkRows } from './payCheck';
@@ -52,10 +52,14 @@ afterAll(() => {
 const sent: Record<string, unknown>[] = [];
 interface Tab { e: GccEngine; browser: string }
 const tabs: Tab[] = [];
+/** While set, every pull reply reaches the browsers without its job-expense rows (none of their deletions either). */
+let dropExpRows = false;
+const EXP_ROW = /^(?:dexp\/|dlog\/exp\.|dchk\/[^/]+\/exp\.|mclose\/[^/]+\/)/;
 afterEach(() => {
   tabs.splice(0).forEach((t) => t.e.dispose());
   LS.clear();
   sent.length = 0;
+  dropExpRows = false;
   vi.setSystemTime(T0);
 });
 
@@ -70,7 +74,9 @@ function mk(browser: string): Tab {
   raw.loading = false;
   const post = async (_u: string, body: Record<string, unknown>) => {
     sent.push(body);
-    return sim.post(body) as Record<string, unknown>;
+    const r = sim.post(body) as Record<string, unknown>;
+    if (dropExpRows && body.action === 'pull' && Array.isArray(r.rows)) r.rows = (r.rows as { k: string }[]).filter((x) => !EXP_ROW.test(x.k));
+    return r;
   };
   raw.transport = post;
   raw.fileTransport = post;
@@ -93,8 +99,8 @@ async function settle(...ts: Tab[]) {
       await tick();
     }
 }
-async function lead() {
-  sim = createGasSim({ teamKey: '', kdfIter: 1000 });
+async function lead(code?: string) {
+  sim = createGasSim({ teamKey: '', kdfIter: 1000, code });
   sim.setup();
   const L = mk('L');
   expect(await L.e.teamOpen(URL)).toBe('setup');
@@ -187,6 +193,29 @@ describe('job expenses in the engine (Code.gs v4 with expenses)', () => {
     expect(S.e.sales.xchk).toHaveProperty(`${d.id}/e1`);
   });
 
+  it('losing ดูค่าใช้จ่าย empties them here at once, not only through the deletions the next pull brings', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const d = L.e.addDeal({ client: 'บริษัท ค่าใช้จ่าย จำกัด', resp: 'เอก' });
+    await settle(L);
+    put(L, [
+      { k: `dexp/${d.id}/e1`, v: exp() },
+      { k: 'dlog/exp.h1', v: { action: 'บันทึกค่าใช้จ่าย', deal: d.id, by: 'หมิว', at: 'a' } },
+      { k: `dchk/${d.id}/exp.e1`, v: { s: 'ok', amt: 3500, d: '2026-10-06', f: '' } },
+      { k: 'mclose/2026-10/out', v: { n: 1, amt: 3500 } },
+    ]);
+    await settle(S);
+    expect([Object.keys(S.e.sales.exp || {}), Object.keys(S.e.sales.xchk || {}), Object.keys(S.e.sales.mcloseOut || {}), !!S.e.sales.log['exp.h1']]).toEqual([[`${d.id}/e1`], [`${d.id}/e1`], ['2026-10'], true]);
+    // from here the script's rows about expenses never reach this browser: only the purge can drop them
+    dropExpRows = true;
+    const { 'view.exp': _v, 'edit.exp': _e, ...noExp } = SALES;
+    await L.e.roleSave({ id: 'sales', n: 'พนักงานขาย', d: '', c: noExp as CapSet });
+    await settle(S);
+    expect(S.e.can('view.exp')).toBe(false);
+    expect([S.e.sales.exp, S.e.sales.xchk, S.e.sales.mcloseOut, S.e.sales.log['exp.h1']]).toEqual([undefined, undefined, undefined, undefined]);
+    expect(expensesOf(S.e.sales, d.id)).toEqual([]);
+  });
+
   it('deleting a deal: its expenses go here and on the sheet (also for an admin who queued them), their checks stay', async () => {
     const L = await lead();
     const S = await member(L, 'aek', 'เอก', 'sales');
@@ -204,5 +233,39 @@ describe('job expenses in the engine (Code.gs v4 with expenses)', () => {
     // one deletion row for it: the web app's own, the script adds none on top
     expect(rows.filter((r) => r.k === `dexp/${d.id}/e1` && r.del)).toHaveLength(1);
     expect(S.e.sales.xchk).toHaveProperty(`${d.id}/e1`);
+  });
+});
+
+describe('a team script with configurable roles from before job expenses (v4, no view.exp / edit.exp)', () => {
+  const CODE = readFileSync(join(ROOT, 'team-sync', 'Code.gs'), 'utf8');
+  const BEFORE = CODE.replace(/^\s*\{ id: '(?:view|edit)\.exp'.*\n/gm, '');
+
+  it('the role editor, extras, requests and สิทธิ์ของฉัน leave the two out (that script refuses them); everything else is offered and saves', async () => {
+    expect(BEFORE).not.toBe(CODE);
+    const L = await lead(BEFORE);
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const ids = (e: GccEngine) => e.capsShown().map((c) => c.id);
+    const rest = CAPS.map((c) => c.id).filter((k) => !LATE_CAPS.includes(k));
+    // the admin page reads the roles: its ผู้ดูแลระบบ has every capability the script knows
+    const dir = await L.e.adminDir();
+    expect(ids(L.e)).toEqual(rest);
+    // a role saved from what the script sent: the two go as 0, which that script accepts
+    const sales = dir.roles.find((r) => r.id === 'sales')!;
+    const { 'edit.task': _t, ...noTask } = sales.c;
+    sent.length = 0;
+    await expect(L.e.roleSave({ id: 'sales', n: sales.n, d: sales.d, c: noTask })).resolves.toMatchObject({ id: 'sales' });
+    expect(sent.find((b) => b.action === 'role_save')).toMatchObject({ c: { 'view.exp': 0, 'edit.exp': 0 } });
+    // asked for anyway (an older tab): the script's refusal says the script needs updating
+    await expect(L.e.roleSave({ id: 'sales', n: sales.n, d: sales.d, c: { ...noTask, 'view.exp': 'all' } })).rejects.toThrow(/อัปเดต Code\.gs/);
+    // an account's own screens read the roles through me
+    expect(S.e.can('view.exp')).toBe(false);
+    await S.e.teamRoles();
+    expect(ids(S.e)).toEqual(rest);
+  });
+
+  it('this script (with them): all of them', async () => {
+    const L = await lead();
+    await L.e.adminDir();
+    expect(L.e.capsShown().map((c) => c.id)).toEqual(CAPS.map((c) => c.id));
   });
 });
