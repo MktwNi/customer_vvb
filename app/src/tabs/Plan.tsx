@@ -404,7 +404,7 @@ export function Plan() {
                 )}
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {!c ? (
-                    <button onClick={openJob} className="lnk" title="เปิดงานใน Sales Tracker เพื่อเชื่อมกับบริษัทในทะเบียน แล้วจึงนัดได้">เปิดงาน</button>
+                    <button onClick={openJob} className="lnk" title={e.can('edit.deal') ? 'เปิดงานใน Sales Tracker แล้วเชื่อมกับบริษัทในทะเบียนที่ “ข้อมูลติดต่อ · SOURCE / บริการ” จึงจะนัดได้' : 'เปิดงานใน Sales Tracker'}>เปิดงาน</button>
                   ) : ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>
                   ) : (
