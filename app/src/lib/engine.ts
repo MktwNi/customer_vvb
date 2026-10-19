@@ -42,6 +42,8 @@ import {
   type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
 } from './notify';
 import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, teamMonth, toMonthClose, toPayCheck, ymTh, type ChkRow, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
+// the month check of money out (job expenses in the money views)
+import { expTeamMonth, expWhat, rowWhat, type XRow } from './expenseMoney';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -5317,6 +5319,128 @@ export class GccEngine {
     this.batchOps(() => {
       this.op('mclose/' + ym);
       this.salesLog({ id: '', client: '' }, 'เปิดเดือนตรวจรับเงินอีกครั้ง', ymTh(ym));
+    });
+    this.saveSales();
+  }
+  // ---- the month check of money out (job expenses, lib/expenseMoney.ts): the income check's rules on paid
+  //      expenses, `dchk/<dealId>/exp.<expId>` and `mclose/<YYYY-MM>/out`, for accounts that see expenses
+  /** Every check of a paid expense this browser holds (`<dealId>/<expId>` → record). */
+  expChecks(): Record<string, PayCheck> {
+    return this.sales.xchk || {};
+  }
+  /** The months whose money out is closed ('YYYY-MM' → record). */
+  monthClosesOut(): Record<string, MonthClose> {
+    return this.sales.mcloseOut || {};
+  }
+  /** Why this account can't check money out ('' = it can): ดูค่าใช้จ่ายและกำไรของงาน is needed besides
+   *  ตรวจยืนยันรับเงิน; the rest is payCheckBlock (a name to sign with; not an expense it recorded itself). */
+  expCheckBlock(r?: Pick<ChkRow, 'by'>): '' | 'cap' | 'name' | 'self' {
+    if (!this.can('view.exp')) return 'cap';
+    return this.payCheckBlock(r);
+  }
+  /** The checks of money out made last: the toast's เลิกทำ takes them back. */
+  lastExpChecks: { keys: string[]; at: number } | null = null;
+  private putExpCheck(key: string, v: PayCheck | null) {
+    const X = this.sales.xchk || (this.sales.xchk = {});
+    if (v) X[key] = v;
+    else delete X[key];
+    const { dealId, lineId } = splitKey(key);
+    this.op(keyOf.dchkExp(dealId, lineId), v ? { ...v } : undefined);
+  }
+  /** A history row about money out, under `dlog/exp.<id>` (the team script sends those only to accounts that
+   *  see expenses). */
+  private expCheckLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail = '') {
+    const id = uid(), L: DealLog = { id: 'exp.' + id, at: new Date().toISOString(), by: this.me(), action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
+    this.sales.log[L.id] = L;
+    this.op(keyOf.dlogExp(id), { ...L });
+  }
+  /** "ตรวจแล้ว" on paid expenses, in one sync round, each with a history row ("ตรวจเงินออก ค่าเดินทาง").
+   *  Rows this account may not check (its own, already checked, before the first month checked) are left
+   *  out. Returns the keys written. */
+  checkExps(rows: XRow[]): string[] {
+    if (this.expCheckBlock()) return this.deny(), [];
+    const ok = rows.filter((r) => r.kind === 'got' && r.fp && r.deal && r.state !== 'none' && r.state !== 'ok' && !this.expCheckBlock(r));
+    if (!ok.length) return [];
+    const at = new Date().toISOString(), by = this.me();
+    this.batchOps(() =>
+      ok.forEach((r) => {
+        const fp = r.fp!;
+        this.putExpCheck(r.key, { s: 'ok', by, at, amt: fp.amt, d: fp.d, f: fp.f });
+        this.expCheckLog(r.deal!, 'ตรวจเงินออก ' + rowWhat(r), `${fmtMoney(fp.amt)} บาท · จ่าย ${isoTh(fp.d)}`);
+      }),
+    );
+    this.lastExpChecks = { keys: ok.map((r) => r.key), at: Date.now() };
+    this.saveSales();
+    return this.lastExpChecks.keys;
+  }
+  /** "ส่งกลับแก้ไข": the expense goes back to whoever recorded it with what to fix; it still counts as paid. */
+  returnExp(r: XRow, note: string): boolean {
+    const n = note.trim().slice(0, PAY_NOTE_MAX);
+    if (this.expCheckBlock()) return this.deny(), false;
+    if (!n || r.kind !== 'got' || !r.fp || !r.deal || r.state === 'none' || this.expCheckBlock(r)) return false;
+    const fp = r.fp;
+    this.batchOps(() => {
+      this.putExpCheck(r.key, { s: 'back', by: this.me(), at: new Date().toISOString(), amt: fp.amt, d: fp.d, f: fp.f, note: n });
+      this.expCheckLog(r.deal!, 'ส่งเงินออกกลับแก้ไข ' + rowWhat(r), `${fmtMoney(fp.amt)} บาท · ${n}`);
+    });
+    this.lastExpChecks = null;
+    this.saveSales();
+    return true;
+  }
+  /** "เลิกทำ": this account's own checks of money out of the last 10 minutes are taken back. */
+  undoExpChecks(keys: string[]): number {
+    if (this.expCheckBlock()) return this.deny(), 0;
+    const X = this.expChecks(), me = this.me(), now = Date.now();
+    const ks = keys.filter((k) => canUndo(X[k], me, now));
+    this.batchOps(() =>
+      ks.forEach((k) => {
+        const { dealId, lineId } = splitKey(k);
+        const e = this.sales.exp?.[k];
+        this.putExpCheck(k, null);
+        this.expCheckLog(this.sales.deals[dealId] || { id: dealId, client: '' }, 'เลิกตรวจเงินออก ' + expWhat(e || { c: '', n: lineId }));
+      }),
+    );
+    this.lastExpChecks = null;
+    if (ks.length) this.saveSales();
+    return ks.length;
+  }
+  /** "รับทราบ" on money out cancelled after its check (the expense deleted, or no longer paid): the record goes. */
+  ackExpOrphan(r: XRow) {
+    if (!this.can('pay.check') || !this.can('view.exp')) return this.deny();
+    if (r.kind !== 'orphan' || !this.expChecks()[r.key]) return;
+    this.batchOps(() => {
+      this.putExpCheck(r.key, null);
+      this.expCheckLog(r.deal || { id: r.dealId, client: '' }, 'รับทราบเงินออกยกเลิกหลังตรวจ ' + rowWhat(r), r.rec?.amt != null ? fmtMoney(r.rec.amt) + ' บาท' : '');
+    });
+    this.saveSales();
+  }
+  /** "ปิดเดือน" of money out: the whole month, every deal's paid expenses, worked out here; only once it has
+   *  ended and every one of them is checked. Returns the record, or null when it may not be closed. */
+  closeMonthOut(ym: string): MonthClose | null {
+    if (this.expCheckBlock()) return this.deny(), null;
+    if (!/^\d{4}-\d\d$/.test(ym)) return null;
+    const today = todayISO();
+    const c = expTeamMonth(this.sales, this.expChecks(), this.payChkCfg().since, ym);
+    if (!canClose(c, ym, today)) return null;
+    const v = closeRecord(c, this.me(), new Date().toISOString());
+    const M = this.sales.mcloseOut || (this.sales.mcloseOut = {});
+    M[ym] = v;
+    this.batchOps(() => {
+      this.op(keyOf.mcloseOut(ym), { ...v });
+      this.expCheckLog({ id: '', client: '' }, 'ปิดเดือนตรวจเงินออก', `${ymTh(ym)} · ${v.n} รายการ · ${fmtMoney(v.amt ?? 0)} บาท`);
+    });
+    this.saveSales();
+    return v;
+  }
+  /** "เปิดเดือนอีกครั้ง" of money out. */
+  reopenMonthOut(ym: string) {
+    if (this.expCheckBlock()) return this.deny();
+    const M = this.sales.mcloseOut || {};
+    if (!M[ym]) return;
+    delete M[ym];
+    this.batchOps(() => {
+      this.op(keyOf.mcloseOut(ym));
+      this.expCheckLog({ id: '', client: '' }, 'เปิดเดือนตรวจเงินออกอีกครั้ง', ymTh(ym));
     });
     this.saveSales();
   }

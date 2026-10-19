@@ -4,6 +4,7 @@ import { todayISO } from '../lib/format';
 import { bellEmpty, bellItems, dayTh, type BellRow } from '../lib/notify';
 import type { GccEngine } from '../lib/engine';
 import { payBackBell, returnedTo } from '../lib/payCheck';
+import { expBackBell } from '../lib/expenseMoney';
 import { Icon } from './icons';
 import { usePopover } from './usePopover';
 
@@ -43,6 +44,8 @@ export function Bell() {
         S: e.sales, tasks: e.crm.tasks, owners: e.crm.owners, coName: (gid) => e.company(gid)?.name || '',
         me: e.me(), caps: e.myCaps(), live: e.notifyLive, checks: e.checks(), cfg: e.notifyCfg(), scope, today,
         back: payBackBell(returnedTo(e.sales, e.payChecks(), e.payChkCfg().since, e.me(), today)),
+        // job expenses sent back (only for those who see them)
+        xback: e.can('view.exp') ? expBackBell(e.sales, e.expChecks(), e.payChkCfg().since, e.me()) : [],
       }),
     [v, today, scope], // eslint-disable-line react-hooks/exhaustive-deps
   );

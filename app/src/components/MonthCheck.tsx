@@ -19,6 +19,8 @@ import { Check } from './Pop';
 import { Select } from './Select';
 import { Status } from './ui';
 import { useSalesActs } from './SalesToast';
+// money out in the same file (job expenses, for those who see them; components/ExpCash.tsx)
+import { X_PREVIEW_HEAD, expSheets, xSheetPreview, type XRow } from '../lib/expenseMoney';
 
 /**
  * The month check for accounting under the Cashflow chart ("ตรวจรับเงิน", cash impl-note "Follow-up: month
@@ -73,7 +75,7 @@ const mineToFix = (r: ChkRow, me: string) => !!me && (r.by.some((b) => sameName(
 // ------------------------------------------------------------------ small parts
 
 /** The app's own tick box (.ckb, as DoneBox in Plan.tsx): a button with aria-pressed; "mixed" draws a bar. */
-function TickBox({ on, mixed, label, disabled, onClick }: { on: boolean; mixed?: boolean; label: string; disabled?: boolean; onClick?: () => void }) {
+export function TickBox({ on, mixed, label, disabled, onClick }: { on: boolean; mixed?: boolean; label: string; disabled?: boolean; onClick?: () => void }) {
   return (
     <button type="button" className={'ckb mc-cb ' + (on || mixed ? 'hv-dk on' : 'hv')} aria-pressed={mixed ? 'mixed' : on} aria-label={label} disabled={disabled} onClick={(ev) => (ev.stopPropagation(), onClick?.())}>
       {mixed ? (
@@ -119,7 +121,7 @@ const nameOf = (r: ChkRow) => (r.line ? payerName(r.line, shortName) : r.deal ? 
 
 // ------------------------------------------------------------------ the card
 
-export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, scope, show, today, phone, tags }: {
+export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, scope, show, today, phone, tags, side, outXl }: {
   S: SalesState;
   /** the year's lines through the page's filter */
   rows: ChkRow[];
@@ -131,6 +133,8 @@ export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, sco
   filter: string;
   undated: CashLine[]; year: string; scope: number | 'y'; show: Show; today: string; phone: boolean;
   /** deal id → its cross-year tag ('' none) */ tags?: Map<string, string>;
+  /** the switch เงินเข้า / เงินออก (those who see job expenses), under the title */ side?: ReactNode;
+  /** the money out of the same scope for the Excel file's out sheets */ outXl?: OutXl;
 }) {
   const { engine: e, ui, set } = useApp();
   const acts = useSalesActs();
@@ -383,6 +387,7 @@ export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, sco
         </div>
         {!phone && <div className="mc-tools-r">{monthPick}{closeBtn}{xlBtn}</div>}
       </div>
+      {side}
       {phone && <div className="mc-ph-row">{monthPick}</div>}
       {figs}
       {banner}
@@ -426,7 +431,7 @@ export function MonthCheck({ S, rows, wide, team, filter: fw, undated, year, sco
       {empty && <div className="cf-empty">{base.length ? 'ไม่มีรายการตามที่เลือก' : ym ? `${ymTh(ym)} ไม่มีเงินเข้าและไม่มีงวดที่ครบกำหนด` : `ยังไม่มีงวดเงินในปี ${year} · งานที่ได้งานแล้วและมีแผนชำระจะแสดงที่นี่`}</div>}
       {phone && <div className="mc-ph-row">{closeBtn}{xlBtn}</div>}
       {ret && <ReturnDialog S={S} r={ret} onClose={() => setRet(null)} />}
-      {xl && <ExcelDialog S={S} rows={inScope} months={ym ? [monthRow!] : yearMonths} ym={ym || null} ce={ce} year={year} filter={fw} onClose={() => setXl(false)} />}
+      {xl && <ExcelDialog S={S} rows={inScope} months={ym ? [monthRow!] : yearMonths} ym={ym || null} ce={ce} year={year} filter={fw} out={outXl?.(ym || null)} onClose={() => setXl(false)} />}
     </section>
   );
 }
@@ -447,7 +452,7 @@ interface Ctl {
   ack: (r: ChkRow) => void;
 }
 
-function Band({ name, count, sum, right }: { name: string; count: string; sum: number; right: ReactNode }) {
+export function Band({ name, count, sum, right }: { name: string; count: string; sum: number; right: ReactNode }) {
   return (
     <>
       <tr className="cf-gap" aria-hidden="true"><td colSpan={7} /></tr>
@@ -682,18 +687,24 @@ function ReturnDialog({ S, r, onClose }: { S: SalesState; r: ChkRow; onClose: ()
   );
 }
 
-/** "ดาวน์โหลด Excel": two sheets (รายการ, สรุป), the money still to come optional, a preview. */
-function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: SalesState; rows: ChkRow[]; months: MonthRow[]; ym: string | null; ce: number; year: string; /** the page's filter in words ('' none) */ filter: string; onClose: () => void }) {
+/** The money out of a scope (a month, or the year: ym null) for the file's out sheets. */
+export type OutXl = (ym: string | null) => { rows: XRow[]; months: MonthRow[] } | null;
+/** "ดาวน์โหลด Excel": two sheets (รายการ, สรุป), the money still to come optional, a preview; with `out` (those
+ *  who see job expenses) two more, เงินออก and สรุปเงินออก (lib/expenseMoney expSheets). */
+export function ExcelDialog({ S, rows, months, ym, ce, year, filter, out, outFirst, onClose }: { S: SalesState; rows: ChkRow[]; months: MonthRow[]; ym: string | null; ce: number; year: string; /** the page's filter in words ('' none) */ filter: string; out?: { rows: XRow[]; months: MonthRow[] } | null; /** opened from the out side: its sheet previewed */ outFirst?: boolean; onClose: () => void }) {
   const [owed, setOwed] = useState(true);
   const [busy, setBusy] = useState('');
-  const sheets = chkSheets(S, rows, months, owed, filter);
+  const sheets = [...chkSheets(S, rows, months, owed, filter), ...(out ? expSheets(out.rows, out.months, owed, (d) => dealMoney(S, d).fcDoc?.docNo || '', months, filter) : [])];
   const ls = sheets[0];
   const got = rows.filter((r) => r.kind === 'got');
   const toCome = rows.filter((r) => r.kind === 'late' || r.kind === 'owed');
+  // the bills not paid yet go with the money still to come (one choice for the file)
+  const unpaid = out ? out.rows.filter((r) => r.kind === 'owed') : [];
   const orphans = rows.filter((r) => r.kind === 'orphan').length;
   const c = sumRows(rows);
   // the preview: the sheet's first lines in short columns that fit the dialog (screen 17)
   const prev = sheetPreview(S, rows, owed, 4, shortName);
+  const xprev = out && outFirst ? xSheetPreview(out.rows, owed, 4, shortName) : null;
   const name = chkFileName(ym, ce);
   const save = async () => {
     setBusy('กำลังทำไฟล์…');
@@ -708,9 +719,10 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
     <Modal title={`ดาวน์โหลด Excel · ${ym ? ymTh(ym) : 'ทั้งปี ' + year}`} onClose={onClose} width={720}>
       <div className="cf-dlg mc-xl">
         <div>
-          <div className="cf-fl">ในไฟล์มี 2 ชีต</div>
+          <div className="cf-fl">ในไฟล์มี {out ? 4 : 2} ชีต</div>
           <div className="mc-xl-t">
             <b>รายการ</b> หนึ่งแถวต่อหนึ่งรายการ {fmtN(ls.rows.length)} แถว{orphans ? ` (รวมยกเลิกหลังตรวจ ${fmtN(orphans)} แถวท้ายชีต ไม่นับในยอด)` : ''} · <b>สรุป</b> ยอดเข้าแล้ว รอรับ เลยกำหนด และบัญชีตรวจแล้ว {fmtN(c.ok)} จาก {fmtN(c.n)} รายการ
+            {out && <> · <b>เงินออก</b> ค่าใช้จ่ายของงาน {fmtN(sheets[2].rows.length)} แถว · <b>สรุปเงินออก</b> จ่ายแล้ว ค้างจ่าย คงเหลือสุทธิ และบัญชีตรวจเงินออก</>}
           </div>
         </div>
         {filter && (
@@ -719,17 +731,34 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
             <div>เฉพาะ {filter} <span className="cf-mute">(ตามที่กรองอยู่ในหน้านี้ · ไฟล์บอกตัวกรองไว้ในชีต “สรุป” · สถานะปิดเดือนเป็นของทั้งเดือน)</span></div>
           </div>
         )}
-        {toCome.length > 0 && (
+        {toCome.length + unpaid.length > 0 && (
           <label className={'cf-ck' + (owed ? ' on' : '')}>
             <input type="checkbox" className="sr-only" checked={owed} onChange={(ev) => setOwed(ev.target.checked)} />
             <Check on={owed} />
             <span>
-              รวมรายการรอรับและเลยกำหนด
-              <small>{fmtN(toCome.length)} รายการ · {m0(toCome.reduce((a, r) => a + r.amt, 0))} บาท · ไม่ติ๊ก = เฉพาะเงินที่รับแล้ว {fmtN(got.length)} รายการ</small>
+              {out ? 'รวมรายการรอรับ เลยกำหนด และค้างจ่าย' : 'รวมรายการรอรับและเลยกำหนด'}
+              <small>
+                {fmtN(toCome.length)} รายการ · {m0(toCome.reduce((a, r) => a + r.amt, 0))} บาท{out ? ` · ค้างจ่าย ${fmtN(unpaid.length)} รายการ ${m0(unpaid.reduce((a, r) => a + r.amt, 0))} บาท` : ''} · ไม่ติ๊ก = เฉพาะเงินที่รับ{out ? 'และจ่าย' : ''}แล้ว{out ? '' : ` ${fmtN(got.length)} รายการ`}
+              </small>
             </span>
           </label>
         )}
-        <div>
+        {xprev && (
+          <div>
+            <div className="cf-fl">ตัวอย่าง {fmtN(xprev.length)} แถวแรกของชีต “เงินออก”</div>
+            {xprev.length ? (
+              <div className="cf-prev mc-prev">
+                <table>
+                  <thead><tr>{X_PREVIEW_HEAD.map((h, i) => <th key={i} className={i === 2 ? 'r' : undefined}>{h}</th>)}</tr></thead>
+                  <tbody>{xprev.map((r, j) => <tr key={j}>{r.map((v, i) => <td key={i} className={i === 2 ? 'r' : i === 0 ? 'wr' : undefined}>{v}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+            ) : (
+              <span className="cf-mute">ยังไม่มีรายการ</span>
+            )}
+          </div>
+        )}
+        {!xprev && <div>
           <div className="cf-fl">ตัวอย่าง {fmtN(prev.length)} แถวแรกของชีต “รายการ”</div>
           {prev.length ? (
             <div className="cf-prev mc-prev">
@@ -741,8 +770,8 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
           ) : (
             <span className="cf-mute">ยังไม่มีรายการ</span>
           )}
-        </div>
-        <p className="cf-dnote">ในไฟล์มีคอลัมน์ ครบกำหนด ฐานยอด (รวม VAT / หลังหัก ณ ที่จ่าย / พิมพ์เอง) วิธีชำระ หลักฐาน บันทึกโดย วันที่ตรวจ และข้อความส่งกลับแก้ไข · ยอดเป็นตัวเลขและวันที่เป็นวันที่จริงของ Excel รวมยอดและกรองได้ทันที · ชื่อไฟล์ {name}</p>
+        </div>}
+        <p className="cf-dnote">{out ? 'ชีตเงินออกมีหมวดค่าใช้จ่าย รายละเอียด วันที่บิล วันที่จ่าย บิล บันทึกโดย และการตรวจของบัญชี · ' : ''}ในไฟล์มีคอลัมน์ ครบกำหนด ฐานยอด (รวม VAT / หลังหัก ณ ที่จ่าย / พิมพ์เอง) วิธีชำระ หลักฐาน บันทึกโดย วันที่ตรวจ และข้อความส่งกลับแก้ไข · ยอดเป็นตัวเลขและวันที่เป็นวันที่จริงของ Excel รวมยอดและกรองได้ทันที · ชื่อไฟล์ {name}</p>
         {busy && <span className="t-sec" role="status">{busy}</span>}
         <div className="dlg-act">
           <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
@@ -757,7 +786,7 @@ function ExcelDialog({ S, rows, months, ym, ce, year, filter, onClose }: { S: Sa
 
 /** "สรุปรายเดือน · ปี 2569": each month's money and check, closing a month; a row opens its month above.
  *  The totals equal the Cashflow cards. */
-export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: { S: SalesState; rows: ChkRow[]; /** the year's lines of every deal (closing a month) */ team: ChkRow[]; /** the page's filter in words ('' none) */ filter: string; year: string; scope: number | 'y'; today: string; phone: boolean }) {
+export function YearCheck({ S, rows, team, filter, year, scope, today, phone, side, outXl }: { S: SalesState; rows: ChkRow[]; /** the year's lines of every deal (closing a month) */ team: ChkRow[]; /** the page's filter in words ('' none) */ filter: string; year: string; scope: number | 'y'; today: string; phone: boolean; /** the switch เงินเข้า / เงินออก */ side?: ReactNode; outXl?: OutXl }) {
   const { engine: e } = useApp();
   const open = useOpenMonth();
   const closeMonth = useCloseMonth();
@@ -807,6 +836,7 @@ export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: 
         </div>
         {!phone && xlBtn}
       </div>
+      {side}
       {phone ? (
         <div className="mc-yl">
           {Y.months.map((m, i) => {
@@ -868,7 +898,7 @@ export function YearCheck({ S, rows, team, filter, year, scope, today, phone }: 
           </tfoot>
         </table>
       )}
-      {xl && <ExcelDialog S={S} rows={rows} months={Y.months} ym={null} ce={ce} year={year} filter={filter} onClose={() => setXl(false)} />}
+      {xl && <ExcelDialog S={S} rows={rows} months={Y.months} ym={null} ce={ce} year={year} filter={filter} out={outXl?.(null)} onClose={() => setXl(false)} />}
     </section>
   );
 }
