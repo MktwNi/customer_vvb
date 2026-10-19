@@ -5,7 +5,8 @@ import { TH_M, addMonths, dtTh, fmtN, isoTh, pad, ymTh } from '../lib/format';
 import type { Cert } from '../lib/types';
 import { feedMeta } from '../lib/feeds';
 import type { Company, Dicts, FeedKey } from '../lib/types';
-import { PageHead, SectionHead, card, tabular } from '../components/ui';
+import { SectionHead, card, tabular } from '../components/ui';
+import { FollowList } from './TrackFollow';
 
 /** A feed row's grey context (lib/feeds.ts words it). */
 export const feedLine = (D: Dicts, k: FeedKey, c: Company) => feedMeta(D, k, c);
@@ -118,21 +119,27 @@ export function Track() {
   const goTable = () => setF({ view: 'cert', tgt: '', cfo: oSt, expM: oExpM, cInd: oInd, cFy: oFy, cProv: oProv, sort: oExpM || oSt === 'soon' ? 'exp' : 'ap' });
   const goSoon = () => setF({ view: 'cert', tgt: '', cfo: 'soon', expM: '', cInd: oInd, cFy: oFy, cProv: oProv, sort: 'exp' });
 
-  // ---- company-level feeds
+  // ---- company-level feeds from the registry (the companies followed have their own list, on top)
   const feeds = useMemo(
-    () => FEEDS.map(([k, label, , desc]) => ({ k, label, desc, all: e.feedItems(k) })),
+    () => FEEDS.filter(([k]) => k !== 'watch').map(([k, label, , desc]) => ({ k, label, desc, all: e.feedItems(k) })),
     [e, v],
   );
   const mon = e.monCfg();
 
   return (
     <>
-      <PageHead title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
+      {/* the companies the team follows first, in full; then the CFO overview; the registry's lists last */}
+      <FollowList />
+      {/* the CFO overview in one block: its filter line stays under the top only while the overview is in view */}
+      <section className="tr-ov" aria-label="ใบรับรอง CFO ที่ต้องติดตาม">
+      <div className="tr-ovh">
+        <SectionHead title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
+      </div>
       <div className="tr-bar">
         {chips.map((c) => (
           <button key={c.label} onClick={() => set(c.p)} className="ftag">{c.label} ×</button>
         ))}
-        {!chips.length && <span className="t-meta" style={{ fontSize: 13 }}>คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งหน้า</span>}
+        {!chips.length && <span className="t-meta" style={{ fontSize: 13 }}>คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองภาพรวมใบรับรอง</span>}
         {chips.length > 0 && <button onClick={() => set({ oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '' })} className="quiet">ล้างทั้งหมด</button>}
         <span style={{ flex: 1 }} />
         <button onClick={goTable} className="btn sm">ดูรายชื่อ {fmtN(ob.count)} รายการในตาราง</button>
@@ -262,21 +269,24 @@ export function Track() {
           <Bars bars={ob.provBars} labelW={130} onPick={(k, on) => set({ oProv: on ? '' : k })} />
         </div>
       </section>
+      </section>
 
-      <div style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>
-        <SectionHead title="รายการติดตามระดับบริษัท" sub={`ใกล้หมดอายุ = ${W} วัน · นับหลังตัดข้อมูลซ้ำ`} />
+      {/* secondary: lists worked out from public data, quieter than the companies followed */}
+      <div className="tr-regh">
+        <h2>เฝ้าดูจากทะเบียน (ข้อมูลสาธารณะ)</h2>
+        <span className="t-meta" style={{ fontSize: 13 }}>{`บริษัทที่เข้าเงื่อนไขในข้อมูล อบก. GI กรอ. และ SET · ใกล้หมดอายุ = ${W} วัน · นับหลังตัดข้อมูลซ้ำ`}</span>
       </div>
-      <section style={pairGrid}>
+      <section className="tr-reg" aria-label="เฝ้าดูจากทะเบียน">
         {feeds.map(({ k, label, desc, all }) => {
           const months = k === 'newFac' ? Object.entries(all.reduce<Record<string, number>>((m, c) => ((m[c.newYm] = (m[c.newYm] || 0) + 1), m), {})).sort((a, b) => b[0].localeCompare(a[0])) : [];
           return (
-            <div key={k} style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', boxSizing: 'border-box' }}>
+            <div key={k} className="tr-feed">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                  <h3 style={panelT}>{label}</h3>
-                  <span className="t-meta" style={{ fontSize: 13, textWrap: 'pretty' }}>{k === 'cfoSoon' ? `ใบล่าสุดจะหมดอายุภายใน ${W} วัน` : desc}</span>
+                  <h3 className="tr-feed-t">{label}</h3>
+                  <span className="t-meta" style={{ textWrap: 'pretty' }}>{k === 'cfoSoon' ? `ใบล่าสุดจะหมดอายุภายใน ${W} วัน` : desc}</span>
                 </div>
-                <span style={{ fontSize: 18, fontWeight: all.length ? 500 : 400, color: all.length ? 'var(--ink)' : 'var(--muted)', ...tabular }}>{fmtN(all.length)}</span>
+                <span className={'tr-feed-n' + (all.length ? '' : ' zero')}>{fmtN(all.length)}</span>
               </div>
               {months.length > 0 && (
                 <div className="no-scrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
@@ -286,7 +296,7 @@ export function Track() {
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                {all.slice(0, 5).map((c) => (
+                {all.slice(0, 3).map((c) => (
                   <button key={c.id} className="hv" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '9px 8px', margin: '0 -8px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: 'var(--ink)' }}>
                     <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                     <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{feedLine(D, k, c)}</span>

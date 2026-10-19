@@ -12,6 +12,8 @@ import './cashflow.css';
 import './quotes.css';
 // per-customer colours on แผนติดต่อ (lib/custColor.ts)
 import './custcolor.css';
+// ติดตาม: บริษัทที่ติดตาม on top (tabs/TrackFollow), the registry's lists below in quiet cards
+import './track.css';
 // configurable roles and permission requests: the Users page's sections, the request dialog, สิทธิ์ของฉัน
 import './roles.css';
 // notifications and the quotation check: the bell, the check sheet, การแจ้งเตือนของฉัน and the admin section
