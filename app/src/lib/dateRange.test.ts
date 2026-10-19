@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isDay, monthEnd, normDateF, presetKey, presetList, rangeTh, resolveDate, thisQuarter, twinOf, weekStart, type DatePreset, type Range } from './dateRange';
-import { localDay, todayISO } from './format';
+import { localDay, stampTh, todayISO } from './format';
 
 // 2026-10-12 is a Monday; the tracker's year 2569
 const T = '2026-10-12';
@@ -143,5 +143,13 @@ describe('local days', () => {
     vi.setSystemTime(new Date('2026-10-11T17:30:00Z'));
     expect(todayISO()).toBe('2026-10-12');
     expect(localDay('2026-10-11T17:30:00.000Z')).toBe('2026-10-12');
+  });
+  it('a grant\'s timestamp reads as its day in Thailand (สิทธิ์ของฉัน: "อนุมัติโดย … เมื่อ")', () => {
+    process.env.TZ = 'Asia/Bangkok';
+    expect(stampTh('2026-10-19T13:39:37.586Z')).toBe('19 ต.ค. 2569');
+    expect(stampTh('2026-10-11T17:30:00.000Z')).toBe('12 ต.ค. 2569');
+    expect(stampTh('2026-10-19')).toBe('19 ต.ค. 2569');
+    expect(stampTh('')).toBe('—');
+    expect(stampTh(undefined)).toBe('—');
   });
 });

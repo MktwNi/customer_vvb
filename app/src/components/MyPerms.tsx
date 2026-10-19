@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { CAPS, GROUPS, LOCKED_CAP, capsOf, live, scopeWord, type CapId, type CapSet } from '../lib/caps';
-import { isoTh, todayISO } from '../lib/format';
+import { isoTh, stampTh, todayISO } from '../lib/format';
 import { Modal } from './Dialog';
 import { RoleChip, nameLetter } from './Login';
 
@@ -46,14 +46,14 @@ export function MyPerms({ onClose }: { onClose: () => void }) {
         {tmpRole && (
           <div className="rl-extra">
             <span>บทบาทชั่วคราว: {e.roleName()}{tmpRole.until ? ` ถึง ${isoTh(tmpRole.until)}` : ''}</span>
-            <small>{[tmpRole.by && `อนุมัติโดย ${tmpRole.by}`, tmpRole.at && `เมื่อ ${isoTh(tmpRole.at)}`].filter(Boolean).join(' ')} · หมดอายุแล้วจะกลับเป็นบทบาทเดิมเอง</small>
+            <small>{[tmpRole.by && `อนุมัติโดย ${tmpRole.by}`, tmpRole.at && `เมื่อ ${stampTh(tmpRole.at)}`].filter(Boolean).join(' ')} · หมดอายุแล้วจะกลับเป็นบทบาทเดิมเอง</small>
           </div>
         )}
         {grants.map((g) => (
           <div key={g.k} className="rl-extra">
             <span>สิทธิ์เพิ่ม{g.until ? 'ชั่วคราว' : ''}: {CAPS.find((c) => c.id === g.k)?.label}{g.until ? ` ถึง ${isoTh(g.until)}` : ''}</span>
             <small>
-              {[g.by && `อนุมัติโดย ${g.by}`, g.at && `เมื่อ ${isoTh(g.at)}`].filter(Boolean).join(' ')}
+              {[g.by && `อนุมัติโดย ${g.by}`, g.at && `เมื่อ ${stampTh(g.at)}`].filter(Boolean).join(' ')}
               {g.until ? ` · หมดอายุแล้วจะกลับเป็นสิทธิ์ของ ${e.roleName()} เอง` : ''}
             </small>
           </div>
