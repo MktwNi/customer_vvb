@@ -142,4 +142,7 @@ export const PREF = {
    *  from the first frame; and the bell's scope chosen here while the script has no notifications. */
   notify: 'gcc-notify-live',
   bellScope: 'gcc-bell-scope',
+  /** What the team script said about the quotations this account attached or edited ({key: url|user, m:
+   *  {docId: QtSent}}): the bell and the card say who was told, or why nobody was. */
+  qtSent: 'gcc-qt-sent',
 } as const;

@@ -4,6 +4,7 @@ import { todayISO } from '../lib/format';
 import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
+import { docById, qtSentView } from '../lib/notify';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -76,6 +77,17 @@ export function SalesMessages() {
   const acts = useSalesActs();
   const t = ui.slToast;
   const held = useRef(false);
+  // what the team script did about a quotation this account just attached or edited: who was mailed, or why
+  // nobody was (a question waiting at the bottom keeps its place: the bell has it too)
+  const fresh = e.qtFresh;
+  useEffect(() => {
+    if (!fresh) return;
+    const doc = docById(e.sales, fresh.id), o = doc && e.qtSentFor(doc);
+    if (!doc || !o || (ui.slToast && !ui.slToast.ms)) return;
+    const ctx = e.qtSentCtx(), admin = ctx.admin;
+    const w = qtSentView(o, ctx);
+    acts.say(`${doc.docNo || 'ใบเสนอราคา'} · ${w.text}`, { ms: 9000, ...(w.fix && admin ? { acts: [{ label: w.fix === 'checker' ? 'ตั้งผู้ตรวจ' : 'ดูการแจ้งเตือน', act: 'notify' as const }, { label: 'ปิด', act: 'dismiss' as const }] } : {}) });
+  }, [fresh?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves)
   useEffect(() => {
     if (!t || !t.ms) return;
@@ -87,6 +99,8 @@ export function SalesMessages() {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });
+    // nobody could be told about a quotation: the admin's page says why, and who checks
+    if (a.act === 'notify') return go('users', { usersSec: 'notify', slToast: null, deal: null });
     // a quotation check taken back (the script allows it for 10 minutes, for the checker's own latest)
     if (a.act === 'qtUndo' && a.k) {
       const doc = e.sales.docs[a.k];

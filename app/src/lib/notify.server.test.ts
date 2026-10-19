@@ -63,11 +63,13 @@ function verify(s: GasSim, tok: string, em: string) {
 /**
  * The mockups' team: หัวหน้า (admin), มินท์ (หัวหน้าฝ่ายขาย, checks quotations), เอก (sales), ฝน
  * (บัญชี/การเงิน, checks quotations), ปลา (viewer); every address verified. The team settings point
- * the links at SITE. Returns the tokens.
+ * the links at SITE. Returns the tokens. `now`: a push mails its quotations itself (the default of the
+ * script); off here (NOTIFY_NOW '0'), so the notifyTick tests below see the timer alone, the safety net.
  */
-function crew(o: { verified?: boolean } = {}) {
+function crew(o: { verified?: boolean; now?: boolean } = {}) {
   at(0);
   const s = mk();
+  if (!o.now) s.props.NOTIFY_NOW = '0';
   const lead = s.bootstrapAdmin({ u: 'lead', name: 'หัวหน้า', pw: 'lead-password-1' });
   const head = String(call(s, lead, 'role_save', { n: 'หัวหน้าฝ่ายขาย', c: HEAD }).id);
   const acct = String(call(s, lead, 'role_save', { n: 'บัญชี/การเงิน', c: ACCT }).id);
@@ -506,7 +508,8 @@ describe('notifyTick: new quotations to the checkers', () => {
     tick(t.s);
     expect(t.s.mail.sent.map((m) => m.subject).slice(2)).toEqual(['ใบเสนอราคาตรวจแล้ว: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021']);
     expect(JSON.stringify(t.s.mail.sent)).not.toContain('customer@example.com');
-    expect(logOf(t.s).filter((r) => r.kind === 'qt').map((r) => [r.u, r.result])).toEqual([['lead', 'sent'], ['mint', 'sent']]);
+    // each mail is claimed in the log before it goes out (a push may be sending the same one), then logged sent
+    expect(logOf(t.s).filter((r) => r.kind === 'qt').map((r) => [r.u, r.result])).toEqual([['lead', 'claim'], ['mint', 'claim'], ['lead', 'sent'], ['mint', 'sent']]);
   });
 
   it('an amount edit or a revision (a new document) mails again; a new file id alone does not', () => {
@@ -522,11 +525,16 @@ describe('notifyTick: new quotations to the checkers', () => {
     at(20 * MIN);
     push(t.s, t.ek, [qt('d1', 'q1', { amount: 95000, cAt: iso(20 * MIN) })]);
     tick(t.s);
-    expect(t.s.mail.sent.slice(3).map((m) => m.subject)).toEqual(Array(3).fill('ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 95,000 บาท'));
+    // an edit says so, and what changed
+    expect(t.s.mail.sent.slice(3).map((m) => m.subject)).toEqual(Array(3).fill('ใบเสนอราคาแก้ไขรอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 95,000 บาท'));
+    expect(t.s.mail.sent[3].htmlBody).toContain('แก้ยอด จาก 101,650 เป็น 95,000 บาท');
+    expect(t.s.mail.sent[3].body).toContain('เอก แก้เมื่อ 12 ต.ค. 2569 06:20');
     at(30 * MIN);
-    push(t.s, t.ek, [qt('d1', 'q1', { target: 'none' }), qt('d1', 'q1v2', { docNo: 'QT-2569-021/1', at: iso(30 * MIN), cAt: iso(30 * MIN) })]);
+    push(t.s, t.ek, [qt('d1', 'q1', { target: 'none', at: iso(0) }), qt('d1', 'q1v2', { docNo: 'QT-2569-021/1', at: iso(30 * MIN), cAt: iso(30 * MIN) })]);
     tick(t.s);
-    expect(t.s.mail.sent.slice(6).map((m) => m.subject)).toEqual(Array(3).fill('ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021/1 · 101,650 บาท'));
+    // a revision names the version it replaces
+    expect(t.s.mail.sent.slice(6).map((m) => m.subject)).toEqual(Array(3).fill('ใบเสนอราคาฉบับแก้ไขรอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021/1 · 101,650 บาท'));
+    expect(t.s.mail.sent[6].body).toContain('แทนฉบับเดิม QT-2569-021 · 101,650 บาท');
   });
 
   it('waits for the file to reach Drive, up to 30 minutes', () => {
@@ -693,7 +701,7 @@ describe('notifyTick: the send log and the quota', () => {
     const n = t.s.mail.sent.length;
     expect(t.s.mail.sent.map((m) => /^(ใบเสนอราคาใหม่รอตรวจ|สรุปวันนี้)/.exec(m.subject)?.[1]).sort()).toEqual(['ใบเสนอราคาใหม่รอตรวจ', 'ใบเสนอราคาใหม่รอตรวจ', 'ใบเสนอราคาใหม่รอตรวจ', 'สรุปวันนี้', 'สรุปวันนี้', 'สรุปวันนี้'].sort());
     expect(first).toMatchObject({ ok: 1, sent: n, err: 'busy' });
-    expect(logOf(t.s).filter((r) => r.kind === 'qt' || r.kind === 'dg')).toEqual([]);
+    expect(logOf(t.s).filter((r) => (r.kind === 'qt' || r.kind === 'dg') && r.result !== 'claim')).toEqual([]);
     expect((JSON.parse(t.s.props.NOTIFY_PEND) as string[][]).filter((x) => x[4] === 'sent')).toHaveLength(n);
     // only the Script Properties copy left (the cache dropped)
     t.s.evictCache();
@@ -720,6 +728,420 @@ describe('notifyTick: the send log and the quota', () => {
     at(91 * DAY + 10 * MIN);
     tick(t.s);
     expect(logOf(t.s).map((r) => r.kind)).toEqual(['test']);
+  });
+});
+
+// ------------------------------------------------------------------ a push mails its quotations itself
+
+type QtOut = { id: string; k: string; fp: string; what: string; to: string[]; later: string[]; bell: string[]; skip: { n: string; r: string }[]; why: string };
+const qtOf = (r: Record<string, unknown>) => (r.qt || []) as QtOut[];
+const fpH = (s: GasSim, o: Record<string, unknown> = {}) => s.run<string>('fpHash_', fp(o));
+const subjects = (s: GasSim, from = 0) => s.mail.sent.slice(from).map((m) => m.subject);
+/** The log rows pushes left in NOTIFY_PEND_<id> (the lock was busy), in key order. */
+const pushPend = (s: GasSim) =>
+  Object.keys(s.props)
+    .filter((k) => k.startsWith('NOTIFY_PEND_'))
+    .sort()
+    .flatMap((k) => JSON.parse(s.props[k]) as string[][]);
+
+describe('a push mails a new quotation\'s checkers at once (the timer is the safety net)', () => {
+  it('right after saving, outside the lock: every checker but the attacher; the reply says who; notifyTick sends nothing more', () => {
+    const t = crew({ now: true });
+    expect(t.s.post({ action: 'hello', cv: 4 })).toMatchObject({ notify: { on: 1, now: 1 } });
+    push(t.s, t.lead, [deal('d1', { email: 'customer@example.com' })]);
+    at(2 * MIN);
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toEqual([{ id: 'q1', k: 'ddoc/d1/q1', fp: fpH(t.s), what: 'new', to: ['หัวหน้า', 'มินท์', 'ฝน'], later: [], bell: ['หัวหน้า', 'มินท์', 'ฝน'], skip: [], why: '' }]);
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+    expect(t.s.mail.calls.every((c) => !c.locked)).toBe(true);
+    const m = lastMailTo(t.s, 'mint@example.com')!;
+    expect(m).toMatchObject({ subject: 'ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 101,650 บาท', replyTo: 'ek@example.com' });
+    expect(m.htmlBody).toContain('เอก แนบเมื่อ 12 ต.ค. 2569 06:02');
+    // the signed link works as the timer's does
+    expect(call(t.s, t.mint, 'qt_check', { k: 'ddoc/d1/q1', st: 'ok', fp: fp(), s: linkOf(m)!.s })).toMatchObject({ chk: { via: 'mail' } });
+    expect(logOf(t.s).filter((x) => x.kind === 'qt').map((x) => [x.u, x.result])).toEqual([['lead', 'claim'], ['mint', 'claim'], ['fon', 'claim'], ['lead', 'sent'], ['mint', 'sent'], ['fon', 'sent']]);
+    at(5 * MIN);
+    expect(tick(t.s)).toMatchObject({ ok: 1, sent: 0 });
+    at(15 * MIN);
+    tick(t.s);
+    // only the check's result to เอก followed; never a customer
+    expect(subjects(t.s, 3)).toEqual(['ใบเสนอราคาตรวจแล้ว: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021']);
+    expect(JSON.stringify(t.s.mail.sent)).not.toContain('customer@example.com');
+  });
+
+  it('an admin who attached it and is the only checker: nobody is mailed, the reply and the log say there is no other checker', () => {
+    at(0);
+    const s = mk();
+    const lead = s.bootstrapAdmin({ u: 'mkorn', name: 'มกร', pw: 'lead-password-1' });
+    const ek = member(s, lead, 'eak', 'เอก', 'sales');
+    verify(s, lead, 'owner2@example.com');
+    verify(s, ek, 'ek@example.com');
+    s.mail.sent.length = 0;
+    push(s, lead, [deal('d1')]);
+    const r = push(s, lead, [qt('d1', 'q1', { by: 'มกร' })]);
+    expect(qtOf(r)).toMatchObject([{ id: 'q1', to: [], later: [], bell: [], why: 'nochk' }]);
+    expect(s.mail.sent).toEqual([]);
+    expect(logOf(s).filter((x) => x.kind === 'qt')).toMatchObject([{ key: `qt:q1:${fpH(s)}:none`, result: 'none:nochk' }]);
+    // the timer says it once, and sends nothing either
+    tick(s);
+    expect(s.mail.sent).toEqual([]);
+    expect(logOf(s).filter((x) => x.kind === 'qt')).toHaveLength(1);
+    expect(call(s, lead, 'notify_status').recent).toMatchObject([{ doc: 'q1', u: '', result: 'none:nochk' }]);
+    // sales attaches (another job): the admin (verified) gets it within the same request
+    at(MIN);
+    const r2 = push(s, ek, [deal('d2', { resp: 'เอก' }), qt('d2', 'q2', { docNo: 'QT-2569-022' })]);
+    expect(qtOf(r2)).toMatchObject([{ id: 'q2', to: ['มกร'], why: '' }]);
+    expect(s.mail.sent.map((m) => [m.to, m.subject])).toEqual([['owner2@example.com', 'ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-022 · 101,650 บาท']]);
+  });
+
+  it('checkers who cannot get mail are named with why: no address, not verified, mails turned off, a role without e-mail', () => {
+    const t = crew({ now: true, verified: false });
+    call(t.s, t.lead, 'notify_me', { em: 'lead@example.com' }); // not verified yet
+    verify(t.s, t.fon, 'fon@example.com');
+    call(t.s, t.fon, 'notify_me', { on: { qt: 0 } });
+    const nomail = String(call(t.s, t.lead, 'role_save', { n: 'ตรวจอย่างเดียว', c: ones([...VIEW, 'qt.check']) }).id);
+    const kai = member(t.s, t.lead, 'kai', 'ไก่', nomail);
+    expect(kai).toBeTruthy();
+    t.s.mail.sent.length = 0;
+    push(t.s, t.lead, [deal('d1')]);
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{
+      to: [], later: [], why: 'nomail', bell: ['หัวหน้า', 'มินท์', 'ฝน', 'ไก่'],
+      skip: [{ n: 'หัวหน้า', r: 'unverified' }, { n: 'มินท์', r: 'noem' }, { n: 'ฝน', r: 'off' }, { n: 'ไก่', r: 'role' }],
+    }]);
+    expect(t.s.mail.sent).toEqual([]);
+    expect(logOf(t.s).filter((x) => x.kind === 'qt').map((x) => x.result)).toEqual(['none:nomail']);
+  });
+
+  it('an edit mails again at once and says what changed; a new file id alone does not; another file ("เปลี่ยนไฟล์") is an edit too', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0) })]);
+    expect(t.s.mail.sent).toHaveLength(3);
+    at(10 * MIN);
+    // the upload's Drive id: the same version, nothing new; the reply says it went to them already
+    const r1 = push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0), fileId: '1newFILE' })]);
+    expect(qtOf(r1)).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'], later: [], why: '' }]);
+    expect(t.s.mail.sent).toHaveLength(3);
+    // the amount and the number corrected by a checker: the other two hear of it, not the one who changed it
+    at(20 * MIN);
+    const r2 = push(t.s, t.mint, [qt('d1', 'q1', { at: iso(0), cAt: iso(20 * MIN), amount: 95000, docNo: 'QT-2569-021A' })]);
+    expect(qtOf(r2)).toMatchObject([{ what: 'edit', to: ['หัวหน้า', 'ฝน'], bell: ['หัวหน้า', 'ฝน'] }]);
+    expect(subjects(t.s, 3)).toEqual(Array(2).fill('ใบเสนอราคาแก้ไขรอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021A · 95,000 บาท'));
+    expect(t.s.mail.sent[3].body).toContain('แก้ยอด จาก 101,650 เป็น 95,000 บาท · เลขที่ จาก QT-2569-021 เป็น QT-2569-021A');
+    expect(t.s.mail.sent[3].body).toContain('มินท์ แก้เมื่อ 12 ต.ค. 2569 06:20 · แนบโดย เอก');
+    // another file for the same quotation: a new record with its values, the old one deleted in the same push
+    at(30 * MIN);
+    const v = { at: iso(0), cAt: iso(20 * MIN), amount: 95000, docNo: 'QT-2569-021A' };
+    const r3 = push(t.s, t.ek, [qt('d1', 'q1b', { ...v, name: 'QT-2569-021A-signed.pdf', size: 41000 }), { k: 'ddoc/d1/q1', del: true }]);
+    expect(qtOf(r3)).toMatchObject([{ id: 'q1b', what: 'edit', to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+    expect(t.s.mail.sent.slice(5).map((m) => m.subject)).toEqual(Array(3).fill('ใบเสนอราคาแก้ไขรอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021A · 95,000 บาท'));
+    expect(t.s.mail.sent[5].body).toContain('แก้ไฟล์ใหม่ QT-2569-021A-signed.pdf');
+    // a revision names the version it replaces
+    at(40 * MIN);
+    const r4 = push(t.s, t.ek, [qt('d1', 'q1b', { ...v, name: 'QT-2569-021A-signed.pdf', size: 41000, target: 'none' }), qt('d1', 'q2', { docNo: 'QT-2569-021/2', amount: 98000, at: iso(40 * MIN), cAt: iso(40 * MIN) })]);
+    expect(qtOf(r4)).toMatchObject([{ id: 'q2', what: 'rev', to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+    expect(t.s.mail.sent[8].subject).toBe('ใบเสนอราคาฉบับแก้ไขรอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021/2 · 98,000 บาท');
+    expect(t.s.mail.sent[8].body).toContain('แทนฉบับเดิม QT-2569-021A · 95,000 บาท');
+    // the timer sends none of these again
+    at(50 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 0 });
+    expect(t.s.mail.sent).toHaveLength(11);
+  });
+
+  it('waits for the file to reach Drive: the push that brings its Drive id mails', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    const r = push(t.s, t.ek, [qt('d1', 'q1', { fileId: '' })]);
+    expect(qtOf(r)).toMatchObject([{ to: [], later: ['หัวหน้า', 'มินท์', 'ฝน'], why: 'file' }]);
+    expect(t.s.mail.sent).toEqual([]);
+    expect(tick(t.s)).toMatchObject({ sent: 0 }); // the timer waits for it too
+    at(MIN);
+    const r2 = push(t.s, t.ek, [qt('d1', 'q1', { fileId: '1q1FILE' })]);
+    expect(qtOf(r2)).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'], later: [], why: '' }]);
+    expect(t.s.mail.sent).toHaveLength(3);
+    at(40 * MIN);
+    tick(t.s);
+    expect(t.s.mail.sent).toHaveLength(3);
+  });
+
+  it('at most 3 mails from one push; the others go with the next notifyTick, once', () => {
+    const t = crew({ now: true });
+    const head = String(call(t.s, t.lead, 'role_save', { n: 'ผู้ตรวจ', c: HEAD }).id);
+    for (const [u, n] of [['nok', 'นก'], ['nam', 'น้ำ']]) verify(t.s, member(t.s, t.lead, u, n, head), u + '@example.com');
+    t.s.mail.sent.length = 0;
+    push(t.s, t.lead, [deal('d1')]);
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'], later: ['นก', 'น้ำ'], why: '' }]);
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+    at(5 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 2 });
+    expect(sentTo(t.s).slice(3)).toEqual(['nok@example.com', 'nam@example.com']);
+    at(15 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 0 });
+  });
+
+  it('a slow mail service: the push stops sending after 6 seconds, the rest go with notifyTick', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    t.s.mail.log = () => vi.setSystemTime(Date.now() + 4000); // each mail takes 4 seconds
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    t.s.mail.log = null;
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า', 'มินท์'], later: ['ฝน'], why: '' }]);
+    expect(logOf(t.s).filter((x) => x.kind === 'qt').map((x) => [x.u, x.result])).toEqual([['lead', 'claim'], ['mint', 'claim'], ['fon', 'claim'], ['lead', 'sent'], ['mint', 'sent'], ['fon', 'retry']]);
+    at(5 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 1 });
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+  });
+
+  it('the day\'s quota runs out within the push: the rest wait for the quota, and the reply says so', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    t.s.mail.quota = 1;
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า'], later: ['มินท์', 'ฝน'], why: 'quota' }]);
+    expect(sentTo(t.s)).toEqual(['lead@example.com']);
+    // with quota to spare and more checkers than one push sends, the rest are not "quota"
+    const u = crew({ now: true });
+    const head = String(call(u.s, u.lead, 'role_save', { n: 'ผู้ตรวจ', c: HEAD }).id);
+    verify(u.s, member(u.s, u.lead, 'nok', 'นก', head), 'nok@example.com');
+    push(u.s, u.lead, [deal('d1')]);
+    u.s.mail.quota = 50;
+    expect(qtOf(push(u.s, u.ek, [qt('d1', 'q1')]))).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'], later: ['นก'], why: '' }]);
+  });
+
+  it('no quota left: the push sends nothing and says so; notifyTick sends once the quota is back', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    t.s.mail.quota = 0;
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ to: [], later: ['หัวหน้า', 'มินท์', 'ฝน'], why: 'quota' }]);
+    expect(tick(t.s)).toMatchObject({ sent: 0, deferred: 3, err: 'quota' });
+    at(10 * MIN);
+    t.s.mail.quota = 100;
+    expect(tick(t.s)).toMatchObject({ sent: 3, deferred: 0 });
+    at(20 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 0 });
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+  });
+
+  it('a claimed mail that did not go is sent by notifyTick even after its run moved past the row (NOTIFY_REDO), once', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    t.s.mail.log = () => void (t.s.mail.quota = 0); // the quota runs out after the first mail
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    t.s.mail.log = null;
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า'], later: ['มินท์', 'ฝน'], why: 'quota' }]);
+    expect(t.s.props.NOTIFY_REDO).toBe(String(r.seq));
+    // a run that read past the row while the push was sending (its position is after the row)
+    t.s.props.NOTIFY_SEQ = String(r.seq);
+    t.s.mail.quota = 100;
+    at(10 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 2 });
+    expect(t.s.props.NOTIFY_REDO).toBeUndefined();
+    at(20 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 0 });
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+  });
+
+  it('never twice with notifyTick: a claim in flight is honoured both ways; one left by an execution that died is retried after 15 minutes', () => {
+    // the timer has claimed หัวหน้า's mail and is sending it: the push leaves it alone
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    t.s.run('logNotify_', [['qt', 'lead', `qt:q1:${fpH(t.s)}:lead`, fpH(t.s), 'claim']]);
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'], later: [] }]);
+    expect(sentTo(t.s)).toEqual(['mint@example.com', 'fon@example.com']);
+    // the push claimed มินท์'s and is sending it: the timer leaves it alone (a claim older than 15 minutes it does not)
+    const u = crew();
+    push(u.s, u.lead, [deal('d1')]);
+    push(u.s, u.ek, [qt('d1', 'q1')]);
+    u.s.run('logNotify_', [['qt', 'mint', `qt:q1:${fpH(u.s)}:mint`, fpH(u.s), 'claim']]);
+    tick(u.s);
+    expect(sentTo(u.s)).toEqual(['lead@example.com', 'fon@example.com']);
+    // the run keeps its place at that row while the claim is out, so a later run looks at it again
+    at(10 * MIN);
+    push(u.s, u.ek, [{ k: 'stage/1', v: 'won' }]);
+    tick(u.s);
+    expect(sentTo(u.s)).toHaveLength(2);
+    at(16 * MIN);
+    tick(u.s);
+    expect(sentTo(u.s)).toEqual(['lead@example.com', 'fon@example.com', 'mint@example.com']);
+    at(30 * MIN);
+    tick(u.s);
+    expect(sentTo(u.s)).toHaveLength(3);
+  });
+
+  it('the lock is free while the push mails (a teammate\'s push meanwhile is saved); a busy lock for the log loses nothing and sends nothing twice', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    let release: (() => void) | null = null;
+    t.s.mail.log = () => {
+      if (release) return;
+      expect(call(t.s, t.lead, 'push', { ops: [{ k: 'stage/9', v: 'won' }] })).toMatchObject({ ok: true });
+      release = t.s.holdLock(); // then another execution holds the lock while the results are written
+    };
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    t.s.mail.log = null;
+    release!();
+    expect(r).toMatchObject({ ok: true, n: 1 });
+    expect(qtOf(r)).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+    // (the first mail went with the lock free; the others while the other execution held it)
+    expect(t.s.mail.calls[0].locked).toBe(false);
+    expect(rowsOf(t.s, t.lead).some((x) => x.k === 'stage/9')).toBe(true);
+    // the results wait in a Script Property of their own (NOTIFY_PEND_<id>); the next run writes them, removes
+    // it and sends nothing again
+    expect(pushPend(t.s).map((x) => x[4])).toEqual(['sent', 'sent', 'sent']);
+    expect(t.s.props.NOTIFY_PEND).toBeUndefined();
+    at(20 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 0 });
+    expect(logOf(t.s).filter((x) => x.kind === 'qt' && x.result === 'sent')).toHaveLength(3);
+    expect(t.s.mail.sent).toHaveLength(3);
+    expect(pushPend(t.s)).toEqual([]);
+  });
+
+  it('a push\'s results waiting for the log survive a run that clears its own: a run that read none of them leaves them, nobody is mailed twice', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1'), deal('d2')]);
+    // an earlier run's rows wait in NOTIFY_PEND (the lock was busy for its log)
+    t.s.props.NOTIFY_PEND = JSON.stringify([['qt', 'x', 'qt:old:1:x', '1', 'sent']]);
+    // the run has read the Script Properties; before it takes the lock to write that pend, a push mails a quotation
+    // while another execution holds the lock, so the push's results wait too
+    t.s.beforeLock(() => {
+      let release: (() => void) | null = null;
+      t.s.mail.log = () => void (release ||= t.s.holdLock());
+      expect(qtOf(push(t.s, t.ek, [qt('d2', 'q2')]))).toMatchObject([{ to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+      t.s.mail.log = null;
+      release!();
+    });
+    tick(t.s);
+    // the run cleared what it logged (NOTIFY_PEND), not the push's rows it never read
+    expect(t.s.props.NOTIFY_PEND).toBeUndefined();
+    expect(pushPend(t.s).map((x) => [x[1], x[4]])).toEqual([['lead', 'sent'], ['mint', 'sent'], ['fon', 'sent']]);
+    for (const m of [10, 20, 30, 40]) {
+      at(m * MIN);
+      tick(t.s);
+    }
+    expect(sentTo(t.s)).toEqual(['lead@example.com', 'mint@example.com', 'fon@example.com']);
+    expect(logOf(t.s).filter((x) => x.key.startsWith('qt:q2:')).map((x) => [x.u, x.result])).toEqual([['lead', 'claim'], ['mint', 'claim'], ['fon', 'claim'], ['lead', 'sent'], ['mint', 'sent'], ['fon', 'sent']]);
+    expect(pushPend(t.s)).toEqual([]);
+  });
+
+  it('only what the account may store, and only quotations in the check: refused ops, a viewer, the team code, other documents, an import', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1'), deal('d2', { jobStatus: 'closed' })]);
+    // a coordinator without แนบเอกสาร: the op is refused, nothing stored, nobody mailed
+    const coord = String(call(t.s, t.lead, 'role_save', { n: 'ประสานงาน', c: ones(['view.sales', 'view.plan', 'edit.cust', 'edit.task', 'notify.mail']) }).id);
+    const co = member(t.s, t.lead, 'coord', 'ประสาน', coord);
+    const denied = call(t.s, co, 'push', { ops: [qt('d1', 'qx')] });
+    expect(denied).toMatchObject({ ok: true, denied: ['ddoc/d1/qx'] });
+    expect(denied.qt).toBeUndefined();
+    expect(call(t.s, t.pla, 'push', { ops: [qt('d1', 'qv')] })).toMatchObject({ ok: false, error: 'forbidden' });
+    // documents outside the check say nothing
+    const r = push(t.s, t.ek, [qt('d2', 'closed'), qt('d1', 'inv', { kind: 'invoice', target: 'actual', stage: 'PAY1' }), qt('d1', 'other', { stage: 'FOLLOW1' }), qt('d1', 'none', { target: 'none' })]);
+    expect(r.qt).toBeUndefined();
+    // confirmed 3 days ago and synced only now: not news
+    at(3 * DAY);
+    expect(qtOf(push(t.s, t.ek, [qt('d1', 'late', { at: iso(), cAt: iso() })]))).toMatchObject([{ id: 'late', why: 'old', to: [] }]);
+    // an import: nobody is mailed, the timer logs it
+    at(3 * DAY + MIN);
+    const imp = push(t.s, t.ek, Array.from({ length: 21 }, (_, i) => qt('d1', 'imp' + i)));
+    expect(qtOf(imp).map((x) => x.why)).toEqual(Array(21).fill('bulk'));
+    tick(t.s);
+    expect(t.s.mail.sent).toEqual([]);
+    expect(logOf(t.s).filter((x) => x.result === 'skipped-bulk')).toHaveLength(21);
+    // the team code (no accounts) never mails from a push
+    const legacy = mk({ teamKey: 'test-key-123' });
+    legacy.run('setupNotify');
+    const lr = legacy.post({ action: 'push', key: 'test-key-123', cv: 4, ops: [deal('d1'), qt('d1', 'q1')] });
+    expect(lr).toMatchObject({ ok: true });
+    expect(lr.qt).toBeUndefined();
+    expect(legacy.mail.sent).toEqual([]);
+  });
+
+  it('a quotation that enters the check only now (its amount confirmed later) is new to the checkers, not an edit', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    expect(push(t.s, t.ek, [qt('d1', 'q1', { amount: null, target: 'none' })]).qt).toBeUndefined();
+    at(5 * MIN);
+    const r = push(t.s, t.ek, [qt('d1', 'q1')]);
+    expect(qtOf(r)).toMatchObject([{ what: 'new', to: ['หัวหน้า', 'มินท์', 'ฝน'] }]);
+    expect(subjects(t.s)).toEqual(Array(3).fill('ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 101,650 บาท'));
+    expect(t.s.mail.sent[0].body).not.toContain('แก้');
+    // the timer words it the same way
+    const u = crew();
+    push(u.s, u.lead, [deal('d1')]);
+    push(u.s, u.ek, [qt('d1', 'q1', { amount: null, target: 'none' })]);
+    tick(u.s);
+    at(5 * MIN);
+    push(u.s, u.ek, [qt('d1', 'q1')]);
+    at(10 * MIN);
+    tick(u.s);
+    expect(subjects(u.s)).toEqual(Array(3).fill('ใบเสนอราคาใหม่รอตรวจ: บริษัท ดูราฟลอร์ จำกัด · QT-2569-021 · 101,650 บาท'));
+  });
+
+  it('with "the attacher may check their own" on: nobody else to mail is "self", not "nochk"; whoever changed it is never mailed about it', () => {
+    at(0);
+    const s = mk();
+    const lead = s.bootstrapAdmin({ u: 'mkorn', name: 'มกร', pw: 'lead-password-1' });
+    const ek = member(s, lead, 'eak', 'เอก', 'sales');
+    verify(s, lead, 'owner2@example.com');
+    push(s, lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: true } }, deal('d1'), deal('d2')]);
+    s.mail.sent.length = 0;
+    // the admin, the only checker, attaches: he may check it himself
+    const r = push(s, lead, [qt('d1', 'q1', { by: 'มกร' })]);
+    expect(qtOf(r)).toMatchObject([{ to: [], bell: [], why: 'self' }]);
+    expect(call(s, lead, 'qt_check', { k: 'ddoc/d1/q1', st: 'ok', fp: fp() })).toMatchObject({ ok: true });
+    // sales edits the admin's quotation: the admin (who attached it) may check it; no mail to anyone
+    at(MIN);
+    push(s, lead, [qt('d2', 'q2', { by: 'มกร', docNo: 'QT-2' })]);
+    at(2 * MIN);
+    expect(qtOf(push(s, ek, [qt('d2', 'q2', { by: 'มกร', docNo: 'QT-2', amount: 9000 })]))).toMatchObject([{ what: 'edit', to: [], why: 'self' }]);
+    // the timer logs the same reason, and mails nobody
+    at(10 * MIN);
+    tick(s);
+    expect(s.mail.sent).toEqual([]);
+    expect(logOf(s).filter((x) => x.result.startsWith('none:')).map((x) => x.result)).toEqual(['none:self', 'none:self', 'none:self']); // q1, q2, q2 as edited
+    // turned off: the same case is "nochk" again
+    push(s, lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: false } }]);
+    at(11 * MIN);
+    expect(qtOf(push(s, lead, [qt('d1', 'q3', { by: 'มกร', docNo: 'QT-3' })]))).toMatchObject([{ why: 'nochk' }]);
+    // a checker who corrects someone else's quotation is not mailed about it, now or by the timer (self on)
+    const t = crew({ now: true });
+    push(t.s, t.lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: true } }, deal('d1')]);
+    push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0) })]);
+    at(20 * MIN);
+    const n = t.s.mail.sent.length;
+    const e = push(t.s, t.mint, [qt('d1', 'q1', { at: iso(0), cAt: iso(20 * MIN), amount: 95000 })]);
+    expect(qtOf(e)).toMatchObject([{ what: 'edit', to: ['หัวหน้า', 'ฝน'], bell: ['หัวหน้า', 'ฝน'] }]);
+    expect(sentTo(t.s).slice(n)).toEqual(['lead@example.com', 'fon@example.com']);
+    const v = crew();
+    push(v.s, v.lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, self: true } }, deal('d1')]);
+    push(v.s, v.mint, [qt('d1', 'q1', { by: 'เอก' })]);
+    at(25 * MIN);
+    tick(v.s);
+    expect(sentTo(v.s).sort()).toEqual(['fon@example.com', 'lead@example.com']);
+  });
+
+  it('an edit of a quotation in the check is news even days later; NOTIFY_NOW "0" leaves the mail to the timer', () => {
+    const t = crew({ now: true });
+    push(t.s, t.lead, [deal('d1')]);
+    push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0) })]);
+    expect(t.s.mail.sent).toHaveLength(3);
+    at(3 * DAY);
+    const r = push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0), docDate: '2026-10-13' })]);
+    expect(qtOf(r)).toMatchObject([{ what: 'edit', to: ['หัวหน้า', 'มินท์', 'ฝน'], why: '' }]);
+    expect(t.s.mail.sent[3].body).toContain('แก้ลงวันที่ จาก 12 ต.ค. 2569 เป็น 13 ต.ค. 2569');
+    // turned off by the owner: the reply says the timer sends it, and it does
+    t.s.props.NOTIFY_NOW = '0';
+    at(3 * DAY + MIN);
+    const r2 = push(t.s, t.ek, [qt('d1', 'q1', { at: iso(0), cAt: iso(0), docDate: '2026-10-14' })]);
+    expect(qtOf(r2)).toMatchObject([{ to: [], later: ['หัวหน้า', 'มินท์', 'ฝน'], why: 'timer' }]);
+    expect(t.s.mail.sent).toHaveLength(6);
+    at(3 * DAY + 10 * MIN);
+    expect(tick(t.s)).toMatchObject({ sent: 3 });
+    expect(t.s.mail.sent[6].subject).toMatch(/^ใบเสนอราคาแก้ไขรอตรวจ: /);
+    expect(call(t.s, t.lead, 'notify_status')).toMatchObject({ now: 0, recent: expect.arrayContaining([{ at: expect.any(String), doc: 'q1', u: 'fon', result: 'sent' }]) });
   });
 });
 

@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, useNarrow } from '../state';
 import { dmTh, downloadBlob, isoTh, localDay, pad, todayISO } from '../lib/format';
 import { dealMoney, fmtMoney, type DealDoc } from '../lib/sales';
 import { qtFacts, qtView } from '../lib/quotes';
-import { QT_CHIP, QT_NOTE_MAX, QT_WORD, checkedLine, docById, qtDayOf, type QtCheckView } from '../lib/notify';
+import { QT_CHIP, QT_NOTE_MAX, QT_WORD, checkedLine, docById, qtDayOf, qtSentView, waitShort, type QtCheckView, type QtSent, type QtSentCtx } from '../lib/notify';
 import { errText } from '../lib/teamSync';
 import type { DocFacts } from '../lib/docExtract';
 import { commitFocus, isTopDialog, useDialog } from './useDialog';
@@ -19,12 +19,13 @@ const hm = (iso: string) => {
   return isNaN(d.getTime()) ? '' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-/** The check status on a quotation (card, table row, phone editor): the chip, who and when, and for a
- *  checker "ตรวจใบนี้" while it waits. Shared words (plan.md §1); neutral or info chips only. */
-export function QtCheckLine({ doc, v, onCheck, bare }: { doc: DealDoc; v: QtCheckView; onCheck?: () => void; bare?: boolean }) {
+/** The check status on a quotation (card, table row, phone editor): the chip, who and when (while it waits:
+ *  who the team script told, `sent`, as this browser heard it, else since when), and for a checker "ตรวจใบนี้"
+ *  while it waits. Shared words (plan.md §1); neutral or info chips only. */
+export function QtCheckLine({ doc, v, onCheck, bare, sent, ctx = { admin: false } }: { doc: DealDoc; v: QtCheckView; onCheck?: () => void; bare?: boolean; sent?: QtSent | null; ctx?: QtSentCtx }) {
   const chip = <span className={QT_CHIP[v.status]}>{QT_WORD[v.status]}</span>;
   if (bare) return chip;
-  const meta = v.status === 'wait' ? (v.stale ? 'แก้หลังตรวจ รอตรวจอีกครั้ง' : `ส่งให้ผู้ตรวจแล้ว ${dmTh(qtDayOf(doc))}`) : checkedLine(v.rec!);
+  const meta = v.status === 'wait' ? waitShort(sent, doc, ctx, !!v.stale) : checkedLine(v.rec!);
   return (
     <span className="qt-chk">
       {chip}
@@ -138,6 +139,8 @@ function Sheet({ doc, sig, onClose }: { doc: DealDoc; sig: string; onClose: () =
   const counted = m.fcDoc?.id === doc.id;
   const typedWas = d.forecast != null && doc.amount != null && Math.abs(d.forecast - doc.amount) >= 0.005 ? d.forecast : null;
   const mailOn = !!e.notifyLive?.on;
+  // who the team script told about this version (as this browser heard it: the attacher's, or the editor's)
+  const sent = qtSentView(e.qtSentFor(doc), e.qtSentCtx());
   const party = facts?.party || '';
   const wordsOk = facts && facts.words != null && facts.total != null && Math.abs(facts.words - facts.total) < 0.01;
   // a checker on a quotation waiting (or changed since its check) asks; a decided one, someone else's, or
@@ -166,7 +169,9 @@ function Sheet({ doc, sig, onClose }: { doc: DealDoc; sig: string; onClose: () =
         {v.status === 'wait'
           ? v.stale
             ? `แก้หลัง${QT_WORD[v.stale.st]} (${checkedLine(v.stale)}) จึงต้องตรวจอีกครั้ง`
-            : `${mailOn ? 'ส่งให้ผู้ตรวจทางอีเมลแล้ว' : 'รอผู้ตรวจ'} ${dmTh(qtDayOf(doc))}${qtDayOf(doc) === todayISO() ? ' ' + hm(doc.cAt || doc.at) : ''}`
+            : sent.state !== 'wait'
+              ? sent.text
+              : `รอผู้ตรวจ ตั้งแต่ ${dmTh(qtDayOf(doc))}${qtDayOf(doc) === todayISO() ? ' ' + hm(doc.cAt || doc.at) : ''}`
           : `${checkedLine(v.rec!)}${v.rec!.at ? ' ' + hm(v.rec!.at) : ''}`}
       </span>
     </div>

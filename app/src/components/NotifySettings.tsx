@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { DIGEST_TIMES, type MyNotify, type Scope } from '../lib/notify';
+import { DIGEST_TIMES, myMailIssues, type MyNotify, type Scope } from '../lib/notify';
 import { TeamSyncError, errText } from '../lib/teamSync';
 import { EMAIL_RE } from '../tabs/users/shared';
 import { Modal } from './Dialog';
@@ -132,12 +132,25 @@ export function NotifySettings({ onClose }: { onClose: () => void }) {
     setOn((o) => ({ ...o, [k]: v }));
   };
   const dis = old || !mailCap;
+  // why mail may not reach me, as saved (the role's own line is under the address)
+  const issues = old || offline ? [] : myMailIssues({ live: e.notifyLive, mail: mailCap, nf: now, checker }).filter((i) => i.k !== 'role');
+  const qtNow = !!e.notifyLive?.now;
 
   return (
     <Modal title="การแจ้งเตือนของฉัน" onClose={busy ? () => {} : onClose} width={620}>
       <div className="ns">
         {old && <p className="ns-old">อีเมลแจ้งเตือนใช้ได้หลังผู้ดูแลระบบอัปเดตสคริปต์ของทีม ตอนนี้ตั้งได้เฉพาะว่ากระดิ่งในเว็บแสดงงานของใคร (เก็บไว้ในเบราว์เซอร์นี้)</p>}
         {!old && offline && <Notice kind="warn" role="status">ต้องออนไลน์เพื่อดูและบันทึกการแจ้งเตือน เพราะเป็นการตั้งค่าของบัญชี ไม่ใช่ข้อมูลทีม</Notice>}
+        {issues.length > 0 && (
+          <ul className="ns-dx" aria-label="ทำไมอีเมลอาจไม่มาถึงคุณ">
+            {issues.map((i) => (
+              <li key={i.k}>
+                <b>{i.text}</b>
+                <span>{i.fix}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         {!old && (
           <div className="ns-sec">
             <label className="ns-h" htmlFor={tid + 'm'}>อีเมลที่รับแจ้งเตือน</label>
@@ -179,7 +192,7 @@ export function NotifySettings({ onClose }: { onClose: () => void }) {
           <div className="ns-sec">
             <span className="ns-h">ส่งอะไรให้ฉันทางอีเมล</span>
             <div className="ns-rows">
-              {checker && <Row on={on.qt} dis={dis} title="ใบเสนอราคาใหม่รอตรวจ" sub="ส่งภายใน 10 นาที เมื่อมีคนแนบหรือแก้ใบเสนอราคา · เฉพาะผู้ตรวจ" onChange={set1('qt')} />}
+              {checker && <Row on={on.qt} dis={dis} title="ใบเสนอราคาใหม่รอตรวจ" sub={`${qtNow ? 'ส่งทันที' : 'ส่งภายใน 10 นาที'} เมื่อมีคนแนบหรือแก้ใบเสนอราคา · เฉพาะผู้ตรวจ · ใบที่คุณแนบหรือแก้เองไม่ส่งถึงคุณ`} onChange={set1('qt')} />}
               <Row on={on.res} dis={dis} title="ผลตรวจใบเสนอราคาที่ฉันแนบ" sub="ตรวจแล้ว หรือ ส่งกลับแก้ไข" onChange={set1('res')} />
               <Row
                 on={on.dg}
