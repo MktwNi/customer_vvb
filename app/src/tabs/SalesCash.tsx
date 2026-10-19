@@ -16,10 +16,17 @@ import { CashChart, CashKey } from '../components/CashChart';
 import { MonthCheck, YearCheck, useOpenMonth } from '../components/MonthCheck';
 import { cashCheckRows, chkRows, pageKeep, sumRows, ymOf } from '../lib/payCheck';
 // joint quotations (package quotes, item 7): the same money as the Dashboard under a person filter; customers per company
-import { customersOf } from '../lib/sales';
+import { customersOf, dealMoney } from '../lib/sales';
 import { viewCashLines } from '../lib/joint';
 import { Check, Pop, Radio } from '../components/Pop';
 import { Chevron } from '../components/StageTrack';
+// job expenses in the money views (money out, for those who see them; lib/expenseMoney.ts)
+import { ExpCheck, ExpKpiRow, ExpYearCheck, SideSeg, seesExp, waitingOut } from '../components/ExpCash';
+import { bothCsvRows, expCheckRows, expChkRows, expCsvRows, expKpis, expLines, expPageKeep, expView, expYear, type CashFlow, type ExpYear } from '../lib/expenseMoney';
+import { isWaiting, yearCheck } from '../lib/payCheck';
+import type { OutXl } from '../components/MonthCheck';
+import { cashCsv } from '../lib/cashUi';
+import { downloadBlob, todayISO } from '../lib/format';
 
 type Show = UIState['slCashShow'];
 const m0 = (n: number) => fmtMoney(Math.round(n)) || '0';
@@ -165,6 +172,23 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
   const allLines = cashLines(S, Object.values(S.deals), today);
   const ce = +year - 543;
   const { rows, wide, team } = cashCheckRows(chkRows(S, allLines, e.payChecks(), e.payChkCfg().since), ce, pageKeep(S, F, today));
+  // money out (job expenses), for those who see them: paid on the paid date, unpaid on the bill date, through
+  // the same filter (a joint quotation header's expense as the part of the companies listed); the month
+  // check's out side has every deal's rows like the income's
+  const xp = seesExp(e);
+  const xAll = xp ? expLines(S) : [];
+  const X = xp ? expYear(expView(S, F, today, xAll), year) : null;
+  const XK = X ? expKpis(X, K.got) : null;
+  const xo = xp ? expCheckRows(expChkRows(S, xAll, e.expChecks(), e.payChkCfg().since), ce, expPageKeep(S, F, today)) : null;
+  const side = xo ? ui.slChkSide : 'in';
+  const anyOut = !!X && X.totals.paid + X.totals.unpaid > 0;
+  const sideSeg = xo ? <SideSeg side={side} onSide={(v) => set({ slChkSide: v, slCashShow: '' })} waitIn={rows.filter(isWaiting).length} waitOut={waitingOut(xo.rows)} /> : null;
+  const outXl: OutXl | undefined = xo
+    ? (ym) => {
+        const months = yearCheck(xo.rows, ce, e.monthClosesOut(), today, xo.team).months;
+        return { rows: ym ? xo.rows.filter((r) => r.ym === ym) : xo.rows, months: ym ? months.filter((m) => m.ym === ym) : months };
+      }
+    : undefined;
   // a deal whose money falls in more than one year says where the rest is ("ข้ามปี: งวด 3 อยู่ปี 2570")
   const byDeal = new Map<string, CashLine[]>();
   allLines.forEach((l) => byDeal.set(l.deal.id, [...(byDeal.get(l.deal.id) || []), l]));
@@ -184,8 +208,18 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
 
   return (
     <>
-      <CashKpiRow K={K} year={year} show={show} onShow={(s) => set({ slCashShow: s })} checked={sumRows(rows).ok} />
+      <CashKpiRow K={K} year={year} show={show} onShow={(s) => set({ slCashShow: s, slChkSide: 'in' })} checked={sumRows(rows).ok} />
       <ReconLine R={R} K={K} year={year} own={own} goYear={goYear} />
+      {XK && (
+        <ExpKpiRow
+          K={XK}
+          year={year}
+          onOpen={(f) => {
+            set({ slChkSide: 'out', slXchkF: f, slChkM: 'y', slCashShow: '' });
+            requestAnimationFrame(() => document.getElementById('mc-card')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+          }}
+        />
+      )}
       <div className="cf-tools">
         <FilterBar
           fields={fields}
@@ -200,24 +234,33 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
       <section className="cf-card" aria-labelledby="cf-chart-t">
         <div className="cf-h">
           <div>
-            <h3 className="cf-t" id="cf-chart-t">{mode === 'm' ? 'เงินเข้ารายเดือน' : 'เงินเข้ารายไตรมาส'} · ปี {year}</h3>
-            <span className="cf-s">รับแล้วนับตามวันที่รับเงิน · ที่ยังไม่รับนับตามวันครบกำหนด</span>
-            {!phone && <CashKey />}
+            <h3 className="cf-t" id="cf-chart-t">{anyOut ? (mode === 'm' ? 'เงินเข้าและเงินออกรายเดือน' : 'เงินเข้าและเงินออกรายไตรมาส') : mode === 'm' ? 'เงินเข้ารายเดือน' : 'เงินเข้ารายไตรมาส'} · ปี {year}</h3>
+            <span className="cf-s">รับแล้วนับตามวันที่รับเงิน · ที่ยังไม่รับนับตามวันครบกำหนด{anyOut ? ' · เงินออกอยู่ใต้เส้นศูนย์ นับตามวันที่จ่าย ค้างจ่ายนับตามวันที่บิล' : ''}</span>
+            {!phone && <CashKey out={anyOut} />}
           </div>
           <div className="seg" role="group" aria-label="ช่วงของกราฟ">
             <button type="button" aria-pressed={mode === 'm'} onClick={() => set({ slCashMode: 'm', slCashPick: null })}>รายเดือน</button>
             <button type="button" aria-pressed={mode === 'q'} onClick={() => set({ slCashMode: 'q', slCashPick: null })}>รายไตรมาส</button>
           </div>
         </div>
-        {phone && <CashKey />}
-        <CashChart data={mode === 'm' ? Y.months : Y.quarters} mode={mode} year={year} now={nowI} pick={picked} onPick={onPick} phone={phone} />
+        {phone && <CashKey out={anyOut} />}
+        <CashChart data={mode === 'm' ? Y.months : Y.quarters} mode={mode} year={year} now={nowI} pick={picked} onPick={onPick} phone={phone} out={X ? (mode === 'm' ? X.months : X.quarters) : null} />
         <div className="cf-foot">
           {phone ? 'นับเฉพาะงานที่ได้งานแล้ว · ยอดรวม VAT · แตะเดือนเพื่อเปิดส่วนตรวจรับเงิน' : 'นับเฉพาะงานที่ได้งานแล้ว (YES) รวมงานที่ปิดแล้ว · ยอดตามเอกสาร รวม VAT · กดแท่งเพื่อเปิดเดือนนั้นในส่วนตรวจรับเงินด้านล่าง'}
         </div>
       </section>
-      <MonthCheck S={S} rows={rows} wide={wide} team={team} filter={filtered ? filterWords : ''} undated={Y.undated} year={year} scope={scope} show={show} today={today} phone={phone} tags={tags} />
-      <YearCheck S={S} rows={rows} team={team} filter={filtered ? filterWords : ''} year={year} scope={show ? 'y' : scope} today={today} phone={phone} />
-      {ui.slCashCsv && <CashExport S={S} year={year} lines={lines} Y={Y} filterWords={filterWords} onClose={() => set({ slCashCsv: false })} />}
+      {side === 'out' && xo ? (
+        <>
+          <ExpCheck S={S} rows={xo.rows} wide={xo.wide} team={xo.team} inRows={rows} inTeam={team} filter={filtered ? filterWords : ''} year={year} scope={scope} today={today} phone={phone} side={sideSeg} />
+          <ExpYearCheck S={S} rows={xo.rows} team={xo.team} inRows={rows} inTeam={team} filter={filtered ? filterWords : ''} year={year} scope={scope} today={today} phone={phone} side={sideSeg} />
+        </>
+      ) : (
+        <>
+          <MonthCheck S={S} rows={rows} wide={wide} team={team} filter={filtered ? filterWords : ''} undated={Y.undated} year={year} scope={scope} show={show} today={today} phone={phone} tags={tags} side={sideSeg} outXl={outXl} />
+          <YearCheck S={S} rows={rows} team={team} filter={filtered ? filterWords : ''} year={year} scope={show ? 'y' : scope} today={today} phone={phone} side={sideSeg} outXl={outXl} />
+        </>
+      )}
+      {ui.slCashCsv && <CashExport S={S} year={year} lines={lines} Y={Y} X={X} filterWords={filterWords} onClose={() => set({ slCashCsv: false })} />}
     </>
   );
 }
@@ -226,24 +269,48 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
 
 /** "ส่งออก Cashflow ปี 2569 เป็น CSV": one row per amount or the months / quarters summed, with or without
  *  the undated money, the page's filters; the first rows as they will be in the file. */
-function CashExport({ S, year, lines, Y, filterWords, onClose }: { S: SalesState; year: string; lines: CashLine[]; Y: CashYear; filterWords: string; onClose: () => void }) {
+function CashExport({ S, year, lines, Y, X, filterWords, onClose }: { S: SalesState; year: string; lines: CashLine[]; Y: CashYear; /** money out (those who see job expenses) */ X: ExpYear | null; filterWords: string; onClose: () => void }) {
   const { engine: e } = useApp();
   const [mode, setMode] = useState<CashCsvMode>('lines');
   const [und, setUnd] = useState(true);
-  const has = Y.undated.length > 0;
-  const rows = cashRows(S, year, Y, mode, und && has);
-  const n = (m: CashCsvMode) => cashRows(S, year, Y, m, und && has).rows.length;
+  // เงินเข้า / เงินออก / ทั้งสองอย่าง (money out only for those who see job expenses)
+  const [flow, setFlow] = useState<CashFlow>('in');
+  const fl: CashFlow = X ? flow : 'in';
+  const has = fl === 'out' ? !!X?.undated.length : Y.undated.length > 0 || (fl === 'both' && !!X?.undated.length);
+  const qtNo = (d: Deal) => dealMoney(S, d).fcDoc?.docNo || '';
+  const rowsOf = (m: CashCsvMode) => {
+    const inRows = cashRows(S, year, Y, m, und && has);
+    if (fl === 'in' || !X) return inRows;
+    return fl === 'out' ? expCsvRows(year, X, m, und && has, qtNo) : bothCsvRows(year, inRows, Y, X, m, und && has, qtNo);
+  };
+  const rows = rowsOf(mode);
+  const n = (m: CashCsvMode) => rowsOf(m).rows.length;
   // the preview's columns: the money and its dates (the file has more: the year, the deal's year, หมวด, …)
-  const cols = mode === 'lines' ? [1, 2, 6, 7, 8, 9, 10] : rows.head.map((_, i) => i).slice(1);
-  const money = new Set(mode === 'lines' ? [7] : [2, 3, 4, 5, 6]);
+  const cols = mode !== 'lines' ? rows.head.map((_, i) => i).slice(1) : fl === 'in' ? [1, 2, 6, 7, 8, 9, 10] : fl === 'out' ? [1, 2, 6, 8, 9, 10, 11] : [1, 2, 3, 7, 9, 11, 12];
+  const money = new Set(mode !== 'lines' ? rows.head.map((h, i) => (/บาท/.test(h) ? i : -1)).filter((i) => i >= 0) : [rows.head.indexOf('ยอด (บาท)')]);
   const undSum = Y.undated.reduce((a, l) => a + l.amt, 0);
+  const save = () => {
+    if (fl === 'in') e.exportCashCsv(year, lines, mode, und && has);
+    else downloadBlob(new Blob(['\ufeff' + cashCsv(rows)], { type: 'text/csv;charset=utf-8' }), `Cashflow_${fl === 'out' ? 'เงินออก_' : 'เงินเข้าออก_'}${year}_${todayISO()}.csv`);
+    onClose();
+  };
   return (
-    <Modal title={`ส่งออก Cashflow ปี ${year} เป็น CSV`} onClose={onClose} width={660}>
+    <Modal title={`ส่งออก Cashflow ปี ${year} เป็น CSV`} onClose={onClose} width={X ? 720 : 660}>
       <div className="cf-dlg" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {X && (
+          <div>
+            <div className="cf-fl" id="cf-csv-flow">เงินในไฟล์</div>
+            <div className="seg" role="group" aria-labelledby="cf-csv-flow">
+              <button type="button" aria-pressed={fl === 'in'} onClick={() => setFlow('in')}>เงินเข้า</button>
+              <button type="button" aria-pressed={fl === 'out'} onClick={() => setFlow('out')}>เงินออก</button>
+              <button type="button" aria-pressed={fl === 'both'} onClick={() => setFlow('both')}>เงินเข้าและเงินออก</button>
+            </div>
+          </div>
+        )}
         <div>
           <div className="cf-fl" id="cf-csv-mode">ข้อมูลในไฟล์</div>
           <div className="seg" role="group" aria-labelledby="cf-csv-mode">
-            <button type="button" aria-pressed={mode === 'lines'} onClick={() => setMode('lines')}>รายงวด · {fmtN(n('lines'))} แถว</button>
+            <button type="button" aria-pressed={mode === 'lines'} onClick={() => setMode('lines')}>{fl === 'in' ? 'รายงวด' : 'รายการ'} · {fmtN(n('lines'))} แถว</button>
             <button type="button" aria-pressed={mode === 'month'} onClick={() => setMode('month')}>สรุปรายเดือน · {fmtN(n('month'))} แถว</button>
             <button type="button" aria-pressed={mode === 'quarter'} onClick={() => setMode('quarter')}>สรุปรายไตรมาส · {fmtN(n('quarter'))} แถว</button>
           </div>
@@ -256,10 +323,17 @@ function CashExport({ S, year, lines, Y, filterWords, onClose }: { S: SalesState
           <label className={'cf-ck' + (und ? ' on' : '')}>
             <input type="checkbox" className="sr-only" checked={und} onChange={(ev) => setUnd(ev.target.checked)} />
             <Check on={und} />
-            <span>
-              รวมรายการ “ยังไม่กำหนดวันรับ”
-              <small>{fmtN(new Set(Y.undated.map((l) => l.deal.id)).size)} งาน · {m0(undSum)} บาท · {mode === 'lines' ? 'อยู่ท้ายไฟล์ เดือนเว้นว่าง' : 'เป็นแถวสุดท้าย'}</small>
-            </span>
+            {fl === 'out' ? (
+              <span>
+                รวมบิลที่ยังไม่ระบุวันที่
+                <small>{fmtN(X!.undated.length)} รายการ · {m0(X!.undated.reduce((a, x) => a + x.amt, 0))} บาท · {mode === 'lines' ? 'อยู่ท้ายไฟล์ เดือนเว้นว่าง' : 'เป็นแถวสุดท้าย'}</small>
+              </span>
+            ) : (
+              <span>
+                รวมรายการ “ยังไม่กำหนดวันรับ”
+                <small>{fmtN(new Set(Y.undated.map((l) => l.deal.id)).size)} งาน · {m0(undSum)} บาท · {mode === 'lines' ? 'อยู่ท้ายไฟล์ เดือนเว้นว่าง' : 'เป็นแถวสุดท้าย'}</small>
+              </span>
+            )}
           </label>
         )}
         <div>
@@ -276,11 +350,11 @@ function CashExport({ S, year, lines, Y, filterWords, onClose }: { S: SalesState
           )}
         </div>
         <p className="cf-dnote">
-          {mode === 'lines' ? 'ในไฟล์มีคอลัมน์ ปีของงาน หมวด ผู้รับผิดชอบ และเลขใบเสนอราคาด้วย · ' : ''}ยอดรวม VAT ตามเอกสาร · วันที่แบบ 2026-04-20 ให้ Excel เรียงได้
+          {mode === 'lines' ? `ในไฟล์มีคอลัมน์ ปีของงาน หมวด ผู้รับผิดชอบ${fl === 'in' ? '' : ' รายละเอียดค่าใช้จ่าย'} และเลขใบเสนอราคาด้วย · ` : ''}ยอดรวม VAT ตามเอกสาร{fl === 'in' ? '' : ' (ค่าใช้จ่ายตามบิล) · จ่ายแล้วนับตามวันที่จ่าย ค้างจ่ายตามวันที่บิล'} · วันที่แบบ 2026-04-20 ให้ Excel เรียงได้
         </p>
         <div className="dlg-act">
           <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
-          <button type="button" className="btn pri" onClick={() => { e.exportCashCsv(year, lines, mode, und && has); onClose(); }}>ส่งออก CSV</button>
+          <button type="button" className="btn pri" onClick={save}>ส่งออก CSV</button>
         </div>
       </div>
     </Modal>

@@ -1,0 +1,84 @@
+/* ---- job expenses in the money views (lib/expenseMoney.ts; components/ExpCash.tsx, ExpDash.tsx, CashChart.tsx
+   InOutChart): the Cashflow tab's money out (cards, the chart under its zero line, the switch เงินเข้า / เงินออก,
+   the out side of the month check and its year table, the CSV) and the Dashboard's card ค่าใช้จ่ายและคงเหลือ.
+   The app's tokens and classes only (.kpi, .cf-card, .cf-list, .mc-*, .seg, .qt, .cm-k, .sd-bars); sizes on
+   the scale, weights 400 / 500. Money out has one calm colour of its own (validated against the brand blue
+   and the late colour for colour-blind readers), never red: red is late money; it always comes with a word. */
+:root{--cash-out:#009494;--cash-out-wait:#D4EEEC}
+.cf-sw.xpaid,.cf-ostack i.xpaid,.cf-hr .trk i.xpaid{background:var(--cash-out)}
+.cf-sw.xdue,.cf-ostack i.xdue,.cf-hr .trk i.xdue{background:var(--cash-out-wait);box-shadow:inset 0 0 0 1.5px var(--cash-out)}
+
+/* the cards of money out (a row under the money in, the same grid) */
+.kpis.xo-kpis{margin-top:-2px}
+.xo-kpis .xo-net{grid-column:span 2}
+.xo-net .kpi-f{display:flex;flex-direction:column;gap:0}
+.xo-net-w b{font-weight:500;color:var(--ink)}
+.xo-bar{display:flex;gap:2px;height:8px;margin-top:8px;border-radius:var(--r-pill);overflow:hidden;background:var(--bar-track)}
+.xo-bar i{display:block;height:100%;min-width:2px}
+.xo-bar i.ex,.xo-bar-k i.ex{background:var(--cash-out)}
+.xo-bar i.nt,.xo-bar-k i.nt{background:var(--bar)}
+.xo-bar-k{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:var(--fs-meta);color:var(--ink-2);line-height:1.4}
+.xo-bar-k span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.xo-bar-k i{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none}
+
+/* the chart with money out: the money in over the zero line as before, the money out under it */
+.cf-col.xo{justify-content:flex-start}
+.cf-up{flex:none;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+.cf-dn{width:100%;display:flex;flex-direction:column;align-items:center;padding-top:2px}
+.cf-ostack{width:24px;display:flex;flex-direction:column;gap:2px}
+.cf-ostack i{display:block;width:100%}
+.cf-ostack i:last-child{border-radius:0 0 4px 4px}
+.cf-oval{margin-top:6px;font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.2}
+.cf-plot.xo .cf-tip{top:12px}
+/* on a phone: the money in bar, and under it a thinner money out bar with its figure */
+.cf-hr.xo{grid-template-rows:auto auto;row-gap:4px;padding-top:6px;padding-bottom:6px}
+.cf-hr.xo>span:first-child{grid-row:1 / 3;align-self:center}
+.cf-hr.xo .xo-trk{grid-column:2;grid-row:2;height:8px}
+.cf-hr.xo>.xo-v{grid-column:3;grid-row:2;font-size:var(--fs-meta);color:var(--muted);text-align:right}
+
+/* the switch เงินเข้า / เงินออก, under the month check's title */
+.xo-side{margin-top:14px;display:flex;min-width:0}
+.xo-side .seg .n{font-size:var(--fs-meta)}
+
+/* the out side's list: the income list's table, a category column in place of the installment */
+/* (its bands lead with the money-out colour: the words say it too) */
+.xo-list tr.cf-band>:first-child,.xo-card .cf-mband{box-shadow:inset 4px 0 0 var(--cash-out)}
+.cf-list.mc-list.xo-list col.c-cat{width:168px}
+.cf-list.mc-list.xo-list col.c-ev{width:150px}
+.xo-list td .cf-cell>span:first-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xo-list .mc-ev small,.mc-mi .mc-ev small{max-width:140px;overflow:hidden;text-overflow:ellipsis}
+.mc-mi.xo-sel{background:var(--tint-2);border-radius:10px;padding-left:8px;padding-right:8px}
+.mc-mi .mc-ev{flex-direction:row;align-items:baseline;gap:8px}
+
+/* the Dashboard's card: the year by quarter on the left, the period's categories and units on the right */
+.sd-xo h3{margin:0;line-height:1.4}
+.xo-dash{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px 28px;align-items:start}
+.xo-dash-l,.xo-dash-r{display:flex;flex-direction:column;gap:12px;min-width:0}
+.xo-qt td small.xo-due{color:var(--muted)}
+.xo-qt td small.xo-pct,.xo-ut td small.xo-pct{color:var(--muted)}
+.qt.xo-qt tr.xo-ex td{color:var(--ink-2)}
+.qt.xo-qt th:first-child{width:72px}
+.xo-h{display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--ink);line-height:1.45}
+.xo-h small{font-size:12px;color:var(--muted)}
+.xo-cats .sd-bar-row{font-size:13px;grid-template-columns:minmax(0,132px) minmax(0,1fr) auto}
+.xo-cats .sd-bar-t i{background:var(--cash-out)}
+.xo-cats .sd-bar-v small{margin-left:6px;font-size:12px;font-weight:400;color:var(--muted)}
+.qt.xo-ut th:first-child{width:auto}
+.xo-ut .un{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.xo-ut .un-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container (max-width:900px){
+  .xo-dash{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:900px){
+  .xo-dash{grid-template-columns:minmax(0,1fr)}
+}
+@container (max-width:640px){
+  .sd-xo .qt-wide{display:none}
+  .sd-xo .qt-narrow{display:table}
+}
+@media (max-width:640px){
+  .sd-xo .qt-wide{display:none}
+  .sd-xo .qt-narrow{display:table}
+  .xo-cats .sd-bar-row{grid-template-columns:minmax(0,96px) minmax(0,1fr) auto}
+}
+@media (forced-colors:active){.xo-bar i,.xo-bar-k i,.cf-ostack i,.xo-cats .sd-bar-t i{forced-color-adjust:none}}

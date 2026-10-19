@@ -107,6 +107,11 @@ export function SalesMessages() {
       const n = e.lastPayChecks ? e.undoPayChecks(e.lastPayChecks.keys) : 0;
       return acts.say(n ? `เลิกทำแล้ว ${n} รายการกลับเป็น “รอตรวจ”` : 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะรายการที่คุณตรวจเอง', { ms: 4000 });
     }
+    // the same for money out (engine.lastExpChecks)
+    if (a.act === 'expUndo') {
+      const n = e.lastExpChecks ? e.undoExpChecks(e.lastExpChecks.keys) : 0;
+      return acts.say(n ? `เลิกทำแล้ว ${n} รายการเงินออกกลับเป็น “รอตรวจ”` : 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะรายการที่คุณตรวจเอง', { ms: 4000 });
+    }
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });
       const d = e.sales.deals[a.deal];
