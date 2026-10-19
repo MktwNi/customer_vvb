@@ -26,7 +26,7 @@ import { Icon } from './icons';
 import { Chevron } from './StageTrack';
 import { QtCard } from './QtCard';
 import { QtCheckLine } from './QtCheckSheet';
-import { checkedLine } from '../lib/notify';
+import { checkedLine, waitShort } from '../lib/notify';
 import { useSalesActs } from './SalesToast';
 import { LensMoney } from '../tabs/SalesCash';
 import type { AttachMore } from './DocAttach';
@@ -465,12 +465,13 @@ function useHeadCheck(S: SalesState, g: JointGroup) {
   const { engine: e } = useApp();
   const doc = qtView(S, g.head).head?.doc;
   const cv = doc ? e.qtCheckFor(doc) : null;
-  return doc && cv ? { doc, cv } : null;
+  // while it waits: who the team script told (as this browser heard it), else since when
+  return doc && cv ? { doc, cv, short: waitShort(e.qtSentFor(doc), doc, e.can('set.users')) } : null;
 }
 /** What the band's and the card's status cell says: the quotation's check, else the payer's state. */
 function HeadState({ S, g, compact }: { S: SalesState; g: JointGroup; compact?: boolean }) {
   const ck = useHeadCheck(S, g);
-  if (ck) return compact ? <QtCheckLine doc={ck.doc} v={ck.cv} bare /> : <span className="jq-st"><QtCheckLine doc={ck.doc} v={ck.cv} bare /><small>{ck.cv.rec ? checkedLine(ck.cv.rec) : ck.cv.stale ? 'แก้หลังตรวจ' : 'ส่งให้ผู้ตรวจแล้ว'}</small></span>;
+  if (ck) return compact ? <QtCheckLine doc={ck.doc} v={ck.cv} bare /> : <span className="jq-st"><QtCheckLine doc={ck.doc} v={ck.cv} bare /><small>{ck.cv.rec ? checkedLine(ck.cv.rec) : ck.cv.stale ? 'แก้หลังตรวจ' : ck.short}</small></span>;
   const sv = statusView(S, g.head, todayISO());
   return <span className="jq-st"><Status kind={sv.kind}>{sv.word}</Status>{!compact && sv.sub && <small>{sv.sub}</small>}</span>;
 }

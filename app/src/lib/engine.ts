@@ -38,8 +38,8 @@ import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, type JointGroup } from './sales';
 import { canMergeFrom, isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
 import {
-  QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
-  type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
+  QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtSentNews, toQtCheck,
+  type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type Scope,
 } from './notify';
 import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, teamMonth, toMonthClose, toPayCheck, ymTh, type ChkRow, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
 // the month check of money out (job expenses in the money views)
@@ -4151,9 +4151,9 @@ export class GccEngine {
       batch.forEach((o) => (o.sent = at));
       await this.writePending(this.qk(cfg), (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
       if (!live()) return;
-      let r: { rejected?: string[]; denied?: string[] };
+      let r: { rejected?: string[]; denied?: string[]; qt?: unknown };
       try {
-        r = await call<{ rejected?: string[]; denied?: string[] }>(this.transport, cfg.url, this.cred(cfg), { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+        r = await call<{ rejected?: string[]; denied?: string[]; qt?: unknown }>(this.transport, cfg.url, this.cred(cfg), { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
       } catch (e) {
         // the sheet answered and refused (busy, wrong code): these were certainly not delivered
         if (e instanceof TeamSyncError && e.code) {
@@ -4163,6 +4163,7 @@ export class GccEngine {
         throw e;
       }
       this.meta(cfg, r);
+      this.heardQt(r, batch);
       rejected += (r.rejected || []).length;
       // changes this account may not make (the script decides): dropped below with the batch, and the
       // team's value put back by the next round
@@ -4872,6 +4873,7 @@ export class GccEngine {
         }
     prefs.del(PREF.peopleHide);
     prefs.del(PREF.peopleGone);
+    prefs.del(PREF.qtSent);
     if (dropUnsent) {
       await this.store.del(this.qk(cfg)).catch(() => {});
       await this.store.del(pendKey(cfg.url)).catch(() => {});
@@ -5129,6 +5131,78 @@ export class GccEngine {
     this.emit();
     this.flushSoon();
   }
+  // ---- who heard of a quotation this account attached or edited (lib/notify.ts QtSent)
+  private qtSentM: { key: string; m: Record<string, QtSent> } | null = null;
+  /** What the script said, per document, for the signed-in account on this team (kept in this browser). */
+  qtSentAll(): Record<string, QtSent> {
+    const cfg = this.teamCfg, s = this.session;
+    const key = cfg && s && cfg.mode === 'accounts' ? cfg.url + '|' + s.u : '';
+    if (!this.qtSentM || this.qtSentM.key !== key) {
+      const p = prefs.get<{ key?: string; m?: Record<string, QtSent> } | null>(PREF.qtSent, null);
+      this.qtSentM = { key, m: key && p && p.key === key && p.m && typeof p.m === 'object' ? p.m : {} };
+    }
+    return this.qtSentM.m;
+  }
+  /** What happened to this version of a quotation this account attached or edited: who was mailed, or why
+   *  nobody was (null: nothing heard here, or the document changed since). */
+  qtSentFor(doc: Pick<DealDoc, 'id' | 'amount' | 'docNo' | 'docDate' | 'name' | 'size'>): QtSent | null {
+    const o = this.qtSentAll()[doc.id];
+    return o && o.fp === qtFpKey(doc) ? o : null;
+  }
+  /** The latest outcome worth the bottom message after attaching or editing (SalesMessages shows it once). */
+  qtFresh: { id: string; n: number } | null = null;
+  /**
+   * A push reply: what the script did about the quotations the push carried (`qt`, see Code.gs "E-mail"). A
+   * script that says nothing (before this release) gets this browser's own word for a quotation that just entered
+   * the check: no notifications in the script, not set up, or its timer mails it within 10 minutes.
+   */
+  private heardQt(r: { qt?: unknown }, batch: SyncOp[]) {
+    const cfg = this.teamCfg, s = this.session;
+    if (!cfg || cfg.mode !== 'accounts' || !s) return;
+    const pushed = new Map(batch.filter((o) => o.k.startsWith('ddoc/') && !o.del && !!o.v && typeof o.v === 'object').map((o) => [o.k, o.v as DealDoc]));
+    if (!pushed.size) return;
+    const at = new Date().toISOString(), outs: QtSent[] = [];
+    if (Array.isArray(r.qt)) {
+      for (const x of r.qt) {
+        const p = parseQtOut(x), v = p && pushed.get(p.k);
+        if (p && v) outs.push({ ...p.o, fp: qtFpKey(v), at });
+      }
+    } else {
+      const live = this.notifyLive;
+      pushed.forEach((v, k) => {
+        const doc = this.sales.docs[k.slice(5)];
+        // only one that is news: confirmed in the last 2 days (as the script decides), as it is here now
+        const t = Date.parse(doc?.cAt || doc?.at || '') || 0;
+        if (!doc || qtFpKey(doc) !== qtFpKey(v) || Date.now() - t > 2 * DAY || !needsCheck(this.sales, doc, live?.since || '') || qtCheckOf(this.checks()[doc.id], doc).status !== 'wait') return;
+        outs.push({ id: doc.id, fp: qtFpKey(v), at, what: 'new', to: [], later: [], bell: [], skip: [], why: !live ? 'script' : !live.on ? 'off' : 'timer', local: true });
+      });
+    }
+    if (!outs.length) return;
+    const M = this.qtSentAll();
+    let fresh = '';
+    outs.forEach((o) => {
+      const was = M[o.id];
+      if (qtSentNews(was, o)) fresh = o.id;
+      // the same version pushed again (its Drive id, a stage note): whoever was told before stays told
+      M[o.id] = was && was.fp === o.fp ? { ...o, to: [...new Set([...was.to, ...o.to])], at: o.to.some((n) => !was.to.includes(n)) || o.why !== was.why ? o.at : was.at } : o;
+    });
+    // the newest 60 of the last 30 days
+    const cut = new Date(Date.now() - 30 * DAY).toISOString();
+    Object.keys(M)
+      .sort((a, b) => M[b].at.localeCompare(M[a].at))
+      .forEach((id, i) => (i >= 60 || M[id].at < cut) && delete M[id]);
+    prefs.set(PREF.qtSent, { key: this.qtSentM!.key, m: M });
+    if (fresh) this.qtFresh = { id: fresh, n: (this.qtFresh?.n || 0) + 1 };
+    this.emit();
+  }
+  /** Pull now, unless one ran in the last few seconds (the bell opened): a teammate's new quotation shows
+   *  without waiting for the next poll. */
+  teamPoke() {
+    if (!this.teamCfg || Date.now() - this.pokedAt < 5000) return;
+    this.pokedAt = Date.now();
+    this.teamSync();
+  }
+  private pokedAt = 0;
   /** This account's notification settings as the script last sent them (me.notify), else the defaults. */
   myNotify(): MyNotify {
     return this.session?.nf || myNotify0(this.can('set.users'));
@@ -5507,7 +5581,8 @@ export class GccEngine {
     this.hidden = new Set();
     this.others = [];
   }
-  /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */
+  /** Poll every 30 s while the page is visible, and right away on focus, when the tab is shown again, and on
+   *  reconnect (the bell also asks when it opens, teamPoke). */
   private startTeam(now = true) {
     this.stopTeam();
     this.teamTimer = setInterval(this.teamWake, 30000);
@@ -5515,6 +5590,7 @@ export class GccEngine {
       window.addEventListener('focus', this.teamWake);
       window.addEventListener('online', this.teamWake);
     }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.teamWake);
     if (now) this.teamSync();
   }
   private stopTeam() {
@@ -5526,6 +5602,7 @@ export class GccEngine {
       window.removeEventListener('focus', this.teamWake);
       window.removeEventListener('online', this.teamWake);
     }
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.teamWake);
   }
 
   // ---- details

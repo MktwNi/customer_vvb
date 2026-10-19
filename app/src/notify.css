@@ -21,6 +21,9 @@
 .nf-t{grid-column:1;font-size:var(--fs-body);font-weight:500;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nf-s{grid-column:1;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nf-r{grid-column:2;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-meta);color:var(--muted);white-space:nowrap}
+.nf-ir{display:flex;flex-direction:column;align-items:flex-start}
+.nf-s.wrap{white-space:normal;overflow:visible;overflow-wrap:anywhere}
+.nf-act{margin:-4px 0 6px 12px;padding:2px 0;font-size:var(--fs-sec)}
 .nf-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px;padding:10px 12px 6px;border-top:1px solid var(--divider);font-size:var(--fs-meta);color:var(--muted)}
 .nf-foot .lnk{font-size:var(--fs-sec);flex:none}
 .nf-empty{padding:18px 12px 20px;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
@@ -196,6 +199,25 @@
 .na-setup ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:var(--fs-body);color:var(--ink);line-height:1.6}
 .na-setup ol li::marker{color:var(--muted)}
 .na-dim{opacity:.5;pointer-events:none}
+/* why mail does not arrive (ผู้ใช้และสิทธิ์ › การแจ้งเตือน) */
+.na-dx{padding:16px 20px;display:flex;flex-direction:column;gap:10px}
+.na-dx-l{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.na-dx-l li{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding-left:18px}
+.na-dx-l li::before{content:'';position:absolute;left:2px;top:8px;width:8px;height:8px;border-radius:50%;background:var(--mark-future)}
+.na-dx-l li.bad::before,.na-dx-l li.warn::before{background:var(--mark-wait)}
+.na-dx-t{font-size:var(--fs-body);color:var(--ink);line-height:1.5}
+.na-dx-f{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.55}
+.na-dx-l .lnk{font-size:var(--fs-sec)}
+.na-dx-r{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--divider);padding-top:10px}
+.na-dx-h{font-size:var(--fs-sec);color:var(--ink-2)}
+.na-dx-r ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.na-dx-r li{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:var(--fs-sec);line-height:1.5;min-width:0}
+.na-dx-n{color:var(--ink);overflow-wrap:anywhere}
+.na-dx-w{color:var(--muted)}
+/* การแจ้งเตือนของฉัน: what keeps my mail from arriving */
+.ns-dx{list-style:none;margin:0;padding:10px 14px;border-radius:var(--r-inner);background:var(--neutral-bg);display:flex;flex-direction:column;gap:8px}
+.ns-dx li{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.ns-dx b{font-weight:500;color:var(--ink)}
 .na-un{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border-radius:var(--r-inner);background:var(--neutral-bg);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
 .na-un b{font-weight:500;color:var(--ink)}
 .na-un .lnk{font-size:var(--fs-sec);margin-top:2px}

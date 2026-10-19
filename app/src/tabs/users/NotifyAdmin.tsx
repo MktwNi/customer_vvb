@@ -2,9 +2,9 @@ import { useEffect, useId, useState } from 'react';
 import { useApp, useEngineVersion, useNarrow } from '../../state';
 import type { TeamDir, TeamUser } from '../../lib/engine';
 import { BUILTIN, can, resolveCaps, type CapSet } from '../../lib/caps';
-import { PRE_DAYS, parseMyNotify, unmatchedNames, wantsLine, type ApptRule, type LateRule, type NotifyCfg, type NotifyStatus } from '../../lib/notify';
+import { PRE_DAYS, docById, mailIssues, parseMyNotify, recentLine, recentQts, unmatchedNames, wantsLine, type ApptRule, type LateRule, type MailPerson, type NotifyCfg, type NotifyStatus } from '../../lib/notify';
 import { errText } from '../../lib/teamSync';
-import { fmtN, pad, todayISO } from '../../lib/format';
+import { dmTh, fmtN, localDay, pad, todayISO } from '../../lib/format';
 import { Notice, Segmented } from '../../components/ui';
 import { Select } from '../../components/Select';
 import { Check } from '../../components/Pop';
@@ -24,6 +24,8 @@ const hm = (iso: string) => {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? '' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+/** "10:42" today, else "12 ต.ค. 10:42". */
+const dayHm = (iso: string, today: string) => (localDay(iso) === today ? hm(iso) : `${dmTh(localDay(iso))} ${hm(iso)}`);
 /** The id of the form the page head's "บันทึก" submits (tabs/Users.tsx). */
 export const NA_FORM = 'na-form';
 
@@ -101,7 +103,14 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
     }
   };
   // st.on: the script's timer is there (setupNotify ran and nobody removed it); without it nothing is mailed
-  const word = !st ? null : !st.on ? ['wait', 'หยุดส่งอยู่'] : st.last && !st.last.ok ? ['wait', 'มีปัญหา'] : left != null && left <= 5 ? ['wait', 'ใกล้ครบโควตาวันนี้'] : ['', 'ทำงานอยู่'];
+  const word = !st ? null : !st.on ? ['wait', live?.now ? 'ตั้งเวลาหาย' : 'หยุดส่งอยู่'] : st.last && !st.last.ok ? ['wait', 'มีปัญหา'] : left != null && left <= 5 ? ['wait', 'ใกล้ครบโควตาวันนี้'] : ['', 'ทำงานอยู่'];
+  // why quotation mail may not arrive, each with its fix (lib/notify.ts mailIssues), and what happened lately
+  const people: MailPerson[] = users.map((u) => ({ u: u.u, name: u.name, caps: capsOf(u), em: u.em || '', ok: u.ok === 1 || u.ok === true, nf: wants(u) }));
+  const issues = dir ? mailIssues({ live, st, people, self: cfg.self }) : [];
+  const nameOf = (u: string) => dir?.users.find((x) => x.u === u)?.name || '';
+  const recent = st ? recentQts(st.recent, nameOf) : [];
+  const now = !!live?.now || !!st?.now;
+  const mailable = people.filter((p) => can(p.caps, 'qt.check') && can(p.caps, 'notify.mail') && p.em && p.ok && p.nf?.on.qt !== false).length;
 
   return (
     <form
@@ -129,11 +138,9 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
               {[
                 st?.from ? `ส่งจาก ${st.from} (บัญชี Google ที่เป็นเจ้าของสคริปต์ของทีม)` : 'ส่งจากบัญชี Google ที่เป็นเจ้าของสคริปต์ของทีม',
                 st?.last?.at ? `ตรวจรอบล่าสุด ${hm(st.last.at)}` : '',
-                'ตรวจทุก 10 นาที',
+                now ? 'ใบเสนอราคาใหม่ส่งทันทีที่แนบ อย่างอื่นตรวจทุก 10 นาที' : 'ตรวจทุก 10 นาที',
               ].filter(Boolean).join(' · ')}
             </small>
-            {st && !st.on && <small className="t-warn">ไม่พบตัวตั้งเวลาของสคริปต์ ให้เจ้าของสคริปต์เปิด Apps Script เลือกฟังก์ชัน “setupNotify” แล้วกด “Run” อีกครั้ง</small>}
-            {st?.last && !st.last.ok && st.last.err && <small className="t-warn">{st.last.err}</small>}
             {stErr && <small className="t-warn">{stErr}</small>}
             {!e.notifyCfg().site && <small>กด “บันทึก” ที่หน้านี้ 1 ครั้ง เพื่อให้อีเมลมีลิงก์และโลโก้ของเว็บนี้</small>}
           </div>
@@ -145,7 +152,48 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
           )}
           <button type="button" className="btn sm" disabled={busy} onClick={test}>ส่งอีเมลทดสอบถึงฉัน</button>
         </section>
-      ) : (
+      ) : null}
+      {on && dir && (
+        <section className="us-card na-dx" aria-labelledby={ids + 'dx'}>
+          <div className="na-st-h">
+            <b id={ids + 'dx'}>ทำไมอีเมลไม่มา</b>
+            <span className={'na-word' + (issues.some((i) => i.tone === 'bad' || i.tone === 'warn') ? ' wait' : '')}>
+              <i aria-hidden="true" />
+              {issues.some((i) => i.tone === 'bad') ? 'มีเรื่องต้องแก้' : issues.some((i) => i.tone === 'warn') ? 'ส่งได้ มีข้อควรรู้' : 'ไม่พบปัญหา'}
+            </span>
+          </div>
+          {issues.length ? (
+            <ul className="na-dx-l">
+              {issues.map((i) => (
+                <li key={i.k} className={i.tone}>
+                  <span className="na-dx-t">{i.text}</span>
+                  <span className="na-dx-f">{i.fix}</span>
+                  {(i.k === 'nochk' || i.k === 'solo') && <button type="button" className="lnk" onClick={onRoles}>ไปที่บทบาทและสิทธิ์</button>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="na-m">ผู้ตรวจ {mailable} คนรับอีเมลได้{now ? ' · ใบเสนอราคาใหม่ส่งถึงผู้ตรวจทันทีที่แนบหรือแก้' : ''} · คนที่แนบใบเองไม่ได้รับอีเมลของใบนั้น</span>
+          )}
+          {recent.length > 0 && (
+            <div className="na-dx-r">
+              <span className="na-dx-h">ใบเสนอราคาล่าสุด</span>
+              <ul>
+                {recent.map((q) => {
+                  const doc = docById(e.sales, q.doc), d = doc ? e.sales.deals[doc.deal] : undefined;
+                  return (
+                    <li key={q.doc}>
+                      <span className="na-dx-n">{doc ? `${doc.docNo || 'ใบเสนอราคา'}${d ? ' · ' + d.client : ''}` : 'ใบเสนอราคาที่ลบแล้ว'}</span>
+                      <span className="na-dx-w">{recentLine(q)}{q.at ? ` · ${dayHm(q.at, today)}` : ''}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+      {on ? null : (
         <section className="us-card na-setup" aria-label="ระบบส่งอีเมล">
           <div className="na-st-h">
             <b>ระบบส่งอีเมล</b>

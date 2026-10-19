@@ -89,7 +89,7 @@ export interface UIState {
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
  *  (components/SalesToast.tsx). */
-export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
+export interface ToastAct { label: string; act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify'; deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`) */ k?: string }
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin

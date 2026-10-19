@@ -22,8 +22,9 @@
  *
  * Public (no key or token):
  *   { action: 'hello' }                          -> { ok, app: 'gcc-team-sync', v: 4, files: true, mode, tid, it, notify }
- *     notify = { on: 1 | 0, since: 'yyyy-mm-dd' | '' }: on = setupNotify() has installed the e-mail trigger; since =
- *     the go-live day (quotations confirmed before it need no check). Scripts before this one send no notify.
+ *     notify = { on: 1 | 0, since: 'yyyy-mm-dd' | '', now: 1 | 0 }: on = setupNotify() has installed the e-mail trigger;
+ *     since = the go-live day (quotations confirmed before it need no check); now = a push mails a new quotation's
+ *     checkers itself (scripts before this one: no now). Scripts before notifications send no notify.
  *   { action: 'login', u, pk, rm }               -> { ok, tok, exp, me, mc }   (me: see "me" below)
  *   { action: 'claim', code, u, name?, pk, rm }  -> same as login (first admin, or admin recovery)
  *     pk = base64url, no padding, of PBKDF2-HMAC-SHA256(NFC(password), salt 'gcc-team|v1|' + tid + '|' + u,
@@ -53,7 +54,9 @@
  *                                                     roles, grants, reqs, audit }
  *   { action: 'user_save', tok, u, create?, name?, role?, on?, pk?, unlock?, kick?, em? } -> { ok, user, sent? }
  *     em: the account's notification address, stored unverified; the code goes to that address (as notify_me)
- *   { action: 'notify_status', tok }             -> { ok, on, since, last, quotaLeft, sentToday, triggers, every }
+ *   { action: 'notify_status', tok }             -> { ok, on, since, last, quotaLeft, sentToday, triggers, every, now, recent }
+ *     now: pushes mail new quotations themselves; recent: the last quotation mails and decisions, newest first
+ *     [{ at, doc, u, result }] (result 'sent' | 'retry' | 'error' | 'none:nochk' | 'none:nomail' | 'skipped-…' | 'checked')
  *   { action: 'role_save', tok, id?, n, d?, c?, from?, o? }  -> { ok, id, roles, grants, reqs }
  *     a `c` that does not name a capability of LATE_CAPS_ (view.exp, edit.exp) keeps what the role has there
  *     (a new role: what the `from` role has): builds before them cannot show them, so their save must not take
@@ -70,7 +73,8 @@
  *   { action: 'pull', key, since, limit?, xp? } -> { ok, seq, rows: Row[], more }
  *     xp: 1 = the build knows job expenses; without it a month-check row of an expense (dchk/<deal>/exp.<id>)
  *     comes as a deletion, since builds before expenses would list it as a cancelled income check.
- *   { action: 'push', key, ops: Op[] }          -> { ok, seq, n, rejected: string[] }   (+ denied: string[] with tok)
+ *   { action: 'push', key, ops: Op[] }          -> { ok, seq, n, rejected: string[] }   (+ denied: string[] and qt with tok:
+ *                                                 what the push did about the quotations it stored, see "E-mail" below)
  *   { action: 'upload', key, docId, name, mime, data }  -> { ok, fileId, size }   (data = base64)
  *   { action: 'file', key, fileId }             -> { ok, name, mime, size, data }
  *   { action: 'delfile', key, fileId }          -> { ok }   (moves the file to the owner's Drive trash)
@@ -95,6 +99,15 @@
  *   e-mail link (#go=qt&doc=<docId>&s=<exp>.<sig>.<u>): valid makes via 'mail', anything else 'app'.
  * E-mail: the time-driven notifyTick (installed by setupNotify) mails verified addresses only, never customers;
  *   the "notify" tab of this spreadsheet logs every mail (90 days) so nothing is sent twice.
+ *   A push that stores a quotation in the check (new, a revision, or its amount, number, date or file changed) mails
+ *   its checkers itself, right after saving and with the lock let go: at most QT_NOW_MAX mails, while the request has
+ *   taken less than QT_NOW_MS; the rest, and any that could not go, go with notifyTick (the same log: never twice).
+ *   Its reply then has qt: [{ id, k, fp, what: 'new'|'rev'|'edit', to: [names mailed, now or before], later: [names
+ *   notifyTick mails], bell: [checkers who see it in the web app's bell], skip: [{ n, r: 'role'|'noem'|'unverified'|
+ *   'off' }] (checkers who get no mail, and why), why }] per quotation; why = '' or the reason: 'nochk' (no other
+ *   checker), 'nomail' (no checker can get mail), 'file' (waits for its file to reach Drive), 'quota', 'timer'
+ *   (NOTIFY_NOW is '0': only notifyTick mails), 'old' (not news), 'bulk' (an import), 'err' (the mail failed: retried).
+ *   hello's notify has now: 1 when pushes mail this way (Script Property NOTIFY_NOW '0' turns it off).
  * Capabilities (CAPS_, the same catalogue as the web app's lib/caps.ts): what a key needs is in KEY_CAP
  * (default deny: an unknown prefix needs set.users, qchk/ is never pushed). A refused op is listed in
  * `denied` and never stored. push needs a write capability, upload and delfile docs.up (or edit.exp for an
@@ -202,6 +215,9 @@ const CODE6_TTL_MS = 15 * 60000; // the code that verifies an e-mail address
 const CODE6_TRIES = 5;
 const CODE6_PER_HOUR = 3;
 const NTICK_S = 330; // a run still going (Apps Script stops a run after 6 minutes)
+const QT_NOW_MAX = 3; // quotation mails a push sends itself right after saving (the rest go with notifyTick)
+const QT_NOW_MS = 6000; // … and only while the request has taken less than this (its reply waits for them)
+const CLAIM_MS = 15 * 60000; // a mail an execution claimed in the log and never reported is tried again after this
 const LIST_MAX = 20; // rows per list in a digest
 const MAIL_SENDER = 'GCC Sales Tracker';
 const EMAIL_RE = /^[^\s@<>()"',;:\\[\]]+@[^\s@<>()"',;:\\[\]]+\.[^\s@<>()"',;:\\[\]]+$/;
@@ -474,6 +490,7 @@ function doGet() {
 }
 
 function doPost(e) {
+  const t0 = Date.now(); // a push mails its quotations only while the request is young (qtNowSend_)
   let req;
   try {
     req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
@@ -521,7 +538,8 @@ function doPost(e) {
       case 'pull':
         return reply_(actor, pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL), actor, Number(req.xp) >= 1));
       case 'push':
-        return reply_(actor, push_(req.ops || [], actor));
+        // saved under the lock; a quotation's checkers are mailed after it is let go
+        return reply_(actor, qtNowSend_(push_(req.ops || [], actor), t0));
       // the three file actions stay together, right before default: teamFiles.test.ts cuts them out as
       // one block to build a script from before attachments
       case 'upload':
@@ -781,6 +799,7 @@ function push_(ops, actor) {
     const denied = [];
     const stored = {}; // keys this push stores
     const kept = {}; // each of them: 1 = a value, 0 = deleted (its last op in this push)
+    const got = {}; // deal/ and ddoc/ rows as this push stores them (the quotation mails read them): { seq, v, del }
     const shares = []; // dshare/<id> of the deals this push deletes
     for (let i = 0; i < list.length; i++) {
       const x = list[i], op = x.op, k = x.k, del = x.del, delR = x.delR;
@@ -812,6 +831,7 @@ function push_(ops, actor) {
       rows.push([String(seq), k, v, del ? '1' : '0', String(actor.legacy ? op.by || '' : actor.name).slice(0, 100), now]);
       stored[k] = 1;
       kept[k] = delR ? 0 : 1;
+      if (/^(deal|ddoc)\//.test(k) || k === 'scfg/notify.cfg') got[k] = { seq: seq, v: delR ? null : val, del: delR };
       if (caps && delR && k.indexOf('deal/') === 0) shares.push('dshare/' + k.slice(5));
     }
     // a deleted deal takes its revenue split along: an account without view.comm never received that
@@ -837,7 +857,26 @@ function push_(ops, actor) {
         rows.push([String(seq), k, '', '1', String(actor.name).slice(0, 100), now]);
       });
     }
+    // the quotations this push stores for the check: who to mail, read from the sheet as it is before these
+    // rows (an account's push only; notifyTick takes over whatever this leaves, and never sends twice)
+    let qn = null;
+    if (caps) {
+      try {
+        qn = qtNowPlan_(props, got, actor, Date.now());
+      } catch (err) {
+        qn = null; // the push itself must not fail for this
+      }
+    }
     appendRows_(props, rows, seq);
+    // the mails to send are claimed in the log under this same lock, so notifyTick (or another push of the same
+    // version) does not send them too; without the claim nothing is sent from here
+    if (qn && qn.log.length) {
+      try {
+        appendNotify_(qn.log);
+      } catch (err) {
+        qtNowDrop_(qn);
+      }
+    }
     // the team's notification settings changed: mails sent from a request (codes, tests) read them again
     if (stored['scfg/notify.cfg']) {
       try {
@@ -848,6 +887,7 @@ function push_(ops, actor) {
     }
     const out = { ok: true, seq: seq, n: rows.length, rejected: rejected };
     if (!actor.legacy) out.denied = denied;
+    if (qn) out._qn = qn; // taken off again by qtNowSend_ before the reply
     return out;
   });
 }
@@ -936,7 +976,8 @@ function notifyState_(A) {
 }
 
 function notifyOf_(p) {
-  return { on: p.NOTIFY_ON === '1' ? 1 : 0, since: DATE_RE.test(String(p.NOTIFY_SINCE || '')) ? p.NOTIFY_SINCE : '' };
+  const on = p.NOTIFY_ON === '1' ? 1 : 0;
+  return { on: on, since: DATE_RE.test(String(p.NOTIFY_SINCE || '')) ? p.NOTIFY_SINCE : '', now: on && p.NOTIFY_NOW !== '0' ? 1 : 0 };
 }
 
 /** Public: username + pk → a session token. A wrong password never takes the script lock or writes Properties. */
@@ -2695,9 +2736,19 @@ function notifyStatus_() {
     quota = null;
   }
   const today = today_();
-  const sentToday = notifyRows_().filter((r) => r.result === 'sent' && dayOf_(r.at) === today).length;
+  const rows = notifyRows_();
+  const sentToday = rows.filter((r) => r.result === 'sent' && dayOf_(r.at) === today).length;
   const nf = notifyOf_(p);
-  return { ok: true, on: nf.on && triggers ? 1 : 0, since: nf.since, last: objProp_(p.NOTIFY_LAST), quotaLeft: quota, sentToday: sentToday, triggers: triggers, every: NOTIFY_EVERY_MIN };
+  // what happened to the latest quotations (the admin page says why a checker got nothing); claims are in-flight
+  const recent = rows
+    .filter((r) => r.kind === 'qt' && r.result !== 'claim')
+    .slice(-40)
+    .reverse()
+    .map((r) => ({ at: r.at, doc: String(r.key.split(':')[1] || ''), u: r.u, result: r.result }));
+  return {
+    ok: true, on: nf.on && triggers ? 1 : 0, since: nf.since, last: objProp_(p.NOTIFY_LAST), quotaLeft: quota, sentToday: sentToday, triggers: triggers,
+    every: NOTIFY_EVERY_MIN, now: nf.now, recent: recent,
+  };
 }
 
 /**
@@ -3022,11 +3073,13 @@ function notifyRun_(now) {
     }
   }
   const logged = notifyRows_();
-  const seen = {};
-  logged.forEach((r) => (seen[r.key] = r.result));
-  pend.forEach((x) => (seen[String(x[2])] = String(x[4])));
+  const lg = seenOf_(logged, pend);
+  const seen = lg.seen;
   if (logged.length && logged[0].at < new Date(now - NOTIFY_KEEP_MS).toISOString()) trimNotify_(now);
-  const cursor = p.NOTIFY_SEQ == null || p.NOTIFY_SEQ === '' ? null : Number(p.NOTIFY_SEQ);
+  let cursor = p.NOTIFY_SEQ == null || p.NOTIFY_SEQ === '' ? null : Number(p.NOTIFY_SEQ);
+  // a quotation mail a push claimed and could not send (NOTIFY_REDO = its row): read again from that row
+  const redo = Number(p.NOTIFY_REDO || 0) || 0;
+  if (redo && cursor !== null && redo - 1 < cursor) cursor = redo - 1;
   const digests = mailable.filter((x) => x.nf.on.dg && ck.wd <= 5 && x.nf.t <= ck.hm && !has_(seen, 'dg:' + x.u + ':' + ck.today));
   const pres = mailable.filter((x) => x.nf.on.pre && x.caps['view.plan']);
   const preWho = pres.map((x) => x.u).sort().join(',');
@@ -3036,13 +3089,13 @@ function notifyRun_(now) {
   if (cursor !== null && curSeq_() <= cursor && !digests.length && !preDue && !reqs.length) return saveLast_(props, last);
   // read under the lock (only new rows, unless something needs the whole picture), then let go of it
   const snap = withLock_(() => readNew_(cursor === null ? Infinity : cursor, digests.length + reqs.length > 0 || preDue, pres.length > 0));
-  const c = { A: A, ck: ck, people: people, seen: seen, out: [], logs: [], hold: Infinity, L: null, S: null, cfg: notifyCfg_(null) };
+  const c = { A: A, ck: ck, people: people, seen: seen, seenAt: lg.seenAt, out: [], logs: [], hold: Infinity, L: null, S: null, cfg: notifyCfg_(null) };
   if (snap.all) {
     c.L = latestMap_(snap.all);
     c.S = salesOf_(snap.all);
     c.cfg = notifyCfg_(rowVal_(c.L['scfg/notify.cfg']));
     putCache_('NCFG', JSON.stringify(c.cfg), 3600);
-    qtMails_(c, snap.rows);
+    qtMails_(c, snap.rows, snap.all);
     resultMails_(c, snap.rows);
     c.waiting = waitingQts_(c);
     c.dealList = Object.keys(c.S.deals).sort().map((id) => c.S.deals[id]);
@@ -3058,14 +3111,37 @@ function notifyRun_(now) {
     });
     preMails_(c, pres);
   }
+  // the quotation mails are claimed in the log first: a push may be mailing the same version right now (a
+  // mail it took care of meanwhile is dropped here). With the lock busy they wait for the next run.
+  const qts = c.out.filter((x) => x.kind === 'qt');
+  if (qts.length) {
+    try {
+      withLock_(() => {
+        const again = seenOf_(notifyRows_(), pend);
+        const now2 = { seen: again.seen, seenAt: again.seenAt, ck: ck };
+        c.out = c.out.filter((x) => {
+          if (x.kind !== 'qt' || !doneIn_(now2, x.key)) return true;
+          if (again.seen[x.key] === 'claim') c.hold = Math.min(c.hold, x.seq); // claimed meanwhile: looked at again later
+          return false;
+        });
+        appendNotify_(c.out.filter((x) => x.kind === 'qt').map((x) => [x.kind, x.u, x.key, x.fp, 'claim']));
+      });
+    } catch (err) {
+      if (!(err && err.busy)) throw err;
+      c.out = c.out.filter((x) => x.kind !== 'qt');
+      qts.forEach((x) => (c.hold = Math.min(c.hold, x.seq)));
+      last.err = 'busy';
+    }
+  }
   // send: the lock is not held here
   c.out.forEach((x) => {
     const err = sendMail_(x.m, x.keep);
     if (err === 'no_quota') {
-      // tried again on the next run (a quotation's row is read again from where it is)
+      // tried again on the next run (a quotation's row is read again from where it is, its claim let go)
       last.deferred++;
       last.err = 'quota';
       if (x.seq) c.hold = Math.min(c.hold, x.seq);
+      if (x.kind === 'qt') c.logs.push([x.kind, x.u, x.key, x.fp, 'retry']);
       return;
     }
     if (err) last.err = err;
@@ -3095,6 +3171,8 @@ function notifyRun_(now) {
   }
   const next = c.hold < Infinity ? c.hold - 1 : snap.seq;
   if (next !== cursor) props.setProperty('NOTIFY_SEQ', String(next));
+  // read again as asked (a later push's request, set meanwhile, stays for the next run)
+  if (redo && Number(props.getProperty('NOTIFY_REDO') || 0) === redo) props.deleteProperty('NOTIFY_REDO');
   if (last.err && last.err !== 'quota' && last.err !== 'busy') last.ok = 0;
   return saveLast_(props, last);
 }
@@ -3232,11 +3310,12 @@ function personOf_(c, name) {
 }
 
 /**
- * New quotations in the rows read: each needing a check (qtNeeds_) and not checked yet goes to every checker
- * once per version (fingerprint). A row waits for its file to reach Drive, up to 30 minutes; one confirmed
- * more than 48 hours ago, or more than 20 at once (an import, a first upload), is logged and not mailed.
+ * New quotations in the rows read (all = every row, in seq order): each needing a check (qtNeeds_) and not
+ * checked yet goes to every checker once per version (fingerprint) that a push has not mailed already. A row
+ * waits for its file to reach Drive, up to 30 minutes; one that is not news (qtNews_), or more than 20 at once (an
+ * import, a first upload), is logged and not mailed; one with no checker to mail is logged with why ('none').
  */
-function qtMails_(c, rows) {
+function qtMails_(c, rows, all) {
   const since = c.A.nf ? c.A.nf.since : '';
   const cands = [];
   rows.forEach((r) => {
@@ -3255,8 +3334,11 @@ function qtMails_(c, rows) {
       c.logs.push(['qt', '', dk, fph, 'checked']);
       return;
     }
-    const t = Math.max(Date.parse(doc.cAt || '') || 0, Date.parse(doc.at || '') || 0);
-    if (!(c.ck.now - t <= NOTIFY_OLD_MS)) {
+    // what it is to its checkers: the record before this row, a record the same push deleted (another file), the
+    // deal's other versions
+    const gone = rows.filter((x) => x.del && x.at === r.at && x.k.indexOf('ddoc/' + doc.deal + '/') === 0).map((x) => toDoc_(valBefore_(all, x.k, x.seq), doc.deal, docIdOf_(x.k)));
+    const prev = qtPrev_(doc, toDoc_(valBefore_(all, r.k, r.seq), doc.deal, doc.id), gone, (c.S.docsBy[doc.deal] || []));
+    if (!qtNews_(c, doc, deal, prev)) {
       c.logs.push(['qt', '', dk, fph, 'skipped-old']);
       return;
     }
@@ -3264,18 +3346,280 @@ function qtMails_(c, rows) {
       c.hold = Math.min(c.hold, r.seq);
       return;
     }
-    const all = checkersOf_(c, doc, cur.by);
-    const to = all.filter((x) => !has_(c.seen, dk + ':' + x.u));
-    if (to.length) cands.push({ doc: doc, deal: deal, fph: fph, dk: dk, all: all, to: to, seq: r.seq });
+    const mailed = checkersOf_(c, doc, cur.by);
+    const to = mailed.filter((x) => !doneIn_(c, dk + ':' + x.u));
+    // one going out from another execution right now: looked at again on a later run (in case it never reports)
+    if (mailed.some((x) => c.seen[dk + ':' + x.u] === 'claim')) c.hold = Math.min(c.hold, r.seq);
+    const none = mailed.length ? '' : bellOf_(c, doc, cur.by).length ? 'nomail' : 'nochk';
+    if (to.length || none) cands.push({ doc: doc, deal: deal, fph: fph, dk: dk, all: mailed, to: to, seq: r.seq, what: prev.what, prev: prev.doc, by: cur.by, at: r.at, none: none });
   });
   if (cands.length > NOTIFY_BULK) {
     cands.forEach((q) => c.logs.push(['qt', '', q.dk, q.fph, 'skipped-bulk']));
     return;
   }
   cands.forEach((q) => {
+    // nobody to mail: said once in the log, where the admin page finds why
+    if (q.none) return void (!has_(c.seen, q.dk + ':none') && c.logs.push(['qt', '', q.dk + ':none', q.fph, 'none:' + q.none]));
     const att = personOf_(c, q.doc.by);
     q.to.forEach((x) => c.out.push({ kind: 'qt', u: x.u, key: q.dk + ':' + x.u, fp: q.fph, seq: q.seq, keep: 0, m: qtMail_(c, q, x, att) }));
   });
+}
+
+/** Key k's value just before row `seq`, from rows in seq order; null when it was deleted or had none. */
+function valBefore_(all, k, seq) {
+  for (let i = all.length - 1; i >= 0; i--) if (all[i].k === k && all[i].seq < seq) return all[i].del ? null : all[i].v;
+  return null;
+}
+
+/**
+ * What a quotation is to its checkers: an edit of one they know ('edit': the same record before with other
+ * figures, b; or the record that another file replaced, "เปลี่ยนไฟล์": deleted by the same change, gone, with the
+ * same attach and confirm times), a revision ('rev': with the newest earlier version of the deal's quotation among
+ * vers), or 'new'. { what, doc: the one before, or null }.
+ */
+function qtPrev_(doc, b, gone, vers) {
+  if (b && !fpSame_(fpOf_(b), fpOf_(doc))) return { what: 'edit', doc: b };
+  for (let i = 0; i < gone.length; i++) {
+    const g = gone[i];
+    if (g && g.id !== doc.id && g.kind === 'quotation' && g.at === doc.at && (g.cAt || '') === (doc.cAt || '')) return { what: 'edit', doc: g };
+  }
+  const older = vers
+    .filter((v) => v && v.id !== doc.id && v.kind === 'quotation' && v.stage === QUOTE_STAGE && (v.at || '') < (doc.at || ''))
+    .sort((x, y) => (x.at || '').localeCompare(y.at || ''));
+  return older.length ? { what: 'rev', doc: older[older.length - 1] } : { what: 'new', doc: null };
+}
+
+/** News to the checkers: confirmed within 48 hours, or an edit of a quotation that was in the check (they hear
+ *  again whenever it changes); a device that was offline for days and syncs an old one now is not. */
+function qtNews_(c, doc, deal, prev) {
+  const t = Math.max(Date.parse(doc.cAt || '') || 0, Date.parse(doc.at || '') || 0);
+  if (c.ck.now - t <= NOTIFY_OLD_MS) return true;
+  return prev.what === 'edit' && qtNeeds_(prev.doc, deal, c.A.nf ? c.A.nf.since : '');
+}
+
+/** What an edit changed, in words: "ยอด จาก 101,650 เป็น 95,000 บาท", "เลขที่ จาก … เป็น …", "ลงวันที่ …", "ไฟล์ใหม่ …". */
+function qtChanges_(a, b) {
+  const out = [];
+  const x = a.amount == null ? null : Number(a.amount), y = b.amount == null ? null : Number(b.amount);
+  if (x === null || y === null ? x !== y : Math.abs(x - y) >= 0.005) out.push('ยอด จาก ' + (x == null ? '—' : baht_(x)) + ' เป็น ' + (y == null ? '—' : baht_(y)) + ' บาท');
+  if (String(a.docNo || '') !== String(b.docNo || '')) out.push('เลขที่ จาก ' + (a.docNo || '—') + ' เป็น ' + (b.docNo || '—'));
+  if (String(a.docDate || '') !== String(b.docDate || '')) out.push('ลงวันที่ จาก ' + (thDay_(a.docDate, { y: 1 }) || '—') + ' เป็น ' + (thDay_(b.docDate, { y: 1 }) || '—'));
+  if (a.name + '|' + a.size !== b.name + '|' + b.size) out.push('ไฟล์ใหม่ ' + b.name);
+  return out;
+}
+
+/** Active checkers who see the quotation in the web app's bell (the holders of qt.check who see the tracker),
+ *  mailed or not: never whoever attached it, nor whoever wrote it last unless the team allows it. */
+function bellOf_(c, doc, lastBy) {
+  return c.people.filter((x) => x.caps['qt.check'] && x.caps['view.sales'] && !sameName_(x.n, doc.by) && (c.cfg.self || !sameName_(x.n, lastBy)));
+}
+
+/** Why a checker gets no quotation mail: 'role' (no notify.mail), 'noem' (no address), 'unverified', 'off'
+ *  (turned those mails off); '' = they get it. */
+function mailWhy_(x) {
+  if (!x.caps['notify.mail']) return 'role';
+  if (!x.nf.em) return 'noem';
+  if (!x.nf.ok) return 'unverified';
+  return x.nf.on.qt ? '' : 'off';
+}
+
+/** The log as it stands: each key's last result and when it was written (rows waiting in NOTIFY_PEND count). */
+function seenOf_(logged, pend) {
+  const seen = {}, seenAt = {};
+  logged.forEach((r) => {
+    seen[r.key] = r.result;
+    seenAt[r.key] = r.at;
+  });
+  pend.forEach((x) => {
+    seen[String(x[2])] = String(x[4]);
+    seenAt[String(x[2])] = '';
+  });
+  return { seen: seen, seenAt: seenAt };
+}
+
+/**
+ * Whether the log has taken care of key k: sent, or decided. A push's mail that did not go ('retry') has not; a
+ * 'claim' (another execution sending it right now) has while it is fresh, not once it is CLAIM_MS old.
+ */
+function doneIn_(c, k) {
+  if (!has_(c.seen, k)) return false;
+  const r = c.seen[k];
+  if (r === 'retry') return false;
+  if (r === 'claim') return c.ck.now - (Date.parse(c.seenAt[k]) || 0) < CLAIM_MS;
+  return true;
+}
+
+// ---- a push mails its quotations itself (see "E-mail" at the top)
+
+function qtOut0_(id, k, fp, what, why) {
+  return { id: id, k: k, fp: fp, what: what, to: [], later: [], bell: [], skip: [], why: why };
+}
+
+/**
+ * The quotations a push stores that their checkers hear about now (push_, under the lock, before its rows are
+ * added; got = its deal/ and ddoc/ rows). For each one in the check (qtNeeds_) and waiting: who is mailed, who
+ * sees it only in the bell, and why nobody is mailed. Up to QT_NOW_MAX mails are claimed (log rows that push_
+ * appends under the same lock) for qtNowSend_ to send once the lock is let go; a quotation nobody can be mailed
+ * about gets a 'none' row (the admin page says why). null: no quotation, or notifications not set up.
+ */
+function qtNowPlan_(props, got, actor, now) {
+  const keys = Object.keys(got).filter((k) => {
+    const g = got[k], v = g.v;
+    return !g.del && !!docIdOf_(k) && !!v && typeof v === 'object' && v.kind === 'quotation' && v.target === 'forecast' && pNum_(v.amount) != null && v.stage === QUOTE_STAGE;
+  });
+  if (!keys.length) return null;
+  const p = props.getProperties();
+  const db = usersOf_(p);
+  if (p.NOTIFY_ON !== '1' || !hasUsers_(db)) return null;
+  const A = dirOf_(db, p);
+  const qn = { out: [], log: [], send: [], c: null };
+  keys.sort((a, b) => got[a].seq - got[b].seq);
+  // an import, or a first upload: notifyTick logs it, and nobody is mailed
+  if (keys.length > NOTIFY_BULK) {
+    keys.forEach((k) => qn.out.push(qtOut0_(docIdOf_(k), k, '', 'new', 'bulk')));
+    return qn;
+  }
+  const deals = {}, ids = {};
+  keys.forEach((k) => {
+    deals[dealOf_(k)] = 1;
+    ids[docIdOf_(k)] = 1;
+  });
+  // the sheet before this push (those deals with every document of theirs, the checks, the team's rules), then after
+  const want = (k) => k === 'scfg/notify.cfg' || (k.indexOf('deal/') === 0 && has_(deals, k.slice(5))) || (k.indexOf('ddoc/') === 0 && has_(deals, dealOf_(k))) || (k.indexOf('qchk/') === 0 && has_(ids, k.slice(5)));
+  const L0 = latestOf_(want);
+  const L = Object.assign({}, L0);
+  const at = new Date(now).toISOString(), name = String(actor.name).slice(0, 100);
+  Object.keys(got).forEach((k) => {
+    if (want(k)) L[k] = { seq: got[k].seq, k: k, v: got[k].v, del: got[k].del, by: name, at: at };
+  });
+  const lg = seenOf_(notifyRows_(), pendOf_(p));
+  const c = { A: A, ck: clockOf_(now), people: peopleOf_(A), seen: lg.seen, seenAt: lg.seenAt, cfg: notifyCfg_(rowVal_(L['scfg/notify.cfg'])), L: L, S: { deals: {} } };
+  qn.c = c;
+  Object.keys(deals).forEach((id) => {
+    const d = toDeal_(rowVal_(L['deal/' + id]), id);
+    if (d) c.S.deals[id] = d;
+  });
+  const since = A.nf.since;
+  const gone = Object.keys(got).filter((k) => got[k].del && docIdOf_(k)).map((k) => toDoc_(rowVal_(L0[k]), dealOf_(k), docIdOf_(k)));
+  // what may go now: the day's quota (a quotation may use all of it: the reserve is kept for it) and this
+  // request's share; NOTIFY_NOW '0' leaves every mail to notifyTick
+  let left = null;
+  try {
+    left = MailApp.getRemainingDailyQuota();
+  } catch (err) {
+    left = null;
+  }
+  const off = p.NOTIFY_NOW === '0';
+  let budget = off || left == null ? 0 : Math.max(0, Math.min(QT_NOW_MAX, left));
+  keys.forEach((k) => {
+    const doc = toDoc_(got[k].v, dealOf_(k), docIdOf_(k));
+    const deal = c.S.deals[doc.deal];
+    if (!qtNeeds_(doc, deal, since) || checkOf_(L, doc) !== 'wait') return;
+    const fph = fpHash_(fpOf_(doc)), dk = 'qt:' + doc.id + ':' + fph;
+    const vers = Object.keys(L).filter((x) => x !== k && x.indexOf('ddoc/' + doc.deal + '/') === 0).map((x) => toDoc_(rowVal_(L[x]), doc.deal, docIdOf_(x)));
+    const prev = qtPrev_(doc, toDoc_(rowVal_(L0[k]), doc.deal, doc.id), gone, vers);
+    const o = qtOut0_(doc.id, k, fph, prev.what, '');
+    qn.out.push(o);
+    const dec = has_(c.seen, dk) ? String(c.seen[dk]) : '';
+    if (dec === 'skipped-bulk') return void (o.why = 'bulk');
+    if (dec === 'skipped-old' || !qtNews_(c, doc, deal, prev)) return void (o.why = 'old');
+    const bell = bellOf_(c, doc, name);
+    o.bell = bell.map((x) => x.n);
+    o.skip = bell.filter((x) => mailWhy_(x)).map((x) => ({ n: x.n, r: mailWhy_(x) }));
+    const mailed = checkersOf_(c, doc, name);
+    if (!mailed.length) {
+      o.why = bell.length ? 'nomail' : 'nochk';
+      if (!has_(c.seen, dk + ':none')) qn.log.push(['qt', '', dk + ':none', fph, 'none:' + o.why]);
+      return;
+    }
+    const q = { doc: doc, deal: deal, fph: fph, all: mailed, what: prev.what, prev: prev.doc, by: name, at: at };
+    mailed.forEach((x) => {
+      const key = dk + ':' + x.u;
+      if (doneIn_(c, key)) return void o.to.push(x.n); // mailed already (this version, an earlier push), or going out now
+      // the file first: the checker compares the figures with it (the push that brings its Drive id mails)
+      if (!doc.fileId || off || left == null || left <= 0 || budget <= 0) {
+        o.later.push(x.n);
+        if (!o.why) o.why = !doc.fileId ? 'file' : off ? 'timer' : left == null ? 'err' : left <= 0 ? 'quota' : '';
+        return;
+      }
+      budget--;
+      qn.log.push(['qt', x.u, key, fph, 'claim']);
+      qn.send.push({ o: o, x: x, key: key, fph: fph, seq: got[k].seq, q: q });
+    });
+  });
+  return qn.out.length ? qn : null;
+}
+
+/** The claims could not be written: nothing is sent from this request (notifyTick sends it). */
+function qtNowDrop_(qn) {
+  qn.send.forEach((s) => s.o.later.push(s.x.n));
+  qn.send = [];
+  qn.log = [];
+}
+
+/**
+ * After push_ let go of the lock: send the mails it claimed while the request is younger than QT_NOW_MS, log each
+ * ('sent', or 'retry' for one that did not go: notifyTick sends it, NOTIFY_REDO taking its run back to that row),
+ * and put qt (see the protocol at the top) on the reply. Nothing here turns the saved push into an error.
+ */
+function qtNowSend_(out, t0) {
+  const qn = out && out._qn;
+  if (!qn) return out;
+  delete out._qn;
+  try {
+    const logs = [];
+    let redo = 0;
+    qn.send.forEach((s) => {
+      let err = Date.now() - t0 > QT_NOW_MS ? 'late' : '';
+      if (!err) {
+        try {
+          err = sendMail_(qtMail_(qn.c, s.q, s.x, personOf_(qn.c, s.q.doc.by)), 0);
+        } catch (e) {
+          err = 'mail_failed';
+        }
+      }
+      if (!err) {
+        s.o.to.push(s.x.n);
+        logs.push(['qt', s.x.u, s.key, s.fph, 'sent']);
+        return;
+      }
+      s.o.later.push(s.x.n);
+      if (!s.o.why && err !== 'late') s.o.why = err === 'no_quota' ? 'quota' : 'err';
+      logs.push(['qt', s.x.u, s.key, s.fph, 'retry']);
+      redo = redo ? Math.min(redo, s.seq) : s.seq;
+    });
+    if (logs.length) qtNowLog_(logs, redo);
+  } catch (err) {
+    // what went out is logged (or waits in NOTIFY_PEND); a claim left behind is notifyTick's after CLAIM_MS
+  }
+  out.qt = qn.out.map((o) => ({ id: o.id, k: o.k, fp: o.fp, what: o.what, to: o.to, later: o.later, bell: o.bell, skip: o.skip, why: o.why }));
+  return out;
+}
+
+/**
+ * A push's mail results into the log, waiting for the lock only briefly (the reply waits): with the lock busy they
+ * go to NOTIFY_PEND, which notifyTick reads as written. redo = the earliest row notifyTick must read again.
+ */
+function qtNowLog_(logs, redo) {
+  const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  if (lock.tryLock(3000)) {
+    try {
+      appendNotify_(logs);
+      if (redo) qtRedo_(props, redo);
+      SpreadsheetApp.flush();
+      return;
+    } finally {
+      lock.releaseLock();
+    }
+  }
+  savePend_(props, pendOf_(props.getProperties()).concat(logs));
+  if (redo) qtRedo_(props, redo);
+}
+
+function qtRedo_(props, seq) {
+  const cur = Number(props.getProperty('NOTIFY_REDO') || 0);
+  if (!cur || seq < cur) props.setProperty('NOTIFY_REDO', String(seq));
 }
 
 /** The latest live ddoc/<deal>/<docId> of a document id: { k, row, doc }, or null. */
@@ -3787,10 +4131,20 @@ function msg_(cfg, to, subject, html, text, replyTo) {
   return m;
 }
 
-/** "ใบเสนอราคาใหม่รอตรวจ" to one checker (screen 01): its button opens the check in the web app. */
+/**
+ * "ใบเสนอราคาใหม่รอตรวจ" to one checker (screen 01): its button opens the check in the web app. A revision says
+ * "ใบเสนอราคาฉบับแก้ไขรอตรวจ" and the version it replaces; an edit "ใบเสนอราคาแก้ไขรอตรวจ" and what changed
+ * (q.what / q.prev from qtPrev_, q.by / q.at: who wrote the row and when).
+ */
 function qtMail_(c, q, x, att) {
   const doc = q.doc, cfg = c.cfg;
   const amt = baht_(doc.amount) + ' บาท', no = doc.docNo || doc.name, client = q.deal.client;
+  const edit = q.what === 'edit' && !!q.prev, rev = q.what === 'rev' && !!q.prev;
+  const kick = edit ? 'ใบเสนอราคาแก้ไขรอตรวจ' : rev ? 'ใบเสนอราคาฉบับแก้ไขรอตรวจ' : 'ใบเสนอราคาใหม่รอตรวจ';
+  const changed = edit ? qtChanges_(q.prev, doc) : [];
+  const what = edit ? (changed.length ? 'แก้' + changed.join(' · ') : '') : rev ? 'แทนฉบับเดิม ' + (q.prev.docNo || q.prev.name) + (q.prev.amount != null ? ' · ' + baht_(q.prev.amount) + ' บาท' : '') : '';
+  const editor = edit && q.by ? q.by : doc.by;
+  const who = edit ? editor + ' แก้เมื่อ ' + thAt_(q.at || doc.cAt || doc.at) + (sameName_(editor, doc.by) ? '' : ' · แนบโดย ' + doc.by) : doc.by + ' แนบเมื่อ ' + thAt_(doc.cAt || doc.at);
   const href = go_(cfg, 'go=qt&doc=' + encodeURIComponent(doc.id) + '&s=' + linkS_(c.A.sec, x.u, doc.id, q.fph, c.ck.now));
   const others = q.all.filter((y) => y.u !== x.u).map((y) => y.n);
   const kept = doc.kept && doc.detected != null && Math.abs(doc.amount - doc.detected) >= 0.005;
@@ -3803,15 +4157,16 @@ function qtMail_(c, q, x, att) {
     mValue_('ยอด' + (BASIS_TH[doc.basis] ? ' (' + BASIS_TH[doc.basis] + ')' : ''), amt, 'นับเป็น Forecast ของงานนี้', MC.ink2, true) +
     '</table>';
   const body =
-    mHead_('ใบเสนอราคาใหม่รอตรวจ', client, [esc_(no + ' · ' + amt) + (BASIS_TH[doc.basis] ? ' <span style="font-size:13px;color:' + MC.ink2 + '">' + esc_(BASIS_TH[doc.basis]) + '</span>' : ''), esc_(doc.by + ' แนบเมื่อ ' + thAt_(doc.cAt || doc.at))]) +
+    mHead_(kick, client, [esc_(no + ' · ' + amt) + (BASIS_TH[doc.basis] ? ' <span style="font-size:13px;color:' + MC.ink2 + '">' + esc_(BASIS_TH[doc.basis]) + '</span>' : '')].concat(what ? [esc_(what)] : [], [esc_(who)])) +
     mBtnRow_('ตรวจและอนุมัติ', href) +
     mPara_(href ? 'ปุ่มนี้เปิดเว็บ (ต้องเข้าสู่ระบบ) ให้ดูไฟล์คู่กับตัวเลข แล้วกด “ข้อมูลถูกต้อง อนุมัติ” หรือ “ส่งกลับแก้ไข”' : 'เปิดเว็บ Sales Tracker แล้วกด “ตรวจใบนี้” ที่ใบเสนอราคาของงานนี้') +
     mPanel_('ค่าที่บันทึกไว้กับไฟล์ ' + doc.name, values);
   const foot = esc_('ส่งถึง ' + x.n + ' เพราะบัญชีนี้มีสิทธิ์ตรวจใบเสนอราคา' + (others.length ? ' · ส่งให้ ' + others.join(', ') + ' ด้วย คนใดคนหนึ่งตรวจก็พอ' : '')) + '<br>' +
     (att && att.nf.ok ? esc_('ตอบกลับอีเมลนี้จะถึง ' + att.n) + ' · ' : '') + mSettings_(cfg);
-  const html = mShell_(cfg, doc.by + ' แนบ ' + no + ' ของ ' + client + ' ' + amt + ' รอตรวจ', 'Sales Tracker · ใบเสนอราคารอตรวจ', body, foot);
-  const text = ['ใบเสนอราคาใหม่รอตรวจ', client, no + ' · ' + amt, doc.by + ' แนบเมื่อ ' + thAt_(doc.cAt || doc.at), '', href ? 'ตรวจและอนุมัติ: ' + href : 'ตรวจได้ในเว็บ Sales Tracker', '(ต้องเข้าสู่ระบบ ลิงก์นี้ไม่อนุมัติอะไรเอง)'].join('\n');
-  return msg_(cfg, x.nf.em, 'ใบเสนอราคาใหม่รอตรวจ: ' + client + ' · ' + no + ' · ' + amt, html, text, att && att.nf.ok ? att.nf.em : '');
+  const pre = (edit ? editor + ' แก้ ' : doc.by + ' แนบ ') + no + ' ของ ' + client + ' ' + amt + ' รอตรวจ';
+  const html = mShell_(cfg, pre, 'Sales Tracker · ใบเสนอราคารอตรวจ', body, foot);
+  const text = [kick, client, no + ' · ' + amt].concat(what ? [what] : [], [who, '', href ? 'ตรวจและอนุมัติ: ' + href : 'ตรวจได้ในเว็บ Sales Tracker', '(ต้องเข้าสู่ระบบ ลิงก์นี้ไม่อนุมัติอะไรเอง)']).join('\n');
+  return msg_(cfg, x.nf.em, kick + ': ' + client + ' · ' + no + ' · ' + amt, html, text, att && att.nf.ok ? att.nf.em : '');
 }
 
 /** The check's result to whoever attached the quotation. */

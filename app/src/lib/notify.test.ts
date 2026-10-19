@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { emptySales, newDeal, toPay, type Deal, type DealDoc, type SalesState } from './sales';
 import {
-  bellEmpty, bellItems, checkedLine, dayTh, docById, fpOf, needsCheck, parseGo, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, sameFp,
-  toQtCheck, unmatchedNames, waitingChecks, wantsLine, whenTh, NOTIFY_CFG0, type BellIn, type QtCheck,
+  bellEmpty, bellItems, checkedLine, dayTh, docById, fpOf, mailIssues, myMailIssues, myNotify0, nameList, needsCheck, parseGo, parseMyNotify, parseNotifyCfg, parseNotifyFlag,
+  parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtSentNews, qtSentView, recentLine, recentQts, sameFp, toQtCheck, unmatchedNames, waitShort, waitingChecks, wantsLine, whenTh,
+  NOTIFY_CFG0, type BellIn, type MailPerson, type NotifyStatus, type QtCheck, type QtSent,
 } from './notify';
 import { applyRow, localRecords, noEffects, parseMe, type SharedState } from './teamSync';
 import { BUILTIN, type CapSet } from './caps';
@@ -183,9 +184,11 @@ describe('the bell', () => {
   it('a checker (team scope): รอตรวจ newest first without their own, งวดเงิน late and due soon, นัดหมาย late first; the count', () => {
     const { base } = team();
     const r = bellItems(base);
-    expect(r.groups.map((g) => [g.kind, g.title, g.n])).toEqual([['chk', 'รอตรวจ', 2], ['pay', 'งวดเงิน', 2], ['appt', 'นัดหมาย', 3]]);
+    expect(r.groups.map((g) => [g.kind, g.title, g.n])).toEqual([['chk', 'รอตรวจ', 2], ['mine', 'ใบเสนอราคาของฉัน', 0], ['pay', 'งวดเงิน', 2], ['appt', 'นัดหมาย', 3]]);
     expect(r.count).toBe(7);
-    const [chk, pay, appt] = r.groups;
+    const [chk, own, pay, appt] = r.groups;
+    // their own (q4) waits for another checker: shown, not counted (nothing heard about it in this browser)
+    expect(own.rows).toMatchObject([{ key: 'w:q4', sub: 'QT-q4 · รอผู้ตรวจ', right: { text: 'รอตรวจ', chip: '' }, count: false, go: { deal: 'dE', doc: 'q4' } }]);
     expect(chk.rows.map((x) => x.go)).toEqual([{ deal: 'dA', doc: 'q1' }, { deal: 'dB', doc: 'q2' }]);
     expect(chk.rows[0]).toMatchObject({ title: 'บริษัท ดูราฟลอร์ จำกัด', sub: 'QT-q1 · 101,650 บาท · เอก แนบ' });
     expect(chk.rows[0].right.text).toMatch(/^วันนี้ \d\d:\d\d$/);
@@ -231,8 +234,10 @@ describe('the bell', () => {
   it('มกร: own appointments; nothing at all says so with no groups', () => {
     const { base } = team();
     const r = bellItems({ ...base, me: 'มกร', caps: SALES, scope: 'mine' });
-    expect(r.groups.map((g) => g.kind)).toEqual(['pay', 'appt']);
-    expect(r.groups[1].rows.map((x) => x.title)).toEqual(['ฝาจีบ']);
+    expect(r.groups.map((g) => g.kind)).toEqual(['mine', 'pay', 'appt']);
+    // q2, sent back and corrected since: waiting again
+    expect(r.groups[0].rows.map((x) => [x.key, x.sub, x.count])).toEqual([['w:q2', 'QT-2569-020 · แก้แล้ว รอตรวจอีกครั้ง', false]]);
+    expect(r.groups[2].rows.map((x) => x.title)).toEqual(['ฝาจีบ']);
     const empty = bellItems({ ...base, me: 'ใครสักคน', caps: SALES, scope: 'mine' });
     expect(empty).toEqual({ groups: [], count: 0 });
   });
@@ -247,8 +252,9 @@ describe('the bell', () => {
   it('what a role may see: no ดูยอดเงิน, no instalments; no แผนติดต่อ, no appointments; not a checker, nothing to check', () => {
     const { base } = team();
     expect(bellItems({ ...base, caps: { ...VIEWER, 'view.money': undefined } }).groups.map((g) => g.kind)).toEqual(['appt']);
-    expect(bellItems({ ...base, caps: { ...ADMIN, 'view.plan': undefined } }).groups.map((g) => g.kind)).toEqual(['chk', 'pay']);
-    expect(bellItems({ ...base, caps: VIEWER }).groups.map((g) => g.kind)).toEqual(['pay', 'appt']);
+    expect(bellItems({ ...base, caps: { ...ADMIN, 'view.plan': undefined } }).groups.map((g) => g.kind)).toEqual(['chk', 'mine', 'pay']);
+    expect(bellItems({ ...base, caps: VIEWER }).groups.map((g) => g.kind)).toEqual(['mine', 'pay', 'appt']);
+    expect(bellItems({ ...base, me: 'ปลา', caps: VIEWER }).groups.map((g) => g.kind)).toEqual(['pay', 'appt']);
   });
 
   it('waitingChecks follows the same rules', () => {
@@ -262,6 +268,188 @@ describe('the bell', () => {
     expect(whenTh(now, TODAY)).toBe('วันนี้ 09:40');
     expect(whenTh(new Date(2026, 9, 10, 9, 40).toISOString(), TODAY)).toBe(dmTh('2026-10-10'));
     expect(dayTh('2026-10-12')).toBe('จันทร์ ' + dmTh('2026-10-12'));
+  });
+});
+
+describe('who heard of a quotation I attached or edited', () => {
+  const AT = '2026-10-12T03:00:00.000Z';
+  const out = (o: Partial<QtSent> = {}): QtSent => ({ id: 'q1', fp: '', at: AT, what: 'new', to: [], later: [], bell: [], skip: [], why: '', ...o });
+
+  it('parseQtOut reads one item of a push reply and nothing else', () => {
+    expect(parseQtOut({ id: 'q1', k: 'ddoc/d1/q1', fp: 'abc', what: 'edit', to: ['มกร', 3, ''], later: ['หมิว'], bell: ['มกร', 'หมิว'], skip: [{ n: 'หมิว', r: 'noem' }, { n: 'x', r: 'weird' }, 5], why: 'nomail' })).toEqual({
+      k: 'ddoc/d1/q1', o: { id: 'q1', what: 'edit', to: ['มกร'], later: ['หมิว'], bell: ['มกร', 'หมิว'], skip: [{ n: 'หมิว', r: 'noem' }], why: 'nomail' },
+    });
+    expect(parseQtOut({ id: 'q1', k: 'ddoc/d1/q1', why: 'boom', what: 'x' })!.o).toMatchObject({ what: 'new', why: '', to: [] });
+    expect(parseQtOut({ id: 'q2', k: 'ddoc/d1/q1' })).toBeNull();
+    expect(parseQtOut({ id: 'q1', k: 'deal/q1' })).toBeNull();
+    expect(parseQtOut(null)).toBeNull();
+  });
+
+  it('qtSentView: who got it; what waits; why nobody did, and whether this account can fix it', () => {
+    const sales = { admin: false }, admin = { admin: true, checker: true };
+    expect(qtSentView(out({ to: ['มกร'] }), sales)).toEqual({ state: 'sent', text: 'ส่งให้ผู้ตรวจแล้ว: มกร', short: 'ส่งให้ มกร แล้ว', fix: '', count: false });
+    expect(qtSentView(out({ to: ['มกร', 'หมิว', 'ฝน'], later: ['นก', 'น้ำ'] }), sales).text).toBe('ส่งให้ผู้ตรวจแล้ว: มกร, หมิว, ฝน · นก, น้ำ จะได้ภายใน 10 นาที');
+    expect(qtSentView(out({ later: ['มกร'], why: 'file' }), sales)).toMatchObject({ state: 'later', short: 'รออัปโหลดไฟล์' });
+    expect(qtSentView(out({ later: ['มกร'], why: 'quota' }), sales).text).toBe('วันนี้ส่งอีเมลครบโควตาแล้ว จะส่งให้ มกร เมื่อโควตากลับมา · ผู้ตรวจเห็นในกระดิ่งแล้ว');
+    expect(qtSentView(out({ why: 'timer', local: true }), sales)).toMatchObject({ state: 'later', text: 'จะส่งอีเมลให้ผู้ตรวจภายใน 10 นาที', short: 'ส่งภายใน 10 นาที' });
+    expect(qtSentView(out({ later: ['มกร'], why: 'err' }), sales).text).toBe('จะส่งอีเมลให้ผู้ตรวจภายใน 10 นาที: มกร');
+    // the owner's case: an admin who is the only checker attached it
+    expect(qtSentView(out({ why: 'nochk' }), admin)).toEqual({
+      state: 'none', text: 'รอผู้ตรวจคนอื่น: ยังไม่มีบัญชีอื่นที่ตรวจใบเสนอราคาได้ ใบที่คุณแนบเองจึงไม่ได้ส่งให้ใคร', short: 'รอผู้ตรวจคนอื่น', fix: 'checker', count: true,
+    });
+    expect(qtSentView(out({ why: 'nochk' }), sales)).toMatchObject({ short: 'ยังไม่มีผู้ตรวจ', fix: '', count: false, text: expect.stringContaining('แจ้งผู้ดูแลระบบ') });
+    const nomail = out({ why: 'nomail', bell: ['มกร', 'หมิว'], skip: [{ n: 'มกร', r: 'unverified' }, { n: 'หมิว', r: 'noem' }] });
+    expect(qtSentView(nomail, sales)).toMatchObject({ state: 'none', text: 'มกร, หมิว เห็นในกระดิ่งแล้ว แต่ยังไม่ได้อีเมล: มกร ยังไม่ยืนยันอีเมล · หมิว ยังไม่ใส่อีเมล', fix: '', count: false });
+    expect(qtSentView(nomail, admin)).toMatchObject({ fix: 'email', count: true });
+    expect(qtSentView(out({ why: 'off', local: true }), admin)).toMatchObject({ short: 'ยังไม่เปิดการแจ้งเตือน', fix: 'setup', count: true, text: expect.stringContaining('setupNotify') });
+    expect(qtSentView(out({ why: 'script', local: true }), sales)).toMatchObject({ short: 'สคริปต์ยังไม่อัปเดต', fix: '', count: false });
+    expect(qtSentView(out({ why: 'old' }), sales).short).toBe('ผู้ตรวจเห็นในกระดิ่ง');
+    expect(qtSentView(out({ why: 'bulk' }), sales).text).toMatch(/^แนบพร้อมกันหลายใบ/);
+    expect(qtSentView(null, sales)).toMatchObject({ state: 'wait', text: 'รอผู้ตรวจ' });
+    expect(nameList(['ก', 'ข', 'ค', 'ง', 'จ'])).toBe('ก, ข, ค และอีก 2 คน');
+  });
+
+  it('qtSentNews: a message only when someone new got it, or a new reason nobody did (not while the file uploads)', () => {
+    const a = out({ fp: 'v1', later: ['มกร'], why: 'file' });
+    expect(qtSentNews(undefined, a)).toBe(false);
+    const b = out({ fp: 'v1', to: ['มกร'] });
+    expect(qtSentNews(a, b)).toBe(true);
+    expect(qtSentNews(b, out({ fp: 'v1', to: ['มกร'] }))).toBe(false); // the same version pushed again (its Drive id)
+    expect(qtSentNews(b, out({ fp: 'v2', to: ['มกร'] }))).toBe(true); // an edit, told again
+    expect(qtSentNews(undefined, out({ why: 'nochk' }))).toBe(true);
+    expect(qtSentNews(out({ why: 'nochk' }), out({ why: 'nochk' }))).toBe(false);
+    expect(qtSentNews(undefined, out({ why: 'old' }))).toBe(false);
+    expect(qtSentNews(undefined, out({ why: 'bulk' }))).toBe(false);
+  });
+
+  it('waitShort: the card says who was told, else since when; changed after a check says so', () => {
+    const doc = { cAt: '2026-10-12T03:00:00.000Z', at: '2026-10-12T03:00:00.000Z' };
+    expect(waitShort(out({ to: ['มกร'] }), doc, false)).toBe('ส่งให้ มกร แล้ว');
+    expect(waitShort(out({ why: 'nochk' }), doc, true)).toBe('รอผู้ตรวจคนอื่น');
+    expect(waitShort(null, doc, false)).toBe('รอผู้ตรวจ ตั้งแต่ ' + dmTh('2026-10-12'));
+    expect(waitShort(null, doc, false, true)).toBe('แก้หลังตรวจ รอตรวจอีกครั้ง');
+    expect(waitShort(out({ to: ['มกร'] }), doc, false, true)).toBe('แก้หลังตรวจ · ส่งให้ มกร แล้ว');
+  });
+
+  /** มกร (admin, the only checker) and เอก (sales), each with a quotation waiting. */
+  function bell() {
+    const s = emptySales();
+    deal(s, 'd1', 'บริษัท ดูราฟลอร์ จำกัด', 'มกร');
+    deal(s, 'd2', 'บริษัท เบทาโกร จำกัด', 'เอก');
+    const own = qt(s, 'd1', 'q1', { by: 'มกร', docNo: 'QT-2569-021' });
+    const ek = qt(s, 'd2', 'q2', { by: 'เอก', docNo: 'QT-2569-022' });
+    const base: BellIn = { S: s, tasks: [], owners: {}, coName: () => '', me: 'มกร', caps: ADMIN, live: { on: true, since: SINCE, now: true }, checks: {}, cfg: NOTIFY_CFG0, scope: 'team', today: TODAY };
+    return { s, base, own, ek };
+  }
+
+  it('the bell: an admin who is the only checker and attached it sees "รอผู้ตรวจคนอื่น" with a link to set checkers (counted)', () => {
+    const { base, own } = bell();
+    const sent = { q1: out({ fp: qtFpKey(own), why: 'nochk' }) };
+    const r = bellItems({ ...base, sent });
+    const mine = r.groups.find((g) => g.kind === 'mine')!;
+    expect(mine).toMatchObject({ title: 'ใบเสนอราคาของฉัน', n: 1 });
+    expect(mine.rows).toEqual([{
+      key: 'w:q1', kind: 'mine', title: 'บริษัท ดูราฟลอร์ จำกัด', sub: 'QT-2569-021 · รอผู้ตรวจคนอื่น: ยังไม่มีบัญชีอื่นที่ตรวจใบเสนอราคาได้ ใบที่คุณแนบเองจึงไม่ได้ส่งให้ใคร',
+      right: { text: 'รอตรวจ', chip: '' }, count: true, go: { deal: 'd1', doc: 'q1' }, wrap: true, act: { label: 'ตั้งผู้ตรวจ', to: 'notify' },
+    }]);
+    // เอก's quotation waits in มกร's รอตรวจ as before
+    expect(r.groups[0]).toMatchObject({ kind: 'chk', rows: [{ key: 'q:q2' }] });
+    expect(r.count).toBe(2);
+    // the team lets the attacher check their own: it is in มกร's รอตรวจ instead
+    const self = bellItems({ ...base, sent, cfg: { ...NOTIFY_CFG0, self: true } });
+    expect(self.groups.map((g) => g.kind)).toEqual(['chk']);
+    expect(self.groups[0].rows.map((x) => x.key).sort()).toEqual(['q:q1', 'q:q2']);
+  });
+
+  it('the bell: sales who attached it see who the script mailed; an outcome about an earlier version is not used', () => {
+    const { base, ek } = bell();
+    const sales = { ...base, me: 'เอก', caps: SALES, scope: 'mine' as const };
+    const r = bellItems({ ...sales, sent: { q2: out({ id: 'q2', fp: qtFpKey(ek), to: ['มกร'] }) } });
+    expect(r.groups[0].rows).toMatchObject([{ key: 'w:q2', sub: 'QT-2569-022 · ส่งให้ผู้ตรวจแล้ว: มกร', count: false, wrap: true }]);
+    expect(r.groups[0].rows[0].act).toBeUndefined();
+    expect(r.count).toBe(0);
+    const old = bellItems({ ...sales, sent: { q2: out({ id: 'q2', fp: qtFpKey({ ...ek, amount: 1 }), to: ['มกร'] }) } });
+    expect(old.groups[0].rows).toMatchObject([{ sub: 'QT-2569-022 · รอผู้ตรวจ', wrap: false }]);
+    // checked: no longer waiting
+    const done = bellItems({ ...sales, checks: { q2: rec(ek, 'ok', 'มกร') }, sent: { q2: out({ id: 'q2', fp: qtFpKey(ek), to: ['มกร'] }) } });
+    expect(done.groups[0].rows.map((x) => [x.key, x.right.text])).toEqual([['m:q2', 'ตรวจแล้ว']]);
+  });
+
+  it('the bell before notifications are set up: what attaching said (no checks), for 7 days', () => {
+    const { base, ek } = bell();
+    const sales = { ...base, me: 'เอก', caps: SALES, scope: 'mine' as const };
+    const sent = { q2: out({ id: 'q2', fp: qtFpKey(ek), why: 'script', local: true }) };
+    for (const live of [null, { on: false, since: '' }]) {
+      const r = bellItems({ ...sales, live, sent });
+      expect(r.groups.map((g) => g.kind)).toEqual(['mine']);
+      expect(r.groups[0].rows[0]).toMatchObject({ key: 'w:q2', count: false, right: { text: 'ยังไม่ได้แจ้ง', chip: '' }, sub: expect.stringContaining('สคริปต์ของทีมยังเป็นรุ่นที่ไม่มีการแจ้งเตือน') });
+    }
+    expect(bellItems({ ...sales, live: null, sent, today: '2026-10-20' }).groups).toEqual([]);
+    expect(bellItems({ ...sales, live: null }).groups).toEqual([]);
+  });
+});
+
+describe('why mail does not arrive', () => {
+  const nf = (o: Partial<ReturnType<typeof myNotify0>> = {}) => ({ ...myNotify0(false), ...o });
+  const person = (u: string, name: string, caps: CapSet, o: Partial<MailPerson> = {}): MailPerson => ({ u, name, caps, em: u + '@example.com', ok: true, nf: nf(), ...o });
+  const st = (o: Partial<NotifyStatus> = {}): NotifyStatus => ({ on: true, since: SINCE, last: null, sent: 3, left: 90, from: '', users: {}, now: true, recent: [], ...o });
+  const live = { on: true, since: SINCE, now: true };
+
+  it('the admin page: script, set-up, timer, checkers, addresses, quota and the last run, each with its fix', () => {
+    const boss = person('mkorn', 'มกร', ADMIN), ek = person('eak', 'เอก', SALES);
+    expect(mailIssues({ live: null, st: null, people: [boss, ek], self: false }).map((i) => [i.k, i.tone])).toEqual([['script', 'bad']]);
+    expect(mailIssues({ live: { on: false, since: '' }, st: null, people: [boss], self: false })[0]).toMatchObject({ k: 'setup', fix: expect.stringContaining('setupNotify') });
+    // the owner's team: one checker (the admin), no confirmed address yet
+    const owner = mailIssues({ live, st: st(), people: [{ ...boss, em: '', ok: false }, ek], self: false });
+    expect(owner.map((i) => [i.k, i.tone])).toEqual([['solo', 'warn'], ['noem', 'bad']]);
+    expect(owner[0].text).toBe('มีผู้ตรวจคนเดียวคือ มกร ใบที่ มกร แนบหรือแก้เองจึงไม่มีใครได้อีเมล');
+    expect(owner[1].text).toBe('ผู้ตรวจยังไม่มีใครรับอีเมลได้ (เห็นในกระดิ่งเท่านั้น): มกร ยังไม่ใส่อีเมล');
+    // the attacher may check their own: one checker is enough
+    expect(mailIssues({ live, st: st(), people: [boss, ek], self: true })).toEqual([]);
+    expect(mailIssues({ live, st: st(), people: [ek], self: false }).map((i) => i.k)).toEqual(['nochk']);
+    // some checkers can't get mail
+    const two = mailIssues({ live, st: st(), people: [boss, person('mint', 'มินท์', ADMIN, { ok: false }), person('fon', 'ฝน', ADMIN, { nf: nf({ on: { qt: false, res: true, dg: true, pre: false } }) }), person('kai', 'ไก่', { ...ADMIN, 'notify.mail': undefined })], self: false });
+    expect(two).toMatchObject([{ k: 'noem', tone: 'warn', text: 'ผู้ตรวจบางคนไม่ได้อีเมล: มินท์ ยังไม่ยืนยันอีเมล · ฝน ปิดอีเมลรอตรวจไว้ · ไก่ บทบาทไม่รับอีเมล' }]);
+    // the timer gone: quotations still go at once with this script, nothing else does
+    expect(mailIssues({ live, st: st({ on: false }), people: [boss, person('mint', 'มินท์', ADMIN)], self: false })).toMatchObject([{ k: 'trigger', tone: 'bad', fix: expect.stringMatching(/^อีเมลใบเสนอราคาใหม่ยังส่งทันที/) }]);
+    expect(mailIssues({ live: { on: true, since: SINCE }, st: st({ on: false, now: null }), people: [boss, person('mint', 'มินท์', ADMIN)], self: false })[0].fix).toMatch(/^ตอนนี้ไม่มีอีเมลออกเลย/);
+    // a script that mails by its timer only
+    expect(mailIssues({ live: { ...live, now: false }, st: st({ now: false }), people: [boss, person('mint', 'มินท์', ADMIN)], self: false }).map((i) => [i.k, i.tone])).toEqual([['now', 'info']]);
+    expect(mailIssues({ live, st: st({ left: 0 }), people: [boss, person('mint', 'มินท์', ADMIN)], self: false }).map((i) => [i.k, i.tone])).toEqual([['quota', 'bad']]);
+    expect(mailIssues({ live, st: st({ left: 3, last: { at: 'x', ok: false, sent: 0, err: 'mail_failed' } }), people: [boss, person('mint', 'มินท์', ADMIN)], self: false }).map((i) => [i.k, i.tone])).toEqual([['quota', 'warn'], ['last', 'warn']]);
+  });
+
+  it('การแจ้งเตือนของฉัน: what keeps my own mail away', () => {
+    expect(myMailIssues({ live: null, mail: true, nf: nf(), checker: true }).map((i) => i.k)).toEqual(['script']);
+    expect(myMailIssues({ live: { on: false, since: '' }, mail: true, nf: nf({ em: 'a@example.com', ok: true }), checker: false }).map((i) => i.k)).toEqual(['setup']);
+    expect(myMailIssues({ live, mail: false, nf: nf(), checker: true }).map((i) => i.k)).toEqual(['role']);
+    expect(myMailIssues({ live, mail: true, nf: nf(), checker: true }).map((i) => i.k)).toEqual(['noem']);
+    expect(myMailIssues({ live, mail: true, nf: nf({ em: 'a@example.com' }), checker: true }).map((i) => i.k)).toEqual(['unverified']);
+    expect(myMailIssues({ live, mail: true, nf: nf({ em: 'a@example.com', ok: true, on: { qt: false, res: true, dg: true, pre: false } }), checker: true }).map((i) => i.k)).toEqual(['off']);
+    expect(myMailIssues({ live, mail: true, nf: nf({ em: 'a@example.com', ok: true }), checker: true })).toEqual([]);
+  });
+
+  it('the latest quotations from notify_status: one line each, newest first', () => {
+    const recent = parseNotifyStatus({ now: 1, recent: [
+      { at: '2026-10-12T03:05:00Z', doc: 'q3', u: 'mint', result: 'sent' },
+      { at: '2026-10-12T03:05:00Z', doc: 'q3', u: 'fon', result: 'retry' },
+      { at: '2026-10-12T03:04:00Z', doc: 'q2', u: '', result: 'none:nochk' },
+      { at: '2026-10-12T03:03:00Z', doc: 'q1', u: 'mint', result: 'sent' },
+      { at: '2026-10-12T03:02:00Z', doc: 'q1', u: 'mint', result: 'retry' },
+      { at: '2026-10-12T03:01:00Z', doc: 'q0', u: '', result: 'none:nomail' },
+      { bad: 1 },
+    ] });
+    expect(recent.now).toBe(true);
+    const q = recentQts(recent.recent, (u) => ({ mint: 'มินท์', fon: 'ฝน' })[u] || '');
+    expect(q.map((x) => [x.doc, recentLine(x)])).toEqual([
+      ['q3', 'ส่งให้ มินท์ · รอส่ง ฝน'],
+      ['q2', 'ไม่ได้ส่ง: ไม่มีผู้ตรวจคนอื่น (คนแนบตรวจเองไม่ได้)'],
+      ['q1', 'ส่งให้ มินท์'],
+      ['q0', 'ไม่ได้ส่ง: ผู้ตรวจยังรับอีเมลไม่ได้ (เห็นในกระดิ่ง)'],
+    ]);
+    expect(recentQts(recent.recent, () => '', 2).map((x) => x.doc)).toEqual(['q3', 'q2']);
+    expect(parseNotifyStatus({}).now).toBeNull();
+    expect(parseNotifyFlag({ on: 1, since: '2026-10-01', now: 1 })).toEqual({ on: true, since: '2026-10-01', now: true });
   });
 });
 
