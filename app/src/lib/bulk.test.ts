@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BIG, MAX_BULK, allWord, bulkActs, clearedWord, confirmWords, createSel, followNote, followSplit, keyView, ownerNote, ownerSplit, pickedCos, pickedRows, planNote,
-  pruneSel, rowCo, rowKey, selKey, selView, selWord, spread, taskDates, toggleAll, toggleKey, tooManyWord, trackerNote, trackerWarn, unfollowNote,
+  BIG, MAX_BULK, TIMED_MAX, TRACKER_MAX, allWord, bulkActs, clearedWord, confirmWords, createSel, dealSig, followNote, followSplit, hintWord, keyView, localWord,
+  noTimeWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, planNote, planWarn, pruneSel, rowCo, rowFits, rowKey, selKey, selView, selWord, spread,
+  taskDates, timedOk, toggleAll, toggleKey, tooManyWord, trackerCapWord, trackerNote, trackerWarn, undoSentNote, unfollowNote,
 } from './bulk';
+import { newDeal } from './sales';
 import { EMPTY_FILTERS, type Filters } from './search';
 import type { CapId } from './caps';
 import type { Cert, Company } from './types';
@@ -102,7 +104,7 @@ describe('what the account may do', () => {
     const all = can(['edit.cust', 'edit.deal', 'view.sales', 'edit.task']);
     expect(bulkActs(all, 3, MAX_BULK)).toMatchObject({ follow: true, tracker: true, tooMany: false });
     expect(bulkActs(all, 3, MAX_BULK + 1)).toEqual({ follow: false, unfollow: false, tracker: false, plan: false, owner: false, csv: true, tooMany: true });
-    expect(tooManyWord(55645)).toBe('เลือกไว้ 55,645 บริษัท ติดตาม ส่ง นัด หรือตั้งผู้รับผิดชอบได้ครั้งละไม่เกิน 5,000 บริษัท กรองให้แคบลงก่อน (ส่งออก CSV ได้)');
+    expect(tooManyWord(55645)).toBe('เลือกไว้ 55,645 บริษัท ทำรายการได้ครั้งละไม่เกิน 5,000 บริษัท กรองให้แคบลงก่อน (ส่งออก CSV ได้)');
   });
   it('a viewer: export only; Sales Tracker needs both ดีลและขั้นตอน and seeing the tracker', () => {
     expect(bulkActs(can([]), 5, 9)).toEqual({ follow: false, unfollow: false, tracker: false, plan: false, owner: false, csv: true, tooMany: false });
@@ -121,6 +123,9 @@ describe('words', () => {
     expect(selWord('co', 15, 15)).toBe('เลือก 15 บริษัท');
     expect(selWord('cert', 12, 10)).toBe('เลือก 12 ใบรับรอง (10 บริษัท)');
     expect(selWord('cert', 3, 3)).toBe('เลือก 3 ใบรับรอง');
+    // the narrow bar leaves the companies to its menu's title
+    expect(selWord('cert', 4367, 1963, true)).toBe('เลือก 4,367 ใบรับรอง');
+    expect(selWord('co', 15, 15, true)).toBe('เลือก 15 บริษัท');
     expect(allWord('co', 2228)).toBe('เลือกทั้งหมด 2,228 บริษัท');
     expect(allWord('cert', 5)).toBe('เลือกทั้งหมด 5 ใบรับรอง');
     expect(clearedWord(15, 'co')).toBe('ล้างที่เลือก 15 บริษัทแล้ว เพราะเปลี่ยนคำค้นหรือตัวกรอง');
@@ -142,9 +147,78 @@ describe('words', () => {
   });
   it('asks before acting on many, and warns how many rows the tracker gets', () => {
     expect(BIG).toBe(200);
-    expect(confirmWords('follow', 2225, 3)).toEqual({ title: 'ติดตาม 2,225 บริษัท?', body: expect.stringContaining('ติดตามอยู่แล้ว 3 บริษัท จะข้ามไป'), ok: 'ติดตาม 2,225 บริษัท' });
-    expect(confirmWords('unfollow', 300, 0).ok).toBe('เลิกติดตาม 300 บริษัท');
-    expect(trackerWarn(2228, '2569')).toMatch(/^จะเพิ่ม 2,228 แถวในตารางปี 2569/);
+    expect(confirmWords('follow', 2225, 3, true)).toEqual({ title: 'ติดตาม 2,225 บริษัท?', body: expect.stringContaining('ติดตามอยู่แล้ว 3 บริษัท จะข้ามไป'), ok: 'ติดตาม 2,225 บริษัท' });
+    expect(confirmWords('unfollow', 300, 0, true).ok).toBe('เลิกติดตาม 300 บริษัท');
+    expect(trackerWarn(250, '2569', true)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ของทั้งทีม ตรวจหมวดและปีให้ถูกก่อนส่ง');
+  });
+  it('speaks of the team only when one is connected (review: the words said so with no team at all)', () => {
+    expect(confirmWords('follow', 2228, 0, true).body).toBe('บริษัทที่เลือกจะเข้ารายการติดตามของทีม ทุกคนในทีมเห็นรายการนี้');
+    expect(confirmWords('follow', 2228, 0, false).body).toBe('บริษัทที่เลือกจะเข้ารายการติดตาม');
+    expect(confirmWords('unfollow', 300, 0, false).body).toBe('บริษัทที่เลือกจะออกจากรายการติดตาม');
+    expect(trackerWarn(250, '2569', false)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ตรวจหมวดและปีให้ถูกก่อนส่ง');
+    expect(ownerSub(12, true)).toBe('ให้ 12 บริษัทที่เลือก · ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท และใช้กรองได้');
+    expect(ownerSub(12, false)).toBe('ให้ 12 บริษัทที่เลือก · ชื่อนี้ขึ้นในหน้าบริษัท และใช้กรองได้');
+    expect(planWarn(2228, true)).toBe('จะสร้าง 2,228 นัดในแผนติดต่อของทีม ทุกคนในทีมเห็นนัดเหล่านี้');
+    expect(planWarn(2228, false)).toBe('จะสร้าง 2,228 นัดในแผนติดต่อ');
+    for (const w of [confirmWords('follow', 9, 1, false).body, confirmWords('unfollow', 9, 1, false).body, trackerWarn(9, '2569', false), ownerSub(9, false), planWarn(9, false), noTimeWord(false), trackerCapWord(400, false)])
+      expect(w).not.toMatch(/ทีม/);
+    // companies from the TGO website sync stay on this device: counted apart in the result
+    expect(followNote(3, 0) + localWord(3)).toBe('ติดตามเพิ่ม 3 บริษัท · 3 บริษัทจากเว็บไซต์ TGO อยู่ในเครื่องนี้เท่านั้น');
+    expect(localWord(0)).toBe('');
+  });
+  it('the bar before anything is picked says what ticking leads to', () => {
+    expect(hintWord('co', false)).toBe('ติ๊กเลือกหลายบริษัท แล้วเลือกว่าจะทำอะไรที่แถบนี้');
+    expect(hintWord('cert', true)).toBe('ติ๊กเลือกหลายใบรับรอง แล้วส่งออก CSV ได้ที่แถบนี้');
+  });
+});
+
+describe('the Sales Tracker: one send adds at most TRACKER_MAX rows, and can be taken back', () => {
+  it('says why a send of more is held, and what to do (review: thousands of rows froze the table)', () => {
+    expect(TRACKER_MAX).toBe(300);
+    expect(trackerCapWord(2227, true)).toBe(
+      'ส่งเข้า Sales Tracker ได้ครั้งละไม่เกิน 300 บริษัท ตอนนี้จะเพิ่ม 2,227 แถว ตารางที่ยาวมากจะเปิดช้าสำหรับทุกคนในทีม ติ๊กออกให้เหลือไม่เกินนี้ หรือกรองในหน้าค้นหาให้แคบลงแล้วส่งทีละชุด (ส่งออก CSV ได้)',
+    );
+    expect(trackerCapWord(301, false)).toMatch(/^ส่งเข้า Sales Tracker ได้ครั้งละไม่เกิน 300 บริษัท ตอนนี้จะเพิ่ม 301 แถว ตารางที่ยาวมากจะเปิดช้า ติ๊กออก/);
+  });
+  it('a row is the same while what is typed in it is (who saved it, and when, do not count)', () => {
+    const d = newDeal({ id: 'd1', client: 'บริษัท ก', year: '2569', section: 'TGO', gid: 7 }, 'หมิว');
+    expect(dealSig({ ...d, at: '2030-01-01T00:00:00Z', by: 'คุณบี' })).toBe(dealSig(d));
+    for (const p of [{ resp: 'คุณบี' }, { forecast: 50000 }, { section: 'อื่นๆ' }, { jobStatus: 'closed' as const }, { service: ['CFO'] }, { contactDate: '2026-10-20' }])
+      expect(dealSig({ ...d, ...p })).not.toBe(dealSig(d));
+  });
+  it('says what เลิกทำ did', () => {
+    expect(undoSentNote({ removed: 15, kept: 0 })).toBe('เอาออกจาก Sales Tracker แล้ว 15 ราย');
+    expect(undoSentNote({ removed: 13, kept: 2 })).toBe('เอาออกจาก Sales Tracker แล้ว 13 ราย (2 รายที่มีคนแก้หรือเพิ่มข้อมูลแล้วยังอยู่)');
+    expect(undoSentNote({ removed: 0, kept: 2 })).toBe('2 รายที่มีคนแก้หรือเพิ่มข้อมูลแล้วยังอยู่');
+    expect(undoSentNote({ removed: 0, kept: 0, late: true })).toMatch(/^เลิกทำได้ภายใน 10 นาทีหลังส่ง/);
+  });
+});
+
+describe('the bar keeps one row (review: the first tick pushed the list 68px down under the pointer)', () => {
+  it('the buttons fit when the count, the buttons and ล้างที่เลือก fit the width with their gaps; else the menu', () => {
+    // 1366 with the menu docked: 1,040px inside; count 200 + six buttons 679 + ล้างที่เลือก 64, gaps 12
+    expect(rowFits(1040, [204, 679, 64], 12)).toBe(true);
+    // 1280: 956px inside
+    expect(rowFits(926, [204, 679, 64], 12)).toBe(false);
+    expect(rowFits(10, [], 12)).toBe(true);
+    expect(rowFits(100, [50, 38], 12)).toBe(true);
+    expect(rowFits(99, [50, 38], 12)).toBe(false);
+  });
+});
+
+describe('appointments for many keep a เวลา only while a day has a few (review: one mail each used the team quota)', () => {
+  it('at most TIMED_MAX a day', () => {
+    expect(TIMED_MAX).toBe(5);
+    expect(timedOk(2000, 0)).toBe(false); // ทั้งหมดในวันเดียว
+    expect(timedOk(5, 0)).toBe(true);
+    expect(timedOk(6, 0)).toBe(false);
+    expect(timedOk(2000, 3)).toBe(true);
+    expect(timedOk(2000, 5)).toBe(true);
+    expect(timedOk(2000, 10)).toBe(false);
+    expect(timedOk(2000, 20)).toBe(false);
+    expect(timedOk(4, 10)).toBe(true); // fewer than a day's share: 4 on the day
+    expect(noTimeWord(true)).toBe('ใส่เวลาได้เมื่อนัดไม่เกินวันละ 5 ราย เพราะนัดที่มีเวลาส่งอีเมลเตือนก่อน 1 ชั่วโมงทีละนัด ให้ทุกคนที่เปิดการเตือนไว้');
+    expect(noTimeWord(false)).toBe('ใส่เวลาได้เมื่อนัดไม่เกินวันละ 5 ราย');
   });
 });
 

@@ -210,8 +210,8 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     A.toggleWatch(c1.id);
     A.toggleWatch(c2.id);
     const r1 = A.addDealsFromCompanies(A.crm.watch, { section: 'TGO', year: '2569' });
-    expect(r1).toEqual({ added: 2, skipped: 0 });
-    expect(A.addDealsFromCompanies([c1.id], { year: '2569' })).toEqual({ added: 0, skipped: 1 });
+    expect(r1).toMatchObject({ added: 2, skipped: 0 });
+    expect(A.addDealsFromCompanies([c1.id], { year: '2569' })).toMatchObject({ added: 0, skipped: 1 });
     const d1 = A.dealsOf(c1.id)[0];
     expect(d1).toMatchObject({ client: c1.name, phone: c1.phone, section: 'TGO', source: ['TGO'], year: '2569', jobStatus: 'open' });
     await A.teamSync();

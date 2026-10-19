@@ -45,7 +45,7 @@ import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg
 // the month check of money out (job expenses in the money views)
 import { expTeamMonth, expWhat, rowWhat, type XRow } from './expenseMoney';
 // many companies at once (the search page's selection)
-import { taskDates } from './bulk';
+import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -981,10 +981,10 @@ export class GccEngine {
   setWatchMany(ids: readonly number[], on: boolean) {
     if (!this.can('edit.cust')) {
       this.deny();
-      return { changed: 0, same: 0 };
+      return { changed: 0, same: 0, local: 0 };
     }
     const W = this.crm.watch, has = new Set(W), done = new Set<number>(), gone = new Set<number>();
-    let changed = 0, same = 0;
+    let changed = 0, same = 0, local = 0;
     this.bulk(() => {
       ids.forEach((id0) => {
         const c = this.company(id0);
@@ -996,6 +996,7 @@ export class GccEngine {
         this.op(keyOf.watch(c.id), on ? 1 : undefined);
         c.fl.watch = on;
         changed++;
+        if (this.staysHere(c.id)) local++;
       });
       // in place: the list is the one every page reads
       if (gone.size) {
@@ -1005,17 +1006,22 @@ export class GccEngine {
       }
       if (changed) this.saveCrm();
     });
-    return { changed, same };
+    return { changed, same, local };
+  }
+  /** A company whose ติดตาม, ผู้รับผิดชอบ and นัด never reach the connected team (from the TGO website sync:
+   *  its id is this browser's, lib/teamSync.ts isLocalOnly). The bulk results count these apart. */
+  private staysHere(id: number) {
+    return !!this.teamCfg && isLocalId(id);
   }
   /** One ผู้รับผิดชอบ for many companies (the search page's selection; '' = none); `onlyEmpty` leaves the
    *  companies that have one. Each changed company gets its history line, as setOwner gives. */
   setOwners(ids: readonly number[], v: string, onlyEmpty = false) {
     if (!this.can('edit.cust')) {
       this.deny();
-      return { changed: 0, same: 0, kept: 0 };
+      return { changed: 0, same: 0, kept: 0, local: 0 };
     }
     const done = new Set<number>();
-    let changed = 0, same = 0, kept = 0;
+    let changed = 0, same = 0, kept = 0, local = 0;
     this.bulk(() =>
       ids.forEach((id0) => {
         const c = this.company(id0);
@@ -1026,9 +1032,10 @@ export class GccEngine {
         if (onlyEmpty && cur) return void kept++;
         this.setOwner(c.id, v);
         changed++;
+        if (this.staysHere(c.id)) local++;
       }),
     );
-    return { changed, same, kept };
+    return { changed, same, kept, local };
   }
   /** `pid`: the person (ผู้ติดต่อ) it was with. */
   addLog(id: number, type: string, result: string, text: string, pid?: string) {
@@ -1103,19 +1110,21 @@ export class GccEngine {
   addTasks(ids: number[], p: { type: TaskType; date: string; time: string; note: string }, perDay = 0, pid?: string) {
     if (!this.can('edit.task')) {
       this.deny();
-      return { n: 0, first: '', last: '' };
+      return { n: 0, first: '', last: '', local: 0 };
     }
     const days = taskDates(p.date, ids.length, perDay);
+    let local = 0;
     this.bulk(() => {
       ids.forEach((id, i) => {
         const c = this.company(id);
         const t: Task = { id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: days[i], time: p.time, note: cap(p.note), done: false, ...(pid ? { pid } : {}) };
         this.crm.tasks.push(t);
         this.op(keyOf.task(t.id), { ...t });
+        if (this.staysHere(id)) local++;
       });
       this.saveCrm();
     });
-    return { n: ids.length, first: days[0] || '', last: days[days.length - 1] || '' };
+    return { n: ids.length, first: days[0] || '', last: days[days.length - 1] || '', local };
   }
   autoPlan(list: Company[], perDay: number) {
     if (!this.can('edit.task')) return this.deny();
@@ -1644,9 +1653,51 @@ export class GccEngine {
   addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
     if (!this.can('edit.deal')) {
       this.deny();
-      return { added: 0, skipped: 0 };
+      return { added: 0, skipped: 0, ids: [] as string[], k: '' };
     }
-    return this.bulk(() => this.addDealsFrom(ids, opts));
+    const r = this.bulk(() => this.addDealsFrom(ids, opts));
+    // what เลิกทำ may take back: these rows as they were made
+    const k = r.ids.length ? uid() : '';
+    this.lastSent = k ? { k, at: Date.now(), sig: Object.fromEntries(r.ids.map((id) => [id, dealSig(this.sales.deals[id])])) } : null;
+    return { ...r, k };
+  }
+  /** The rows the last send to the Sales Tracker added (`k` names that send, `sig` each row as it was made). */
+  lastSent: { k: string; at: number; sig: Record<string, string> } | null = null;
+  /**
+   * "เลิกทำ" after a send (the search page's toast): the rows send `k` added are deleted for the whole team,
+   * within UNDO_SEND_MS, by an account that may delete deals (the script asks del.rec for it). A row that
+   * someone changed since, or gave a step, a document, a payment line, a contact, an expense or a joint
+   * quotation, stays: that is someone's work. `late`: too long ago, or another send since.
+   */
+  undoSent(k: string) {
+    const L = this.lastSent;
+    if (!L || L.k !== k || Date.now() - L.at > UNDO_SEND_MS) return { removed: 0, kept: 0, late: true };
+    if (!this.can('del.rec')) {
+      this.deny();
+      return { removed: 0, kept: 0 };
+    }
+    let removed = 0, kept = 0;
+    this.bulk(() =>
+      Object.entries(L.sig).forEach(([id, sig]) => {
+        const d = this.sales.deals[id];
+        if (!d) return; // a teammate deleted it already
+        if (dealSig(d) !== sig || this.dealHasWork(id)) return void kept++;
+        this.deleteDealNow(d, 'เลิกส่งเข้า Sales Tracker');
+        removed++;
+      }),
+    );
+    this.lastSent = null;
+    if (removed) this.saveSales();
+    return { removed, kept };
+  }
+  /** Anything recorded on a deal besides its row: steps, documents, payment lines, contacts, expenses, a
+   *  joint quotation (the records dropDealRecords would take with it). */
+  private dealHasWork(id: string) {
+    const S = this.sales, pre = id + '/';
+    const under = (bag?: Record<string, unknown>) => !!bag && Object.keys(bag).some((k) => k.startsWith(pre));
+    return under(S.steps) || under(S.pays) || under(S.acts) || under(S.exp) || !!S.jqt?.[id] || !!S.shares?.[id]
+      || Object.keys(S.jqm || {}).some((k) => k.startsWith(pre) || k.endsWith('/' + id))
+      || Object.values(S.docs).some((x) => x.deal === id);
   }
   /**
    * Does a company have its own row in the Sales Tracker of `year`? As dealsOf finds a company's deals (by
@@ -1670,6 +1721,7 @@ export class GccEngine {
     const seen = new Set<number>();
     const has = this.trackedIn(year);
     let added = 0, skipped = 0;
+    const made: string[] = [];
     ids.forEach((id) => {
       const c = this.company(id);
       if (!c || seen.has(c.id)) return;
@@ -1678,10 +1730,12 @@ export class GccEngine {
         skipped++;
         return;
       }
-      has.add(this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) }));
+      const d = this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) });
+      has.add(d);
+      made.push(d.id);
       added++;
     });
-    return { added, skipped };
+    return { added, skipped, ids: made };
   }
   updateDeal(id: string, patch: Partial<Deal>, opt: { keepJoint?: boolean } = {}) {
     const d = this.sales.deals[id];

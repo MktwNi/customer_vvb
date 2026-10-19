@@ -58,7 +58,14 @@ export function Search() {
   }, [key, F.out]); // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (k: number) => searchSel.set({ key, ids: toggleKey(sel, k) });
   const pickAll = () => searchSel.set({ key, ids: toggleAll(sel, F.out) });
-  const tick = (k: number, name: string) => <TickBox on={sel.has(k)} label={'เลือก ' + name} onClick={() => pick(k)} />;
+  /** A row's box. Its whole cell picks the row (`cell`: on the desktop rows, out to the row's edges: its full
+   *  height, its left padding, half the gap), so a near miss never opens the company; the box itself is the
+   *  control a keyboard or a screen reader uses. */
+  const tick = (k: number, name: string, cell?: React.CSSProperties) => (
+    <span className="sx-tk" style={cell} onClick={(ev) => (ev.stopPropagation(), pick(k))}>
+      <TickBox on={sel.has(k)} label={'เลือก ' + name} onClick={() => pick(k)} />
+    </span>
+  );
 
   const counts = useMemo(() => {
     const cnt = (k: 'ind' | 'prov' | 'type') => {
@@ -73,7 +80,9 @@ export function Search() {
   const pages = Math.max(1, Math.ceil(F.out.length / ps));
   const page = Math.min(ui.page, pages - 1);
   const sl = F.out.slice(page * ps, page * ps + ps);
-  const rowPad = CONFIG.density === 'compact' ? '8px 20px' : '12px 20px';
+  const rowPy = CONFIG.density === 'compact' ? 8 : 12;
+  const rowPad = `${rowPy}px 20px`;
+  const tickCell: React.CSSProperties = { margin: `-${rowPy}px -7px -${rowPy}px -20px`, padding: `${rowPy}px 7px ${rowPy}px 20px` };
 
   const dictOpts = (arr: string[], m: Record<number, number>, byName?: boolean) =>
     arr.map((l, i) => ({ v: String(i), label: `${l} (${fmtN(m[i] || 0)})`, l, n: m[i] || 0 }))
@@ -141,7 +150,7 @@ export function Search() {
   const rndText = (c: Company) => (c.rnd ? (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd : '');
   /** A click anywhere on a result row opens the company (not on its buttons, nor when text was selected). */
   const rowOpen = (ev: React.MouseEvent, id: number) => {
-    if ((ev.target as HTMLElement).closest('button, a, input, select, label')) return;
+    if ((ev.target as HTMLElement).closest('button, a, input, select, label, .sx-tk')) return;
     if (window.getSelection()?.toString()) return;
     open(id);
   };
@@ -250,7 +259,9 @@ export function Search() {
         </div>
       </section>
 
-      {sv.n > 0 && <BulkBar view={s.view} rows={F.out} sel={sel} n={sv.n} />}
+      {/* always in its place while there are results (a quiet line until something is picked): ticking the
+          first row never moves the list */}
+      {unitN > 0 && <BulkBar view={s.view} rows={F.out} sel={sel} n={sv.n} />}
 
       {s.view === 'co' && narrow && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -318,7 +329,7 @@ export function Search() {
               const cv = cfoView(c), rt = rndText(c);
               return (
                 <div key={c.id} className={'sxr' + (sel.has(c.id) ? ' on' : '')} onClick={(ev) => rowOpen(ev, c.id)} style={{ gridTemplateColumns: coCols, padding: rowPad }}>
-                  {tick(c.id, c.name)}
+                  {tick(c.id, c.name, tickCell)}
                   <button onClick={() => open(c.id)} className="sxr-name">
                     <span className="t-name">{c.name}</span>
                     <span className="t-sec sxr-sub">
@@ -360,7 +371,7 @@ export function Search() {
               const rt = ct.isLatest && !ct.bad && ct.co ? rndText(ct.co) : '';
               return (
                 <div key={ct.cid} className={'sxr' + (sel.has(ct.cid) ? ' on' : '')} onClick={(ev) => rowOpen(ev, ct.gid)} style={{ gridTemplateColumns: ctCols, padding: rowPad }}>
-                  {tick(ct.cid, ct.org)}
+                  {tick(ct.cid, ct.org, tickCell)}
                   <span className="t-sec">{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} className="sxr-name">
                     <span className="t-name">{ct.org}</span>

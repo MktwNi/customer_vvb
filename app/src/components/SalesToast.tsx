@@ -4,6 +4,7 @@ import { todayISO } from '../lib/format';
 import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
+import { undoSentNote } from '../lib/bulk';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -87,7 +88,13 @@ export function SalesMessages() {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
     // the search page's bulk actions: where the companies went
-    if (a.act === 'goTrack') return go('track', { slToast: null, sel: null });
+    // (the followed companies' list, wherever the ติดตาม page has it: id track-watch)
+    if (a.act === 'goTrack') {
+      go('track', { slToast: null, sel: null });
+      return void requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('track-watch')?.scrollIntoView({ block: 'start' })));
+    }
+    // a send just made, taken back (engine.undoSent: within 10 minutes, rows nobody has worked on since)
+    if (a.act === 'sendUndo' && a.k) return acts.say(undoSentNote(e.undoSent(a.k)), { ms: 6000 });
     if (a.act === 'goSales') return go('sales', { slView: 'table', ...(a.year ? { slYear: a.year } : {}), slToast: null, sel: null });
     if (a.act === 'goPlan') return go('plan', { ...(a.day ? { calDay: a.day, calM: a.day.slice(0, 7) } : {}), slToast: null, sel: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });

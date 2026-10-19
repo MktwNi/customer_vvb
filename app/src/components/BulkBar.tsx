@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useApp, useEngineVersion, useNarrow } from '../state';
-import { fmtN } from '../lib/format';
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useApp, useEngineVersion } from '../state';
 import {
-  BIG, bulkActs, confirmWords, createSel, followNote, followSplit, ownerNote, ownerSplit, pickedCos, pickedRows, selWord, tooManyWord, unfollowNote,
-  type Row, type SelStore,
+  BIG, bulkActs, confirmWords, createSel, followNote, followSplit, hintWord, localWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, rowFits, selWord,
+  tooManyWord, unfollowNote, type Row, type SelStore,
 } from '../lib/bulk';
+import { fmtN } from '../lib/format';
 import { Modal, DialogActions } from './Dialog';
 import { Notice } from './ui';
 import { SelField } from './Select';
@@ -24,22 +24,26 @@ export function useSel(store: SelStore = searchSel) {
 type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'owner' | 'csv';
 
 /**
- * The bar over the search results while rows are picked (the owner's "เลือกทั้งหมด แล้วเลือกได้ว่าจะทำอะไร"):
- * how many, then what this account may do with them (lib/bulk.ts bulkActs): ติดตาม / เลิกติดตาม, ส่งเข้า
- * Sales Tracker (the send dialog), วางแผนติดต่อ (the appointment dialog, spread per day), ตั้งผู้รับผิดชอบ,
- * ส่งออก CSV, ล้างที่เลือก. It stays under the top of the page while the list scrolls. Acting on more than
+ * The bar over the search results (the owner's "เลือกทั้งหมด แล้วเลือกได้ว่าจะทำอะไร"). It is there whenever
+ * there are results, so ticking the first row moves nothing under the pointer: before anything is picked
+ * it is a quiet line saying what ticking does; then how many are picked and what this account may do with
+ * them (lib/bulk.ts bulkActs): ติดตาม / เลิกติดตาม, ส่งเข้า Sales Tracker (the send dialog), วางแผนติดต่อ (the
+ * appointment dialog, spread per day), ตั้งผู้รับผิดชอบ, ส่งออก CSV, ล้างที่เลือก. It keeps one row (the same
+ * height either way): when the buttons do not fit, they are one "ทำรายการ" menu (phones, narrow windows).
+ * While something is picked it stays under the top of the page as the list scrolls. Acting on more than
  * BIG companies asks first; each action says what it did at the bottom, with a link to where they went.
- * Phones: the count, one "ทำรายการ" menu and ล้าง.
  */
 export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: readonly Row[]; sel: ReadonlySet<number>; n: number }) {
   const { engine: e, set, openSched } = useApp();
   const ver = useEngineVersion();
-  const narrow = useNarrow();
   const { say } = useSalesActs();
-  const cos = useMemo(() => pickedCos(sel, rows), [sel, rows]);
+  const idle = n === 0;
+  const cos = useMemo(() => (idle ? [] : pickedCos(sel, rows)), [idle, sel, rows]);
   const watch = useMemo(() => new Set(e.crm.watch), [e, ver]);
   const fs = followSplit(cos, watch);
-  const acts = bulkActs((c) => e.can(c), fs.on, cos.length);
+  const can = (c: Parameters<typeof e.can>[0]) => e.can(c);
+  const acts = bulkActs(can, fs.on, cos.length);
+  const team = !!e.teamCfg;
   const [ask, setAsk] = useState<'follow' | 'unfollow' | null>(null);
   const [owner, setOwner] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -49,8 +53,8 @@ export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: rea
   const follow = (on: boolean) => {
     setAsk(null);
     const r = e.setWatchMany(cos, on);
-    if (on) say(followNote(r.changed, r.same), { ms: 8000, acts: r.changed ? [{ label: 'ดูรายการติดตาม', act: 'goTrack', primary: true }] : undefined });
-    else say(unfollowNote(r.changed, r.same), { ms: 6000 });
+    if (on) say(followNote(r.changed, r.same) + localWord(r.local), { ms: 8000, acts: r.changed ? [{ label: 'ดูรายการติดตาม', act: 'goTrack', primary: true }] : undefined });
+    else say(unfollowNote(r.changed, r.same) + localWord(r.local), { ms: 6000 });
   };
   const run = (a: Act) => {
     setMenu(false);
@@ -71,29 +75,80 @@ export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: rea
     ['csv', 'ส่งออก CSV', acts.csv],
   ];
   const shown = list.filter((x) => x[2]);
-  const cw = ask ? confirmWords(ask, ask === 'follow' ? fs.off : fs.on, ask === 'follow' ? fs.on : fs.off) : null;
+  const cw = ask ? confirmWords(ask, ask === 'follow' ? fs.off : fs.on, ask === 'follow' ? fs.on : fs.off, team) : null;
+  const long = selWord(view, n, cos.length);
+  // before anything is picked: what ticking leads to (an account that may only export is told so)
+  const some = bulkActs(can, 0, 1);
+  const hint = hintWord(view, !(some.follow || some.tracker || some.plan || some.owner));
 
+  // ---- one row: the buttons when they fit, else the menu. Measured on a hidden copy (the full count and
+  // every button), so the choice does not depend on which one is showing and never flips back and forth.
+  const barRef = useRef<HTMLDivElement>(null);
+  const measRef = useRef<HTMLSpanElement>(null);
+  const clearRef = useRef<HTMLButtonElement>(null);
+  const [fit, setFit] = useState(true);
+  const why = idle || !acts.tooMany ? '' : tooManyWord(cos.length);
+  const shape = long + '|' + shown.map((x) => x[0]).join() + '|' + why;
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (idle || !bar) return;
+    const check = () => {
+      const meas = measRef.current, clr = clearRef.current;
+      if (!meas || !clr) return;
+      const cs = getComputedStyle(bar);
+      const inner = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const gap = parseFloat(cs.columnGap) || 0;
+      const w = (sel: string) => [...meas.querySelectorAll<HTMLElement>(sel)].map((x) => x.offsetWidth);
+      const btns = w('.btn'), [count] = w('.bk-mn'), whyW = w('.bk-mw');
+      // the count (and its 4px), the buttons as one group (8px apart), the reason when only the export is
+      // left (in full, or it goes into the menu), ล้างที่เลือก
+      const ok = rowFits(inner, [count + 4, btns.reduce((a, b) => a + b, 0) + 8 * Math.max(0, btns.length - 1), ...whyW, clr.offsetWidth], gap);
+      setFit((f) => (f === ok ? f : ok));
+      if (ok) setMenu(false);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(bar);
+    void document.fonts?.ready.then(check);
+    return () => ro.disconnect();
+  }, [idle, shape]);
+
+  if (idle)
+    return (
+      <div className="bk-bar idle" role="region" aria-label="บริษัทที่เลือก">
+        <span className="bk-n" aria-live="polite">{hint}</span>
+      </div>
+    );
   return (
     <>
-      <div className="bk-bar" role="region" aria-label="บริษัทที่เลือก">
-        <span className="bk-n" aria-live="polite">{selWord(view, n, cos.length)}</span>
-        {narrow ? (
-          <button ref={menuBtn} type="button" className="btn sm bk-menu" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
-            ทำรายการ
-            <Chevron />
-          </button>
-        ) : (
+      <div ref={barRef} className="bk-bar" role="region" aria-label="บริษัทที่เลือก">
+        <span className="bk-n" aria-live="polite" title={fit ? undefined : long}>{fit ? long : selWord(view, n, cos.length, true)}</span>
+        {fit ? (
           <span className="bk-acts">
             {shown.map(([a, label]) => (
               <button key={a} type="button" className="btn sm" onClick={() => run(a)}>{label}</button>
             ))}
           </span>
+        ) : (
+          <button ref={menuBtn} type="button" className="btn sm bk-menu" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
+            ทำรายการ
+            <Chevron />
+          </button>
         )}
-        <button type="button" className="quiet bk-clear" onClick={clear}>ล้างที่เลือก</button>
-        {acts.tooMany && <span className="bk-why">{tooManyWord(cos.length)}</span>}
+        {fit && why && <span className="bk-why" title={why}>{why}</span>}
+        <button ref={clearRef} type="button" className="quiet bk-clear" onClick={clear}>ล้างที่เลือก</button>
+        {/* (the hidden copy the one-row choice is measured on) */}
+        <span ref={measRef} className="bk-meas" aria-hidden="true">
+          <span className="bk-mn">{long}</span>
+          {shown.map(([a, label]) => (
+            <span key={a} className="btn sm">{label}</span>
+          ))}
+          {why && <span className="bk-mw">{why}</span>}
+        </span>
       </div>
       {menu && (
-        <Pop anchor={menuBtn} onClose={() => setMenu(false)} label={selWord(view, n, cos.length)} kind="list" role="none" width={260} className="menu" align="start">
+        <Pop anchor={menuBtn} onClose={() => setMenu(false)} label={long} kind="list" role="none" width={280} className="menu" align="start">
+          {why && <p className="bk-mwhy">{why}</p>}
           <div role="menu" aria-label="ทำรายการกับบริษัทที่เลือก" className="fmenu bk-mlist" onKeyDown={menuKeys}>
             {shown.map(([a, label]) => (
               <button key={a} type="button" role="menuitem" className="fmi hv" onClick={() => run(a)}>
@@ -136,11 +191,11 @@ function OwnerDialog({ ids, onClose }: { ids: number[]; onClose: () => void }) {
   const save = () => {
     const r = e.setOwners(ids, v, only);
     onClose();
-    say(ownerNote(v, r), { ms: 6000 });
+    say(ownerNote(v, r) + localWord(r.local), { ms: 6000 });
   };
   return (
     <Modal title="ตั้งผู้รับผิดชอบ" onClose={onClose} width={480}>
-      <span className="t-sec">{`ให้ ${fmtN(ids.length)} บริษัทที่เลือก · ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท และใช้กรองได้`}</span>
+      <span className="t-sec">{ownerSub(ids.length, !!e.teamCfg)}</span>
       {team.length ? (
         <SelField
           style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' }}

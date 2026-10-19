@@ -2,6 +2,7 @@ import { EMPTY_FILTERS, type Filters } from './search';
 import { addDays, fmtN, isoTh, nextWork } from './format';
 import type { CapId } from './caps';
 import type { Cert, Company } from './types';
+import type { Deal } from './sales';
 
 /**
  * Many search results at once (the search page's selection and its action bar): which rows are picked,
@@ -15,6 +16,15 @@ export const BIG = 200;
  *  (55,000) picked by mistake would put that many rows on the team's sheet for every teammate to pull.
  *  More can still be exported. */
 export const MAX_BULK = 5000;
+/** The most rows one send adds to the Sales Tracker: the table draws every row of its year (a year of a
+ *  thousand rows takes seconds to open, for every teammate, on every visit), and rows are deleted one by
+ *  one. More: send in parts after narrowing the search, or export. */
+export const TRACKER_MAX = 300;
+/** Appointments made together keep their เวลา only while a day has at most this many: each timed one
+ *  sends a reminder an hour before to everyone who chose reminders (the team's daily mail quota). */
+export const TIMED_MAX = 5;
+/** How long the toast's เลิกทำ can take back a send to the Sales Tracker (engine.undoSent). */
+export const UNDO_SEND_MS = 10 * 60000;
 /** A result row: a company (view บริษัท) or a CFO certificate (view ใบรับรอง CFO). */
 export type Row = Company | Cert;
 const isCert = (r: Row): r is Cert => 'cid' in r;
@@ -109,9 +119,17 @@ export function ownerSplit(ids: readonly number[], owners: Readonly<Record<strin
 // ------------------------------------------------------------------ words
 
 const unitOf = (view: 'co' | 'cert') => (view === 'cert' ? 'ใบรับรอง' : 'บริษัท');
-/** The bar's count: "เลือก 15 บริษัท", "เลือก 12 ใบรับรอง (10 บริษัท)". */
-export const selWord = (view: 'co' | 'cert', n: number, cos: number) =>
-  `เลือก ${fmtN(n)} ${unitOf(view)}` + (view === 'cert' && cos !== n ? ` (${fmtN(cos)} บริษัท)` : '');
+/** The bar's count: "เลือก 15 บริษัท", "เลือก 12 ใบรับรอง (10 บริษัท)"; `short` leaves the companies out (the
+ *  narrow bar, whose menu says them). */
+export const selWord = (view: 'co' | 'cert', n: number, cos: number, short = false) =>
+  `เลือก ${fmtN(n)} ${unitOf(view)}` + (view === 'cert' && cos !== n && !short ? ` (${fmtN(cos)} บริษัท)` : '');
+/**
+ * Whether the bar's parts (the count, each action button, ล้างที่เลือก: their widths) fit one row of
+ * `width` with `gap` between them. The bar never wraps: a second row would push the list down under the
+ * pointer as boxes are ticked; when the buttons do not fit, they go into one "ทำรายการ" menu instead.
+ */
+export const rowFits = (width: number, parts: readonly number[], gap: number) =>
+  parts.reduce((a, b) => a + b, 0) + gap * Math.max(0, parts.length - 1) <= width;
 /** "เลือกทั้งหมด 15 บริษัท" */
 export const allWord = (view: 'co' | 'cert', n: number) => `เลือกทั้งหมด ${fmtN(n)} ${unitOf(view)}`;
 /** What is said when a change of filters let the picked rows go. */
@@ -131,16 +149,48 @@ export function ownerNote(name: string, r: { changed: number; same: number; kept
 export const planNote = (n: number, first: string, last: string) =>
   `นัดติดต่อ ${fmtN(n)} บริษัท ` + (first === last ? `วันที่ ${isoTh(first)}` : `${isoTh(first)} ถึง ${isoTh(last)}`);
 
-/** Why the bar offers only the export: too many picked for one change. */
-export const tooManyWord = (n: number) => `เลือกไว้ ${fmtN(n)} บริษัท ติดตาม ส่ง นัด หรือตั้งผู้รับผิดชอบได้ครั้งละไม่เกิน ${fmtN(MAX_BULK)} บริษัท กรองให้แคบลงก่อน (ส่งออก CSV ได้)`;
-/** The question before acting on more than BIG companies at once (follow / stop following). */
-export function confirmWords(act: 'follow' | 'unfollow', n: number, skip: number) {
+/** Why the bar offers only the export: too many picked for one change (short: it sits in the bar's one row). */
+export const tooManyWord = (n: number) => `เลือกไว้ ${fmtN(n)} บริษัท ทำรายการได้ครั้งละไม่เกิน ${fmtN(MAX_BULK)} บริษัท กรองให้แคบลงก่อน (ส่งออก CSV ได้)`;
+/** The bar before anything is picked (it keeps its place, so ticking the first row moves nothing). */
+export const hintWord = (view: 'co' | 'cert', csvOnly: boolean) =>
+  `ติ๊กเลือกหลาย${view === 'cert' ? 'ใบรับรอง' : 'บริษัท'} แล้ว${csvOnly ? 'ส่งออก CSV ได้ที่แถบนี้' : 'เลือกว่าจะทำอะไรที่แถบนี้'}`;
+/**
+ * The question before acting on more than BIG companies at once (follow / stop following). `team`: a team
+ * is connected (the list is the team's; without one it is this browser's).
+ */
+export function confirmWords(act: 'follow' | 'unfollow', n: number, skip: number, team: boolean) {
   return act === 'follow'
-    ? { title: `ติดตาม ${fmtN(n)} บริษัท?`, body: `บริษัทที่เลือกจะเข้ารายการติดตามของทีม ทุกคนในทีมเห็นรายการนี้${skip ? ` (ติดตามอยู่แล้ว ${fmtN(skip)} บริษัท จะข้ามไป)` : ''}`, ok: `ติดตาม ${fmtN(n)} บริษัท` }
-    : { title: `เลิกติดตาม ${fmtN(n)} บริษัท?`, body: 'บริษัทที่เลือกจะออกจากรายการติดตามของทีม ทุกคนในทีมจะไม่เห็นในรายการนี้อีก', ok: `เลิกติดตาม ${fmtN(n)} บริษัท` };
+    ? { title: `ติดตาม ${fmtN(n)} บริษัท?`, body: (team ? 'บริษัทที่เลือกจะเข้ารายการติดตามของทีม ทุกคนในทีมเห็นรายการนี้' : 'บริษัทที่เลือกจะเข้ารายการติดตาม') + (skip ? ` (ติดตามอยู่แล้ว ${fmtN(skip)} บริษัท จะข้ามไป)` : ''), ok: `ติดตาม ${fmtN(n)} บริษัท` }
+    : { title: `เลิกติดตาม ${fmtN(n)} บริษัท?`, body: team ? 'บริษัทที่เลือกจะออกจากรายการติดตามของทีม ทุกคนในทีมจะไม่เห็นในรายการนี้อีก' : 'บริษัทที่เลือกจะออกจากรายการติดตาม', ok: `เลิกติดตาม ${fmtN(n)} บริษัท` };
 }
-/** The Sales Tracker dialog's warning for many rows: "จะเพิ่ม 2,228 แถวในตารางปี 2569". */
-export const trackerWarn = (n: number, year: string) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year} ของทั้งทีม ตรวจหมวดและปีให้ถูกก่อนส่ง`;
+/** The Sales Tracker dialog's warning for many rows: "จะเพิ่ม 250 แถวในตารางปี 2569". */
+export const trackerWarn = (n: number, year: string, team: boolean) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year}${team ? ' ของทั้งทีม' : ''} ตรวจหมวดและปีให้ถูกก่อนส่ง`;
+/** More rows than one send may add (TRACKER_MAX): what to do instead. */
+export const trackerCapWord = (n: number, team: boolean) =>
+  `ส่งเข้า Sales Tracker ได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท ตอนนี้จะเพิ่ม ${fmtN(n)} แถว ตารางที่ยาวมากจะเปิดช้า${team ? 'สำหรับทุกคนในทีม' : ''} ` +
+  'ติ๊กออกให้เหลือไม่เกินนี้ หรือกรองในหน้าค้นหาให้แคบลงแล้วส่งทีละชุด (ส่งออก CSV ได้)';
+/** The ผู้รับผิดชอบ dialog's line under its title. */
+export const ownerSub = (n: number, team: boolean) => `ให้ ${fmtN(n)} บริษัทที่เลือก · ${team ? 'ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท' : 'ชื่อนี้ขึ้นในหน้าบริษัท'} และใช้กรองได้`;
+/** The appointment dialog's warning for many: "จะสร้าง 2,228 นัดในแผนติดต่อของทีม". */
+export const planWarn = (n: number, team: boolean) => `จะสร้าง ${fmtN(n)} นัดในแผนติดต่อ${team ? 'ของทีม ทุกคนในทีมเห็นนัดเหล่านี้' : ''}`;
+/** Whether appointments made together keep a เวลา: at most TIMED_MAX on a day (`perDay` 0 = all on one). */
+export const timedOk = (n: number, perDay: number) => (perDay > 0 ? Math.min(perDay, n) : n) <= TIMED_MAX;
+/** Why the เวลา field is off for this many a day. */
+export const noTimeWord = (team: boolean) =>
+  `ใส่เวลาได้เมื่อนัดไม่เกินวันละ ${TIMED_MAX} ราย` + (team ? ' เพราะนัดที่มีเวลาส่งอีเมลเตือนก่อน 1 ชั่วโมงทีละนัด ให้ทุกคนที่เปิดการเตือนไว้' : '');
+/** Companies from the TGO website sync have ids of this browser only: their ติดตาม, ผู้รับผิดชอบ and นัด stay
+ *  here (lib/teamSync.ts isLocalOnly), which the result says when a team is connected. */
+export const localWord = (n: number) => (n ? ` · ${fmtN(n)} บริษัทจากเว็บไซต์ TGO อยู่ในเครื่องนี้เท่านั้น` : '');
+/** A tracker row as typed in the table (not who saved it when): a row whose sign differs from the one a
+ *  send made has been changed by someone since, and เลิกทำ leaves it. */
+export const dealSig = (d: Deal) =>
+  JSON.stringify([d.year, d.section, d.gid, d.client, d.contactName, d.phone, d.email, d.resp, d.referral, d.contactDate, d.jobStatus, d.closedDate, d.forecast, d.actual, d.source, d.service, d.order]);
+/** What เลิกทำ after a send to the Sales Tracker did: rows someone has changed or added to since stay. */
+export function undoSentNote(r: { removed: number; kept: number; late?: boolean }) {
+  if (r.late) return 'เลิกทำได้ภายใน 10 นาทีหลังส่ง ลบทีละรายการได้ที่ Sales Tracker';
+  const kept = r.kept ? `${fmtN(r.kept)} รายที่มีคนแก้หรือเพิ่มข้อมูลแล้วยังอยู่` : '';
+  return r.removed ? `เอาออกจาก Sales Tracker แล้ว ${fmtN(r.removed)} ราย${kept ? ` (${kept})` : ''}` : kept || 'ไม่มีรายการที่ต้องเอาออก';
+}
 
 /**
  * The day of each appointment when `n` are made from `start`, `perDay` a working day (0 = all on `start`):

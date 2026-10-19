@@ -3,7 +3,7 @@ import { useApp } from '../state';
 import { TT } from '../lib/constants';
 import { addDays, fmtN, isoTh, nextWork, todayISO } from '../lib/format';
 import type { TaskForm, TaskType } from '../lib/types';
-import { BIG, planNote, spread as spreadOf } from '../lib/bulk';
+import { BIG, localWord, noTimeWord, planNote, planWarn, spread as spreadOf, timedOk } from '../lib/bulk';
 import { pageOk } from './Sidebar';
 import { DateField, Notice } from './ui';
 import { Modal } from './Dialog';
@@ -40,18 +40,23 @@ function ScheduleForm() {
   const [skip, setSkip] = useState(true);
   const ids = isMulti && skip && planned.size ? o.ids.filter((id) => !planned.has(id)) : o.ids;
   const sp = isMulti ? spreadOf(date, ids.length, +perDay) : null;
+  const team = !!e.teamCfg;
+  // several at once keep a เวลา only while a day has a few: each timed appointment mails a reminder an hour
+  // before to everyone who chose reminders, and hundreds at one time would use up the team's daily mails
+  const [time, setTime] = useState(() => (init ? init.time : ''));
+  const timeOn = !isMulti || timedOk(ids.length, +perDay);
   const cancel = () => set({ sched: null });
   const save = (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const fd = new FormData(ev.currentTarget);
     const g = (k: string) => String(fd.get(k) || '').trim();
-    const p = { type: (g('type') || 'call') as TaskType, date: g('date') || todayISO(), time: g('time'), note: g('note') };
+    const p = { type: (g('type') || 'call') as TaskType, date: g('date') || todayISO(), time: timeOn ? g('time') : '', note: g('note') };
     if (o.taskId) {
       if (t) e.updateTask(t.id, p, init); // gone: a teammate deleted it meanwhile, and that stands (see `gone`)
     } else if (ids.length) {
       const r = e.addTasks(ids, p, isMulti ? +perDay : 0, o.pid);
       // from the search page's selection: say what was made and where to see it
-      if (o.stay && r.n) say(planNote(r.n, r.first, r.last) + (ids.length < o.ids.length ? ` (ข้าม ${fmtN(o.ids.length - ids.length)} บริษัทที่มีนัดอยู่แล้ว)` : ''), { ms: 8000, acts: pageOk(e, 'plan') ? [{ label: 'ดูแผนติดต่อ', act: 'goPlan', day: r.first, primary: true }] : undefined });
+      if (o.stay && r.n) say(planNote(r.n, r.first, r.last) + (ids.length < o.ids.length ? ` (ข้าม ${fmtN(o.ids.length - ids.length)} บริษัทที่มีนัดอยู่แล้ว)` : '') + localWord(r.local), { ms: 8000, acts: pageOk(e, 'plan') ? [{ label: 'ดูแผนติดต่อ', act: 'goPlan', day: r.first, primary: true }] : undefined });
     }
     set({ sched: null, picked: {} });
   };
@@ -64,7 +69,7 @@ function ScheduleForm() {
         <SelField style={field} text="ประเภท" name="type" defaultValue={init ? init.type : 'call'} options={TT.map(([v, label]) => ({ v, label }))} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <label style={field}>วันที่<DateField name="date" value={date} onChange={(v) => v && setDate(v)} /></label>
-          <label style={field}>เวลา<input name="time" type="time" defaultValue={init ? init.time : ''} className="fld" /></label>
+          <label style={field}>เวลา<input name="time" type="time" value={timeOn ? time : ''} onChange={(ev) => setTime(ev.target.value)} disabled={!timeOn} aria-describedby={timeOn ? undefined : 'sched-notime'} className="fld" /></label>
         </div>
         {isMulti && (
           <SelField
@@ -75,6 +80,7 @@ function ScheduleForm() {
             options={[{ v: '0', label: 'ทั้งหมดในวันเดียว' }, { v: '3', label: 'วันละ 3 ราย (วันทำการ)' }, { v: '5', label: 'วันละ 5 ราย (วันทำการ)' }, { v: '10', label: 'วันละ 10 ราย (วันทำการ)' }, { v: '20', label: 'วันละ 20 ราย (วันทำการ)' }]}
           />
         )}
+        {!timeOn && <span id="sched-notime" className="t-meta">{noTimeWord(team)}</span>}
         {isMulti && planned.size > 0 && (
           <label className="hv" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer', padding: '4px 2px', borderRadius: 8 }}>
             <input type="checkbox" checked={skip} onChange={(ev) => setSkip(ev.target.checked)} style={{ accentColor: 'var(--brand)' }} />
@@ -87,7 +93,7 @@ function ScheduleForm() {
             {`จะนัด ${fmtN(ids.length)} บริษัท ` + (sp.first === sp.last ? `วันที่ ${isoTh(sp.first)}` : `${isoTh(sp.first)} ถึง ${isoTh(sp.last)} (${fmtN(sp.days)} วันทำการ)`)}
           </span>
         )}
-        {isMulti && ids.length > BIG && <Notice kind="warn">{`จะสร้าง ${fmtN(ids.length)} นัดในแผนติดต่อของทีม ทุกคนในทีมเห็นนัดเหล่านี้`}</Notice>}
+        {isMulti && ids.length > BIG && <Notice kind="warn">{planWarn(ids.length, team)}</Notice>}
         {isMulti && !ids.length && <Notice kind="info">ทุกบริษัทที่เลือกมีนัดอยู่แล้ว</Notice>}
         <label style={field}>หมายเหตุ<input name="note" defaultValue={init ? init.note : ''} className="fld" /></label>
         {gone && <span role="alert" className="note err">คนในทีมลบนัดนี้ไปแล้วระหว่างที่เปิดอยู่ จึงบันทึกไม่ได้ กดยกเลิก แล้วเพิ่มนัดใหม่ถ้ายังต้องการ</span>}

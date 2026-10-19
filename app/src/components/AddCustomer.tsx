@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useApp, useEngineVersion } from '../state';
+import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { beYear } from '../lib/sales';
 import type { Company } from '../lib/types';
 import { Modal } from './Dialog';
@@ -8,7 +8,7 @@ import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
 import { customersOf, jointRole, payerDeal } from '../lib/sales';
 import { fmtN } from '../lib/format';
-import { BIG, trackerNote, trackerWarn } from '../lib/bulk';
+import { BIG, TRACKER_MAX, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { useSalesActs } from './SalesToast';
 
 /** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
@@ -176,14 +176,21 @@ export function SendToTracker() {
   const has = useMemo(() => e.trackedIn(year), [e, year, ver]);
   const inYear = useMemo(() => cos.filter((c) => has(c)).length, [cos, has]);
   const toAdd = chosen.filter((c) => !has(c)).length;
+  // one send adds at most TRACKER_MAX rows (the table draws its whole year for every teammate)
+  const over = toAdd > TRACKER_MAX;
+  const team = !!e.teamCfg;
   const shown = all ? cos : cos.slice(0, LIST_FIRST);
   const send = () => {
+    if (over) return;
     const r = e.addDealsFromCompanies(chosen.map((c) => c.id), section === AUTO ? { year } : { section, year });
     const note = `ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`;
     if (ui.sendStay) {
-      // from the search page's selection: stay there, say what was sent, link to the table
+      // from the search page's selection: stay there, say what was sent, link to the table; an account
+      // that may delete deals can take the rows back (เลิกทำ, 10 minutes: engine.undoSent)
       set({ sendIds: null });
-      say(trackerNote(r.added, r.skipped, year), { ms: 8000, acts: r.added ? [{ label: `ดูตารางปี ${year}`, act: 'goSales', year, primary: true }] : undefined });
+      const acts: ToastAct[] = r.added ? [{ label: `ดูตารางปี ${year}`, act: 'goSales', year, primary: true }] : [];
+      if (r.added && e.can('del.rec')) acts.push({ label: 'เลิกทำ', act: 'sendUndo', k: r.k });
+      say(trackerNote(r.added, r.skipped, year), { ms: acts.length > 1 ? 12000 : 8000, acts: acts.length ? acts : undefined });
       return;
     }
     if (cos.length === 1) {
@@ -198,7 +205,7 @@ export function SendToTracker() {
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
       {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ</span>}
       {/* many at once: how many rows the team's table gets, before sending */}
-      {!ro && toAdd > BIG && <Notice kind="warn">{trackerWarn(toAdd, year)}</Notice>}
+      {!ro && (over ? <Notice kind="warn">{trackerCapWord(toAdd, team)}</Notice> : toAdd > BIG && <Notice kind="warn">{trackerWarn(toAdd, year, team)}</Notice>)}
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* (minmax: the long "อัตโนมัติ — …" choice must not widen the column past the dialog) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 120px', gap: 10 }}>
@@ -235,7 +242,7 @@ export function SendToTracker() {
       </ReadOnly>
       <div className="dlg-act">
         <button onClick={close} className="quiet">ยกเลิก</button>
-        {!ro && toAdd > 0 && <button onClick={send} className="btn pri">
+        {!ro && toAdd > 0 && !over && <button onClick={send} className="btn pri">
           ส่ง {fmtN(toAdd)} รายการ
         </button>}
       </div>
