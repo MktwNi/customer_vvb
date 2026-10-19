@@ -55,6 +55,9 @@
  *     em: the account's notification address, stored unverified; the code goes to that address (as notify_me)
  *   { action: 'notify_status', tok }             -> { ok, on, since, last, quotaLeft, sentToday, triggers, every }
  *   { action: 'role_save', tok, id?, n, d?, c?, from?, o? }  -> { ok, id, roles, grants, reqs }
+ *     a `c` that does not name a capability of LATE_CAPS_ (view.exp, edit.exp) keeps what the role has there
+ *     (a new role: what the `from` role has): builds before them cannot show them, so their save must not take
+ *     them away (newer builds send 0 for off)
  *   { action: 'role_del', tok, id, to? }         -> { ok, roles, grants, reqs }   (members and grants move to `to`)
  *   { action: 'grant_save', tok, u, c: [{ k, s?, until? }] } / { action: 'grant_del', tok, u, k } -> { ok, roles, grants, reqs }
  *   { action: 'req_decide', tok, u, ok, note?, id } -> { ok, roles, grants, reqs }   id = the request shown (REQS[u].id):
@@ -64,7 +67,9 @@
  *              [{ at, actor, u, action, detail, note }]
  * Team code (legacy mode) or token (accounts mode):
  *   { action: 'ping', key }                     -> { ok, seq, files: true }
- *   { action: 'pull', key, since, limit? }      -> { ok, seq, rows: Row[], more }
+ *   { action: 'pull', key, since, limit?, xp? } -> { ok, seq, rows: Row[], more }
+ *     xp: 1 = the build knows job expenses; without it a month-check row of an expense (dchk/<deal>/exp.<id>)
+ *     comes as a deletion, since builds before expenses would list it as a cancelled income check.
  *   { action: 'push', key, ops: Op[] }          -> { ok, seq, n, rejected: string[] }   (+ denied: string[] with tok)
  *   { action: 'upload', key, docId, name, mime, data }  -> { ok, fileId, size }   (data = base64)
  *   { action: 'file', key, fileId }             -> { ok, name, mime, size, data }
@@ -92,10 +97,17 @@
  *   the "notify" tab of this spreadsheet logs every mail (90 days) so nothing is sent twice.
  * Capabilities (CAPS_, the same catalogue as the web app's lib/caps.ts): what a key needs is in KEY_CAP
  * (default deny: an unknown prefix needs set.users, qchk/ is never pushed). A refused op is listed in
- * `denied` and never stored. push needs a write capability, upload and delfile docs.up, file docs.open.
+ * `denied` and never stored. push needs a write capability, upload and delfile docs.up (or edit.exp for an
+ * expense's bill: docId exp_<expId>), file docs.open.
  * Accounts without set.users get by = their name in log/, dlog/, dact/ values, by + at = their name
- * and the time in dchk/ and mclose/, and in a ddoc/ value by = whoever attached the document (the
+ * and the time in dchk/, mclose/ and dexp/, and in a ddoc/ value by = whoever attached the document (the
  * account for a new one, else the attacher stored with it). pull strips money without view.money and commission without view.comm.
+ * Job expenses (ค่าใช้จ่ายของงาน): dexp/<dealId>/<expId> = { c, n?, amt, d, paid?, file?: { id, name, mime, size },
+ * by, at } (edit.exp; own work = the deal's resp, as dpay/), their history rows dlog/exp.<id> (edit.exp or
+ * pay.check), the month check of an expense dchk/<dealId>/exp.<expId> (pay.check, d = the paid date, f = the
+ * bill's file id) and of a month's expenses mclose/<YYYY-MM>/out = { by, at, n, amt } (pay.check). Without
+ * view.exp (which needs view.money) pull sends all four as deletions. An account's push that deletes a deal
+ * also deletes that deal's expenses (as its dshare/), whether or not the account sees them.
  * A token request from an older build (cv < 4) may still read, but push, upload and delfile answer
  * 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)', which those builds show as is (their queue is kept).
  *   Errors: { ok: false, error: 'unauthorized' | 'no_team_key' | 'busy' | 'bad_json' | 'unknown_action'
@@ -204,11 +216,13 @@ const CAPS_ = [
   { id: 'view.money', g: 'v', th: 'ดูยอดเงิน', real: 1, d: [1, 1, 1] },
   { id: 'view.cash', g: 'v', th: 'ดู Cashflow', needs: 'view.money', d: [1, 1, 1] },
   { id: 'view.comm', g: 'v', th: 'ดูค่าคอมมิชชั่น / สัดส่วนรายได้', real: 1, needs: 'view.money', d: [1, 0, 0] },
+  { id: 'view.exp', g: 'v', th: 'ดูค่าใช้จ่ายและกำไรของงาน', real: 1, needs: 'view.money', d: [1, 1, 0] },
   { id: 'docs.open', g: 'v', th: 'เปิดเอกสารแนบ', needs: 'view.money', d: [1, 1, 1] },
   { id: 'edit.cust', g: 'e', th: 'ลูกค้าและผู้ติดต่อ', d: [1, 1, 0] },
   { id: 'edit.deal', g: 'e', th: 'ดีลและขั้นตอน', scope: 1, needs: 'view.money', d: [1, 1, 0] },
   { id: 'edit.task', g: 'e', th: 'นัดหมาย', d: [1, 1, 0] },
   { id: 'edit.pay', g: 'e', th: 'แผนชำระเงินและการรับเงิน', scope: 1, needs: 'view.money', d: [1, 1, 0] },
+  { id: 'edit.exp', g: 'e', th: 'บันทึกค่าใช้จ่ายของงาน', scope: 1, needs: 'view.exp', d: [1, 'own', 0] },
   { id: 'docs.up', g: 'e', th: 'แนบเอกสาร', needs: 'view.money', d: [1, 1, 0] },
   { id: 'edit.ctag', g: 'e', th: 'ติดประเภทลูกค้า', d: [1, 1, 0] },
   { id: 'edit.jqt', g: 'e', th: 'สร้างใบเสนอราคาร่วม', needs: 'view.money', d: [1, 1, 0] },
@@ -227,9 +241,14 @@ const CAPS_ = [
 /** The built-in roles: their ids are what USERS has always stored. admin is locked to everything. */
 const BUILTIN_ROLES = [
   { id: 'admin', n: 'ผู้ดูแลระบบ', d: 'ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และสิทธิ์' },
-  { id: 'sales', n: 'พนักงานขาย', d: 'เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร ลบได้เฉพาะบันทึกของตัวเอง' },
+  { id: 'sales', n: 'พนักงานขาย', d: 'เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร บันทึกค่าใช้จ่ายของงานตัวเอง ลบได้เฉพาะบันทึกของตัวเอง' },
   { id: 'viewer', n: 'ดูอย่างเดียว', d: 'ดูได้ทุกหน้า รวมยอดเงินและ Cashflow แก้ไขไม่ได้' },
 ];
+/**
+ * Capabilities added after the first web app with capabilities shipped (job expenses). That build cannot show
+ * them, so a role_save whose `c` does not name one keeps what the role has (roleSave_); later builds send 0.
+ */
+const LATE_CAPS_ = ['view.exp', 'edit.exp'];
 /**
  * What writing (w) and deleting (d) a record needs, by key prefix; the first match wins. A capability id,
  * a list (any one of them), or '' = nobody (qchk/: only the qt_check action writes it). ow / od: when the
@@ -252,9 +271,12 @@ const KEY_CAP = [
   { p: 'deal/', w: 'edit.deal', d: 'del.rec', ow: 'deal' },
   { p: 'dstep/', w: 'edit.deal', d: 'edit.deal', ow: 'resp', od: 'resp' },
   { p: 'dact/', w: 'edit.deal', d: 'del.log', ow: 'resp', od: 'by' },
+  // the history of a deal's expenses: a key of its own, so pull can leave it out without view.exp
+  { p: 'dlog/exp.', w: ['edit.exp', 'pay.check'], d: 'set.users' },
   { p: 'dlog/', w: ['edit.deal', 'edit.pay', 'docs.up', 'edit.jqt', 'edit.share', 'pay.check'], d: 'set.users' },
   { p: 'ddoc/', w: 'docs.up', d: 'docs.up' },
   { p: 'dpay/', w: 'edit.pay', d: 'edit.pay', ow: 'resp', od: 'resp' },
+  { p: 'dexp/', w: 'edit.exp', d: 'edit.exp', ow: 'resp', od: 'resp' },
   { p: 'ctag/', w: 'edit.ctag', d: 'edit.ctag' },
   { p: 'jqt/', w: 'edit.jqt', d: 'del.rec' },
   { p: 'jqm/', w: 'edit.jqt', d: 'edit.jqt' },
@@ -483,7 +505,7 @@ function doPost(e) {
       // what the account's capabilities allow, checked here and not inside the cases below (the file
       // cases stay one block); each op of a push is checked again by its key in push_
       const need = action === 'push' ? WRITE_CAPS_ : action === 'upload' || action === 'delfile' ? ['docs.up'] : action === 'file' ? ['docs.open'] : null;
-      if (need && !need.some((c) => actor.caps[c])) return reply_(actor, { ok: false, error: 'forbidden' });
+      if (need && !need.some((c) => actor.caps[c]) && !expBill_(action, req, actor.caps)) return reply_(actor, { ok: false, error: 'forbidden' });
     }
     switch (action) {
       case 'ping':
@@ -491,7 +513,7 @@ function doPost(e) {
         if (!sheetReady_()) withLock_(() => sheet_());
         return reply_(actor, { ok: true, seq: cachedSeq_() ?? seq_(), files: true });
       case 'pull':
-        return reply_(actor, pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL), actor));
+        return reply_(actor, pull_(Number(req.since) || 0, Math.min(Number(req.limit) || MAX_PULL, MAX_PULL), actor, Number(req.xp) >= 1));
       case 'push':
         return reply_(actor, push_(req.ops || [], actor));
       // the three file actions stay together, right before default: teamFiles.test.ts cuts them out as
@@ -516,6 +538,19 @@ function doPost(e) {
 
 function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * An account without docs.up that records job expenses (edit.exp) may still upload an expense's bill (docId
+ * exp_<expId>) and move one to the trash (a file stored as "exp_<expId>__<name>"): recording an expense
+ * includes its evidence. A file that is not there passes, so delfile answers not_found as for documents.
+ */
+function expBill_(action, req, caps) {
+  if (!caps['edit.exp']) return false;
+  if (action === 'upload') return /^exp_/.test(cleanId_(req.docId));
+  if (action !== 'delfile') return false;
+  const f = docFile_(req.fileId);
+  return !f || /^exp_/.test(f.getName());
 }
 
 /** Run fn under the script lock; spreadsheet writes are flushed before the lock is released. */
@@ -614,12 +649,27 @@ function rowOut_(r) {
 /**
  * Rows with seq > since, oldest first (rows are stored in ascending seq order). For an account,
  * what its capabilities may not see is taken out of each row (redact_); the rows themselves and
- * their seq stay, so the reader's position in the log is the same for every account.
+ * their seq stay, so the reader's position in the log is the same for every account. `xp`: the
+ * build knows job expenses; to one that does not (the team code too) an expense's month check comes as
+ * a deletion, which it ignores, instead of a check whose income line is gone.
  */
-function pull_(since, limit, actor) {
+function pull_(since, limit, actor, xp) {
   const out = pullRows_(since, limit);
-  if (actor && !actor.legacy && out.rows.length && (!actor.caps['view.money'] || !actor.caps['view.comm'])) out.rows = out.rows.map((r) => redact_(r, actor.caps));
+  if (!out.rows.length) return out;
+  const caps = actor && !actor.legacy ? actor.caps : null;
+  if (caps && (!caps['view.money'] || !caps['view.comm'] || !caps['view.exp'])) out.rows = out.rows.map((r) => redact_(r, caps));
+  if (!xp) out.rows = out.rows.map((r) => (!r.del && EXP_CHK_RE.test(r.k) ? gone_(r) : r));
   return out;
+}
+
+// the job-expense records (see the protocol at the top): an expense, its history, its month check and the
+// month check of a month's expenses
+const EXP_KEY_RE = /^(?:dexp\/|dlog\/exp\.|dchk\/[^/]+\/exp\.|mclose\/[^/]+\/)/;
+const EXP_CHK_RE = /^dchk\/[^/]+\/exp\./;
+
+/** A pulled row as a deletion (same seq, key, author and time). */
+function gone_(row) {
+  return Object.assign({}, row, { v: null, del: true });
 }
 
 function pullRows_(since, limit) {
@@ -657,7 +707,8 @@ function push_(ops, actor) {
     let seq = Number(props.getProperty('SEQ') || 0);
     const now = new Date().toISOString();
     const caps = actor.legacy ? null : actor.caps;
-    // accounts other than admins write log entries and checks in their own name, checks also at this time
+    // accounts other than admins write log entries, checks and expenses in their own name, checks and
+    // expenses also at this time
     const stamp = !!caps && !caps['set.users'];
     const list = ops.map((op) => {
       op = op || {};
@@ -670,6 +721,7 @@ function push_(ops, actor) {
     const rejected = [];
     const denied = [];
     const stored = {}; // keys this push stores
+    const kept = {}; // each of them: 1 = a value, 0 = deleted (its last op in this push)
     const shares = []; // dshare/<id> of the deals this push deletes
     for (let i = 0; i < list.length; i++) {
       const x = list[i], op = x.op, k = x.k, del = x.del, delR = x.delR;
@@ -682,9 +734,10 @@ function push_(ops, actor) {
       let val = op.v;
       if (stamp && !delR && val && typeof val === 'object' && !Array.isArray(val)) {
         // a contact-log entry (company log, deal history, a deal's contact record) always carries the
-        // writer's own name (key order kept); a payment check or a month close also the server's time
+        // writer's own name (key order kept); a payment check, a month close or a job expense also the
+        // server's time
         if (/^(d?log|dact)\//.test(k) && Object.prototype.hasOwnProperty.call(val, 'by')) val = Object.assign({}, val, { by: actor.name });
-        else if (/^(dchk|mclose)\//.test(k)) val = Object.assign({}, val, { by: actor.name, at: now });
+        else if (/^(dchk|mclose|dexp)\//.test(k)) val = Object.assign({}, val, { by: actor.name, at: now });
         // a document's by is whoever attached it (the quotation check and its mails rely on it): the
         // account for a new document, else the attacher stored with it, whatever the op says
         else if (docIdOf_(k)) val = Object.assign({}, val, { by: allowed.attacher(k) || actor.name });
@@ -699,6 +752,7 @@ function push_(ops, actor) {
       // with a token the row's author is the account, whatever the op says
       rows.push([String(seq), k, v, del ? '1' : '0', String(actor.legacy ? op.by || '' : actor.name).slice(0, 100), now]);
       stored[k] = 1;
+      kept[k] = delR ? 0 : 1;
       if (caps && delR && k.indexOf('deal/') === 0) shares.push('dshare/' + k.slice(5));
     }
     // a deleted deal takes its revenue split along: an account without view.comm never received that
@@ -709,6 +763,21 @@ function push_(ops, actor) {
       seq++;
       rows.push([String(seq), k, '', '1', String(actor.name).slice(0, 100), now]);
     });
+    // and its job expenses, which an account without view.exp never received either (one sheet read, only
+    // for a push that deletes a deal). Their month checks stay: accounting sees a checked expense whose
+    // deal is gone, as it does a checked income line
+    if (shares.length) {
+      const ids = {};
+      shares.forEach((k) => (ids[k.slice(7)] = 1));
+      const under = (k) => k.indexOf('dexp/') === 0 && has_(ids, dealOf_(k));
+      const live = liveKeys_(under);
+      Object.keys(kept).forEach((k) => under(k) && (kept[k] ? (live[k] = 1) : delete live[k]));
+      Object.keys(live).forEach((k) => {
+        stored[k] = 1;
+        seq++;
+        rows.push([String(seq), k, '', '1', String(actor.name).slice(0, 100), now]);
+      });
+    }
     appendRows_(props, rows, seq);
     // the team's notification settings changed: mails sent from a request (codes, tests) read them again
     if (stored['scfg/notify.cfg']) {
@@ -1745,7 +1814,7 @@ function docIdOf_(k) {
   return m ? m[1] : '';
 }
 
-/** The deal id in a deal record's key: deal/<id>, dstep/<id>/<stage>, dpay/<id>/<stage>, dact/<id>/<act>. */
+/** The deal id in a deal record's key: deal/<id>, dstep/<id>/<stage>, dpay/<id>/<stage>, dact/<id>/<act>, dexp/<id>/<exp>. */
 function dealOf_(k) {
   return k.split('/')[1] || '';
 }
@@ -1800,6 +1869,25 @@ function latest_(deals, keys, docs) {
   return out;
 }
 
+/**
+ * The keys `test` accepts whose latest row is a value, not a deletion: { <k>: 1 } (caller holds the lock).
+ * One read of the key, value and deleted columns.
+ */
+function liveKeys_(test) {
+  const out = {}, seen = {};
+  const sh = sheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return out;
+  const vals = sh.getRange(2, 2, last - 1, 3).getValues();
+  for (let i = vals.length - 1; i >= 0; i--) {
+    const k = String(vals[i][0]);
+    if (!k || !test(k) || has_(seen, k)) continue;
+    seen[k] = 1;
+    if (!(vals[i][2] === 1 || vals[i][2] === true || vals[i][2] === '1') && vals[i][1] !== '') out[k] = 1;
+  }
+  return out;
+}
+
 /** Two display names are the same person: compared as names are typed (spaces, case, NFC); '' never matches. */
 function sameName_(a, b) {
   const n = (s) => String(s == null ? '' : s).normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1839,15 +1927,17 @@ function unmoneyLog_(action, detail) {
 }
 
 /**
- * A pulled row as an account without view.money / view.comm may see it. Without view.money the money
- * fields are null (a quotation check's fp.a too) and amounts in the app's own notes and in a check's
+ * A pulled row as an account without view.money / view.comm / view.exp may see it. Without view.money the
+ * money fields are null (a quotation check's fp.a too) and amounts in the app's own notes and in a check's
  * note are "…"; without view.comm a revenue split
- * (dshare/) comes as a deletion and a unit (scfg/unit.*) without its rates. The row keeps its seq.
- * Text people typed themselves ("ราคา 350000") is theirs and stays.
+ * (dshare/) comes as a deletion and a unit (scfg/unit.*) without its rates; without view.exp (or
+ * view.money, which it needs) every job-expense record (EXP_KEY_RE) comes as a deletion. The row keeps its
+ * seq. Text people typed themselves ("ราคา 350000") is theirs and stays.
  */
 function redact_(row, caps) {
   const k = row.k;
-  if (!caps['view.comm'] && k.indexOf('dshare/') === 0) return Object.assign({}, row, { v: null, del: true });
+  if ((!caps['view.exp'] || !caps['view.money']) && EXP_KEY_RE.test(k)) return gone_(row);
+  if (!caps['view.comm'] && k.indexOf('dshare/') === 0) return gone_(row);
   const v = row.v;
   if (!v || typeof v !== 'object' || Array.isArray(v)) return row;
   let o = null;
@@ -2089,7 +2179,9 @@ function capMap_(c) {
 /**
  * Create a role (no id; at most MAX_ROLES with the built-ins) or change one: name (unique), description,
  * capabilities (`c`, or copied `from` another role) and order. admin can't be changed. A capability whose
- * `needs` is missing is left out. The change applies to every account of the role on its next request.
+ * `needs` is missing is left out. The change applies to every account of the role on its next request. A
+ * capability of LATE_CAPS_ that `c` does not name keeps the role's value, or for a new role the value of
+ * the role it is copied `from` (a build from before that capability is saving).
  */
 function roleSave_(req, actor) {
   const id = req.id == null || req.id === '' ? '' : String(req.id);
@@ -2110,6 +2202,10 @@ function roleSave_(req, actor) {
       const m = capMap_(req.c);
       if (m.err) return { ok: false, error: m.err };
       c = m.c;
+      // a build from before these capabilities sends none of them: what the role has there stays (a new
+      // role copied from another: what that one has)
+      const was = old ? old.c : req.from != null && req.from !== '' && roleExists_(R.roles, String(req.from)) ? roleCaps_(R.roles, String(req.from)) : {};
+      LATE_CAPS_.forEach((k) => !has_(req.c, k) && was[k] && (c[k] = was[k]));
     } else if (req.from != null && req.from !== '') {
       if (!roleExists_(R.roles, String(req.from))) return { ok: false, error: 'bad_role' };
       c = roleCaps_(R.roles, String(req.from));

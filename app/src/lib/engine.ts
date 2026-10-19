@@ -19,7 +19,7 @@ import {
 } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
 import {
-  BUILTIN, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, parseAudit, parseGrants, parseReqs, parseRoles, sameName, capsWire,
+  BUILTIN, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, parseAudit, parseGrants, parseReqs, parseRoles, sameName, roleWire,
   type AuditRow, type CapAsk, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
 } from './caps';
 import {
@@ -28,6 +28,7 @@ import {
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
+import { purgeExpenses, toExpense } from './expense';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
@@ -1200,6 +1201,21 @@ export class GccEngine {
         const c = toMonthClose(v), M = S.mclose || (S.mclose = {});
         if (c && /^\d{4}-\d\d$/.test(k) && !(k in M)) M[k] = c;
       });
+      // job expenses (lib/expense.ts), only for an account that sees them (as the script would send them)
+      if (this.can('view.exp')) {
+        Object.entries((IS.exp || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const x = toExpense(v), E = S.exp || (S.exp = {}), j = k.indexOf('/');
+          if (x && j > 0 && j < k.length - 1 && !k.includes('/', j + 1) && S.deals[k.slice(0, j)] && !(k in E)) E[k] = x;
+        });
+        Object.entries((IS.xchk || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const c = toPayCheck(v), X = S.xchk || (S.xchk = {}), j = k.indexOf('/');
+          if (c && j > 0 && j < k.length - 1 && !k.includes('/', j + 1) && !(k in X)) X[k] = c;
+        });
+        Object.entries((IS.mcloseOut || {}) as Record<string, unknown>).forEach(([k, v]) => {
+          const c = toMonthClose(v), M = S.mcloseOut || (S.mcloseOut = {});
+          if (c && /^\d{4}-\d\d$/.test(k) && !(k in M)) M[k] = c;
+        });
+      }
       // joint quotations: the header's mark and each membership (else the header turns into a plain customer
       // and the members' own typed figures count again); only for deals this browser has
       Object.entries(IS.jqt || {}).forEach(([k, v]) => {
@@ -1690,6 +1706,13 @@ export class GccEngine {
       delete S.shares[id];
       if (this.canWriteKey(keyOf.dshare(id), true)) this.op(keyOf.dshare(id));
     }
+    // its job expenses: the same (the script deletes them with the deal for an account); accounting's checks
+    // of them stay, as checks of income do
+    Object.keys(S.exp || {}).forEach((k) => {
+      if (!k.startsWith(id + '/')) return;
+      delete S.exp![k];
+      if (this.canWriteKey('dexp/' + k, true)) this.op('dexp/' + k);
+    });
   }
   /** Replace one of the tracker's lists (sections, SOURCE, Services, stages). */
   setSalesList(name: keyof SalesCfg, items: string[]) {
@@ -3388,7 +3411,8 @@ export class GccEngine {
   private async pullFrom(cfg: TeamCfg, since: number) {
     const rows: SyncRow[] = [];
     for (;;) {
-      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, this.cred(cfg), { action: 'pull', since });
+      // xp: this build knows job expenses (an older one would get an expense's month check as a deletion)
+      const r = await call<{ rows: SyncRow[]; more: boolean }>(this.transport, cfg.url, this.cred(cfg), { action: 'pull', since, xp: 1 });
       this.meta(cfg, r);
       rows.push(...r.rows);
       if (r.rows.length) since = r.rows[r.rows.length - 1].seq;
@@ -3425,9 +3449,10 @@ export class GccEngine {
 
   /**
    * The account as the script describes it now (name, role, capabilities, requests). Returns whether
-   * anything changed. A role that gains or loses what the script hides from it (money, commission)
-   * pulls everything again — the rows it holds were sent without those fields, or with them — and one
-   * that may no longer open documents drops the copies kept in this browser.
+   * anything changed. A role that gains or loses what the script hides from it (money, commission, job
+   * expenses) pulls everything again — the rows it holds were sent without those fields, or with them — one
+   * that may no longer open documents drops the copies kept in this browser, and one that may no longer see
+   * job expenses drops them at once.
    */
   private adoptMe(s: Session, me: ReturnType<typeof parseMe>) {
     const before = capsOf(s) || {};
@@ -3470,8 +3495,8 @@ export class GccEngine {
       // the same role, other capabilities: the role was edited, or an extra was added or ran out
       this.teamNote = ranOut ? 'สิทธิ์เพิ่มชั่วคราวหมดอายุแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี' : 'สิทธิ์ของคุณเปลี่ยนแล้ว · ดูได้ที่ สิทธิ์ของฉัน ในเมนูบัญชี';
     }
-    // what the script leaves out depends on these two: the rows held here were sent for the old set
-    const real = (c: CapSet) => `${!!c['view.money']}|${!!c['view.comm']}`;
+    // what the script leaves out depends on these three: the rows held here were sent for the old set
+    const real = (c: CapSet) => `${!!c['view.money']}|${!!c['view.comm']}|${!!c['view.exp']}`;
     const cfg = this.teamCfg;
     if (real(before) !== real(after) && cfg && cfg.mode === 'accounts' && cfg.u === s.u) {
       // the next round pulls every row again (each record is replaced whole); set after this round ends,
@@ -3480,6 +3505,8 @@ export class GccEngine {
       this.flushSoon();
     }
     if ((before['docs.open'] && !after['docs.open']) || (before['view.money'] && !after['view.money'])) this.purgeDocCopies();
+    // the job expenses go at once (the pull that follows brings them as deletions anyway)
+    if (before['view.exp'] && !after['view.exp'] && purgeExpenses(this.sales)) this.saveSales();
     return true;
   }
   /** The account's capabilities changed what the script sends it: pull everything again (adoptMe). */
@@ -4602,7 +4629,7 @@ export class GccEngine {
   /** Create (no id) or change a role: name, description, capabilities. `from`: the role it was copied
    *  from (the audit trail says so). Returns the roles as they are now. */
   async roleSave(r: { id?: string; n: string; d: string; c: CapSet; from?: string }) {
-    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: capsWire(r.c), ...(r.from ? { from: r.from } : {}) }).catch((e) => {
+    const x = await this.adminCall<Record<string, unknown>>({ action: 'role_save', ...(r.id ? { id: r.id } : {}), n: r.n.trim(), d: r.d.trim(), c: roleWire(r.c), ...(r.from ? { from: r.from } : {}) }).catch((e) => {
       // the script shares these codes with accounts: say them about a role
       throw e instanceof TeamSyncError && e.code === 'name_taken' ? codeError('name_dup', e.extra) : e instanceof TeamSyncError && e.code === 'bad_name' ? codeError('role_name', e.extra) : e;
     });

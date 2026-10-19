@@ -26,13 +26,14 @@ const at = (ms: number) => vi.setSystemTime(T0 + ms);
  * The built-in roles' capabilities as the roles design gives them (roles/impl-note.md §1.1): they keep
  * what each role could do before capabilities; sales may delete only its own contact records.
  */
-const ALL_CAPS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users'];
+const ALL_CAPS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'view.exp', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'edit.exp', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users'];
 const VIEW_CAPS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'docs.open'];
-const SALES_CAPS = [...VIEW_CAPS, 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail'];
+// job expenses: sales sees them and records them on its own deals (the viewer neither)
+const SALES_CAPS = [...VIEW_CAPS, 'view.exp', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail'];
 const ones = (l: string[]): Record<string, 1> => Object.fromEntries(l.map((c) => [c, 1 as const]));
 const BUILTIN: Record<Role, { rn: string; caps: Record<string, 1 | 'own'> }> = {
   admin: { rn: 'ผู้ดูแลระบบ', caps: ones(ALL_CAPS) },
-  sales: { rn: 'พนักงานขาย', caps: { ...ones(SALES_CAPS), 'del.log': 'own' } },
+  sales: { rn: 'พนักงานขาย', caps: { ...ones(SALES_CAPS), 'edit.exp': 'own', 'del.log': 'own' } },
   viewer: { rn: 'ดูอย่างเดียว', caps: ones(VIEW_CAPS) },
 };
 /** The e-mail settings of an account that never set any (notify.server.test.ts): the whole team for admins. */

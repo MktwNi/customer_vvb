@@ -14,6 +14,7 @@ import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyRe
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
 import { applyUnitRow, unitRecords } from './contrib';
 import { parsePayChkCfg, toMonthClose, toPayCheck } from './payCheck';
+import { toExpense } from './expense';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -301,6 +302,12 @@ export const keyOf = {
   unit: (id: string) => `scfg/unit.${id}`,
   unitm: (k: string) => `scfg/unitm.${k}`,
   dshare: (id: string) => `dshare/${id}`,
+  /** a job expense of a deal, a history row about one, accounting's check of a paid one, a month's expenses
+   *  closed (lib/expense.ts) */
+  dexp: (id: string, expId: string) => `dexp/${id}/${expId}`,
+  dlogExp: (id: string) => `dlog/exp.${id}`,
+  dchkExp: (id: string, expId: string) => `dchk/${id}/exp.${expId}`,
+  mcloseOut: (ym: string) => `mclose/${ym}/out`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -368,6 +375,13 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     Object.entries(S.pchk || {}).forEach(([k, v]) => m.set('dchk/' + k, { ...v }));
     Object.entries(S.mclose || {}).forEach(([k, v]) => m.set('mclose/' + k, { ...v }));
     if (S.pcfg) m.set('scfg/paychk.cfg', { ...S.pcfg });
+    // job expenses (lib/expense.ts), their checks and closed months
+    Object.entries(S.exp || {}).forEach(([k, v]) => m.set('dexp/' + k, { ...v }));
+    Object.entries(S.xchk || {}).forEach(([k, v]) => {
+      const j = k.indexOf('/');
+      m.set(keyOf.dchkExp(k.slice(0, j), k.slice(j + 1)), { ...v });
+    });
+    Object.entries(S.mcloseOut || {}).forEach(([k, v]) => m.set(keyOf.mcloseOut(k), { ...v }));
     // the lists too: customised before connecting, they are uploaded like every other record
     if (S.cfg) (CFG_KEYS as (keyof SalesCfg)[]).forEach((k) => Array.isArray(S.cfg[k]) && m.set(keyOf.scfg(k), S.cfg[k].slice()));
     // units, their members and the revenue splits (set up before connecting: uploaded like the lists)
@@ -562,16 +576,51 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
     case 'dchk':
     case 'mclose': {
       // the month check (lib/payCheck.ts): a received line checked, a month closed; whole records, last
-      // write wins (not MERGED); older builds skip both prefixes
-      const bag = (type === 'dchk' ? s.sales.pchk || (s.sales.pchk = {}) : s.sales.mclose || (s.sales.mclose = {})) as Record<string, unknown>;
-      if (!rest || (type === 'dchk' ? rest.indexOf('/') <= 0 : !/^\d{4}-\d\d$/.test(rest))) return;
+      // write wins (not MERGED); older builds skip both prefixes. The money going out has bags of its own
+      // (lib/expense.ts): an expense's check, dchk/<deal>/exp.<expId> → xchk '<deal>/<expId>', and a month's
+      // expenses closed, mclose/<YYYY-MM>/out → mcloseOut 'YYYY-MM' (builds before expenses skip that key,
+      // and the script sends them no expense's check)
+      const S = s.sales;
+      let bag: Record<string, unknown>, key = rest;
+      if (type === 'dchk') {
+        const j = rest.indexOf('/');
+        if (j <= 0) return;
+        if (rest.startsWith('exp.', j + 1)) {
+          const id = rest.slice(j + 5);
+          if (!id || id.includes('/')) return;
+          key = rest.slice(0, j + 1) + id;
+          bag = S.xchk || (S.xchk = {});
+        } else bag = S.pchk || (S.pchk = {});
+      } else {
+        const m = /^(\d{4}-\d\d)(\/out)?$/.exec(rest);
+        if (!m) return;
+        key = m[1];
+        bag = m[2] ? S.mcloseOut || (S.mcloseOut = {}) : S.mclose || (S.mclose = {});
+      }
       if (del) {
-        if (!(rest in bag)) return;
-        delete bag[rest];
+        if (!(key in bag)) return;
+        delete bag[key];
       } else {
         const v = type === 'dchk' ? toPayCheck(row.v) : toMonthClose(row.v);
         if (!v) return;
-        bag[rest] = v;
+        bag[key] = v;
+      }
+      fx.sales = true;
+      break;
+    }
+    case 'dexp': {
+      // a job expense (lib/expense.ts; its fields merge like a payment line's, MERGED): older builds skip the
+      // prefix. Without ดูค่าใช้จ่าย the script sends every one as a deletion
+      const E = s.sales.exp || (s.sales.exp = {});
+      const j = rest.indexOf('/');
+      if (j <= 0 || j === rest.length - 1 || rest.includes('/', j + 1)) return;
+      if (del) {
+        if (!(rest in E)) return;
+        delete E[rest];
+      } else {
+        const v = toExpense(row.v);
+        if (!v) return;
+        E[rest] = v;
       }
       fx.sales = true;
       break;
@@ -628,7 +677,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|person|jqt|jqm)\/|scfg\/unit\.)/;
+const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|dexp|person|jqt|jqm)\/|scfg\/unit\.)/;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.

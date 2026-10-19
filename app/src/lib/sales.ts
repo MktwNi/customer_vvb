@@ -16,6 +16,7 @@ import { addDays, daysBetween, localDay, pad, todayISO } from './format';
 import { ceOf, inRange, isDay, monthEnd, normDateF, resolveDate, type DateBasis, type DateF, type Range } from './dateRange';
 import type { NotifyCfg, QtCheck } from './notify';
 import type { MonthClose, PayCheck, PayChkCfg } from './payCheck';
+import type { JobExp } from './expense';
 import type { CustomCo } from './types';
 // units and the revenue split (package dash): only plain helpers, which import nothing from here at run time
 import { dealUnits, setPartsHook, unitCtx, type Part, type ShareRec, type UnitMember, type UnitRec } from './contrib';
@@ -186,6 +187,13 @@ export interface SalesState {
   pchk?: Record<string, PayCheck>;
   mclose?: Record<string, MonthClose>;
   pcfg?: PayChkCfg;
+  /** Job expenses (lib/expense.ts): `${dealId}/${expId}` → an expense (`dexp/`); accounting's check of a paid
+   *  one, `${dealId}/${expId}` → `dchk/<dealId>/exp.<expId>`; 'YYYY-MM' → that month's expenses closed
+   *  (`mclose/<YYYY-MM>/out`). None of it reaches an account without ดูค่าใช้จ่าย; missing in what an older
+   *  build stored. */
+  exp?: Record<string, JobExp>;
+  xchk?: Record<string, PayCheck>;
+  mcloseOut?: Record<string, MonthClose>;
 }
 
 export const emptyCfg = (): SalesCfg => ({ sections: DEFAULT_SECTIONS.slice(), sources: DEFAULT_SOURCES.slice(), services: DEFAULT_SERVICES.slice(), stages: DEFAULT_STAGES.slice() });

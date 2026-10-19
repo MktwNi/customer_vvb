@@ -15,8 +15,8 @@
  */
 
 export type CapId =
-  | 'view.sales' | 'view.plan' | 'view.money' | 'view.cash' | 'view.comm' | 'docs.open'
-  | 'edit.cust' | 'edit.deal' | 'edit.task' | 'edit.pay' | 'docs.up' | 'edit.ctag' | 'edit.jqt' | 'edit.share' | 'del.rec' | 'del.log'
+  | 'view.sales' | 'view.plan' | 'view.money' | 'view.cash' | 'view.comm' | 'view.exp' | 'docs.open'
+  | 'edit.cust' | 'edit.deal' | 'edit.task' | 'edit.pay' | 'edit.exp' | 'docs.up' | 'edit.ctag' | 'edit.jqt' | 'edit.share' | 'del.rec' | 'del.log'
   | 'qt.check' | 'pay.check' | 'notify.mail' | 'set.lists' | 'set.units' | 'set.dedup' | 'set.data' | 'set.users';
 export type Scope = 'all' | 'own';
 /** The capabilities an account or role holds, with their scope. */
@@ -30,12 +30,14 @@ export const CAPS: CapDef[] = [
   { id: 'view.money', g: 'v', label: 'ดูยอดเงิน', desc: 'Forecast, Actual, งวดชำระ และยอดในเอกสาร', real: true },
   { id: 'view.cash', g: 'v', label: 'ดู Cashflow', desc: 'เงินที่รับแล้วและเงินที่จะเข้า แยกตามปีและไตรมาส', needs: 'view.money' },
   { id: 'view.comm', g: 'v', label: 'ดูค่าคอมมิชชั่น / สัดส่วนรายได้', desc: 'ส่วนแบ่งของแต่ละหน่วยงานและค่าคอมมิชชั่น', real: true, needs: 'view.money' },
+  { id: 'view.exp', g: 'v', label: 'ดูค่าใช้จ่ายและกำไรของงาน', desc: 'เงินที่จ่ายออกของแต่ละงาน และเงินคงเหลือหลังหักค่าใช้จ่าย', real: true, needs: 'view.money' },
   { id: 'docs.open', g: 'v', label: 'เปิดเอกสารแนบ', desc: 'ใบเสนอราคา ใบแจ้งหนี้ ใบเสร็จ', needs: 'view.money' },
 
   { id: 'edit.cust', g: 'e', label: 'ลูกค้าและผู้ติดต่อ', desc: 'เพิ่มและแก้ลูกค้า ผู้ติดต่อ บันทึกการติดต่อ' },
   { id: 'edit.deal', g: 'e', label: 'ดีลและขั้นตอน', desc: 'ส่งเข้า Sales Tracker บันทึกขั้นตอน ได้งาน/ไม่ได้งาน ปิดงาน', scope: true, needs: 'view.money' },
   { id: 'edit.task', g: 'e', label: 'นัดหมาย', desc: 'เพิ่ม แก้ และติ๊กว่าทำแล้วในแผนติดต่อ' },
   { id: 'edit.pay', g: 'e', label: 'แผนชำระเงินและการรับเงิน', desc: 'ตั้งงวด บันทึกรับเงิน แนบใบเสร็จ', scope: true, needs: 'view.money' },
+  { id: 'edit.exp', g: 'e', label: 'บันทึกค่าใช้จ่ายของงาน', desc: 'เพิ่ม แก้ และลบค่าใช้จ่าย พร้อมแนบบิลหรือใบเสร็จ', scope: true, needs: 'view.exp' },
   { id: 'docs.up', g: 'e', label: 'แนบเอกสาร', desc: 'แนบใบเสนอราคา ฉบับแก้ไข และใบแจ้งหนี้', needs: 'view.money' },
   { id: 'edit.ctag', g: 'e', label: 'ติดประเภทลูกค้า', desc: 'CFO, CFP, ที่ปรึกษา, ทวนสอบ และอื่นๆ' },
   { id: 'edit.jqt', g: 'e', label: 'สร้างใบเสนอราคาร่วม', desc: 'ใบเสนอราคาหัวเดียว ทำหลายบริษัท', needs: 'view.money' },
@@ -78,7 +80,7 @@ export const ROLE_NAME_MAX = 30;
 
 const all = (ids: CapId[]): CapSet => Object.fromEntries(ids.map((k) => [k, 'all'])) as CapSet;
 export const ALL_CAPS: CapSet = all(CAP_IDS);
-const SALES: CapSet = { ...all(['view.sales', 'view.plan', 'view.money', 'view.cash', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail']), 'del.log': 'own' };
+const SALES: CapSet = { ...all(['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.exp', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'docs.up', 'edit.ctag', 'edit.jqt', 'notify.mail']), 'edit.exp': 'own', 'del.log': 'own' };
 const VIEWER: CapSet = all(['view.sales', 'view.plan', 'view.money', 'view.cash', 'docs.open']);
 
 export type BuiltinId = 'admin' | 'sales' | 'viewer';
@@ -86,7 +88,7 @@ export interface RoleDef { id: string; n: string; d: string; c: CapSet; builtin?
 /** The three roles every team has (their ids are the ones accounts were made with). */
 export const BUILTIN: Record<BuiltinId, RoleDef> = {
   admin: { id: 'admin', n: 'ผู้ดูแลระบบ', d: 'ทำได้ทุกอย่าง รวมถึงจัดการผู้ใช้และสิทธิ์', c: ALL_CAPS, builtin: true, o: 0 },
-  sales: { id: 'sales', n: 'พนักงานขาย', d: 'เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร ลบได้เฉพาะบันทึกของตัวเอง', c: SALES, builtin: true, o: 1 },
+  sales: { id: 'sales', n: 'พนักงานขาย', d: 'เพิ่มและแก้ลูกค้า ดีล นัดหมาย แผนชำระ และแนบเอกสาร บันทึกค่าใช้จ่ายของงานตัวเอง ลบได้เฉพาะบันทึกของตัวเอง', c: SALES, builtin: true, o: 1 },
   viewer: { id: 'viewer', n: 'ดูอย่างเดียว', d: 'ดูได้ทุกหน้า รวมยอดเงินและ Cashflow แก้ไขไม่ได้', c: VIEWER, builtin: true, o: 2 },
 };
 export const BUILTIN_IDS = Object.keys(BUILTIN) as BuiltinId[];
@@ -126,6 +128,16 @@ export function parseCaps(x: unknown): CapSet | null {
 /** The map the team script stores: {cap: 1 | 'own'}. */
 export const capsWire = (c: CapSet) => Object.fromEntries((Object.entries(c) as [CapId, Scope | undefined][]).filter(([k, s]) => s && isCap(k)).map(([k, s]) => [k, s === 'own' ? 'own' : 1]));
 
+/**
+ * Capabilities added after the first build with capabilities shipped (job expenses). That build cannot show
+ * them, so the team script keeps a role's value for one its role_save does not name (Code.gs LATE_CAPS_):
+ * this build names each of them, 0 when off (roleWire). They only ever come from the script: one before
+ * capabilities (no me.caps) never stored or hid their records, so its built-in role gives none (capsOf).
+ */
+export const LATE_CAPS: CapId[] = ['view.exp', 'edit.exp'];
+/** A role's capabilities as role_save sends them: capsWire, plus 0 for every LATE_CAPS one that is off. */
+export const roleWire = (c: CapSet): Record<string, 1 | 'own' | 0> => ({ ...Object.fromEntries(LATE_CAPS.map((k) => [k, 0 as const])), ...(capsWire(c) as Record<string, 1 | 'own'>) });
+
 /** Both sets together; the wider scope wins. */
 export function unionCaps(a: CapSet, b: CapSet): CapSet {
   const out: CapSet = { ...a };
@@ -163,12 +175,16 @@ export function resolveCaps(baseRole: string, roles: Record<string, CapSet>, g: 
 /** A signed-in account as the client knows it. */
 export interface CapHolder { role: string; caps?: CapSet | null }
 /** The account's capabilities: what the script sent (me.caps), or — from a script that sends none (the
- *  one deployed before this release) — the built-in caps of me.role. An unknown role gets nothing.
+ *  one deployed before this release) — the built-in caps of me.role, less LATE_CAPS (that script neither
+ *  hides nor guards job expenses). An unknown role gets nothing.
  *  null = no accounts (team code, or this browser only): everything is allowed, as before accounts. */
 export function capsOf(s: CapHolder | null | undefined): CapSet | null {
   if (!s) return null;
   if (s.caps) return closeNeeds(s.caps);
-  return isBuiltin(s.role) ? { ...BUILTIN[s.role].c } : {};
+  if (!isBuiltin(s.role)) return {};
+  const c: CapSet = { ...BUILTIN[s.role].c };
+  LATE_CAPS.forEach((k) => delete c[k]);
+  return c;
 }
 
 /** Names as people type them in ผู้รับผิดชอบ and as accounts carry them: the same person whatever the
@@ -226,11 +242,16 @@ export function keyRule(k: string, del: boolean): KeyRule | null | 'never' {
     case 'dact/':
       return r('edit.deal', 'del.log', 'resp', 'by');
     case 'dlog/':
+      // the history of a deal's expenses has keys of its own (dlog/exp.<id>): the script leaves them out
+      // for an account without ดูค่าใช้จ่าย
+      if (k.startsWith('dlog/exp.')) return r(['edit.exp', 'pay.check'], 'set.users');
       return r(['edit.deal', 'edit.pay', 'docs.up', 'edit.jqt', 'edit.share', 'pay.check'], 'set.users');
     case 'ddoc/':
       return r('docs.up', 'docs.up');
     case 'dpay/':
       return r('edit.pay', 'edit.pay', 'resp', 'resp');
+    case 'dexp/':
+      return r('edit.exp', 'edit.exp', 'resp', 'resp');
     case 'ctag/':
       return r('edit.ctag', 'edit.ctag');
     case 'jqt/':
@@ -259,7 +280,7 @@ export function keyRule(k: string, del: boolean): KeyRule | null | 'never' {
   return null;
 }
 /** The record prefixes the allow-list knows (for tests and the parity check). */
-export const KNOWN_PREFIXES = ['stage/', 'owner/', 'watch/', 'contact/', 'ccol/', 'cust/', 'person/', 'log/', 'task/', 'deal/', 'dstep/', 'dact/', 'dlog/', 'ddoc/', 'dpay/', 'ctag/', 'jqt/', 'jqm/', 'dshare/', 'dchk/', 'mclose/', 'dedup/', 'team/', 'dundo/', 'scfg/', 'qchk/'];
+export const KNOWN_PREFIXES = ['stage/', 'owner/', 'watch/', 'contact/', 'ccol/', 'cust/', 'person/', 'log/', 'task/', 'deal/', 'dstep/', 'dact/', 'dlog/exp.', 'dlog/', 'ddoc/', 'dpay/', 'dexp/', 'ctag/', 'jqt/', 'jqm/', 'dshare/', 'dchk/', 'mclose/', 'dedup/', 'team/', 'dundo/', 'scfg/', 'qchk/'];
 
 /**
  * May this account write (or delete) record `k`? `own`: whether the record is the account's, for a rule
@@ -282,7 +303,7 @@ const PHRASE: Partial<Record<CapId, string>> = {
 };
 export const capPhrase = (k: CapId) => PHRASE[k] || CAP[k].label;
 /** Short names for the role editor's save bar. */
-const SHORT: Partial<Record<CapId, string>> = { 'view.comm': 'ค่าคอมมิชชั่น' };
+const SHORT: Partial<Record<CapId, string>> = { 'view.comm': 'ค่าคอมมิชชั่น', 'view.exp': 'ดูค่าใช้จ่าย', 'edit.exp': 'บันทึกค่าใช้จ่าย' };
 export const capShort = (k: CapId) => SHORT[k] || CAP[k].label;
 
 /** What `to` adds over `from`, in words (a wider scope counts too). */
@@ -311,11 +332,12 @@ export function summarize(c: CapSet): string {
   if (!edits && !WRITE_CAPS.some((k) => c[k]) && !c['qt.check']) {
     // a role that only looks
     const pages = c['view.sales'] && c['view.plan'] ? 'ดูได้ทุกหน้า' : c['view.sales'] ? 'ดู Sales Tracker และผู้ติดต่อ' : c['view.plan'] ? 'ดูแผนติดต่อ' : 'ดูหน้าทะเบียนบริษัท';
-    const money = c['view.money'] ? ' รวมยอดเงิน' + (c['view.cash'] ? 'และ Cashflow' : '') + (c['view.comm'] ? ' และค่าคอมมิชชั่น' : '') : ' ไม่เห็นยอดเงิน';
+    const money = c['view.money'] ? ' รวมยอดเงิน' + (c['view.cash'] ? 'และ Cashflow' : '') + (c['view.comm'] ? ' และค่าคอมมิชชั่น' : '') + (c['view.exp'] ? ' และค่าใช้จ่ายของงาน' : '') : ' ไม่เห็นยอดเงิน';
     if (!c['view.sales'] && !c['view.plan'] && !c['view.money']) return 'ยังไม่มีสิทธิ์ใดเลย นอกจากหน้าทะเบียนบริษัท';
     return pages + money + ' แก้ไขไม่ได้';
   }
   if (edits) parts.push(nouns.length ? 'เพิ่มและแก้' + nouns.join(' ') + (c['docs.up'] ? ' และแนบเอกสาร' : '') : 'แนบเอกสาร');
+  if (c['edit.exp']) parts.push(c['edit.exp'] === 'own' ? 'บันทึกค่าใช้จ่ายของงานตัวเอง' : 'บันทึกค่าใช้จ่ายของงาน');
   if (c['del.rec']) parts.push('ลบดีล ลูกค้า และผู้ติดต่อได้');
   else if (c['del.log'] === 'own') parts.push('ลบได้เฉพาะบันทึกของตัวเอง');
   else if (c['del.log']) parts.push('ลบบันทึกการติดต่อได้');
