@@ -7,13 +7,13 @@ import { shortName } from '../lib/salesUi';
 import { unitCtx, unitsOf } from '../lib/contrib';
 import { EXP_CAT_MAX, EXP_NOTE_MAX, expensesOf, type DealExp } from '../lib/expense';
 import {
-  CAT_EXAMPLES, catSuggest, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTouched, jobComm, jobSum, readExpForm, sameBill,
+  CAT_EXAMPLES, catSuggest, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTouched, jobBar, jobComm, jobSum, readExpForm, sameBill,
   type ExpField, type ExpForm, type ExpKey, type JobSum,
 } from '../lib/expenseJob';
 import { DOC_ACCEPT } from '../lib/teamFiles';
 // the month check of money out (accounting's check of a paid expense): its chip and note on each line, and the
-// question before a checked line (or one of a closed month) changes; the same bar figures as Cashflow
-import { dealExpChecks, expGoneCheckWords, expGuard, expGuardText, expNoteOf, netSplit, type XRow } from '../lib/expenseMoney';
+// question before a checked line (or one of a closed month) changes
+import { dealExpChecks, expGoneCheckWords, expGuard, expGuardText, expNoteOf, type XRow } from '../lib/expenseMoney';
 import { chipOf, type PayFp } from '../lib/payCheck';
 import { Modal } from './Dialog';
 import { SHOWABLE } from './DocAttach';
@@ -117,38 +117,45 @@ export function BillsStuckNote() {
 
 // ------------------------------------------------------------------ the summary
 
-/** "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)": คงเหลือ is the money received less the expenses
- *  PAID, as Cashflow and the Dashboard count it; bills not paid yet say "ค้างจ่ายอีก …" with what is left once
- *  paid. Then the Forecast line, and (with ดูค่าคอมมิชชั่น and units) what is left after the computed
+/** The owner's line "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)": every expense of the job,
+ *  paid or not, off the money received. With a bill not paid yet, the split under it "จ่ายแล้ว 29,000 · ค้างจ่าย
+ *  6,000" and what is left counting the paid ones only (as Cashflow and the Dashboard count it: received −
+ *  paid). Then the Forecast line, and (with ดูค่าคอมมิชชั่น and units) what is left after the computed
  *  commission. `jr`: a joint quotation's header counts the whole quotation, a member company its part. */
 function Summary({ j, comm, jr }: { j: JobSum; comm: number | null; jr: 'plain' | 'header' | 'member' }) {
   const t = j.t;
-  // one rounded figure for the words and the bar (lib/expenseMoney netSplit, as Cashflow's card)
-  const B = netSplit(j.inc, t.paid);
+  const owe = t.unpaid > 0;
+  // the bar from the rounded figures the words print (paid, not paid yet, left: lib/expenseJob jobBar)
+  const B = jobBar(j);
   return (
     <div className="xp-sum">
       <p className="xp-line">
         {j.inc > 0 ? <>เงินเข้า <b>{m0(j.inc)}</b></> : <span className="t-muted">ยังไม่มีเงินเข้า</span>}
-        {' · '}{t.unpaid > 0 ? 'จ่ายแล้ว' : 'ค่าใช้จ่าย'} <b className="xp-out">{m0(t.paid)}</b>
-        {j.inc > 0 && <> · คงเหลือ <b>{m0(j.left)}</b>{pctWord(j.pct)}</>}
+        {' · '}ค่าใช้จ่าย <b className="xp-out">{m0(t.out)}</b>
+        {j.inc > 0 && <> · <span className="xp-nw">คงเหลือ <b>{m0(j.after)}</b>{pctWord(j.afterPct)}</span></>}
       </p>
       {B && (
-        <span className={'xp-bar' + (j.left < 0 ? ' over' : '')} role="img" aria-label={`ค่าใช้จ่ายที่จ่ายแล้ว ${B.ex}% · คงเหลือ ${B.left}% ของเงินเข้า`}>
-          {B.exW > 0 && <i className="out" style={{ width: B.exW + '%' }} />}
+        <span
+          className="xp-bar"
+          role="img"
+          aria-label={owe ? `ค่าใช้จ่าย ${B.paid + B.owed}% (จ่ายแล้ว ${B.paid}% · ค้างจ่าย ${B.owed}%) · คงเหลือ ${B.left}% ของเงินเข้า` : `ค่าใช้จ่าย ${B.paid}% · คงเหลือ ${B.left}% ของเงินเข้า`}
+        >
+          {B.paidW > 0 && <i className="out" style={{ width: B.paidW + '%' }} />}
+          {B.owedW > 0 && <i className="owe" style={{ width: B.owedW + '%' }} />}
           {B.leftW > 0 && <i className="left" />}
         </span>
       )}
-      {t.unpaid > 0 && (
+      {owe && (
         <p className="xp-sub">
-          <span className="xp-unpaid">ค้างจ่ายอีก {m0(t.unpaid)} ยังไม่หัก</span>
-          {j.inc > 0 && <> · ถ้าจ่ายครบ คงเหลือ <b>{m0(j.after)}</b>{pctWord(j.afterPct)}</>}
+          จ่ายแล้ว <b className="xp-out">{m0(t.paid)}</b> · <span className="xp-unpaid">ค้างจ่าย {m0(t.unpaid)}</span>
+          {j.inc > 0 && <> · นับเฉพาะที่จ่ายแล้ว <span className="xp-nw">คงเหลือ <b>{m0(j.left)}</b>{pctWord(j.pct)}</span></>}
         </p>
       )}
       {j.fc != null && j.fc > 0 && j.fc !== j.inc && (
         <p className="xp-sub">ถ้ารับครบตาม Forecast {m0(j.fc)}{jr === 'header' ? ' (ทั้งใบ)' : jr === 'member' ? ' (ส่วนแบ่ง)' : ''}: คงเหลือ <b>{m0(j.fcLeft!)}</b>{pctWord(j.fcPct)}</p>
       )}
       {comm != null && comm > 0 && j.inc > 0 && (
-        <p className="xp-sub">หลังหักค่าคอมมิชชั่น (คำนวณ) {m0(comm)}: คงเหลือ <b>{m0(j.left - comm)}</b>{pctWord(Math.round(((j.left - comm) / j.inc) * 100))}</p>
+        <p className="xp-sub">หลังหักค่าคอมมิชชั่น (คำนวณ) {m0(comm)}: คงเหลือ <b>{m0(j.after - comm)}</b>{pctWord(Math.round(((j.after - comm) / j.inc) * 100))}</p>
       )}
     </div>
   );

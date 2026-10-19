@@ -22,7 +22,7 @@ import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { cashKpis, cashYear, filterDeals, jointAttr, jointCashLines, normSalesFilter, type PlanInput, type SalesFilterIn } from './sales';
 import { viewCashLines } from './joint';
-import { headPartExps, jobSum } from './expenseJob';
+import { headPartExps, jobBar, jobSum } from './expenseJob';
 import {
   dealExpChecks, expCheckRows, expChkRows, expGoneCheckWords, expGuard, expKpis, expLines, expNoteOf, expPageKeep, expSheets, expTeamMonth, expView, expYear, netQuarters, netSplit,
 } from './expenseMoney';
@@ -133,13 +133,14 @@ function dashboard(S: Fx['S'], f: Partial<SalesFilterIn>) {
 const resp = (...v: string[]) => ({ resp: { v } });
 
 describe('the owner\'s job: the card, Cashflow and the Dashboard say the same', () => {
-  it('"เงินเข้า 100,000 · จ่ายแล้ว 30,000 · คงเหลือ 70,000 (70%)" and the 5,000 not paid yet apart', () => {
+  it('"เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)", and paid only "จ่ายแล้ว 30,000 · คงเหลือ 70,000 (70%)" = the money views', () => {
     const { S, p } = fx;
     const j = jobSum(S, p, TODAY);
     expect([j.inc, j.t.out, j.t.paid, j.t.unpaid, j.t.n, j.t.nUnpaid]).toEqual([100000, 35000, 30000, 5000, 2, 1]);
     expect([j.left, j.pct, j.after, j.afterPct]).toEqual([70000, 70, 65000, 65]);
-    // the bar's figures are Cashflow's card's (one rounded figure)
+    // the bar's figures are Cashflow's card's (one rounded figure), and the card's bar adds the 5% not paid yet
     expect(netSplit(j.inc, j.t.paid)).toMatchObject({ ex: 30, left: 70 });
+    expect(jobBar(j)).toMatchObject({ paid: 30, owed: 5, left: 65 });
     // Cashflow under คุณบี (this job alone): รับแล้ว, จ่ายแล้ว, ค้างจ่าย, คงเหลือสุทธิ and its %
     const c = cashflow(S, resp('คุณบี'));
     expect([c.K.got, c.XK.paid, c.XK.unpaid, c.XK.net, c.XK.pct]).toEqual([j.inc, j.t.paid, j.t.unpaid, j.left, j.pct]);

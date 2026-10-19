@@ -4,7 +4,7 @@
    of its own (never red, amber or green: red is late) and always its words, เงินออก / ค่าใช้จ่าย. */
 /* the same money-out colour as Cashflow and the Dashboard (--cash-out, with this value where those are not
    loaded); its text is a darker step of it, for 4.5:1 on white */
-:root{--out:#00706F;--out-bar:var(--cash-out,#009494);--out-left:var(--bar)}
+:root{--out:#00706F;--out-bar:var(--cash-out,#009494);--out-left:var(--bar);--out-owe:#8CCFCF;--out-owe-2:#BFE4E4}
 
 /* ---- the card */
 .xp-card{container:xp/inline-size}
@@ -30,11 +30,15 @@
 .xp-line b{font-weight:500;color:var(--ink)}
 .xp-line b.xp-out,.xp-out{color:var(--out)}
 .xp-unpaid{color:var(--ink-2)}
+/* "คงเหลือ 65,000 (65%)" kept on one line (Thai line breaking may split คง|เหลือ on a phone) */
+.xp-nw{white-space:nowrap}
 .xp-sub{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.55;font-variant-numeric:tabular-nums}
 .xp-sub b{font-weight:500;color:var(--ink)}
 .xp-bar{display:flex;gap:2px;height:8px;border-radius:999px;overflow:hidden;background:var(--bar-track)}
 .xp-bar i{display:block;height:100%}
 .xp-bar i.out{background:var(--out-bar);min-width:3px}
+/* bills not paid yet (ค้างจ่าย): a lighter step of the same colour with fine stripes, its words in the line under it */
+.xp-bar i.owe{min-width:3px;background:repeating-linear-gradient(135deg,var(--out-owe) 0 3px,var(--out-owe-2) 3px 6px)}
 .xp-bar i.left{flex:1;background:var(--out-left)}
 
 /* the lines: a light table, a line per expense (as the payment plan's) */

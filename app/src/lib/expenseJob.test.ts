@@ -2,7 +2,7 @@
  *  (a plain deal, a joint quotation's header and member, the computed commission). Mon 12 Oct 2569. */
 import { describe, expect, it } from 'vitest';
 import {
-  CAT_EXAMPLES, catKey, catSuggest, expCats, expChanged, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTotals, expTouched, headPartExps, jobComm, jobIncome, jobSum, memberExps, pctOf,
+  CAT_EXAMPLES, catKey, catSuggest, expCats, expChanged, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTotals, expTouched, headPartExps, jobBar, jobComm, jobIncome, jobSum, memberExps, pctOf,
   readExpForm, sameBill, tidyCat,
 } from './expenseJob';
 import { emptySales, newDeal, type Deal, type DealDoc, type JointMember, type PayLine, type SalesState } from './sales';
@@ -179,6 +179,26 @@ describe('one job\'s money', () => {
     expect(pctOf(-5000, 100000)).toBe(-5);
     expect(pctOf(2, 3)).toBe(67);
     expect(pctOf(100, 0)).toBeNull();
+  });
+
+  it('the card\'s bar: paid, not paid yet and left from the two figures the card prints (adding up to 100)', () => {
+    // the owner's job: 100,000 in, 29,000 paid, 6,000 not paid yet: "คงเหลือ 65,000 (65%)", paid only 71%
+    expect(jobBar({ pct: 71, afterPct: 65 })).toEqual({ paid: 29, owed: 6, left: 65, paidW: 29, owedW: 6, leftW: 65 });
+    // all paid: no part for bills not paid yet
+    expect(jobBar({ pct: 65, afterPct: 65 })).toEqual({ paid: 35, owed: 0, left: 65, paidW: 35, owedW: 0, leftW: 65 });
+    // the bills not paid yet would take it past what came in: the bar is full, paid first
+    expect(jobBar({ pct: 20, afterPct: -10 })).toEqual({ paid: 80, owed: 30, left: -10, paidW: 80, owedW: 20, leftW: 0 });
+    // already spent more than came in
+    expect(jobBar({ pct: -5, afterPct: -15 })).toMatchObject({ paid: 105, owed: 10, paidW: 100, owedW: 0, leftW: 0 });
+    // nothing received: no bar
+    expect(jobBar({ pct: null, afterPct: null })).toBeNull();
+    // from jobSum (rounded figures): 50,000 in, 29,400 paid, 35,600 in all
+    const s = world();
+    s.exp = { 'p1/e1': X({ amt: 29400, paid: '2026-10-07' }), 'p1/e2': X({ amt: 6200 }) };
+    const j = jobSum(s, s.deals.p1, T);
+    const b = jobBar(j)!;
+    expect(b.paid + b.owed + b.left).toBe(100);
+    expect([b.left, 100 - b.paid]).toEqual([j.afterPct, j.pct]);
   });
 
   it('a plain deal: received as Cashflow counts it; คงเหลือ = received − paid (as the money views), the bill not paid yet apart', () => {

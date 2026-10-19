@@ -8,9 +8,10 @@
  *   quotation's money; a member company holds none of its own, so its card counts its part of the header's
  *   (the split every other money view uses, holdPart).
  * - ค่าใช้จ่าย = every expense recorded on the job, paid or not (a bill not paid yet is still a cost of the job),
- *   but คงเหลือ = เงินเข้า − the expenses PAID, as Cashflow and the Dashboard count it (received − paid; a
- *   bill not paid yet, "ค้างจ่าย", is said apart with what would be left once it is paid), so the card's
- *   figures are the money views' for the same job and period.
+ *   and the card's line is the owner's: "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)" (เงินเข้า −
+ *   all of them, `after`). Under it, with a bill not paid yet, the split "จ่ายแล้ว 29,000 · ค้างจ่าย 6,000" and
+ *   what is left counting the PAID ones only (`left`: received − paid), as Cashflow and the Dashboard count
+ *   it, so the money views' figure for the same job and period is on the card too.
  * - A joint quotation's panel adds its member companies' expenses to the header's own: each expense belongs
  *   to one deal, so a total over the header and its members counts every one once. A member company counts
  *   its own and its part of the header's (split as the quotation's money is, holdPart), as the money views do
@@ -229,11 +230,11 @@ export function headPartExps(s: SalesState, d: Deal): HeadPart | null {
 
 /**
  * The card's figures: เงินเข้า (inc); ค่าใช้จ่าย (`t`: this job's own expenses, for a joint quotation's header its
- * members' too, for a member company its part of the header's); คงเหลือ = inc − the paid ones (as Cashflow and
- * the Dashboard: received − paid) and its % of inc (null with nothing received); `after` = what is left once
- * the bills not paid yet are paid too (inc − all of them); and the same against the Forecast "ถ้ารับครบตาม
- * Forecast" (all of them; null without one). `own` / `members` / `head` = the job's own expenses, a header's
- * members', a member's part of its header's.
+ * members' too, for a member company its part of the header's); `after` = the card's คงเหลือ, inc − all of them
+ * (paid or not), and its % of inc (null with nothing received); `left` = inc − the paid ones only (as Cashflow
+ * and the Dashboard: received − paid), said under the line while a bill is not paid yet; and the same against
+ * the Forecast "ถ้ารับครบตาม Forecast" (all of them; null without one). `own` / `members` / `head` = the job's
+ * own expenses, a header's members', a member's part of its header's.
  */
 export interface JobSum {
   inc: number; fc: number | null; t: ExpTotals; own: ExpTotals; members: MemberExp[]; head: HeadPart | null;
@@ -252,6 +253,22 @@ export function jobSum(s: SalesState, d: Deal, today: string): JobSum {
 export function pctOf(part: number, whole: number): number | null {
   if (!(whole > 0)) return null;
   return Math.round((part / whole) * 100);
+}
+
+/** The card's bar under its line, in % of เงินเข้า: the expenses paid, the bills not paid yet, what is left. */
+export interface JobBar { paid: number; owed: number; left: number; paidW: number; owedW: number; leftW: number }
+/**
+ * The bar from the two rounded figures the card prints (คงเหลือ after every expense, `afterPct`, and counting
+ * the paid ones only, `pct`), so the bar never reads 65% beside 64%: paid = 100 − pct, not paid yet = pct −
+ * afterPct, left = afterPct (they add up to 100). `*W` are the bar's widths (0–100; a job that spent more than
+ * came in is filled with its expenses, paid first). null when nothing was received.
+ */
+export function jobBar(j: Pick<JobSum, 'pct' | 'afterPct'>): JobBar | null {
+  if (j.pct == null || j.afterPct == null) return null;
+  const paid = 100 - j.pct, owed = j.pct - j.afterPct, left = j.afterPct;
+  const paidW = Math.min(100, Math.max(0, paid));
+  const owedW = Math.min(100 - paidW, Math.max(0, owed));
+  return { paid, owed, left, paidW, owedW, leftW: Math.max(0, 100 - paidW - owedW) };
 }
 
 /** Every dated day (an amount received without a date has no rate to price it). */
