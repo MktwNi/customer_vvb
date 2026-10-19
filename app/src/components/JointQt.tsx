@@ -17,6 +17,8 @@ import type { DocFacts } from '../lib/docExtract';
 import type { CashLens } from '../lib/cashUi';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { Modal, DialogActions } from './Dialog';
+// ค่าใช้จ่ายของงาน: the band's ⋯ menu records one on the joint quotation
+import { openExp } from './ExpCard';
 import { CoAvatar } from './CoAvatar';
 import { DateField, Notice, Status } from './ui';
 import { SelField } from './Select';
@@ -511,6 +513,7 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise,
     ...(canEdit ? [{ label: 'แก้ไขรายชื่อบริษัท', sub: `${g.members.length} บริษัท`, act: () => set({ jqDlg: { k: 'members', hid: h.id } }) }] : []),
     ...(!ro && qv && onRevise ? [{ label: 'แนบใบเสนอราคาฉบับแก้ไข', sub: `${qv.doc.docNo || 'ใบเสนอราคา'} · ตอนนี้ฉบับที่ ${qv.n}`, act: () => onRevise(qv.doc.id) }] : []),
     ...(!ro && money ? [{ label: 'แผนการชำระเงิน', sub: P ? 'แก้ไขแผนของผู้จ่าย' : 'ตั้งแผนของผู้จ่าย', act: () => onOpen(h.id, 'edit') }] : []),
+    ...(e.canExp(h) ? [{ label: 'บันทึกค่าใช้จ่าย', sub: 'ค่าใช้จ่ายของใบเสนอราคาร่วม', act: () => openExp(h.id) }] : []),
     ...(!ro && h.jobStatus === 'open' ? [{ label: 'ปิดงาน', sub: `ปิดทั้งใบเสนอราคาและ ${g.members.length} บริษัท (ถามยืนยัน)`, act: () => acts.close(h.id), sep: true }] : []),
   ];
   return (

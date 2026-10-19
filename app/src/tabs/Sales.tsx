@@ -22,6 +22,8 @@ import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } fr
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
+// ค่าใช้จ่ายของงาน: the row menu's บันทึกค่าใช้จ่าย and the phone card's row
+import { ExpMini, expMenuSub, openExp } from '../components/ExpCard';
 import { Av, insidePop } from '../components/Pop';
 import { Select } from '../components/Select';
 import { FilterBar, ReadChip, type FVal } from '../components/FilterBar';
@@ -1088,7 +1090,7 @@ function DealRow({ d, open, t, kidIds, stages, jm }: { d: Deal; open: boolean; t
       <td className="k-fc"><MoneyFc d={d} /></td>
       <td className="k-ac"><MoneyAc d={d} /></td>
       <td className="k-st"><StatusCell d={d} /></td>
-      <td className="k-act">{!tk.ro && <RowMenu d={d} />}</td>
+      <td className="k-act">{(!tk.ro || tk.e.canExp(d)) && <RowMenu d={d} />}</td>
     </tr>
   );
 }
@@ -1494,6 +1496,8 @@ function RowMenu({ d }: { d: Deal }) {
               <button role="menuitem" className="menu-i" onClick={pick(() => tk.acts.close(d.id))}>ปิดงาน<small>{ready ? 'ย้ายไปแท็บปิดงาน' : 'ยังไม่ครบ ปิดเองได้ (ถามยืนยัน)'}</small></button>
             </>
           )}
+          {/* ค่าใช้จ่ายของงาน: whoever records expenses on this deal (an account without ดีลและขั้นตอน too) */}
+          {open && tk.e.canExp(d) && <button role="menuitem" className="menu-i" onClick={pick(() => openExp(d.id))}>บันทึกค่าใช้จ่าย<small>{expMenuSub(jointRole(tk.S, d))}</small></button>}
         </span>
       )}
     </span>
@@ -2494,6 +2498,8 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
           </div>
         </div>
       )}
+      {/* ค่าใช้จ่ายของงาน: the panel's card in short (only with ดูยอดเงิน and ดูค่าใช้จ่าย) */}
+      {e.can('view.money') && <ExpMini d={d} onOpen={() => tk.openPanel(d.id)} />}
       <div className="sl-mk" role="listitem">
         <span className={'sl-flagb' + (cv.ready ? ' ready' : '')} aria-hidden="true" />
         <div className="sl-mk-t">

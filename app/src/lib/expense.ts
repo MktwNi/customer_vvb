@@ -7,7 +7,7 @@
  *   c = the category as typed (free text up to 40 characters, no fixed list: the screens suggest the ones
  *   already used), n = a description (up to 200), amt = baht as on the bill (VAT included), d = the bill's date,
  *   paid = the day it was paid (none: not paid yet), file = the bill, uploaded like a document (docId
- *   `exp_<expId>`), by / at = who wrote it last and when (the team script sets both for every account but an
+ *   `exp_<expId>`; id '' until the browser that attached it has uploaded it, as a document's fileId), by / at = who wrote it last and when (the team script sets both for every account but an
  *   admin). `expId` is made in the browser, like every record id.
  * - Its history rows are `dlog/exp.<id>` (in SalesState.log); accounting's check of a paid expense is
  *   `dchk/<dealId>/exp.<expId>` = the income check's record with d = the paid date and f = the bill's file id
@@ -53,7 +53,8 @@ export function toExpense(v: unknown): JobExp | null {
   if (n) out.n = n;
   if (isDay(x.paid)) out.paid = x.paid.slice(0, 10);
   const f = x.file && typeof x.file === 'object' && !Array.isArray(x.file) ? (x.file as Record<string, unknown>) : null;
-  if (f && typeof f.id === 'string' && /^[\w-]{1,200}$/.test(f.id)) out.file = { id: f.id, name: str(f.name, 150) || 'บิล', mime: str(f.mime, 100), size: Math.max(0, num(f.size) ?? 0) };
+  // (an id '' = the bill is still only in the browser that attached it, uploaded after its next sync)
+  if (f && typeof f.id === 'string' && /^[\w-]{0,200}$/.test(f.id)) out.file = { id: f.id, name: str(f.name, 150) || 'บิล', mime: str(f.mime, 100), size: Math.max(0, num(f.size) ?? 0) };
   return out;
 }
 
