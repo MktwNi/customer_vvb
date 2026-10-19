@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { cashLines, cashYear, emptySales, newDeal, type Deal, type PayLine, type SalesState } from './sales';
 import type { JobExp } from './expense';
 import {
-  NO_CAT, X_CHK_F, asCashLine, bothCsvRows, expBackBell, catKey, dealExpChecks, expByCat, expByDeal, expByPerson, expByUnit, expChangeWords, expCheckRows, expChkRows, expCsvRows, expFp, expIn, expKpis,
-  expLines, expNoteOf, expOwners, expPageKeep, expRecorders, expReturnedTo, expSheets, expTeamMonth, expView, expWhat, expYear, isXChkF, netMonths, netOf, netQuarters, pctWord, rowWhat, topCats,
+  NO_CAT, X_CHK_F, asCashLine, bothCsvRows, carriedOwed, expBackBell, catKey, dealExpChecks, expByCat, expByDeal, expByPerson, expByUnit, expChangeWords, expCheckRows, expChkRows, expCsvRows, expFp, expIn, expKpis,
+  expLines, expNoteOf, expOwners, expPageKeep, expRecorders, expReturnedTo, expSheets, expTeamMonth, expView, expWhat, expYear, isXChkF, netMonths, netOf, netQuarters, netSplit, pctWord, rowWhat, topCats,
   unitNets, xCheckWord, xMoneyWord, xSheetLines, xSheetPreview, type XRow,
 } from './expenseMoney';
 import { canClose, canConfirm, canReturn, canTick, chipOf, chkMatch, closeRecord, sumRows, yearCheck, type PayCheck } from './payCheck';
@@ -107,6 +107,22 @@ describe('expense lines', () => {
     expect(netMonths(C, Y)[9]).toEqual({ got: 100000, paid: 25000, unpaid: 6000, net: 75000, pct: 75 });
     const K = expKpis(Y, C.totals.got);
     expect([K.paid, K.paidN, K.unpaid, K.unpaidN, K.lastPaid, K.net, K.pct, K.deals]).toEqual([41000, 4, 6000, 1, '2026-10-06', 159000, 80, 3]);
+  });
+
+  it('the bar under คงเหลือสุทธิ reads the card\'s one rounded figure: never 65% beside 64% on a .5', () => {
+    // 64.5% left: rounding each part on its own read "เหลือ 65%" beside "คงเหลือ 64%"
+    expect(netOf(100000, 35500).pct).toBe(65);
+    expect(netSplit(100000, 35500)).toEqual({ ex: 35, left: 65, exW: 35, leftW: 65 });
+    // the reviewer's year: 747,000 received, 115,785 paid (84.5% left)
+    expect(netSplit(747000, 115785)).toMatchObject({ ex: 15, left: 85 });
+    expect(netSplit(747000, 115785)!.left).toBe(netOf(747000, 115785).pct);
+    for (const [g, p] of [[100000, 35000], [3, 1], [7, 5], [1000, 0], [200000, 41000], [999, 998.5]]) {
+      const b = netSplit(g, p)!;
+      expect([b.left, b.ex + b.left, b.exW + b.leftW]).toEqual([netOf(g, p).pct, 100, 100]);
+    }
+    // spent more than came in: the words say so (−50%), the bar is all expenses
+    expect(netSplit(1000, 1500)).toEqual({ ex: 150, left: -50, exW: 100, leftW: 0 });
+    expect(netSplit(0, 500)).toBeNull();
   });
 });
 
@@ -342,6 +358,21 @@ describe('the month check of money out', () => {
     expect(expCheckRows(all, 2025, null).rows.map((r) => r.key)).toEqual(['old/o1']);
     expect(dealExpChecks(s, 'd1', { 'd1/e1': rec({ amt: 25000, d: '2026-10-06', f: 'f1' }), 'jh/h1': rec({ amt: 1, d: '2026-08-15' }) }, SINCE).map((r) => [r.key, r.state])).toEqual([['d1/e2', 'wait'], ['d1/e1', 'ok']]);
   });
+
+  it('"ค้างจากเดือนก่อน": unpaid bills of earlier months, last year\'s too, counted by year (as the income side\'s late money)', () => {
+    const s = world();
+    s.exp!['old/o4'] = X({ c: 'ค่าแล็บ', amt: 7000, d: '2025-12-15' });
+    s.exp!['d1/e5'] = X({ amt: 2000, d: '2026-09-10' });
+    s.exp!['d1/e6'] = X({ amt: 30000, d: '2026-10-01' });
+    const rows = expChkRows(s, expLines(s), {}, SINCE);
+    // October: September's 2,000 and last December's 7,000; October's own bills (6,000 and 30,000) are this month's
+    expect(carriedOwed(rows, '2026-10')).toEqual({ n: 2, amt: 9000, years: [{ be: '2568', n: 1, amt: 7000 }, { be: '2569', n: 1, amt: 2000 }] });
+    // January: only December's, of the year before (its own link "ดูปี 2568")
+    expect(carriedOwed(rows, '2026-01')).toEqual({ n: 1, amt: 7000, years: [{ be: '2568', n: 1, amt: 7000 }] });
+    // paid ones and checks never count; nothing before: none
+    expect(carriedOwed(rows, '2025-12')).toEqual({ n: 0, amt: 0, years: [] });
+    expect(carriedOwed(rows.filter((r) => r.kind !== 'owed'), '2026-12').n).toBe(0);
+  });
 });
 
 describe('the files', () => {
@@ -375,15 +406,49 @@ describe('the files', () => {
     expect(lines.head[6]).toBe('หมวดค่าใช้จ่าย');
     expect(lines.rows[0]).toEqual(['2569', 'ส.ค. 2569', 'ผู้จ่าย ร่วม (ใบเสนอราคาร่วม 2 บริษัท)', '2569', 'Partner', 'หมิว', 'ค่าแล็บ', '', 10000, '2026-08-14', '2026-08-15', 'จ่ายแล้ว', '', 'หมิว']);
     expect(lines.rows.map((r) => r[11])).toEqual(['จ่ายแล้ว', 'จ่ายแล้ว', 'จ่ายแล้ว', 'จ่ายแล้ว', 'ค้างจ่าย']);
-    const m = expCsvRows('2569', X0, 'month', false, qt, C);
-    expect(m.head).toEqual(['ปี (พ.ศ.)', 'เดือน', 'รับแล้ว (บาท)', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'คงเหลือสุทธิ (บาท)', 'จำนวนรายการ']);
-    expect(m.rows[9]).toEqual(['2569', 'ต.ค. 2569', 100000, 25000, 6000, 75000, 2]);
+    const m = expCsvRows('2569', X0, 'month', false, qt);
+    expect(m.head).toEqual(['ปี (พ.ศ.)', 'เดือน', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'จำนวนรายการ']);
+    expect(m.rows[9]).toEqual(['2569', 'ต.ค. 2569', 25000, 6000, 2]);
     expect(expCsvRows('2569', X0, 'quarter', false, qt).rows[2]).toEqual(['2569', 'ไตรมาส 3 (ก.ค.–ก.ย.)', 16000, 0, 3]);
     const und = expCsvRows('2568', expYear(expLines(s), '2568'), 'month', true, qt);
     expect(und.rows.at(-1)).toEqual(['2568', 'ยังไม่ระบุวันที่บิล', 0, 300, 1]);
     const both = bothCsvRows('2569', cashRows(s, '2569', C, 'lines', false), C, X0, 'lines', false, qt);
     expect(both.rows.map((r) => [r[2], r[9]])).toEqual([['เงินเข้า', 100000], ['เงินออก', 10000], ['เงินออก', 2000], ['เงินออก', 4000], ['เงินเข้า', 100000], ['เงินออก', 25000], ['เงินออก', 6000]]);
     expect(both.head.length).toBe(both.rows[0].length);
+  });
+
+  it('the CSV "เงินเข้าและเงินออก" summed by month or quarter keeps the money still owed and the undated income', () => {
+    const s = world();
+    // a won job: 60,000 came in in March, the last 40,000 has no date yet; a bill with no date
+    s.deals.u1 = { ...s.deals.d1, id: 'u1', client: 'ยังไม่กำหนดวัน', forecast: 100000 };
+    s.steps['u1/CLOSED DEAL'] = { d: '2026-02-01', n: 'YES' };
+    s.pays['u1/PAY1'] = L({ amt: 60000, due: '2026-03-01', rcv: '2026-03-01' });
+    s.pays['u1/PAY2'] = L({ amt: 40000 });
+    s.exp!['d1/e7'] = X({ amt: 500, d: '' });
+    const C = cashYear(cashLines(s, Object.values(s.deals), T), '2569'), X0 = expYear(expLines(s), '2569'), qt = () => '';
+    expect([C.undated.length, X0.undated.length]).toEqual([1, 1]);
+    const inM = cashRows(s, '2569', C, 'month', true);
+    const m = bothCsvRows('2569', inM, C, X0, 'month', true, qt);
+    expect(m.head).toEqual(['ปี (พ.ศ.)', 'เดือน', 'รับแล้ว (บาท)', 'เลยกำหนด (บาท)', 'รอรับ (บาท)', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'คงเหลือสุทธิ (บาท)', 'จำนวนงวด', 'จำนวนรายการค่าใช้จ่าย']);
+    expect(m.rows.every((r) => r.length === m.head.length)).toBe(true);
+    // each month's money in is the in-only file's (received, late, still to come)
+    expect(m.rows.slice(0, 12).map((r) => r.slice(2, 5))).toEqual(inM.rows.slice(0, 12).map((r) => r.slice(2, 5)));
+    expect(m.rows[2]).toEqual(['2569', 'มี.ค. 2569', 60000, 0, 0, 0, 0, 60000, 1, 0]);
+    expect(m.rows[9]).toEqual(['2569', 'ต.ค. 2569', 100000, 0, 0, 25000, 6000, 75000, 1, 2]);
+    // the money with no date: the income's 40,000 (the in-only file's last row) and the bill's 500
+    expect(inM.rows.at(-1)).toEqual(['2569', 'ยังไม่กำหนดวันรับ', 0, 0, 40000, 40000, 1]);
+    expect(m.rows.slice(12)).toEqual([
+      ['2569', 'ยังไม่กำหนดวันรับ', 0, 0, 40000, 0, 0, 0, 1, 0],
+      ['2569', 'ยังไม่ระบุวันที่บิล', 0, 0, 0, 0, 500, 0, 0, 1],
+    ]);
+    // without them: the twelve months only
+    expect(bothCsvRows('2569', cashRows(s, '2569', C, 'month', false), C, X0, 'month', false, qt).rows).toHaveLength(12);
+    const q = bothCsvRows('2569', cashRows(s, '2569', C, 'quarter', true), C, X0, 'quarter', true, qt);
+    expect(q.head[1]).toBe('ไตรมาส');
+    expect(q.rows[3]).toEqual(['2569', 'ไตรมาส 4 (ต.ค.–ธ.ค.)', 100000, 0, 0, 25000, 6000, 75000, 1, 2]);
+    expect(q.rows.map((r) => r[1]).slice(4)).toEqual(['ยังไม่กำหนดวันรับ', 'ยังไม่ระบุวันที่บิล']);
+    // the year adds up: the quarters' received and paid are the year's
+    expect([q.rows.slice(0, 4).reduce((a, r) => a + (r[2] as number), 0), q.rows.slice(0, 4).reduce((a, r) => a + (r[5] as number), 0)]).toEqual([C.totals.got, X0.totals.paid]);
   });
 });
 

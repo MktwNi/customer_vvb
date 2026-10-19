@@ -265,4 +265,53 @@ describe('the month check of money out against the team script', () => {
     expect(sent.filter((b) => b.action === 'push')).toEqual([]);
     expect(stored(L, `dchk/${d.id}/exp.e1`)).toBeUndefined();
   });
+
+  it('a bill opened from the out side leaves no copy in the browser: the team\'s Drive file with เปิดเอกสารแนบ, or this browser\'s own copy of a bill attached here', async () => {
+    const L = await lead();
+    const { id: acct } = await L.e.roleSave({ n: 'บัญชี/การเงิน', d: '', c: ACCT });
+    const { 'docs.open': _open, ...shut } = ACCT;
+    const { id: acct2 } = await L.e.roleSave({ n: 'บัญชีไม่เปิดไฟล์', d: '', c: shut });
+    const F = await member(L, 'fon', 'ฝน', acct);
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const G = await member(L, 'kate', 'เก๋', acct2);
+    const d = S.e.addDeal({ client: 'บริษัท บิล จำกัด', year: '2569', resp: 'เอก' });
+    await settle(S);
+    // เอก uploads the bill (บันทึกค่าใช้จ่ายของงาน may) and records the paid expense with it
+    const bytes = Buffer.from('%PDF-1.4 bill of e1');
+    const up = sim.post({ action: 'upload', cv: 4, tok: S.e.session!.tok, docId: 'exp_e1', name: 'บิล.pdf', mime: 'application/pdf', data: bytes.toString('base64') }) as { ok: boolean; fileId: string };
+    expect(up.ok).toBe(true);
+    const file = { id: up.fileId, name: 'บิล.pdf', mime: 'application/pdf', size: bytes.length };
+    expect(push(S, [{ k: `dexp/${d.id}/e1`, v: exp({ file }) }])).toMatchObject({ ok: true, denied: [] });
+    await settle(S, F, G);
+    const x = expLines(F.e.sales).find((l) => l.id === d.id + '/e1')!;
+    expect(x.file).toEqual(file);
+    // ฝน opens it: the file, and nothing written to the browser's store (no 'docblob:exp_e1', no 'expblob:e1')
+    const writes: string[] = [];
+    const st = F.e.store, set0 = st.set.bind(st);
+    st.set = (k, v) => (writes.push(k), set0(k, v));
+    const b = await F.e.expBill({ id: x.expId, file: x.file });
+    expect(Buffer.from(await b.arrayBuffer()).toString()).toBe('%PDF-1.4 bill of e1');
+    expect(b.type).toBe('application/pdf');
+    expect(writes.filter((k) => /blob:/.test(k))).toEqual([]);
+    expect([await st.get('docblob:exp_e1'), await st.get('expblob:e1')]).toEqual([null, null]);
+    // signing out with "delete the team's data" has no bill copy to miss
+    await F.e.teamLogout({ wipe: true });
+    expect([await st.get('docblob:exp_e1'), await st.get('expblob:e1')]).toEqual([null, null]);
+    // without เปิดเอกสารแนบ the team's file is not opened (and nothing is asked of the script)
+    sent.length = 0;
+    await expect(G.e.expBill({ id: x.expId, file: x.file })).rejects.toThrow('เปิดไฟล์แนบไม่ได้');
+    expect(sent.filter((r) => r.action === 'file')).toEqual([]);
+    // a bill attached in this browser and not uploaded yet (file id ''): its copy here opens, with no request;
+    // a copy of another file under the same id (the bill was replaced elsewhere) is not that bill
+    const local = new TextEncoder().encode('%PDF-1.4 attached here');
+    await S.e.store.set('expblob:e9', { name: 'ใบเสร็จ.pdf', mime: 'application/pdf', data: local.buffer, by: 'เอก' });
+    const here = { id: 'e9', file: { id: '', name: 'ใบเสร็จ.pdf', mime: 'application/pdf', size: local.byteLength } };
+    sent.length = 0;
+    expect(await (await S.e.expBill(here)).text()).toBe('%PDF-1.4 attached here');
+    expect(sent).toEqual([]);
+    await expect(S.e.expBill({ id: 'e9', file: { ...here.file, name: 'อื่น.pdf' } })).rejects.toThrow('ยังไม่ได้อัปโหลด');
+    // one that only lives on the recorder's computer: said so, nothing asked of the script
+    await expect(F.e.expBill({ id: 'e8', file: { id: '', name: 'x.pdf', mime: 'application/pdf', size: 3 } })).rejects.toThrow('ยังอยู่ในเครื่องของคนที่บันทึก');
+    await expect(F.e.expBill({ id: 'e8', file: null })).rejects.toThrow('ยังไม่มีบิล');
+  });
 });

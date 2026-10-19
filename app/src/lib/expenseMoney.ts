@@ -21,7 +21,7 @@
  */
 import {
   LIST_KEYS, beOf, filterDeals, fmtMoney, holdPart, jointAttr, jointHeadOf, jointOf, jointParts, jointRole, moneyOwners, normSalesFilter,
-  type CashLine, type CashYear, type Deal, type JointGroup, type SalesFilterIn, type SalesState,
+  type CashLine, type CashSum, type CashYear, type Deal, type JointGroup, type SalesFilterIn, type SalesState,
 } from './sales';
 import type { ExpFile, JobExp } from './expense';
 import { lineParts, unitsOf, contribIn, type UnitCtx } from './contrib';
@@ -197,6 +197,18 @@ export function netOf(got: number, paid: number): { net: number; pct: number | n
 }
 /** "65%" ('—' when nothing was received). */
 export const pctWord = (p: number | null) => (p == null ? '—' : `${p}%`);
+/**
+ * The bar under คงเหลือสุทธิ: the paid expenses' share of the money received and what is left, from the one
+ * rounded figure the card prints (left = netOf's pct, the expenses' share 100 − it), so the two never read
+ * 65% beside 64%; `exW` / `leftW` the bar's parts (0–100: spending more than came in fills it with the
+ * expenses). null when nothing was received.
+ */
+export function netSplit(got: number, paid: number): { ex: number; left: number; exW: number; leftW: number } | null {
+  const { pct } = netOf(got, paid);
+  if (pct == null) return null;
+  const w = (n: number) => Math.min(100, Math.max(0, n));
+  return { ex: 100 - pct, left: pct, exW: w(100 - pct), leftW: w(pct) };
+}
 
 /** A period's money in and out side by side: received, paid out, still unpaid, and what is left. */
 export interface NetRow { got: number; paid: number; unpaid: number; net: number; pct: number | null }
@@ -386,6 +398,26 @@ export function expTeamMonth(s: SalesState, checks: Record<string, PayCheck>, si
   return sumRows(expChkRows(s, expLines(s), checks, since).filter((r) => r.ym === ym));
 }
 
+/**
+ * Bills of earlier months still unpaid, the years before included (as the income side's carriedLate): the
+ * month figure's "ค้างจากเดือนก่อน", with how many fall in each Buddhist-era year (oldest first), so the
+ * link opens the shown year and each other year has its own. `rows` must reach back before the shown year
+ * (the filter over every year).
+ */
+export function carriedOwed(rows: XRow[], ym: string): { n: number; amt: number; years: { be: string; n: number; amt: number }[] } {
+  const by = new Map<string, { n: number; amt: number }>();
+  let n = 0, amt = 0;
+  for (const r of rows) {
+    if (r.kind !== 'owed' || r.ym >= ym) continue;
+    const be = String(+r.ym.slice(0, 4) + 543), y = by.get(be) || (by.set(be, { n: 0, amt: 0 }), by.get(be)!);
+    y.n++;
+    y.amt = r2(y.amt + r.amt);
+    n++;
+    amt = r2(amt + r.amt);
+  }
+  return { n, amt, years: [...by].sort(([a], [b]) => a.localeCompare(b)).map(([be, y]) => ({ be, ...y })) };
+}
+
 /** The out side's filter chips: ทั้งหมด · รอตรวจ · ตรวจแล้ว · ส่งกลับแก้ไข · ค้างจ่าย (payCheck chkMatch reads them;
  *  'owed' is an unpaid bill here). */
 export type XChkF = 'all' | 'wait' | 'ok' | 'back' | 'owed';
@@ -541,24 +573,27 @@ export function xSheetPreview(rows: XRow[], owed: boolean, n = 4, short: (client
 export type CashFlow = 'in' | 'out' | 'both';
 /** The money status of an expense line in the CSV. */
 export const expStatusWord = (x: Pick<ExpLine, 'kind'>) => (x.kind === 'paid' ? 'จ่ายแล้ว' : 'ค้างจ่าย');
+/** The last row of a summary: bills with no date (in no month). */
+const X_UNDATED = 'ยังไม่ระบุวันที่บิล';
+const undatedOut = (X: Pick<ExpYear, 'undated'>) => {
+  const u = xs0();
+  X.undated.forEach((x) => addX(u, x));
+  return u;
+};
 /** A joint quotation's expense in the CSV's client cell. */
 const expClient = (x: ExpLine) =>
   x.deal.client + (x.joint ? (x.joint.role === 'header' ? ` (ใบเสนอราคาร่วม ${x.joint.members} บริษัท${x.joint.part ? ` · ส่วนของ ${x.joint.part} บริษัท` : ''})` : ' (บริษัทในใบเสนอราคาร่วม)') : '');
 /**
  * The money-out rows of the Cashflow file of a year (Excel opens it). `lines`: one row per expense, paid on
  * the paid date, unpaid on the bill date, the bills with no date last (`undated`). `month` / `quarter`: the
- * sums, with the money received (`Y`) and what is left when given.
+ * sums, the bills with no date in one last row (`undated`).
  */
-export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string, Y?: Pick<CashYear, 'months' | 'quarters'>) {
+export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string) {
   if (mode !== 'lines') {
-    const head = ['ปี (พ.ศ.)', mode === 'month' ? 'เดือน' : 'ไตรมาส', ...(Y ? ['รับแล้ว (บาท)'] : []), 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', ...(Y ? ['คงเหลือสุทธิ (บาท)'] : []), 'จำนวนรายการ'];
-    const row = (label: string, c: ExpSum, got?: number): (string | number)[] => [be, label, ...(Y ? [got ?? 0] : []), c.paid, c.unpaid, ...(Y ? [r2((got ?? 0) - c.paid)] : []), c.paidN + c.unpaidN];
-    const rows = mode === 'month' ? X.months.map((c, i) => row(`${TH_M[i]} ${be}`, c, Y?.months[i].got)) : X.quarters.map((c, i) => row(`ไตรมาส ${i + 1} (${Q_TH[i]})`, c, Y?.quarters[i].got));
-    if (undated && X.undated.length) {
-      const u = xs0();
-      X.undated.forEach((x) => addX(u, x));
-      rows.push(row('ยังไม่ระบุวันที่บิล', u, Y ? 0 : undefined));
-    }
+    const head = ['ปี (พ.ศ.)', mode === 'month' ? 'เดือน' : 'ไตรมาส', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'จำนวนรายการ'];
+    const row = (label: string, c: ExpSum): (string | number)[] => [be, label, c.paid, c.unpaid, c.paidN + c.unpaidN];
+    const rows = mode === 'month' ? X.months.map((c, i) => row(`${TH_M[i]} ${be}`, c)) : X.quarters.map((c, i) => row(`ไตรมาส ${i + 1} (${Q_TH[i]})`, c));
+    if (undated && X.undated.length) rows.push(row(X_UNDATED, undatedOut(X)));
     return { head, rows };
   }
   const head = ['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'หมวดค่าใช้จ่าย', 'รายละเอียด', 'ยอด (บาท)', 'วันที่บิล', 'วันที่จ่าย', 'สถานะ', 'เลขใบเสนอราคา', 'บันทึกโดย'];
@@ -569,11 +604,26 @@ export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'qu
 }
 /**
  * Money in and out in one file: `lines` one row per amount, the kind first ("เงินเข้า" / "เงินออก"), soonest
- * first; the sums are expCsvRows' with the money received. `inRows`: sales cashRows of the same year and mode
- * (its own columns: the in lines are re-laid in the shared columns).
+ * first. `month` / `quarter`: each period's money in as the in-only file has it (received, late, still to
+ * come) beside its money out (paid, unpaid) and what is left (received − paid), then with `undated` the
+ * money with no date: "ยังไม่กำหนดวันรับ" of the income and "ยังไม่ระบุวันที่บิล" of the bills, a row each when
+ * there is any. `inRows`: sales cashRows of the same year and mode (its own columns: the in lines are
+ * re-laid in the shared columns).
  */
 export function bothCsvRows(be: string, inRows: { head: string[]; rows: (string | number)[][] }, Y: Pick<CashYear, 'months' | 'quarters' | 'lines' | 'undated'>, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string) {
-  if (mode !== 'lines') return expCsvRows(be, X, mode, undated, qtNo, Y);
+  if (mode !== 'lines') {
+    const head = ['ปี (พ.ศ.)', mode === 'month' ? 'เดือน' : 'ไตรมาส', 'รับแล้ว (บาท)', 'เลยกำหนด (บาท)', 'รอรับ (บาท)', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'คงเหลือสุทธิ (บาท)', 'จำนวนงวด', 'จำนวนรายการค่าใช้จ่าย'];
+    const row = (label: string, c: CashSum, x: ExpSum): (string | number)[] => [be, label, r2(c.got), r2(c.late), r2(c.wait), x.paid, x.unpaid, r2(c.got - x.paid), c.n, x.paidN + x.unpaidN];
+    const rows = mode === 'month' ? X.months.map((x, i) => row(`${TH_M[i]} ${be}`, Y.months[i], x)) : X.quarters.map((x, i) => row(`ไตรมาส ${i + 1} (${Q_TH[i]})`, Y.quarters[i], x));
+    if (undated && Y.undated.length) {
+      // as the in-only file: what came in without a date counts as received, the rest as still to come
+      const u: CashSum = { got: 0, late: 0, wait: 0, n: Y.undated.length };
+      Y.undated.forEach((l) => (l.kind === 'got' ? (u.got += l.amt) : (u.wait += l.amt)));
+      rows.push(row('ยังไม่กำหนดวันรับ', u, xs0()));
+    }
+    if (undated && X.undated.length) rows.push(row(X_UNDATED, { got: 0, late: 0, wait: 0, n: 0 }, undatedOut(X)));
+    return { head, rows };
+  }
   const head = ['ปี (พ.ศ.)', 'เดือน', 'เงินเข้า / เงินออก', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'งวด / หมวดค่าใช้จ่าย', 'รายละเอียด', 'ยอด (บาท)', 'ครบกำหนด / วันที่บิล', 'วันที่รับ / วันที่จ่าย', 'สถานะ', 'เลขใบเสนอราคา'];
   // the in rows as cashRows laid them: [ปี, เดือน, ลูกค้า, ปีของงาน, หมวด, ผู้รับผิดชอบ, งวด, ยอด, ครบกำหนด, วันที่รับ, สถานะ, เลขใบเสนอราคา, …]
   const ins = inRows.rows.map((r) => ({ d: String(r[9] || r[8] || ''), row: [r[0], r[1], 'เงินเข้า', r[2], r[3], r[4], r[5], r[6], '', r[7], r[8], r[9], r[10], r[11]] as (string | number)[] }));

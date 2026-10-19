@@ -246,7 +246,13 @@ export function CashView({ S, today, year }: { S: SalesState; today: string; yea
         {phone && <CashKey out={anyOut} />}
         <CashChart data={mode === 'm' ? Y.months : Y.quarters} mode={mode} year={year} now={nowI} pick={picked} onPick={onPick} phone={phone} out={X ? (mode === 'm' ? X.months : X.quarters) : null} />
         <div className="cf-foot">
-          {phone ? 'นับเฉพาะงานที่ได้งานแล้ว · ยอดรวม VAT · แตะเดือนเพื่อเปิดส่วนตรวจรับเงิน' : 'นับเฉพาะงานที่ได้งานแล้ว (YES) รวมงานที่ปิดแล้ว · ยอดตามเอกสาร รวม VAT · กดแท่งเพื่อเปิดเดือนนั้นในส่วนตรวจรับเงินด้านล่าง'}
+          {anyOut
+            ? phone
+              ? 'เงินเข้านับเฉพาะงานที่ได้งานแล้ว · เงินออกนับค่าใช้จ่ายของทุกงาน · ยอดรวม VAT · แตะเดือนเพื่อเปิดส่วนตรวจรับเงิน'
+              : 'เงินเข้านับเฉพาะงานที่ได้งานแล้ว (YES) รวมงานที่ปิดแล้ว · เงินออกนับค่าใช้จ่ายของทุกงาน ได้งานหรือไม่ก็ตาม · ยอดตามเอกสาร รวม VAT · กดแท่งเพื่อเปิดเดือนนั้นในส่วนตรวจรับเงินด้านล่าง'
+            : phone
+              ? 'นับเฉพาะงานที่ได้งานแล้ว · ยอดรวม VAT · แตะเดือนเพื่อเปิดส่วนตรวจรับเงิน'
+              : 'นับเฉพาะงานที่ได้งานแล้ว (YES) รวมงานที่ปิดแล้ว · ยอดตามเอกสาร รวม VAT · กดแท่งเพื่อเปิดเดือนนั้นในส่วนตรวจรับเงินด้านล่าง'}
         </div>
       </section>
       {side === 'out' && xo ? (
@@ -276,7 +282,9 @@ function CashExport({ S, year, lines, Y, X, filterWords, onClose }: { S: SalesSt
   // เงินเข้า / เงินออก / ทั้งสองอย่าง (money out only for those who see job expenses)
   const [flow, setFlow] = useState<CashFlow>('in');
   const fl: CashFlow = X ? flow : 'in';
-  const has = fl === 'out' ? !!X?.undated.length : Y.undated.length > 0 || (fl === 'both' && !!X?.undated.length);
+  // the money with no date the file may hold: the income's (in, both) and the bills' (out, both)
+  const undIn = fl !== 'out' && Y.undated.length > 0, undOut = fl !== 'in' && !!X?.undated.length;
+  const has = undIn || undOut;
   const qtNo = (d: Deal) => dealMoney(S, d).fcDoc?.docNo || '';
   const rowsOf = (m: CashCsvMode) => {
     const inRows = cashRows(S, year, Y, m, und && has);
@@ -286,9 +294,12 @@ function CashExport({ S, year, lines, Y, X, filterWords, onClose }: { S: SalesSt
   const rows = rowsOf(mode);
   const n = (m: CashCsvMode) => rowsOf(m).rows.length;
   // the preview's columns: the money and its dates (the file has more: the year, the deal's year, หมวด, …)
-  const cols = mode !== 'lines' ? rows.head.map((_, i) => i).slice(1) : fl === 'in' ? [1, 2, 6, 7, 8, 9, 10] : fl === 'out' ? [1, 2, 6, 8, 9, 10, 11] : [1, 2, 3, 7, 9, 11, 12];
+  const cols = mode !== 'lines' ? (fl === 'both' ? [1, 2, 3, 4, 5, 6, 7] : rows.head.map((_, i) => i).slice(1)) : fl === 'in' ? [1, 2, 6, 7, 8, 9, 10] : fl === 'out' ? [1, 2, 6, 8, 9, 10, 11] : [1, 2, 3, 7, 9, 11, 12];
   const money = new Set(mode !== 'lines' ? rows.head.map((h, i) => (/บาท/.test(h) ? i : -1)).filter((i) => i >= 0) : [rows.head.indexOf('ยอด (บาท)')]);
   const undSum = Y.undated.reduce((a, l) => a + l.amt, 0);
+  const undWhere = mode === 'lines' ? 'อยู่ท้ายไฟล์ เดือนเว้นว่าง' : undIn && undOut ? 'เป็น 2 แถวสุดท้าย' : 'เป็นแถวสุดท้าย';
+  const undInWords = `${fmtN(new Set(Y.undated.map((l) => l.deal.id)).size)} งาน · ${m0(undSum)} บาท`;
+  const undOutWords = X ? `${fmtN(X.undated.length)} รายการ · ${m0(X.undated.reduce((a, x) => a + x.amt, 0))} บาท` : '';
   const save = () => {
     if (fl === 'in') e.exportCashCsv(year, lines, mode, und && has);
     else downloadBlob(new Blob(['\ufeff' + cashCsv(rows)], { type: 'text/csv;charset=utf-8' }), `Cashflow_${fl === 'out' ? 'เงินออก_' : 'เงินเข้าออก_'}${year}_${todayISO()}.csv`);
@@ -323,15 +334,20 @@ function CashExport({ S, year, lines, Y, X, filterWords, onClose }: { S: SalesSt
           <label className={'cf-ck' + (und ? ' on' : '')}>
             <input type="checkbox" className="sr-only" checked={und} onChange={(ev) => setUnd(ev.target.checked)} />
             <Check on={und} />
-            {fl === 'out' ? (
+            {undIn && undOut ? (
+              <span>
+                รวมรายการที่ยังไม่มีวันที่
+                <small>เงินเข้า “ยังไม่กำหนดวันรับ” {undInWords} · บิลที่ยังไม่ระบุวันที่ {undOutWords} · {undWhere}</small>
+              </span>
+            ) : undOut ? (
               <span>
                 รวมบิลที่ยังไม่ระบุวันที่
-                <small>{fmtN(X!.undated.length)} รายการ · {m0(X!.undated.reduce((a, x) => a + x.amt, 0))} บาท · {mode === 'lines' ? 'อยู่ท้ายไฟล์ เดือนเว้นว่าง' : 'เป็นแถวสุดท้าย'}</small>
+                <small>{undOutWords} · {undWhere}</small>
               </span>
             ) : (
               <span>
                 รวมรายการ “ยังไม่กำหนดวันรับ”
-                <small>{fmtN(new Set(Y.undated.map((l) => l.deal.id)).size)} งาน · {m0(undSum)} บาท · {mode === 'lines' ? 'อยู่ท้ายไฟล์ เดือนเว้นว่าง' : 'เป็นแถวสุดท้าย'}</small>
+                <small>{undInWords} · {undWhere}</small>
               </span>
             )}
           </label>

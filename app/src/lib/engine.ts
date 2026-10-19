@@ -5101,6 +5101,29 @@ export class GccEngine {
     });
     this.saveSales();
   }
+  /**
+   * An expense's bill (the out side's "บิล / ใบเสร็จ"): this browser's copy of this very file (the one the
+   * expense dialog attached here, kept as 'expblob:<expId>'; one downloaded before only with เปิดเอกสารแนบ),
+   * else the team's Drive file with เปิดเอกสารแนบ. Nothing is written here: a bill opened from the money
+   * views leaves no copy that signing out or a lost capability would have to find. (The expense dialog's
+   * own expBill, same contract, keeps and purges its copies; once both are in, it replaces this one.)
+   */
+  async expBill(x: { id: string; file?: { id: string; name: string; mime: string; size: number } | null }): Promise<Blob> {
+    const f = x.file;
+    if (!f) throw new Error('รายการนี้ยังไม่มีบิล');
+    const open = this.can('docs.open');
+    const b = await this.store.get<{ name: string; mime: string; data: ArrayBuffer; by?: string; fid?: string }>('expblob:' + x.id).catch(() => null);
+    if (b && (b.fid ? b.fid === f.id : b.name === f.name && b.data.byteLength === f.size) && (b.by || open)) return new Blob([b.data], { type: b.mime || f.mime });
+    if (!f.id) throw new Error('บิลนี้ยังอยู่ในเครื่องของคนที่บันทึก ยังไม่ได้อัปโหลดขึ้น Drive ของทีม');
+    if (!open) throw new Error('บัญชีของคุณเปิดไฟล์แนบไม่ได้ (ขอสิทธิ์ “เปิดเอกสารแนบ” ได้ที่ สิทธิ์ของฉัน)');
+    const cfg = this.teamCfg;
+    if (!cfg) throw new Error('เชื่อมต่อทีม (แท็บอัปเดตข้อมูล) ก่อน จึงจะเปิดไฟล์ใน Drive ของทีมได้');
+    try {
+      return (await downloadDocFile(this.fileTransport, cfg.url, this.cred(cfg), f.id)).blob;
+    } catch (e) {
+      throw new Error('เปิดไฟล์จาก Drive ของทีมไม่ได้: ' + fileErrText(e));
+    }
+  }
   /** แก้ชื่อที่แสดง (before the account's first sign-in): the team list takes the new name in place of the
    *  old one, which would otherwise stay behind as a name with no account. */
   async adminRename(u: TeamUser, name: string) {

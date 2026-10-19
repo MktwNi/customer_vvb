@@ -2,19 +2,18 @@ import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useApp } from '../state';
 import type { GccEngine } from '../lib/engine';
 import { daysBetween, dmTh, fmtN, localDay } from '../lib/format';
-import { dealMoney, fmtMoney, type DealDoc, type SalesState } from '../lib/sales';
+import { dealMoney, fmtMoney, type SalesState } from '../lib/sales';
 import { MONTHS_TH, dayTh } from '../lib/cashUi';
 import { shortName } from '../lib/salesUi';
 import { sameName } from '../lib/caps';
-import { expDocId } from '../lib/expense';
 import {
   canConfirm, canReclose, canReturn, canTick, canUndo, chipOf, chkMatch, isSelf, isWaiting, sumRows, waitingElsewhere, yearCheck, ymOf, ymTh,
   type ChkRow, type MonthRow,
 } from '../lib/payCheck';
-import { NO_CAT, X_CHK_F, expNoteOf, netOf, pctWord, rowWhat, type ExpKpis, type ExpLine, type XChkF, type XRow } from '../lib/expenseMoney';
+import { NO_CAT, X_CHK_F, carriedOwed, expNoteOf, netOf, netSplit, pctWord, rowWhat, type ExpKpis, type ExpLine, type XChkF, type XRow } from '../lib/expenseMoney';
 import { CoAvatar } from './CoAvatar';
 import { DialogActions, Modal } from './Dialog';
-import { openDocFile } from './DocAttach';
+import { SHOWABLE } from './DocAttach';
 import { Select } from './Select';
 import { Kpi, Status } from './ui';
 import { useSalesActs } from './SalesToast';
@@ -44,7 +43,8 @@ export const seesExp = (e: Pick<GccEngine, 'can'>) => e.can('view.money') && e.c
  * the two parts, each named). The first two open the out side of the month check.
  */
 export function ExpKpiRow({ K, year, onOpen }: { K: ExpKpis; year: string; onOpen: (f: XChkF) => void }) {
-  const exPct = K.got > 0 ? Math.min(100, Math.max(0, Math.round((K.paid / K.got) * 100))) : 0;
+  // one rounded figure: the text's "เหลือ 65%" and the bar's "คงเหลือ 65%" are the same number
+  const B = netSplit(K.got, K.paid);
   return (
     <div className="kpis sl-kpis xo-kpis" role="group" aria-label={`เงินออกและคงเหลือ ปี ${year}`}>
       <Kpi
@@ -70,13 +70,13 @@ export function ExpKpiRow({ K, year, onOpen }: { K: ExpKpis; year: string; onOpe
         <span className={'kpi-v' + (K.got || K.paid ? '' : ' zero')}>{m0(K.net)}<small>บาท</small></span>
         <span className="kpi-f">
           <span className="xo-net-w">รับแล้ว {m0(K.got)} − จ่ายแล้ว {m0(K.paid)} · เหลือ <b>{pctWord(K.pct)}</b> ของเงินที่รับ</span>
-          {K.got > 0 && (
-            <span className="xo-bar" role="img" aria-label={`ค่าใช้จ่าย ${exPct}% · คงเหลือ ${100 - exPct}% ของเงินที่รับแล้ว`}>
-              <i className="ex" style={{ flex: `${exPct} 1 0` }} />
-              <i className="nt" style={{ flex: `${100 - exPct} 1 0` }} />
+          {B && (
+            <span className="xo-bar" role="img" aria-label={`ค่าใช้จ่าย ${pctWord(B.ex)} · คงเหลือ ${pctWord(B.left)} ของเงินที่รับแล้ว`}>
+              <i className="ex" style={{ flex: `${B.exW} 1 0` }} />
+              <i className="nt" style={{ flex: `${B.leftW} 1 0` }} />
             </span>
           )}
-          {K.got > 0 && <span className="xo-bar-k" aria-hidden="true"><span><i className="ex" />ค่าใช้จ่าย {exPct}%</span><span><i className="nt" />คงเหลือ {100 - exPct}%</span></span>}
+          {B && <span className="xo-bar-k" aria-hidden="true"><span><i className="ex" />ค่าใช้จ่าย {pctWord(B.ex)}</span><span><i className="nt" />คงเหลือ {pctWord(B.left)}</span></span>}
         </span>
       </div>
     </div>
@@ -110,9 +110,29 @@ function useCloseOut() {
 }
 const CLOSE_ALL = 'ปิดทั้งเดือน รวมรายการที่ไม่อยู่ในตัวกรอง';
 
-/** The bill as the document opener reads it (uploaded like a document under exp_<expId>). */
-const billDoc = (x: ExpLine): DealDoc =>
-  ({ id: expDocId(x.expId), deal: x.deal.id, kind: 'receipt', name: x.file!.name, mime: x.file!.mime, size: x.file!.size, fileId: x.file!.id, docNo: '', docDate: '', amount: null, target: 'none', detected: null, basis: 'total', stage: '', at: x.at, by: x.by } as DealDoc);
+/**
+ * Open an expense's bill (engine.expBill: this browser's copy, else the team's Drive; nothing is kept): the
+ * tab is opened within the click, then filled (a pop-up opened after a slow download would be blocked).
+ */
+export async function openOutBill(e: Pick<GccEngine, 'expBill'>, x: Pick<ExpLine, 'expId' | 'file'>) {
+  const f = x.file;
+  if (!f) return;
+  const w = SHOWABLE.test(f.mime) ? window.open('', '_blank') : null;
+  try {
+    const url = URL.createObjectURL(await e.expBill({ id: x.expId, file: f }));
+    if (w) w.location.href = url;
+    else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.name;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    w?.close();
+    window.alert('เปิดบิลไม่สำเร็จ: ' + ((err as Error)?.message || err));
+  }
+}
 
 interface Ctl {
   me: string;
@@ -203,8 +223,22 @@ export function ExpCheck({ S, rows, wide, team, inRows, inTeam, filter: fw, year
 
   // the three figures
   const nm = ym ? 'เดือนนี้' : 'ทั้งปี';
-  const carried = ym ? wide.filter((r) => r.kind === 'owed' && r.ym < ym) : [];
-  const carriedAmt = carried.reduce((a, r) => a + r.amt, 0);
+  // bills of earlier months still unpaid (as the income side's late money): the words open this year's
+  // unpaid bills, and each earlier year that holds some has its own link
+  const carried = ym ? carriedOwed(wide, ym) : { n: 0, amt: 0, years: [] };
+  const owedIn = (be: string) => {
+    if (be === year) return (set({ slXchkF: 'owed' }), open('y'));
+    set({ slYear: be, slChkM: 'y', slXchkF: 'owed', slCashShow: '' });
+    requestAnimationFrame(() => document.getElementById('mc-card')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  };
+  const carriedWords = `ค้างจากเดือนก่อน ${fmtN(carried.n)} รายการ · ${m0(carried.amt)} บาท`;
+  const carriedTxt = carried.n > 0 && (
+    <>
+      {' · '}
+      {carried.years.some((x) => x.be === year) ? <button type="button" className="lnk" title={`ดูบิลค้างจ่ายทั้งปี ${year}`} onClick={() => owedIn(year)}>{carriedWords}</button> : carriedWords}
+      {carried.years.filter((x) => x.be !== year).map((x) => <Fragment key={x.be}> · <button type="button" className="lnk" title={`ดูบิลค้างจ่ายปี ${x.be} · ${fmtN(x.n)} รายการ`} onClick={() => owedIn(x.be)}>ดูปี {x.be}</button></Fragment>)}
+    </>
+  );
   const net = netOf(got, sum.got);
   const figs = (
     <div className="mc-figs">
@@ -218,7 +252,7 @@ export function ExpCheck({ S, rows, wide, team, inRows, inTeam, filter: fw, year
         <span className={'mc-fig-v' + (sum.owed ? '' : ' zero')}>{m0(sum.owed)}<small>บาท</small></span>
         <span className="mc-fig-f">
           {sum.owedN ? `${fmtN(sum.owedN)} รายการ · บิลลงวันที่${ym ? 'ในเดือนนี้' : 'ในปีนี้'} ยังไม่ได้จ่าย` : 'ไม่มีบิลค้างจ่าย'}
-          {ym && carried.length > 0 && <> · <button type="button" className="lnk" onClick={() => (set({ slXchkF: 'owed' }), open('y'))}>ค้างจากเดือนก่อน {fmtN(carried.length)} รายการ · {m0(carriedAmt)} บาท</button></>}
+          {carriedTxt}
         </span>
       </div>
       <div className="mc-fig">
@@ -424,7 +458,7 @@ function Bill({ x }: { x: ExpLine | null }) {
   const name = x.file.name;
   return (
     <span className="mc-ev">
-      {e.can('docs.open') ? <button type="button" className="lnk xo-bill" title={`เปิดไฟล์ ${name}`} onClick={() => void openDocFile(e, billDoc(x)).catch(() => {})}>บิล / ใบเสร็จ</button> : <span>บิล / ใบเสร็จ</span>}
+      {e.can('docs.open') ? <button type="button" className="lnk xo-bill" title={`เปิดไฟล์ ${name}`} onClick={() => void openOutBill(e, x)}>บิล / ใบเสร็จ</button> : <span>บิล / ใบเสร็จ</span>}
       <small title={name}>{name}</small>
     </span>
   );
