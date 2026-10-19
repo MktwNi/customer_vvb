@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { FEEDS, STG, TT, stageOf } from '../lib/constants';
+import { STG, TT, stageOf } from '../lib/constants';
 import { TH_M, addDays, daysBetween, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
-import { fmtMoney, type Deal, type LineView } from '../lib/sales';
+import { beYear, fmtMoney, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { ccVars, custKey, dealKey } from '../lib/custColor';
 import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from '../lib/planCal';
-import type { Company, FeedKey, StageKey, Task } from '../lib/types';
-import { feedLine } from './Track';
+import { jobTag, planRows, planSrc, rowsOf, srcCounts, type PlanSrc } from '../lib/planList';
+import type { Company, StageKey, Task } from '../lib/types';
 import { PageHead } from '../components/ui';
 import { FilterBar } from '../components/FilterBar';
 import { Select } from '../components/Select';
@@ -48,7 +48,7 @@ interface PayK { deal: Deal; line: LineView; ck: string }
 type CellEntry = { p: PayK; x?: undefined } | { x: TaskK; p?: undefined };
 
 export function Plan() {
-  const { engine: e, ui, set, open, openSched } = useApp();
+  const { engine: e, ui, set, go, open, openSched } = useApp();
   // an account without นัดหมาย sees the plan but makes no appointments
   const ro = !e.can('edit.task');
   const v = useEngineVersion();
@@ -86,21 +86,34 @@ export function Plan() {
   const dayP = payBy[selISO] || [];
   const legend = monthCustomers(tasksK, calM);
 
-  const plannedBy: Record<number, Task> = {};
-  open_.forEach((t) => {
-    const g = e.canonical(t.gid);
-    if (!plannedBy[g] || t.date < plannedBy[g].date) plannedBy[g] = t;
-  });
-  const feedAll = useMemo(() => e.feedItems(ui.plFeed || 'cfoSoon'), [e, v, ui.plFeed]);
-  let tg: Company[] = feedAll;
-  if (ui.plStage) tg = tg.filter((c) => (C.stages[c.id] || 'none') === ui.plStage);
-  if (ui.plOwner) tg = tg.filter((c) => (ui.plOwner === '-' ? !C.owners[c.id] : C.owners[c.id] === ui.plOwner));
-  const unpl = tg.filter((c) => !plannedBy[c.id]);
+  // "รายชื่อที่ต้องติดต่อ": the team's real work (lib/planList.ts), never a registry list: the companies followed
+  // and the open jobs of the Sales Tracker's year (for an account that sees the tracker), one row per company
+  const sees = e.can('view.sales');
+  const year = ui.slYear || beYear();
+  const rowsAll = useMemo(
+    () => planRows<Company>({ company: (id) => e.company(id), watch: C.watch, tasks: C.tasks, owners: C.owners, stages: C.stages, sales: sees ? e.sales : null, year, today }),
+    [e, v, sees, year, today],
+  );
+  const counts = srcCounts(rowsAll);
+  // an older value (a registry feed) or the tracker for an account without it: the default
+  const src: PlanSrc = planSrc(ui.plFeed) === 'sales' && !sees ? 'all' : planSrc(ui.plFeed);
+  const srcRows = rowsOf(rowsAll, src);
+  let tg = srcRows;
+  if (ui.plStage) tg = tg.filter((r) => r.stage === ui.plStage);
+  if (ui.plOwner) tg = tg.filter((r) => (ui.plOwner === '-' ? !r.owner : r.owner === ui.plOwner));
+  // an appointment needs a company of the register: a client not linked to one is opened in the tracker
+  const unpl = tg.flatMap((r) => (r.c && !r.task ? [r.c] : []));
+  const unlinked = tg.filter((r) => !r.c).length;
   const shown = tg.slice(0, ui.plLim || 60);
+  const shownCos = shown.flatMap((r) => (r.c ? [r.c] : []));
   const pk = ui.picked || {};
   const pkIds = Object.keys(pk).map(Number);
-  const allOn = shown.length > 0 && shown.every((c) => pk[c.id]);
-  const feedKey = ui.plFeed || 'cfoSoon';
+  const allOn = shownCos.length > 0 && shownCos.every((c) => pk[c.id]);
+  const srcOpts = [
+    { v: 'all' as const, label: 'ทั้งหมดที่ต้องติดต่อ', n: fmtN(counts.all), sub: sees ? 'ที่ติดตาม และงานที่ยังเปิดใน Sales Tracker' : 'บริษัทที่ติดตาม' },
+    { v: 'watch' as const, label: 'ที่ติดตาม', n: fmtN(counts.watch), sub: 'บริษัทที่ทีมกดติดตามไว้' },
+    ...(sees ? [{ v: 'sales' as const, label: 'Sales Tracker (งานที่ยังเปิดอยู่)', n: fmtN(counts.sales), sub: `งานในตารางปี ${year} ที่ยังไม่ปิด` }] : []),
+  ];
 
   // parts of the open tasks: [label, count, colour class when there are some]
   const segs: [string, number, string][] = [
@@ -147,7 +160,7 @@ export function Plan() {
 
   return (
     <>
-      <PageHead title="แผนติดต่อ" sub={`นัดโทร ส่งอีเมล หรือเข้าพบ ${e.teamCfg ? "แชร์กับทีม" : "บันทึกในเครื่องนี้"} · สีแยกตามลูกค้า`} />
+      <PageHead title="แผนติดต่อ" sub={`นัดติดต่อบริษัทที่ติดตาม${sees ? 'และงานที่ยังเปิดใน Sales Tracker' : ''} · ${e.teamCfg ? 'แชร์กับทีม' : 'บันทึกในเครื่องนี้'} · สีแยกตามลูกค้า`} />
       <section className="pl-sum card" aria-label="สรุปงานที่นัดไว้">
         <div className="pl-sum-total">
           <span>งานค้างทั้งหมด</span>
@@ -294,10 +307,10 @@ export function Plan() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <h3 className="card-t">รายชื่อที่ต้องติดต่อ</h3>
-            <span className="t-sec">{`${fmtN(tg.length)} บริษัท · ยังไม่มีนัด ${fmtN(unpl.length)}`}</span>
+            <span className="t-sec">{`${fmtN(tg.length)} บริษัท · ยังไม่มีนัด ${fmtN(unpl.length)}${unlinked ? ` · ยังไม่ได้เชื่อมบริษัท ${fmtN(unlinked)}` : ''}`}</span>
           </div>
           <div className="pl-tools">
-            <Select variant="tool" prefix="รายการ" label="รายการ" value={feedKey} onChange={(v) => set({ plFeed: v as FeedKey, picked: {}, plLim: 60 })} options={FEEDS.map(([v, label]) => ({ v, label }))} search={false} width={280} />
+            <Select variant="tool" prefix="รายการ" label="รายการ" value={src} onChange={(x) => set({ plFeed: x, picked: {}, plLim: 60 })} options={srcOpts} search={false} width={320} />
             {/* two filters, always shown as pills (no field menu) */}
             <FilterBar
               fields={[
@@ -308,7 +321,7 @@ export function Plan() {
               onChange={(k, x) => set(k === 'stage' ? { plStage: (x?.v[0] ?? '') as StageKey | '', picked: {} } : { plOwner: x?.v[0] ?? '', picked: {} })}
               anySet={false}
             />
-            {!ro && <Select variant="tool" prefix="นัดอัตโนมัติวันละ" label="นัดอัตโนมัติวันละ" value={String(ui.perDay)} onChange={(v) => set({ perDay: +v })} options={[3, 5, 10, 20].map((n) => ({ v: String(n), label: `${n} ราย` }))} search={false} />}
+            {!ro && unpl.length > 0 && <Select variant="tool" prefix="นัดอัตโนมัติวันละ" label="นัดอัตโนมัติวันละ" value={String(ui.perDay)} onChange={(v) => set({ perDay: +v })} options={[3, 5, 10, 20].map((n) => ({ v: String(n), label: `${n} ราย` }))} search={false} />}
             {!ro && unpl.length > 0 && (
               <button
                 onClick={() => window.confirm(`นัด ${fmtN(unpl.length)} รายที่ยังไม่มีแผน วันละ ${ui.perDay || 5} ราย (วันทำการ)?`) && e.autoPlan(unpl, ui.perDay || 5)}
@@ -319,32 +332,37 @@ export function Plan() {
             )}
           </div>
         </div>
-        {/* picking companies only leads to making appointments or sending them to the tracker */}
-        {!ro && <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--divider)', paddingTop: 10 }}>
+        {/* picking companies only leads to making appointments or sending them to the tracker (a client not
+            linked to the register is not picked: an appointment needs a company) */}
+        {!ro && shownCos.length > 0 && <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--divider)', paddingTop: 10 }}>
           <button
             onClick={() => {
               const p = { ...pk };
-              if (allOn) shown.forEach((c) => delete p[c.id]);
-              else shown.forEach((c) => (p[c.id] = 1));
+              if (allOn) shownCos.forEach((c) => delete p[c.id]);
+              else shownCos.forEach((c) => (p[c.id] = 1));
               set({ picked: p });
             }}
             className="lnk"
             style={{ fontSize: 13 }}
           >
-            {allOn ? 'ยกเลิกเลือกทั้งหมด' : `เลือก ${fmtN(shown.length)} รายที่แสดง`}
+            {allOn ? 'ยกเลิกเลือกทั้งหมด' : `เลือก ${fmtN(shownCos.length)} รายที่แสดง`}
           </button>
           <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1 }}>{pkIds.length ? `เลือกแล้ว ${fmtN(pkIds.length)} ราย` : 'เลือกหลายรายเพื่อนัดพร้อมกัน'}</span>
           {pkIds.length > 0 && <button onClick={() => openSched({ ids: pkIds })} className="btn sm pri">นัดที่เลือก {fmtN(pkIds.length)} ราย</button>}
-          {pkIds.length > 0 && <button onClick={() => set({ sendIds: pkIds })} className="btn sm">ส่งเข้า Sales Tracker</button>}
+          {pkIds.length > 0 && sees && e.can('edit.deal') && <button onClick={() => set({ sendIds: pkIds })} className="btn sm">ส่งเข้า Sales Tracker</button>}
         </div>}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {shown.map((c) => {
-            const st = stageOf(C.stages[c.id]);
-            const ot = plannedBy[c.id];
-            const p = !!pk[c.id];
+          {shown.map((r) => {
+            const c = r.c, j = r.jobs[0];
+            const p = !!(c && pk[c.id]);
+            const ot = r.task;
+            // what is late, in words (the order already puts it first; the deal panel's words for a job)
+            const warn = ot && ot.date < today ? 'นัดเกินกำหนด' : r.idle != null ? `ไม่ได้ติดต่อ ${fmtN(r.idle)} วัน` : '';
+            const meta = [c ? D.prov[c.prov] : j && j.deal.section ? 'หมวด ' + j.deal.section : '', r.owner].filter(Boolean).join(' · ');
+            const openJob = () => j && set({ deal: j.deal.id });
             return (
-              <div key={c.id} className="plan-row">
-                {ro ? <span /> : (
+              <div key={r.key} className="plan-row">
+                {ro || !c ? <span /> : (
                   <button
                     onClick={() => {
                       const q = { ...pk };
@@ -352,24 +370,37 @@ export function Plan() {
                       else q[c.id] = 1;
                       set({ picked: q });
                     }}
-                    aria-label="เลือก" aria-pressed={p}
+                    aria-label={'เลือก ' + r.name} aria-pressed={p}
                     className={'ckb ' + (p ? 'hv-dk on' : 'hv')}
                   >
                     {p && <Icon name="check" size={14} />}
                   </button>
                 )}
-                <button onClick={() => open(c.id)} className="hv-tx" style={{ cursor: 'pointer', border: 0, textAlign: 'left', padding: 0, display: 'flex', gap: 12, alignItems: 'center', minWidth: 0, color: 'var(--ink)' }}>
-                  <CoAvatar name={c.name} web={c.web} set={c.set} size={28} />
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>{c.name}</span>
-                    <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{[D.prov[c.prov], feedLine(D, feedKey, c), C.owners[c.id]].filter(Boolean).join(' · ')}</span>
-                  </span>
-                </button>
-                <span style={{ fontSize: 13, color: 'var(--ink-2)', wordBreak: 'break-word' }}>{c.phone || 'ยังไม่มีเบอร์'}</span>
-                {/* the stage reads as plain text; a picker under the pointer (plain text for viewers) */}
-                <Select variant="cell" className="pl-stage" value={st[0]} disabled={!e.can('edit.cust')} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
+                <div className="pl-who">
+                  <CoAvatar name={r.name} web={c?.web} set={c?.set} size={28} />
+                  <div className="pl-who-t">
+                    <button onClick={() => (c ? open(c.id) : openJob())} className="hv-tx pl-who-n" title={c ? 'เปิดหน้าบริษัท' : 'เปิดงานใน Sales Tracker'}>{r.name}</button>
+                    {/* where it comes from: followed, and/or its tracker job's next step (opens the job) */}
+                    <span className="pl-src">
+                      {r.watch && <span className="chip">ติดตาม</span>}
+                      {j && <button type="button" className="chip pl-tag hv" onClick={openJob} title="เปิดงานใน Sales Tracker">{jobTag(r.jobs)}</button>}
+                      {warn && <span className="pl-warn">{warn}</span>}
+                      {meta && <span className="pl-meta">{meta}</span>}
+                    </span>
+                  </div>
+                </div>
+                <span style={{ fontSize: 13, color: 'var(--ink-2)', wordBreak: 'break-word' }}>{r.phone || 'ยังไม่มีเบอร์'}</span>
+                {/* the stage reads as plain text; a picker under the pointer (plain text for viewers); a client
+                    not linked to the register has none (it is a company's) */}
+                {c ? (
+                  <Select variant="cell" className="pl-stage" value={stageOf(r.stage)[0]} disabled={!e.can('edit.cust')} onChange={(v) => e.setStage(c.id, v as StageKey)} label={'สถานะการขาย ' + c.name} search={false} width={220} options={STG.map(([v, label]) => ({ v, label }))} />
+                ) : (
+                  <span className="pl-nolink">ยังไม่ได้เชื่อมบริษัท</span>
+                )}
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  {ro ? null : ot ? (
+                  {!c ? (
+                    <button onClick={openJob} className="lnk" title="เปิดงานใน Sales Tracker เพื่อเชื่อมกับบริษัทในทะเบียน แล้วจึงนัดได้">เปิดงาน</button>
+                  ) : ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>
                   ) : (
                     <button onClick={() => openSched({ ids: [c.id] })} className="lnk">นัด</button>
@@ -378,7 +409,27 @@ export function Plan() {
               </div>
             );
           })}
-          {!tg.length && <span className="empty" style={{ padding: '16px 0' }}>ไม่มีรายชื่อในรายการนี้</span>}
+          {!tg.length && srcRows.length > 0 && (
+            <span className="empty" style={{ padding: '16px 0' }}>
+              ไม่มีรายชื่อที่ตรงกับตัวกรอง · <button className="lnk" onClick={() => set({ plStage: '', plOwner: '', picked: {} })}>ล้างตัวกรอง</button>
+            </span>
+          )}
+          {!srcRows.length && (
+            <div className="pl-none">
+              <b>ยังไม่มีรายชื่อที่ต้องติดต่อ</b>
+              <span>
+                {src === 'watch'
+                  ? 'ยังไม่ได้ติดตามบริษัทไหน · กด ติดตาม ในหน้าบริษัท หรือเลือกบริษัทในหน้าค้นหา'
+                  : src === 'sales'
+                    ? `ยังไม่มีงานที่ยังเปิดอยู่ใน Sales Tracker ปี ${year}`
+                    : `รายชื่อมาจากบริษัทที่ทีมติดตาม${sees ? ` และงานที่ยังเปิดอยู่ใน Sales Tracker ปี ${year}` : ''} · เลือกบริษัทในหน้าค้นหา แล้วกด ติดตาม${sees ? ' หรือ ส่งเข้า Sales Tracker' : ''}`}
+              </span>
+              <span className="pl-none-a">
+                <button className="lnk" onClick={() => go('search')}>หาบริษัทจากหน้าค้นหา</button>
+                {sees && <button className="lnk" onClick={() => go('sales', { slView: 'table' })}>ไปที่ Sales Tracker</button>}
+              </span>
+            </div>
+          )}
           {tg.length > shown.length && <button onClick={() => set({ plLim: (ui.plLim || 60) + 120 })} className="lnk" style={{ alignSelf: 'center', marginTop: 10 }}>{`แสดงเพิ่ม (อีก ${fmtN(tg.length - shown.length)} ราย)`}</button>}
         </div>
       </section>

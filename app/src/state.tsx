@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { GccEngine } from './lib/engine';
 import type { FeedKey, StageKey } from './lib/types';
+import type { PlanSrc } from './lib/planList';
 import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
@@ -21,7 +22,9 @@ export interface UIState {
   // CFO dashboard cross-filter (Track tab)
   oInd: string; oProv: string; oExpM: string; oFy: string; oSt: string;
   // Plan tab
-  calM: string; calDay: string; plFeed: FeedKey; plStage: StageKey | ''; plOwner: string; perDay: number; picked: Record<number, 1>; plLim: number;
+  /** `plFeed`: where "รายชื่อที่ต้องติดต่อ" comes from (lib/planList.ts planSrc reads it; a registry feed key
+   *  left from before is read as the default). */
+  calM: string; calDay: string; plFeed: PlanSrc | FeedKey; plStage: StageKey | ''; plOwner: string; perDay: number; picked: Record<number, 1>; plLim: number;
   /** The one customer the calendar shows (its ckey, lib/custColor.ts), pressed in "ลูกค้าในเดือนนี้"; '' = all. */
   plCust: string;
   // Dedup tab
@@ -104,7 +107,7 @@ const initial = (): UIState => {
     f: { ...EMPTY_FILTERS, view, sort: view === 'cert' ? 'ap' : 'default' },
     page: 0, sel: null, dTab: 'info', sched: null,
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
-    calM: '', calDay: '', plFeed: 'cfoSoon', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60, plCust: '',
+    calM: '', calDay: '', plFeed: 'all', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60, plCust: '',
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
