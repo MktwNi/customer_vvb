@@ -69,8 +69,9 @@ export function activeCust(only: string, keys: Iterable<string>): string {
 }
 /** The UI keys that open แผนติดต่อ on day `d` ('YYYY-MM-DD') with every customer shown: a link from
  *  another page (the Dashboard's "อีก N นัด", later the bell's rows) never lands on a day filtered to
- *  the one customer pressed in the legend earlier in the session, which would hide what it promised. */
-export const planDayLink = (d: string) => ({ tab: 'plan' as const, calM: d.slice(0, 7), calDay: d, plCust: '' });
+ *  the one customer (or the one service type) pressed in the legend earlier in the session, which would
+ *  hide what it promised. */
+export const planDayLink = (d: string) => ({ tab: 'plan' as const, calM: d.slice(0, 7), calDay: d, plCust: '', plOnlyT: '' });
 /** The entries of the customer shown alone (`only`), or all of them. */
 export function onlyCust<T extends { ck: string }>(xs: readonly T[], only: string): T[] {
   return only ? xs.filter((x) => x.ck === only) : xs.slice();

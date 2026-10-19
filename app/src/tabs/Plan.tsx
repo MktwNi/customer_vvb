@@ -6,10 +6,12 @@ import { beYear, fmtMoney, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { ccVars, custKey, dealKey } from '../lib/custColor';
 import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from '../lib/planCal';
-import { filterRows, jobTag, ownerChoices, planRows, planSrc, rowsOf, srcCounts, unplanned, type PlanSrc } from '../lib/planList';
+import { filterRows, jobTag, openJob, ownerChoices, planRows, planSrc, rowsOf, srcCounts, unplanned, type PlanRow, type PlanSrc } from '../lib/planList';
+import { NO_TYPES, SVC_TYPES, activeType, custTypes, dealTypes, filterTypes, mainType, monthTypes, onlyType, svcType, typeCounts, typeSel, typeVars, typesOf, type CustTypes, type SvcTypeId } from '../lib/svcType';
 import type { Company, StageKey, Task } from '../lib/types';
-import { PageHead } from '../components/ui';
-import { FilterBar } from '../components/FilterBar';
+import { PageHead, Segmented } from '../components/ui';
+import { FilterBar, type FVal } from '../components/FilterBar';
+import { SvcChips } from '../components/SvcChips';
 import { Select } from '../components/Select';
 import { Icon } from '../components/icons';
 import { CoAvatar } from '../components/CoAvatar';
@@ -40,10 +42,11 @@ export function DoneBox({ t, onToggle, ro = false }: { t: Task; onToggle: () => 
   );
 }
 
-/** An appointment with its customer: the key (colour, legend, filter), the full name and the short one. */
-interface TaskK { t: Task; ck: string; full: string; name: string; date: string }
-/** An installment still to be received, with its deal's customer. */
-interface PayK { deal: Deal; line: LineView; ck: string }
+/** An appointment with its customer: the key (colour, legend, filter), the full name and the short one, and
+ *  the customer's service types (lib/svcType.ts: chips, the type colour, the type legend and filter). */
+interface TaskK { t: Task; ck: string; full: string; name: string; date: string; ct: CustTypes; types: readonly SvcTypeId[] }
+/** An installment still to be received, with its deal's customer and the types of its deal's Services. */
+interface PayK { deal: Deal; line: LineView; ck: string; ct: CustTypes; types: readonly SvcTypeId[] }
 /** One line of a day cell: an installment or an appointment. */
 type CellEntry = { p: PayK; x?: undefined } | { x: TaskK; p?: undefined };
 
@@ -62,34 +65,58 @@ export function Plan() {
   const first = `${calM}-01`;
   const start = addDays(first, -dow(first));
   const selISO = ui.calDay || today;
+  // the Sales Tracker (for an account that sees it) and its year: the contact list's jobs and every
+  // customer's service types (lib/svcType.ts), read from the Services of its jobs, never stored
+  const sees = e.can('view.sales');
+  const year = ui.slYear || beYear();
+  const typeMap = useMemo(
+    () => custTypes(sees ? e.sales : null, (d) => dealKey(e, d), year, (d) => openJob(e.sales, d, year, today)),
+    [e, v, sees, year, today],
+  );
+  // "แยกสีตาม": by customer (as always) or by service type; types need the tracker
+  const mode: 'cust' | 'type' = sees && ui.plColor === 'type' ? 'type' : 'cust';
   // every appointment with its customer (lib/custColor.ts: one key, so one colour on every page)
   const tasksK: TaskK[] = C.tasks.map((t) => {
     const c = e.company(t.gid), full = c ? c.name : t.title;
-    return { t, ck: custKey(e, t.gid, t.title), full, name: shortName(full), date: t.date };
+    const ck = custKey(e, t.gid, t.title), ct = typesOf(typeMap, ck);
+    return { t, ck, full, name: shortName(full), date: t.date, ct, types: ct.types };
   });
   // installments of won deals still to be received (the payment plan): read-only entries, never stored
   // (amounts the account may not see: no installments at all, as the bell)
   const money = e.can('view.money');
   const pays = money ? e.payDue('', '9999-12-31') : [];
-  const paysK: PayK[] = pays.map((x) => ({ ...x, ck: dealKey(e, x.deal) }));
-  // the customer pressed in the legend (this session only), while it still has an entry
-  const only = activeCust(ui.plCust, [...tasksK, ...paysK].map((x) => x.ck));
+  const paysK: PayK[] = pays.map((x) => {
+    const ct = sees ? dealTypes(e.sales, x.deal) : NO_TYPES;
+    return { ...x, ck: dealKey(e, x.deal), ct, types: ct.types };
+  });
+  // the customer (or, by type, the type) pressed in the legend (this session only), while it still has an
+  // entry; each belongs to its own colour mode
+  const only = mode === 'cust' ? activeCust(ui.plCust, [...tasksK, ...paysK].map((x) => x.ck)) : '';
+  const onlyT = mode === 'type' ? activeType(ui.plOnlyT, [...tasksK, ...paysK]) : '';
   const onlyName = only ? tasksK.find((x) => x.ck === only)?.name || shortName(paysK.find((x) => x.ck === only)?.deal.client || '') : '';
+  /** The entries the calendar shows: the customer or the type pressed, or all. */
+  const pick = <X extends { ck: string; types: readonly SvcTypeId[] }>(xs: X[]) => onlyType(onlyCust(xs, only), onlyT);
+  /** An entry's colour: its customer's (lib/custColor.ts), or by type its type's (the type shown alone when
+   *  it has several). */
+  const markVars = (ck: string, types: readonly SvcTypeId[]) => (mode === 'type' ? typeVars(mainType(types, onlyT)) : ccVars(ck));
+  /** "CFO, ทวนสอบ": a tooltip's and a day's label words for the types. */
+  const typeWords = (types: readonly SvcTypeId[]) => types.map((t) => svcType(t).n).join(', ');
   const byDay: Record<string, TaskK[]> = {};
-  onlyCust(tasksK, only).forEach((x) => (byDay[x.date] || (byDay[x.date] = [])).push(x));
+  pick(tasksK).forEach((x) => (byDay[x.date] || (byDay[x.date] = [])).push(x));
   // untimed first, then by time (the day list's order)
   Object.values(byDay).forEach((l) => l.sort((a, b) => (a.t.time || '').localeCompare(b.t.time || '')));
   const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i)).filter((_, i) => i < 35 || addDays(start, 35).slice(0, 7) === calM);
   const dayT = byDay[selISO] || [];
   const payBy: Record<string, PayK[]> = {};
-  onlyCust(paysK, only).forEach((x) => (payBy[x.line.due] || (payBy[x.line.due] = [])).push(x));
+  pick(paysK).forEach((x) => (payBy[x.line.due] || (payBy[x.line.due] = [])).push(x));
   const dayP = payBy[selISO] || [];
   const legend = monthCustomers(tasksK, calM);
+  // by type: "ประเภทบริการในเดือนนี้" (an appointment of a company with two types counts under both)
+  const tLegend = monthTypes(tasksK, calM);
+  const tLegendN = tasksK.filter((x) => x.date.slice(0, 7) === calM).length;
 
   // "รายชื่อที่ต้องติดต่อ": the team's real work (lib/planList.ts), never a registry list: the companies followed
   // and the open jobs of the Sales Tracker's year (for an account that sees the tracker), one row per company
-  const sees = e.can('view.sales');
-  const year = ui.slYear || beYear();
   const rowsAll = useMemo(
     () => planRows<Company>({ company: (id) => e.company(id), watch: C.watch, tasks: C.tasks, owners: C.owners, stages: C.stages, sales: sees ? e.sales : null, year, today }),
     [e, v, sees, year, today],
@@ -98,7 +125,19 @@ export function Plan() {
   // an older value (a registry feed) or the tracker for an account without it: the default
   const src: PlanSrc = planSrc(ui.plFeed) === 'sales' && !sees ? 'all' : planSrc(ui.plFeed);
   const srcRows = rowsOf(rowsAll, src);
-  const tg = filterRows(srcRows, ui.plStage, ui.plOwner);
+  // a row's service types: its company's (or, for a client not linked, its jobs' client's), as the calendar reads them
+  const rowCt = (r: PlanRow<Company>): CustTypes => typesOf(typeMap, r.c ? custKey(e, r.c.id, r.c.name) : r.jobs[0] ? dealKey(e, r.jobs[0].deal) : '');
+  const rowTypes = (r: PlanRow<Company>) => rowCt(r).types;
+  const plTypes = sees ? typeSel(ui.plTypes) : [];
+  // the ประเภทบริการ filter after the other two: its counts are what each type would leave
+  const tgBase = filterRows(srcRows, ui.plStage, ui.plOwner);
+  const tCounts = typeCounts(tgBase, rowTypes);
+  const tg = filterTypes(tgBase, plTypes, rowTypes);
+  /** "เหลือ N บริษัท" in a filter's popover: the rows its draft would leave with the other filters as they are. */
+  const liveCount = (k: string, d: FVal | null) => {
+    const st = k === 'stage' ? ((d?.v[0] ?? '') as StageKey | '') : ui.plStage, ow = k === 'owner' ? d?.v[0] ?? '' : ui.plOwner;
+    return filterTypes(filterRows(srcRows, st, ow), k === 'type' ? d?.v ?? [] : plTypes, rowTypes).length;
+  };
   // "ยังไม่มีแผน": no appointment and no step planned ahead in the tracker (lib/planList.ts hasPlan); an
   // appointment needs a company of the register: a client not linked to one is opened in the tracker
   const unpl = unplanned(tg);
@@ -129,30 +168,32 @@ export function Plan() {
     const c = e.company(gid);
     return <CoAvatar key={key} name={c ? c.name : title} web={c?.web} set={c?.set} size={size} />;
   };
-  const upcoming = onlyCust(tasksK, only).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || '')).slice(0, 8);
-  const upPays = onlyCust(paysK, only).filter((x) => x.line.due >= today).slice(0, 4);
-  /** "รับชำระ PAY2 · กรีนวัลเลย์ ฟู้ดส์ · 53,500 บาท": opens the deal (the receipt is recorded there). */
-  const payItem = (x: { deal: Deal; line: LineView }, when?: boolean) => (
+  const upcoming = pick(tasksK).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || '')).slice(0, 8);
+  const upPays = pick(paysK).filter((x) => x.line.due >= today).slice(0, 4);
+  /** "รับชำระ PAY2 · กรีนวัลเลย์ ฟู้ดส์ · 53,500 บาท" and its deal's service types: opens the deal (the receipt is
+   *  recorded there). It keeps its status look in both colour modes. */
+  const payItem = (x: PayK, when?: boolean) => (
     <button key={x.deal.id + x.line.stage} className={'pl-pay hv' + (when ? ' up' : '') + (x.line.lateDays ? ' late' : '')} onClick={() => set({ deal: x.deal.id })}>
-      <span>รับชำระ {x.line.stage} · {shortName(x.deal.client)} · {fmtMoney(x.line.left || x.line.amt)} บาท</span>
+      <span className="pl-pay-t">รับชำระ {x.line.stage} · {shortName(x.deal.client)} · {fmtMoney(x.line.left || x.line.amt)} บาท{sees && <SvcChips ct={x.ct} />}</span>
       <small>{x.line.lateDays ? `เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : when ? isoTh(x.line.due) : x.line.due === today ? 'ครบกำหนดวันนี้' : `อีก ${fmtN(daysBetween(today, x.line.due))} วัน`}</small>
     </button>
   );
-  /** A day's appointment in its cell: the customer's colour bar on its tint and the short name in ink (the
-   *  time too when the chip is wide enough); the full name, type and time in its tooltip. */
+  /** A day's appointment in its cell: the customer's colour bar on its tint (by type: its type's) and the
+   *  short name in ink (the time too when the chip is wide enough); the full name, type and time in its
+   *  tooltip (by type: the service types too). */
   const taskChip = (x: TaskK) => {
     const ty = TT.find((k) => k[0] === x.t.type) || TT[0];
     return (
-      <span key={x.t.id} className={'pl-ev' + (x.t.done ? ' done' : '')} style={ccVars(x.ck)} title={[x.full, ty[1], x.t.time, x.t.done ? 'ทำแล้ว' : ''].filter(Boolean).join(' · ')}>
+      <span key={x.t.id} className={'pl-ev' + (x.t.done ? ' done' : '')} style={markVars(x.ck, x.types)} title={[x.full, mode === 'type' ? typeWords(x.types) : '', ty[1], x.t.time, x.t.done ? 'ทำแล้ว' : ''].filter(Boolean).join(' · ')}>
         {x.t.time && <span className="pl-ev-t">{x.t.time}</span>}
         <span className="pl-ev-n">{chipName(x.full)}</span>
       </span>
     );
   };
   /** A day's installment in its cell: outlined in its status colour (late: red) with the word รับเงิน, never
-   *  in a customer colour, so it does not read as an appointment. */
+   *  in a customer or a type colour, so it does not read as an appointment. */
   const payChip = (x: PayK) => (
-    <span key={x.deal.id + x.line.stage} className={'pl-ev pay' + (x.line.lateDays ? ' late' : '')} title={`รับชำระ ${x.line.stage} · ${shortName(x.deal.client)} · ${fmtMoney(x.line.left || x.line.amt)} บาท${x.line.lateDays ? ` · เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : ''}`}>
+    <span key={x.deal.id + x.line.stage} className={'pl-ev pay' + (x.line.lateDays ? ' late' : '')} title={`รับชำระ ${x.line.stage} · ${shortName(x.deal.client)}${mode === 'type' ? ' · ' + typeWords(x.types) : ''} · ${fmtMoney(x.line.left || x.line.amt)} บาท${x.line.lateDays ? ` · เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : ''}`}>
       <span className="pl-ev-k">รับเงิน</span>
       <span className="pl-ev-n">{chipName(x.deal.client)}</span>
     </span>
@@ -161,10 +202,17 @@ export function Plan() {
   const owners = ownerChoices(C.team, rowsAll);
   if (ui.plOwner && ui.plOwner !== '-' && !owners.includes(ui.plOwner)) owners.push(ui.plOwner);
   const teamOpts = [{ v: '-', label: 'ยังไม่มีผู้รับผิดชอบ' }].concat(owners.map((v) => ({ v, label: v })));
+  // the six types, อื่นๆ and ยังไม่ระบุประเภท, each with the rows it would leave and the Services it stands for
+  const typeOpts = SVC_TYPES.map((t) => ({
+    v: t.id,
+    label: t.n,
+    n: tCounts[t.id],
+    desc: t.svc.length ? 'Services ' + t.svc.join(', ') : t.id === 'oth' ? 'Services อื่น เช่น Course Training, CF-EVENT' : 'ติดตามอย่างเดียว หรืองานยังไม่ได้เลือก Services',
+  }));
 
   return (
     <>
-      <PageHead title="แผนติดต่อ" sub={`นัดติดต่อบริษัทที่ติดตาม${sees ? 'และงานที่ยังเปิดใน Sales Tracker' : ''} · ${e.teamCfg ? 'แชร์กับทีม' : 'บันทึกในเครื่องนี้'} · สีแยกตามลูกค้า`} />
+      <PageHead title="แผนติดต่อ" sub={`นัดติดต่อบริษัทที่ติดตาม${sees ? 'และงานที่ยังเปิดใน Sales Tracker' : ''} · ${e.teamCfg ? 'แชร์กับทีม' : 'บันทึกในเครื่องนี้'} · สีแยกตาม${mode === 'type' ? 'ประเภทบริการ' : 'ลูกค้า'}`} />
       <section className="pl-sum card" aria-label="สรุปงานที่นัดไว้">
         <div className="pl-sum-total">
           <span>งานค้างทั้งหมด</span>
@@ -186,6 +234,13 @@ export function Plan() {
         <div className="pl-cal card">
           <div className="pl-cal-head">
             <span className="pl-month">{`${TH_M[m - 1]} ${y + 543}`}</span>
+            {/* the colours by customer (as always) or by service type; a filter pressed in the legend is the old mode's */}
+            {sees && (
+              <div className="pl-colorby">
+                <span className="pl-colorby-l" aria-hidden="true">แยกสีตาม</span>
+                <Segmented label="แยกสีตาม" value={mode} onChange={(x) => set({ plColor: x, plCust: '', plOnlyT: '' })} options={[{ v: 'cust', label: 'ลูกค้า' }, { v: 'type', label: 'ประเภทบริการ' }]} />
+              </div>
+            )}
             <div className="pl-nav">
               {calM !== today.slice(0, 7) && <button className="btn xs" onClick={() => set({ calM: today.slice(0, 7), calDay: today })}>วันนี้</button>}
               <button className="btn xs" onClick={() => set({ calM: new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7) })}>เดือนก่อน</button>
@@ -202,8 +257,10 @@ export function Plan() {
               // installments first, then the appointments by time: up to 3 lines (phones: 3 dots)
               const entries: CellEntry[] = [...ps.map((p) => ({ p })), ...ts.map((x) => ({ x }))];
               const lines = cellLines(entries), dots = cellDots(entries);
+              // by type, each name says its types ("ซากิโนมิยะ ประเทศไทย (CFO, CFP)"): the colour is not seen
+              const said = (name: string, types: readonly SvcTypeId[]) => (mode === 'type' ? `${name} (${typeWords(types)})` : name);
               return (
-                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => x.name), ps.map((x) => ({ name: shortName(x.deal.client), late: x.line.lateDays > 0 })))}>
+                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => said(x.name, x.types)), ps.map((x) => ({ name: said(shortName(x.deal.client), x.types), late: x.line.lateDays > 0 })))}>
                   <span className="pl-dn">{+d.slice(8)}</span>
                   {entries.length > 0 && (
                     <>
@@ -214,7 +271,7 @@ export function Plan() {
                       <span className="pl-dots" aria-hidden="true">
                         {dots.shown.map((en) => en.p
                           ? <i key={en.p.deal.id + en.p.line.stage} className={'pl-dot pay' + (en.p.line.lateDays ? ' late' : '')} />
-                          : <i key={en.x.t.id} className={'pl-dot' + (en.x.t.done ? ' done' : '')} style={ccVars(en.x.ck)} />)}
+                          : <i key={en.x.t.id} className={'pl-dot' + (en.x.t.done ? ' done' : '')} style={markVars(en.x.ck, en.x.types)} />)}
                         {dots.more > 0 && <span className="pl-dmore">อีก {fmtN(dots.more)}</span>}
                       </span>
                     </>
@@ -223,24 +280,45 @@ export function Plan() {
               );
             })}
           </div>
-          {/* the month's customers: a colour dot and the name (the type tag elsewhere is coloured text) */}
+          {/* the month's customers: a colour dot and the name (the type tag elsewhere is coloured text); by type,
+              the month's service types: a colour dot, the type's name and its appointments */}
           <div className="pl-legend">
-            <span className="pl-lg-h">
-              ลูกค้าในเดือนนี้
-              <small>{legend.length ? `${fmtN(legend.length)} บริษัท · กดชื่อเพื่อดูเฉพาะรายนั้น` : pickHere ? 'ยังไม่มีนัดในเดือนนี้ · เลือกบริษัทที่รายชื่อด้านล่างแล้วกด นัด' : 'ยังไม่มีนัดในเดือนนี้'}</small>
-              {only && <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>}
-            </span>
-            {legend.length > 0 && (
+            {mode === 'type' ? (
+              <span className="pl-lg-h">
+                ประเภทบริการในเดือนนี้
+                <small>{tLegend.length ? `${fmtN(tLegendN)} นัด · กดชื่อประเภทเพื่อดูเฉพาะประเภทนั้น` : pickHere ? 'ยังไม่มีนัดในเดือนนี้ · เลือกบริษัทที่รายชื่อด้านล่างแล้วกด นัด' : 'ยังไม่มีนัดในเดือนนี้'}</small>
+                {onlyT && <button className="lnk" onClick={() => set({ plOnlyT: '' })}>แสดงทุกประเภท</button>}
+              </span>
+            ) : (
+              <span className="pl-lg-h">
+                ลูกค้าในเดือนนี้
+                <small>{legend.length ? `${fmtN(legend.length)} บริษัท · กดชื่อเพื่อดูเฉพาะรายนั้น` : pickHere ? 'ยังไม่มีนัดในเดือนนี้ · เลือกบริษัทที่รายชื่อด้านล่างแล้วกด นัด' : 'ยังไม่มีนัดในเดือนนี้'}</small>
+                {only && <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>}
+              </span>
+            )}
+            {(mode === 'type' ? tLegend.length : legend.length) > 0 && (
               <>
-                <div className="pl-lg-list">
-                  {legend.map((it) => (
-                    <button key={it.ck} className="pl-lg" aria-pressed={it.ck === only} style={ccVars(it.ck)} onClick={() => set({ plCust: it.ck === only ? '' : it.ck })} title={`${it.name} · ${fmtN(it.n)} นัดในเดือนนี้`}>
-                      <i aria-hidden="true" />
-                      {it.name}
-                      <small>{fmtN(it.n)}</small>
-                    </button>
-                  ))}
-                </div>
+                {mode === 'type' ? (
+                  <div className="pl-lg-list">
+                    {tLegend.map((it) => (
+                      <button key={it.id} className="pl-lg" aria-pressed={it.id === onlyT} style={typeVars(it.id)} onClick={() => set({ plOnlyT: it.id === onlyT ? '' : it.id })} title={`${svcType(it.id).n} · ${fmtN(it.n)} นัด · ${fmtN(it.cos)} บริษัทในเดือนนี้`}>
+                        <i aria-hidden="true" />
+                        {svcType(it.id).n}
+                        <small>{fmtN(it.n)}</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="pl-lg-list">
+                    {legend.map((it) => (
+                      <button key={it.ck} className="pl-lg" aria-pressed={it.ck === only} style={ccVars(it.ck)} onClick={() => set({ plCust: it.ck === only ? '' : it.ck })} title={`${it.name} · ${fmtN(it.n)} นัดในเดือนนี้`}>
+                        <i aria-hidden="true" />
+                        {it.name}
+                        <small>{fmtN(it.n)}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {money && (
                   <span className="pl-lg-key">
                     <span className="pl-ev pay"><span className="pl-ev-k">รับเงิน</span></span>
@@ -267,17 +345,28 @@ export function Plan() {
               <button className="lnk" onClick={() => set({ plCust: '' })}>แสดงทุกบริษัท</button>
             </div>
           )}
+          {onlyT && (
+            <div className="pl-filt" style={typeVars(onlyT)}>
+              <i aria-hidden="true" />
+              <span>แสดงเฉพาะประเภท {svcType(onlyT).n}</span>
+              <button className="lnk" onClick={() => set({ plOnlyT: '' })}>แสดงทุกประเภท</button>
+            </div>
+          )}
           {!dayT.length && !dayP.length && <span className="pl-empty">{pickHere ? 'ไม่มีงานในวันนี้ · เลือกวันอื่น หรือกด นัด ที่รายชื่อด้านล่าง' : 'ไม่มีงานในวันนี้ · เลือกวันอื่น'}</span>}
           {dayP.map((x) => payItem(x))}
-          {dayT.map(({ t, ck }) => {
+          {dayT.map(({ t, ck, ct, types }) => {
             const ti = taskInfo(e, t);
-            // the customer's colour as a stripe beside the card: a website icon in the avatar never hides it
+            // the customer's colour (by type: its type's) as a stripe beside the card: a website icon in the
+            // avatar never hides it; the service types as words beside the name, in both modes
             return (
-              <div key={t.id} className={'pl-task cc' + (t.done ? ' done-t' : '')} style={ccVars(ck)}>
+              <div key={t.id} className={'pl-task cc' + (t.done ? ' done-t' : '')} style={markVars(ck, types)}>
                 <DoneBox t={t} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
                 {avOf(t.id, t.gid, t.title, 36)}
                 <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                  <button onClick={() => ti.company && open(ti.company.id)} className="hv-tx" style={{ cursor: 'pointer', border: 0, textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: 'var(--ink)', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
+                  <span className="pl-nm-row">
+                    <button onClick={() => ti.company && open(ti.company.id)} className="hv-tx" style={{ cursor: 'pointer', border: 0, textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: 'var(--ink)', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
+                    {sees && <SvcChips ct={ct} />}
+                  </span>
                   <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{ti.meta}</span>
                   {t.note && <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{t.note}</span>}
                 </div>
@@ -299,7 +388,7 @@ export function Plan() {
             const t = u.t, ti = taskInfo(e, t);
             return (
               <button key={t.id} className="pl-up hv" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '8px', margin: '0 4px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 14, color: 'var(--ink)' }}>
-                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}><i className="pl-bar" style={ccVars(u.ck)} aria-hidden="true" />{avOf(t.id, t.gid, t.title, 28)}<span style={{ minWidth: 0 }}>{ti.title}</span></span>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}><i className="pl-bar" style={markVars(u.ck, u.types)} aria-hidden="true" />{avOf(t.id, t.gid, t.title, 28)}<span className="pl-up-n"><span>{ti.title}</span>{sees && <SvcChips ct={u.ct} />}</span></span>
                 <span style={{ color: 'var(--ink-2)', fontSize: 13, whiteSpace: 'nowrap' }}>{ti.when}</span>
               </button>
             );
@@ -317,14 +406,18 @@ export function Plan() {
           <div className="pl-tools">
             <Select variant="tool" prefix="รายการ" label="รายการ" value={src} onChange={(x) => set({ plFeed: x, picked: {}, plLim: 60 })} options={srcOpts} search={false} width={320} />
             {/* two filters, always shown as pills (no field menu) */}
+            {/* the filters, always shown as pills (no field menu): ประเภทบริการ for an account that sees the tracker */}
             <FilterBar
               fields={[
                 { key: 'stage', label: 'สถานะการขาย', kind: 'single', all: 'ทั้งหมด', pinned: true, rest: 'ทั้งหมด', options: STG.map(([v, label]) => ({ v, label })) },
                 { key: 'owner', label: 'ผู้รับผิดชอบ', kind: 'single', all: 'ทั้งหมด', pinned: true, rest: 'ทุกคน', people: true, options: teamOpts },
+                ...(sees ? [{ key: 'type', label: 'ประเภทบริการ', kind: 'multi' as const, pinned: true, rest: 'ทุกประเภท', options: typeOpts }] : []),
               ]}
-              value={{ stage: ui.plStage ? { v: [ui.plStage] } : undefined, owner: ui.plOwner ? { v: [ui.plOwner] } : undefined }}
-              onChange={(k, x) => set(k === 'stage' ? { plStage: (x?.v[0] ?? '') as StageKey | '', picked: {} } : { plOwner: x?.v[0] ?? '', picked: {} })}
+              value={{ stage: ui.plStage ? { v: [ui.plStage] } : undefined, owner: ui.plOwner ? { v: [ui.plOwner] } : undefined, type: plTypes.length ? { v: plTypes } : undefined }}
+              onChange={(k, x) => set(k === 'stage' ? { plStage: (x?.v[0] ?? '') as StageKey | '', picked: {} } : k === 'type' ? { plTypes: typeSel(x?.v), picked: {} } : { plOwner: x?.v[0] ?? '', picked: {} })}
               anySet={false}
+              liveCount={liveCount}
+              unit="บริษัท"
             />
             {!ro && unpl.length > 0 && <Select variant="tool" prefix="นัดอัตโนมัติวันละ" label="นัดอัตโนมัติวันละ" value={String(ui.perDay)} onChange={(v) => set({ perDay: +v })} options={[3, 5, 10, 20].map((n) => ({ v: String(n), label: `${n} ราย` }))} search={false} />}
             {!ro && unpl.length > 0 && (
@@ -364,7 +457,7 @@ export function Plan() {
             // what is late, in words (the order already puts it first; the deal panel's words for a job)
             const warn = ot && ot.date < today ? 'นัดเกินกำหนด' : r.idle != null ? `ไม่ได้ติดต่อ ${fmtN(r.idle)} วัน` : '';
             const meta = [c ? D.prov[c.prov] : j && j.deal.section ? 'หมวด ' + j.deal.section : '', r.owner].filter(Boolean).join(' · ');
-            const openJob = () => j && set({ deal: j.deal.id });
+            const openDeal = () => j && set({ deal: j.deal.id });
             return (
               <div key={r.key} className="plan-row">
                 {ro || !c ? <span /> : (
@@ -384,11 +477,14 @@ export function Plan() {
                 <div className="pl-who">
                   <CoAvatar name={r.name} web={c?.web} set={c?.set} size={28} />
                   <div className="pl-who-t">
-                    <button onClick={() => (c ? open(c.id) : openJob())} className="hv-tx pl-who-n" title={c ? 'เปิดหน้าบริษัท' : 'เปิดงานใน Sales Tracker'}>{r.name}</button>
+                    <span className="pl-nm-row">
+                      <button onClick={() => (c ? open(c.id) : openDeal())} className="hv-tx pl-who-n" title={c ? 'เปิดหน้าบริษัท' : 'เปิดงานใน Sales Tracker'}>{r.name}</button>
+                      {sees && <SvcChips ct={rowCt(r)} />}
+                    </span>
                     {/* where it comes from: followed, and/or its tracker job's next step (opens the job) */}
                     <span className="pl-src">
                       {r.watch && <span className="chip">ติดตาม</span>}
-                      {j && <button type="button" className="chip pl-tag hv" onClick={openJob} title="เปิดงานใน Sales Tracker">{jobTag(r.jobs)}</button>}
+                      {j && <button type="button" className="chip pl-tag hv" onClick={openDeal} title="เปิดงานใน Sales Tracker">{jobTag(r.jobs)}</button>}
                       {warn && <span className="pl-warn">{warn}</span>}
                       {meta && <span className="pl-meta">{meta}</span>}
                     </span>
@@ -404,7 +500,7 @@ export function Plan() {
                 )}
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {!c ? (
-                    <button onClick={openJob} className="lnk" title={e.can('edit.deal') ? 'เปิดงานใน Sales Tracker แล้วเชื่อมกับบริษัทในทะเบียนที่ “ข้อมูลติดต่อ · SOURCE / บริการ” จึงจะนัดได้' : 'เปิดงานใน Sales Tracker'}>เปิดงาน</button>
+                    <button onClick={openDeal} className="lnk" title={e.can('edit.deal') ? 'เปิดงานใน Sales Tracker แล้วเชื่อมกับบริษัทในทะเบียนที่ “ข้อมูลติดต่อ · SOURCE / บริการ” จึงจะนัดได้' : 'เปิดงานใน Sales Tracker'}>เปิดงาน</button>
                   ) : ro ? null : ot ? (
                     <button onClick={() => openSched({ taskId: ot.id, ids: [c.id] })} className="lnk" style={{ fontSize: 13 }}>นัดแล้ว {isoTh(ot.date)}</button>
                   ) : (
@@ -416,7 +512,7 @@ export function Plan() {
           })}
           {!tg.length && srcRows.length > 0 && (
             <span className="empty" style={{ padding: '16px 0' }}>
-              ไม่มีรายชื่อที่ตรงกับตัวกรอง · <button className="lnk" onClick={() => set({ plStage: '', plOwner: '', picked: {} })}>ล้างตัวกรอง</button>
+              ไม่มีรายชื่อที่ตรงกับตัวกรอง · <button className="lnk" onClick={() => set({ plStage: '', plOwner: '', plTypes: [], picked: {} })}>ล้างตัวกรอง</button>
             </span>
           )}
           {!srcRows.length && (

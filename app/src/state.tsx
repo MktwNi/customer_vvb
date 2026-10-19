@@ -27,6 +27,10 @@ export interface UIState {
   calM: string; calDay: string; plFeed: PlanSrc | FeedKey; plStage: StageKey | ''; plOwner: string; perDay: number; picked: Record<number, 1>; plLim: number;
   /** The one customer the calendar shows (its ckey, lib/custColor.ts), pressed in "ลูกค้าในเดือนนี้"; '' = all. */
   plCust: string;
+  /** "แยกสีตาม": the calendar's colours by customer (as always) or by service type (lib/svcType.ts); kept in
+   *  this browser with the tab. `plOnlyT`: the one type the calendar shows, pressed in "ประเภทบริการในเดือนนี้"
+   *  ('' = all); `plTypes`: the contact list's ประเภทบริการ filter (type ids; none = every row). */
+  plColor: 'cust' | 'type'; plOnlyT: string; plTypes: string[];
   // Dedup tab
   ddF: 'pending' | 'auto' | 'decided' | 'all'; ddPage: number;
   // Sales Tracker
@@ -99,7 +103,7 @@ export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after th
 const TAB_KEYS: Tab[] = ['overview', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users', 'help'];
 
 const initial = (): UIState => {
-  const s = prefs.get<{ tab?: unknown; view?: unknown } | null>(PREF.ui, {}) || {};
+  const s = prefs.get<{ tab?: unknown; view?: unknown; plColor?: unknown } | null>(PREF.ui, {}) || {};
   const tab = TAB_KEYS.includes(s.tab as Tab) ? (s.tab as Tab) : 'overview';
   const view = s.view === 'cert' ? 'cert' : 'co';
   return {
@@ -108,6 +112,7 @@ const initial = (): UIState => {
     page: 0, sel: null, dTab: 'info', sched: null,
     oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '',
     calM: '', calDay: '', plFeed: 'all', plStage: '', plOwner: '', perDay: 5, picked: {}, plLim: 60, plCust: '',
+    plColor: s.plColor === 'type' ? 'type' : 'cust', plOnlyT: '', plTypes: [],
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
@@ -168,7 +173,7 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
       }),
     [engine],
   );
-  useEffect(() => prefs.set(PREF.ui, { tab: ui.tab, view: ui.f.view }), [ui.tab, ui.f.view]);
+  useEffect(() => prefs.set(PREF.ui, { tab: ui.tab, view: ui.f.view, plColor: ui.plColor }), [ui.tab, ui.f.view, ui.plColor]);
   const value = useMemo<Ctx>(() => ({
     engine, ui, set,
     go: (tab, p) => {

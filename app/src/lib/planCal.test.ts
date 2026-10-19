@@ -88,7 +88,7 @@ describe('plan calendar: the legend and its filter', () => {
     expect(activeCust('', keys)).toBe('');
   });
   it('a link to a day from another page shows every customer (the legend filter is cleared)', () => {
-    expect(planDayLink('2026-10-19')).toEqual({ tab: 'plan', calM: '2026-10', calDay: '2026-10-19', plCust: '' });
+    expect(planDayLink('2026-10-19')).toEqual({ tab: 'plan', calM: '2026-10', calDay: '2026-10-19', plCust: '', plOnlyT: '' });
     // what the day then shows: all of its entries, not the customer pressed earlier
     const before: { plCust: string } = { plCust: '26' };
     const ui = { ...before, ...planDayLink('2026-10-12') };
