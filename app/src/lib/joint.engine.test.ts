@@ -277,7 +277,7 @@ describe('one row per company and year; the CSV; money once in Cashflow', () => 
     // no file: the total is the header's typed Forecast until the quotation is attached
     expect(dealMoney(A.sales, A.sales.deals[hid])).toMatchObject({ forecast: 1284000, fcConfirmed: false });
     const r = A.addDealsFromCompanies([payer.id, member.id], { year: '2569' });
-    expect(r).toEqual({ added: 1, skipped: 1 });
+    expect(r).toMatchObject({ added: 1, skipped: 1 });
     expect(A.dealsOf(payer.id).filter((d) => d.year === '2569')).toHaveLength(2);
     A.dispose();
   });

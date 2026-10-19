@@ -270,7 +270,8 @@ export function Track() {
         {feeds.map(({ k, label, desc, all }) => {
           const months = k === 'newFac' ? Object.entries(all.reduce<Record<string, number>>((m, c) => ((m[c.newYm] = (m[c.newYm] || 0) + 1), m), {})).sort((a, b) => b[0].localeCompare(a[0])) : [];
           return (
-            <div key={k} style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', boxSizing: 'border-box' }}>
+            // (track-watch: where the search page's "ดูรายการติดตาม" lands, below the sticky filter line)
+            <div key={k} id={k === 'watch' ? 'track-watch' : undefined} style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', boxSizing: 'border-box', scrollMarginTop: 'calc(var(--sticky-top) + 84px)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                   <h3 style={panelT}>{label}</h3>
