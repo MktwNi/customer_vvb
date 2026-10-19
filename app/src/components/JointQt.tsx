@@ -17,8 +17,8 @@ import type { DocFacts } from '../lib/docExtract';
 import type { CashLens } from '../lib/cashUi';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { Modal, DialogActions } from './Dialog';
-// ค่าใช้จ่ายของงาน: the band's ⋯ menu records one on the joint quotation
-import { openExp } from './ExpCard';
+// ค่าใช้จ่ายของงาน: the band's ⋯ menu records one on the joint quotation; cancelling it names the header's
+import { cancelExpWords, openExp } from './ExpCard';
 import { CoAvatar } from './CoAvatar';
 import { DateField, Notice, Status } from './ui';
 import { SelField } from './Select';
@@ -812,7 +812,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
           {info}
           {history}
           {e.can('del.rec') && (
-            <button type="button" className="quiet dp-del" onClick={() => window.confirm(`ยกเลิกใบเสนอราคาร่วม ${no || title}? ใบเสนอราคา แผนชำระของผู้จ่าย และไฟล์ใบเสนอราคาจะถูกลบ (ไฟล์ไปถังขยะของ Drive ทีม) บริษัททั้ง ${g.members.length} รายยังอยู่ในตารางตามเดิม`) && (e.cancelJoint(hid), close())}>
+            <button type="button" className="quiet dp-del" onClick={() => window.confirm(`ยกเลิกใบเสนอราคาร่วม ${no || title}? ใบเสนอราคา แผนชำระของผู้จ่าย และไฟล์ใบเสนอราคาจะถูกลบ (ไฟล์ไปถังขยะของ Drive ทีม) บริษัททั้ง ${g.members.length} รายยังอยู่ในตารางตามเดิม${cancelExpWords(e, hid)}`) && (e.cancelJoint(hid), close())}>
               ยกเลิกใบเสนอราคาร่วม · บริษัทยังอยู่ในตารางตามเดิม
             </button>
           )}

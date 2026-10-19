@@ -13,8 +13,9 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { BUILTIN, type CapSet } from './caps';
-import { expensesOf, toExpense } from './expense';
-import { catSuggest, jobSum } from './expenseJob';
+import { expensesOf, toExpense, type JobExp } from './expense';
+import { catSuggest, expClash, expFieldWords, expFollow, expForm, expTouched, jobSum, readExpForm, type ExpInput } from './expenseJob';
+import { cancelExpWords } from '../components/ExpCard';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -117,6 +118,7 @@ const rows = (k: string) => sim.post({ action: 'pull', since: 0, cv: 4, xp: 1, t
 const pdf = (name: string, body = name) => Object.assign(new Blob(['%PDF-1.4 ' + body], { type: 'application/pdf' }), { name });
 const files = () => sim.drive.list().filter((x) => x.kind === 'file');
 const LINE = { c: 'ค่าเดินทาง', amt: 3500, d: '2026-10-05' };
+const T = '2026-10-12';
 
 describe('recording job expenses (engine, Code.gs in the simulator)', () => {
   it('a sales account records on its own deal: the record, its history line, the server\'s name and time; a teammate sees it', async () => {
@@ -327,5 +329,235 @@ describe('a role without บันทึกค่าใช้จ่าย', () =
     expect(S.e.deleteExpense(d.id, x.id)).toBe(false);
     await expect(S.e.attachExpenseBill(d.id, x.id, pdf('x.pdf'))).rejects.toThrow(/แนบบิล/);
     expect(expensesOf(S.e.sales, d.id)[0].amt).toBe(3500);
+  });
+});
+
+/** The sheet's latest value of a record. */
+const lastV = (k: string) => rows(k).at(-1)!.v as JobExp;
+/** An account's uploads failing (offline) until the returned function is called. */
+const blockUploads = (t: Tab) => {
+  const orig = t.e.fileTransport;
+  let on = true;
+  (t.e as unknown as { fileTransport: unknown }).fileTransport = async (u: string, body: Record<string, unknown>) => {
+    if (on && body.action === 'upload') throw new TypeError('fetch failed');
+    return (orig as (u: string, b: Record<string, unknown>) => Promise<unknown>)(u, body);
+  };
+  return () => (on = false);
+};
+const later = (min: number) => vi.setSystemTime(new Date(Date.now() + min * 60000));
+
+describe('review fixes (side A)', () => {
+  it('the dialog saves only what the person changed: a teammate\'s amount that came in while it was open is kept', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const d = L.e.addDeal({ client: 'บริษัท ฟอร์มค้าง จำกัด', resp: 'เอก' });
+    await settle(L, S);
+    const x = S.e.addExpense(d.id, { ...LINE, n: 'รอบแรก' })!;
+    await settle(S, L);
+    const k = `${d.id}/${x.id}`;
+    // เอก opens the dialog
+    let ed = { init: expForm(S.e.sales.exp![k], T), f: expForm(S.e.sales.exp![k], T) };
+    // the admin corrects the amount; it reaches เอก's browser while the dialog is open, which follows it
+    expect(L.e.updateExpense(d.id, x.id, { ...LINE, n: 'รอบแรก', amt: 3800 })).toBe(true);
+    await settle(L, S);
+    expect(S.e.sales.exp![k].amt).toBe(3800);
+    ed = expFollow(ed, expForm(S.e.sales.exp![k], T));
+    expect(ed.f.amt).toBe('3,800');
+    // เอก ticks จ่ายแล้ว and saves: nothing clashes, only the paid date is written
+    const f = { ...ed.f, paidOn: true, paid: '2026-10-09' };
+    expect(expClash(ed.init, f, expForm(S.e.sales.exp![k], T))).toEqual([]);
+    const r = readExpForm(f);
+    expect(r.ok).toBe(true);
+    expect(S.e.updateExpense(d.id, x.id, (r as { v: ExpInput }).v, expTouched(ed.init, f))).toBe(true);
+    await settle(S, L, S);
+    for (const v of [lastV('dexp/' + k), L.e.sales.exp![k], S.e.sales.exp![k]]) expect(v).toMatchObject({ amt: 3800, paid: '2026-10-09', n: 'รอบแรก' });
+  });
+
+  it('even a form that did not follow (saved from the values it opened with) writes only the fields changed', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const d = L.e.addDeal({ client: 'บริษัท ฟอร์มเก่า จำกัด', resp: 'เอก' });
+    await settle(L, S);
+    const x = S.e.addExpense(d.id, LINE)!;
+    await settle(S, L);
+    const k = `${d.id}/${x.id}`;
+    const init = expForm(S.e.sales.exp![k], T);
+    expect(L.e.updateExpense(d.id, x.id, { ...LINE, amt: 3800, c: 'ค่าเดินทางไประยอง' })).toBe(true);
+    await settle(L, S);
+    // a stale form: amount and category as they were; the person changed the bill date only
+    const f = { ...init, d: '2026-10-07' };
+    const r = readExpForm(f) as { ok: true; v: ExpInput };
+    expect(S.e.updateExpense(d.id, x.id, r.v, expTouched(init, f))).toBe(true);
+    await settle(S, L);
+    expect(lastV('dexp/' + k)).toMatchObject({ amt: 3800, c: 'ค่าเดินทางไประยอง', d: '2026-10-07' });
+    // a field both changed: the question names the team's value now
+    const g = { ...init, amt: '4,000' };
+    expect(expClash(init, g, expForm(S.e.sales.exp![k], T))).toEqual(['amt']);
+    expect(expFieldWords('amt', S.e.sales.exp![k])).toBe('ยอด 3,800 บาท');
+  });
+
+  it('a teammate\'s bill waiting on their computer is never this browser\'s unsent file (an account that sees but cannot upload)', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const c: CapSet = { 'view.sales': 'all', 'view.money': 'all', 'view.cash': 'all', 'view.exp': 'all', 'pay.check': 'all', 'docs.open': 'all' };
+    const { id } = await L.e.roleSave({ n: 'บัญชี', d: '', c });
+    const A = await member(L, 'acc', 'แอน', id as Role);
+    const d = L.e.addDeal({ client: 'บริษัท รอบิล จำกัด', resp: 'เอก' });
+    await settle(L, S, A);
+    const unblock = blockUploads(S);
+    const x = S.e.addExpense(d.id, LINE)!;
+    await S.e.attachExpenseBill(d.id, x.id, pdf('wait.pdf'));
+    await settle(S, A, L);
+    expect(lastV(`dexp/${d.id}/${x.id}`).file!.id).toBe('');
+    // เอก: his only copy, unsent; แอน and the admin: not theirs
+    expect([S.e.docsUnsent, A.e.docsUnsent, L.e.docsUnsent]).toEqual([1, 0, 0]);
+    expect(expensesOf(A.e.sales, d.id)[0].file).toMatchObject({ id: '', name: 'wait.pdf' });
+    unblock();
+    later(40);
+    await settle(S, A, L);
+    expect([S.e.docsUnsent, A.e.docsUnsent, L.e.docsUnsent]).toEqual([0, 0, 0]);
+    expect(lastV(`dexp/${d.id}/${x.id}`).file!.id).toBeTruthy();
+  });
+
+  it('a job handed to someone else before its bill went up: not uploaded (no file left in Drive), kept here and said; it goes up once the job is back', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const d = L.e.addDeal({ client: 'บริษัท ส่งต่อ จำกัด', resp: 'เอก' });
+    await settle(L, S);
+    const unblock = blockUploads(S);
+    const x = S.e.addExpense(d.id, LINE)!;
+    await S.e.attachExpenseBill(d.id, x.id, pdf('handed.pdf'));
+    await settle(S);
+    L.e.updateDeal(d.id, { resp: 'หมิว' });
+    await settle(L, S);
+    unblock();
+    const k = `${d.id}/${x.id}`;
+    for (let i = 0; i < 4; i++) {
+      later(40);
+      await settle(S);
+    }
+    expect(sent.filter((b) => b.action === 'upload')).toHaveLength(0);
+    expect(files().filter((f) => f.name.startsWith('exp_'))).toEqual([]);
+    expect(S.e.sales.exp![k].file).toMatchObject({ id: '', name: 'handed.pdf' });
+    expect(S.e.billsStuck().map((y) => y.id)).toEqual([x.id]);
+    expect(S.e.docsUnsent).toBe(1);
+    // still his to open and pass on
+    expect(await (await S.e.expBill({ ...S.e.sales.exp![k], id: x.id })).text()).toBe('%PDF-1.4 handed.pdf');
+    // the job comes back: it goes up and is linked
+    L.e.updateDeal(d.id, { resp: 'เอก' });
+    await settle(L, S);
+    later(40);
+    await settle(S, L);
+    expect(S.e.billsStuck()).toEqual([]);
+    expect(S.e.docsUnsent).toBe(0);
+    const fid = lastV('dexp/' + k).file!.id;
+    expect(fid).toBeTruthy();
+    expect(L.e.sales.exp![k].file!.id).toBe(fid);
+  });
+
+  it('handed over between the upload and its link: the link is refused, the copy forgets that file, and nothing is sent again', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const d = L.e.addDeal({ client: 'บริษัท ส่งต่อกลางทาง จำกัด', resp: 'เอก' });
+    await settle(L, S);
+    const unblock = blockUploads(S);
+    const x = S.e.addExpense(d.id, LINE)!;
+    await S.e.attachExpenseBill(d.id, x.id, pdf('race.pdf'));
+    await settle(S);
+    // the deal is handed over on the server; เอก's browser has not heard yet when his upload goes
+    L.e.updateDeal(d.id, { resp: 'หมิว' });
+    await settle(L);
+    unblock();
+    later(40);
+    await S.e.uploadDocs();
+    expect(sent.filter((b) => b.action === 'upload')).toHaveLength(1);
+    // the link is refused, the team's value put back; the next rounds leave it held here
+    for (let i = 0; i < 4; i++) {
+      later(40);
+      await settle(S);
+    }
+    const k = `${d.id}/${x.id}`;
+    expect(lastV('dexp/' + k).file!.id).toBe('');
+    expect(S.e.sales.exp![k].file!.id).toBe('');
+    expect(S.e.billsStuck().map((y) => y.id)).toEqual([x.id]);
+    expect(sent.filter((b) => b.action === 'upload')).toHaveLength(1);
+    const pushes = sent.filter((b) => b.action === 'push' && JSON.stringify(b.ops || []).includes(`dexp/${k}`)).length;
+    later(40);
+    await settle(S);
+    expect(sent.filter((b) => b.action === 'push' && JSON.stringify(b.ops || []).includes(`dexp/${k}`)).length).toBe(pushes);
+    // the copy no longer names the refused upload: a later upload is a new file
+    expect((await S.store.get<{ fid?: string }>('expblob:' + x.id))!.fid).toBeUndefined();
+  });
+
+  it('losing เปิดเอกสารแนบ (keeping ดูค่าใช้จ่าย): a bill downloaded before no longer opens; the copies go', async () => {
+    const L = await lead();
+    const c: CapSet = { 'view.sales': 'all', 'view.money': 'all', 'view.exp': 'all', 'docs.open': 'all' };
+    const { id } = await L.e.roleSave({ n: 'ดูบิล', d: '', c });
+    const B = await member(L, 'bee', 'บี', id as Role);
+    const d = L.e.addDeal({ client: 'บริษัท เปิดบิล จำกัด', resp: 'หมิว' });
+    await settle(L, B);
+    const x = L.e.addExpense(d.id, LINE)!;
+    await L.e.attachExpenseBill(d.id, x.id, pdf('secret.pdf'));
+    await settle(L, B);
+    const k = `${d.id}/${x.id}`;
+    expect(await (await B.e.expBill({ ...B.e.sales.exp![k], id: x.id })).text()).toBe('%PDF-1.4 secret.pdf');
+    expect(await B.store.get('expblob:' + x.id)).not.toBeNull();
+    await L.e.roleSave({ id, n: 'ดูบิล', d: '', c: { 'view.sales': 'all', 'view.money': 'all', 'view.exp': 'all' } } as never);
+    await settle(L, B, B);
+    expect([B.e.can('docs.open'), B.e.can('view.exp')]).toEqual([false, true]);
+    expect(await B.store.get('expblob:' + x.id)).toBeNull();
+    await expect(B.e.expBill({ ...B.e.sales.exp![k], id: x.id })).rejects.toThrow(/เปิดไฟล์แนบไม่ได้/);
+  });
+
+  it('a downloaded copy left behind (another tab) is not opened without เปิดเอกสารแนบ; one attached here still is', async () => {
+    const L = await lead();
+    const c: CapSet = { 'view.sales': 'all', 'view.money': 'all', 'view.exp': 'all', 'docs.open': 'all', 'edit.exp': 'all' };
+    const { id } = await L.e.roleSave({ n: 'บันทึกบิล', d: '', c });
+    const B = await member(L, 'bee', 'บี', id as Role);
+    const d = L.e.addDeal({ client: 'บริษัท สำเนาค้าง จำกัด', resp: 'หมิว' });
+    await settle(L, B);
+    const x = L.e.addExpense(d.id, LINE)!;
+    await L.e.attachExpenseBill(d.id, x.id, pdf('team.pdf'));
+    const y = B.e.addExpense(d.id, { ...LINE, c: 'ค่าแล็บ' })!;
+    const unblock = blockUploads(B);
+    await B.e.attachExpenseBill(d.id, y.id, pdf('mine.pdf'));
+    await settle(L, B);
+    const kx = `${d.id}/${x.id}`, ky = `${d.id}/${y.id}`;
+    await B.e.expBill({ ...B.e.sales.exp![kx], id: x.id });
+    const copy = await B.store.get('expblob:' + x.id);
+    await L.e.roleSave({ id, n: 'บันทึกบิล', d: '', c: { ...c, 'docs.open': undefined } } as never);
+    await settle(L, B, B);
+    expect(B.e.can('docs.open')).toBe(false);
+    // as if another tab had kept the copy
+    await B.store.set('expblob:' + x.id, copy);
+    await expect(B.e.expBill({ ...B.e.sales.exp![kx], id: x.id })).rejects.toThrow(/เปิดไฟล์แนบไม่ได้/);
+    expect(await B.store.get('expblob:' + x.id)).toBeNull();
+    // the bill attached here (not uploaded yet) is this person's own file
+    expect(await (await B.e.expBill({ ...B.e.sales.exp![ky], id: y.id })).text()).toBe('%PDF-1.4 mine.pdf');
+    unblock();
+  });
+
+  it('cancelling a joint quotation: its header\'s expenses and bills go (the question names them); a member\'s stay', async () => {
+    const L = await lead();
+    const a = L.e.addDeal({ client: 'บริษัท ร่วมหนึ่ง จำกัด', resp: 'หมิว', year: '2569' });
+    const b = L.e.addDeal({ client: 'บริษัท ร่วมสอง จำกัด', resp: 'หมิว', year: '2569' });
+    const { hid } = await L.e.createJoint({
+      title: 'โครงการร่วม', payer: 'มหาวิทยาลัยตัวอย่าง', payerGid: null, year: '2569', section: a.section, resp: 'หมิว', service: [], total: 100000, docNo: 'QT-J9', docDate: '2026-10-06',
+      members: [{ deal: a.id, share: null, pct: null }, { deal: b.id, share: null, pct: null }],
+    });
+    expect(L.e.sales.deals[hid]).toBeTruthy();
+    const hx = L.e.addExpense(hid, { ...LINE, c: 'ค่าธรรมเนียม TGO', amt: 20000, paid: '2026-10-06' })!;
+    await L.e.attachExpenseBill(hid, hx.id, pdf('tgo.pdf'));
+    L.e.addExpense(b.id, { ...LINE, amt: 1500 });
+    await settle(L);
+    expect(cancelExpWords(L.e, hid)).toBe(
+      '\n\nค่าใช้จ่ายที่บันทึกไว้ที่ใบเสนอราคาร่วม 1 รายการ (20,000 บาท) และบิลที่แนบ จะถูกลบด้วย (ถ้าจะเก็บไว้ ให้บันทึกที่แถวของบริษัทก่อนยกเลิก) ค่าใช้จ่ายที่บันทึกที่แถวของแต่ละบริษัทยังอยู่ตามเดิม',
+    );
+    const fid = L.e.sales.exp![`${hid}/${hx.id}`].file!.id;
+    L.e.cancelJoint(hid);
+    await settle(L);
+    expect(expensesOf(L.e.sales, hid)).toEqual([]);
+    expect(expensesOf(L.e.sales, b.id)).toHaveLength(1);
+    expect(files().find((f) => f.id === fid)!.trashed).toBe(true);
   });
 });

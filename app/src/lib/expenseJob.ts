@@ -14,7 +14,8 @@
  * - The commission line (ค่าคอมมิชชั่น (คำนวณ), with ดูค่าคอมมิชชั่น) is computed from units (lib/contrib.ts),
  *   never stored and never part of the expense total.
  */
-import { cashLines, dealMoney, holdPart, jointOf, jointRole, parseAmount, type Deal, type SalesState } from './sales';
+import { cashLines, dealMoney, fmtMoney, holdPart, jointOf, jointRole, parseAmount, type Deal, type SalesState } from './sales';
+import { isoTh } from './format';
 import { shareOf as jointShare } from './joint';
 import { contribIn, type UnitCtx } from './contrib';
 import { EXP_CAT_MAX, EXP_NOTE_MAX, expensesOf, type DealExp, type JobExp } from './expense';
@@ -108,6 +109,58 @@ export function readExpForm(f: ExpForm): { ok: true; v: ExpInput } | { ok: false
 export function expChanged(a: Partial<JobExp>, b: Partial<JobExp>): (keyof JobExp)[] {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof JobExp)[]);
   return [...keys].filter((k) => k !== 'by' && k !== 'at' && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
+
+// ------------------------------------------------------------------ a teammate's change while the dialog is open
+
+/** The record fields the dialog writes, one per form field ('paid' is the box and its date together). */
+export type ExpKey = keyof ExpInput;
+export const EXP_KEYS: ExpKey[] = ['c', 'n', 'amt', 'd', 'paid'];
+/** What a form field reads as, to tell whether it was changed (a paid date counts only while ticked). */
+const fieldOf = (f: ExpForm, k: ExpKey) => (k === 'paid' ? (f.paidOn ? f.paid : '') : f[k]);
+const setField = (f: ExpForm, k: ExpKey, from: ExpForm): ExpForm => (k === 'paid' ? { ...f, paidOn: from.paidOn, paid: from.paid } : { ...f, [k]: from[k] });
+/** The fields the person changed in the dialog: `init` = the record as the dialog holds it untouched. */
+export const expTouched = (init: ExpForm, f: ExpForm): ExpKey[] => EXP_KEYS.filter((k) => fieldOf(init, k) !== fieldOf(f, k));
+/**
+ * A teammate changed the record while the dialog is open (`live` = the record now, as a form): every field
+ * the person has not changed follows it, so the dialog always shows what saving keeps; a field the person
+ * changed keeps what they typed and the value it was changed from (expClash asks about it at saving).
+ */
+export function expFollow(ed: { init: ExpForm; f: ExpForm }, live: ExpForm): { init: ExpForm; f: ExpForm } {
+  const touched = expTouched(ed.init, ed.f);
+  let { init, f } = ed;
+  for (const k of EXP_KEYS) {
+    if (touched.includes(k) || fieldOf(init, k) === fieldOf(live, k)) continue;
+    init = setField(init, k, live);
+    f = setField(f, k, live);
+  }
+  return init === ed.init && f === ed.f ? ed : { init, f };
+}
+/** The fields the person changed that a teammate changed too, to another value, while the dialog was open:
+ *  saving over them asks first (as the step editor does). */
+export const expClash = (init: ExpForm, f: ExpForm, live: ExpForm): ExpKey[] =>
+  expTouched(init, f).filter((k) => fieldOf(live, k) !== fieldOf(init, k) && fieldOf(live, k) !== fieldOf(f, k));
+/** A field and its value now, in words, for the question before saving over a teammate's change. */
+export function expFieldWords(k: ExpKey | 'file', live: JobExp): string {
+  if (k === 'c') return `ประเภท "${live.c}"`;
+  if (k === 'n') return live.n ? `รายละเอียด "${live.n}"` : 'รายละเอียด (ว่าง)';
+  if (k === 'amt') return `ยอด ${fmtMoney(live.amt) || '0'} บาท`;
+  if (k === 'd') return `วันที่ในบิล ${live.d ? isoTh(live.d) : '(ไม่ระบุ)'}`;
+  if (k === 'paid') return live.paid ? `จ่ายแล้ว ${isoTh(live.paid)}` : 'ยังไม่จ่าย (ค้างจ่าย)';
+  return live.file ? `บิล ${live.file.name}` : 'ไม่มีบิล';
+}
+/** Two bills are one file (the same upload, or the same file still waiting to go up). */
+export const sameBill = (a: JobExp['file'] | null | undefined, b: JobExp['file'] | null | undefined) =>
+  !a || !b ? !a && !b : a.id === b.id && a.name === b.name && a.size === b.size;
+
+/**
+ * What deleting a deal (or cancelling a joint quotation) takes of its job expenses, in words for its
+ * question: "ค่าใช้จ่ายที่บันทึกไว้ 2 รายการ (23,500 บาท) และบิลที่แนบ จะถูกลบด้วย"; '' when there are none.
+ */
+export function expGoneWords(list: Pick<JobExp, 'amt' | 'file'>[], where = ''): string {
+  if (!list.length) return '';
+  const t = expTotals(list);
+  return `ค่าใช้จ่ายที่บันทึกไว้${where} ${t.n} รายการ (${fmtMoney(t.out) || '0'} บาท)${list.some((x) => x.file) ? ' และบิลที่แนบ' : ''} จะถูกลบด้วย`;
 }
 
 // ------------------------------------------------------------------ one job's money

@@ -23,7 +23,7 @@ import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
 // ค่าใช้จ่ายของงาน: the row menu's บันทึกค่าใช้จ่าย and the phone card's row
-import { ExpMini, expMenuSub, openExp } from '../components/ExpCard';
+import { BillsStuckNote, ExpMini, expMenuSub, openExp } from '../components/ExpCard';
 import { Av, insidePop } from '../components/Pop';
 import { Select } from '../components/Select';
 import { FilterBar, ReadChip, type FVal } from '../components/FilterBar';
@@ -155,6 +155,7 @@ export function Sales() {
       />
       <span className="sr-only" role="status">{said}</span>
       {e.docMsg && <Notice kind="error">{e.docMsg}</Notice>}
+      <BillsStuckNote />
       {ui.slNote && (
         <Notice kind="ok" role="status">
           {ui.slNote}

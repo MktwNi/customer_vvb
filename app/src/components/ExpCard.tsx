@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import type { GccEngine } from '../lib/engine';
 import { dtTh, isoTh, todayISO } from '../lib/format';
@@ -6,7 +6,10 @@ import { fmtMoney, jointOf, jointRole, type Deal } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { unitCtx, unitsOf } from '../lib/contrib';
 import { EXP_CAT_MAX, EXP_NOTE_MAX, expensesOf, type DealExp } from '../lib/expense';
-import { CAT_EXAMPLES, catSuggest, expForm, jobComm, jobSum, readExpForm, type ExpField, type ExpForm, type JobSum } from '../lib/expenseJob';
+import {
+  CAT_EXAMPLES, catSuggest, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTouched, jobComm, jobSum, readExpForm, sameBill,
+  type ExpField, type ExpForm, type ExpKey, type JobSum,
+} from '../lib/expenseJob';
 import { DOC_ACCEPT } from '../lib/teamFiles';
 import { Modal } from './Dialog';
 import { SHOWABLE } from './DocAttach';
@@ -69,16 +72,42 @@ export async function openBill(e: GccEngine, x: DealExp) {
   }
 }
 
-/** "ใบเสร็จ/บิล" of a line: opens the file; one still waiting in another browser says so. */
-function BillLink({ x }: { x: DealExp }) {
+/** "ใบเสร็จ/บิล" of a line: opens the file; one still waiting in another browser says so, and one held in
+ *  this browser that can't go up (engine.billsStuck) says that. */
+function BillLink({ x, stuck }: { x: DealExp; stuck?: boolean }) {
   const { engine: e } = useApp();
   if (!x.file) return <span className="xp-nobill">ไม่มีบิล</span>;
   // (with no team there is nowhere to upload it: this browser's copy is the bill)
   const waiting = !x.file.id && !!e.teamCfg;
+  const word = stuck ? ' (อยู่ในเครื่องนี้เท่านั้น)' : waiting ? ' (รออัปโหลด)' : '';
   return (
     <button type="button" className="lnk xp-bill" onClick={() => void openBill(e, x)} title={`${x.file.name}${waiting ? ' · ยังไม่ได้อัปโหลดขึ้น Drive ของทีม' : ''}`}>
-      ใบเสร็จ/บิล{waiting ? ' (รออัปโหลด)' : ''}
+      ใบเสร็จ/บิล{word}
     </button>
+  );
+}
+
+/** Why a bill attached here can't go up, and what to do: the job is no longer this account's to record. */
+const STUCK_WHY = 'ส่งขึ้น Drive ของทีมไม่ได้ เพราะบัญชีของคุณบันทึกค่าใช้จ่ายของงานนี้ไม่ได้แล้ว (เช่น เปลี่ยนผู้รับผิดชอบ)';
+/** The Sales tab's note over the table: bills attached in this browser that can't go up (engine.billsStuck),
+ *  each the team's only copy. Nothing without ดูค่าใช้จ่าย or with none held. */
+export function BillsStuckNote() {
+  const { engine: e, set } = useApp();
+  useEngineVersion();
+  if (!e.can('view.exp')) return null;
+  const list = e.billsStuck();
+  if (!list.length) return null;
+  return (
+    <p className="xp-stuck" role="status">
+      บิลค่าใช้จ่าย {list.length} รายการอยู่ในเครื่องนี้เท่านั้น {STUCK_WHY} · เปิดบิลแล้วส่งให้ผู้รับผิดชอบงานแนบแทน
+      {list.slice(0, 3).map((x, i) => (
+        <Fragment key={x.id}>
+          {i ? ' · ' : ': '}
+          <button type="button" className="lnk" onClick={() => set({ deal: x.deal })}>{shortName(e.sales.deals[x.deal]?.client || '')} · {x.c}</button>
+        </Fragment>
+      ))}
+      {list.length > 3 && ` และอีก ${list.length - 3} รายการ`}
+    </p>
   );
 }
 
@@ -117,7 +146,7 @@ function Summary({ j, comm, jr }: { j: JobSum; comm: number | null; jr: 'plain' 
 // ------------------------------------------------------------------ the deal panel's card
 
 /** One expense: category and description, amount, paid or ค้างจ่าย, the bill, who recorded it; แก้ไข / ลบ. */
-function ExpRow({ x, can }: { x: DealExp; can: boolean }) {
+function ExpRow({ x, can, stuck }: { x: DealExp; can: boolean; stuck?: boolean }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const del = () => {
@@ -135,7 +164,7 @@ function ExpRow({ x, can }: { x: DealExp; can: boolean }) {
         {x.paid ? <Status kind="neutral">จ่ายแล้ว {isoTh(x.paid)}</Status> : <Status kind="warn">ค้างจ่าย</Status>}
       </span>
       <span className="c-meta" role="cell">
-        <span>บิล {x.d ? isoTh(x.d) : 'ไม่ระบุวันที่'} · <BillLink x={x} /> · บันทึกโดย {x.by || 'ไม่ระบุ'}{x.at ? ' ' + dtTh(x.at) : ''}</span>
+        <span>บิล {x.d ? isoTh(x.d) : 'ไม่ระบุวันที่'} · <BillLink x={x} stuck={stuck} /> · บันทึกโดย {x.by || 'ไม่ระบุ'}{x.at ? ' ' + dtTh(x.at) : ''}</span>
         {can && (
           <span className="xp-acts">
             <button type="button" className="lnk" onClick={() => openExp(x.deal, x.id)} aria-label={`แก้ไขค่าใช้จ่าย ${x.c} ${m0(x.amt)} บาท`}>แก้ไข</button>
@@ -164,6 +193,8 @@ export function ExpCard({ d }: { d: Deal }) {
   const comm = e.seesComm() && unitsOf(unitCtx(S), true).length ? jobComm(e.unitCtx(), S, d, today) : null;
   const g = jr === 'member' ? jointOf(S, d) : null;
   const empty = !list.length && !j.members.length;
+  // bills attached in this browser that can't go up any more (the job is no longer this account's)
+  const stuck = new Set(e.billsStuck().filter((x) => x.deal === d.id).map((x) => x.id));
   const add = can && <button type="button" className="btn xs" onClick={() => openExp(d.id)}>บันทึกค่าใช้จ่าย</button>;
   return (
     <section className="dp-card xp-card" aria-labelledby="dp-exp">
@@ -192,7 +223,7 @@ export function ExpCard({ d }: { d: Deal }) {
               <span role="columnheader" className="r">ยอด (บาท)</span>
               <span role="columnheader">การจ่าย</span>
             </div>
-            {list.map((x) => <ExpRow key={x.id} x={x} can={can} />)}
+            {list.map((x) => <ExpRow key={x.id} x={x} can={can} stuck={stuck.has(x.id)} />)}
             {j.members.map((m) => (
               <div key={m.deal.id} className="xp-r mem" role="row">
                 <span className="c-cat" role="cell">
@@ -222,6 +253,11 @@ export function ExpCard({ d }: { d: Deal }) {
             {j.members.length > 0 && <span>ของใบนี้เอง {m0(j.own.out)} · บริษัทในใบ {m0(j.t.out - j.own.out)}</span>}
           </div>
         </>
+      )}
+      {stuck.size > 0 && (
+        <p className="xp-ro t-warn" role="status">
+          บิล {stuck.size} รายการของงานนี้อยู่ในเครื่องนี้เท่านั้น {STUCK_WHY} · กดใบเสร็จ/บิลเพื่อเปิด แล้วส่งให้{d.resp ? ` ${d.resp} ` : 'ผู้รับผิดชอบงาน'}แนบแทน
+        </p>
       )}
       {!can && e.can('edit.exp') && <p className="xp-ro">บันทึกค่าใช้จ่ายได้เฉพาะงานที่คุณเป็นผู้รับผิดชอบ{d.resp ? ` (งานนี้: ${d.resp})` : ''}</p>}
     </section>
@@ -277,10 +313,32 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
   const S = e.sales, today = todayISO();
   const d = S.deals[dealId];
   const x = expId ? expensesOf(S, dealId).find((y) => y.id === expId) || null : null;
-  const [f, setF] = useState<ExpForm>(() => expForm(x, today));
+  // the form, and the record as it holds it untouched (`init`): a teammate's change that comes in while the
+  // dialog is open moves every field the person has not changed (expFollow); saving writes only the fields
+  // they changed, and asks first over a field the teammate changed too (expClash)
+  const [ed, setEd] = useState(() => {
+    const f0 = expForm(x, today);
+    return { init: f0, f: f0 };
+  });
+  const f = ed.f;
+  const setF = (fn: (v: ExpForm) => ExpForm) => setEd((s) => ({ ...s, f: fn(s.f) }));
+  const liveF = x ? expForm(x, today) : null;
+  const liveKey = liveF ? JSON.stringify(liveF) : '';
+  useEffect(() => {
+    if (liveF) setEd((s) => expFollow(s, liveF));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey]);
+  // what the dialog opened with: a teammate's change since is said above the buttons (the bill by its name
+  // and size: its upload from this browser only adds the Drive file's id)
+  const billWord = (v: DealExp | null) => (v?.file ? v.file.name + '/' + v.file.size : '');
+  const [open0] = useState(() => ({ f: liveKey, bill: billWord(x) }));
+  const moved = !!x && (liveKey !== open0.f || billWord(x) !== open0.bill);
   const [err, setErr] = useState<Partial<Record<ExpField, string>>>({});
   const [file, setFile] = useState<File | null>(null);
   const [dropBill, setDropBill] = useState(false);
+  // the bill as it was when the person chose another file or took it off (a teammate may change it meanwhile)
+  const [billAt, setBillAt] = useState<{ f: DealExp['file'] } | null>(null);
+  const touchBill = () => setBillAt((b) => b || { f: x?.file });
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -306,6 +364,7 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
     if (!fl) return;
     setMsg('');
     if (fl.size > 10 * 1024 * 1024) return setMsg('ไฟล์ใหญ่เกิน 10 MB');
+    touchBill();
     setFile(fl);
     setDropBill(false);
   };
@@ -315,12 +374,20 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
       setErr(r.err);
       return;
     }
+    if (x && liveF) {
+      // a field the person changed that a teammate changed too while the dialog was open, or the bill they
+      // replaced or took off that a teammate replaced meanwhile: ask before saving over it
+      const clash: (ExpKey | 'file')[] = expClash(ed.init, f, liveF);
+      if ((file || dropBill) && billAt && !sameBill(billAt.f, x.file)) clash.push('file');
+      if (clash.length && !window.confirm(`มีคนแก้รายการนี้ระหว่างที่เปิดอยู่${x.by ? ` (${x.by})` : ''}:\n${clash.map((k) => expFieldWords(k, x)).join('\n')}\n\nบันทึกของคุณทับหรือไม่?`)) return;
+    }
     setBusy(true);
     setMsg('');
     try {
       let id = expId || '';
       if (expId) {
-        if (!e.updateExpense(dealId, expId, r.v)) throw new Error('บันทึกไม่สำเร็จ (อาจมีคนลบรายการนี้ไประหว่างนี้)');
+        // only what the person changed: every other field keeps the record's value as it is now
+        if (!e.updateExpense(dealId, expId, r.v, expTouched(ed.init, f))) throw new Error('บันทึกไม่สำเร็จ (อาจมีคนลบรายการนี้ไประหว่างนี้)');
       } else {
         const n = e.addExpense(dealId, r.v);
         if (!n) throw new Error('บันทึกไม่สำเร็จ');
@@ -455,11 +522,14 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
           <span className="sl-drop-b">
             {bill && !bill.now && x && <button type="button" className="lnk" onClick={() => void openBill(e, x)}>เปิด</button>}
             <button type="button" className="btn xs" onClick={() => fileIn.current?.click()}>{bill ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์'}</button>
-            {bill && <button type="button" className="quiet" onClick={() => (file ? setFile(null) : setDropBill(true))}>{bill.now ? 'ไม่แนบไฟล์นี้' : 'เอาบิลออก'}</button>}
+            {bill && <button type="button" className="quiet" onClick={() => (file ? setFile(null) : (touchBill(), setDropBill(true)))}>{bill.now ? 'ไม่แนบไฟล์นี้' : 'เอาบิลออก'}</button>}
             {dropBill && !file && <button type="button" className="quiet" onClick={() => setDropBill(false)}>ใช้บิลเดิม</button>}
             <input ref={fileIn} type="file" hidden accept={DOC_ACCEPT} onChange={(ev) => { const fl = ev.target.files?.[0]; ev.target.value = ''; pick(fl); }} />
           </span>
         </div>
+        {x && moved && (
+          <p className="note xp-moved" role="status">มีคนแก้รายการนี้ระหว่างที่เปิดอยู่{x.by ? ` (${x.by})` : ''} · ช่องที่คุณยังไม่ได้แก้แสดงค่าล่าสุดแล้ว</p>
+        )}
         {msg && <p className="note err" role="alert" style={{ margin: 0 }}>{msg}</p>}
         <div className="dlg-act">
           {x && <button type="button" className="quiet xp-del" onClick={remove} disabled={busy}>ลบรายการนี้</button>}
@@ -470,6 +540,21 @@ function ExpDialog({ dealId, expId, onClose }: { dealId: string; expId?: string;
       </form>
     </Modal>
   );
+}
+
+/**
+ * What cancelling a joint quotation does to the expenses recorded on it (they go with its header, their
+ * bills to the Drive trash), for its question; only with ดูค่าใช้จ่าย (no word of them otherwise, as the team
+ * script sends such an account none). The member companies' own expenses stay with their rows.
+ */
+export function cancelExpWords(e: GccEngine, hid: string): string {
+  if (!e.can('view.exp')) return '';
+  const S = e.sales;
+  const w = expGoneWords(expensesOf(S, hid), 'ที่ใบเสนอราคาร่วม');
+  if (!w) return '';
+  const g = jointOf(S, { id: hid });
+  const kept = !!g && g.members.some((m) => expensesOf(S, m.deal.id).length > 0);
+  return `\n\n${w} (ถ้าจะเก็บไว้ ให้บันทึกที่แถวของบริษัทก่อนยกเลิก)${kept ? ' ค่าใช้จ่ายที่บันทึกที่แถวของแต่ละบริษัทยังอยู่ตามเดิม' : ''}`;
 }
 
 /** A note for a member company's row in the table menu: how its expenses relate to the joint quotation. */

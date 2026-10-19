@@ -1,7 +1,10 @@
 /** Job expenses per job (lib/expenseJob.ts): categories suggested, the dialog's line, and one job's money
  *  (a plain deal, a joint quotation's header and member, the computed commission). Mon 12 Oct 2569. */
 import { describe, expect, it } from 'vitest';
-import { CAT_EXAMPLES, catKey, catSuggest, expCats, expChanged, expForm, expTotals, jobComm, jobIncome, jobSum, memberExps, pctOf, readExpForm, tidyCat } from './expenseJob';
+import {
+  CAT_EXAMPLES, catKey, catSuggest, expCats, expChanged, expClash, expFieldWords, expFollow, expForm, expGoneWords, expTotals, expTouched, jobComm, jobIncome, jobSum, memberExps, pctOf,
+  readExpForm, sameBill, tidyCat,
+} from './expenseJob';
 import { emptySales, newDeal, type Deal, type DealDoc, type JointMember, type PayLine, type SalesState } from './sales';
 import { staffKey, unitCtx } from './contrib';
 import type { JobExp } from './expense';
@@ -101,6 +104,67 @@ describe('the dialog\'s line', () => {
   it('expChanged: the fields an edit changes (a field taken away counts; who and when do not)', () => {
     expect(expChanged(X({ paid: '2026-10-07' }), X({ amt: 1200, by: 'ฝน', at: 'x' }))).toEqual(['amt', 'paid']);
     expect(expChanged(X(), X())).toEqual([]);
+  });
+});
+
+describe('a teammate\'s change while the dialog is open', () => {
+  const open = expForm(X({ amt: 3500, n: 'รอบแรก' }), T);
+  it('expTouched: the fields the person changed (a paid date counts only while ticked)', () => {
+    expect(expTouched(open, open)).toEqual([]);
+    expect(expTouched(open, { ...open, paidOn: true, paid: '2026-10-09' })).toEqual(['paid']);
+    // a date picked and the box ticked off again: nothing changed
+    expect(expTouched(open, { ...open, paid: '2026-10-09' })).toEqual([]);
+    expect(expTouched(open, { ...open, amt: '3500', c: 'ค่าแล็บ' })).toEqual(['c', 'amt']);
+  });
+  it('expFollow: fields the person has not changed follow the record; changed ones keep what was typed', () => {
+    const ed = { init: open, f: { ...open, paidOn: true, paid: '2026-10-09' } };
+    const live = expForm(X({ amt: 3800, n: 'รอบแรก', d: '2026-10-06' }), T);
+    const next = expFollow(ed, live);
+    expect(next.f).toEqual({ ...open, amt: '3,800', d: '2026-10-06', paidOn: true, paid: '2026-10-09' });
+    expect(next.init).toEqual({ ...open, amt: '3,800', d: '2026-10-06' });
+    // the paid date stays the person's change, and does not clash with a record still unpaid
+    expect(expTouched(next.init, next.f)).toEqual(['paid']);
+    expect(expClash(next.init, next.f, live)).toEqual([]);
+    // nothing new: the same object (no re-render)
+    expect(expFollow(next, live)).toBe(next);
+  });
+  it('expClash: a field both changed, to different values, asks; the same value or the teammate alone does not', () => {
+    const f = { ...open, amt: '4,000' };
+    expect(expClash(open, f, expForm(X({ amt: 3800, n: 'รอบแรก' }), T))).toEqual(['amt']);
+    expect(expClash(open, f, expForm(X({ amt: 4000, n: 'รอบแรก' }), T))).toEqual([]);
+    expect(expClash(open, open, expForm(X({ amt: 3800, n: 'รอบแรก' }), T))).toEqual([]);
+    // a paid date both set, differently
+    const paid = { ...open, paidOn: true, paid: '2026-10-09' };
+    expect(expClash(open, paid, expForm(X({ amt: 3500, n: 'รอบแรก', paid: '2026-10-08' }), T))).toEqual(['paid']);
+  });
+  it('expFieldWords: the record\'s value now, in the question', () => {
+    const live = X({ amt: 3800, n: '', paid: '2026-10-08', file: { id: 'F', name: 'บิล.pdf', mime: 'application/pdf', size: 9 } });
+    expect(expFieldWords('amt', live)).toBe('ยอด 3,800 บาท');
+    expect(expFieldWords('paid', live)).toBe('จ่ายแล้ว 8 ต.ค. 2569');
+    expect(expFieldWords('paid', X())).toBe('ยังไม่จ่าย (ค้างจ่าย)');
+    expect(expFieldWords('c', live)).toBe('ประเภท "ค่าเดินทาง"');
+    expect(expFieldWords('n', live)).toBe('รายละเอียด (ว่าง)');
+    expect(expFieldWords('d', live)).toBe('วันที่ในบิล 5 ต.ค. 2569');
+    expect(expFieldWords('file', live)).toBe('บิล บิล.pdf');
+    expect(expFieldWords('file', X())).toBe('ไม่มีบิล');
+  });
+  it('sameBill: one file (the same upload, or the same one still waiting)', () => {
+    const b = { id: '', name: 'a.pdf', mime: 'application/pdf', size: 5 };
+    expect(sameBill(b, { ...b })).toBe(true);
+    expect(sameBill(b, { ...b, id: 'F' })).toBe(false);
+    expect(sameBill(b, { ...b, name: 'b.pdf' })).toBe(false);
+    expect(sameBill(undefined, null)).toBe(true);
+    expect(sameBill(b, undefined)).toBe(false);
+  });
+});
+
+describe('what deleting a job takes of its expenses, in words', () => {
+  it('expGoneWords: how many, how much, and the bills', () => {
+    expect(expGoneWords([])).toBe('');
+    expect(expGoneWords([X({ amt: 20000 }), X({ amt: 3500.5, file: { id: 'F', name: 'b.pdf', mime: 'application/pdf', size: 1 } })], 'ที่ใบเสนอราคาร่วม')).toBe(
+      'ค่าใช้จ่ายที่บันทึกไว้ที่ใบเสนอราคาร่วม 2 รายการ (23,500.5 บาท) และบิลที่แนบ จะถูกลบด้วย',
+    );
+    expect(expGoneWords([X({ amt: 1000 })])).toBe('ค่าใช้จ่ายที่บันทึกไว้ 1 รายการ (1,000 บาท) จะถูกลบด้วย');
   });
 });
 

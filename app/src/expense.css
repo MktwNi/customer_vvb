@@ -16,6 +16,13 @@
 .xp-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:10px 14px;border:1px dashed var(--field);border-radius:var(--r-inner);font-size:var(--fs-body);color:var(--ink-2);line-height:1.55;flex-wrap:wrap}
 .xp-empty>span{flex:1 1 280px;min-width:0}
 .xp-ro{margin:0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+/* a bill attached here that can't go up any more (engine.billsStuck): the card's line, and the Sales tab's
+   note over the table; amber with its words, as a payment still owed (never red) */
+.xp-ro.t-warn{color:var(--warn)}
+.xp-stuck{display:block;margin:0 0 12px;font-size:var(--fs-sec);line-height:1.6;color:var(--warn);overflow-wrap:anywhere}
+.xp-stuck .lnk{font-size:var(--fs-sec)}
+/* the dialog: a teammate changed the record while it was open */
+.xp-moved{margin:0}
 
 /* the summary: "เงินเข้า 100,000 · ค่าใช้จ่าย 35,000 · คงเหลือ 65,000 (65%)", a slim bar, the calmer lines under it */
 .xp-sum{display:flex;flex-direction:column;gap:6px}
