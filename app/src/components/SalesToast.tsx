@@ -76,12 +76,14 @@ export function SalesMessages() {
   useEngineVersion();
   const acts = useSalesActs();
   const t = ui.slToast;
-  const held = useRef(false);
-  // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves)
+  const box = useRef<HTMLDivElement>(null);
+  // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves). Asked
+  // of the message itself at each tick: a flag set on mouseenter / focus would stay set when the message is
+  // removed under the pointer (its link clicked: ดูรายการติดตาม, ดูตารางปี …), and hold every later one.
   useEffect(() => {
     if (!t || !t.ms) return;
     const n = t.n;
-    const h = setInterval(() => !held.current && set((s) => (s.slToast?.n === n ? { slToast: null } : {})), t.ms);
+    const h = setInterval(() => !box.current?.matches(':hover, :focus-within') && set((s) => (s.slToast?.n === n ? { slToast: null } : {})), t.ms);
     return () => clearInterval(h);
   }, [t?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const run = (a: ToastAct) => {
@@ -137,7 +139,7 @@ export function SalesMessages() {
       {/* (centred in the deal panel while it is open) */}
       <div className={'sl-live' + (ui.deal ? ' in-dp' : '')} role="status" aria-live="polite">
         {t && (
-          <div className="sl-toast" key={t.n} onMouseEnter={() => (held.current = true)} onMouseLeave={() => (held.current = false)} onFocus={() => (held.current = true)} onBlur={() => (held.current = false)}>
+          <div className="sl-toast" key={t.n} ref={box}>
             <span>{t.text}</span>
             {t.acts?.map((a) => (
               <button key={a.label} type="button" className={a.primary ? 'p' : ''} onClick={() => run(a)}>{a.label}</button>
