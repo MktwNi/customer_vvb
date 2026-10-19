@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { useApp, useEngineVersion, useNarrow } from '../../state';
 import type { TeamDir, TeamUser } from '../../lib/engine';
 import { BUILTIN, can, resolveCaps, type CapSet } from '../../lib/caps';
-import { PRE_DAYS, docById, mailIssues, parseMyNotify, recentLine, recentQts, unmatchedNames, wantsLine, type ApptRule, type LateRule, type MailPerson, type NotifyCfg, type NotifyStatus } from '../../lib/notify';
+import { PRE_DAYS, docById, mailIssues, parseMyNotify, recentLine, recentName, recentQts, unmatchedNames, wantsLine, type ApptRule, type LateRule, type MailPerson, type NotifyCfg, type NotifyStatus } from '../../lib/notify';
 import { errText } from '../../lib/teamSync';
 import { dmTh, fmtN, localDay, pad, todayISO } from '../../lib/format';
 import { Notice, Segmented } from '../../components/ui';
@@ -66,6 +66,8 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
   useEffect(() => {
     if (!on) return;
     let ok = true;
+    // pull too: a quotation the status names may not have reached this device yet (ใบเสนอราคาล่าสุด)
+    e.teamPoke();
     e.notifyStatus().then(
       (x) => ok && setSt(x),
       (x) => ok && setStErr(errText(x, 'connect')),
@@ -183,7 +185,7 @@ export function NotifyAdmin({ dir, onEditUser, onRoles }: { dir: TeamDir | null;
                   const doc = docById(e.sales, q.doc), d = doc ? e.sales.deals[doc.deal] : undefined;
                   return (
                     <li key={q.doc}>
-                      <span className="na-dx-n">{doc ? `${doc.docNo || 'ใบเสนอราคา'}${d ? ' · ' + d.client : ''}` : 'ใบเสนอราคาที่ลบแล้ว'}</span>
+                      <span className="na-dx-n">{recentName(q, doc, d?.client, e.team.last)}</span>
                       <span className="na-dx-w">{recentLine(q)}{q.at ? ` · ${dayHm(q.at, today)}` : ''}</span>
                     </li>
                   );

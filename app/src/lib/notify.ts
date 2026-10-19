@@ -494,6 +494,12 @@ export function recentQts(recent: NotifyStatus['recent'], nameOf: (u: string) =>
   }
   return out;
 }
+/** Which quotation a recent line is about: its number and client; one not on this device is deleted, or newer
+ *  than its last sync (`last`, ISO; the page pulls when it opens) and on its way. */
+export function recentName(q: Pick<RecentQt, 'at'>, doc: Pick<DealDoc, 'docNo'> | null | undefined, client: string | undefined, last: string) {
+  if (doc) return `${doc.docNo || 'ใบเสนอราคา'}${client ? ' · ' + client : ''}`;
+  return !last || q.at > last ? 'ใบเสนอราคาใหม่ กำลังซิงก์' : 'ใบเสนอราคาที่ลบแล้ว';
+}
 /** One recent quotation in words: "ส่งให้ มกร, สมชาย" · "ไม่ได้ส่ง: ไม่มีผู้ตรวจคนอื่น". */
 export function recentLine(q: RecentQt) {
   if (q.sent.length) return `ส่งให้ ${nameList(q.sent)}${q.later.length ? ` · รอส่ง ${nameList(q.later)}` : ''}`;

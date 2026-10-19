@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptySales, newDeal, toPay, type Deal, type DealDoc, type SalesState } from './sales';
 import {
   bellEmpty, bellItems, checkedLine, dayTh, dirPeople, docById, fpOf, mailIssues, myMailIssues, myNotify0, nameList, needsCheck, parseGo, parseMyNotify, parseNotifyCfg, parseNotifyFlag,
-  parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, qtSentView, recentLine, recentQts, sameFp, toQtCheck, unmatchedNames, waitShort, waitingChecks, wantsLine, whenTh,
+  parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, qtSentView, recentLine, recentName, recentQts, sameFp, toQtCheck, unmatchedNames, waitShort, waitingChecks, wantsLine, whenTh,
   NOTIFY_CFG0, type BellIn, type MailPerson, type NotifyStatus, type QtCheck, type QtSent,
 } from './notify';
 import { applyRow, localRecords, noEffects, parseMe, type SharedState } from './teamSync';
@@ -520,6 +520,13 @@ describe('why mail does not arrive', () => {
       ['qs', 'ไม่ได้ส่ง: ไม่มีผู้ตรวจคนอื่น (คนแนบตรวจเองได้)'],
     ]);
     expect(recentQts(recent.recent, () => '', 2).map((x) => x.doc)).toEqual(['q3', 'q2']);
+    // which quotation: one this device has not pulled yet is on its way, not deleted
+    const at = { at: '2026-10-12T03:05:00Z' };
+    expect(recentName(at, { docNo: 'QT-1' }, 'บริษัท เอ จำกัด', '2026-10-12T03:00:00Z')).toBe('QT-1 · บริษัท เอ จำกัด');
+    expect(recentName(at, { docNo: '' }, undefined, '')).toBe('ใบเสนอราคา');
+    expect(recentName(at, null, undefined, '2026-10-12T03:00:00Z')).toBe('ใบเสนอราคาใหม่ กำลังซิงก์');
+    expect(recentName(at, null, undefined, '')).toBe('ใบเสนอราคาใหม่ กำลังซิงก์');
+    expect(recentName(at, null, undefined, '2026-10-12T03:06:00Z')).toBe('ใบเสนอราคาที่ลบแล้ว');
     expect(parseNotifyStatus({}).now).toBeNull();
     expect(parseNotifyFlag({ on: 1, since: '2026-10-01', now: 1 })).toEqual({ on: true, since: '2026-10-01', now: true });
   });
