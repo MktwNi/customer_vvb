@@ -8,7 +8,7 @@ import { dmTh, isoTh } from './format';
 import {
   DEAL_STAGE, QUOTE_STAGE, apportion, countsActual, dealMoney, dealResult, docsOf, filterDeals, fmtMoney, hasPlan, holdPart, jointAttr, jointBase, jointCashLines, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights,
   moneyHolds, payState, sectionsFor, stepOf, workTally,
-  type CashLine, type Deal, type DealDoc, type JointGroup, type JointMember, type SalesFilterIn, type SalesState,
+  type CashLine, type Deal, type DealDoc, type JointGroup, type JointMember, type SalesFilterIn, type SalesState, type WorkTally,
 } from './sales';
 import { isQtVersion, qtVersions, qtView } from './quotes';
 import { shortName } from './salesUi';
@@ -232,6 +232,34 @@ export function jointRows(s: SalesState, deals: Deal[]): { secs: string[]; rows:
   plain.forEach((d) => put(d.section, { k: 'deal', d }));
   const secs = sectionsFor(s, [...plain, ...heads]).filter((x) => rows.has(x));
   return { secs, rows };
+}
+/** The ปิดงาน list's rows in the order it shows them (mockup 14): each joint quotation's band (its companies
+ *  under it) first, then the other rows, section by section. The export follows it (closedCsvRows). */
+export function closedOrder(s: SalesState, deals: Deal[]): JRow[] {
+  const jr = jointRows(s, deals), all = jr.secs.flatMap((x) => jr.rows.get(x) || []);
+  return [...all.filter((r) => r.k === 'band'), ...all.filter((r) => r.k === 'deal')];
+}
+/** A row of the ปิดงาน export: `job` / `work` it carries a job / a company worked for (the columns "นับเป็นงาน"
+ *  and "นับเป็นบริษัทที่ทำงานให้"); a payer's row the money this view counts of its quotation (`fc` / `ac`,
+ *  null = none; `part`: of how many of its companies, under a filter that keeps some). */
+export interface ClosedCsvRow { d: Deal; job: boolean; work: boolean; fc?: number | null; ac?: number | null; part?: number }
+/**
+ * The ปิดงาน tab's export (owner: a SUM in Excel equals the screen, under any filter): its rows in list order
+ * (closedOrder), one per company, each joint quotation led by its payer's row, also when the filters left that
+ * row out (คุณบี's company in มจพ's quotation): the payer's row carries the quotation's job and the money the
+ * view counts of it (moneyHolds / holdPart: the whole, or the parts of the companies listed under a ผู้รับผิดชอบ
+ * / SOURCE / REFERRAL filter, `attr`), so the Forecast and Actual columns sum to the line's; its companies' money
+ * cells stay empty. `t`: the list's workTally (engine.workTally, with the same `attr`).
+ */
+export function closedCsvRows(s: SalesState, deals: Deal[], attr: boolean, t: Pick<WorkTally, 'jobRow' | 'workRow'>): ClosedCsvRow[] {
+  const holds = new Map(moneyHolds(s, deals, attr).flatMap((h) => (h.g ? [[h.g.head.id, h] as const] : [])));
+  const row = (d: Deal): ClosedCsvRow => ({ d, job: t.jobRow.has(d.id), work: t.workRow.has(d.id) });
+  return closedOrder(s, deals).flatMap((r) => {
+    if (r.k === 'deal') return [row(r.d)];
+    const h = holds.get(r.g.head.id), m = dealMoney(s, r.g.head);
+    const part = (x: number | null) => (x == null || !h ? null : holdPart(s, h, x));
+    return [{ ...row(r.g.head), fc: part(m.forecast), ac: part(m.actual), ...(h?.keep ? { part: h.keep.length } : {}) }, ...r.shown.map(row)];
+  });
 }
 /** The customers a section's rows hold (plain rows and the members shown; a header is not one). */
 export const rowDeals = (rows: JRow[]) => rows.flatMap((r) => (r.k === 'deal' ? [r.d] : r.shown));

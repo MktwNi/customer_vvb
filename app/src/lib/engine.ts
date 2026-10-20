@@ -36,7 +36,7 @@ import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fi
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
 import { DEAL_STAGE, QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, workTally, type JointGroup, type WorkOpts, type WorkTally } from './sales';
-import { canMergeFrom, isJointNote, jointFill, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
+import { canMergeFrom, closedCsvRows, isJointNote, jointFill, jointNo, jointNote, jointTitle, rowFate, shareOf, type ClosedCsvRow, type JointNew, type JointPick } from './joint';
 import {
   QT_NOTE_MAX, dirPeople, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, toQtCheck,
   type MailPerson, type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type QtSentCtx, type Scope,
@@ -3448,17 +3448,34 @@ export class GccEngine {
     const text = cashCsv(cashRows(this.sales, year, cashYear(lines, year), mode, undated));
     downloadBlob(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }), `Cashflow_${year}_${todayISO()}.csv`);
   }
-  salesCsv(deals: Deal[]) {
+  /** The ปิดงาน tab's export (its menu: "ส่งออก CSV · งานที่ปิดแล้ว"): closedCsv of the tab's rows. The file's name
+   *  stays ASCII (Chromium dropped a Thai one and saved the file as "download", without .csv). */
+  exportClosedCsv(year: string, deals: Deal[], attr: boolean) {
+    downloadBlob(new Blob(['﻿' + this.closedCsv(deals, attr)], { type: 'text/csv;charset=utf-8' }), `Sales_Tracker_${year}_Closed_${todayISO()}.csv`);
+  }
+  /** The ปิดงาน tab's rows as CSV (lib/joint closedCsvRows): in list order, a joint quotation's payer's row with
+   *  the money the view counts of it, and the columns "นับเป็นงาน" and "นับเป็นบริษัทที่ทำงานให้" (1 on the rows
+   *  that carry them, workTally), so the sums in Excel are the tab's line, under its filters too (`attr`). */
+  closedCsv(deals: Deal[], attr: boolean, t: WorkTally = this.workTally(deals, { attr })) {
+    return this.salesCsv(deals, closedCsvRows(this.sales, deals, attr, t));
+  }
+  /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns. */
+  salesCsv(deals: Deal[], rows?: ClosedCsvRow[]) {
     const S = this.sales, C = S.cfg, today = todayISO();
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
-      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ']);
-    const lines = deals.map((d, i) => {
+      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ'])
+      .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : []);
+    const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
+    const lines = list.map((x, i) => {
+      const d = x.d;
       const st = dealStatus(S, d), jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
-      // a joint quotation counts once: its header carries the money, a member's cells stay empty (its share said)
-      const m = jr === 'member' ? { forecast: null, actual: null, fcConfirmed: false, acConfirmed: false } : dealMoney(S, d);
+      // a joint quotation counts once: its header carries the money, a member's cells stay empty (its share said);
+      // in the ปิดงาน export the payer's row carries what the view counts (the parts of the companies listed)
+      const m0 = jr === 'member' ? { forecast: null, actual: null, fcConfirmed: false, acConfirmed: false } : dealMoney(S, d);
+      const m = x.fc !== undefined ? { ...m0, forecast: x.fc, actual: x.ac ?? null } : m0;
       const sh = jr === 'member' ? shareOf(S, d) : null;
-      const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
+      const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท${x.part != null ? ` · นับส่วนของ ${x.part} บริษัทตามตัวกรอง` : ''}` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
       // ticks and notes no longer in the lists are kept (removing a list item keeps them on the deals)
       const otherSteps = Object.entries(S.steps)
@@ -3473,6 +3490,7 @@ export class GccEngine {
           return [csvCell(x.d), csvCell(x.n)];
         }), [csvCell(otherSteps.join(' | '))])
         .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
+        .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
         .join(',');
     });
     return [head.map(csvCell).join(','), ...lines].join('\r\n');

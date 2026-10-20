@@ -141,6 +141,14 @@ const PATHS = {
       <path d="M12 11v5.5M12 7.5h.01" />
     </>
   ),
+  // a building: the companies worked for (the Dashboard's ทำงานให้ card)
+  company: (
+    <>
+      <path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16" />
+      <path d="M15 10h4a1 1 0 0 1 1 1v10" />
+      <path d="M3 21h18M8 8h3M8 12h3M8 16h3" />
+    </>
+  ),
 };
 export type IconName = keyof typeof PATHS;
 

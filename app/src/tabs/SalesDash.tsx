@@ -20,6 +20,7 @@ import { thisQuarter } from '../lib/dateRange';
 import { payIn, payMonthCounts } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
 import { customersOf, jointAttr, jointCashLines, jointRole } from '../lib/sales';
+import { workCardRows, workCardSub } from '../lib/workUi';
 import { shareOf } from '../lib/joint';
 // units, % contribution and commission (package dash, items 8 and 9b)
 import { commPeriod0, unitQuarters, unitsOf, type CommPeriod } from '../lib/contrib';
@@ -172,6 +173,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
     setCq(qPick ? qPick - 1 : commPeriod0(year, today));
   }
   const payCount = (p: PayF) => customersOf(S, filterDeals(S, { ...F, quick: '', pay: p || undefined }, today)).length;
+  // ทำงานให้: the companies won and closed, each once (workTally, as the ปิดงาน tab counts them), a range read on
+  // the day each job closed and not narrowed by การรับเงิน (lib/workUi workCardRows)
+  const worked = e.workTally(workCardRows(S, F, today), { attr }).worked;
   // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
   const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
   // การรับเงิน, pinned after ผู้รับผิดชอบ: its choices count the money of the range
@@ -262,7 +266,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </div>
         <div className="sd-heroes">
           {([
-            ['user', st.total, 'ลูกค้า', 'ราย', `เปิดงาน ${fmtN(st.open)} · ปิดงาน ${fmtN(st.closed)}`, ''],
+            // rows in ราย (each company of a joint quotation one): not to be read against the ปิดงาน tab's jobs
+            ['user', st.total, 'ลูกค้า', 'ราย', `เปิด ${fmtN(st.open)} · ปิดแล้ว ${fmtN(st.closed)} ราย`, ''],
             ['sales', st.yes, 'ปิดการขายได้', 'ราย', st.decided ? `Win rate ${st.winRate}%` : 'ยังไม่มีลูกค้าที่รู้ผล', 'pri'],
             ['plan', st.overdue, 'ค้างติดตาม', 'ราย', 'ไม่ได้ติดต่อเกิน 14 วัน', st.overdue ? 'warn' : ''],
           ] as const).map(([ic, n, l, unit, sub2, tone]) => (
@@ -272,6 +277,12 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               <small>{sub2}</small>
             </div>
           ))}
+          {/* the companies we worked for (owner: the work volume; mockups m4 / m7): won and closed, each once */}
+          <div className="sd-stat work">
+            <span className="sd-stat-l"><Icon name="company" />ทำงานให้</span>
+            <span className="sd-stat-v"><b>{fmtN(worked)}</b> บริษัท</span>
+            <small>{workCardSub(qPick, !!date)}</small>
+          </div>
           {money && <CashStat lines={lines} pay={F.pay || ''} r={moneyR} ranged={!!date} when={qPick ? ` · ไตรมาส ${qPick}` : date ? ' · ในช่วงนี้' : ''} />}
         </div>
       </div>

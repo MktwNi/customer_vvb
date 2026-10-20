@@ -36,7 +36,9 @@ import { attachLines, previewOf } from '../lib/payCheck';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
 import { customersOf, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
-import { canMergeFrom, jointNo, jointRows, rowDeals, type JRow } from '../lib/joint';
+import { canMergeFrom, closedOrder, jointNo, jointRows, rowDeals, type JRow } from '../lib/joint';
+// the work count (jobs, companies worked for): the ปิดงาน tab's line and counter, its export
+import { closedExportSub, closedLine, closedMeta, closedTabRows } from '../lib/workUi';
 import { JointBand, JointCard, JointClosedRows, JointShare } from '../components/JointQt';
 // units (package dash): the หน่วยงาน filter's set-up link
 import { UnitsDialog } from '../components/UnitsDialog';
@@ -92,7 +94,8 @@ export function Sales() {
   const shown = filterDeals(S, fT, today);
   // the quick views are about open work: their counts come from the other filters, and the closed tab ignores them
   const noQuick = f.quick || lens ? filterDeals(S, { ...fT, quick: '' }, today) : shown;
-  const closedRows = (lens ? filterDeals(S, { ...f, quick: '' }, today) : noQuick).filter((d) => d.jobStatus === 'closed');
+  // the ปิดงาน tab's rows: the table's filters (not the lens nor a quick view), closed jobs only
+  const closedRows = closedTabRows(S, f, today);
   // not memoised: the engine changes S.deals in place (an import or a team sync can add a year)
   const all = Object.values(S.deals);
   const v = ui.slView;
@@ -112,7 +115,8 @@ export function Sales() {
   // jobs with money in this one
   const tableYear = lens ? filterDeals(S, { year, money: 'cash' }, today) : yearDeals;
   const openN = customersOf(S, tableYear).filter((d) => d.jobStatus === 'open').length;
-  const closedN = customersOf(S, yearDeals).filter((d) => d.jobStatus === 'closed').length;
+  // the ปิดงาน tab counts jobs: a joint quotation is one job however many companies it has (workTally)
+  const closedN = e.workTally(closedTabRows(S, { year }, today)).jobs;
   const [said, setSaid] = useState('');
   const tabs: [typeof v, ReactNode, number | null, string?][] = [
     // five tabs fit a phone's row: the first reads "ตาราง" there
@@ -145,14 +149,17 @@ export function Sales() {
               ariaLabel={`ปี ${year} (พ.ศ.)`}
               width={240}
               search={false}
-              options={years.map((y) => ({ v: y, label: `ปี ${y}`, sub: yearSub(y), n: moneyLines ? yearMoneyLabel(cashYear(moneyLines, y)) : perYear.get(y) ? `${fmtN(perYear.get(y)!)} งาน` : 'ยังไม่มีงาน' }))}
+              // customers (rows: each company of a joint quotation one) in ราย, as the Dashboard's ลูกค้า card; "งาน"
+              // is a job on the ปิดงาน tab (a joint quotation one)
+              options={years.map((y) => ({ v: y, label: `ปี ${y}`, sub: yearSub(y), n: moneyLines ? yearMoneyLabel(cashYear(moneyLines, y)) : perYear.get(y) ? `${fmtN(perYear.get(y)!)} ราย` : 'ยังไม่มีงาน' }))}
               onChange={(y) => {
                 set({ slYear: y, slF: toSlF({ ...f, date: null }), slCollapsed: {} });
                 setSaid(f.date ? `ช่วงเวลากลับเป็นทั้งปี ${y}` : '');
               }}
             />
             {e.can('edit.deal') && <AddMenu />}
-            <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...closedRows]} />
+            {/* on the ปิดงาน tab it exports that tab's list (its jobs and companies, closedCsv) */}
+            <MoreMenu year={year} deals={[...shown.filter((d) => d.jobStatus === 'open'), ...closedRows]} closed={view === 'closed' ? { deals: closedRows, attr: jointAttr(f) } : undefined} />
           </div>
         }
       />
@@ -293,10 +300,14 @@ function AddMenu() {
   );
 }
 
-function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
+/** ⋯ beside เพิ่มลูกค้า. `closed`: the ปิดงาน tab is open: its export is that tab's list (closedCsv: closed rows
+ *  in list order, a joint quotation's payer's row with the money once, the two count columns). */
+function MoreMenu({ year, deals, closed }: { year: string; deals: Deal[]; closed?: { deals: Deal[]; attr: boolean } }) {
   const { engine: e, ui, set } = useApp();
   const yearTotal = Object.values(e.sales.deals).filter((d) => d.year === year).length;
   const { open, setOpen, close, btn, wrap, cls } = useMenu();
+  // (counted while the menu is open)
+  const work = open && closed ? e.workTally(closed.deals, { attr: closed.attr }) : null;
   const [lists, setLists] = useState(false);
   const [units, setUnits] = useState(false);
   const [imp, setImp] = useState<{ msg: string; err?: boolean; years?: string[]; batch?: string; n?: number } | null>(null);
@@ -354,11 +365,18 @@ function MoreMenu({ year, deals }: { year: string; deals: Deal[] }) {
               <small>รายงวด หรือสรุปรายเดือน / รายไตรมาส</small>
             </button>
           )}
-          <button role="menuitem" className="menu-i" onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
-            {/* the table's filters apply (also when another tab is open): say so */}
-            ส่งออก CSV
-            <small>{deals.length < yearTotal ? `${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรอง` : `ทั้งตาราง ${fmtN(yearTotal)} รายการ · เปิดใน Excel`}</small>
-          </button>
+          {closed && work ? (
+            <button role="menuitem" className="menu-i" onClick={() => { close(); e.exportClosedCsv(year, closed.deals, closed.attr); }}>
+              ส่งออก CSV · งานที่ปิดแล้ว
+              <small>{closedExportSub(work)}</small>
+            </button>
+          ) : (
+            <button role="menuitem" className="menu-i" onClick={() => { close(); e.exportSalesCsv(year, deals); }}>
+              {/* the table's filters apply (also when another tab is open): say so */}
+              ส่งออก CSV
+              <small>{deals.length < yearTotal ? `${fmtN(deals.length)} จาก ${fmtN(yearTotal)} รายการ ตามตัวกรอง` : `ทั้งตาราง ${fmtN(yearTotal)} รายการ · เปิดใน Excel`}</small>
+            </button>
+          )}
           {e.can('set.data') && <button role="menuitem" className="menu-i" onClick={() => { close(); fileRef.current?.click(); }}>นำเข้าจาก Sales Tracker เดิม<small>ไฟล์สำรอง JSON หรือ CSV / Excel</small></button>}
           {e.can('set.lists') && <button role="menuitem" className="menu-i" onClick={() => { close(); setLists(true); }}>จัดการหมวด / SOURCE / Services</button>}
           {/* units and commission rates (package dash): for ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น, where commission is private */}
@@ -2575,21 +2593,31 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
   // a joint quotation's money counts once, on the header (under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter, the
   // parts of its companies shown)
   const attr = jointAttr(F);
-  const { fc, ac } = moneySum(S, deals, attr);
+  const money = e.can('view.money') ? moneySum(S, deals, attr) : null;
   // a joint quotation is one group (its band, then its closed companies): the groups first, then the
-  // other rows in their order (mockup 14)
-  const jr = jointRows(S, deals);
-  const all = jr.secs.flatMap((x) => jr.rows.get(x) || []);
-  const flat = [...all.filter((r) => r.k === 'band'), ...all.filter((r) => r.k === 'deal')];
-  const nCust = customersOf(S, deals).length;
-  const which = date ? `ตามตัวกรอง · ${dateWords(date.f, date.r).field} ${dateWords(date.f, date.r).op} ${rangeTh(date.r)}` : 'ตามตัวกรอง';
+  // other rows in their order (mockup 14; the export follows it, closedCsv)
+  const flat = closedOrder(S, deals);
+  // the work it holds (owner: "how many companies we worked for"): jobs, a joint quotation one, and the
+  // companies won and closed, each once (workTally; the tab's counter, the Dashboard card and the export count it so)
+  const t = e.workTally(deals, { attr });
+  const which = !on ? '' : date ? `ตามตัวกรอง · ${dateWords(date.f, date.r).field} ${dateWords(date.f, date.r).op} ${rangeTh(date.r)}` : 'ตามตัวกรอง';
+  // reopening a joint quotation is the whole group's: refused (said why) when the account may not edit one of its rows
+  const reopen = (hid: string) => {
+    const why = e.jointCloseBlock(hid, 'reopen');
+    if (!why) e.reopenJoint(hid);
+    else set((s) => ({ slToast: { text: why, ms: 6000, n: (s.slToast?.n || 0) + 1 } }));
+  };
   return (
     <>
       <p className="sl-closed-sum">
-        <span>ปิดแล้ว <b>{fmtN(nCust)}</b> งาน{on ? ` จาก ${fmtN(total)} (${which})` : ''}{e.can('view.money') && <> · Forecast <b>{fmtMoney(fc) || '0'}</b> · Actual <b>{fmtMoney(ac) || '0'}</b></>}</span>
-        <span className="t-meta">งานที่กด “ปิดงาน” แล้ว ทั้งได้งานและไม่ได้งาน · เปิดกลับได้ · ยอดยังนับในสรุปปี</span>
+        <span>
+          {closedLine(t, money).map(([w, n, u], i) => (
+            <Fragment key={i}>{i > 0 && ' · '}{w}<b>{n}</b>{u}</Fragment>
+          ))}
+        </span>
+        <span className="t-meta">{closedMeta(t, which)}</span>
       </p>
-      <Toolbar S={S} F={F} yearDeals={facets} today={today} job="closed" shown={nCust} total={total} />
+      <Toolbar S={S} F={F} yearDeals={facets} today={today} job="closed" shown={t.jobs} total={total} />
       <div className="card sl-list">
         {!deals.length ? (
           <div className="sl-list-empty">
@@ -2607,7 +2635,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
             </thead>
             <tbody>
               {flat.map((row) => {
-                if (row.k === 'band') return <JointClosedRows key={'jq' + row.g.head.id} b={row} attr={attr} onReopen={e.canDeal('edit.deal', row.g.head) ? () => e.reopenJoint(row.g.head.id) : undefined} />;
+                if (row.k === 'band') return <JointClosedRows key={'jq' + row.g.head.id} b={row} attr={attr} onReopen={e.canDeal('edit.deal', row.g.head) ? () => reopen(row.g.head.id) : undefined} />;
                 const d = row.d;
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (
