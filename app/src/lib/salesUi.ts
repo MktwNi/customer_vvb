@@ -1,6 +1,6 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
-import { daysBetween, dmTh, localDay } from './format';
-import { basisDates, customersOf, filterDeals, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
+import { addDays, daysBetween, dmTh, dow, localDay } from './format';
+import { basisDates, customersOf, filterDeals, jointAttr, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, stepContactDay, withActIndex, workTally, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
   DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, dupCounted, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
@@ -64,22 +64,36 @@ export const RESULT_OPTS: { v: Exclude<ResultF, ''>; label: string; chip: string
 export type ViewJob = 'open' | 'closed' | '';
 const viewOf = (F: SalesFilter, job: ViewJob): SalesFilter => ({ ...F, job, quick: job === 'open' ? F.quick : '' });
 
-/** The rows of the view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date'
- *  takes a date draft). Customers only: a joint quotation's header is not one (its members are). */
-export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string): number {
-  return customersOf(S, filterDeals(S, { ...viewOf(F, job), [key]: draft ?? undefined }, today)).length;
+/**
+ * How many the rows `rows` of a view are, as the view counts them: the ปิดงาน tab counts jobs (a joint quotation
+ * one however many of its companies are listed, workTally under the filters `f`, as its line and its counter
+ * say); the table and the Dashboard count customers, in ราย (a joint quotation's header is not one, its
+ * companies are).
+ */
+export function viewCount(S: SalesState, rows: Deal[], job: ViewJob, f: SalesFilter): number {
+  return job === 'closed' ? workTally(S, rows, { attr: jointAttr(f) }).jobs : customersOf(S, rows).length;
 }
 
-/** How many rows of the view (date filter off) have a date of `basis` in each month of `ceYear`. */
+/** The view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date' takes a date
+ *  draft), counted as the view counts (viewCount). */
+export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string): number {
+  const f = { ...viewOf(F, job), [key]: draft ?? undefined };
+  return viewCount(S, filterDeals(S, f, today), job, f);
+}
+
+/** How many of the view (date filter off) have a date of `basis` in each month of `ceYear`, counted as the view
+ *  counts (viewCount: what the view says once that month is picked). */
 export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceYear: number, job: ViewJob, today: string): number[] {
-  const out = Array(12).fill(0) as number[], y = String(ceYear);
+  const y = String(ceYear), f = { ...viewOf(F, job), date: null };
+  const by: Deal[][] = Array.from({ length: 12 }, () => []);
   withActIndex(S, () =>
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), date: null }, today)).forEach((d) => {
+    // (the ปิดงาน tab's jobs include a joint quotation's header: the payer's row is that job)
+    (job === 'closed' ? filterDeals(S, f, today) : customersOf(S, filterDeals(S, f, today))).forEach((d) => {
       const ms = new Set(basisDates(S, d, basis, today).filter((x) => x.d.startsWith(y)).map((x) => +x.d.slice(5, 7) - 1));
-      ms.forEach((m) => out[m]++);
+      ms.forEach((m) => by[m].push(d));
     }),
   );
-  return out;
+  return by.map((l) => (l.length ? viewCount(S, l, job, f) : 0));
 }
 
 const thCmp = (a: string, b: string) => a.localeCompare(b, 'th');
@@ -101,11 +115,17 @@ export function trackerFields(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FF
 }
 function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
   const { yearDeals, job, me, today } = ctx;
-  const counts = (k: ListKey) => {
-    const m = new Map<string, number>();
-    // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today)).forEach((d) => listValues(k === 'section' ? payerDeal(S, d) : d, k, S).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
+  /** each value's rows, counted as the view counts them (viewCount, under the filters with that value picked) */
+  const tally = (rows: Deal[], valuesOf: (d: Deal) => string[], f: (v: string) => SalesFilter) => {
+    const by = new Map<string, Deal[]>(), m = new Map<string, number>();
+    rows.forEach((d) => valuesOf(d).forEach((v) => (by.get(v) || by.set(v, []).get(v)!).push(d)));
+    by.forEach((l, v) => m.set(v, viewCount(S, l, job, f(v))));
     return m;
+  };
+  const counts = (k: ListKey) => {
+    const f = { ...viewOf(F, job), [k]: undefined }, rows = filterDeals(S, f, today);
+    // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
+    return tally(job === 'closed' ? rows : customersOf(S, rows), (d) => listValues(k === 'section' ? payerDeal(S, d) : d, k, S), (v) => ({ ...f, [k]: { v: [v] } }));
   };
   const used = (k: ListKey) => new Set(yearDeals.flatMap((d) => listValues(d, k, S)));
   const opt = (v: string, n: Map<string, number>, sub?: string): FOpt => ({ v, label: v === NONE ? 'ไม่ระบุ' : v, n: n.get(v) || 0, sub });
@@ -149,14 +169,34 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
     });
   }
   if (!ctx.dash) {
-    const n = new Map<string, number>();
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), result: '' }, today)).forEach((d) => {
-      const r = dealResult(S, d) || 'EMPTY';
-      n.set(r, (n.get(r) || 0) + 1);
-    });
+    const f = { ...viewOf(F, job), result: '' as const }, rows = filterDeals(S, f, today);
+    const n = tally(job === 'closed' ? rows : customersOf(S, rows), (d) => [dealResult(S, d) || 'EMPTY'], (v) => ({ ...f, result: v as ResultF }));
     fields.push({ key: 'result', label: 'ผลการขาย', hint: 'ได้งาน / ไม่ได้งาน / รอผล', kind: 'single', all: 'ทั้งหมด', options: RESULT_OPTS.map((o) => ({ ...o, n: n.get(o.v) || 0 })) });
   }
   return fields;
+}
+
+/**
+ * The Dashboard's การติดต่อสัปดาห์นี้: the steps and contact records of the deals `ids` dated this week (Monday
+ * `mon` to today: a later date is a plan, not a contact yet) by day, and how many on the same days of last
+ * week. A joint quotation's company given the payer's result when it closed is not a contact (stepContactDay).
+ */
+export function weekContacts(S: SalesState, ids: Set<string>, today: string) {
+  const mon = addDays(today, -((dow(today) + 6) % 7));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+  const perDay: Record<string, number> = {};
+  let lastWeek = 0;
+  const prevMon = addDays(mon, -7), prevToday = addDays(today, -7);
+  const contact = (day: string) => {
+    if (day >= mon && day <= today) perDay[day] = (perDay[day] || 0) + 1;
+    else if (day >= prevMon && day <= prevToday) lastWeek++;
+  };
+  Object.keys(S.steps).forEach((k) => {
+    const i = k.indexOf('/'), id = k.slice(0, i), day = ids.has(id) ? stepContactDay(S, id, k.slice(i + 1)) : '';
+    if (day) contact(day);
+  });
+  Object.entries(S.acts || {}).forEach(([k, x]) => x.d && ids.has(k.slice(0, k.indexOf('/'))) && contact(x.d));
+  return { mon, days, perDay, lastWeek };
 }
 
 /** Win rate (%) of each SOURCE that has deals with a known result — a channel at 0% is kept. */
@@ -192,7 +232,8 @@ export function statusView(s: SalesState, d: Deal, today: string): StatusView {
     if (ps.left.length) return v('yes', 'ok', 'ได้งาน', ps.left.length > 1 ? `รอชำระ ${ps.left.length} งวด` : `รอชำระงวด ${ps.pays.indexOf(ps.left[0]) + 1}`);
     return v('yes', 'ok', ps.pays.length ? 'ได้งาน · รับครบ' : 'ได้งาน', 'พร้อมปิดงาน');
   }
-  if (r === 'NO') return v('no', 'bad', 'ไม่ได้งาน', 'พร้อมปิดงาน');
+  // (a company that withdrew from a joint quotation closes with it)
+  if (r === 'NO') return v('no', 'bad', 'ไม่ได้งาน', ready || jointRole(s, d) !== 'member' ? 'พร้อมปิดงาน' : 'ปิดพร้อมใบเสนอราคาร่วม');
   if (r === 'WAIT') return v('wait', 'warn', 'รอผล', stepOf(s, d.id, DEAL_STAGE).n.trim());
   if (dealStatus(s, d).started) {
     const t = stageTrack(s, d, today), last = s.cfg.stages.filter((p) => t.states[p] === 'done').pop() || lastStage(s, d);
@@ -355,16 +396,20 @@ export const CLOSE_TITLE = 'ปิดงาน · ย้ายงานที่
  * '' when ready: the button shows); `progress` = "รับแล้ว 50% · เหลือ 53,500" on the plan total, else the Forecast.
  * `ro`: an account that can only read gets where it stands, without the steps it has no buttons for.
  */
-export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null }
+export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint': the lead phrase (the table's closing row) */ lead?: string }
 export function closingView(s: SalesState, d: Deal, today: string, ro = false): ClosingView {
   const r = dealResult(s, d), ready = closeReady(s, d, today);
-  // a won member of a joint quotation (`joint`): its money is the header's; it closes once the payer has paid
-  // (or with the whole group, from the joint quotation)
-  if (r === 'YES' && !ready && jointRole(s, d) === 'member') {
-    const h = s.deals[jointHeadOf(s, d.id)], P = h ? payState(s, h, today).plan : null;
+  // a company of a joint quotation (`joint`): its money is the header's, and it closes with the whole
+  // quotation, once the payer has paid in full (or said NO); closing records the payer's result for it when it
+  // has none (engine.closeJoint)
+  if (jointRole(s, d) === 'member') {
+    const h = s.deals[jointHeadOf(s, d.id)], P = h ? payState(s, h, today).plan : null, hr = h ? dealResult(s, h) : '';
     const progress = P && P.total ? { pct: Math.min(100, Math.round((P.got / P.total) * 100)), got: P.got, base: P.total, left: Math.max(0, P.total - P.got) } : null;
-    const paid = P ? ` · ผู้จ่ายชำระ ${P.paidN} จาก ${P.n} งวด` : '';
-    return { ready, state: 'joint', text: `ได้งานแล้ว · ${JOINT_PAID}${paid}${ro ? '' : ' ปิดงานได้เมื่อผู้จ่ายชำระครบ หรือปิดทั้งกลุ่มที่ใบเสนอราคาร่วม'}`, hint: 'ปิดได้เมื่อผู้จ่ายชำระครบ', waitFor: [], progress };
+    const own = r === 'YES' ? 'ได้งานแล้ว' : r === 'NO' ? 'ไม่ได้งาน (ถอนตัว)' : 'ยังไม่มีผลของบริษัทนี้';
+    const lead = ready ? `${own} · ${hr === 'NO' ? 'ผู้จ่ายตอบว่าไม่ได้งาน' : 'ผู้จ่ายชำระครบแล้ว'}` : `${own} · ${JOINT_PAID}${P ? ` · ผู้จ่ายชำระ ${P.paidN} จาก ${P.n} งวด` : ''}`;
+    const fill = r !== 'YES' && r !== 'NO' && (ready || hr === 'YES') ? ` บริษัทที่ยังไม่มีผลจะได้ผลตามผู้จ่าย` : '';
+    const rest = ro ? '' : ready ? ` ปิดงานพร้อมกันทั้งใบเสนอราคาร่วม${fill}` : ` ปิดงานพร้อมกันทั้งใบเสนอราคาร่วมเมื่อผู้จ่ายชำระครบ${fill}`;
+    return { ready, state: 'joint', text: lead + rest, lead, hint: ready ? '' : hr === 'YES' ? 'ปิดได้เมื่อผู้จ่ายชำระครบ' : 'รอผลจากผู้จ่าย', waitFor: [], progress };
   }
   if (r === 'NO') return { ready, state: 'no', text: ro ? 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ' : 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ กดปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” (เปิดกลับได้ ยอดยังนับในสรุปปี)', hint: '', waitFor: [], progress: null };
   if (r !== 'YES') return { ready, state: 'none', text: ro ? 'ยังไม่มีผลการขาย' : 'ยังไม่มีผลการขาย เมื่อบันทึก CLOSED DEAL เป็น NO หรือ YES และรับชำระครบทุกงวด ระบบจะขึ้นปุ่มปิดงาน', hint: 'รอผลการขาย', waitFor: [], progress: null };

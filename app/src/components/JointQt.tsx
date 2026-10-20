@@ -7,8 +7,9 @@ import {
   type Deal, type DealDoc, type DocKind, type JointGroup, type SalesState,
 } from '../lib/sales';
 import { JOINT_PAID, nextStepView, shortName, statusView } from '../lib/salesUi';
+import { jointCloseCount } from '../lib/workUi';
 import {
-  OWN_TH, bandPart, closeSummary, closedWord, jointNo, jointShort, jointSub, jointTitle, memberLine, memberShares, outWord, ownJob, parseShare, payerShort, pickLine, pickParts, resultsWord, sentDay, shareOf, sharesCheck,
+  OWN_TH, bandPart, closeSummary, closedJoint, closedWord, jointNo, jointShort, jointSub, jointTitle, memberLine, memberShares, outWord, ownJob, parseShare, payerShort, pickLine, pickParts, resultsWord, sentDay, shareOf, sharesCheck,
   sharesWord,
   type JRow, type JointPick, type RowFate,
 } from '../lib/joint';
@@ -356,8 +357,21 @@ function JointClose({ hid, onClose }: { hid: string; onClose: () => void }) {
   const g = jointOf(S, { id: hid });
   if (!g) return null;
   const sum = closeSummary(S, g, today), v = qtView(S, g.head).head, money = e.can('view.money');
+  // it closes as one: a company this account may not edit stops it (named, with its owner)
+  const block = e.jointCloseBlock(hid);
+  // what it then counts (mockup m3): 1 job, and its companies won as the ปิดงาน tab will count them (the
+  // engine's workTally over the tracker as closing leaves it: the payer's result recorded for those without one)
+  const A = closedJoint(S, g, today);
+  const count = jointCloseCount({
+    worked: e.workTally(g.members.map((x) => A.deals[x.deal.id]), { s: A }).worked,
+    fill: sum.fill,
+    filled: sum.rows.filter((x) => x.by).length,
+    waiting: sum.rows.filter((x) => !/^(YES|NO)$/.test(x.after)).length,
+    payer: payerShort(g),
+  });
   const go = () => {
     const n = e.closeJoint(hid);
+    if (!n && e.jointCloseBlock(hid)) return;
     onClose();
     set((s) => ({
       deal: s.deal && (s.deal === hid || g.members.some((x) => x.deal.id === s.deal)) ? null : s.deal,
@@ -375,16 +389,22 @@ function JointClose({ hid, onClose }: { hid: string; onClose: () => void }) {
         {sum.rows.map((x) => (
           <div key={x.deal.id} className="jx-r" role="row">
             <span role="cell"><span className="co-name dense" title={x.deal.client}>{shortName(x.deal.client)}</span>{x.closed && <small className="t-meta"> · ปิดแล้ว</small>}</span>
-            <span role="cell"><ResultWord r={x.result} /></span>
-            <span role="cell" className="r">{money ? (x.share != null && x.result !== 'NO' ? fmtMoney(x.share) : <span className="none">—</span>) : ''}</span>
+            {/* a company without a result shows the one closing records for it: the payer's */}
+            <span role="cell" className="jx-res"><ResultWord r={x.after} />{x.by && <small className="jx-by">ตามผู้จ่าย</small>}</span>
+            <span role="cell" className="r">{money ? (x.share != null && x.after !== 'NO' ? fmtMoney(x.share) : <span className="none">—</span>) : ''}</span>
           </div>
         ))}
         {money && <div className="jx-r sum" role="row"><span role="cell">รวม นับครั้งเดียว</span><span role="cell" /><span role="cell" className="r">{m0(sum.total)}</span></div>}
       </div>
-      <p className="jx-n">{money ? sum.pay + ' · ' : ''}ทั้ง {fmtN(sum.open)} บริษัทย้ายไปแท็บปิดงานพร้อมกัน แสดงเป็นกลุ่มใต้ใบเสนอราคานี้ เปิดกลับได้</p>
+      <p className="jx-n">
+        {money && <>{sum.pay}<br /></>}
+        <b>{count.count}</b>
+        {count.more.map((x) => ' · ' + x).join('')}
+      </p>
+      {block && <Notice kind="error" role="alert">{block}</Notice>}
       <DialogActions>
         <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
-        <button type="button" className="btn pri" onClick={go}>{sum.open ? `ปิดงานทั้ง ${fmtN(sum.open)} บริษัท` : 'ปิดงานใบเสนอราคาร่วม'}</button>
+        <button type="button" className="btn pri" disabled={!!block} onClick={go}>{sum.open ? `ปิดงานทั้ง ${fmtN(sum.open)} บริษัท` : 'ปิดงานใบเสนอราคาร่วม'}</button>
       </DialogActions>
     </Modal>
   );
@@ -605,7 +625,8 @@ export function JointCard({ b, attr, onOpen }: { b: Extract<JRow, { k: 'band' }>
 
 /** A joint quotation in the ปิดงาน list: its band (results "ได้ 3 · ไม่ได้ 1", the Forecast and Actual once, as
  *  the list's sum counts them: `attr`, lib/joint bandPart) and its closed companies under it (their parts grey,
- *  a withdrawn one "ถอนตัว"). */
+ *  a withdrawn one "ถอนตัว"). It reopens as one, from its band (`onReopen`, engine.reopenJoint): a company has no
+ *  reopen of its own here (owner text, mockups m1 / m2); its panel's "เปิดใบเสนอราคาร่วมอีกครั้ง" is the same. */
 export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: 'band' }>; attr?: boolean; onReopen?: () => void }) {
   const { engine: e, set } = useApp();
   const S = e.sales, g = b.g, h = g.head, today = todayISO(), money = e.can('view.money');
@@ -625,7 +646,7 @@ export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: '
         <td className="r">{money && <BandFig v={m.forecast} bp={bp} note={<small className={m.fcConfirmed ? 'ok' : ''}>{m.fcDoc ? (v.cur && v.versions.length > 1 ? `จากเอกสาร ฉบับที่ ${v.cur.n}` : 'จากเอกสาร') : 'นับครั้งเดียว'}</small>} />}</td>
         <td className="r c-opt">{money && <BandFig v={m.actual} bp={bp} note={P && <small className={P.left ? '' : 'ok'}>{P.left ? `ค้าง ${fmtMoney(bp.part(P.left))}` : `รับครบ ${P.n} งวด`}</small>} />}</td>
         <td className="c-opt t-sec">{h.jobStatus === 'closed' && h.closedDate ? isoTh(h.closedDate) : 'ยังเปิดอยู่'}</td>
-        <td className="r">{onReopen && h.jobStatus === 'closed' && <button type="button" className="lnk sl-reopen" onClick={onReopen}>เปิดงานอีกครั้ง</button>}</td>
+        <td className="r">{onReopen && (h.jobStatus === 'closed' || b.shown.some((d) => d.jobStatus === 'closed')) && <button type="button" className="lnk sl-reopen" onClick={onReopen} title="เปิดกลับทั้งใบเสนอราคาและทุกบริษัท">เปิดงานอีกครั้ง</button>}</td>
       </tr>
       {b.shown.map((d, i) => {
         const r = dealResult(S, d);
@@ -638,7 +659,7 @@ export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: '
             <td className="r">{money && <JointShare S={S} d={d} col="fc" />}</td>
             <td className="r c-opt">{money && <JointShare S={S} d={d} col="ac" />}</td>
             <td className="c-opt t-sec">{d.closedDate ? isoTh(d.closedDate) : '—'}</td>
-            <td className="r">{e.canDeal('edit.deal', d) && d.jobStatus === 'closed' && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}</td>
+            <td className="r" />
           </tr>
         );
       })}
@@ -694,8 +715,10 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
     const cur = stepOf(S, hid, DEAL_STAGE);
     if (r === v) return;
     const was = closeReady(S, d, today);
-    e.setStep(hid, DEAL_STAGE, { d: cur.d || today, n: v === 'WAIT' ? 'รอผล' : v });
+    const filled = e.setStep(hid, DEAL_STAGE, { d: cur.d || today, n: v === 'WAIT' ? 'รอผล' : v });
     if (v === 'WAIT') acts.say(`บันทึกผลจาก ${payer} เป็น รอผล แล้ว`);
+    // closed already: the companies without a result got the payer's (engine.setStep)
+    else if (d.jobStatus === 'closed') acts.say(`บันทึกผลจาก ${payer} แล้ว${filled ? ` · ${fmtN(filled)} บริษัทที่ยังไม่มีผลได้ผล “${v === 'YES' ? 'ได้งาน' : 'ไม่ได้งาน'}” ตามผู้จ่าย` : ''}`);
     else acts.afterResult(d, was);
   };
   return (
@@ -707,7 +730,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
             <span className="dp-crumb">Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · ใบเสนอราคาร่วม</span>
             <span className="dp-acts">
               {!ro && (d.jobStatus === 'closed' ? (
-                <button type="button" className="btn xs" onClick={() => (e.reopenJoint(hid), acts.say('เปิดใบเสนอราคาร่วมอีกครั้งแล้ว'))}>เปิดงานอีกครั้ง</button>
+                <button type="button" className="btn xs" onClick={() => acts.say(e.reopenJoint(hid) ? 'เปิดใบเสนอราคาร่วมอีกครั้งแล้ว' : e.teamNote || 'ไม่มีรายการให้เปิดอีกครั้ง', { ms: 6000 })}>เปิดงานอีกครั้ง</button>
               ) : (
                 <button type="button" className="btn xs" onClick={() => set({ jqDlg: { k: 'close', hid } })} title="ปิดทั้งใบเสนอราคาและทุกบริษัท (ถามยืนยัน)">ปิดงาน</button>
               ))}

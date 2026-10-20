@@ -40,6 +40,21 @@
 .sl-ltable tr.jq-cm.last>:first-child{border-radius:0 0 0 var(--r-band)}
 .sl-ltable tr.jq-cm .sl-mn b.share{font-weight:400;color:var(--muted)}
 .jq-res{font-size:var(--fs-sec);color:var(--ink-2)}
+/* on a phone (mockups m6 / m6b; index.css lays the rows out in two lines): the band is a head of two lines
+   (its name across, then its results and the Forecast), its tint and edge on the row; its companies keep the
+   edge down the left. The desktop's per-cell tint, edge and corners are undone. In a list below 860px, as
+   index.css. */
+@container sl-list (max-width:860px){
+  .sl-ltable tbody tr.jq-cband{grid-template-areas:"n n" "r f";row-gap:8px;margin-top:6px;padding:12px 2px 12px 14px;background:#F7F9FE;border-top:1px solid var(--line);border-radius:var(--r-band) var(--r-band) 0 0;box-shadow:inset 3px 0 0 var(--tint-line)}
+  .sl-ltable tbody tr.jq-cband>*,.sl-ltable tbody tr.jq-cband>:first-child,.sl-ltable tbody tr.jq-cband>:last-child{height:auto;background:none;border:0;border-radius:0;box-shadow:none}
+  .sl-ltable tbody tr.jq-cband>td:nth-child(2){grid-area:r;align-self:center}
+  .sl-ltable tbody tr.jq-cband>td:nth-child(3){grid-area:f}
+  .sl-ltable tbody tr.jq-cband :is(.jq-nm,.jq-sub){white-space:normal}
+  .sl-ltable tbody tr.jq-cm{padding-left:20px;box-shadow:inset 3px 0 0 var(--tint-line)}
+  .sl-ltable tbody tr.jq-cm>:first-child{box-shadow:none;padding-left:0}
+  .sl-ltable tbody tr.jq-cm.last{margin-bottom:6px;border-bottom:1px solid var(--line);border-radius:0 0 0 var(--r-band)}
+  .sl-ltable tbody tr.jq-cm.last>*,.sl-ltable tbody tr.jq-cm.last>:first-child{border:0;border-radius:0}
+}
 
 /* ---------- a member's own panel: where it belongs ---------- */
 .jq-mb{margin:6px 0 0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 12px;border-radius:var(--r-inner);background:#F7F9FE;box-shadow:inset 3px 0 0 var(--tint-line);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
@@ -133,7 +148,11 @@
 .jx-p{margin:0;line-height:1.6;color:var(--ink)}
 .jx-p small{display:block;font-size:var(--fs-sec);color:var(--ink-2)}
 .jx-list{border:1px solid var(--line);border-radius:var(--r-inner);padding:2px 14px}
-.jx-r{display:grid;grid-template-columns:minmax(0,1fr) 104px 104px;gap:12px;align-items:center;padding:9px 0;border-top:1px solid var(--divider);font-size:var(--fs-body)}
+.jx-r{display:grid;grid-template-columns:minmax(0,1fr) 136px 104px;gap:12px;align-items:center;padding:9px 0;border-top:1px solid var(--divider);font-size:var(--fs-body)}
+/* "ได้งาน  ตามผู้จ่าย" (mockup m3): the result closing records for a company without one; on a phone the grey
+   words go under the result */
+.jx-res{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;min-width:0}
+.jx-by{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap}
 .jx-r:first-child{border-top:0}
 .jx-r.ph{font-size:var(--fs-meta);color:var(--muted);padding:8px 0 6px}
 .jx-r .r{text-align:right}
@@ -141,7 +160,8 @@
 .jx-r.sum{font-weight:500}
 .jx-r.sum span:first-child{font-weight:400;color:var(--ink-2);font-size:var(--fs-sec)}
 .jx-n{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.6}
-@media (max-width:520px){.jx-r{grid-template-columns:minmax(0,1fr) 88px 88px}}
+.jx-n b{font-weight:500;color:var(--ink)}
+@media (max-width:520px){.jx-r{grid-template-columns:minmax(0,1fr) 96px 88px}.jx-by{padding-left:14px}}
 
 /* ---------- a phone: one card per joint quotation ---------- */
 .jm{background:#fff;border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-card), inset 3px 0 0 var(--tint-line);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
