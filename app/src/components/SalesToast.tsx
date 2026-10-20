@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
-import { todayISO } from '../lib/format';
-import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
-import { jointCloseOf } from '../lib/joint';
+import { fmtN, todayISO } from '../lib/format';
+import { closeReady, dealResult, hasPlan, jointOf, jointRole, planOf, type Deal } from '../lib/sales';
+import { jointCloseOf, jointShort } from '../lib/joint';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
 import { docById, qtSentView } from '../lib/notify';
@@ -19,9 +19,14 @@ export function useSalesActs() {
   const { engine: e, set } = useApp();
   /** One message at the bottom; `ms` 0 = it stays until acted on. */
   const say = (text: string, o: { acts?: ToastAct[]; ms?: number } = {}) => set((s) => ({ slToast: { text, acts: o.acts, ms: o.ms ?? 4000, n: (s.slToast?.n || 0) + 1 } }));
-  /** "รับชำระครบทุกงวดแล้ว ปิดงาน X เลยไหม?" with ปิดงาน / ไว้ก่อน; the deal's panel asks in its closing card too. */
+  /** "รับชำระครบทุกงวดแล้ว ปิดงาน X เลยไหม?" with ปิดงาน / ไว้ก่อน; the deal's panel asks in its closing card too.
+   *  A joint quotation's payer is named as the quotation and its companies: they close as one (its ปิดงาน opens
+   *  the joint dialog), as the message after closing says. */
   const prompt = (d: Deal, via: 'result' | 'payment') => {
-    say(closePrompt(e.sales, d, shortName(d.client), via), { ms: 0, acts: [{ label: 'ปิดงาน', act: 'close', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
+    const g = jointRole(e.sales, d) === 'header' ? jointOf(e.sales, d) : null;
+    const open = g ? g.members.filter((x) => x.deal.jobStatus === 'open').length : 0;
+    const name = g ? `ใบเสนอราคาร่วม ${jointShort(g)}${open ? ` และ ${fmtN(open)} บริษัท` : ''}` : shortName(d.client);
+    say(closePrompt(e.sales, d, name, via), { ms: 0, acts: [{ label: 'ปิดงาน', act: 'close', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     set({ slPrompt: d.id });
   };
   /** After this user's own change: ask to close when it just made the deal ready, else say `done`. A
