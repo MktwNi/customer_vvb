@@ -95,7 +95,8 @@ export function useAttach() {
     if (r.over) {
       // the money of this job is in already (an earlier receipt counted more than its installment, say):
       // one tap would count it again — the form is there for money that really came in on top
-      acts.say(recvOverText(S, d, r), { ms: 12000, acts: [{ label: 'แก้ยอด / วันที่', act: 'recvEdit', deal: d.id, k: stage }] });
+      // (without a plan there is no installment form to correct: the message says to attach the receipt)
+      acts.say(recvOverText(S, d, r), { ms: 12000, acts: r.plan ? [] : [{ label: 'แก้ยอด / วันที่', act: 'recvEdit', deal: d.id, k: stage }] });
       return 'over';
     }
     if (r.ask && !(typed != null && typed > 0)) {
@@ -118,7 +119,7 @@ export function useAttach() {
           { label: 'เลิกทำ', act: 'recvUndo', deal: d.id, k: x.stage, recv: x.undo, primary: !x.ready },
         ];
         if (x.ready) set({ slPrompt: d.id });
-        acts.say(recvToast(e.sales, dd, x.stage, x.amount) + (x.ready ? ' · รับครบทุกงวดแล้ว' : ''), { ms: 12000, acts: tacts });
+        acts.say(recvToast(e.sales, dd, x.stage, x.amount, x.code) + (x.ready ? ' · รับครบทุกงวดแล้ว' : ''), { ms: 12000, acts: tacts });
       },
     });
     return 'done';

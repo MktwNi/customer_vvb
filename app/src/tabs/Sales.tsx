@@ -4,7 +4,7 @@ import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib
 import { CONFIG } from '../lib/constants';
 import {
   ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, filterDeals, fmtMoney, lastContactInfo, mismatchText,
-  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stepCode, stepOf, withActIndex, workTally,
+  normSalesFilter, overdueDays, owedIn, owedNoPlan, paidNote, parseAmount, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stepCode, stepOf, withActIndex, workTally,
   type BasisDate, type Deal, type DealAct, type DealDoc, type DealStep, type DealSteps, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState, type StepKind, type StepView,
 } from '../lib/sales';
 import { BASIS_TH, JOINT_PAID, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, stepEdit, stepLines, trackerFields, yearOptions, type FigView, type NextStepView, type StepLine } from '../lib/salesUi';
@@ -1436,13 +1436,16 @@ function MoneyAc({ d, t }: { d: Deal; t?: DealSteps }) {
         <small title={`แผนการชำระที่พิมพ์ไว้ก่อน รวม ${fmtMoney(P.total)} บาท`}>แผน {P.n} งวด</small>
       </span>
     );
-  // what needs a look first: a document that disagrees, then what is still owed, then where it comes from
-  const owe = r === 'YES' && m.actual != null && m.forecast != null && m.actual < m.forecast;
+  // what needs a look first: a document that disagrees, then what is still owed, then where it comes from —
+  // owed as ค้างรับ and the panel say it (owedNoPlan: nothing once every PAY step is in; a shortfall that is
+  // withholding tax is said as such)
+  const o = owedNoPlan(S, d, today, t), owed = m.actual != null && o ? o.owed : 0, owe = owed > 0.005;
   // still owed on a typed Actual: "ค้าง x", and on hover the attach, as for any typed figure
   const sub =
     v.kind === 'warn' ? <FigSub v={v} />
-    : owe && v.kind === 'typed' && att ? <FigSub v={{ ...v, word: 'ค้าง ' + fmtMoney(m.forecast! - m.actual!), title: `Actual พิมพ์เอง · ค้าง ${fmtMoney(m.forecast! - m.actual!)} บาท แนบใบเสร็จเพื่อตรวจยอด` }} onAttach={att} />
-    : owe ? <small>ค้าง {fmtMoney(m.forecast! - m.actual!)}</small>
+    : owe && v.kind === 'typed' && att ? <FigSub v={{ ...v, word: 'ค้าง ' + fmtMoney(owed), title: `Actual พิมพ์เอง · ค้าง ${fmtMoney(owed)} บาท แนบใบเสร็จเพื่อตรวจยอด` }} onAttach={att} />
+    : owe ? <small>ค้าง {fmtMoney(owed)}</small>
+    : o?.wht ? <small className="ok" title={`รับครบ · ส่วนที่ขาด ${fmtMoney(o.wht.short)} บาท คือหัก ณ ที่จ่าย ${o.wht.rate}%${v.title ? ' · ' + v.title : ''}`}>หัก ณ ที่จ่าย {o.wht.rate}%</small>
     : v.kind === 'ok' ? <FigSub v={v} />
     : r === 'YES' && m.actual != null && !ps.left.length ? <small className="ok">รับครบ</small>
     : <FigSub v={v} onAttach={att} />;
@@ -1981,6 +1984,8 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
         return <b>{lead || 'ชำระผ่านใบเสนอราคาร่วม'}</b>;
       case 'done':
         return <b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b>;
+      case 'dup':
+        return <b>{lead}</b>;
       default:
         return <>ยังไม่มีผลการขาย</>;
     }
@@ -1997,6 +2002,9 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
       return <><b>{lead || 'ชำระผ่านใบเสนอราคาร่วม'}</b> ปิดงานพร้อมกันทั้งใบเสนอราคาร่วม</>;
     case 'done':
       return <><b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b> กดปิดงานเพื่อย้ายไปแท็บปิดงาน</>;
+    case 'dup':
+      // (a document counted twice: never "paid in full" until it counts once — the panel's box says how)
+      return <><b>{lead}</b> ให้นับครั้งเดียวก่อน แล้วปุ่มปิดงานจะขึ้น</>;
     default:
       return <>ผลการขาย (CLOSE) YES / NO <b>ยังไม่ใช่การปิดงาน</b> ปุ่มปิดงานจะขึ้นเมื่อผลเป็น NO หรือได้งานและรับชำระครบ</>;
   }
@@ -2335,6 +2343,8 @@ function DealCard({ d }: { d: Deal }) {
   const tone = (v: FigView) => (v.kind === 'ok' ? 'ok' : v.kind === 'warn' ? 'warn' : '');
   const attFc = !ro && (fv.kind === 'typed' || !fv.kind) ? () => tk.attach(d, { at: 'quote' }) : null;
   const attAc = !ro && (av.kind === 'typed' || av.kind === 'hand' || (!av.kind && won)) ? () => tk.attach(d, { at: 'pay' }) : null;
+  // without a plan, what is owed as ค้างรับ and the panel say it (owedNoPlan)
+  const owe = won && !P ? owedNoPlan(S, d, today, t) : null;
   const acTile = P && won ? (
     <>
       <b className={P.got ? '' : 'none'}>{P.got ? fmtMoney(P.got) : '—'}</b>
@@ -2349,8 +2359,10 @@ function DealCard({ d }: { d: Deal }) {
   ) : (
     <>
       <b className={m.actual != null ? '' : 'none'}>{m.actual != null ? fmtMoney(m.actual) : '—'}</b>
-      {av.kind !== 'warn' && m.actual != null && m.forecast != null && m.forecast > m.actual && won ? (
-        <small>ค้าง {fmtMoney(m.forecast - m.actual)}</small>
+      {av.kind !== 'warn' && m.actual != null && (owe?.owed ?? 0) > 0.005 ? (
+        <small>ค้าง {fmtMoney(owe!.owed)}</small>
+      ) : av.kind !== 'warn' && owe?.wht ? (
+        <small className="ok" title={`รับครบ · ส่วนที่ขาด ${fmtMoney(owe.wht.short)} บาท คือหัก ณ ที่จ่าย ${owe.wht.rate}%`}>หัก ณ ที่จ่าย {owe.wht.rate}%</small>
       ) : (
         <small className={tone(av)} title={av.title || undefined}>{word(av, actualSource())}</small>
       )}
@@ -2611,7 +2623,7 @@ function CardKids({ d, t }: { d: Deal; t: DealSteps }) {
           <div><b>ปิดงาน</b><span>ย้ายไปแท็บปิดงาน</span></div>
           <p className="sl-mk-plan">
             {cv.state === 'no' ? (ro ? 'ผลเป็น NO' : 'ผลเป็น NO กดปิดงานเพื่อย้ายไปแท็บปิดงาน')
-              : cv.state === 'pays' && cv.lead ? cv.lead
+              : (cv.state === 'pays' || cv.state === 'dup') && cv.lead ? cv.lead
               : cv.state === 'plan' || cv.state === 'pays' ? `ได้งานแล้ว · รับ ${ps.paid.length}/${ps.pays.length} งวด${P ? 'ตามแผน' : ''} · ${cv.hint}`
               : cv.state === 'done' ? (ro ? 'ได้งานและรับชำระครบ' : 'ได้งานและรับชำระครบ ปิดงานได้')
               : cv.state === 'joint' ? 'ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม'

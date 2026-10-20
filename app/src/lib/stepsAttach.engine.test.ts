@@ -17,12 +17,13 @@ import { analyzeDocText, type DocFacts } from './docExtract';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import {
-  attachStage, closeReady, dealMoney, dealSteps, docsOf, dupCounted, payState, planOf, stepCode, stepOf,
+  attachStage, cashLines, closeReady, dealMoney, dealSteps, docsOf, dupCounted, overdueDays, owedNoPlan, payDone, payState, planOf, receivables, stepCode, stepOf,
   type Deal,
 } from './sales';
-import { acFig, fcFig } from './salesUi';
+import { acFig, closeConfirm, closingView, fcFig, statusView } from './salesUi';
+import { trackWords } from '../components/StageTrack';
 import { teamSteps } from './steps';
-import { attachPlan, panelEntry, receiveNow, recvPlan, recvToast, type AttachChoice, type AttachEntry } from './attachPlan';
+import { attachPlan, panelEntry, receiveNow, recvOverText, recvPlan, recvToast, recvUndoText, undoReceive, type AttachChoice, type AttachEntry } from './attachPlan';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -275,5 +276,154 @@ describe('a payment plan: one PAY step per installment', () => {
     expect(actual(e, id)).toBe(60000);
     expect(pays(e, id).map((v) => `${v.code}:${v.state}`)).toEqual(['PAY:done']);
     expect(ready(e, id)).toBe(true);
+  });
+});
+
+describe('review of batch 7: one rule for what is owed, one tap on the rest, a double count, the name notice', () => {
+  /** A deal without a plan whose quotation was recorded with VAT (deef2c3 attached at the "total" basis by
+   *  default: 61,730.77), won — the sample receipt (ยอดชำระ 60,000) is short of it by withholding tax only. */
+  async function vatQuoted(e: GccEngine) {
+    const id = newDeal(e);
+    await e.attachDoc(id, QFILE, { kind: 'quotation', amount: 61730.77, target: 'forecast', basis: 'total', detected: 61730.77, docNo: 'QT2026080001', docDate: '2026-08-20', stage: 'QUOTATION' });
+    e.setStep(id, 'CLOSED DEAL', { d: '2026-08-25', n: 'YES' });
+    return id;
+  }
+  /** Forecast `fc` (typed into a quotation), won, no plan */
+  async function won(e: GccEngine, fc: number) {
+    const id = newDeal(e);
+    await e.attachDoc(id, QFILE, { kind: 'quotation', amount: fc, target: 'forecast', basis: 'manual', detected: fc, docNo: 'QT2026080020', docDate: '2026-08-20', stage: 'QUOTATION' });
+    e.setStep(id, 'CLOSED DEAL', { d: '2026-08-25', n: 'YES' });
+    return id;
+  }
+  const rc = (no: string, amount: number, date = '2026-09-15') => facts({ docNo: no, docDate: date, total: amount });
+  const owedAll = (e: GccEngine, id: string) => ({
+    kpi: receivables(e.sales, [deal(e, id)], TODAY).receivable,
+    cash: cashLines(e.sales, [deal(e, id)], TODAY).filter((l) => l.kind === 'owed').reduce((a, l) => a + l.amt, 0),
+    deal: owedNoPlan(e.sales, deal(e, id), TODAY),
+  });
+
+  it('short of the Forecast by withholding tax only: the dialog says so, and the panel, the row, ค้างรับ and Cashflow all owe nothing', async () => {
+    const e = mk(), id = await vatQuoted(e);
+    expect(owedAll(e, id)).toEqual({ kpi: 61730.77, cash: 61730.77, deal: { owed: 61730.77, wht: null, under: 0 } });
+    const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
+    expect(p).toMatchObject({ title: 'ใบเสร็จ · ขั้น PAY ชำระเงิน', amount: 60000 });
+    expect(p.after).toBe('Actual เป็น 60,000 บาท · ขั้น PAY ถือว่ารับครบ เพราะส่วนที่ขาด 1,730.77 คือหัก ณ ที่จ่าย 3% · งานนี้พร้อมปิดงาน');
+    await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
+    expect(ready(e, id)).toBe(true);
+    expect(shown(e, id)).toEqual([...FIVE, 'PAY ชำระเงิน']);
+    expect(owedAll(e, id)).toEqual({ kpi: 0, cash: 0, deal: { owed: 0, wht: { short: 1730.77, rate: 3 }, under: 0 } });
+  });
+
+  it('the rest filed with less than it ("PAY ส่วนที่เหลือ" done by a part receipt): ready, nothing owed anywhere, and "ต่ำกว่า Forecast" said', async () => {
+    const e = mk(), id = await won(e, 100000);
+    const p1 = await save(e, id, { at: 'pay', stage: 'PAY1' }, rc('RC-1', 30000), {}, pdf('RC-1.pdf'));
+    expect(p1.after).toBe('Actual เป็น 30,000 บาท · ยังค้างรับ 70,000 บาท');
+    expect(owedAll(e, id)).toEqual({ kpi: 70000, cash: 70000, deal: { owed: 70000, wht: null, under: 0 } });
+    const p2 = plan(e, id, { at: 'pay', stage: 'PAY2' }, rc('RC-2', 30000, '2026-10-01'), {}, pdf('RC-2.pdf'));
+    expect(p2.title).toBe('ใบเสร็จ · ขั้น PAY ส่วนที่เหลือ');
+    expect(p2.after).toBe('Actual เป็น 60,000 บาท · ต่ำกว่า Forecast 40,000 บาท · งานนี้พร้อมปิดงาน');
+    await save(e, id, { at: 'pay', stage: 'PAY2' }, rc('RC-2', 30000, '2026-10-01'), {}, pdf('RC-2.pdf'));
+    expect(ready(e, id)).toBe(true);
+    expect(owedAll(e, id)).toEqual({ kpi: 0, cash: 0, deal: { owed: 0, wht: null, under: 40000 } });
+  });
+
+  it('one tap at PAY when the job\'s money already makes up the Forecast (a receipt filed at PAY2 the eight-stage way): nothing recorded, and why', async () => {
+    const e = mk(), id = await won(e, 60000);
+    await e.attachDoc(id, RFILE, { kind: 'receipt', amount: 60000, target: 'actual', basis: 'netPay', detected: 60000, docNo: 'INV2026090004', docDate: '2026-09-28', stage: 'PAY2' });
+    expect(pays(e, id).map((v) => `${v.code}${v.rest ? ' ' + v.th : ''}:${v.state}`)).toEqual(['PAY:next', 'PAY ส่วนที่เหลือ:done']);
+    const r = recvPlan(e.sales, deal(e, id), 'PAY1', TODAY)!;
+    expect(r.over).toEqual({ actual: 60000, cap: 60000, extra: null, what: 'Forecast' });
+    expect(recvOverText(e.sales, deal(e, id), r)).toBe('ยังไม่ได้บันทึก PAY · Actual 60,000 บาท ครบตาม Forecast 60,000 บาทแล้ว · ถ้าได้รับเงินเพิ่มจริง แนบใบเสร็จที่ขั้นนี้');
+    expect(receiveNow(e, id, 'PAY1', TODAY, 60000)).toBeNull();
+    expect(actual(e, id)).toBe(60000);
+    expect(planOf(e.sales, deal(e, id), TODAY)).toBeNull();
+  });
+
+  /** no plan, won, Forecast 100,000, a receipt of 40,000 at PAY: "PAY ส่วนที่เหลือ" owes 60,000 */
+  async function partPaid(e: GccEngine) {
+    const id = await won(e, 100000);
+    await save(e, id, { at: 'pay', stage: 'PAY1' }, rc('RC2026090001', 40000), {}, pdf('RC2026090001.pdf'));
+    expect(shown(e, id)).toEqual([...FIVE, 'PAY ชำระเงิน', 'PAY ส่วนที่เหลือ']);
+    return id;
+  }
+
+  it('one tap on "PAY ส่วนที่เหลือ": the money is recorded at the single PAY, the steps keep their names (no PAY1 / PAY2 of a plan), and "เลิกทำ" puts it back', async () => {
+    const e = mk(), id = await partPaid(e);
+    expect(recvPlan(e.sales, deal(e, id), 'PAY2', TODAY)).toMatchObject({ plan: true, shown: 60000, ask: false, over: null });
+    const x = receiveNow(e, id, 'PAY2', TODAY)!;
+    expect(x).toMatchObject({ stage: 'PAY1', code: 'PAY ส่วนที่เหลือ', amount: 60000, ready: true, madePlan: true });
+    expect(recvToast(e.sales, deal(e, id), x.stage, x.amount, x.code)).toBe('บันทึกรับเงิน PAY ส่วนที่เหลือ แล้ว 60,000 บาท · วันนี้ · ยังไม่มีใบเสร็จ');
+    expect(shown(e, id)).toEqual([...FIVE, 'PAY ชำระเงิน']);
+    expect(planOf(e.sales, deal(e, id), TODAY)!.lines.map((l) => `${l.stage}:${l.code}:${l.status}:${l.amt}:${l.got}`)).toEqual(['PAY1:PAY:paid:100000:100000']);
+    expect(actual(e, id)).toBe(100000);
+    expect(ready(e, id)).toBe(true);
+    expect(owedAll(e, id).kpi).toBe(0);
+    const r = undoReceive(e, x.undo);
+    expect(r).toEqual({ stale: [] });
+    expect(recvUndoText(e.sales, deal(e, id), x.undo, r)).toBe('เลิกทำแล้ว · PAY ส่วนที่เหลือ กลับเป็นยังไม่ได้รับ · แผนชำระที่ตั้งให้ถูกลบด้วย');
+    expect(shown(e, id)).toEqual([...FIVE, 'PAY ชำระเงิน', 'PAY ส่วนที่เหลือ']);
+    expect(planOf(e.sales, deal(e, id), TODAY)).toBeNull();
+    expect(actual(e, id)).toBe(40000);
+  });
+
+  it('one tap on the rest, then the receipt of that money: not counted on top (Actual stays 100,000)', async () => {
+    const e = mk(), id = await partPaid(e);
+    receiveNow(e, id, 'PAY2', TODAY);
+    const f = rc('RC2026100002', 60000, TODAY), file = pdf('RC2026100002.pdf');
+    const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, f, {}, file);
+    expect(p.save?.target).toBe('none');
+    await save(e, id, { at: 'pay', stage: 'PAY1' }, f, {}, file);
+    expect(actual(e, id)).toBe(100000);
+    expect(ready(e, id)).toBe(true);
+  });
+
+  it('one tap on the rest of a deal paid the old way (PAY done by a note, the Actual typed): the whole Forecast is in, one PAY step', async () => {
+    const e = mk(), id = await won(e, 100000);
+    e.setStep(id, 'PAY1', { d: '2026-09-10', n: 'โอนมาแล้วบางส่วน' });
+    e.updateDeal(id, { actual: 40000 });
+    expect(pays(e, id).map((v) => `${v.code}${v.rest ? ' ' + v.th : ''}:${v.state}:${v.short ?? ''}`)).toEqual(['PAY:done:', 'PAY ส่วนที่เหลือ:next:60000']);
+    const x = receiveNow(e, id, 'PAY2', TODAY)!;
+    expect(x).toMatchObject({ code: 'PAY ส่วนที่เหลือ', amount: 60000, ready: true });
+    expect(actual(e, id)).toBe(100000);
+    expect(shown(e, id)).toEqual([...FIVE, 'PAY ชำระเงิน']);
+    undoReceive(e, x.undo);
+    expect(actual(e, id)).toBe(40000);
+    expect(shown(e, id)).toEqual([...FIVE, 'PAY ชำระเงิน', 'PAY ส่วนที่เหลือ']);
+  });
+
+  it('a receipt counted twice is not "paid in full": not ready to close, the words say what to fix; counted once, ready', async () => {
+    const e = mk(), id = newDeal(e);
+    await e.attachDoc(id, QFILE, { kind: 'quotation', amount: 60000, target: 'forecast', basis: 'netPay', detected: 60000, docNo: 'QT2026080001', docDate: '2026-08-20', stage: 'QUOTATION' });
+    e.setStep(id, 'CLOSED DEAL', { d: '2026-08-25', n: 'YES' });
+    await e.attachDoc(id, RFILE, { kind: 'receipt', amount: 61730.77, target: 'actual', basis: 'total', detected: 61730.77, docNo: 'INV2026090004', docDate: '2026-09-28', stage: 'PAY1' });
+    await e.attachDoc(id, RFILE, { kind: 'receipt', amount: 60000, target: 'actual', basis: 'netPay', detected: 60000, docNo: 'INV2026090004', docDate: '2026-09-28', stage: 'PAY2' });
+    expect(payState(e.sales, deal(e, id), TODAY).left).toEqual([]);
+    expect(ready(e, id)).toBe(false);
+    expect(statusView(e.sales, deal(e, id), TODAY)).toMatchObject({ word: 'ได้งาน', sub: 'รอแก้ยอดนับซ้ำ', ready: false });
+    const cv = closingView(e.sales, deal(e, id), TODAY);
+    expect(cv).toMatchObject({ state: 'dup', ready: false, hint: 'รอแก้ยอดนับซ้ำ', progress: null, lead: 'ได้งานแล้ว · ใบเสร็จ INV2026090004 นับซ้ำ 2 ครั้ง' });
+    expect(cv.text).toBe('ได้งานแล้ว · ใบเสร็จ INV2026090004 นับซ้ำ 2 ครั้ง ให้นับครั้งเดียวก่อน แล้วระบบจะชวนให้ปิดงาน');
+    expect(closeConfirm(e.sales, deal(e, id), TODAY, 'ห้าขั้น')).toContain('ยอดนับซ้ำ');
+    // (not a job to call either: its money is in, only counted twice)
+    expect(overdueDays(e.sales, deal(e, id), TODAY)).toBeNull();
+    expect(payDone(e.sales, deal(e, id), TODAY)).toBe(true);
+    await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
+    expect(ready(e, id)).toBe(true);
+    expect(closingView(e.sales, deal(e, id), TODAY).state).toBe('done');
+  });
+
+  it('the customer\'s name in the document is another company\'s: its own notice, after the main one (whose link stays with its sentence)', async () => {
+    const e = mk(), id = await won(e, 61730.77);
+    const p = plan(e, id, { at: 'other' }, { ...RC, kind: 'invoice', docNo: 'BL2026080006', party: 'บริษัท พีเอ็ม เอ็นไวรอนเมนทัล จำกัด (สำนักงานใหญ่)' }, {}, pdf('BL2026080006.pdf'));
+    expect(p.notice!.tag).toBe('เป็นใบแจ้งหนี้');
+    expect(p.notice!.text).not.toContain('ชื่อลูกค้า');
+    expect(p.notice!.text.endsWith('ถ้าเป็นเงินที่ได้รับของงานนี้')).toBe(true);
+    expect(p.party).toEqual({ tone: 'warn', tag: 'ชื่อไม่ตรง', text: `ชื่อลูกค้าในเอกสาร "บริษัท พีเอ็ม เอ็นไวรอนเมนทัล จำกัด (สำนักงานใหญ่)" ไม่ตรงกับ "${deal(e, id).client}" · ตรวจว่าแนบถูกงาน`, alts: [] });
+  });
+
+  it('the dots\' words name "PAY ส่วนที่เหลือ" in full: the two PAY steps can be told apart', async () => {
+    const e = mk(), id = await partPaid(e);
+    const t = steps(e, id);
+    expect(trackWords(t.steps.filter((v) => v.counted), t.next?.id || '')).toBe('CONTACT ข้าม · QUOTATION ทำแล้ว · FOLLOW ข้าม · CLOSE ได้งาน · PAY ทำแล้ว · PAY ส่วนที่เหลือ ถัดไป');
   });
 });

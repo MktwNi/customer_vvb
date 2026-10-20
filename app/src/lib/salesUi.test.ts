@@ -72,7 +72,7 @@ function one(steps: SalesState['steps'], pays: Record<string, Partial<PayLine>> 
   if (stages) S.cfg.stages = stages;
   Object.entries(pays).forEach(([k, v]) => (S.pays['x/' + k] = pay(v)));
   Object.entries(docs).forEach(([stage, amount], i) => {
-    S.docs['x/r' + i] = { id: 'r' + i, deal: 'x', kind: 'receipt', name: 'r.pdf', mime: 'application/pdf', size: 1, fileId: '', docNo: 'RC-' + i, docDate: '', amount, target: 'actual', detected: null, basis: 'total', stage, at: '2026-10-01T00:00:00.000Z', by: '' };
+    S.docs['x/r' + i] = { id: 'r' + i, deal: 'x', kind: 'receipt', name: `r${i}.pdf`, mime: 'application/pdf', size: 1, fileId: '', docNo: 'RC-' + i, docDate: '', amount, target: 'actual', detected: null, basis: 'total', stage, at: '2026-10-01T00:00:00.000Z', by: '' };
   });
   return { S, d };
 }

@@ -71,7 +71,8 @@ async function attach(e: GccEngine, id: string, o: { fx?: DocFacts; stage?: stri
   const stage = o.stage ?? attachStage(S, d, { kind, target: 'actual' }, TODAY);
   const p = proposedAmount(f), amount = o.amount ?? p.value!;
   const file = pdf(o.name ?? (f.docNo || 'INV2026090004') + '.pdf'), docNo = o.docNo ?? f.docNo, docDate = o.docDate ?? f.docDate;
-  const info: AttachInfo = { kind, amount, target: targetForStage(S.cfg, stage, kind), docDate, stage };
+  // (what the document is goes with it: the preview sees a double count as saving it does — closeReady)
+  const info: AttachInfo = { kind, amount, target: targetForStage(S.cfg, stage, kind), docDate, stage, docNo, name: file.name, size: file.size };
   const g = countGuard(S, d, { ...info, add: o.add, pinned: o.pinned, docNo, name: file.name, size: file.size, figures: [f.total, f.netPay, f.subtotal], refs: f.refs }, TODAY);
   const mode = o.mode ?? g.pick;
   const how = countAs(g, mode, info);

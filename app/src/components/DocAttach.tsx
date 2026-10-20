@@ -321,6 +321,11 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
                 </p>
               </div>
             )}
+            {plan.party && (
+              <div className={'oa-box ' + plan.party.tone} role="status">
+                <p><span className="oa-tag">{plan.party.tag}</span><Nw t={plan.party.text} /></p>
+              </div>
+            )}
             {scan ? (
               // S2: nothing read (a photo, a scan): one question
               <div className="oa-scan">

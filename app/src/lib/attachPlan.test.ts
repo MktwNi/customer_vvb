@@ -383,14 +383,16 @@ describe('nothing read, a number typed, a name that does not match, a change bef
     expect(plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT(), { figure: 'total' })).toMatchObject({ amount: 61730.77, basis: 'total', primary: 'บันทึกรับเงิน 61,730.77 บาท' });
   });
 
-  it('18. the customer named in the document is another company: a tag, appended to another notice', async () => {
+  it('18. the customer named in the document is another company: a tag, its own notice after another one (review: never spliced into it)', async () => {
     const e = mk(), id = await job(e, { plan: 1 });
     const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT({ party: 'บริษัท อื่น จำกัด' }));
-    expect(p.notice).toMatchObject({ tone: 'warn', tag: 'ชื่อไม่ตรง' });
+    expect(p.notice).toBeNull();
+    expect(p.party).toMatchObject({ tone: 'warn', tag: 'ชื่อไม่ตรง' });
     await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     const q = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT({ party: 'บริษัท อื่น จำกัด' }));
     expect(q.notice!.tag).toBe('ใบซ้ำ');
-    expect(q.notice!.text).toContain('ชื่อลูกค้าในเอกสาร "บริษัท อื่น จำกัด" ไม่ตรงกับ');
+    expect(q.notice!.text).not.toContain('ชื่อลูกค้า');
+    expect(q.party!.text).toContain('ชื่อลูกค้าในเอกสาร "บริษัท อื่น จำกัด" ไม่ตรงกับ');
   });
 
   it('19. worked out again at save time: another document counted meanwhile changes the sentence and the button', async () => {
@@ -659,7 +661,7 @@ describe('a receipt larger than its installment (review)', () => {
     const e2 = mk(), id2 = await job(e2, { qt: 60000, qtBasis: 'manual', plan: 2 });
     await save(e2, id2, { at: 'pay', stage: 'PAY1' }, RCT());
     const r2 = recvPlan(e2.sales, deal(e2, id2), 'PAY2', TODAY)!;
-    expect(r2.over).toEqual({ actual: 60000, cap: 60000, extra: { stage: 'PAY1', by: 30000 } });
+    expect(r2.over).toEqual({ actual: 60000, cap: 60000, extra: { stage: 'PAY1', by: 30000 }, what: 'แผน' });
     expect(recvOverText(e2.sales, deal(e2, id2), r2)).toBe('ยังไม่ได้บันทึก PAY2 · Actual 60,000 บาท ครบตามแผน 60,000 บาทแล้ว (PAY1 รับเกินงวด 30,000 บาท) · ถ้าได้รับเงินเพิ่มจริง กด “แก้ยอด / วันที่”');
     expect(receiveNow(e2, id2, 'PAY2', TODAY)).toBeNull();
     expect(actual(e2, id2)).toBe(60000);

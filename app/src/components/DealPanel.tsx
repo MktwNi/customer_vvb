@@ -4,11 +4,11 @@ import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
   ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, beYear, closeReady, dealMoney, dealResult, dealSteps, docMismatch, docsOf, dueOf, dupCounted, fmtMoney,
-  lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stepCode, stepOf, whtRate, wonDate,
+  lastContactInfo, mismatchText, overdueDays, owedNoPlan, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stepCode, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState, type StepView,
 } from '../lib/sales';
 import { OLD_TH } from '../lib/steps';
-import { CLOSE_TITLE, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, stepEdit, type FigView } from '../lib/salesUi';
+import { CLOSE_TITLE, DUP_HINT, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, stepEdit, type FigView } from '../lib/salesUi';
 import { SHOWABLE, openDocFile } from './DocAttach';
 import { useAttach } from './AttachProvider';
 import { panelEntry, recvPlan, type AttachEntry } from '../lib/attachPlan';
@@ -369,12 +369,17 @@ export function DealPanel() {
       </>
     );
 
-  // the summary strip: สถานะ · Forecast · Actual · ค้างรับ
+  // one document counted more than once (an old double count, two teammates attaching the same receipt)
+  const dups = money && jr !== 'member' ? dupCounted(S, d) : [];
+  // the summary strip: สถานะ · Forecast · Actual · ค้างรับ (a double count is never "paid in full": closeReady)
   const stWord =
-    won ? (P ? (ps.left.length ? `ได้งาน · รับ ${P.paidN}/${P.n} งวด` : 'ได้งาน · รับครบทุกงวด') : ps.left.length ? `ได้งาน · รอชำระ ${codes(ps.left)}` : ps.pays.length ? 'ได้งาน · รับชำระครบ' : 'ได้งาน')
+    won ? (ps.pays.length && !ps.left.length && dups.length ? 'ได้งาน · นับยอดซ้ำ' : P ? (ps.left.length ? `ได้งาน · รับ ${P.paidN}/${P.n} งวด` : 'ได้งาน · รับครบทุกงวด') : ps.left.length ? `ได้งาน · รอชำระ ${codes(ps.left)}` : ps.pays.length ? 'ได้งาน · รับชำระครบ' : 'ได้งาน')
     : r === 'NO' ? 'ไม่ได้งาน' : r === 'WAIT' ? 'รอผล' : t.done ? 'กำลังติดตาม' : 'ยังไม่เริ่ม';
   const stKind = won ? 'ok' : r === 'NO' ? 'bad' : r === 'WAIT' ? 'warn' : t.done ? 'info' : 'neutral';
-  const left = P && won ? P.left : won && m.forecast != null ? Math.max(0, m.forecast - (m.actual || 0)) : null;
+  // without a plan, what is owed as ค้างรับ and Cashflow say it (lib/sales owedNoPlan): nothing once every PAY step
+  // is in — a shortfall that is withholding tax, or a rest done with less, is said in words instead
+  const owe = won && !P ? owedNoPlan(S, d, today, t) : null;
+  const left = P && won ? P.left : won && m.forecast != null ? owe?.owed ?? 0 : null;
   const nx = P && won ? P.next : null;
   const typedAc = !m.acDocs && !m.hand && !P;
   // "แนบเอกสาร" at the figures: a quotation for the Forecast (checked against the typed one), an invoice
@@ -394,8 +399,6 @@ export function DealPanel() {
     if ((ev.target as Element | null)?.closest?.('.xp-card')) return;
     attach(panelEntry(S, d, t.next?.id || '', today), f);
   };
-  // one document counted more than once (an old double count, two teammates attaching the same receipt)
-  const dups = money && jr !== 'member' ? dupCounted(S, d) : [];
 
   return (
     <>
@@ -449,7 +452,12 @@ export function DealPanel() {
               <span>ค้างรับ</span>
               <b className={left ? (nx && nx.lateDays ? 'bad' : 'warn') : 'none'}>{left ? fmtMoney(left) : '—'}</b>
               {won ? (
-                nx ? <small className={nx.lateDays ? 'bad' : ''}>{nx.code} · {nx.lateDays ? `เลยกำหนด ${nx.lateDays} วัน` : nx.due ? dmTh(nx.due) : 'ยังไม่กำหนดวัน'}</small> : left ? <small>{codes(ps.left)}</small> : <small className="ok">ครบทุกงวด</small>
+                nx ? <small className={nx.lateDays ? 'bad' : ''}>{nx.code} · {nx.lateDays ? `เลยกำหนด ${nx.lateDays} วัน` : nx.due ? dmTh(nx.due) : 'ยังไม่กำหนดวัน'}</small>
+                : left ? <small>{codes(ps.left)}</small>
+                : dups.length && !ps.left.length ? <small className="warn">{DUP_HINT}</small>
+                : owe?.wht ? <small className="ok" title={`ส่วนที่ขาด ${fmtMoney(owe.wht.short)} บาท คือหัก ณ ที่จ่าย ${owe.wht.rate}%`}>รับครบ · หัก ณ ที่จ่าย {owe.wht.rate}%</small>
+                : owe?.under ? <small title={`ทุกขั้น PAY บันทึกแล้ว · ขาดจาก Forecast ${fmtMoney(owe.under)} บาท`}>ต่ำกว่า Forecast</small>
+                : <small className="ok">ครบทุกงวด</small>
               ) : r === 'NO' ? <small>ไม่ได้งาน</small> : P ? <small>แผน {P.n} งวด · {fmtMoney(P.total)}</small> : <small>ยังไม่มีผลการขาย</small>}
             </div>
             </>}
@@ -625,6 +633,11 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
                   <p className="sl-tl-n t-muted">ยังไม่ได้บันทึก</p>
                 ) : null}
                 {planLine}
+                {/* money recorded by hand on top of the documents shown here ("รับเงินแล้ว" at "PAY ส่วนที่เหลือ"):
+                    said, so the step does not read as only what its documents count */}
+                {money && pl && pl.hand && pl.docs.length > 0 && pl.handGot > 0 && (
+                  <p className="sl-tl-plan">บันทึกรับเงินเองอีก {fmtMoney(pl.handGot)} บาท{pl.line.rcv ? ' · ' + isoTh(pl.line.rcv) : ''} · ยังไม่มีใบเสร็จ</p>
+                )}
                 {v.kind === 'pay' && v.state === 'future' && !won && !P && t.result !== 'NO' && v.counted && (
                   <p className="sl-tl-plan">ตั้งแผนกี่งวด ขั้น PAY จะขึ้นตามจำนวนงวด</p>
                 )}
@@ -793,7 +806,8 @@ function StepEdit({ d, p, v, won, doc, qt, attach, onHold, onDone }: { d: Deal; 
   const P = planOf(S, d, today);
   // one tap: with a plan the installment not received yet (part received by hand: its form opens, as one
   // installment keeps one hand receipt and its date); without one, a won deal's PAY step (the single PAY, or
-  // the rest of the payment "PAY ส่วนที่เหลือ": recvPlan sets a plan of one installment for what is left)
+  // the rest of the payment "PAY ส่วนที่เหลือ": receiveNow sets a plan of one installment, the whole Forecast at
+  // the single PAY step, so the steps keep their names)
   const canRecv = own && v.kind === 'pay' && won && (line ? line.status !== 'paid' && line.status !== 'off' && (!!recvPlan(S, d, p, today) || line.handGot > 0) : !P && !v.outside && v.state !== 'done');
   const recv = (typed?: number | null) => {
     const r = at.recv(d, p, typed, { inline: true });

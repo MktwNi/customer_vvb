@@ -2056,17 +2056,19 @@ export class GccEngine {
    * amount counts as complete ("ถือว่ารับครบงวดนี้"). An empty note of its step (every installment is
    * one, PAY3 too) is filled in as a document's would be ("รับชำระแล้ว 53,500 บาท · โอน", on the date
    * received), so builds without the plan see the stage done too. A document attached there later takes
-   * over the amount. Returns true when this made the deal ready to close (the UI then offers ปิดงาน).
+   * over the amount. `add`: the money is kept on top of the documents counted there (PayLine.add: one tap on
+   * "PAY ส่วนที่เหลือ", whose receipt so far is at the single PAY). Returns true when this made the deal ready to
+   * close (the UI then offers ปิดงาน).
    */
-  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean {
+  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean; add?: boolean }): boolean {
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
     if (!this.canDeal('edit.pay', d)) return this.deny(), false;
     if (!d || !cur) return false;
     const today = todayISO(), was = closeReady(S, d, today);
-    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, fullAt: null, ...(r.how !== undefined ? { how: r.how } : {}), at: new Date().toISOString(), by: this.me() })!;
+    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, fullAt: null, ...(r.how !== undefined ? { how: r.how } : {}), ...(r.add !== undefined ? { add: r.add } : {}), at: new Date().toISOString(), by: this.me() })!;
     n.rcv = n.rcv || today;
     if (n.full) n.fullAt = this.gotWith(d, stage, n); // counted complete for what came in now
-    const f = (['rcv', 'got', 'full', 'fullAt', 'how'] as const).filter((x) => n[x] !== cur[x]);
+    const f = (['rcv', 'got', 'full', 'fullAt', 'how', 'add'] as const).filter((x) => n[x] !== cur[x]);
     this.batchOps(() => {
       S.pays[k] = n;
       this.op(keyOf.dpay(dealId, stage), { ...n }, { f: [...f, 'at', 'by'] });

@@ -603,7 +603,8 @@ export function overdueDays(s: SalesState, d: Deal, today: string, t?: DealSteps
   const jr = jointRole(s, d);
   if (jr === 'header') return null;
   // (a company that withdrew from a joint quotation waits for it to close: nothing to follow up)
-  if (dealResult(s, d) === 'NO' || closeReady(s, d, today, t) || (dealResult(s, d) === 'YES' && (jr === 'member' || hasPlan(s, d.id)))) return null;
+  // (a won job whose money is only counted twice is not one to call: payDone, not closeReady)
+  if (dealResult(s, d) === 'NO' || payDone(s, d, today, t) || (dealResult(s, d) === 'YES' && (jr === 'member' || hasPlan(s, d.id)))) return null;
   const lc = lastContact(s, d, today) || (d.at || '').slice(0, 10);
   if (!lc || lc > today) return null;
   const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(lc + 'T00:00:00')) / 864e5);
@@ -1181,7 +1182,8 @@ export function payState(s: SalesState, d: Deal, today: string, t?: DealSteps): 
   return { pays, paid, left: pays.filter((p) => !paid.includes(p)), plan: null };
 }
 /** When to offer "ปิดงาน": the result is NO; or it is YES and every installment of the plan is received
- *  (in full or counted complete) — without a plan, every PAY step of the deal is paid (payState).
+ *  (in full or counted complete) — without a plan, every PAY step of the deal is paid (payState) — and no
+ *  document is counted twice (dupCounted: the Actual says "นับซ้ำ"; never "paid in full" until it counts once).
  *  Installments outside the plan, and a plan total off the Forecast, don't matter.
  *  A joint quotation closes as one (its header and every company together, engine.closeJoint): a company of
  *  it is ready when its quotation is (the payer said NO, or YES and paid in full), whatever its own result. */
@@ -1190,8 +1192,36 @@ export function closeReady(s: SalesState, d: Deal, today: string, t?: DealSteps)
     const h = s.deals[jointHeadOf(s, d.id)];
     if (h) return closeReady(s, h, today);
   }
+  // (a document counted twice is not "paid in full": it is counted once first — dupCounted, the panel's box)
+  return payDone(s, d, today, t) && (dealResult(s, d) !== 'YES' || !dupCounted(s, d).length);
+}
+/** closeReady without the double-count check: the result is NO, or YES and every installment is in — a job
+ *  that needs closing (or fixing its count), not a call (overdueDays, the plan's contact list). */
+export function payDone(s: SalesState, d: Deal, today: string, t?: DealSteps): boolean {
+  if (jointRole(s, d) === 'member') {
+    const h = s.deals[jointHeadOf(s, d.id)];
+    if (h) return payDone(s, h, today);
+  }
   const r = dealResult(s, d);
   return r === 'NO' || (r === 'YES' && payState(s, d, today, t).left.length === 0);
+}
+/**
+ * What a won deal without a plan still owes of its Forecast: one rule for the deal panel, the table row, the
+ * phone card, ค้างรับ and Cashflow. Forecast − Actual while one of its PAY steps is still to receive (payState),
+ * else nothing — and then, when the Actual is still below the Forecast, why: `wht` the shortfall is withholding
+ * tax (the single PAY received in full, dealSteps), else `under` (the rest of the payment was done with less: a
+ * receipt of part of it, a note such as "ตกลงลดยอด"). null: not won, a plan (its lines say it), no Forecast, or a
+ * joint quotation's company (the joint quotation owes).
+ */
+export function owedNoPlan(s: SalesState, d: Deal, today: string, t?: DealSteps): { owed: number; wht: { short: number; rate: number } | null; under: number } | null {
+  if (dealResult(s, d) !== 'YES' || jointRole(s, d) === 'member' || planOf(s, d, today)) return null;
+  const m = dealMoney(s, d);
+  if (m.forecast == null) return null;
+  const A = m.actual || 0;
+  if (!(A < m.forecast)) return { owed: 0, wht: null, under: 0 };
+  if (payState(s, d, today, t).left.length) return { owed: m.forecast - A, wht: null, under: 0 };
+  const short = Math.round((m.forecast - A) * 100) / 100, r = m.actual != null ? whtRate(m.forecast, m.actual) : null;
+  return r != null ? { owed: 0, wht: { short, rate: r }, under: 0 } : { owed: 0, wht: null, under: short };
 }
 
 /** What a document attaches as: its kind, amount, what it counts toward, date; `stage` = where the user
@@ -1199,7 +1229,12 @@ export function closeReady(s: SalesState, d: Deal, today: string, t?: DealSteps)
  *  document at that stage the new one replaces ("ใช้ยอดนี้แทน"); `addHand` = the installment's hand
  *  receipt keeps counting with it ("นับเพิ่ม": paid partly by hand, the rest with this receipt); `drop` =
  *  other counted copies of the same document that stop counting with it (countAs 'replace'). */
-export interface AttachInfo { kind: DocKind; amount: number | null; target: DocTarget; docDate: string; stage?: string; replace?: string; drop?: string[]; addHand?: boolean }
+export interface AttachInfo {
+  kind: DocKind; amount: number | null; target: DocTarget; docDate: string; stage?: string; replace?: string; drop?: string[]; addHand?: boolean;
+  /** what the document is (its number, file name and size), when known: a preview (withDoc) then sees it counted
+   *  twice as saving it would (dupCounted, closeReady) */
+  docNo?: string; name?: string; size?: number;
+}
 /** Whether a document counts as money received: Actual with an amount. At a PAY stage only such a
  *  document completes the stage, replaces another or takes over its note. */
 export const countsActual = (x: Pick<DealDoc, 'target' | 'amount'>) => x.target === 'actual' && x.amount != null;
@@ -1226,7 +1261,7 @@ export function withDoc(s: SalesState, d: Deal, info: AttachInfo, today: string)
   const docs: Record<string, DealDoc> = {
     ...s.docs,
     [`${d.id}/${id}`]: {
-      id, deal: d.id, kind: info.kind, name: '', mime: '', size: 0, fileId: '', docNo: '', docDate: info.docDate, amount: info.amount,
+      id, deal: d.id, kind: info.kind, name: info.name ?? '', mime: '', size: info.size ?? 0, fileId: '', docNo: info.docNo ?? '', docDate: info.docDate, amount: info.amount,
       target: info.amount == null ? 'none' : info.target, detected: null, basis: 'manual', stage, at, cAt: at, by: '',
     },
   };
@@ -2088,9 +2123,9 @@ function cashPass(s: SalesState, deals: Iterable<Deal>, today: string): CashLine
     receivedOf(s, d, today, null).forEach((x, i) =>
       out.push({ ...base, id: `${d.id}/${x.doc?.id || x.src}/${i}`, stage: x.stage, code: code(x.stage), n: 0, amt: x.amt, kind: 'got', date: x.date, due: '', rcv: x.date, status: 'paid', src: x.src as 'doc' | 'typed', doc: x.doc }),
     );
-    const m = dealMoney(s, d), left = payState(s, d, today).left;
-    if (m.forecast != null && (m.actual || 0) < m.forecast && left.length)
-      out.push({ ...base, id: `${d.id}/rest`, stage: left[0], code: code(left[0]), n: 0, amt: m.forecast - (m.actual || 0), kind: 'owed', date: '', due: '', rcv: '', status: 'wait', src: 'rest', doc: null });
+    const o = owedNoPlan(s, d, today), left = payState(s, d, today).left;
+    if (o && o.owed > 0)
+      out.push({ ...base, id: `${d.id}/rest`, stage: left[0], code: code(left[0]), n: 0, amt: o.owed, kind: 'owed', date: '', due: '', rcv: '', status: 'wait', src: 'rest', doc: null });
   }
   return out.sort((a, b) => (!a.date ? 1 : 0) - (!b.date ? 1 : 0) || a.date.localeCompare(b.date) || a.deal.client.localeCompare(b.deal.client, 'th') || a.n - b.n);
 }
@@ -2235,8 +2270,8 @@ export function receivables(s: SalesState, deals: Deal[], today: string, attr = 
         }
       });
     else {
-      const m = dealMoney(s, d);
-      if (m.forecast != null && (m.actual || 0) < m.forecast && payState(s, d, today).left.length) r.receivable += part(m.forecast - (m.actual || 0));
+      const o = owedNoPlan(s, d, today);
+      if (o && o.owed > 0) r.receivable += part(o.owed);
     }
   });
   return r;

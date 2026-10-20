@@ -18,7 +18,7 @@ import type { DocFacts } from './docExtract';
 import { jointNo } from './joint';
 import { attachRevision, qtDay, qtView } from './quotes';
 import {
-  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countsActual, dealMoney, dealResult, dealSteps, docNoKey, docsOf, fmtMoney, isPayAt, jointHeadOf, jointOf, jointRole, payState, planOf, stageOk, stepCode, stepLabel, stepOf, whtRate, withDoc,
+  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countsActual, dealMoney, dealResult, dealSteps, docNoKey, docsOf, fmtMoney, isPayAt, jointHeadOf, jointOf, jointRole, owedNoPlan, payState, planOf, stageOk, stepCode, stepLabel, stepOf, whtRate, withDoc,
   type AttachInfo, type CountGuard, type CountMode, type Deal, type DealDoc, type DealStep, type DocKind, type DocTarget, type LineView, type PayHow, type PayLine, type PlanInput, type PlanView, type SalesState,
 } from './sales';
 import { shortName } from './salesUi';
@@ -98,6 +98,9 @@ export interface AttachPlan {
   scan: boolean;
   chip: { label: string; value: number } | null;
   notice: AttachNotice | null;
+  /** the customer named in the document is another company ("ชื่อไม่ตรง"): its own box after `notice`, so a
+   *  notice's link stays right after the sentence it completes */
+  party: AttachNotice | null;
   /** the "หลังบันทึก" line; `overTag` = "มากกว่าแผน" when Actual goes past the plan */
   after: string; overTag: string;
   /** how it counts next to money already counted ('nosave': the same file already counted: nothing stored) */
@@ -400,7 +403,7 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     }
     // a receipt larger than its installment: when it pays the next one(s) too, one click makes them one
     // installment (the plan, saved after the document: engine.setPlan)
-    const S1a = counting ? withDoc(s, d, toInfo(save!), today) : s;
+    const S1a = counting ? withDoc(s, d, { ...toInfo(save!), docNo, name: read.name.slice(0, 120), size: read.size }, today) : s;
     const P1a = counting && tStage ? planOf(S1a, d, today) : null;
     const big = P1a?.lines.find((l) => l.stage === tStage) || null;
     const cover = big && big.amt > 0 && big.got > big.amt + 0.005 ? coverOf(P1a!, big) : null;
@@ -456,6 +459,11 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
         if (ready1) parts.push('งานนี้พร้อมปิดงาน');
       } else {
         if (!replaced) parts.push(`Actual เป็น ${N(A)} บาท${mA.forecast != null && A != null && A >= mA.forecast - 0.005 ? ' · ครบตาม Forecast' : ''}`);
+        // no plan: what the Forecast still lacks once saved, as the panel, the row and ค้างรับ say it (owedNoPlan)
+        const o = !P1 ? owedNoPlan(S2, d, today) : null;
+        if (o?.wht) parts.push(`ขั้น ${code(s, d, tStage, today) || 'PAY'} ถือว่ารับครบ เพราะส่วนที่ขาด ${N(o.wht.short)} คือหัก ณ ที่จ่าย ${o.wht.rate}%`);
+        else if (o?.under) parts.push(`ต่ำกว่า Forecast ${N(o.under)} บาท`);
+        else if (o && o.owed > 0.005) parts.push(`ยังค้างรับ ${N(o.owed)} บาท`);
         if (ready1) parts.push('งานนี้พร้อมปิดงาน');
       }
       // installments received now and not after saving (a copy at another one stops counting) — against the
@@ -505,12 +513,12 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     links = { other: false, type: !jm, note: false };
   }
 
-  // ---- R9: the customer named in the document (a joint quotation's member may name its payer)
+  // ---- R9: the customer named in the document (a joint quotation's member may name its payer): a box of its
+  // own after the notice (never spliced into another notice's sentence, between it and its link)
   const payer = jm ? s.deals[jointHeadOf(s, d.id)]?.client : undefined;
-  if (f?.party && !sameParty(f.party, company) && !(payer && sameParty(f.party, payer))) {
-    const t = `ชื่อลูกค้าในเอกสาร "${f.party}" ไม่ตรงกับ "${company}" · ตรวจว่าแนบถูกงาน`;
-    notice = notice ? { ...notice, text: notice.text + ' · ' + t } : { tone: 'warn', tag: 'ชื่อไม่ตรง', text: t, alts: [] };
-  }
+  const party: AttachNotice | null = f?.party && !sameParty(f.party, company) && !(payer && sameParty(f.party, payer))
+    ? { tone: 'warn', tag: 'ชื่อไม่ตรง', text: `ชื่อลูกค้าในเอกสาร "${f.party}" ไม่ตรงกับ "${company}" · ตรวจว่าแนบถูกงาน`, alts: [] }
+    : null;
 
   // ---- "เปลี่ยนประเภท": a tile per installment still to be received (one when there is one or no plan)
   const tiles: TypeTile[] = [];
@@ -536,7 +544,7 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     amount, basis, detected, kept: save?.kept ?? false, proposed: prop?.value ?? null, figures,
     title, sub, subShort, docWord: WORD[kind], docNo, docDate, copies: !!f?.copies,
     amountLabel, reason, figs: f && mode !== 'other' && amount != null && !(links.other === false && mode === 'pay') ? figParts(f) : [], low, scan, chip,
-    notice, after, overTag, count, save: noSave ? null : save, noSave, full, fullStage, whtShort, merge,
+    notice, party, after, overTag, count, save: noSave ? null : save, noSave, full, fullStage, whtShort, merge,
     primary, primaryOff: mode !== 'other' && amount == null && !choice.later, quiet, left, links, tiles, toast,
     key: JSON.stringify([notice?.tag, notice?.text, amount, primary, count, save?.stage, save?.target, save?.replace, full, merge?.stages, after]),
   };
@@ -738,7 +746,8 @@ function payCount(
  *  counted whole at an earlier installment, say) — not recorded, the form is offered instead. */
 export interface RecvPlan {
   stage: string; amount: number | null; shown: number | null; how: PayHow; plan: boolean; ask: boolean;
-  over: { actual: number; cap: number; extra: { stage: string; by: number } | null } | null;
+  /** `what` it is measured against: the plan's total, or (no plan) the Forecast */
+  over: { actual: number; cap: number; extra: { stage: string; by: number } | null; what: 'แผน' | 'Forecast' } | null;
 }
 export function recvPlan(s: SalesState, d: Deal, stage: string, today: string): RecvPlan | null {
   const P = planOf(s, d, today);
@@ -750,17 +759,23 @@ export function recvPlan(s: SalesState, d: Deal, stage: string, today: string): 
     // (as countGuard.over for documents: a job paid to 90% of its plan, taken past 105% by this)
     const m = dealMoney(s, d), A = m.acDocs || m.hand ? m.actual ?? 0 : 0, cap = P.total;
     const x = P.lines.find((z) => z.amt > 0 && z.got > z.amt + 0.005);
-    const over = cap > 0 && A >= cap * 0.9 && A + l.amt > cap * 1.05 ? { actual: A, cap, extra: x ? { stage: x.stage, by: r2(x.got - x.amt) } : null } : null;
+    const over = cap > 0 && A >= cap * 0.9 && A + l.amt > cap * 1.05 ? { actual: A, cap, extra: x ? { stage: x.stage, by: r2(x.got - x.amt) } : null, what: 'แผน' as const } : null;
     return { stage, amount: null, shown: l.amt, how, plan: false, ask: false, over };
   }
   const m = dealMoney(s, d), left = m.forecast != null ? r2(m.forecast - (m.actual || 0)) : null;
-  return { stage, amount: null, shown: left != null && left > 0 ? left : null, how: 'transfer', plan: true, ask: !(left != null && left > 0), over: null };
+  // the money counted already makes up the Forecast (a receipt filed at another PAY step, say): one tap would
+  // count it again — as with a plan, nothing is recorded and the message says why (a typed Actual is replaced
+  // by the tap, never added to: it does not count here)
+  const A = m.acDocs || m.hand ? m.actual ?? 0 : 0;
+  const over = m.forecast != null && m.forecast > 0 && A >= m.forecast - 0.005 ? { actual: A, cap: m.forecast, extra: null, what: 'Forecast' as const } : null;
+  return { stage, amount: null, shown: left != null && left > 0 ? left : null, how: 'transfer', plan: true, ask: !(left != null && left > 0), over };
 }
 /** The engine calls one tap makes (lib/engine: markPaid, quickPlan, updatePayLine; undoPays for "เลิกทำ"). */
 export interface RecvEngine {
   sales: SalesState;
-  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean;
+  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean; add?: boolean }): boolean;
   quickPlan(dealId: string, n: number): { stages: string[]; amounts: (number | null)[] } | null;
+  setPlan(dealId: string, lines: PlanInput[]): unknown;
   updatePayLine(dealId: string, stage: string, patch: { amt?: number | null }): void;
   undoPays(dealId: string, u: Pick<RecvUndo, 'before' | 'after' | 'step'>): { stale: string[] };
 }
@@ -768,22 +783,35 @@ export interface RecvEngine {
  *  up, the amount it asked for, the line it marked), and the stage note it may have filled in. */
 export interface RecvUndo {
   deal: string; stage: string; madePlan: boolean;
+  /** the step as it was named at the tap ("PAY ส่วนที่เหลือ"; '' = as `stage` is named now) */
+  code?: string;
   before: Record<string, PayLine>; after: Record<string, PayLine>;
   step: { stage: string; before: DealStep; after: DealStep };
 }
 const paysOf = (s: SalesState, id: string): Record<string, PayLine> =>
   Object.fromEntries(Object.entries(s.pays || {}).filter(([k]) => k.startsWith(id + '/')).map(([k, v]) => [k.slice(id.length + 1), { ...v }]));
 /** Record the money at once (today, the planned amount; `typed` when it had to be asked). Returns where it
- *  went and how much, whether the job is now ready to close, whether a plan was set for it, and what
- *  "เลิกทำ" puts back. Nothing when it is not one tap (recvPlan null, `over`, or an amount still to type). */
-export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: string, typed?: number | null): { stage: string; amount: number; ready: boolean; madePlan: boolean; undo: RecvUndo } | null {
+ *  went and how much, the step as the person saw it (`code`: "PAY ส่วนที่เหลือ"), whether the job is now ready
+ *  to close, whether a plan was set for it, and what "เลิกทำ" puts back. Nothing when it is not one tap
+ *  (recvPlan null, `over`, or an amount still to type).
+ *  Without a plan, the money needs one (a hand receipt is an installment's): the single PAY step becomes a plan
+ *  of one installment — still "PAY". At "PAY ส่วนที่เหลือ" that one installment is the whole Forecast at the
+ *  single PAY step: the documents counted there stay, the money now is kept on top of them (PayLine.add), and
+ *  the steps keep the names the person saw (never "งวดที่ 1 / 2" of a plan of two). */
+export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: string, typed?: number | null): { stage: string; code: string; amount: number; ready: boolean; madePlan: boolean; undo: RecvUndo } | null {
   const d = e.sales.deals[dealId];
   if (!d) return null;
   const r = recvPlan(e.sales, d, stage, today);
   if (!r || r.over || (r.ask && !(typed != null && typed > 0))) return null;
+  const said = code(e.sales, d, stage, today), ready0 = closeReady(e.sales, d, today);
   const before = paysOf(e.sales, dealId);
-  let at = stage, madePlan = false;
-  if (r.plan) {
+  let at = stage, madePlan = false, hand: number | null = r.plan || r.ask ? null : r.amount, add = false;
+  const rest = r.plan ? restOf(e.sales, d, stage, today) : null;
+  if (rest) {
+    e.setPlan(dealId, [{ stage: rest.at, amt: rest.total, pct: null, due: '', rel: 30, how: 'transfer', howT: '', note: '' }]);
+    if (!planOf(e.sales, e.sales.deals[dealId], today)) return null;
+    ((at = rest.at), (madePlan = true), (hand = rest.hand), (add = rest.add));
+  } else if (r.plan) {
     const q = e.quickPlan(dealId, 1);
     if (!q || !q.stages.length) return null;
     at = q.stages[0];
@@ -791,10 +819,24 @@ export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: 
     if (r.ask) e.updatePayLine(dealId, at, { amt: typed! });
   } else if (r.ask) e.updatePayLine(dealId, at, { amt: typed! });
   const step0 = stepOf(e.sales, dealId, at);
-  const ready = e.markPaid(dealId, at, { date: today, amount: r.plan || r.ask ? null : r.amount, how: r.how, full: false });
+  e.markPaid(dealId, at, { date: today, amount: hand, how: r.how, full: false, ...(add ? { add: true } : {}) });
+  // (ready by the tap as a whole: a plan it set may already count money in — a PAY paid the old way)
+  const ready = !ready0 && closeReady(e.sales, e.sales.deals[dealId], today);
   const l = planOf(e.sales, e.sales.deals[dealId], today)?.lines.find((x) => x.stage === at);
-  const undo: RecvUndo = { deal: dealId, stage: at, madePlan, before, after: paysOf(e.sales, dealId), step: { stage: at, before: { ...step0 }, after: { ...stepOf(e.sales, dealId, at) } } };
-  return { stage: at, amount: r.ask ? typed! : r.shown ?? l?.got ?? 0, ready, madePlan, undo };
+  const undo: RecvUndo = { deal: dealId, stage: at, code: said, madePlan, before, after: paysOf(e.sales, dealId), step: { stage: at, before: { ...step0 }, after: { ...stepOf(e.sales, dealId, at) } } };
+  return { stage: at, code: said, amount: r.ask ? typed! : r.shown ?? l?.got ?? 0, ready, madePlan, undo };
+}
+/** "PAY ส่วนที่เหลือ" of a won deal without a plan (lib/sales dealSteps `rest`), as one tap records it: the single
+ *  PAY step (`at`) gets the whole Forecast (`total`); `hand` = what the documents counted do not cover (the
+ *  rest, or the whole Forecast when the money was only typed); `add` = documents count at `at` (kept with them). */
+function restOf(s: SalesState, d: Deal, stage: string, today: string): { at: string; total: number; hand: number; add: boolean } | null {
+  if (planOf(s, d, today)) return null;
+  const ps = dealSteps(s, d, today).steps.filter((v) => v.kind === 'pay' && v.counted);
+  const first = ps[0], m = dealMoney(s, d);
+  if (!first || ps.length !== 2 || !ps[1].rest || ps[1].id !== stage || m.forecast == null || !(m.forecast > 0)) return null;
+  const docs = m.acDocs ? m.actual ?? 0 : 0, hand = r2(m.forecast - docs);
+  if (!(hand > 0)) return null;
+  return { at: first.id, total: m.forecast, hand, add: countedAt(s, d, first.id).length > 0 };
 }
 /** "เลิกทำ": the deal's installments as they were before the tap (the plan it set up goes, a received line
  *  that plan carried in too; the planned amount it asked for goes back). Refused, changing nothing, when a
@@ -802,22 +844,24 @@ export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: 
 export function undoReceive(e: RecvEngine, u: RecvUndo): { stale: string[] } {
   return e.undoPays(u.deal, u);
 }
-/** The message after one tap (T-RECV). */
-export const recvToast = (s: SalesState, d: Deal, stage: string, amount: number) => `บันทึกรับเงิน ${code(s, d, stage)} แล้ว ${N(amount)} บาท · วันนี้ · ยังไม่มีใบเสร็จ`;
+/** The message after one tap (T-RECV); `said`: the step as it was named at the tap (receiveNow `code`). */
+export const recvToast = (s: SalesState, d: Deal, stage: string, amount: number, said = '') => `บันทึกรับเงิน ${said || code(s, d, stage)} แล้ว ${N(amount)} บาท · วันนี้ · ยังไม่มีใบเสร็จ`;
 /** The message when one tap records nothing (RecvPlan.over): the job's money is in already. */
 export function recvOverText(s: SalesState, d: Deal, r: RecvPlan): string {
   const o = r.over;
   if (!o) return '';
+  const what = o.what === 'Forecast' ? ' Forecast ' : 'แผน ';
   const head = o.actual >= o.cap - 0.005
-    ? `Actual ${N(o.actual)} บาท ครบตามแผน ${N(o.cap)} บาทแล้ว`
-    : `Actual ${N(o.actual)} บาท บันทึกอีก ${N(r.shown)} บาทจะเกินแผน ${N(o.cap)} บาท`;
+    ? `Actual ${N(o.actual)} บาท ครบตาม${what}${N(o.cap)} บาทแล้ว`
+    : `Actual ${N(o.actual)} บาท บันทึกอีก ${N(r.shown)} บาทจะเกิน${what}${N(o.cap)} บาท`;
   const x = o.extra ? ` (${code(s, d, o.extra.stage)} รับเกินงวด ${N(o.extra.by)} บาท)` : '';
-  return `ยังไม่ได้บันทึก ${code(s, d, r.stage)} · ${head}${x} · ถ้าได้รับเงินเพิ่มจริง กด “แก้ยอด / วันที่”`;
+  // (no plan: no installment form to correct — a receipt is what tells more money came in)
+  return `ยังไม่ได้บันทึก ${code(s, d, r.stage)} · ${head}${x} · ถ้าได้รับเงินเพิ่มจริง ${o.what === 'Forecast' ? 'แนบใบเสร็จที่ขั้นนี้' : 'กด “แก้ยอด / วันที่”'}`;
 }
 /** The message after "เลิกทำ" of one tap: done, or refused because a line was changed since. */
 export function recvUndoText(s: SalesState, d: Deal, u: RecvUndo, r: { stale: string[] }): string {
   if (r.stale.length) return `เลิกทำไม่ได้ · ${r.stale.map((x) => code(s, d, x)).join(', ')} มีการแก้ไขหลังบันทึก · แก้ที่ “แผนการชำระเงิน” ของงานนี้`;
-  return `เลิกทำแล้ว · ${code(s, d, u.stage)} กลับเป็นยังไม่ได้รับ${u.madePlan ? ' · แผนชำระที่ตั้งให้ถูกลบด้วย' : ''}`;
+  return `เลิกทำแล้ว · ${u.code || code(s, d, u.stage)} กลับเป็นยังไม่ได้รับ${u.madePlan ? ' · แผนชำระที่ตั้งให้ถูกลบด้วย' : ''}`;
 }
 
 /** A step's own attach (its row, its card): QUOTATION takes the quotation, an installment its receipt. */

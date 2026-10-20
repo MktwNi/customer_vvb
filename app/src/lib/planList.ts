@@ -9,7 +9,7 @@
  */
 import { addDays } from './format';
 import { norm } from './core';
-import { OVERDUE_DAYS, closeReady, dealResult, jointRole, overdueDays, type Deal, type SalesState } from './sales';
+import { OVERDUE_DAYS, dealResult, jointRole, overdueDays, payDone, type Deal, type SalesState } from './sales';
 import { nextStepView, type NextStepView } from './salesUi';
 import type { StageKey, Task } from './types';
 
@@ -67,7 +67,7 @@ export interface PlanIn<C extends PlanCo = PlanCo> {
 /** A tracker job still to be worked on, of `year`: open, not lost, not won and fully paid (it needs closing,
  *  not a call, as overdueDays says), and not a joint quotation's header (its members are the customers). */
 export function openJob(s: SalesState, d: Deal, year: string, today: string): boolean {
-  return d.year === year && d.jobStatus !== 'closed' && dealResult(s, d) !== 'NO' && jointRole(s, d) !== 'header' && !closeReady(s, d, today);
+  return d.year === year && d.jobStatus !== 'closed' && dealResult(s, d) !== 'NO' && jointRole(s, d) !== 'header' && !payDone(s, d, today);
 }
 
 function jobOf(s: SalesState, d: Deal, today: string): PlanJob {

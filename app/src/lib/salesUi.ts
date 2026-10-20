@@ -232,6 +232,8 @@ export function statusView(s: SalesState, d: Deal, today: string, t?: DealSteps)
     // (without a plan: the rest of the payment is "รอชำระเงิน" too, never "งวด 2" of a plan the deal has not)
     const rest = ps.left.length === 1 && (t || dealSteps(s, d, today)).steps.some((x) => x.rest && x.id === ps.left[0]);
     if (ps.left.length) return v('yes', 'ok', 'ได้งาน', ps.pays.length === 1 || rest ? 'รอชำระเงิน' : ps.left.length > 1 ? `รอชำระ ${ps.left.length} งวด` : `รอชำระงวด ${ps.pays.indexOf(ps.left[0]) + 1}`);
+    // every installment in, but a document counted twice: not "paid in full" until it counts once (closeReady)
+    if (!ready && dupCounted(s, d).length) return v('yes', 'ok', 'ได้งาน', DUP_HINT);
     return v('yes', 'ok', 'ได้งาน · รับครบ', 'พร้อมปิดงาน');
   }
   // (a company that withdrew from a joint quotation closes with it)
@@ -433,7 +435,9 @@ export const CLOSE_TITLE = 'ปิดงาน · ย้ายงานที่
  * plan total, else the Forecast.
  * `ro`: an account that can only read gets where it stands, without the steps it has no buttons for.
  */
-export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint', and 'pays' while the rest of a payment without a plan is owed: the lead phrase (the table's closing row, the phone card) */ lead?: string }
+export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'done' | 'joint' | 'dup'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint', 'dup', and 'pays' while the rest of a payment without a plan is owed: the lead phrase (the table's closing row, the phone card) */ lead?: string }
+/** Why a won job with every installment in is not ready to close: a document counted twice (closeReady). */
+export const DUP_HINT = 'รอแก้ยอดนับซ้ำ';
 export function closingView(s: SalesState, d: Deal, today: string, ro = false, t?: DealSteps): ClosingView {
   const r = dealResult(s, d), ready = closeReady(s, d, today, t);
   // a company of a joint quotation (`joint`): its money is the header's, and it closes with the whole
@@ -466,6 +470,12 @@ export function closingView(s: SalesState, d: Deal, today: string, ro = false, t
     return { ...out('pays', lead + (ro ? '' : ` เมื่อ${how} ระบบจะชวนให้ปิดงาน`)), hint: 'ปิดได้เมื่อรับส่วนที่เหลือ', lead };
   }
   if (left.length) return out('pays', `ได้งานแล้ว · รับชำระ ${ps.paid.length} จาก ${ps.pays.length} งวด${ro ? '' : ` เมื่อแนบเอกสาร ${codes} ระบบจะชวนให้ปิดงาน`}`);
+  // every installment in, but a document counted twice (Actual says "นับซ้ำ"): counted once first, no "100%"
+  const dup = dupCounted(s, d)[0];
+  if (dup) {
+    const lead = `ได้งานแล้ว · ${KIND_TH[dup[0].kind].split(' / ')[0]} ${dup[0].docNo || dup[0].name} นับซ้ำ ${dup.length} ครั้ง`;
+    return { ready, state: 'dup', text: lead + (ro ? '' : ' ให้นับครั้งเดียวก่อน แล้วระบบจะชวนให้ปิดงาน'), hint: DUP_HINT, waitFor: [], progress: null, lead };
+  }
   return out('done', `ได้งานและรับชำระครบทุกงวด${P ? 'ตามแผน' : ''}แล้ว${ro ? ' พร้อมปิดงาน' : ' ปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” ยอด Forecast / Actual ยังนับในสรุปปีเหมือนเดิม'}`);
 }
 /** The prompt after this user's own action made a deal ready (`via` the result, or a payment / document /
@@ -478,6 +488,7 @@ export function closePrompt(s: SalesState, d: Deal, name: string, via: 'result' 
 /** Asked before closing a deal that is not ready (from ⋯ or the panel head); '' when it is ready. */
 export function closeConfirm(s: SalesState, d: Deal, today: string, name: string) {
   if (closeReady(s, d, today)) return '';
-  const left = dealResult(s, d) === 'YES' ? payState(s, d, today).left.map((p) => stepCode(s, d, p, today)) : [];
-  return `ปิดงาน “${name}” ตอนนี้? ${left.length ? `ยังรับชำระไม่ครบ (${left.join(', ')})` : 'ยังไม่มีผลการขาย'} งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`;
+  const won = dealResult(s, d) === 'YES', left = won ? payState(s, d, today).left.map((p) => stepCode(s, d, p, today)) : [];
+  const why = left.length ? `ยังรับชำระไม่ครบ (${left.join(', ')})` : won && dupCounted(s, d).length ? 'ยังมียอดนับซ้ำ' : 'ยังไม่มีผลการขาย';
+  return `ปิดงาน “${name}” ตอนนี้? ${why} งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`;
 }
