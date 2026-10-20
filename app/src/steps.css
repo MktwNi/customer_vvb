@@ -1,0 +1,17 @@
+/* ---- the five steps (lib/steps.ts): CONTACT · QUOTATION · FOLLOW · CLOSE · PAY per installment. Every call,
+   e-mail or meeting is a contact filed inside its step (components/DealActs.tsx StepEntries; the table's and the
+   phone card's step lines, tabs/Sales.tsx) */
+
+/* under a step's contacts in the panel: "ดูอีก 1 ครั้ง" and "บันทึกการติดต่อเพิ่ม" on one line */
+.sl-tl-more{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.sl-tl-more .lnk{font-size:var(--fs-sec)}
+.sl-tl-more .sl-tl-act{align-self:auto}
+/* the word before a CONTACT / FOLLOW line in a row or a card ("นัดพบ ประชุมที่โรงงาน"), and its "รวม 4 ครั้ง" */
+.sl-kty{font-weight:500;color:var(--ink-2);margin-right:6px}
+.sl-kn-c{margin-left:8px;font-size:var(--fs-sec)}
+/* the contact block's note about contacts filed at a step the deal no longer has */
+.sl-kact-o{font-size:var(--fs-meta)}
+/* CONTACT / FOLLOW done with a call booked ahead, which is the next step: done's fill, next's dashed ring around it
+   (the row says "ทำแล้ว" and "นัด 14 ต.ค." in words) */
+.sl-bd.d.now{background:var(--mark-done);border:2px solid #fff;outline:2px dashed var(--brand);outline-offset:-1px}
+.sl-bd.d.now.late{outline-color:var(--bad)}

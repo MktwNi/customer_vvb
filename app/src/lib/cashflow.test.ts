@@ -119,9 +119,9 @@ describe('the demo world against the mockups', () => {
     expect(crossYearTag(own('w1'), '2569')).toBe('');
     expect(instWords([3, 1])).toBe('งวด 1, 3');
     const c4 = own('c4')[0], d3 = Y.undated[0], p3 = own('dep2')[2];
-    expect([instText(c4), instSub(c4), statusWord(c4)]).toEqual(['ไม่มีแผน', 'รับที่ PAY1 · พิมพ์เอง', 'รับแล้ว']);
+    expect([instText(c4), instSub(c4), statusWord(c4)]).toEqual(['ไม่มีแผน', 'รับที่ PAY · พิมพ์เอง', 'รับแล้ว']); // a single PAY step
     expect([instText(d3), instSub(d3), statusWord(d3)]).toEqual(['ไม่มีแผน', 'ส่วนที่ยังไม่รับ', 'ยังไม่กำหนดวันรับ']);
-    expect([instText(p3), instSub(p3), statusWord(p3)]).toEqual(['งวด 3/3', 'PAY3 · งวดเพิ่ม', 'รอรับ']);
+    expect([instText(p3), instSub(p3), statusWord(p3)]).toEqual(['งวด 3/3', 'PAY3', 'รอรับ']); // every installment is a step: no "งวดเพิ่ม" 
     expect(statusWord(own('w2')[0])).toBe('เลยกำหนด');
     expect(statusWord(own('w3')[0])).toBe('ถึงกำหนด');
     expect(yearMoneyLabel(Y)).toBe('เงินเข้า 13 งวด');

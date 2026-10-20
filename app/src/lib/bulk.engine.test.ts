@@ -128,7 +128,7 @@ function live(L: Tab, pre: string) {
   const m = new Map<string, { k: string; del: boolean; v: unknown }>();
   let since = 0;
   for (;;) {
-    const r = sim.post({ action: 'pull', since, cv: 4, tok: L.e.session!.tok }) as { rows: { k: string; del: boolean; v: unknown; seq: number }[]; seq: number; more?: boolean };
+    const r = sim.post({ action: 'pull', since, cv: 5, tok: L.e.session!.tok }) as { rows: { k: string; del: boolean; v: unknown; seq: number }[]; seq: number; more?: boolean };
     r.rows.forEach((x) => x.k.startsWith(pre) && m.set(x.k, x));
     if (!r.more) break;
     since = r.rows[r.rows.length - 1].seq;

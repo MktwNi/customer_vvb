@@ -3,7 +3,7 @@ import { useApp } from '../state';
 import { norm } from '../lib/core';
 import { dmTh, isoTh, todayISO } from '../lib/format';
 import {
-  KIND_TH, QUOTE_STAGE, attachPreview, closeReady, countedAt, dealMoney, fmtMoney, mismatchText, parseAmount, planOf, stageTh, stageTrack, stepOf, targetForStage,
+  KIND_TH, QUOTE_STAGE, attachPreview, closeReady, countedAt, dealMoney, fmtMoney, mismatchText, parseAmount, planOf, dealSteps, stepLabel, stepOf, targetForStage,
   type Deal, type DealDoc, type DocKind, type DocTarget,
 } from '../lib/sales';
 import { attachCheck, attachKind0, attachRevision, qtDiffText, qtFacts, qtView } from '../lib/quotes';
@@ -206,7 +206,13 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
   const replace = old && mode === 'replace' && tgt === 'actual' ? old.id : undefined;
   // the installment planned at this stage, and the stage's circle
   const line = stage ? planOf(e.sales, deal, today)?.lines.find((l) => l.stage === stage) : undefined;
-  const st = stage ? stageTrack(e.sales, deal, today).states[stage] : undefined;
+  // (the step that reads it: an older stage, CALL2, reads as CONTACT)
+  const steps = dealSteps(e.sales, deal, today).steps;
+  const stepAt = (p: string) => steps.find((v) => v.id === p || v.aliases.includes(p));
+  const st = stage ? stepAt(stage)?.state : undefined;
+  // the stage in the deal's words: "PAY" for a single installment, "CONTACT" for CALL2
+  const sl = stage ? stepLabel(e.sales, deal, stage, today) : null, code = sl?.code || '';
+  const codeOf = (p: string) => (p ? stepLabel(e.sales, deal, p, today).code : '');
   // part paid by hand with no document yet: this one is the receipt for that money, or for the rest
   const handPart = !!line && line.hand && !line.docs.length && line.status === 'part' && target === 'actual';
   const addHand = handPart && mode === 'add' && tgt === 'actual';
@@ -236,10 +242,10 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
     ? ''
     : [
         pv.line
-          ? `หลังแนบ: ${pv.stage} รับแล้ว ${fmtMoney(pv.line.got)} บาท · ${pv.short > 0 ? `ขาด ${fmtMoney(pv.short)} จากแผน ${fmtMoney(pv.line.amt)}` : pv.line.amt > 0 && pv.line.got > pv.line.amt ? `รับเกินแผน ${fmtMoney(pv.line.got - pv.line.amt)}` : 'ครบตามแผน'}`
+          ? `หลังแนบ: ${codeOf(pv.stage)} รับแล้ว ${fmtMoney(pv.line.got)} บาท · ${pv.short > 0 ? `ขาด ${fmtMoney(pv.short)} จากแผน ${fmtMoney(pv.line.amt)}` : pv.line.amt > 0 && pv.line.got > pv.line.amt ? `รับเกินแผน ${fmtMoney(pv.line.got - pv.line.amt)}` : 'ครบตามแผน'}`
           : tgt === 'forecast'
-            ? `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Forecast จะเป็น ${fmtMoney(fin)}`
-            : `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Actual จะเป็น ${fmtMoney(pv.actual)}${pv.fcFull ? ' (ครบตาม Forecast)' : ''}`,
+            ? `หลังแนบ: ${pv.stage ? codeOf(pv.stage) + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Forecast จะเป็น ${fmtMoney(fin)}`
+            : `หลังแนบ: ${pv.stage ? codeOf(pv.stage) + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Actual จะเป็น ${fmtMoney(pv.actual)}${pv.fcFull ? ' (ครบตาม Forecast)' : ''}`,
         pv.ready || (fullOn && pv.readyIfFull) ? (pv.line ? 'รับครบทุกงวดแล้ว งานนี้จะพร้อมปิดงาน' : 'งานนี้จะพร้อมปิดงาน') : '',
       ].filter(Boolean).join(' · ');
   const save = async () => {
@@ -262,7 +268,7 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
       if (d)
         acts.after(d, was, 'payment', revising
           ? `แนบใบเสนอราคา${doc.docNo ? ' ' + doc.docNo : ''} ฉบับที่ ${revN} แล้ว · Forecast ${fmtMoney(fin)} บาท`
-          : `แนบ${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''}${doc.stage ? ' ที่ ' + doc.stage : ''} แล้ว${kept ? ' · คงยอดเดิม ' + fmtMoney(fin) : ''}`);
+          : `แนบ${KIND_TH[doc.kind]}${doc.docNo ? ' ' + doc.docNo : ''}${doc.stage ? ' ที่ ' + codeOf(doc.stage) : ''} แล้ว${kept ? ' · คงยอดเดิม ' + fmtMoney(fin) : ''}`);
     } catch (err) {
       setSaving('บันทึกไม่สำเร็จ: ' + ((err as Error)?.message || err));
     }
@@ -289,21 +295,21 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
   const qtStep = stepOf(e.sales, deal.id, QUOTE_STAGE);
 
   return (
-    <Modal title={jm ? 'แนบเอกสารอื่น · ไม่นับยอด' : rev ? `แนบฉบับแก้ไข · ใบเสนอราคา${qtNo ? ' ' + qtNo : ''}` : stage ? `แนบเอกสารที่ ${stage}${stageTh(stage) ? ' · ' + stageTh(stage) : ''}` : `แนบ${KIND_TH[kind]}`} onClose={onClose} width={rev ? 640 : 620}>
+    <Modal title={jm ? 'แนบเอกสารอื่น · ไม่นับยอด' : rev ? `แนบฉบับแก้ไข · ใบเสนอราคา${qtNo ? ' ' + qtNo : ''}` : stage ? `แนบเอกสารที่ ${code}${sl?.th ? ' · ' + sl.th.replace(/\s*\(YES \/ NO\)$/, '') : ''}` : `แนบ${KIND_TH[kind]}`} onClose={onClose} width={rev ? 640 : 620}>
       <span className="sl-dlg-sub">{deal.client}</span>
       {jm && <Notice kind="info">บริษัทนี้อยู่ในใบเสนอราคาร่วม เอกสารที่แนบที่นี่เก็บไว้เป็นหลักฐาน ไม่นับยอด · ใบเสนอราคาและใบเสร็จของงานนี้แนบที่ใบเสนอราคาร่วม</Notice>}
       {rev ? (
         <div className="sl-stagebar">
-          <Bead state={stageTrack(e.sales, deal, today).states[QUOTE_STAGE] || 'future'} now stage={QUOTE_STAGE} />
+          <Bead state={stepAt(QUOTE_STAGE)?.state || 'future'} now stage={QUOTE_STAGE} />
           <span>
             ไฟล์นี้จะเป็น <b>ฉบับที่ {revN}</b>{qtNo ? ' ของ ' + qtNo : ''} ที่ขั้น <b>{QUOTE_STAGE}</b> · ยอดที่ยืนยันเป็น Forecast {rev.state === 'cur' ? 'แทนฉบับที่ ' + rev.n : qv.typed ? 'แทนยอดที่พิมพ์ไว้' : ''}
           </span>
         </div>
       ) : stage && (
         <div className="sl-stagebar">
-          <Bead state={st || 'future'} now stage={stage} />
+          <Bead state={st || 'future'} now stage={stepAt(stage)?.id || stage} />
           <span>
-            เอกสารนี้จะผูกกับขั้น <b>{stage}</b> · ยอดที่ยืนยัน{target === 'forecast' ? 'เป็น Forecast' : target === 'actual' ? 'รวมเข้า Actual' : 'ไม่นับยอด'}
+            เอกสารนี้จะผูกกับขั้น <b>{code}</b> · ยอดที่ยืนยัน{target === 'forecast' ? 'เป็น Forecast' : target === 'actual' ? 'รวมเข้า Actual' : 'ไม่นับยอด'}
             {line && line.amt > 0 && <> · <b>แผนงวดนี้ {fmtMoney(line.amt)} บาท{line.due ? ' ครบกำหนด ' + dmTh(line.due) : ''}</b></>}
           </span>
         </div>
@@ -423,14 +429,14 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
           )}
           {handPart && amt != null && tgt === 'actual' && (
             <fieldset className="sl-repl">
-              <legend>{stage} บันทึกรับเงินเองไว้ {fmtMoney(line!.got)} บาท ยังไม่มีเอกสาร</legend>
+              <legend>{code} บันทึกรับเงินเองไว้ {fmtMoney(line!.got)} บาท ยังไม่มีเอกสาร</legend>
               <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'replace'} onChange={() => setMode('replace')} /> ใช้ยอดนี้แทน <span className="t-meta">ใบนี้เป็นใบเสร็จของเงินก้อนนั้น</span></label>
               <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'add'} onChange={() => setMode('add')} /> นับเพิ่ม <span className="t-meta">ใบนี้คือส่วนที่เหลือ รวมกับยอดที่บันทึกไว้</span></label>
             </fieldset>
           )}
           {old && amt != null && (
             <fieldset className="sl-repl">
-              <legend>{stage} นับยอดจาก{KIND_TH[old.kind]}{old.docNo ? ' ' + old.docNo : ''} {fmtMoney(old.amount)} บาท อยู่แล้ว</legend>
+              <legend>{code} นับยอดจาก{KIND_TH[old.kind]}{old.docNo ? ' ' + old.docNo : ''} {fmtMoney(old.amount)} บาท อยู่แล้ว</legend>
               <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'replace'} onChange={() => setMode('replace')} /> ใช้ยอดนี้แทน <span className="t-meta">ใบเดิมเก็บไว้เป็นหลักฐาน ไม่นับยอด</span></label>
               <label className="hv-tx"><input type="radio" name="repl" checked={mode === 'add'} onChange={() => setMode('add')} /> นับเพิ่ม <span className="t-meta">งวดนี้จ่ายหลายครั้ง</span></label>
             </fieldset>
@@ -469,7 +475,7 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
             {rev && fin == null && !badAmt && <span className="t-sec">ใส่ยอดในเอกสารก่อน จึงแนบเป็นฉบับแก้ไขได้</span>}
             {!badAmt && !(rev && fin == null) && (
               <button onClick={save} disabled={saving === 'กำลังบันทึก…'} className="btn pri">
-                {jm ? 'แนบเอกสาร (ไม่นับยอด)' : rev ? `ยืนยันยอด ${fmtMoney(fin)} บาท และแนบเป็นฉบับที่ ${revN}` : fin != null ? `ยืนยันยอด ${fmtMoney(fin)} บาท และ${stage ? 'แนบที่ ' + stage : 'แนบเอกสาร'}` : 'แนบเอกสาร (ไม่ระบุยอด)'}
+                {jm ? 'แนบเอกสาร (ไม่นับยอด)' : rev ? `ยืนยันยอด ${fmtMoney(fin)} บาท และแนบเป็นฉบับที่ ${revN}` : fin != null ? `ยืนยันยอด ${fmtMoney(fin)} บาท และ${stage ? 'แนบที่ ' + code : 'แนบเอกสาร'}` : 'แนบเอกสาร (ไม่ระบุยอด)'}
               </button>
             )}
           </div>

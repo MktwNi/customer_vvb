@@ -62,7 +62,7 @@ describe('the date filter, basis by basis', () => {
     expect(ids(filterDeals(S, { year: '2569', date: { basis: 'contact', preset: 'custom', from: '2026-10-01', to: '2026-10-31' } }, T))).toEqual(['a', 'b', 'c']);
     // a call planned for tomorrow is not a contact yet
     expect(dateMatch(S, p, R('2026-10-13'), 'contact', T)).toBeNull();
-    expect(dateMatch(S, b, R('2026-10-04'), 'contact', T)).toMatchObject({ d: '2026-10-04', what: 'CALL1' });
+    expect(dateMatch(S, b, R('2026-10-04'), 'contact', T)).toMatchObject({ d: '2026-10-04', what: 'CONTACT' }); // CALL1 read into CONTACT
     expect(dateMatch(S, c, R('2026-10-01', '2026-10-05'), 'contact', T)).toMatchObject({ d: '2026-10-05', what: 'นัดพบ · QUOTATION' });
     expect(dateMatch(S, a, R('2026-10-03', '2026-10-09'), 'contact', T)?.what).toBe('วันที่ติดต่อ');
     expect(dateMatch(S, a, R('2026-09-01', '2026-10-02'), 'contact', T)).toBeNull();
@@ -88,7 +88,7 @@ describe('the date filter, basis by basis', () => {
     S.pays['x/PAY1'] = L({ amt: 50000, due: '2026-10-01', rcv: '2026-10-05', got: 50000 });
     S.pays['x/PAY2'] = L({ amt: 50000, due: '2026-11-01' });
     expect(dateMatch(S, x, R('2026-10-01', '2026-10-31'), 'paid', T)).toMatchObject({ d: '2026-10-05', what: 'PAY1 · 50,000', amt: 50000, tone: 'ok' });
-    expect(dateMatch(S, y, R('2026-10-11'), 'paid', T)).toMatchObject({ what: 'PAY1' });
+    expect(dateMatch(S, y, R('2026-10-11'), 'paid', T)).toMatchObject({ what: 'PAY' }); // a single installment: PAY
     expect(dateMatch(S, z, R('2026-10-01', '2026-10-31'), 'paid', T)).toBeNull(); // dated tomorrow: planned, not paid
   });
   it('due: the plan\'s due dates (not a lost deal\'s); the earliest one still owed; late is bad, paid is ok', () => {

@@ -17,7 +17,7 @@ import {
 } from './joint';
 // the second review's fixes
 import { bandPart, jointNo, moneyWords, noteNo, pickLine, viewCashLines } from './joint';
-import { payStages } from './sales';
+import { dealSteps } from './sales';
 import { cashRows, payerName } from './cashUi';
 import { closingView, liveCount, monthCounts, nextStepView, statusView, trackerFields } from './salesUi';
 import { applyRow, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
@@ -294,7 +294,9 @@ describe('a member follows up on its own row and is paid through the joint quota
     s.steps['b2/CLOSED DEAL'] = { d: '2026-10-07', n: 'YES' };
     const b2 = s.deals.b2;
     const t = stageTrack(s, b2, T);
-    expect([t.states.PAY1, t.states.PAY2, t.next]).toEqual(['off', 'off', '']);
+    expect([t.states.PAY1, t.states.PAY2, t.next]).toEqual(['off', undefined, '']);
+    // one PAY step, paid through the joint quotation: shown, not counted
+    expect(dealSteps(s, b2, T).steps.filter((v) => v.kind === 'pay').map((v) => [v.id, v.code, v.outside, v.counted, v.state])).toEqual([['PAY1', 'PAY', 'joint', false, 'off']]);
     expect(payState(s, b2, T).left).toEqual(['PAY1', 'PAY2']);
     expect(closeReady(s, b2, T)).toBe(false);
     expect(nextStepView(s, b2, T)).toMatchObject({ kind: 'joint', hint: 'ชำระผ่านใบเสนอราคาร่วม' });
@@ -656,18 +658,18 @@ describe('review 2: the words', () => {
     s.steps['b4/CLOSED DEAL'] = { d: '2026-08-02', n: 'NO' };
     expect(moneyWords(s, s.deals.b4, true)).toEqual(['ถอนตัวจาก QT ร่วม']);
   });
-  it('a member\'s stages do not count the PAY stages the joint quotation pays ("ทำแล้ว 2 จาก 6"); a plain deal\'s all', () => {
+  it('a member\'s steps do not count the PAY the joint quotation pays ("ทำแล้ว 2 จาก 4"); a plain deal\'s all five; the payer\'s one per installment', () => {
     const s = world({ yes: true, plan: true, paid1: true });
     s.pays['h/PAY2'].rcv = '2026-10-11';
     s.steps['b1/CLOSED DEAL'] = { d: '2026-10-07', n: 'YES' };
-    const n = s.cfg.stages.length, pays = payStages(s.cfg).length;
     const t = stageTrack(s, s.deals.b1, T);
-    expect([t.done, t.total]).toEqual([2, n - pays]);
+    expect([t.done, t.total]).toEqual([2, 4]);
     expect(nextStepView(s, s.deals.b1, T).kind).toBe('done');
-    expect(stageTrack(s, s.deals.p1, T).total).toBe(n);
-    expect(stageTrack(s, s.deals.h, T).total).toBe(n);
-    // a PAY stage a member did on its own (an older build) is its own again
+    expect(stageTrack(s, s.deals.p1, T).total).toBe(5);
+    expect(stageTrack(s, s.deals.h, T).total).toBe(6); // a plan of two installments: PAY1, PAY2
+    // a PAY record a member wrote itself (an older build) shows, still not counted
     s.steps['b1/PAY1'] = { d: '2026-10-09', n: 'รับแล้ว' };
-    expect(stageTrack(s, s.deals.b1, T).total).toBe(n - pays + 1);
+    expect(stageTrack(s, s.deals.b1, T).total).toBe(4);
+    expect(dealSteps(s, s.deals.b1, T).steps.find((v) => v.id === 'PAY1')).toMatchObject({ state: 'done', counted: false, outside: 'joint' });
   });
 });

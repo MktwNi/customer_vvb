@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { addDays, dow, fmtN, isoTh } from '../lib/format';
-import { DEAL_STAGE, STAGE_TH, dealMoney, dealResult, filterDeals, fmtMoney, lastContact, normSalesFilter, overdueDays, salesStats, stepOf, type Deal, type SalesFilter, type SalesState, type SalesStats } from '../lib/sales';
+import { DEAL_STAGE, dealMoney, dealResult, filterDeals, fmtMoney, lastContact, normSalesFilter, overdueDays, salesStats, stepOf, type Deal, type SalesFilter, type SalesState, type SalesStats } from '../lib/sales';
 import { liveCount, monthCounts, trackerFields, weekContacts, winRateBySource, withoutDate } from '../lib/salesUi';
 import { rangeTh, resolveDate } from '../lib/dateRange';
 import { FilterBar, type FVal } from '../components/FilterBar';
@@ -313,8 +313,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         {st.stages.map((x) => {
           const share = st.total ? Math.round((x.n / st.total) * 100) : 0;
           return (
-            <div key={x.name} role="listitem" className="sd-stage" title={`${x.name}${STAGE_TH[x.name] ? ' · ' + STAGE_TH[x.name] : ''}: ${fmtN(x.n)} ราย (${share}%)`}>
-              <span className="sd-stage-l">{STAGE_TH[x.name] || x.name}</span>
+            <div key={x.name} role="listitem" className="sd-stage" title={`${x.code}${x.th ? ' · ' + x.th : ''}: ${fmtN(x.n)} ราย (${share}%)`}>
+              <span className="sd-stage-l">{x.th || x.code}</span>
               <span className={'sd-stage-p' + (x.n ? '' : ' zero')}>{fmtN(x.n)} ราย · {share}%</span>
             </div>
           );
@@ -402,7 +402,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           <span className="sd-muted">{`Win rate · ปิดได้ ÷ รู้ผลแล้ว (${fmtN(st.decided)} ราย)`}</span>
           <div className="sd-wins">
             <span className="sd-wins-h">ปิดการขายล่าสุด</span>
-            {!wins.length && <span className="sd-muted">ยังไม่มี · ใส่ YES ในขั้น CLOSED DEAL ของตาราง</span>}
+            {!wins.length && <span className="sd-muted">ยังไม่มี · ใส่ YES ในขั้น CLOSE ของตาราง</span>}
             {wins.map(({ d, at, amt, fc }) => {
               const c = d.gid != null ? e.company(d.gid) : undefined;
               return (
@@ -567,7 +567,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             <Bars items={Object.entries(st.byService)} />
           </Acc>
           <Acc title="ขั้นตอนการขาย (ตาราง)" sub="จำนวนลูกค้าที่มีวันที่หรือโน้ตในแต่ละขั้น" open={!!acc.stg} onToggle={() => setAcc({ ...acc, stg: !acc.stg })}>
-            <Bars items={st.stages.map((x) => [STAGE_TH[x.name] ? `${x.name} · ${STAGE_TH[x.name]}` : x.name, x.n])} keepZero />
+            <Bars items={st.stages.map((x) => [x.th ? `${x.code} · ${x.th}` : x.code, x.n])} keepZero />
           </Acc>
         </section>
       </div>

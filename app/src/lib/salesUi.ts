@@ -2,8 +2,8 @@
 import { addDays, daysBetween, dmTh, dow, localDay } from './format';
 import { basisDates, customersOf, filterDeals, jointAttr, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, stepContactDay, withActIndex, workTally, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
-  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
-  type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
+  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, stepCode, countedAt, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payState, stepOf,
+  type Deal, type DealAct, type DealDoc, type DealSteps, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats, type StepView,
 } from './sales';
 import type { FField, FOpt } from '../components/FilterBar';
 
@@ -45,7 +45,7 @@ export function withoutDate<F extends { date?: unknown }>(f: F): F {
 export const BASIS_TH: Record<DateBasis, { label: string; sub: string; hint: string; short: string; head: string; sent: string }> = {
   contact: { label: 'มีการติดต่อ', sub: 'ติดต่อแล้ว ไม่นับนัดล่วงหน้า', hint: 'นับวันที่ติดต่อที่พิมพ์ไว้ วันที่ของขั้นตอน และบันทึกการติดต่อ ที่ไม่เกินวันนี้', short: 'ติดต่อ', head: 'ติดต่อล่าสุด', sent: 'งานที่มีการติดต่อ' },
   added: { label: 'เพิ่มเข้าตาราง', sub: 'วันที่ส่งเข้า Sales Tracker', hint: 'นับวันที่ลูกค้าถูกเพิ่มเข้าตารางของปีนี้', short: 'เพิ่มเข้าตาราง', head: 'เพิ่มเข้าตาราง', sent: 'งานที่เพิ่มเข้าตาราง' },
-  result: { label: 'ได้ผลการขาย', sub: 'ได้งาน / ไม่ได้งาน', hint: 'นับวันที่ของขั้น CLOSED DEAL เมื่อรู้ผลแล้ว ทั้งได้งานและไม่ได้งาน', short: 'ได้ผลการขาย', head: 'วันที่ได้ผล', sent: 'งานที่ได้ผลการขาย' },
+  result: { label: 'ได้ผลการขาย', sub: 'ได้งาน / ไม่ได้งาน', hint: 'นับวันที่ของขั้น CLOSE เมื่อรู้ผลแล้ว ทั้งได้งานและไม่ได้งาน', short: 'ได้ผลการขาย', head: 'วันที่ได้ผล', sent: 'งานที่ได้ผลการขาย' },
   paid: { label: 'รับเงิน', sub: 'งวดที่รับเงินแล้ว', hint: 'นับวันที่รับเงินของแต่ละงวด งานที่ไม่มีแผนนับวันที่ของขั้น PAY ที่ทำแล้ว', short: 'รับเงิน', head: 'รับเงิน', sent: 'งานที่รับเงิน' },
   due: { label: 'ครบกำหนดชำระ', sub: 'งวดตามแผนการชำระ', hint: 'นับวันครบกำหนดของงวดในแผนการชำระ ไม่นับงวดที่ยกเลิก', short: 'ครบกำหนด', head: 'ครบกำหนด', sent: 'งานที่มีงวดครบกำหนด' },
   closed: { label: 'ปิดงาน', sub: 'วันที่กดปิดงาน', hint: 'นับวันที่กดปิดงาน งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”', short: 'ปิดงาน', head: 'ปิดงาน', sent: 'งานที่ปิด' },
@@ -220,58 +220,93 @@ export type StatusKind = 'ok' | 'warn' | 'bad' | 'info' | 'neutral';
 /** A deal's status (row, phone card, panel): the word with its colour, one grey line under it, and
  *  whether to offer ปิดงาน (`sub` then reads "พร้อมปิดงาน", which viewers see in place of the button). */
 export interface StatusView { tone: 'new' | 'run' | 'wait' | 'yes' | 'no' | 'closed'; kind: StatusKind; word: string; sub: string; ready: boolean }
-export function statusView(s: SalesState, d: Deal, today: string): StatusView {
-  const r = dealResult(s, d), ready = d.jobStatus === 'open' && closeReady(s, d, today);
+export function statusView(s: SalesState, d: Deal, today: string, t?: DealSteps): StatusView {
+  const r = dealResult(s, d), ready = d.jobStatus === 'open' && closeReady(s, d, today, t);
   const v = (tone: StatusView['tone'], kind: StatusKind, word: string, sub: string): StatusView => ({ tone, kind, word, sub, ready });
   if (d.jobStatus === 'closed') return v('closed', r === 'YES' ? 'ok' : r === 'NO' ? 'bad' : 'neutral', r === 'YES' ? 'ได้งาน' : r === 'NO' ? 'ไม่ได้งาน' : 'ปิดงาน', 'ปิดงานแล้ว' + (d.closedDate ? ' ' + dmTh(d.closedDate) : ''));
   if (r === 'YES') {
-    const ps = payState(s, d, today);
+    const ps = payState(s, d, today, t);
     // a joint quotation's member is paid through it: the payer's progress, said so
     if (jointRole(s, d) === 'member') return v('yes', 'ok', 'ได้งาน', ready ? 'พร้อมปิดงาน' : ps.plan ? `ผู้จ่ายชำระ ${ps.plan.paidN}/${ps.plan.n} งวด` : 'ชำระผ่านใบเสนอราคาร่วม');
     if (ps.plan && ps.left.length) return v('yes', 'ok', 'ได้งาน', `รับแล้ว ${ps.plan.paidN}/${ps.plan.n} งวด`);
-    if (ps.left.length) return v('yes', 'ok', 'ได้งาน', ps.left.length > 1 ? `รอชำระ ${ps.left.length} งวด` : `รอชำระงวด ${ps.pays.indexOf(ps.left[0]) + 1}`);
-    return v('yes', 'ok', ps.pays.length ? 'ได้งาน · รับครบ' : 'ได้งาน', 'พร้อมปิดงาน');
+    // (without a plan: the rest of the payment is "รอชำระเงิน" too, never "งวด 2" of a plan the deal has not)
+    const rest = ps.left.length === 1 && (t || dealSteps(s, d, today)).steps.some((x) => x.rest && x.id === ps.left[0]);
+    if (ps.left.length) return v('yes', 'ok', 'ได้งาน', ps.pays.length === 1 || rest ? 'รอชำระเงิน' : ps.left.length > 1 ? `รอชำระ ${ps.left.length} งวด` : `รอชำระงวด ${ps.pays.indexOf(ps.left[0]) + 1}`);
+    return v('yes', 'ok', 'ได้งาน · รับครบ', 'พร้อมปิดงาน');
   }
   // (a company that withdrew from a joint quotation closes with it)
   if (r === 'NO') return v('no', 'bad', 'ไม่ได้งาน', ready || jointRole(s, d) !== 'member' ? 'พร้อมปิดงาน' : 'ปิดพร้อมใบเสนอราคาร่วม');
   if (r === 'WAIT') return v('wait', 'warn', 'รอผล', stepOf(s, d.id, DEAL_STAGE).n.trim());
   if (dealStatus(s, d).started) {
-    const t = stageTrack(s, d, today), last = s.cfg.stages.filter((p) => t.states[p] === 'done').pop() || lastStage(s, d);
+    const last = lastStage(s, d, today, t);
     return v('run', 'info', 'กำลังติดตาม', last ? 'ล่าสุด ' + last : '');
   }
   return v('new', 'neutral', 'ยังไม่เริ่ม', d.at ? 'เพิ่มเมื่อ ' + dmTh(localDay(d.at)) : '');
 }
 
-/** The next-step pill: "ถัดไป <stage> <hint>". `pay`: a won deal with a plan names its next installment
- *  (`tone` late = past due, due = due within 7 days or part paid); `joint`: a won member of a joint
- *  quotation, paid through it ("ชำระผ่านใบเสนอราคาร่วม"); `label` is its aria-label. */
-export interface NextStepView { kind: 'no' | 'done' | 'planned' | 'overdue' | 'next' | 'pay' | 'joint'; stage: string; hint: string; tone: '' | 'due' | 'late'; line: LineView | null; label: string }
-export function nextStepView(s: SalesState, d: Deal, today: string): NextStepView {
-  const t = stageTrack(s, d, today);
-  if (t.result === 'NO') return { kind: 'no', stage: '', hint: 'ไม่ต้องติดตามต่อ', tone: '', line: null, label: 'ไม่ต้องติดตามต่อ' };
-  if (t.result === 'YES' && !t.next && jointRole(s, d) === 'member' && !closeReady(s, d, today)) return { kind: 'joint', stage: '', hint: JOINT_PAID, tone: '', line: null, label: JOINT_PAID };
-  const pl = t.result === 'YES' ? payState(s, d, today).plan?.next : null;
-  if (pl && (!t.next || payStages(s.cfg).includes(t.next))) {
+/** The next-step pill: "ถัดไป <code> <hint>" ("ถัดไป FOLLOW ติดตามผล", "ถัดไป CLOSE นัด 20 ต.ค."). `stage` is the
+ *  record its editor writes (the step's id; a step done with a call booked ahead: the record holding that date,
+ *  an older stage's too), `code` / `th` what shows, `date` the day it is planned for ('' when it is not). `pay`: a won deal with a plan names its next installment (`tone` late = past due, due = due within
+ *  7 days or part paid); `joint`: a won member of a joint quotation, paid through it ("ชำระผ่านใบเสนอราคาร่วม");
+ *  `label` is its aria-label. */
+export interface NextStepView { kind: 'no' | 'done' | 'planned' | 'overdue' | 'next' | 'pay' | 'joint'; stage: string; code: string; th: string; date: string; hint: string; tone: '' | 'due' | 'late'; line: LineView | null; label: string }
+export function nextStepView(s: SalesState, d: Deal, today: string, t = dealSteps(s, d, today)): NextStepView {
+  const nx = t.next;
+  const none = (kind: NextStepView['kind'], hint: string): NextStepView => ({ kind, stage: '', code: '', th: '', date: '', hint, tone: '', line: null, label: hint });
+  if (t.result === 'NO') return none('no', 'ไม่ต้องติดตามต่อ');
+  if (t.result === 'YES' && !nx && jointRole(s, d) === 'member' && !closeReady(s, d, today, t)) return none('joint', JOINT_PAID);
+  const pl = t.result === 'YES' ? payState(s, d, today, t).plan?.next : null;
+  if (pl && (!nx || nx.kind === 'pay')) {
     const hint =
       pl.status === 'late' ? `เลยกำหนด ${pl.lateDays} วัน`
       : pl.status === 'part' ? `ค้าง ${fmtMoney(pl.left)}`
       : pl.due ? (pl.due === today ? 'ครบกำหนดวันนี้' : `ครบกำหนด ${dmTh(pl.due)}`)
       : 'รอรับชำระ';
     const tone = pl.lateDays > 0 ? 'late' : pl.status === 'part' || pl.status === 'due' ? 'due' : '';
-    return { kind: 'pay', stage: pl.stage, hint, tone, line: pl, label: `ถัดไป ${pl.stage} ${fmtMoney(pl.amt)} บาท ${hint} — บันทึกรับเงิน` };
+    const th = t.steps.find((v) => v.id === pl.stage)?.th || '';
+    return { kind: 'pay', stage: pl.stage, code: pl.code, th, date: '', hint, tone, line: pl, label: `ถัดไป ${pl.code} ${fmtMoney(pl.amt)} บาท ${hint} — บันทึกรับเงิน` };
   }
-  // won and paid (a stage paid by its document counts even when its note was cleared): ปิดงาน is next
-  if (!t.next || (t.result === 'YES' && closeReady(s, d, today))) return { kind: 'done', stage: '', hint: 'ครบทุกขั้น', tone: '', line: null, label: 'ครบทุกขั้น' };
-  const p = t.next, planned = t.states[p] === 'planned';
-  const hint = planned ? `นัด ${dmTh(stepOf(s, d.id, p).d)}` : stageTh(p);
-  const kind = planned ? 'planned' : overdueDays(s, d, today) != null ? 'overdue' : 'next';
-  return { kind, stage: p, hint, tone: '', line: null, label: `ถัดไป ${p} ${hint} — บันทึกวันที่และโน้ต` };
+  // won and paid (an installment paid by its document counts even when its note was cleared): ปิดงาน is next
+  if (!nx || (t.result === 'YES' && closeReady(s, d, today, t))) return none('done', 'ครบทุกขั้น');
+  // planned: the step itself (a date booked ahead), or a call booked ahead on a step already done (CONTACT, FOLLOW)
+  const when = nx.state === 'planned' ? nx.date : nx.ahead || '';
+  const planned = !!when;
+  const hint = planned ? `นัด ${dmTh(when)}` : nx.short != null ? `ค้าง ${fmtMoney(nx.short)}` : nx.th;
+  const kind = planned ? 'planned' : overdueDays(s, d, today, t) != null ? 'overdue' : 'next';
+  // (a call booked ahead on a step done: its editor opens the record holding that date, CALL2 in place)
+  return { kind, stage: nx.ahead ? nx.top.stage : nx.id, code: nx.code, th: nx.th, date: when, hint, tone: '', line: null, label: `ถัดไป ${nx.code} ${hint} — บันทึกวันที่และโน้ต` };
 }
 
-/** Under the Actual header: "จาก PAY1 + PAY2"; "จาก PAY ทุกงวด" for 3 or more; "จาก ใบเสร็จ" without PAY stages. */
-export function actualSource(cfg: SalesCfg) {
-  const p = payStages(cfg);
-  return 'จาก ' + (!p.length ? 'ใบเสร็จ' : p.length <= 2 ? p.join(' + ') : 'PAY ทุกงวด');
+/** One line of a CONTACT / FOLLOW step: its own record, a contact record, or an older stage's record it reads
+ *  (CALL2, CALL1 …: `stage` is where it is stored). */
+export type StepLine = { kind: 'own' | 'act' | 'old'; d: string; at: string; stage: string; note: string; act?: DealAct };
+/** What a CONTACT / FOLLOW step holds, newest first (the step's own record first on its day). The newest is the
+ *  step's line in the table and the card; "รวม n ครั้ง" opens the rest. */
+export function stepLines(v: StepView): StepLine[] {
+  const own: StepLine[] = v.own.d || v.own.n.trim() ? [{ kind: 'own', d: v.own.d, at: '', stage: v.id, note: v.own.n }] : [];
+  const rest = v.entries.map((x): StepLine => (x.kind === 'act' && x.act ? { kind: 'act', d: x.d, at: x.at, stage: x.stage, note: x.act.note, act: x.act } : { kind: 'old', d: x.d, at: '', stage: x.stage, note: x.step?.n || '' }));
+  // (a time sorts the contacts of one day; the step's own record has none and comes first)
+  return [...own, ...rest].sort((a, b) => b.d.localeCompare(a.d) || (a.kind === 'own' ? -1 : b.kind === 'own' ? 1 : b.at.localeCompare(a.at)));
+}
+/**
+ * What a step's own button opens (the table row, the phone card, the panel's step heading), so it never edits
+ * a record other than the one its line shows. CONTACT / FOLLOW show their newest line: the step's own record
+ * ("แก้ไข" as on any step); an older stage's record ("แก้ไข" edits it where it is stored, from its own date and
+ * note: `stage` CALL2, `old`); or a contact record, which has no editor: the button then records one more contact
+ * at the step ("บันทึกเพิ่ม", `act`). Any other step, and an empty one: its own record.
+ */
+export function stepEdit(v: StepView): { stage: string; act: boolean; old: boolean; label: 'แก้ไข' | 'บันทึกเพิ่ม' } {
+  if (v.kind === 'contact' || v.kind === 'follow') {
+    const top = stepLines(v)[0];
+    if (top?.kind === 'old') return { stage: top.stage, act: false, old: true, label: 'แก้ไข' };
+    if (top?.kind === 'act') return { stage: v.id, act: true, old: false, label: 'บันทึกเพิ่ม' };
+  }
+  return { stage: v.id, act: false, old: false, label: 'แก้ไข' };
+}
+
+/** Under the Actual header: the payments it adds up ("จาก PAY": every installment is a PAY step). */
+export function actualSource(_cfg?: SalesCfg) {
+  return 'จาก PAY';
 }
 
 /** A due date given as days after the win: "เมื่อได้งาน" / "30 วันหลังได้งาน"; '' without one. */
@@ -382,14 +417,15 @@ export const JOINT_PAID = 'ชำระผ่านใบเสนอราค�
 export const CLOSE_TITLE = 'ปิดงาน · ย้ายงานที่จบแล้วไปแท็บ “ปิดงาน”';
 /**
  * Where a deal stands toward ปิดงาน: `state` none (no result yet), no, plan (won, installments of the
- * plan left), pays (won, PAY stages left, no plan), nopay (won, the list has no PAY stage), done (won and
- * received); the closing card's `text`; `hint` for the table's closing row ("ปิดได้เมื่อรับ PAY2", "รอผลการขาย";
- * '' when ready: the button shows); `progress` = "รับแล้ว 50% · เหลือ 53,500" on the plan total, else the Forecast.
+ * plan left), pays (won, PAY steps left, no plan), done (won and received: every deal has a PAY step); the
+ * closing card's `text`; `hint` for the table's closing row ("ปิดได้เมื่อรับ PAY2", "รอผลการขาย"; '' when ready:
+ * the button shows); `waitFor` the installments left (their ids); `progress` = "รับแล้ว 50% · เหลือ 53,500" on the
+ * plan total, else the Forecast.
  * `ro`: an account that can only read gets where it stands, without the steps it has no buttons for.
  */
-export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint': the lead phrase (the table's closing row) */ lead?: string }
-export function closingView(s: SalesState, d: Deal, today: string, ro = false): ClosingView {
-  const r = dealResult(s, d), ready = closeReady(s, d, today);
+export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint', and 'pays' while the rest of a payment without a plan is owed: the lead phrase (the table's closing row, the phone card) */ lead?: string }
+export function closingView(s: SalesState, d: Deal, today: string, ro = false, t?: DealSteps): ClosingView {
+  const r = dealResult(s, d), ready = closeReady(s, d, today, t);
   // a company of a joint quotation (`joint`): its money is the header's, and it closes with the whole
   // quotation, once the payer has paid in full (or said NO); closing records the payer's result for it when it
   // has none (engine.closeJoint)
@@ -403,27 +439,35 @@ export function closingView(s: SalesState, d: Deal, today: string, ro = false): 
     return { ready, state: 'joint', text: lead + rest, lead, hint: ready ? '' : hr === 'YES' ? 'ปิดได้เมื่อผู้จ่ายชำระครบ' : 'รอผลจากผู้จ่าย', waitFor: [], progress };
   }
   if (r === 'NO') return { ready, state: 'no', text: ro ? 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ' : 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ กดปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” (เปิดกลับได้ ยอดยังนับในสรุปปี)', hint: '', waitFor: [], progress: null };
-  if (r !== 'YES') return { ready, state: 'none', text: ro ? 'ยังไม่มีผลการขาย' : 'ยังไม่มีผลการขาย เมื่อบันทึก CLOSED DEAL เป็น NO หรือ YES และรับชำระครบทุกงวด ระบบจะขึ้นปุ่มปิดงาน', hint: 'รอผลการขาย', waitFor: [], progress: null };
-  const ps = payState(s, d, today), P = ps.plan, m = dealMoney(s, d);
+  if (r !== 'YES') return { ready, state: 'none', text: ro ? 'ยังไม่มีผลการขาย' : 'ยังไม่มีผลการขาย เมื่อบันทึก CLOSE เป็น NO หรือ YES และรับชำระครบทุกงวด ระบบจะขึ้นปุ่มปิดงาน', hint: 'รอผลการขาย', waitFor: [], progress: null };
+  const ps = payState(s, d, today, t), P = ps.plan, m = dealMoney(s, d);
   const base = P ? P.total : m.forecast, got = P ? P.got : m.actual || 0;
   const progress = base ? { pct: Math.min(100, Math.round((got / base) * 100)), got, base, left: Math.max(0, base - got) } : null;
-  const left = ps.left, hint = left.length ? 'ปิดได้เมื่อรับ ' + left.join(', ') : '';
+  const left = ps.left, codes = left.map((p) => stepCode(s, d, p, today)).join(', '), hint = left.length ? 'ปิดได้เมื่อรับ ' + codes : '';
   const out = (state: ClosingView['state'], text: string): ClosingView => ({ ready, state, text, hint, waitFor: left, progress });
   if (P && left.length) return out('plan', `ได้งานแล้ว · รับ ${P.paidN} จาก ${P.n} งวดตามแผน${ro ? '' : ' เมื่อรับครบทุกงวด ระบบจะชวนให้ปิดงาน'}`);
-  if (left.length) return out('pays', `ได้งานแล้ว · รับชำระ ${ps.paid.length} จาก ${ps.pays.length} งวด${ro ? '' : ` เมื่อแนบเอกสาร ${left.join(', ')} ระบบจะชวนให้ปิดงาน`}`);
-  if (!ps.pays.length) return out('nopay', ro ? 'ได้งานแล้ว' : 'ได้งานแล้ว ตารางนี้ไม่มีขั้นชำระเงิน (PAY) กดปิดงานเมื่องานจบ');
+  if (left.length && ps.pays.length === 1) return out('pays', `ได้งานแล้ว · ยังไม่ได้รับชำระ${ro ? '' : ` เมื่อแนบใบเสร็จที่ ${codes} ระบบจะชวนให้ปิดงาน`}`);
+  // no plan, its PAY step done but not known to be paid in full: the rest of it (dealSteps `rest`)
+  const rest = !P && left.length === 1 ? (t || dealSteps(s, d, today)).steps.find((v) => v.rest && v.id === left[0]) : undefined;
+  if (rest) {
+    // (a session without ดูยอดเงิน cannot tell what came in: the rest is still to record)
+    const lead = rest.short == null ? 'ได้งานแล้ว · รอบันทึกรับส่วนที่เหลือ' : `ได้งานแล้ว · ${m.actual == null ? 'ยังไม่มียอดที่รับ (Actual) ' : ''}ค้างรับ ${fmtMoney(rest.short)} บาท`;
+    const how = m.actual == null && rest.short != null ? 'แนบใบเสร็จหรือใส่ยอด Actual' : 'แนบใบเสร็จของส่วนที่เหลือ';
+    return { ...out('pays', lead + (ro ? '' : ` เมื่อ${how} ระบบจะชวนให้ปิดงาน`)), hint: 'ปิดได้เมื่อรับส่วนที่เหลือ', lead };
+  }
+  if (left.length) return out('pays', `ได้งานแล้ว · รับชำระ ${ps.paid.length} จาก ${ps.pays.length} งวด${ro ? '' : ` เมื่อแนบเอกสาร ${codes} ระบบจะชวนให้ปิดงาน`}`);
   return out('done', `ได้งานและรับชำระครบทุกงวด${P ? 'ตามแผน' : ''}แล้ว${ro ? ' พร้อมปิดงาน' : ' ปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” ยอด Forecast / Actual ยังนับในสรุปปีเหมือนเดิม'}`);
 }
 /** The prompt after this user's own action made a deal ready (`via` the result, or a payment / document /
  *  "ถือว่ารับครบ"): "รับชำระครบทุกงวดแล้ว ปิดงาน X เลยไหม?". A teammate's change never prompts. */
 export function closePrompt(s: SalesState, d: Deal, name: string, via: 'result' | 'payment') {
   const r = dealResult(s, d);
-  const lead = r === 'NO' ? 'ผลการขายเป็น NO' : via === 'payment' ? 'รับชำระครบทุกงวดแล้ว' : payStages(s.cfg).length ? 'ได้งานและรับชำระครบแล้ว' : 'ได้งานแล้ว';
+  const lead = r === 'NO' ? 'ผลการขายเป็น NO' : via === 'payment' ? 'รับชำระครบทุกงวดแล้ว' : 'ได้งานและรับชำระครบแล้ว';
   return `${lead} ปิดงาน ${name} เลยไหม?`;
 }
 /** Asked before closing a deal that is not ready (from ⋯ or the panel head); '' when it is ready. */
 export function closeConfirm(s: SalesState, d: Deal, today: string, name: string) {
   if (closeReady(s, d, today)) return '';
-  const left = dealResult(s, d) === 'YES' ? payState(s, d, today).left : [];
+  const left = dealResult(s, d) === 'YES' ? payState(s, d, today).left.map((p) => stepCode(s, d, p, today)) : [];
   return `ปิดงาน “${name}” ตอนนี้? ${left.length ? `ยังรับชำระไม่ครบ (${left.join(', ')})` : 'ยังไม่มีผลการขาย'} งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`;
 }

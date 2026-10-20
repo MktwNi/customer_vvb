@@ -113,8 +113,8 @@ async function member(L: Tab, u: string, name: string, role: Role) {
   return M;
 }
 /** An account writes expense records straight to the script (the recording screens are the other side's). */
-const push = (t: Tab, ops: { k: string; v?: unknown }[]) => sim.post({ action: 'push', cv: 4, tok: t.e.session!.tok, ops }) as { ok: boolean; denied: string[] };
-const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, xp: 1, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
+const push = (t: Tab, ops: { k: string; v?: unknown }[]) => sim.post({ action: 'push', cv: 5, tok: t.e.session!.tok, ops }) as { ok: boolean; denied: string[] };
+const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 5, xp: 1, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
 const rowsOf = (t: Tab) => expChkRows(t.e.sales, expLines(t.e.sales), t.e.expChecks(), t.e.payChkCfg().since);
 const rowOf = (t: Tab, key: string) => rowsOf(t).find((r) => r.key === key) as XRow;
 const BASE: CapSet = { 'view.sales': 'all', 'view.plan': 'all', 'view.money': 'all', 'view.cash': 'all', 'docs.open': 'all', 'pay.check': 'all' };
@@ -278,7 +278,7 @@ describe('the month check of money out against the team script', () => {
     await settle(S);
     // เอก uploads the bill (บันทึกค่าใช้จ่ายของงาน may) and records the paid expense with it
     const bytes = Buffer.from('%PDF-1.4 bill of e1');
-    const up = sim.post({ action: 'upload', cv: 4, tok: S.e.session!.tok, docId: 'exp_e1', name: 'บิล.pdf', mime: 'application/pdf', data: bytes.toString('base64') }) as { ok: boolean; fileId: string };
+    const up = sim.post({ action: 'upload', cv: 5, tok: S.e.session!.tok, docId: 'exp_e1', name: 'บิล.pdf', mime: 'application/pdf', data: bytes.toString('base64') }) as { ok: boolean; fileId: string };
     expect(up.ok).toBe(true);
     const file = { id: up.fileId, name: 'บิล.pdf', mime: 'application/pdf', size: bytes.length };
     expect(push(S, [{ k: `dexp/${d.id}/e1`, v: exp({ file }) }])).toMatchObject({ ok: true, denied: [] });

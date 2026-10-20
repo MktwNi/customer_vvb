@@ -16,7 +16,7 @@ import { BUILTIN, LATE_CAPS, type CapSet } from './caps';
 import { histLine } from './reqText';
 import { payState, planOf, quickMatch, trackerStatus } from './sales';
 import { nextStepView, statusView } from './salesUi';
-import type { Role } from './teamSync';
+import { CV, type Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -124,14 +124,14 @@ async function member(L: Tab, u: string, name: string, role: Role, cv?: number) 
 }
 const pulls = () => sent.filter((b) => b.action === 'pull').map((b) => Number(b.since));
 /** What the script stored for key k (as an admin pulls it). */
-const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
+const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 5, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
 const SALES = BUILTIN.sales.c;
 /** A built-in role as a script before capabilities gives it: without job expenses, which only a script that
  *  hides and guards them gives (lib/caps.ts LATE_CAPS). */
 const before = (c: CapSet) => Object.fromEntries(Object.entries(c).filter(([k]) => !(LATE_CAPS as string[]).includes(k))) as CapSet;
 
 describe('against the team script deployed before configurable roles (no me.caps)', () => {
-  it('each account works by its role\'s built-in capabilities; cv 4 is accepted; roles and requests are not there yet', async () => {
+  it('each account works by its role\'s built-in capabilities; this build\'s cv (5) is accepted; roles and requests are not there yet', async () => {
     const L = await lead(V3);
     expect(L.e.myCaps()).toEqual(before(BUILTIN.admin.c));
     expect(L.e.can('view.exp')).toBe(false); // no job expenses: that script neither hides nor guards them
@@ -147,7 +147,8 @@ describe('against the team script deployed before configurable roles (no me.caps
     expect(S.e.can('del.log', 'หมิว')).toBe(false);
     expect(V.e.canWrite()).toBe(false);
     expect(V.e.can('view.money')).toBe(true);
-    expect(sent.every((b) => b.cv === 4)).toBe(true);
+    // (a script that knows an older client version takes this build's writes: its gate is a minimum)
+    expect(sent.every((b) => b.cv === CV && CV === 5)).toBe(true);
     // a sales account's edits go through as before
     const d = S.e.addDeal({ client: 'บริษัท ทดสอบสิทธิ์ จำกัด' });
     await settle(S);
@@ -202,7 +203,7 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     expect(S.e.canWriteKey('dstep/' + other.id + '/CALL1', false)).toBe(false);
     expect(S.e.canWriteKey('dstep/' + mine.id + '/CALL1', false)).toBe(true);
     // the script decides the same, whatever a browser sends
-    const forced = sim.post({ action: 'push', cv: 4, tok: S.e.session!.tok, ops: [{ k: 'dstep/' + other.id + '/CALL1', v: { d: '2026-10-15', n: 'x' } }, { k: 'dstep/' + mine.id + '/CALL1', v: { d: '2026-10-15', n: 'y' } }] });
+    const forced = sim.post({ action: 'push', cv: 5, tok: S.e.session!.tok, ops: [{ k: 'dstep/' + other.id + '/CALL1', v: { d: '2026-10-15', n: 'x' } }, { k: 'dstep/' + mine.id + '/CALL1', v: { d: '2026-10-15', n: 'y' } }] });
     expect(forced.denied).toEqual(['dstep/' + other.id + '/CALL1']);
   });
 
@@ -246,7 +247,7 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     L.e.setStep(d2.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
     L.e.setPlan(d2.id, [{ stage: 'PAY1', amt: 1000, pct: null, due: '2026-10-05', rel: null, how: 'transfer', howT: '', note: '' }]);
     await settle(L);
-    sim.post({ action: 'push', cv: 4, tok: L.e.session!.tok, ops: [{ k: `dpay/${d2.id}/PAY1`, v: { ...stored(L, `dpay/${d2.id}/PAY1`)!.v as object, rcv: '2026-10-12', got: 1000 } }] });
+    sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ k: `dpay/${d2.id}/PAY1`, v: { ...stored(L, `dpay/${d2.id}/PAY1`)!.v as object, rcv: '2026-10-12', got: 1000 } }] });
     await settle(N);
     const S = N.e.sales, today = '2026-10-15';
     expect(N.e.can('view.money')).toBe(false);
@@ -335,7 +336,7 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     expect(S.e.roleNameOf(id)).toBe('หัวหน้าฝ่ายขาย');
     await S.e.reqSend({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31' });
     expect(S.e.session!.req).toMatchObject({ st: 'p', k: 'role', role: id, until: '2027-01-31', note: 'ดูแลทีมแทนช่วงลา' });
-    expect(sent.find((b) => b.action === 'req_send')).toMatchObject({ action: 'req_send', k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31', cv: 4 });
+    expect(sent.find((b) => b.action === 'req_send')).toMatchObject({ action: 'req_send', k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31', cv: 5 });
     await S.e.reqCancel();
     expect(S.e.session!.req).toBeNull();
     await S.e.reqSend({ k: 'role', role: id, note: 'ดูแลทีมแทนช่วงลา', until: '2027-01-31' });
@@ -423,5 +424,22 @@ describe('against the team script with configurable roles (Code.gs v4)', () => {
     expect(O.e.teamPendingN).toBeGreaterThan(0); // kept, sent again after a refresh
     expect(O.e.team.msg).toBe(REFRESH);
     expect(stored(L, 'deal/' + d.id)!.v).not.toMatchObject({ referral: 'จากแท็บเก่า' });
+  });
+
+  it('a tab on a build from before the five steps (cv 4) reads but may not write: it would not show CONTACT / FOLLOW, and could delete their contacts', async () => {
+    const L = await lead();
+    const d = L.e.addDeal({ client: 'บริษัท แปดขั้น จำกัด' });
+    L.e.setStep(d.id, 'CONTACT', { d: '2026-10-05', n: 'โทรครั้งแรก' });
+    const a = L.e.addAct(d.id, { type: 'call', note: 'โทรตาม', d: '2026-10-06', stage: 'CONTACT' })!;
+    await settle(L);
+    const O = await member(L, 'eight', 'แปด', 'sales', 4);
+    expect(O.e.sales.acts![`${d.id}/${a.id}`]).toBeTruthy(); // it reads
+    O.e.delAct(d.id, a.id); // an older screen listed it under "การติดต่ออื่น", with ลบ
+    O.e.setStep(d.id, 'CALL1', { d: '2026-10-07', n: 'จากแท็บเก่า' });
+    await settle(O);
+    expect(O.e.team.msg).toBe(REFRESH);
+    expect(O.e.teamPendingN).toBeGreaterThan(0); // kept, sent again after a refresh
+    expect(stored(L, `dact/${d.id}/${a.id}`)!.del).toBe(false);
+    expect(stored(L, `dstep/${d.id}/CALL1`)).toBeUndefined();
   });
 });

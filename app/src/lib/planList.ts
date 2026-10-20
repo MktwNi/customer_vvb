@@ -21,8 +21,8 @@ export function planSrc(v: unknown): PlanSrc {
   return v === 'watch' || v === 'sales' ? v : 'all';
 }
 
-/** One open tracker job on a row: its next step as the tracker's table words it ("ถัดไป FOLLOW1 ติดตามครั้งที่
- *  1"), the date it is about ('' none: a step not planned yet), and whether that date has passed (the step's
+/** One open tracker job on a row: its next step as the tracker's table words it ("ถัดไป FOLLOW ติดตามผล"),
+ *  the date it is about ('' none: a step not planned yet), and whether that date has passed (the step's
  *  installment is late, or nobody has contacted the client for more than OVERDUE_DAYS: `idle` days). */
 export interface PlanJob { deal: Deal; next: NextStepView; when: string; late: boolean; idle: number | null }
 /** A row: the company (null = a client not linked to the register), its name and phone (the job's when the
@@ -75,7 +75,7 @@ function jobOf(s: SalesState, d: Deal, today: string): PlanJob {
   // a step planned ahead is in hand, however long ago the last contact was (as the tracker's table says it)
   const idle = next.kind === 'overdue' ? overdueDays(s, d, today) : null;
   let when = '';
-  if (next.kind === 'planned') when = s.steps[`${d.id}/${next.stage}`]?.d || '';
+  if (next.kind === 'planned') when = next.date;
   else if (next.kind === 'pay' && next.line?.due) when = next.line.due;
   // not contacted for too long: the step was due OVERDUE_DAYS after the last contact
   else if (idle != null) when = addDays(today, OVERDUE_DAYS - idle);
@@ -182,14 +182,14 @@ export function unplanned<C extends PlanCo>(rows: readonly PlanRow<C>[]): C[] {
   return rows.flatMap((r) => (r.c && !hasPlan(r) ? [r.c] : []));
 }
 
-/** A job's tag: "Sales Tracker · ถัดไป FOLLOW1 ติดตามครั้งที่ 1" (the tracker table's next-step words: "นัด 20
+/** A job's tag: "Sales Tracker · ถัดไป FOLLOW ติดตามผล" (the tracker table's next-step words: "นัด 20
  *  ต.ค." for a planned step, the installment's state at a PAY stage); "Sales Tracker 2 งาน · …" when the
  *  company has more than one (the most urgent one is named). A number stays on the line of the word before
  *  it and of "วัน" after it (no-break spaces), so a narrow tag never ends a line on "ครั้งที่". */
 export function jobTag(jobs: readonly Pick<PlanJob, 'next'>[]): string {
   if (!jobs.length) return '';
   const n = jobs[0].next;
-  const what = (n.stage ? `ถัดไป ${n.stage}${n.hint ? ' ' + n.hint : ''}` : n.hint).replace(/ (?=\d)/g, NBSP).replace(/(\d) (?=วัน)/g, '$1' + NBSP);
+  const what = (n.stage ? `ถัดไป ${n.code || n.stage}${n.hint ? ' ' + n.hint : ''}` : n.hint).replace(/ (?=\d)/g, NBSP).replace(/(\d) (?=วัน)/g, '$1' + NBSP);
   return `Sales Tracker${jobs.length > 1 ? ` ${jobs.length} งาน` : ''}${what ? ' · ' + what : ''}`;
 }
 const NBSP = '\u00a0';

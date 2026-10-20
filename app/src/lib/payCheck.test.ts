@@ -281,6 +281,19 @@ describe('who may check (the self-check)', () => {
     // old data without the row: the plan line's writer
     expect(byKey(rows, 'c1/PAY2').by).toEqual(['หมิว']);
   });
+  it('a plan of one: the history row names it as the screens do ("รับชำระ PAY"), and the older "รับชำระ PAY1" still counts', () => {
+    const s = demo();
+    // c1 cut to a plan of one, received by ปลา; the line itself last written by หมิว
+    delete s.pays['c1/PAY2'];
+    s.pays['c1/PAY1'] = { ...s.pays['c1/PAY1'], amt: 240000, got: 240000, by: 'หมิว' };
+    log(s, 'c1', 'รับชำระ PAY', 'ปลา', '2026-06-30T08:00:00.000Z', '240,000 บาท · โอน');
+    expect(byKey(rowsOf(s), 'c1/PAY1').by).toEqual(['ปลา']);
+    const t = demo();
+    delete t.pays['c1/PAY2'];
+    t.pays['c1/PAY1'] = { ...t.pays['c1/PAY1'], by: 'หมิว' };
+    log(t, 'c1', 'รับชำระ PAY1', 'ปลา', '2026-06-30T08:00:00.000Z');
+    expect(byKey(rowsOf(t), 'c1/PAY1').by).toEqual(['ปลา']);
+  });
   it('a document\'s attacher; a typed Actual\'s editor; both a hand receipt and a receipt counted together', () => {
     const s = demo();
     s.docs['demo3/rc3'] = doc({ id: 'rc3', deal: 'demo3', amount: 125000, stage: 'PAY1', by: 'มกร' });
@@ -325,10 +338,11 @@ describe('the filter and the words', () => {
     log(s, 'c2', 'แก้ไข', 'คุณเอ', '2026-10-05T03:00:00.000Z', 'Actual');
     const n = sp(noteOf(s, byKey(month(rowsOf(s), '2026-10'), 'c2/typed'))!);
     expect(n).toEqual({ head: 'สิ่งที่ต้องแก้ จาก ฝน · 12 ต.ค. · ส่งถึง คุณเอ', body: 'ยอดไม่ตรง', to: 'คุณเอ' });
-    expect(instOf(back)).toEqual({ text: 'ไม่มีแผน', sub: 'รับที่ PAY2' });
+    // (no plan: PAY1 and PAY2 are the payment and the rest of it)
+    expect(instOf(back)).toEqual({ text: 'ไม่มีแผน', sub: 'รับที่ PAY ส่วนที่เหลือ' });
     expect(basisWord(back)).toBe('พิมพ์เอง');
     expect(evidenceWord(back)).toBe('ไม่มีไฟล์');
-    expect(lineLabel(back)).toBe('รับที่ PAY2 · พิมพ์เอง');
+    expect(lineLabel(back)).toBe('รับที่ PAY ส่วนที่เหลือ · พิมพ์เอง');
     expect(basisWord(byKey(oct, oct.find((r) => r.kind === 'late')!.key))).toBe('ตามแผน');
     expect(docWord({ kind: 'invoice', docNo: 'INV-1' })).toBe('ใบแจ้งหนี้ INV-1');
     expect(ymTh('2026-10')).toBe('ตุลาคม 2569');
@@ -643,7 +657,7 @@ describe('the bell: money sent back to whoever recorded it', () => {
     expect(returnedTo(s, s.pchk, since, 'ปลา', T)).toEqual([]);
     expect(returnedTo(s, s.pchk, since, '', T)).toEqual([]);
     const rows = payBackBell(returnedTo(s, s.pchk, since, 'มกร', T));
-    expect(rows).toEqual([{ key: 'b:c2/typed', kind: 'pchk', title: 'พฤกษา โฮลดิ้ง', sub: 'รับที่ PAY2 · พิมพ์เอง · 180,000 บาท · ฝน ส่งกลับให้แก้: ยอดไม่ตรงกับบัญชีธนาคาร', right: { text: 'ส่งกลับแก้ไข', chip: '' }, count: true, go: { deal: 'c2' } }]);
+    expect(rows).toEqual([{ key: 'b:c2/typed', kind: 'pchk', title: 'พฤกษา โฮลดิ้ง', sub: 'รับที่ PAY ส่วนที่เหลือ · พิมพ์เอง · 180,000 บาท · ฝน ส่งกลับให้แก้: ยอดไม่ตรงกับบัญชีธนาคาร', right: { text: 'ส่งกลับแก้ไข', chip: '' }, count: true, go: { deal: 'c2' } }]);
     const base = { S: s, tasks: [], owners: {}, coName: () => '', me: 'มกร', live: null, checks: {}, cfg: NOTIFY_CFG0, scope: 'mine' as const, today: T, back: rows };
     const b = bellItems({ ...base, caps: { 'view.sales': 'all', 'view.money': 'all' } });
     expect(b.groups.map((g) => [g.kind, g.title, g.n])).toEqual([['pchk', 'รับเงินที่บัญชีส่งกลับ', 1]]);

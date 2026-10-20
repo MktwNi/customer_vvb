@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { emptySales, filterDeals, newDeal, planOf, salesStats, type Deal, type PayLine, type SalesState } from './sales';
+import { emptySales, filterDeals, newDeal, planOf, salesStats, setMoneyHidden, type Deal, type PayLine, type SalesState } from './sales';
 import {
   actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, trackerFields, winRateBySource, yearOptions,
 } from './salesUi';
 
 const deal = (p: Partial<Deal> = {}): Deal => newDeal({ id: p.id || 'd' + Math.random().toString(36).slice(2), client: 'บริษัท ก', year: '2569', ...p }, 'me', '2026-10-01T00:00:00.000Z');
-const state = (deals: Deal[], steps: SalesState['steps'] = {}): SalesState => ({ ...emptySales(), deals: Object.fromEntries(deals.map((d) => [d.id, d])), steps });
+// (the steps are copied: a test that writes a step must not change a shared fixture such as YES)
+const state = (deals: Deal[], steps: SalesState['steps'] = {}): SalesState => ({ ...emptySales(), deals: Object.fromEntries(deals.map((d) => [d.id, d])), steps: { ...steps } });
 
 describe('import year prompt', () => {
   it('takes a Buddhist-era year only', () => {
@@ -85,11 +86,11 @@ describe('names and sources', () => {
     expect(shortName('Siam Steel Co., Ltd.')).toBe('Siam Steel Co., Ltd.');
     expect(shortName('บริษัท จำกัด')).toBe('บริษัท จำกัด');
   });
-  it('the Actual header says where the figure comes from', () => {
+  it('the Actual header says where the figure comes from: the PAY steps, whatever the team\'s list says', () => {
     const cfg = emptySales().cfg;
-    expect(actualSource(cfg)).toBe('จาก PAY1 + PAY2');
-    expect(actualSource({ ...cfg, stages: [...cfg.stages, 'PAY3'] })).toBe('จาก PAY ทุกงวด');
-    expect(actualSource({ ...cfg, stages: ['CALL1', 'CLOSED DEAL'] })).toBe('จาก ใบเสร็จ');
+    expect(actualSource(cfg)).toBe('จาก PAY');
+    expect(actualSource({ ...cfg, stages: [...cfg.stages, 'PAY3'] })).toBe('จาก PAY');
+    expect(actualSource({ ...cfg, stages: ['CALL1', 'CLOSED DEAL'] })).toBe('จาก PAY');
   });
 });
 
@@ -101,13 +102,21 @@ describe('deal status words (dot + word + one grey line)', () => {
       return [v.kind, v.word, v.sub, v.ready];
     };
     expect(w({})).toEqual(['neutral', 'ยังไม่เริ่ม', 'เพิ่มเมื่อ 6 ต.ค.', false]);
-    expect(w({ 'x/CALL1': { d: '2026-10-01', n: '' }, 'x/CALL2': { d: '2026-10-05', n: 'คุยแล้ว' } })).toEqual(['info', 'กำลังติดตาม', 'ล่าสุด CALL2', false]);
+    expect(w({ 'x/CALL1': { d: '2026-10-01', n: '' }, 'x/CALL2': { d: '2026-10-05', n: 'คุยแล้ว' } })).toEqual(['info', 'กำลังติดตาม', 'ล่าสุด CONTACT', false]);
+    expect(w({ 'x/CALL1': { d: '2026-10-01', n: '' }, 'x/FOLLOW': { d: '2026-10-05', n: 'โทรตาม' } })).toEqual(['info', 'กำลังติดตาม', 'ล่าสุด FOLLOW', false]);
     expect(w({ 'x/CLOSED DEAL': { d: '2026-10-01', n: 'รอผู้บริหารอนุมัติ' } })).toEqual(['warn', 'รอผล', 'รอผู้บริหารอนุมัติ', false]);
     expect(w(YES, { PAY1: { amt: 1 }, PAY2: { amt: 1 } }, { PAY1: 1 })).toEqual(['ok', 'ได้งาน', 'รับแล้ว 1/2 งวด', false]);
-    expect(w({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } })).toEqual(['ok', 'ได้งาน', 'รอชำระงวด 2', false]);
-    expect(w(YES)).toEqual(['ok', 'ได้งาน', 'รอชำระ 2 งวด', false]);
+    // no plan: a single PAY; recorded, it is paid when no amount says less came in
+    expect(w({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } })).toEqual(['ok', 'ได้งาน · รับครบ', 'พร้อมปิดงาน', true]);
+    {
+      const { S, d } = one({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } });
+      d.forecast = 250000;
+      d.actual = 125000; // paid in part: the rest of it is still to come (no plan: never "งวด 2")
+      expect(statusView(S, d, TODAY)).toMatchObject({ word: 'ได้งาน', sub: 'รอชำระเงิน', ready: false });
+    }
+    expect(w(YES)).toEqual(['ok', 'ได้งาน', 'รอชำระเงิน', false]);
     expect(w(YES, {}, { PAY1: 1, PAY2: 1 })).toEqual(['ok', 'ได้งาน · รับครบ', 'พร้อมปิดงาน', true]);
-    expect(w(YES, {}, {}, ['CALL1', 'CLOSED DEAL'])).toEqual(['ok', 'ได้งาน', 'พร้อมปิดงาน', true]);
+    expect(w(YES, {}, {}, ['CALL1', 'CLOSED DEAL'])).toEqual(['ok', 'ได้งาน', 'รอชำระเงิน', false]); // every deal has a PAY step
     expect(w({ 'x/CLOSED DEAL': { d: '2026-10-01', n: 'NO' } })).toEqual(['bad', 'ไม่ได้งาน', 'พร้อมปิดงาน', true]);
     const { S, d } = one({ 'x/CLOSED DEAL': { d: '2026-10-01', n: 'NO' } });
     d.jobStatus = 'closed';
@@ -125,11 +134,23 @@ describe('the next-step pill', () => {
     };
     expect(n({ 'x/CLOSED DEAL': { d: '2026-10-01', n: 'NO' } })).toEqual(['no', '', 'ไม่ต้องติดตามต่อ']);
     expect(n(YES, {}, { PAY1: 1, PAY2: 1 })).toEqual(['done', '', 'ครบทุกขั้น']);
+    expect(n({})).toEqual(['next', 'CONTACT', 'ติดต่อประสานงาน']);
+    // a call booked ahead (an older build's CALL2) on a CONTACT done: planned, its editor opens CALL2 in place
     expect(n({ 'x/CALL1': { d: '2026-10-07', n: 'x' }, 'x/CALL2': { d: '2026-10-12', n: '' } })).toEqual(['planned', 'CALL2', 'นัด 12 ต.ค.']);
-    expect(n({ 'x/CALL1': { d: '2026-09-01', n: 'x' } })).toEqual(['overdue', 'CALL2', 'โทรครั้งที่ 2']);
-    expect(n({ 'x/CALL1': { d: '2026-10-07', n: 'x' } })).toEqual(['next', 'CALL2', 'โทรครั้งที่ 2']);
+    expect(n({ 'x/CALL2': { d: '2026-10-12', n: '' } })).toEqual(['planned', 'CONTACT', 'นัด 12 ต.ค.']);
+    expect(n({ 'x/CALL1': { d: '2026-09-01', n: 'x' } })).toEqual(['overdue', 'QUOTATION', 'ส่งใบเสนอราคา']);
+    expect(n({ 'x/CALL1': { d: '2026-10-07', n: 'x' } })).toEqual(['next', 'QUOTATION', 'ส่งใบเสนอราคา']);
+    expect(n({ 'x/CONTACT': { d: '2026-10-07', n: 'x' }, 'x/QUOTATION': { d: '2026-10-07', n: 'QT' } })).toEqual(['next', 'FOLLOW', 'ติดตามผล']);
     const { S, d } = one({ 'x/CALL1': { d: '2026-10-07', n: 'x' } });
-    expect(nextStepView(S, d, TODAY).label).toBe('ถัดไป CALL2 โทรครั้งที่ 2 — บันทึกวันที่และโน้ต');
+    expect(nextStepView(S, d, TODAY)).toMatchObject({ code: 'QUOTATION', th: 'ส่งใบเสนอราคา', date: '', label: 'ถัดไป QUOTATION ส่งใบเสนอราคา — บันทึกวันที่และโน้ต' });
+    // CLOSE is stored as CLOSED DEAL: the pill names it CLOSE, its editor writes CLOSED DEAL
+    const c = one({ 'x/CONTACT': { d: '2026-10-07', n: 'x' }, 'x/CLOSED DEAL': { d: '2026-10-20', n: '' } });
+    expect(nextStepView(c.S, c.d, TODAY)).toMatchObject({ kind: 'planned', stage: 'CLOSED DEAL', code: 'CLOSE', date: '2026-10-20', hint: 'นัด 20 ต.ค.', label: 'ถัดไป CLOSE นัด 20 ต.ค. — บันทึกวันที่และโน้ต' });
+    // paid in part without a plan: the rest of it is next ("PAY ส่วนที่เหลือ", written to PAY2), what is owed says so
+    const part = one({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } });
+    part.d.forecast = 250000;
+    part.d.actual = 125000;
+    expect(nextStepView(part.S, part.d, TODAY)).toMatchObject({ stage: 'PAY2', code: 'PAY', th: 'ส่วนที่เหลือ', hint: 'ค้าง 125,000' });
   });
   it('a won deal with a plan: the next installment, coloured when due soon, part paid or late', () => {
     const p = (pays: Record<string, Partial<PayLine>>, docs: Record<string, number> = {}) => {
@@ -143,10 +164,13 @@ describe('the next-step pill', () => {
     expect(p({ PAY1: { amt: 1000, due: '2026-10-04' } })).toEqual(['pay', 'PAY1', 'เลยกำหนด 4 วัน', 'late']);
     expect(p({ PAY1: { amt: 1000 } }, { PAY1: 750 })).toEqual(['pay', 'PAY1', 'ค้าง 250', 'due']);
     expect(p({ PAY1: { amt: 1000 } })).toEqual(['pay', 'PAY1', 'รอรับชำระ', '']);
-    // the extra installment after the list's last PAY stage came in
+    // the third installment, after the two came in: a step like the others
     expect(p({ PAY1: { amt: 1 }, PAY2: { amt: 1 }, PAY3: { amt: 1, due: '2026-12-01' } }, { PAY1: 1, PAY2: 1 })).toEqual(['pay', 'PAY3', 'ครบกำหนด 1 ธ.ค.', '']);
+    // a plan of one installment: "PAY" (its record stays PAY1)
     const { S, d } = one(YES, { PAY1: { amt: 53500, due: '2026-10-20' } });
-    expect(nextStepView(S, d, TODAY).label).toBe('ถัดไป PAY1 53,500 บาท ครบกำหนด 20 ต.ค. — บันทึกรับเงิน');
+    expect(nextStepView(S, d, TODAY)).toMatchObject({ stage: 'PAY1', code: 'PAY', th: 'ชำระเงิน', label: 'ถัดไป PAY 53,500 บาท ครบกำหนด 20 ต.ค. — บันทึกรับเงิน' });
+    const two = one(YES, { PAY1: { amt: 53500, due: '2026-10-20' }, PAY2: { amt: 53500 } });
+    expect(nextStepView(two.S, two.d, TODAY)).toMatchObject({ stage: 'PAY1', code: 'PAY1', th: 'ชำระงวดที่ 1' });
   });
 });
 
@@ -228,8 +252,24 @@ describe('closing', () => {
     const plan = c(YES, { PAY1: { amt: 53500 }, PAY2: { amt: 53500 } }, { PAY1: 53500 });
     expect(plan).toMatchObject({ ready: false, state: 'plan', hint: 'ปิดได้เมื่อรับ PAY2', waitFor: ['PAY2'], progress: { pct: 50, got: 53500, base: 107000, left: 53500 } });
     expect(plan.text).toBe('ได้งานแล้ว · รับ 1 จาก 2 งวดตามแผน เมื่อรับครบทุกงวด ระบบจะชวนให้ปิดงาน');
-    expect(c({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } }).text).toBe('ได้งานแล้ว · รับชำระ 1 จาก 2 งวด เมื่อแนบเอกสาร PAY2 ระบบจะชวนให้ปิดงาน');
-    expect(c(YES, {}, {}, ['CALL1', 'CLOSED DEAL'])).toMatchObject({ ready: true, state: 'nopay' });
+    {
+      const { S, d } = one({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } });
+      d.forecast = 250000;
+      d.actual = 125000; // paid in part, no plan: the rest of it (stored at PAY2), never "งวด 2 of 2"
+      expect(closingView(S, d, TODAY)).toMatchObject({
+        ready: false, state: 'pays', hint: 'ปิดได้เมื่อรับส่วนที่เหลือ', waitFor: ['PAY2'], lead: 'ได้งานแล้ว · ค้างรับ 125,000 บาท',
+        text: 'ได้งานแล้ว · ค้างรับ 125,000 บาท เมื่อแนบใบเสร็จของส่วนที่เหลือ ระบบจะชวนให้ปิดงาน',
+      });
+      expect(closingView(S, d, TODAY, true).text).toBe('ได้งานแล้ว · ค้างรับ 125,000 บาท');
+      d.actual = null; // the Forecast and no Actual: all of it, said why
+      expect(closingView(S, d, TODAY).text).toBe('ได้งานแล้ว · ยังไม่มียอดที่รับ (Actual) ค้างรับ 250,000 บาท เมื่อแนบใบเสร็จหรือใส่ยอด Actual ระบบจะชวนให้ปิดงาน');
+      setMoneyHidden(S, true); // no money in this session: nothing to say an amount with
+      expect(closingView(S, d, TODAY, true)).toMatchObject({ ready: false, lead: 'ได้งานแล้ว · รอบันทึกรับส่วนที่เหลือ', text: 'ได้งานแล้ว · รอบันทึกรับส่วนที่เหลือ' });
+    }
+    // a single PAY, not received yet (also with a list that has no PAY stage: every deal has one)
+    for (const list of [undefined, ['CALL1', 'CLOSED DEAL']])
+      expect(c(YES, {}, {}, list)).toMatchObject({ ready: false, state: 'pays', hint: 'ปิดได้เมื่อรับ PAY', waitFor: ['PAY1'], text: 'ได้งานแล้ว · ยังไม่ได้รับชำระ เมื่อแนบใบเสร็จที่ PAY ระบบจะชวนให้ปิดงาน' });
+    expect(c({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } })).toMatchObject({ ready: true, state: 'done' });
     const done = c(YES, { PAY1: { amt: 1000 } }, { PAY1: 1000 });
     expect(done).toMatchObject({ ready: true, state: 'done', hint: '' });
     expect(done.text).toBe('ได้งานและรับชำระครบทุกงวดตามแผนแล้ว ปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” ยอด Forecast / Actual ยังนับในสรุปปีเหมือนเดิม');

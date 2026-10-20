@@ -116,9 +116,9 @@ describe('protocol helpers', () => {
     await call(t, URL, { tok: 'g1.a.b' }, { action: 'pull', since: 0 });
     await call(t, URL, null, { action: 'login', u: 'mod', pk: 'x' });
     expect(sent).toEqual([
-      { action: 'ping', cv: 4, key: 'team-code-1' },
-      { action: 'pull', since: 0, cv: 4, tok: 'g1.a.b' },
-      { action: 'login', u: 'mod', pk: 'x', cv: 4 },
+      { action: 'ping', cv: 5, key: 'team-code-1' },
+      { action: 'pull', since: 0, cv: 5, tok: 'g1.a.b' },
+      { action: 'login', u: 'mod', pk: 'x', cv: 5 },
     ]);
   });
   it('call: a refusal is a TeamSyncError with its code, a Thai message and the reply', async () => {

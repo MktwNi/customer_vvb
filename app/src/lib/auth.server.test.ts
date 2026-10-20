@@ -83,7 +83,7 @@ function team(opts: Parameters<typeof createGasSim>[0] = {}) {
   return { s, admin };
 }
 /** A request from the current web app (cv 4); builds before capabilities sent cv 3 (see "older builds"). */
-const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 4, tok, ...extra });
+const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 5, tok, ...extra });
 const login = (s: GasSim, u: string, pw: string, rm = true) => s.post({ action: 'login', cv: 3, u, pk: s.pk(u, pw), rm });
 const claim = (s: GasSim, code: string | undefined, u: string, name: string | undefined, pw: string, rm = true) =>
   s.post({ action: 'claim', cv: 3, code, u, name, pk: s.pk(u, pw), rm });
