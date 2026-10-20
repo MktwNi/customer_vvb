@@ -677,7 +677,7 @@ export interface DealSteps {
   done: number;
   total: number;
   result: 'YES' | 'NO' | 'WAIT' | '';
-  /** contact records and older stages' records: "ติดต่อ 7 ครั้ง" */
+  /** contact records, older stages' records and CONTACT / FOLLOW's own: "ติดต่อ 7 ครั้ง" */
   contacts: number;
   /** what no step reads (a stage no longer anywhere, none): "การติดต่ออื่น", "เอกสารอื่น" */
   other: { acts: DealAct[]; docs: DealDoc[] };
@@ -850,7 +850,8 @@ function buildSteps(s: SalesState, d: Deal, today: string): DealSteps {
     done: seq.filter((v) => DONE.includes(v.state)).length,
     total: seq.length,
     result: res,
-    contacts: views.reduce((a, v) => a + v.entries.length, 0) + other.acts.length,
+    // (a step's own record at CONTACT or FOLLOW is a contact too, as an older stage's read into it is)
+    contacts: views.reduce((a, v) => a + v.entries.length + ((v.kind === 'contact' || v.kind === 'follow') && isFilled(v.own) ? 1 : 0), 0) + other.acts.length,
     other,
   };
 }

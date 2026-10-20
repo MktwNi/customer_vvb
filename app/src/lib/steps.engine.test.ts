@@ -103,7 +103,8 @@ describe('the five steps between browsers (real Code.gs)', () => {
       expect(c.entries.map((x) => [x.kind, x.stage])).toEqual([['old', 'CALL2'], ['act', 'CONTACT']]);
       expect(f).toMatchObject({ state: 'done', date: '2026-10-04', top: { stage: 'FOLLOW1', n: 'ตามผลทางอีเมล' } });
       expect(f.entries.map((x) => [x.kind, x.stage])).toEqual([['act', 'FOLLOW2'], ['old', 'FOLLOW1']]);
-      expect(dealSteps(e.sales, e.sales.deals[d.id], TODAY)).toMatchObject({ done: 2, total: 5, contacts: 4, next: { id: 'CLOSED DEAL' } });
+      // (contacts: CONTACT's own record, CALL2, the two contact records and FOLLOW1)
+      expect(dealSteps(e.sales, e.sales.deals[d.id], TODAY)).toMatchObject({ done: 2, total: 5, contacts: 5, next: { id: 'CLOSED DEAL' } });
       expect(lastContactInfo(e.sales, e.sales.deals[d.id], TODAY)).toMatchObject({ date: '2026-10-04', from: 'act' });
       expect(overdueDays(e.sales, e.sales.deals[d.id], TODAY)).toBeNull();
       expect(e.sales.cfg.stages).toEqual(DEFAULT_STAGES);
@@ -218,7 +219,7 @@ describe('the five steps between browsers (real Code.gs)', () => {
       '2026-09-12', 'คุยรายละเอียด; CALL1: โทร 1', '2026-09-20', 'FOLLOW2: ตาม', '2026-09-25', 'YES',
     ]);
     expect([r['PAY วันที่'], r['PAY โน้ต'], r['การติดต่อ (ครั้ง)'], r['ขั้นตอนอื่น']]).toEqual([
-      'PAY1 2026-10-01; PAY2 2026-10-03', 'PAY1: รับงวด 1; PAY2: รับงวด 2', '3', 'OLDSTAGE: 2026-08-01 ขั้นที่ถูกลบออกจากรายการ',
+      'PAY1 2026-10-01; PAY2 2026-10-03', 'PAY1: รับงวด 1; PAY2: รับงวด 2', '4', 'OLDSTAGE: 2026-08-01 ขั้นที่ถูกลบออกจากรายการ',
     ]);
     E.dispose();
   });

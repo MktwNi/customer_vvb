@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
-import { KIND_TH, docsOf, fmtMoney, stageTrack, trackerStatus, type Deal } from '../lib/sales';
+import { KIND_TH, dealSteps, docsOf, fmtMoney, trackerStatus, type Deal } from '../lib/sales';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
 import { moneyWords } from '../lib/joint';
 import type { Company, LogEntry, Person, Task } from '../lib/types';
@@ -627,7 +627,7 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
 function DealMini({ d, p }: { d: Deal; p: Person }) {
   const { engine: e, set } = useApp();
   const S = e.sales;
-  const tr = stageTrack(S, d, todayISO());
+  const tr = dealSteps(S, d, todayISO());
   const mine = !!d.contactName && nameKey(d.contactName) === nameKey(p.name);
   return (
     <button className="pe-deal" onClick={() => set({ deal: d.id })}>
@@ -636,7 +636,7 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
         <span className="pe-sub">{trackerStatus(S, d)}</span>
       </span>
       <span className="pe-mini" role="img" aria-label={`ทำแล้ว ${tr.done} จาก ${tr.total} ขั้น`}>
-        {S.cfg.stages.map((s) => <i key={s} className={'s-' + tr.states[s]} title={s} />)}
+        {tr.steps.filter((v) => v.counted).map((v) => <i key={v.id} className={'s-' + v.state} title={v.code} />)}
       </span>
       <span className="pe-sub">
         {/* (a joint quotation's member: its part, never its own typed figures, which count nowhere) */}

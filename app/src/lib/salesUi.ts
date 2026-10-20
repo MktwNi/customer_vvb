@@ -385,13 +385,13 @@ export const JOINT_PAID = 'ชำระผ่านใบเสนอราค�
 export const CLOSE_TITLE = 'ปิดงาน · ย้ายงานที่จบแล้วไปแท็บ “ปิดงาน”';
 /**
  * Where a deal stands toward ปิดงาน: `state` none (no result yet), no, plan (won, installments of the
- * plan left), pays (won, PAY steps left, no plan), done (won and received; 'nopay' is no longer given: every
- * deal has a PAY step); the closing card's `text`; `hint` for the table's closing row ("ปิดได้เมื่อรับ PAY2",
- * "รอผลการขาย"; '' when ready: the button shows); `waitFor` the installments left (their ids); `progress` =
- * "รับแล้ว 50% · เหลือ 53,500" on the plan total, else the Forecast.
+ * plan left), pays (won, PAY steps left, no plan), done (won and received: every deal has a PAY step); the
+ * closing card's `text`; `hint` for the table's closing row ("ปิดได้เมื่อรับ PAY2", "รอผลการขาย"; '' when ready:
+ * the button shows); `waitFor` the installments left (their ids); `progress` = "รับแล้ว 50% · เหลือ 53,500" on the
+ * plan total, else the Forecast.
  * `ro`: an account that can only read gets where it stands, without the steps it has no buttons for.
  */
-export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint': the lead phrase (the table's closing row) */ lead?: string }
+export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint': the lead phrase (the table's closing row) */ lead?: string }
 export function closingView(s: SalesState, d: Deal, today: string, ro = false): ClosingView {
   const r = dealResult(s, d), ready = closeReady(s, d, today);
   // a company of a joint quotation (`joint`): its money is the header's, and it closes with the whole

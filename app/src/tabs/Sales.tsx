@@ -2,11 +2,11 @@ import { Fragment, createContext, useCallback, useContext, useDeferredValue, use
 import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
 import {
-  ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
-  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex, workTally,
-  type BasisDate, type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState,
+  ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, filterDeals, fmtMoney, lastContactInfo, mismatchText,
+  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stepLabel, stepOf, withActIndex, workTally,
+  type BasisDate, type Deal, type DealAct, type DealDoc, type DealStep, type DealSteps, type DocKind, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState, type StepKind, type StepView,
 } from '../lib/sales';
-import { BASIS_TH, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, trackerFields, yearOptions, type FigView } from '../lib/salesUi';
+import { BASIS_TH, JOINT_PAID, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, trackerFields, yearOptions, type FigView } from '../lib/salesUi';
 import { rangeTh, resolveDate, type DateBasis, type DateF, type Range } from '../lib/dateRange';
 import { useMedia } from '../components/Sidebar';
 import { Kpi, Notice, PageHead, Status } from '../components/ui';
@@ -18,9 +18,9 @@ import { QtPhone, deleteQt } from '../components/QtCard';
 import { QtCheckLine } from '../components/QtCheckSheet';
 import { qtFigWords, qtView } from '../lib/quotes';
 import { followStep, stepMoved, type StepEd, type StepFields } from '../lib/stepEditor';
-import { ActForm, ActList, ActStageSel, ActTypeSeg, delActFocus, useActForm } from '../components/DealActs';
+import { ActForm, ActItem, ActList, ActStageSel, ActTypeSeg, actCode, delActFocus, oldWord, useActForm } from '../components/DealActs';
 import { DateChip } from '../components/DateChip';
-import { Bead, Chevron, MiniTrack, reachedOf } from '../components/StageTrack';
+import { Bead, Chevron, MiniTrack, beadOf, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
 // ค่าใช้จ่ายของงาน: the row menu's บันทึกค่าใช้จ่าย and the phone card's row
 import { BillsStuckNote, ExpMini, expMenuSub, openExp } from '../components/ExpCard';
@@ -50,8 +50,10 @@ import { followedBatch, followedMenuWords } from '../lib/bulk';
 export { Modal } from '../components/Dialog';
 
 type Engine = ReturnType<typeof useApp>['engine'];
-/** A stage's Thai name in the tracker's rows (CLOSED DEAL says "ผลการขาย": its buttons say YES / NO). */
-const thOf = (p: string) => stageTh(p).replace(/\s*\(YES \/ NO\)$/, '');
+/** A step's Thai name in the tracker's rows (CLOSE says "ผลการขาย": its buttons say YES / NO). */
+const thShort = (th: string) => th.replace(/\s*\(YES \/ NO\)$/, '');
+/** Something recorded at a stored stage: its date or its note. */
+const isFilled = (x: DealStep) => !!(x.d || x.n.trim());
 const agoTh = (iso: string, today: string) => {
   const n = daysBetween(iso, today);
   return n === 0 ? 'วันนี้' : n === 1 ? 'เมื่อวาน' : n > 1 ? `${fmtN(n)} วันก่อน` : `อีก ${fmtN(-n)} วัน`;
@@ -60,7 +62,7 @@ const agoTh = (iso: string, today: string) => {
 const isAutoNote = (S: SalesState, d: Deal, stage: string) => {
   const n = stepOf(S, d.id, stage).n;
   const line = planOf(S, d, todayISO())?.lines.find((l) => l.stage === stage);
-  return !!n && ((stageDocs(S, d).by[stage] || []).some((x) => x.auto?.n === n) || (!!line && n === paidNote(line.line)));
+  return !!n && (docsOf(S, d.id).some((x) => x.stage === stage && x.auto?.n === n) || (!!line && n === paidNote(line.line)));
 };
 
 /** The table's filters as one shape (old string values read too: filterDeals normalises at every read). */
@@ -866,7 +868,6 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       </div>
     );
   }
-  const stages = S.cfg.stages;
   return (
     <TkCtx.Provider value={tk}>
       {!money ? null : cash ? (
@@ -955,7 +956,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                 ) : (
                   <>
                     <th className="k-fc" title="Forecast คือยอดในใบเสนอราคาที่แนบที่ขั้น QUOTATION (หรือยอดที่พิมพ์เอง)">Forecast<small className="sl-th-fc">จาก QUOTATION</small><small className="sl-th-ac2">และ Actual</small></th>
-                    <th className="k-ac" title={`Actual คือยอดใบแจ้งหนี้ / ใบเสร็จที่แนบที่ ${payStages(S.cfg).join(', ') || 'PAY'} รวมกัน`}>Actual<small>{actualSource(S.cfg)}</small></th>
+                    <th className="k-ac" title="Actual คือยอดใบแจ้งหนี้ / ใบเสร็จที่แนบที่ขั้น PAY ของแต่ละงวดรวมกัน">Actual<small>{actualSource()}</small></th>
                   </>
                 )}
                 <th className="k-st">สถานะ</th>
@@ -992,10 +993,10 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                   {!col &&
                     list.map((r) =>
                       r.k === 'deal' ? (
-                        <DealRows key={r.d.id} d={r.d} open={!!ui.slOpen[r.d.id]} stages={stages} />
+                        <DealRows key={r.d.id} d={r.d} open={!!ui.slOpen[r.d.id]} />
                       ) : (
                         <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} attr={attr} onOpen={(id, plan) => tk.openPanel(id, plan)} onRevise={(id) => tk.attach(r.g.head, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id })}>
-                          {!jqFold[r.g.head.id] && r.shown.map((d, i) => <DealRows key={d.id} d={d} open={!!ui.slOpen[d.id]} stages={stages} jm={i === r.shown.length - 1 ? 'last' : 'mid'} />)}
+                          {!jqFold[r.g.head.id] && r.shown.map((d, i) => <DealRows key={d.id} d={d} open={!!ui.slOpen[d.id]} jm={i === r.shown.length - 1 ? 'last' : 'mid'} />)}
                         </JointBand>
                       ),
                     )}
@@ -1044,7 +1045,7 @@ function SecMeta({ sum }: { sum: { n: number; od: number; rd: number } }) {
   );
 }
 
-/** A deal's row, and when it is open: its stages (one child row each) and the closing row, framed together. */
+/** A deal's row, and when it is open: its steps (one child row each) and the closing row, framed together. */
 /** A deal's rows and card read the table's context with this deal's own answer to "may edit": an
  *  account that may edit only its own deals (scope "own") sees another person's deal read-only. */
 function ForDeal({ d, children }: { d: Deal; children: ReactNode }) {
@@ -1053,30 +1054,28 @@ function ForDeal({ d, children }: { d: Deal; children: ReactNode }) {
   return <TkCtx.Provider value={ro === tk.ro ? tk : { ...tk, ro }}>{children}</TkCtx.Provider>;
 }
 
-function DealRows(p: { d: Deal; open: boolean; stages: string[]; jm?: 'mid' | 'last' }) {
+function DealRows(p: { d: Deal; open: boolean; jm?: 'mid' | 'last' }) {
   return (
     <ForDeal d={p.d}>
       <DealRowsIn {...p} />
     </ForDeal>
   );
 }
-function DealRowsIn({ d, open, stages, jm }: { d: Deal; open: boolean; stages: string[]; jm?: 'mid' | 'last' }) {
+function DealRowsIn({ d, open, jm }: { d: Deal; open: boolean; jm?: 'mid' | 'last' }) {
   const { S, today } = useTk();
-  const t = stageTrack(S, d, today);
+  const t = dealSteps(S, d, today);
   const kids = open ? kidList(S, d, today) : [];
   return (
     <>
       {open && <tr className="sl-gap" aria-hidden="true"><td colSpan={10} /></tr>}
-      <DealRow d={d} open={open} t={t} kidIds={kids.map((_, i) => `k-${d.id}-${i}`).concat(`k-${d.id}-end`)} stages={stages} jm={jm} />
+      <DealRow d={d} open={open} t={t} kidIds={kids.map((_, i) => `k-${d.id}-${i}`).concat(`k-${d.id}-end`)} jm={jm} />
       {open && <KidRows d={d} t={t} list={kids} />}
       {open && <tr className="sl-gap" aria-hidden="true"><td colSpan={10} /></tr>}
     </>
   );
 }
 
-type Track = ReturnType<typeof stageTrack>;
-
-function DealRow({ d, open, t, kidIds, stages, jm }: { d: Deal; open: boolean; t: Track; kidIds: string[]; stages: string[]; jm?: 'mid' | 'last' }) {
+function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSteps; kidIds: string[]; jm?: 'mid' | 'last' }) {
   const tk = useTk();
   const { e, S, today } = tk;
   const c = d.gid != null ? e.company(d.gid) : undefined;
@@ -1085,7 +1084,7 @@ function DealRow({ d, open, t, kidIds, stages, jm }: { d: Deal; open: boolean; t
   const isNew = !dealStatus(S, d).started && !!d.at && daysBetween(localDay(d.at), today) <= 7;
   const lc = lastContactInfo(S, d, today).date;
   const late = overdueDays(S, d, today) != null || nextStepView(S, d, today).tone === 'late';
-  const reached = reachedOf(stages, t.states);
+  const reached = reachedOf(t.steps.filter((v) => v.counted));
   return (
     <tr className={'sl-row' + (cur ? ' cur' : '') + (open ? ' og ogf' : '') + (jm ? ' jq-m' + (jm === 'last' && !open ? ' last' : '') : '')} aria-current={cur ? 'true' : undefined} data-id={d.id} style={open && reached >= 0 ? { '--line-c': 'var(--brand)' } : undefined}>
       <td className="k-chev">
@@ -1114,7 +1113,7 @@ function DealRow({ d, open, t, kidIds, stages, jm }: { d: Deal; open: boolean; t
       <td className="k-stage">
         <span className="sl-stw">
           <NextPill d={d} />
-          <MiniTrack stages={stages} states={t.states} next={t.next} done={t.done} late={late} />
+          <MiniTrack steps={t.steps} next={t.next?.id || ''} done={t.done} late={late} />
         </span>
       </td>
       <td className="k-last">{tk.date && tk.date.basis !== 'contact' ? <BasisCell d={d} /> : <ContactCell d={d} />}</td>
@@ -1151,8 +1150,8 @@ function Owner({ d }: { d: Deal }) {
   );
 }
 
-/** "ถัดไป CALL2 โทรครั้งที่ 2": opens the stage editor on that stage; plain text for viewers. A won deal
- *  with a plan names its next installment (red when late, amber when due within 7 days or part paid). */
+/** "ถัดไป FOLLOW ติดตามผล": opens the step's editor in its row; plain text for viewers. A won deal with a plan
+ *  names its next installment (red when late, amber when due within 7 days or part paid). */
 function NextPill({ d, card }: { d: Deal; card?: boolean }) {
   const tk = useTk();
   const v = nextStepView(tk.S, d, tk.today);
@@ -1162,15 +1161,15 @@ function NextPill({ d, card }: { d: Deal; card?: boolean }) {
   const inner = (
     <>
       <span className="nx-l">ถัดไป</span>
-      <b>{v.stage}</b>
-      <em>{v.kind === 'next' || v.kind === 'overdue' ? thOf(v.stage) : v.hint}</em>
+      <b>{v.code}</b>
+      {/* (the step's name, or what is owed on it: "ถัดไป PAY2 ค้าง 125,000") */}
+      <em>{(v.kind === 'next' || v.kind === 'overdue') && v.hint === v.th ? thShort(v.th) : v.hint}</em>
     </>
   );
   const tone = v.tone ? ' ' + v.tone : '';
   const title = v.label.replace(/ — .*/, '');
   if (tk.ro) return <span className={'sl-nx ro' + tone} title={title}>{inner}</span>;
-  // an installment beyond the stage list has no row to edit in: the panel takes the receipt
-  const inList = tk.S.cfg.stages.includes(v.stage);
+  // every step has its row (an installment of the plan too): its editor opens there
   return (
     <button
       type="button"
@@ -1178,7 +1177,7 @@ function NextPill({ d, card }: { d: Deal; card?: boolean }) {
       data-qa={d.id + ':' + v.stage + (card ? ':card' : '')}
       title={v.label}
       aria-label={v.label}
-      onClick={(ev) => (inList ? tk.openEditor(d.id, v.stage, ev.currentTarget) : tk.openPanel(d.id, `recv:${v.stage}`))}
+      onClick={(ev) => (v.stage ? tk.openEditor(d.id, v.stage, ev.currentTarget) : tk.openPanel(d.id))}
     >
       {inner}
     </button>
@@ -1192,9 +1191,9 @@ function ContactCell({ d }: { d: Deal }) {
   const { e, S, today, ro } = tk;
   const { date, from, act } = lastContactInfo(S, d, today);
   const od = overdueDays(S, d, today);
-  const src = from === 'act' && act ? `จากบันทึกการติดต่อ (${ACT_TH[act.type]}${act.stage ? ' ที่ ' + act.stage : ''})` : from && from !== 'typed' ? `จากขั้น ${from}` : from === 'typed' ? 'วันที่ติดต่อที่พิมพ์ไว้' : '';
+  const src = from === 'act' && act ? `จากบันทึกการติดต่อ (${ACT_TH[act.type]}${act.stage ? ' ที่ ' + actCode(S, act, today) : ''})` : from && from !== 'typed' ? `จากขั้น ${from}` : from === 'typed' ? 'วันที่ติดต่อที่พิมพ์ไว้' : '';
   const main = date ? dmTh(date) : '—';
-  // a contact range on: the latest contact inside it, when that is not the last one ("ในช่วงนี้ 20 ก.ย. · CALL2")
+  // a contact range on: the latest contact inside it, when that is not the last one ("ในช่วงนี้ 20 ก.ย. · CONTACT")
   const inR = tk.date?.basis === 'contact' ? dateMatch(S, d, tk.date.r, 'contact', today) : null;
   const other = inR && inR.d !== date ? inR : null;
   const sub =
@@ -1266,7 +1265,7 @@ function basisRel(x: BasisDate, basis: DateBasis, today: string): { text: string
   const n = daysBetween(today, x.d);
   return n > 0 ? { text: `อีก ${fmtN(n)} วัน`, tone: '' } : n === 0 ? { text: 'วันนี้', tone: '' } : { text: `เลยมา ${fmtN(-n)} วัน`, tone: x.tone === 'bad' ? 'bad' : '' };
 }
-/** What a basis date was, short enough for the column and the card: "PAY1" without its amount (the
+/** What a basis date was, short enough for the column and the card: "PAY1" or "PAY" without its amount (the
  *  title says it). */
 const whatShort = (x: BasisDate, basis: DateBasis) => (basis === 'paid' || basis === 'due' ? x.what.split(' · ')[0] : x.what);
 /** The row's date when the date filter is about another date than contacts: read-only, the date over
@@ -1348,7 +1347,7 @@ function MoneyFc({ d }: { d: Deal }) {
   if (tk.cash) return <LensMoney L={tk.cash} d={d} col="fc" won={dealResult(S, d) === 'YES'} />;
   if (jointRole(S, d) === 'member') return <JointShare S={S} d={d} col="fc" />;
   const m = dealMoney(S, d);
-  const att = ro ? undefined : () => tk.attach(d, S.cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', { target: 'forecast' });
+  const att = ro ? undefined : () => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast' });
   const sub = <FigSub v={fcFig(S, d)} onAttach={att} />;
   const ac2 = m.actual != null && <span className="sl-ac2">Actual <b>{fmtMoney(m.actual)}</b></span>;
   if (m.fcDoc || ro)
@@ -1385,7 +1384,7 @@ function MoneyAc({ d }: { d: Deal }) {
         {v.kind === 'warn' && !P.late.length ? (
           <FigSub v={v} />
         ) : P.left ? (
-          <small className={P.late.length ? 'bad' : ''} title={`ค้างรับตามแผน ${fmtMoney(P.left)} บาท${P.late.length ? ' · เลยกำหนด ' + P.late.map((l) => l.stage).join(', ') : ''}`}>ค้าง {fmtMoney(P.left)}</small>
+          <small className={P.late.length ? 'bad' : ''} title={`ค้างรับตามแผน ${fmtMoney(P.left)} บาท${P.late.length ? ' · เลยกำหนด ' + P.late.map((l) => l.code).join(', ') : ''}`}>ค้าง {fmtMoney(P.left)}</small>
         ) : (
           <small className="ok">รับครบ</small>
         )}
@@ -1535,136 +1534,99 @@ function RowMenu({ d }: { d: Deal }) {
   );
 }
 
-// ------------------------------------------------------------------ child rows (one per stage)
+// ------------------------------------------------------------------ child rows (one per step)
 
-/** A child row: a stage of the list, a run of done stages folded into one line, or an installment of the
- *  plan beyond the stage list ("งวดเพิ่ม", after the last PAY stage). `i` is the index in the stage list. */
-type Kid = { fold: string[]; i: number } | { p: string; i: number; extra?: boolean };
-function kidList(S: SalesState, d: Deal, today: string, showAll = false, editStage = ''): Kid[] {
-  const stages = S.cfg.stages, t = stageTrack(S, d, today), P = planOf(S, d, today), pays = payStages(S.cfg);
-  const extras = P ? P.lines.filter((l) => !l.inList).map((l) => l.stage) : [];
-  const lastPay = pays.length ? stages.indexOf(pays[pays.length - 1]) : stages.length - 1;
-  // done stages that hold no money and no result (CALL…, FOLLOW…) fold into one line when there are two or more
-  const foldable = showAll ? [] : stages.filter((p) => t.states[p] === 'done' && p !== QUOTE_STAGE && p !== DEAL_STAGE && !isPayStage(S.cfg, p) && p !== editStage);
-  const fold = foldable.length >= 2 ? foldable : [];
-  const rows: Kid[] = [];
-  stages.forEach((p, i) => {
-    if (fold.includes(p)) {
-      if (p === fold[0]) rows.push({ fold, i: stages.indexOf(fold[fold.length - 1]) });
-    } else rows.push({ p, i });
-    if (i === lastPay) extras.forEach((x) => rows.push({ p: x, i: -1, extra: true }));
-  });
-  if (lastPay < 0) extras.forEach((x) => rows.push({ p: x, i: -1, extra: true }));
-  return rows;
+/** A deal's child rows: its steps in order (dealSteps: CONTACT, QUOTATION, FOLLOW, CLOSE, PAY per installment;
+ *  an installment outside the plan too, uncounted). Five steps need no fold. */
+function kidList(S: SalesState, d: Deal, today: string): StepView[] {
+  return dealSteps(S, d, today).steps;
 }
 
-function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
-  const { engine: e, ui, set } = useApp();
+/** What a CONTACT / FOLLOW step holds, newest first: its own record, its contact records, the older stages' records
+ *  it reads (CALL2, CALL1 …). The newest is the step's line in the table and the card; "รวม n ครั้ง" opens the rest. */
+type SLine = { kind: 'own' | 'act' | 'old'; d: string; at: string; stage: string; note: string; act?: DealAct };
+function stepLines(v: StepView): SLine[] {
+  const own: SLine[] = v.own.d || v.own.n.trim() ? [{ kind: 'own', d: v.own.d, at: '~', stage: v.id, note: v.own.n }] : [];
+  const rest = v.entries.map((x): SLine => (x.kind === 'act' && x.act ? { kind: 'act', d: x.d, at: x.at, stage: x.stage, note: x.act.note, act: x.act } : { kind: 'old', d: x.d, at: '', stage: x.stage, note: x.step?.n || '' }));
+  // (the step's own record first on the same day)
+  return [...own, ...rest].sort((a, b) => b.d.localeCompare(a.d) || b.at.localeCompare(a.at));
+}
+/** The word before a line: the contact's type (โทร, อีเมล, นัดพบ …), an older stage's (CALL: โทร, FOLLOW: ติดตาม). */
+const lineWord = (l: SLine) => (l.kind === 'act' && l.act ? ACT_TH[l.act.type] : l.kind === 'old' ? oldWord(l.stage) : '');
+/** CONTACT and FOLLOW: a step whose contacts are its lines (the others show their own note). */
+const isContactStep = (v: Pick<StepView, 'kind'>) => v.kind === 'contact' || v.kind === 'follow';
+
+function KidRows({ d, t, list: list0 }: { d: Deal; t: DealSteps; list: StepView[] }) {
+  const { engine: e } = useApp();
   const tk = useTk();
   const { S, today, ro } = tk;
-  const stages = S.cfg.stages;
   const editStage = tk.edit?.id === d.id && !tk.edit.act ? tk.edit.stage : '';
-  // contacts beyond the stages: "+2 ครั้ง" by a stage's date opens that stage's under its row
-  const byAct = stageActs(S, d);
+  // a step's contacts (and, at CONTACT / FOLLOW, its other lines) opened under its row
   const [actOpen, setActOpen] = useState<Record<string, boolean>>({});
-  const actsUnder = (p: string) => (actOpen[p] ? (byAct.by[p] || []).map((a) => <ActRow key={a.id} a={a} under />) : null);
-  const more = (p: string) => {
-    const n = (byAct.by[p] || []).length;
+  const flip = (id: string) => setActOpen({ ...actOpen, [id]: !actOpen[id] });
+  const more = (v: StepView) => {
+    const n = v.entries.length;
     return n ? (
-      <button type="button" className="lnk sl-kmore" aria-expanded={!!actOpen[p]} onClick={() => setActOpen({ ...actOpen, [p]: !actOpen[p] })} aria-label={`การติดต่อเพิ่มที่ ${p} ${n} ครั้ง`}>
-        {timesWord(S, d, p, n)}
+      <button type="button" className="lnk sl-kmore" aria-expanded={!!actOpen[v.id]} onClick={() => flip(v.id)} aria-label={`การติดต่อที่ ${v.code} ${n} ครั้ง`}>
+        {`${isFilled(v.own) ? '+' : ''}${n} ครั้ง`}
       </button>
     ) : null;
   };
-  // the list from the parent (for the chevron's aria-controls) unless the editor or "แสดง" changed it
-  const list = editStage || ui.slShowAll[d.id] ? kidList(S, d, today, !!ui.slShowAll[d.id], editStage) : list0;
-  const reached = reachedOf(stages, t.states);
+  const list = list0.length === t.steps.length ? list0 : t.steps;
+  const reached = reachedOf(list.map((v) => ({ state: beadOf(v) })));
   const P = planOf(S, d, today), won = t.result === 'YES';
   const late = overdueDays(S, d, today) != null;
   const cv = closingView(S, d, today);
   const ps = payState(S, d, today);
   const hid = jointRole(S, d) === 'member' ? jointHeadOf(S, d.id) : '';
+  const money = e.can('view.money');
   return (
     <>
-      {list.map((r, ri) => {
+      {list.map((v, ri) => {
         const id = `k-${d.id}-${ri}`;
-        if ('fold' in r) {
-          const last = r.fold.map((p) => stepOf(S, d.id, p).d).filter(Boolean).sort().pop();
-          const nf = r.fold.reduce((a, p) => a + (byAct.by[p] || []).length, 0);
-          return (
-            <tr key={id} id={id} className={'sl-kid og on1 kfold' + (r.i < reached ? ' on2' : '')} data-deal={d.id} data-stage="fold">
-              <td className="k-chev"><Bead state="done" /></td>
-              <th scope="row" className="k-name" colSpan={4}>
-                <span className="sl-kf">
-                  <b>{r.fold.join(' · ')}</b>
-                  <span>ทำแล้ว {r.fold.length} ขั้น{nf ? ` · ติดต่อเพิ่ม ${nf} ครั้ง` : ''}{last ? ' · ล่าสุด ' + isoTh(last) : ''}</span>
-                  <button type="button" className="lnk" onClick={() => set({ slShowAll: { ...ui.slShowAll, [d.id]: 1 } })} aria-label={'แสดงขั้น ' + r.fold.join(', ')}>แสดง</button>
-                </span>
-              </th>
-              <td className="k-last" />
-              <td className="k-m2" colSpan={2} />
-              <td className="k-st"><Status kind="ok">ทำแล้ว</Status></td>
-              <td className="k-act" />
-            </tr>
-          );
-        }
-        const { p, i, extra } = r;
-        const line = P?.lines.find((l) => l.stage === p) || null;
-        const st: StageState = extra ? (line?.status === 'paid' ? 'done' : 'future') : t.states[p];
-        const isNow = !extra && p === t.next;
-        const editing = p === editStage && !ro && !extra;
-        const on1 = !extra && i <= reached, on2 = !extra && i < reached;
-        const dash1 = on1 && st === 'planned', dash2 = on2 && t.states[stages[i + 1]] === 'planned';
-        const fut = (st === 'future' || st === 'off') && !isNow && !editing && !line;
-        // a PAY stage the plan does not use (one done on its own, paid the old way, reads as its step)
-        const unused = !!P && won && isPayStage(S.cfg, p) && !line && t.states[p] === 'off';
-        const cls = ['sl-kid og', on1 && 'on1', on2 && 'on2', dash1 && 'dash1', dash2 && 'dash2', (st === 'off' || unused) && 'off', (fut || unused) && 'fut', editing && 'editing', line && 'pk'].filter(Boolean).join(' ');
+        const p = v.id, line = v.line, st = v.state;
+        const isNow = p === t.next?.id;
+        const editing = !ro && !!editStage && (p === editStage || v.aliases.includes(editStage));
+        const on1 = ri <= reached, on2 = ri < reached;
+        const dash1 = on1 && st === 'planned', dash2 = on2 && !!list[ri + 1] && beadOf(list[ri + 1]) === 'planned';
+        const off = st === 'off' || !!v.outside;
+        const fut = (st === 'future' || off) && !isNow && !editing && !(line && won);
+        const cls = ['sl-kid og', on1 && 'on1', on2 && 'on2', dash1 && 'dash1', dash2 && 'dash2', off && 'off', fut && 'fut', editing && 'editing', line && 'pk'].filter(Boolean).join(' ');
         const nameCell = (
           <th scope="row" className="k-name">
             <span className="sl-kn">
-              <b>{p}</b>
-              <span>{thOf(p)}</span>
-              {extra && <i className="sl-xtag" title="ยังไม่มีขั้นนี้ในรายการขั้นตอน แสดงจากแผนการชำระ (ผู้ดูแลระบบเพิ่มขั้นได้ที่จัดการรายการ)">งวดเพิ่ม</i>}
+              <b>{v.code}</b>
+              <span>{editing && editStage !== p ? 'บันทึกเดิม ' + editStage : thShort(v.th)}</span>
             </span>
           </th>
         );
-        const editBtn = ro ? null : extra ? (
-          <button type="button" className="sl-kedit lnk" onClick={() => tk.openPanel(d.id, 'edit')} aria-label={'แก้แผนงวด ' + p}>แก้ไข</button>
-        ) : (
-          <button type="button" className="sl-kedit lnk" data-qa={d.id + ':' + p + ':kid'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)} aria-label={`แก้ไข ${p} ${thOf(p)}`}>แก้ไข</button>
-        );
+        const editBtn = ro ? null : <button type="button" className="sl-kedit lnk" data-qa={d.id + ':' + p + ':kid'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)} aria-label={`แก้ไข ${v.code} ${thShort(v.th)}`}>แก้ไข</button>;
         if (editing)
           return (
             <tr key={id} id={id} className={cls} data-deal={d.id} data-stage={p}>
               <td className="k-chev"><Bead state={st} now={isNow} late={late} stage={p} /></td>
               {nameCell}
-              <KidEditor d={d} stage={p} line={line} won={won} />
+              <KidEditor d={d} stage={editStage} code={editStage === p ? v.code : editStage} kind={editStage === p ? v.kind : 'contact'} line={editStage === p ? line : null} won={won} />
             </tr>
           );
+        // a step's contacts under its row: CONTACT / FOLLOW the lines not shown on it, the others their contacts
+        const lines = isContactStep(v) ? stepLines(v) : [];
+        // (the step's line runs on through them to the next step)
+        const rail = on2 ? (dash2 ? 'on1 on2 dash1 dash2' : 'on1 on2') : '';
+        const under = !actOpen[p] ? null : isContactStep(v) ? lines.slice(1).map((l) => <LineRow key={l.kind + (l.act?.id || l.stage)} d={d} v={v} l={l} rail={rail} />) : v.entries.map((x) => x.act && <ActRow key={x.act.id} a={x.act} under rail={rail} />);
         // an installment of the plan (typed in advance, or after the win)
         if (line)
           return (
             <Fragment key={id}>
-              <PayRow id={id} cls={cls} d={d} line={line} st={st} isNow={isNow} won={won} next={P?.next?.stage === p} nameCell={nameCell} editBtn={editBtn} more={more(p)} />
-              {actsUnder(p)}
+              <PayRow id={id} cls={cls} d={d} v={v} st={st} isNow={isNow} won={won} next={P?.next?.stage === p} nameCell={nameCell} editBtn={editBtn} more={more(v)} />
+              {under}
             </Fragment>
           );
-        // a PAY stage the plan does not use (won deal)
-        if (unused)
-          return (
-            <tr key={id} id={id} className={cls} data-deal={d.id} data-stage={p}>
-              <td className="k-chev"><Bead state="off" stage={p} /></td>
-              {nameCell}
-              <td className="sl-knote" colSpan={3}><span className="t-muted">ไม่มีงวดนี้ในแผนการชำระ</span></td>
-              <td className="k-last" />
-              <td className="k-m2" colSpan={2} />
-              <td className="k-st"><span className="sl-st-m">ไม่ใช้</span></td>
-              <td className="k-act" />
-            </tr>
-          );
-        const s = stepOf(S, d.id, p);
+        const s = v.own;
         const chip =
-          st === 'done' ? <Status kind="ok">ทำแล้ว</Status>
+          v.outside === 'plan' ? <span className="sl-st-m">นอกแผนชำระ</span>
+          : v.outside === 'joint' && st === 'off' ? <span className="sl-st-m" title={JOINT_PAID}>{JOINT_PAID}</span>
+          : st === 'done' ? <Status kind="ok">ทำแล้ว</Status>
           : st === 'yes' ? <Status kind="ok">ได้งาน</Status>
           : st === 'no' ? <Status kind="bad">ไม่ได้งาน</Status>
           : st === 'wait' ? <Status kind="warn">รอผล</Status>
@@ -1674,7 +1636,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
           : st === 'off' ? <span className="sl-st-m">ไม่ต้องทำ</span>
           : null;
         let note: ReactNode = null;
-        if (p === DEAL_STAGE && st !== 'future' && st !== 'off' && !(isNow && !s.d)) {
+        if (v.kind === 'close' && st !== 'future' && st !== 'off' && !(isNow && !s.d)) {
           note = ro ? (
             <span className="t-muted">{st === 'yes' ? 'ได้งาน (YES)' : st === 'no' ? 'ไม่ได้งาน (NO)' : st === 'wait' ? s.n : ''}</span>
           ) : (
@@ -1683,26 +1645,43 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
               <span className="sl-kcap" title={st === 'wait' ? s.n : undefined}>{st === 'yes' || st === 'no' ? 'ยังไม่ใช่การปิดงาน' : st === 'wait' ? s.n : ''}</span>
             </span>
           );
-        } else if (p === DEAL_STAGE && isNow) {
+        } else if (v.kind === 'close' && isNow) {
           note = ro ? null : (
             <span className="sl-ynw">
               <ResultSeg d={d} state={st} />
               <span className="sl-kcap">ยังไม่ใช่การปิดงาน</span>
             </span>
           );
-        } else if (!P && won && isPayStage(S.cfg, p) && isNow && !ro) {
+        } else if (!P && won && v.kind === 'pay' && isNow && !ro) {
           note = <QuickPlan d={d} />;
+        } else if (isContactStep(v) && lines.length) {
+          // the newest line, "โทร ขอใบเสนอราคา", and "รวม 4 ครั้ง" when there are more
+          const top = lines[0];
+          note = (
+            <span className="sl-clamp" title={top.note}>
+              {lineWord(top) && <span className="sl-kty">{lineWord(top)}</span>}
+              {top.note || (top.kind === 'old' ? 'บันทึกเดิม ' + top.stage : '')}
+              {lines.length > 1 && (
+                <button type="button" className="lnk sl-kn-c" aria-expanded={!!actOpen[p]} onClick={() => flip(p)} aria-label={`ดูการติดต่อทั้ง ${lines.length} ครั้งในขั้น ${v.code}`}>รวม {lines.length} ครั้ง</button>
+              )}
+            </span>
+          );
         } else if (s.n) {
           note = <span className={'sl-clamp' + (isAutoNote(S, d, p) ? ' auto' : '')} title={s.n}>{s.n}</span>;
           // a joint quotation's member: its quotation is the joint one's
-          if (hid && p === QUOTE_STAGE) note = <span className="qt-kn">{note}<button type="button" className="lnk" onClick={() => tk.openPanel(hid)}>เปิดใบเสนอราคาร่วม</button></span>;
+          if (hid && v.kind === 'quote') note = <span className="qt-kn">{note}<button type="button" className="lnk" onClick={() => tk.openPanel(hid)}>เปิดใบเสนอราคาร่วม</button></span>;
+        } else if (v.outside === 'plan') {
+          note = <span className="t-muted">ไม่อยู่ในแผนชำระแล้ว ไม่นับเป็นขั้น</span>;
+        } else if (v.kind === 'pay' && st === 'future' && !won && !P && t.result !== 'NO' && v.counted) {
+          note = <span className="sl-clamp t-meta">หลังได้งาน · ตั้งแผนกี่งวด ขั้น PAY จะขึ้นตามจำนวนงวด</span>;
         } else if (isNow && !ro) {
           note = <button type="button" className="lnk" data-qa={d.id + ':' + p + ':add'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)}>บันทึกวันที่และโน้ต</button>;
         }
+        if (money && v.short != null && !(!P && won && v.kind === 'pay' && isNow && !ro)) note = <span className="sl-clamp">ยังค้างรับ {fmtMoney(v.short)} บาท{s.n ? ' · ' + s.n : ''}</span>;
         // QUOTATION with a quotation: its check status (package notify) and "แนบฉบับแก้ไข" always in view by
         // its note, the version under its figure
         // (a joint quotation's member: its quotation is the joint one; one of its own counts nowhere, เอกสารอื่น)
-        const qv = p === QUOTE_STAGE && !hid ? qtView(S, d) : null;
+        const qv = v.kind === 'quote' && !hid ? qtView(S, d) : null;
         const qcv = qv?.head ? e.qtCheckFor(qv.head.doc) : null;
         if (qv?.head && (!ro || qcv))
           note = (
@@ -1712,40 +1691,40 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
               {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>}
             </span>
           );
-        const date = s.d ? (st === 'planned' ? <span className="sl-kdate">นัด {dmTh(s.d)}<small>{agoTh(s.d, today)}</small></span> : <span className="sl-kdate">{isoTh(s.d)}</span>) : null;
+        const date = v.date ? (st === 'planned' ? <span className="sl-kdate">นัด {dmTh(v.date)}<small>{agoTh(v.date, today)}</small></span> : <span className="sl-kdate">{isoTh(v.date)}</span>) : null;
         // documents and amounts sit in the column they feed: QUOTATION under Forecast, PAY under Actual
-        let money: ReactNode = null;
-        const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p);
-        if (isMoney && st !== 'off') {
+        let moneyCell: ReactNode = null;
+        const isMoney = v.kind === 'quote' || v.kind === 'pay';
+        if (isMoney && !off) {
           const fig = hid ? null : stageFig(S, d, p);
-          const slot = !fig && !hid && (p === QUOTE_STAGE ? isNow || st === 'done' : won && isNow) && !ro;
-          money = fig ? <StageAmount fig={fig} ver={qv ? qtFigWords(qv, fig.doc.id) : null} /> : slot ? (
-            <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={p === QUOTE_STAGE ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${p}`}>
-              แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}
+          const slot = !fig && !hid && (v.kind === 'quote' ? isNow || st === 'done' : won && isNow) && !ro;
+          moneyCell = fig ? <StageAmount fig={fig} ver={qv ? qtFigWords(qv, fig.doc.id) : null} /> : slot ? (
+            <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={v.kind === 'quote' ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${v.code}`}>
+              แนบ{v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบเสร็จ'}
             </button>
           ) : null;
         }
         return (
           <Fragment key={id}>
             <tr id={id} className={cls} data-deal={d.id} data-stage={p}>
-              <td className="k-chev"><Bead state={st} now={isNow} late={late} stage={p} /></td>
+              <td className="k-chev"><Bead state={beadOf(v)} now={isNow} late={late} stage={p} /></td>
               {nameCell}
               <td className="sl-knote" colSpan={3}>{note}</td>
-              <td className="k-last">{date}{more(p)}</td>
+              <td className="k-last">{date}{!isContactStep(v) && more(v)}</td>
               <td className="k-m2" colSpan={2}>
                 <span className="sl-m2">
-                  <span className="k2-fc">{p === QUOTE_STAGE && money}</span>
-                  <span className="k2-ac">{p !== QUOTE_STAGE && money}</span>
+                  <span className="k2-fc">{v.kind === 'quote' && moneyCell}</span>
+                  <span className="k2-ac">{v.kind !== 'quote' && moneyCell}</span>
                 </span>
               </td>
               <td className="k-st">{chip}</td>
               <td className="k-act">{editBtn}</td>
             </tr>
-            {actsUnder(p)}
+            {under}
           </Fragment>
         );
       })}
-      <ActRows d={d} />
+      <ActRows d={d} t={t} />
       <tr id={`k-${d.id}-end`} className="sl-kend og ogl">
         <td className="k-chev"><span className={'sl-flagb' + (cv.ready ? ' ready' : '')} aria-hidden="true" /></td>
         <th scope="row" className="k-name">
@@ -1753,7 +1732,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         </th>
         <td className="sl-rule" colSpan={4}>
           <span className="sl-clamp">
-            {closingRule(cv.state, P, ps, ro, cv.lead)} · <button type="button" className="lnk" onClick={() => tk.openPanel(d.id)}>รายละเอียดทั้งหมด</button>
+            {closingRule(cv.state, P, ps, ro, cv.lead, (ids) => ids.map((x) => stepLabel(S, d, x, today).code).join(', '))} · <button type="button" className="lnk" onClick={() => tk.openPanel(d.id)}>รายละเอียดทั้งหมด</button>
           </span>
         </td>
         <td className="k-m2" colSpan={2}>
@@ -1772,23 +1751,17 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
   );
 }
 
-// ------------------------------------------------------------------ contacts beyond the stages (dact records)
+// ------------------------------------------------------------------ contacts (dact records) in the rows
 
-/** "+2 ครั้ง" by a stage that has its own record (contacts beyond its milestone), "2 ครั้ง" by one not recorded yet. */
-const timesWord = (S: SalesState, d: Deal, p: string, n: number) => {
-  const st = stepOf(S, d.id, p);
-  return `${st.d || st.n.trim() ? '+' : ''}${n} ครั้ง`;
-};
-
-/** One contact as a child row: the type word (and its stage) under ลูกค้า, the note, the date under
- *  ติดต่อล่าสุด, who wrote it, "ลบ" for its author. `under`: shown under its stage's row (no stage repeated). */
-function ActRow({ a, under }: { a: DealAct; under?: boolean }) {
-  const { e } = useTk();
+/** One contact as a child row: the type word (and its step) under ลูกค้า, the note, the date under
+ *  ติดต่อล่าสุด, who wrote it, "ลบ" for its author. `under`: shown under its step's row (no step repeated). */
+function ActRow({ a, under, rail = '' }: { a: DealAct; under?: boolean; rail?: string }) {
+  const { e, today } = useTk();
   return (
-    <tr className={'sl-kid og sl-kact' + (under ? ' under' : '')} data-deal={a.deal} data-act={a.id}>
+    <tr className={'sl-kid og sl-kact' + (under ? ' under' : '') + (rail ? ' ' + rail : '')} data-deal={a.deal} data-act={a.id}>
       <td className="k-chev" />
       <th scope="row" className="k-name">
-        <span className="sl-kn"><b>{ACT_TH[a.type]}</b>{!under && a.stage && <span>{a.stage}</span>}</span>
+        <span className="sl-kn"><b>{ACT_TH[a.type]}</b>{!under && a.stage && <span>{actCode(e.sales, a, today)}</span>}</span>
       </th>
       <td className="sl-knote" colSpan={3}>{a.note ? <span className="sl-clamp" title={a.note}>{a.note}</span> : <span className="t-muted">ไม่มีโน้ต</span>}</td>
       <td className="k-last"><span className="sl-kdate">{isoTh(a.d)}</span></td>
@@ -1803,27 +1776,51 @@ function ActRow({ a, under }: { a: DealAct; under?: boolean }) {
   );
 }
 
-/** Under the stage rows: "การติดต่อ" with how many, "บันทึกการติดต่อ" (the quick-add row: type, note,
- *  date, stage; Enter saves, Escape or a click elsewhere leaves it), then the newest 3 and "ทั้งหมด n". */
-function ActRows({ d }: { d: Deal }) {
+/** A line of a CONTACT / FOLLOW step under its row: a contact (ActRow), or a record (the step's own, an older
+ *  stage's: "โทร · บันทึกเดิม CALL2") with "แก้ไข", which edits it where it is stored. */
+function LineRow({ d, v, l, rail = '' }: { d: Deal; v: StepView; l: SLine; rail?: string }) {
   const tk = useTk();
-  const { S, ro } = tk;
-  const list = actsOf(S, d.id);
+  if (l.kind === 'act' && l.act) return <ActRow a={l.act} under rail={rail} />;
+  return (
+    <tr className={'sl-kid og sl-kact under' + (rail ? ' ' + rail : '')} data-deal={d.id} data-stage={l.stage}>
+      <td className="k-chev" />
+      <th scope="row" className="k-name">
+        <span className="sl-kn"><b>{lineWord(l) || 'บันทึก'}</b><span>{l.kind === 'old' ? 'บันทึกเดิม ' + l.stage : 'ขั้น ' + v.code}</span></span>
+      </th>
+      <td className="sl-knote" colSpan={3}>{l.note ? <span className="sl-clamp" title={l.note}>{l.note}</span> : <span className="t-muted">ไม่มีโน้ต</span>}</td>
+      <td className="k-last"><span className="sl-kdate">{l.d ? isoTh(l.d) : ''}</span></td>
+      <td className="k-m2" colSpan={2} />
+      <td className="k-st" />
+      <td className="k-act">
+        {!tk.ro && <button type="button" className="sl-kedit lnk" onClick={(ev) => tk.openEditor(d.id, l.stage, ev.currentTarget)} aria-label={`แก้ไข${l.kind === 'old' ? 'บันทึกเดิม ' + l.stage : ' ' + v.code}`}>แก้ไข</button>}
+      </td>
+    </tr>
+  );
+}
+
+/** Under the step rows: "การติดต่อ" with how many ("ติดต่อ 7 ครั้ง": each step holds its own), "บันทึกการติดต่อ"
+ *  (the quick-add row: type, note, date, step; Enter saves, Escape or a click elsewhere leaves it), then the contacts
+ *  filed at a step the deal no longer has (none are lost). */
+function ActRows({ d, t }: { d: Deal; t: DealSteps }) {
+  const tk = useTk();
+  const { ro } = tk;
+  const list = t.other.acts;
   const [all, setAll] = useState(false);
   const adding = !ro && tk.edit?.id === d.id && !!tk.edit.act;
-  if (ro && !list.length) return null;
+  if (ro && !t.contacts) return null;
   const shown = all ? list : list.slice(0, 3);
   return (
     <>
       <tr id={`k-${d.id}-acts`} className="sl-kid og sl-kact-h">
         <td className="k-chev" />
         <th scope="row" className="k-name">
-          <span className="sl-kn"><b>การติดต่อ</b><span>{list.length ? `ติดต่อเพิ่ม ${list.length} ครั้ง` : 'ยังไม่มีบันทึกเพิ่ม'}</span></span>
+          <span className="sl-kn"><b>การติดต่อ</b><span>{t.contacts ? `ติดต่อ ${t.contacts} ครั้ง` : 'ยังไม่มีบันทึก'}</span></span>
         </th>
         <td className="sl-knote" colSpan={3}>
           {!ro && !adding && (
             <button type="button" className="lnk" data-qa={d.id + ':act'} onClick={(ev) => tk.openEditor(d.id, '', ev.currentTarget, true)}>บันทึกการติดต่อ</button>
           )}
+          {list.length > 0 && <span className="t-meta sl-kact-o">{adding ? '' : ' · '}ขั้นที่ไม่อยู่ในขั้นตอนแล้ว {list.length} ครั้ง</span>}
         </td>
         <td className="k-last" />
         <td className="k-m2" colSpan={2} />
@@ -1849,8 +1846,8 @@ function ActRows({ d }: { d: Deal }) {
   );
 }
 
-/** The quick-add in a row, laid out like a stage's editor: type and note under the note columns, the
- *  date under ติดต่อล่าสุด, the stage under the money, then บันทึก / ยกเลิก. */
+/** The quick-add in a row, laid out like a step's editor: type and note under the note columns, the
+ *  date under ติดต่อล่าสุด, the step under the money, then บันทึก / ยกเลิก. */
 function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
   const tk = useTk();
   const f = useActForm(d, stage || undefined);
@@ -1863,7 +1860,7 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
   const save = () => {
     const a = f.save();
     tk.closeEditor();
-    if (a) tk.acts.say(`บันทึกการติดต่อ ${shortName(d.client)} แล้ว · ${ACT_TH[a.type]} ${dmTh(a.d)}${a.stage ? ' ที่ ' + a.stage : ''}`);
+    if (a) tk.acts.say(`บันทึกการติดต่อ ${shortName(d.client)} แล้ว · ${ACT_TH[a.type]} ${dmTh(a.d)}${a.stage ? ' ที่ ' + actCode(tk.S, a, tk.today) : ''}`);
   };
   // a click outside the row (not in a dialog it opened) leaves it, as the stage editor does
   const cancelRef = useRef(tk.closeEditor);
@@ -1917,7 +1914,7 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
 
 /** The closing row's sentence (the lead phrase 500); `ro` (an account that can only read): the lead
  *  phrase alone, without the steps it has no buttons for. */
-function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnType<typeof planOf>, ps: ReturnType<typeof payState>, ro: boolean, lead = ''): ReactNode {
+function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnType<typeof planOf>, ps: ReturnType<typeof payState>, ro: boolean, lead = '', codes: (ids: string[]) => string = (ids) => ids.join(', ')): ReactNode {
   if (ro) {
     switch (state) {
       case 'no':
@@ -1926,8 +1923,6 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
         return <b>ได้งานแล้ว · รับ {P?.paidN} จาก {P?.n} งวดตามแผน</b>;
       case 'pays':
         return <b>ได้งานแล้ว · รับชำระ {ps.paid.length} จาก {ps.pays.length} งวด</b>;
-      case 'nopay':
-        return <b>ได้งานแล้ว</b>;
       case 'joint':
         return <b>{lead || 'ชำระผ่านใบเสนอราคาร่วม'}</b>;
       case 'done':
@@ -1942,15 +1937,13 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
     case 'plan':
       return <><b>ได้งานแล้ว · รับ {P?.paidN} จาก {P?.n} งวดตามแผน</b> รับครบทุกงวดแล้วปุ่มปิดงานจะขึ้น</>;
     case 'pays':
-      return <><b>ได้งานแล้ว · รับชำระ {ps.paid.length} จาก {ps.pays.length} งวด</b> แนบเอกสาร {ps.left.join(', ')} แล้วปุ่มปิดงานจะขึ้น</>;
-    case 'nopay':
-      return <><b>ได้งานแล้ว</b> ตารางนี้ไม่มีขั้นชำระเงิน (PAY) กดปิดงานเมื่องานจบ</>;
+      return <><b>ได้งานแล้ว · รับชำระ {ps.paid.length} จาก {ps.pays.length} งวด</b> แนบเอกสาร {codes(ps.left)} แล้วปุ่มปิดงานจะขึ้น</>;
     case 'joint':
       return <><b>{lead || 'ชำระผ่านใบเสนอราคาร่วม'}</b> ปิดงานพร้อมกันทั้งใบเสนอราคาร่วม</>;
     case 'done':
       return <><b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b> กดปิดงานเพื่อย้ายไปแท็บปิดงาน</>;
     default:
-      return <>ผลการขาย YES / NO <b>ยังไม่ใช่การปิดงาน</b> ปุ่มปิดงานจะขึ้นเมื่อผลเป็น NO หรือได้งานและรับชำระครบ</>;
+      return <>ผลการขาย (CLOSE) YES / NO <b>ยังไม่ใช่การปิดงาน</b> ปุ่มปิดงานจะขึ้นเมื่อผลเป็น NO หรือได้งานและรับชำระครบ</>;
   }
 }
 
@@ -2039,15 +2032,16 @@ function QuickPlan({ d }: { d: Deal }) {
 }
 
 /** An installment's child row: its terms, when it is due or came in, the amount under Actual, the status. */
-function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, more }: { id: string; cls: string; d: Deal; line: LineView; st: StageState; isNow: boolean; won: boolean; next: boolean; nameCell: ReactNode; editBtn: ReactNode; more?: ReactNode }) {
+function PayRow({ id, cls, d, v, st, isNow, won, next, nameCell, editBtn, more }: { id: string; cls: string; d: Deal; v: StepView; st: StageState; isNow: boolean; won: boolean; next: boolean; nameCell: ReactNode; editBtn: ReactNode; more?: ReactNode }) {
   const tk = useTk();
   const { S, today, ro } = tk;
+  const x = v.line!;
   const s = stepOf(S, d.id, x.stage);
   const meta = lineMeta(x.line);
   const userNote = s.n && !isAutoNote(S, d, x.stage) ? s.n : '';
   const acts = !won || ro || !next ? null : x.status === 'part' ? (
     <span className="sl-pk-b">
-      <button type="button" className="btn xs" onClick={() => { const r = tk.e.setPayFull(d.id, x.stage, true); if (r) tk.acts.prompt(d, 'payment'); else tk.acts.say(`ถือว่ารับครบ ${x.stage} แล้ว`); }}>ถือว่ารับครบ</button>
+      <button type="button" className="btn xs" onClick={() => { const r = tk.e.setPayFull(d.id, x.stage, true); if (r) tk.acts.prompt(d, 'payment'); else tk.acts.say(`ถือว่ารับครบ ${x.code} แล้ว`); }}>ถือว่ารับครบ</button>
       <button type="button" className="lnk" onClick={() => tk.attach(d, x.stage, undefined, { add: true })}>แนบใบเสร็จเพิ่ม</button>
     </span>
   ) : x.status !== 'paid' ? (
@@ -2124,7 +2118,7 @@ function PayRow({ id, cls, d, line: x, st, isNow, won, next, nameCell, editBtn, 
 /** The editor's state: the note (a draft left with Escape comes back), the date (today unless the stage
  *  was done earlier), save / cancel / the result. Saving checks that nobody changed the stage meanwhile;
  *  a change while nothing was typed (a quotation action, a teammate) is followed instead (lib/stepEditor). */
-function useStepEditor(d: Deal, stage: string) {
+function useStepEditor(d: Deal, stage: string, code = stage) {
   const tk = useTk();
   const { e, today } = tk;
   const key = d.id + '/' + stage;
@@ -2148,14 +2142,14 @@ function useStepEditor(d: Deal, stage: string) {
   const save = () => {
     if (changed()) return tk.closeEditor();
     // a PAY stage's date is the received date of its documents: a checked line is asked about first
-    askPay(e, { d, after: previewOf.step(e.sales, d.id, stage, { d: date, n: note }), kind: 'edit', title: `บันทึก ${stage}`, verb: 'บันทึก', run: () => {
+    askPay(e, { d, after: previewOf.step(e.sales, d.id, stage, { d: date, n: note }), kind: 'edit', title: `บันทึก ${code}`, verb: 'บันทึก', run: () => {
       const was = closeReady(e.sales, d, today);
       e.setStep(d.id, stage, { d: date, n: note });
       drafts.delete(key);
       tk.closeEditor();
       const r = dealResult(e.sales, d);
       if (stage === DEAL_STAGE && (r === 'YES' || r === 'NO')) tk.acts.afterResult(d, was);
-      else tk.acts.after(d, was, 'payment', `บันทึก ${stage} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
+      else tk.acts.after(d, was, 'payment', `บันทึก ${code} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
     } });
   };
   const cancel = () => {
@@ -2198,21 +2192,22 @@ function useStepEditor(d: Deal, stage: string) {
   };
   return { note, setNote, date, setDate, save, cancel, result, box, keys, init, follow };
 }
-const PLACEHOLDER = (S: SalesState, p: string) =>
-  p === QUOTE_STAGE ? 'หรือพิมพ์โน้ต เช่น ส่งใบเสนอราคาทางอีเมลแล้ว' : isPayStage(S.cfg, p) ? 'หรือพิมพ์โน้ต เช่น ลูกค้าโอนงวดนี้แล้ว' : p === DEAL_STAGE ? 'หรือหมายเหตุ เช่น รอผู้บริหารอนุมัติ' : 'โน้ต เช่น คุยกับใคร ได้ข้อมูลอะไร นัดอะไรต่อ';
+const PLACEHOLDER = (kind: StepKind) =>
+  kind === 'quote' ? 'หรือพิมพ์โน้ต เช่น ส่งใบเสนอราคาทางอีเมลแล้ว' : kind === 'pay' ? 'หรือพิมพ์โน้ต เช่น ลูกค้าโอนงวดนี้แล้ว' : kind === 'close' ? 'หรือหมายเหตุ เช่น รอผู้บริหารอนุมัติ' : 'โน้ต เช่น คุยกับใคร ได้ข้อมูลอะไร นัดอะไรต่อ';
 
-/** The editor in a child row: the same columns become fields (on the tint). */
-function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: LineView | null; won: boolean }) {
+/** The editor in a child row: the same columns become fields (on the tint). `stage` is the stored stage it
+ *  writes (the step's own, or an older stage's record, CALL2, edited in place); `code` what it is called. */
+function KidEditor({ d, stage, code, kind, line, won }: { d: Deal; stage: string; code: string; kind: StepKind; line: StepView['line']; won: boolean }) {
   const tk = useTk();
   const { S } = tk;
-  const ed = useStepEditor(d, stage);
+  const ed = useStepEditor(d, stage, code);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     input.current?.focus();
     input.current?.closest('tr')?.scrollIntoView?.({ block: 'nearest' });
   }, []);
-  const isMoney = stage === QUOTE_STAGE || isPayStage(S.cfg, stage);
-  const hasDoc = (stageDocs(S, d).by[stage] || []).some((x) => x.amount != null);
+  const isMoney = kind === 'quote' || kind === 'pay';
+  const hasDoc = docsOf(S, d.id).some((x) => x.stage === stage && x.amount != null);
   // a quotation there already: a revised one (compared with it, which stays as "ฉบับเดิม")
   const qh = stage === QUOTE_STAGE ? qtView(S, d).head : null;
   const jm = jointRole(S, d) === 'member';
@@ -2227,8 +2222,8 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
               className="fld sl-fld"
               value={ed.note}
               maxLength={NOTE_MAX}
-              placeholder={PLACEHOLDER(S, stage)}
-              aria-label={`${stage} โน้ต`}
+              placeholder={PLACEHOLDER(kind)}
+              aria-label={`${code} โน้ต`}
               onChange={(ev) => ed.setNote(ev.target.value)}
               onKeyDown={(ev) => {
                 if (ev.key === 'Enter' && !ev.shiftKey) {
@@ -2238,13 +2233,13 @@ function KidEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Line
               }}
             />
             {/* (the date's own column folds away in a narrow table: it comes here instead) */}
-            <span className="sl-qa-date" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${stage}`} /></span>
+            <span className="sl-qa-date" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${code}`} /></span>
             {line && won && line.status !== 'paid' && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.openPanel(d.id, `recv:${stage}`); }}>รับเงินแล้ว</button>}
           </span>
           <span className="sl-qa-hint">Enter บันทึก · Esc ยกเลิก</span>
         </span>
       </td>
-      <td className="k-last" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${stage}`} /></td>
+      <td className="k-last" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${code}`} /></td>
       <td className="k-m2" colSpan={2}>
         <span className="sl-m2">
           <span className="k2-fc">
@@ -2270,7 +2265,7 @@ function DealCard({ d }: { d: Deal }) {
   const open = !!ui.slOpen[d.id];
   const cur = tk.cur === d.id;
   const c = d.gid != null ? e.company(d.gid) : undefined;
-  const t = stageTrack(S, d, today);
+  const t = dealSteps(S, d, today);
   const m = dealMoney(S, d);
   const lc = lastContactInfo(S, d, today).date;
   const od = overdueDays(S, d, today);
@@ -2282,7 +2277,7 @@ function DealCard({ d }: { d: Deal }) {
   const fv = fcFig(S, d), av = acFig(S, d);
   const word = (v: FigView, none: string) => (v.kind === 'ok' ? 'จากเอกสาร ' + v.docNo : v.kind === 'warn' ? 'ไม่ตรงเอกสาร' : v.word || none);
   const tone = (v: FigView) => (v.kind === 'ok' ? 'ok' : v.kind === 'warn' ? 'warn' : '');
-  const attFc = !ro && (fv.kind === 'typed' || !fv.kind) ? () => tk.attach(d, S.cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', { target: 'forecast' }) : null;
+  const attFc = !ro && (fv.kind === 'typed' || !fv.kind) ? () => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast' }) : null;
   const attAc = !ro && (av.kind === 'typed' || av.kind === 'hand' || (!av.kind && won)) ? () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' }) : null;
   const acTile = P && won ? (
     <>
@@ -2301,7 +2296,7 @@ function DealCard({ d }: { d: Deal }) {
       {av.kind !== 'warn' && m.actual != null && m.forecast != null && m.forecast > m.actual && won ? (
         <small>ค้าง {fmtMoney(m.forecast - m.actual)}</small>
       ) : (
-        <small className={tone(av)} title={av.title || undefined}>{word(av, actualSource(S.cfg))}</small>
+        <small className={tone(av)} title={av.title || undefined}>{word(av, actualSource())}</small>
       )}
     </>
   );
@@ -2320,7 +2315,7 @@ function DealCard({ d }: { d: Deal }) {
         </div>
         <div className="sl-mc-st"><Status kind={sv.kind}>{sv.word}</Status></div>
       </div>
-      <MiniTrack stages={S.cfg.stages} states={t.states} next={t.next} done={t.done} late={od != null || nextStepView(S, d, today).tone === 'late'} />
+      <MiniTrack steps={t.steps} next={t.next?.id || ''} done={t.done} late={od != null || nextStepView(S, d, today).tone === 'late'} />
       {!money ? null : tk.cash ? (
         <div className="sl-mc-money">
           <div className="sl-mc-m"><span>{tk.cash.range ? 'เงินเข้าในช่วงนี้' : `เงินเข้าปี ${tk.year}`}</span><LensMoney L={tk.cash} d={d} col="fc" won={won} /></div>
@@ -2375,54 +2370,58 @@ function CardWhen({ d, lc }: { d: Deal; lc: string }) {
   );
 }
 
-/** The open card: the stages as a short vertical timeline, then the closing step. */
-function CardKids({ d, t }: { d: Deal; t: Track }) {
-  const { engine: e, ui, set } = useApp();
+/** A line of a CONTACT / FOLLOW step in the open card: a contact (ActItem), or a record (the step's own, an older
+ *  stage's: "โทร · 25 ก.ย. · บันทึกเดิม CALL2") with "แก้ไข" (edits it where it is stored). */
+function LineItem({ d, v, l }: { d: Deal; v: StepView; l: SLine }) {
+  const tk = useTk();
+  if (l.kind === 'act' && l.act) return <ActItem a={l.act} short />;
+  return (
+    <li className="sl-act sl-act-old">
+      <span className="sl-act-h">
+        <b>{lineWord(l) || 'บันทึก'}</b>
+        <span>{[l.d ? dmTh(l.d) : 'ไม่ระบุวันที่', l.kind === 'old' ? 'บันทึกเดิม ' + l.stage : 'ขั้น ' + v.code].join(' · ')}</span>
+        {!tk.ro && <button type="button" className="quiet sl-act-x" onClick={(ev) => tk.openEditor(d.id, l.stage, ev.currentTarget)} aria-label={`แก้ไข${l.kind === 'old' ? 'บันทึกเดิม ' + l.stage : ' ' + v.code}`}>แก้ไข</button>}
+      </span>
+      {l.note && <span className="sl-act-n">{l.note}</span>}
+    </li>
+  );
+}
+
+/** The open card: the steps as a short vertical timeline (CONTACT and FOLLOW by their newest line, "รวม n ครั้ง"
+ *  for the rest), the contact block, then the closing step. */
+function CardKids({ d, t }: { d: Deal; t: DealSteps }) {
+  const { engine: e } = useApp();
   const tk = useTk();
   const { S, today, ro } = tk;
-  const stages = S.cfg.stages;
   const editStage = tk.edit?.id === d.id && !tk.edit.act ? tk.edit.stage : '';
   const adding = !ro && tk.edit?.id === d.id && !!tk.edit.act;
-  const list = kidList(S, d, today, !!ui.slShowAll[d.id], editStage);
-  // contacts beyond the stages: "+2 ครั้ง" by a stage opens its own; the newest 3 sit before ปิดงาน
-  const byAct = stageActs(S, d), allActs = actsOf(S, d.id);
+  const list = kidList(S, d, today);
+  // a step's contacts (CONTACT / FOLLOW: its other lines) opened under it
   const [actOpen, setActOpen] = useState<Record<string, boolean>>({});
-  const nAct = (p: string) => (byAct.by[p] || []).length;
+  const flip = (id: string) => setActOpen({ ...actOpen, [id]: !actOpen[id] });
   const actDone = (a: DealAct | null) => {
     tk.closeEditor();
-    if (a) tk.acts.say(`บันทึกการติดต่อแล้ว · ${ACT_TH[a.type]} ${dmTh(a.d)}${a.stage ? ' ที่ ' + a.stage : ''}`);
+    if (a) tk.acts.say(`บันทึกการติดต่อแล้ว · ${ACT_TH[a.type]} ${dmTh(a.d)}${a.stage ? ' ที่ ' + actCode(S, a, today) : ''}`);
   };
-  const reached = reachedOf(stages, t.states);
+  const reached = reachedOf(list.map((v) => ({ state: beadOf(v) })));
   const P = planOf(S, d, today), won = t.result === 'YES';
   const late = overdueDays(S, d, today) != null;
   const cv = closingView(S, d, today);
   const ps = payState(S, d, today);
+  const money = e.can('view.money');
   return (
     <div className="sl-mc-kids" id={`mk-${d.id}`} role="list" aria-label={'ขั้นตอนของ ' + shortName(d.client)}>
-      {list.map((r, ri) => {
-        if ('fold' in r)
-          return (
-            <div key={ri} className="sl-mk on" role="listitem">
-              <Bead state="done" />
-              <div className="sl-mk-t">
-                <div><b>{r.fold.join(' · ')}</b></div>
-                <p className="sl-mk-plan">ทำแล้ว {r.fold.length} ขั้น{r.fold.some(nAct) ? ` · ติดต่อเพิ่ม ${r.fold.reduce((a, p) => a + nAct(p), 0)} ครั้ง` : ''} · <button type="button" className="lnk" onClick={() => set({ slShowAll: { ...ui.slShowAll, [d.id]: 1 } })}>แสดง</button></p>
-              </div>
-              <div className="sl-mk-r" />
-            </div>
-          );
-        const { p, i, extra } = r;
-        const s = stepOf(S, d.id, p);
-        const pl = P?.lines.find((l) => l.stage === p) || null;
-        const st: StageState = extra ? (pl?.status === 'paid' ? 'done' : 'future') : t.states[p];
-        const isNow = !extra && p === t.next;
-        const editing = p === editStage && !ro && !extra;
-        const on = !extra && i < reached, dash = on && t.states[stages[i + 1]] === 'planned';
-        const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p);
+      {list.map((v, ri) => {
+        const p = v.id, s = v.own, pl = v.line, st = v.state;
+        const isNow = p === t.next?.id;
+        const editing = !ro && !!editStage && (p === editStage || v.aliases.includes(editStage));
+        const off = st === 'off' || !!v.outside;
+        const on = ri < reached, dash = on && !!list[ri + 1] && beadOf(list[ri + 1]) === 'planned';
+        const isMoney = v.kind === 'quote' || v.kind === 'pay';
         const fig = isMoney ? stageFig(S, d, p) : null;
-        const unused = !!P && won && isPayStage(S.cfg, p) && !pl && t.states[p] === 'off';
-        const fut = (st === 'future' || st === 'off' || unused) && !isNow && !(pl && won);
-        let right: ReactNode = s.d && !editing && !pl ? <span className="sl-kdate">{st === 'planned' ? 'นัด ' : ''}{dmTh(s.d)}</span> : null;
+        const fut = (st === 'future' || off) && !isNow && !(pl && won);
+        const lines = isContactStep(v) ? stepLines(v) : [];
+        let right: ReactNode = v.date && !editing && !pl ? <span className="sl-kdate">{st === 'planned' ? 'นัด ' : ''}{dmTh(v.date)}</span> : null;
         if (pl && !editing) {
           const sv = lineStatusView(pl, today);
           right = (
@@ -2431,15 +2430,15 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
               {sv.kind === 'muted' ? <span className="sl-st-m">{sv.word}</span> : sv.chip ? <span className={'chip ' + sv.kind}>{sv.word}</span> : <Status kind={sv.kind}>{sv.word}</Status>}
             </>
           );
-        } else if (isMoney && st !== 'off' && !editing && !unused && (fig || (p === QUOTE_STAGE && (isNow || st === 'done')) || (won && isNow)))
+        } else if (isMoney && !off && !editing && (fig || (v.kind === 'quote' && (isNow || st === 'done')) || (won && isNow)))
           right = (
             <>
               {right}
-              {fig ? <StageAmount fig={fig} ver={p === QUOTE_STAGE ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+              {fig ? <StageAmount fig={fig} ver={v.kind === 'quote' ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
             </>
           );
         // the quotation's check status (package notify), by its figure
-        const qh = p === QUOTE_STAGE && !editing ? qtView(S, d).head : null;
+        const qh = v.kind === 'quote' && !editing ? qtView(S, d).head : null;
         const qcv = qh ? e.qtCheckFor(qh.doc) : null;
         if (qh && qcv)
           right = (
@@ -2448,17 +2447,25 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
               <QtCheckLine doc={qh.doc} v={qcv} bare />
             </>
           );
-        // a QUOTATION done (its quotation attached) is edited here too: a revision, its figures, its file
-        if (p === QUOTE_STAGE && st === 'done' && !ro && !editing)
+        // a step done (or holding something) is edited here too: CONTACT / FOLLOW's own record, a QUOTATION's
+        // quotation (a revision, its figures, its file)
+        if (!ro && !editing && !off && (v.kind === 'quote' ? st === 'done' : isContactStep(v) && lines.length > 0))
           right = (
             <>
               {right}
-              <button type="button" className="lnk sl-mk-e" data-qa={d.id + ':' + p + ':edit'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)} aria-label={`แก้ไข ${p} ${thOf(p)}`}>แก้ไข</button>
+              <button type="button" className="lnk sl-mk-e" data-qa={d.id + ':' + p + ':edit'} onClick={(ev) => tk.openEditor(d.id, p, ev.currentTarget)} aria-label={`แก้ไข ${v.code} ${thShort(v.th)}`}>แก้ไข</button>
             </>
           );
         let body: ReactNode =
-          p === DEAL_STAGE && (st === 'yes' || st === 'no' || st === 'wait') ? (
+          v.kind === 'close' && (st === 'yes' || st === 'no' || st === 'wait') ? (
             <Status kind={st === 'yes' ? 'ok' : st === 'no' ? 'bad' : 'warn'}>{st === 'yes' ? 'ได้งาน (YES)' : st === 'no' ? 'ไม่ได้งาน (NO)' : 'รอผล'}</Status>
+          ) : isContactStep(v) && lines.length ? (
+            <>
+              <p>{lineWord(lines[0]) && <span className="sl-kty">{lineWord(lines[0])}</span>}{lines[0].note || (lines[0].kind === 'old' ? 'บันทึกเดิม ' + lines[0].stage : '')}</p>
+              {lines.length > 1 && !editing && (
+                <p className="sl-mk-plan"><button type="button" className="lnk" aria-expanded={!!actOpen[p]} onClick={() => flip(p)} aria-label={`ดูการติดต่อทั้ง ${lines.length} ครั้งในขั้น ${v.code}`}>รวม {lines.length} ครั้ง</button></p>
+              )}
+            </>
           ) : s.n && !isAutoNote(S, d, p) ? (
             <p>{s.n}</p>
           ) : null;
@@ -2472,7 +2479,9 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
               </p>
             </>
           );
-        if (unused) body = <p className="sl-mk-plan">ไม่มีงวดนี้ในแผน</p>;
+        if (v.outside === 'plan') body = <>{body}<p className="sl-mk-plan">ไม่อยู่ในแผนชำระแล้ว ไม่นับเป็นขั้น</p></>;
+        if (money && v.short != null) body = <>{body}<p className="sl-mk-plan">ยังค้างรับ {fmtMoney(v.short)} บาท</p></>;
+        if (v.kind === 'pay' && st === 'future' && !won && !P && t.result !== 'NO' && v.counted && !editing) body = <>{body}<p className="sl-mk-plan">หลังได้งาน · ตั้งแผนกี่งวด ขั้น PAY จะขึ้นตามจำนวนงวด</p></>;
         if (pl && won && !ro && !editing && P?.next?.stage === p)
           body = (
             <>
@@ -2491,36 +2500,46 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
               </span>
             </>
           );
-        if (nAct(p) && !editing)
+        // the other steps' contacts: "+2 ครั้ง" by the step opens them
+        const nAct = isContactStep(v) ? 0 : v.entries.length;
+        if (nAct && !editing)
           right = (
             <>
               {right}
-              <button type="button" className="lnk sl-kmore" aria-expanded={!!actOpen[p]} onClick={() => setActOpen({ ...actOpen, [p]: !actOpen[p] })} aria-label={`การติดต่อเพิ่มที่ ${p} ${nAct(p)} ครั้ง`}>{timesWord(S, d, p, nAct(p))}</button>
+              <button type="button" className="lnk sl-kmore" aria-expanded={!!actOpen[p]} onClick={() => flip(p)} aria-label={`การติดต่อที่ ${v.code} ${nAct} ครั้ง`}>{`${isFilled(s) ? '+' : ''}${nAct} ครั้ง`}</button>
             </>
           );
-        if (actOpen[p] && !editing) body = <>{body}<ActList acts={byAct.by[p]} short label={'การติดต่อที่ ' + p} /></>;
+        if (actOpen[p] && !editing)
+          body = (
+            <>
+              {body}
+              <ul className="sl-acts" aria-label={'การติดต่อในขั้น ' + v.code}>
+                {isContactStep(v) ? lines.slice(1).map((l) => <LineItem key={l.kind + (l.act?.id || l.stage)} d={d} v={v} l={l} />) : v.entries.map((x) => x.act && <ActItem key={x.act.id} a={x.act} short />)}
+              </ul>
+            </>
+          );
         return (
-          <div key={ri} className={'sl-mk' + (on ? (dash ? ' dash' : ' on') : '') + (fut ? ' fut' : '') + (editing ? ' editing' : '')} role="listitem">
-            <Bead state={unused ? 'off' : st} now={isNow} late={late || (pl?.lateDays || 0) > 0} stage={p} />
+          <div key={p} className={'sl-mk' + (on ? (dash ? ' dash' : ' on') : '') + (fut ? ' fut' : '') + (editing ? ' editing' : '')} role="listitem">
+            <Bead state={beadOf(v)} now={isNow} late={late || (pl?.lateDays || 0) > 0} stage={p} />
             <div className="sl-mk-t">
               <div>
-                <b>{p}</b>
-                <span>{isNow && !editing ? 'ถัดไป · ' : ''}{thOf(p)}</span>
-                {extra && <i className="sl-xtag">งวดเพิ่ม</i>}
+                <b>{v.code}</b>
+                <span>{editing && editStage !== p ? 'บันทึกเดิม ' + editStage : `${isNow && !editing ? 'ถัดไป · ' : ''}${thShort(v.th)}`}</span>
               </div>
               {body}
-              {editing && <CardEditor d={d} stage={p} line={pl} won={won} />}
+              {editing && <CardEditor d={d} stage={editStage} code={editStage === p ? v.code : editStage} kind={editStage === p ? v.kind : 'contact'} line={editStage === p ? pl : null} won={won} />}
             </div>
             {!editing && <div className="sl-mk-r">{right}</div>}
           </div>
         );
       })}
-      {(allActs.length > 0 || !ro) && (
+      {(t.contacts > 0 || !ro) && (
         <div className={'sl-mk sl-mk-acts' + (adding ? ' editing' : '')} role="listitem">
           <span className="sl-mk-dot" aria-hidden="true" />
           <div className="sl-mk-t">
-            <div><b>การติดต่อ</b><span>{allActs.length ? `ติดต่อเพิ่ม ${allActs.length} ครั้ง` : 'ยังไม่มีบันทึกเพิ่ม'}</span></div>
-            <ActList acts={allActs} max={3} stage short label={'การติดต่อของ ' + shortName(d.client)} />
+            <div><b>การติดต่อ</b><span>{t.contacts ? `ติดต่อ ${t.contacts} ครั้ง` : 'ยังไม่มีบันทึก'}</span></div>
+            {/* (every contact sits in its step: here only those filed at a step the deal no longer has) */}
+            {t.other.acts.length > 0 && <ActList acts={t.other.acts} max={3} stage short label={'การติดต่ออื่นของ ' + shortName(d.client)} />}
             {adding ? (
               <ActForm d={d} stage={tk.edit!.stage || undefined} onDone={actDone} compact />
             ) : (
@@ -2538,9 +2557,9 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
           <p className="sl-mk-plan">
             {cv.state === 'no' ? (ro ? 'ผลเป็น NO' : 'ผลเป็น NO กดปิดงานเพื่อย้ายไปแท็บปิดงาน')
               : cv.state === 'plan' || cv.state === 'pays' ? `ได้งานแล้ว · รับ ${ps.paid.length}/${ps.pays.length} งวด${P ? 'ตามแผน' : ''} · ${cv.hint}`
-              : cv.state === 'done' || cv.state === 'nopay' ? (ro ? 'ได้งานและรับชำระครบ' : 'ได้งานและรับชำระครบ ปิดงานได้')
+              : cv.state === 'done' ? (ro ? 'ได้งานและรับชำระครบ' : 'ได้งานและรับชำระครบ ปิดงานได้')
               : cv.state === 'joint' ? 'ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม'
-              : 'ผล YES / NO ยังไม่ใช่การปิดงาน'}
+              : 'ผล YES / NO ที่ CLOSE ยังไม่ใช่การปิดงาน'}
           </p>
         </div>
         <div className="sl-mk-r">{cv.ready && !ro && <button type="button" className="btn pri xs" onClick={() => tk.acts.close(d.id)}>ปิดงาน</button>}</div>
@@ -2549,16 +2568,17 @@ function CardKids({ d, t }: { d: Deal; t: Track }) {
   );
 }
 
-/** The editor in an open phone card: attach first on QUOTATION / a PAY after the win, then the note. */
-function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: LineView | null; won: boolean }) {
+/** The editor in an open phone card: attach first on QUOTATION / a PAY after the win, then the note. `stage` is
+ *  the stored stage it writes (an older stage's record, CALL2, in place); `code` what it is called. */
+function CardEditor({ d, stage, code, kind, line, won }: { d: Deal; stage: string; code: string; kind: StepKind; line: StepView['line']; won: boolean }) {
   const tk = useTk();
-  const ed = useStepEditor(d, stage);
+  const ed = useStepEditor(d, stage, code);
   const ta = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     ta.current?.focus();
     ta.current?.scrollIntoView?.({ block: 'nearest' });
   }, []);
-  const isMoney = stage === QUOTE_STAGE || isPayStage(tk.S.cfg, stage);
+  const isMoney = kind === 'quote' || kind === 'pay';
   // QUOTATION with a quotation: the quotation (a revision, its figures, its file, earlier versions) first
   const qv = stage === QUOTE_STAGE ? qtView(tk.S, d) : null;
   return (
@@ -2570,16 +2590,16 @@ function CardEditor({ d, stage, line, won }: { d: Deal; stage: string; line: Lin
           <QtPhone d={d} v={qv} onRevise={(id) => { ed.cancel(); tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id }); }} onChange={() => ed.follow(true)} />
           <span className="sl-or">โน้ตของขั้นนี้</span>
         </>
-      ) : isMoney && (stage === QUOTE_STAGE || won) && (
+      ) : isMoney && (kind === 'quote' || won) && (
         <>
-          <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>{stage === QUOTE_STAGE ? 'แนบใบเสนอราคา (Forecast)' : 'แนบใบเสร็จ / ใบแจ้งหนี้ (Actual)'}</button>
+          <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>{kind === 'quote' ? 'แนบใบเสนอราคา (Forecast)' : 'แนบใบเสร็จ / ใบแจ้งหนี้ (Actual)'}</button>
           {line && <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.openPanel(d.id, `recv:${stage}`); }}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
           <span className="sl-or">หรือบันทึกโน้ต</span>
         </>
       )}
-      <textarea ref={ta} value={ed.note} maxLength={NOTE_MAX} aria-label={`${stage} โน้ต`} placeholder={PLACEHOLDER(tk.S, stage)} onChange={(ev) => ed.setNote(ev.target.value)} className="fld" />
+      <textarea ref={ta} value={ed.note} maxLength={NOTE_MAX} aria-label={`${code} โน้ต`} placeholder={PLACEHOLDER(kind)} onChange={(ev) => ed.setNote(ev.target.value)} className="fld" />
       <div className="sl-mk-row">
-        <DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${stage}`} text={ed.date === tk.today ? 'วันนี้ ' + isoTh(ed.date) : undefined} />
+        <DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${code}`} text={ed.date === tk.today ? 'วันนี้ ' + isoTh(ed.date) : undefined} />
         <button type="button" className="quiet" onClick={ed.cancel}>ยกเลิก</button>
         <button type="button" className="btn pri xs" onClick={ed.save}>บันทึก</button>
       </div>

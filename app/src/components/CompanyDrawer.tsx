@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, STG, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
 import type { Cert, Company, ContactForm, Detail, LogEntry, StageKey } from '../lib/types';
-import { ACT_TH, actsOf, beYear, dealMoney, fmtMoney, lastContact, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { ACT_TH, actsOf, beYear, dealMoney, fmtMoney, lastContact, stepLabel, trackerStatus, type Deal, type DealAct } from '../lib/sales';
 import { fcFig } from '../lib/salesUi';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
@@ -401,7 +401,7 @@ export function CompanyDrawer() {
                           <span style={{ width: 10, height: 10, borderRadius: '50%', background: ink, marginTop: 6 }} />
                           <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                             {a.note && <span style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{a.note}</span>}
-                            <span className="t-meta"><span style={{ color: ink }}>{ACT_TH[a.type]}</span>{[`Sales Tracker ปี ${x.year}${a.stage ? ' ที่ ' + a.stage : ''}`, isoTh(a.d), a.by].filter(Boolean).map((t) => ' · ' + t).join('')}</span>
+                            <span className="t-meta"><span style={{ color: ink }}>{ACT_TH[a.type]}</span>{[`Sales Tracker ปี ${x.year}${a.stage ? ' ที่ ' + stepLabel(e.sales, x, a.stage, todayISO()).code : ''}`, isoTh(a.d), a.by].filter(Boolean).map((t) => ' · ' + t).join('')}</span>
                           </span>
                           <span className="dr-acts"><button onClick={() => set({ sel: null, deal: x.id })} className="lnk" style={{ fontSize: 13, alignSelf: 'flex-start' }}>เปิดดีล</button></span>
                         </div>

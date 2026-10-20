@@ -79,6 +79,8 @@ describe('CONTACT and FOLLOW read their older stages', () => {
     expect(view(s, 'CONTACT')).toMatchObject({ date: '2026-10-02', top: { stage: 'CONTACT' }, own: { n: 'คุยรายละเอียด' } });
     expect(view(s, 'CONTACT').entries.map((e) => e.stage)).toEqual(['CALL1']);
     expect(view(s, 'FOLLOW').entries.map((e) => e.stage)).toEqual(['FOLLOW1']);
+    // "ติดต่อ 4 ครั้ง": the steps' own records count as contacts, as the older stages' read into them do
+    expect(dealSteps(s, s.deals.x, TODAY).contacts).toBe(4);
     // the same day: the step's own first
     s.steps['x/CALL2'] = { d: '2026-10-02', n: 'วันเดียวกัน' };
     expect(readStep(s, 'x', 'CONTACT').stage).toBe('CONTACT');
