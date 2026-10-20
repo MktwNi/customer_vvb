@@ -2125,7 +2125,7 @@ export class GccEngine {
       // the note the tap filled in (an empty stage gets "รับชำระแล้ว … บาท"), while nobody has changed it
       const w = u.step, sk = (x: DealStep) => x.d + '\n' + x.n;
       if (w && sk(stepOf(S, dealId, w.stage)) === sk(w.after) && sk(w.before) !== sk(w.after)) this.setStep(dealId, w.stage, w.before, true, true);
-      this.salesLog(d, 'เลิกทำรับชำระ', stages.join(', '));
+      this.salesLog(d, 'เลิกทำรับชำระ', stages.map((st) => stepLabel(S, d, st, todayISO()).code).join(', '));
     });
     this.saveSales();
     return { stale: [] };
