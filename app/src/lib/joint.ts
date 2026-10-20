@@ -7,7 +7,7 @@
 import { dmTh, isoTh } from './format';
 import {
   DEAL_STAGE, QUOTE_STAGE, apportion, countsActual, dealMoney, dealResult, docsOf, filterDeals, fmtMoney, hasPlan, holdPart, jointAttr, jointBase, jointCashLines, jointHeadOf, jointOf, jointParts, jointRole, jointSplit, jointWeights,
-  moneyHolds, payState, sectionsFor, stepOf,
+  moneyHolds, payState, sectionsFor, stepOf, workTally,
   type CashLine, type Deal, type DealDoc, type JointGroup, type JointMember, type SalesFilterIn, type SalesState,
 } from './sales';
 import { isQtVersion, qtVersions, qtView } from './quotes';
@@ -279,12 +279,43 @@ export function closedWord(g: JointGroup) {
 export const sentDay = (s: SalesState, g: JointGroup) => stepOf(s, g.head.id, QUOTE_STAGE).d;
 
 /**
+ * The joint quotation a deal closes and reopens with (its header's id: closing is always the whole quotation,
+ * engine.closeJoint), '' for a deal that closes on its own.
+ */
+export function jointCloseOf(s: SalesState, d: Pick<Deal, 'id'>): string {
+  const r = jointRole(s, d);
+  return r === 'header' ? d.id : r === 'member' ? jointHeadOf(s, d.id) : '';
+}
+/**
+ * What closing a joint quotation records for its companies: the payer's result `r` (YES or NO; '' while it has
+ * neither, and nothing is recorded), dated as the payer's (`d`, its CLOSED DEAL day; '' = the day it closes),
+ * for the companies `ids` whose own result is neither YES nor NO (one recorded NO, a company that withdrew,
+ * stays NO; a YES stays). The same when the payer's result comes after the closing (engine.setStep).
+ */
+export function jointFill(s: SalesState, g: JointGroup): { r: 'YES' | 'NO' | ''; d: string; ids: string[] } {
+  const hr = dealResult(s, g.head), r = hr === 'YES' || hr === 'NO' ? hr : '';
+  const ids = r && s.cfg.stages.includes(DEAL_STAGE) ? g.members.filter((x) => !/^(YES|NO)$/.test(dealResult(s, x.deal))).map((x) => x.deal.id) : [];
+  return { r, d: stepOf(s, g.head.id, DEAL_STAGE).d, ids };
+}
+/** The tracker as closing joint quotation `g` today would leave it (its header and companies closed, the
+ *  payer's result recorded for those without one, jointFill), for the closing dialog's preview. */
+export function closedJoint(s: SalesState, g: JointGroup, today: string): SalesState {
+  const f = jointFill(s, g), deals = { ...s.deals }, steps = { ...s.steps };
+  [g.head, ...g.members.map((x) => x.deal)].forEach((d) => d.jobStatus === 'open' && (deals[d.id] = { ...d, jobStatus: 'closed', closedDate: today }));
+  f.ids.forEach((id) => (steps[`${id}/${DEAL_STAGE}`] = { d: f.d || today, n: f.r }));
+  return { ...s, deals, steps };
+}
+
+/**
  * The closing dialog's summary (ปิดงานใบเสนอราคาร่วม): every member with its result and part (a withdrawn
- * one has none), the total counted once (the quotation's), and where the payer's payment stands.
+ * one has none), the total counted once (the quotation's), and where the payer's payment stands. `after`: a
+ * member's result once closed (`by`: recorded from the payer's, jointFill), `fill` the payer's result written
+ * then, and `worked` how many companies the quotation then counts as worked for (workTally, by name or link).
  */
 export function closeSummary(s: SalesState, g: JointGroup, today: string) {
-  const sh = memberShares(s, g);
-  const rows = g.members.map((x, i) => ({ deal: x.deal, result: dealResult(s, x.deal), share: sh[i].out ? null : sh[i].amt, closed: x.deal.jobStatus === 'closed' }));
+  const sh = memberShares(s, g), f = jointFill(s, g), by = new Set(f.ids);
+  const rows = g.members.map((x, i) => ({ deal: x.deal, result: dealResult(s, x.deal), after: by.has(x.deal.id) ? f.r : dealResult(s, x.deal), by: by.has(x.deal.id), share: sh[i].out ? null : sh[i].amt, closed: x.deal.jobStatus === 'closed' }));
+  const A = closedJoint(s, g, today), worked = workTally(A, g.members.map((x) => A.deals[x.deal.id])).worked;
   const m = dealMoney(s, g.head), r = dealResult(s, g.head), ps = payState(s, g.head, today), P = ps.plan;
   const payer = payerShort(g);
   const pay =
@@ -292,7 +323,7 @@ export function closeSummary(s: SalesState, g: JointGroup, today: string) {
     : r !== 'YES' ? `ยังไม่มีผลจาก ${payer}`
     : P ? (ps.left.length ? `รับจาก ${payer} ${P.paidN} จาก ${P.n} งวด · ค้าง ${fmtMoney(P.left)} บาท` : `รับจาก ${payer} ครบ ${P.n} จาก ${P.n} งวด · ${fmtMoney(P.got)} บาท`)
     : m.actual != null ? `รับจาก ${payer} ${fmtMoney(m.actual)} บาท` : `ยังไม่มีแผนชำระของ ${payer}`;
-  return { rows, total: m.forecast, pay, n: g.members.filter((x) => x.deal.jobStatus === 'open').length + (g.head.jobStatus === 'open' ? 1 : 0), open: g.members.filter((x) => x.deal.jobStatus === 'open').length };
+  return { rows, total: m.forecast, pay, fill: f.r, worked, n: g.members.filter((x) => x.deal.jobStatus === 'open').length + (g.head.jobStatus === 'open' ? 1 : 0), open: g.members.filter((x) => x.deal.jobStatus === 'open').length };
 }
 
 /** The line a member's panel opens with: "อยู่ในใบเสนอราคาร่วม QT-… (มจพ) · ร่วมกับอีก 3 บริษัท · ส่วนแบ่ง 321,000 (25%)". */

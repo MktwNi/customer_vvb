@@ -212,7 +212,7 @@ describe('changing, closing, cancelling', () => {
     B.dispose();
   });
 
-  it('closing closes the header and every company in one push; reopening brings back those closed with it (one that withdrew earlier stays closed)', async () => {
+  it('closing closes the header and every company in one push; reopening brings back the whole group (one closed alone earlier, by an older build, too)', async () => {
     const { A, B, hid, ms } = await made();
     A.setStep(ms[3].id, 'CLOSED DEAL', { d: '2026-08-02', n: 'NO' });
     vi.setSystemTime(new Date('2026-10-05T03:00:00Z'));
@@ -223,8 +223,8 @@ describe('changing, closing, cancelling', () => {
     expect(all.map((id) => A.sales.deals[id].jobStatus)).toEqual(['closed', 'closed', 'closed', 'closed', 'closed']);
     await settle(A, B);
     expect(all.map((id) => B.sales.deals[id].jobStatus)).toEqual(['closed', 'closed', 'closed', 'closed', 'closed']);
-    expect(B.reopenJoint(hid)).toBe(4);
-    expect(all.map((id) => B.sales.deals[id].jobStatus)).toEqual(['open', 'open', 'open', 'open', 'closed']);
+    expect(B.reopenJoint(hid)).toBe(5);
+    expect(all.map((id) => B.sales.deals[id].jobStatus)).toEqual(['open', 'open', 'open', 'open', 'open']);
     A.dispose();
     B.dispose();
   });

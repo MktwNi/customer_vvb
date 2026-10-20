@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
 import {
   ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
-  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex,
+  normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex, workTally,
   type BasisDate, type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState,
 } from '../lib/sales';
 import { BASIS_TH, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, trackerFields, yearOptions, type FigView } from '../lib/salesUi';
@@ -455,9 +455,10 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   const seg = quick === 'paylate' ? 'payment' : quick;
   const views: [QuickView, string][] = [['', 'ทั้งหมด'], ['overdue', 'ค้างติดตาม'], ['notstarted', 'ยังไม่เริ่ม'], ['active', 'กำลังติดตาม'], ['payment', 'รอชำระเงิน'], ['ready', 'พร้อมปิดงาน']];
   const pick = (q: QuickView) => up({ quick: q }, { slCollapsed: {} });
-  // the quick views' counts: one pass each over the rows, the contact records indexed once (ค้างติดตาม reads them)
+  // the quick views' counts: one pass each over the rows, the contact records indexed once (ค้างติดตาม reads them);
+  // พร้อมปิดงาน counts jobs (a joint quotation closes as one: once, lib/sales workTally)
   const cust = base ? customersOf(S, base) : [];
-  const viewN = base ? withActIndex(S, () => views.map(([k]) => (k ? cust.filter((d) => quickMatch(S, d, k, today)).length : cust.length))) : [];
+  const viewN = base ? withActIndex(S, () => views.map(([k]) => (k === 'ready' ? workTally(S, base.filter((d) => quickMatch(S, d, k, today))).jobs : k ? cust.filter((d) => quickMatch(S, d, k, today)).length : cust.length))) : [];
   const anyLate = !!base && withActIndex(S, () => base.some((d) => quickMatch(S, d, 'paylate', today)));
   // the counts in the field menu follow the search too, a little behind the typing (six passes over the year)
   const key = useDeferredValue(JSON.stringify(ui.slF));
@@ -812,11 +813,10 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
    *  filter a joint quotation counts the parts of its companies shown). */
   const secSum = (rows: JRow[]) => {
     const list = rowDeals(rows), held = [...rows.flatMap((r) => (r.k === 'band' && r.inList ? [r.g.head] : [])), ...list];
-    let od = 0, rd = 0;
-    for (const d of list) {
-      if (overdueDays(S, d, today) != null) od++;
-      if (closeReady(S, d, today)) rd++;
-    }
+    let od = 0;
+    for (const d of list) if (overdueDays(S, d, today) != null) od++;
+    // ready to close, in jobs: a joint quotation once (it closes as one)
+    const rd = workTally(S, list.filter((d) => d.jobStatus === 'open' && closeReady(S, d, today))).jobs;
     let { fc, ac } = moneySum(S, held, attr);
     // the lens: the section's money in the year, and what of it came in
     if (cash) ({ fc, ac } = lensSum(cash, moneyHolds(S, held, attr).map((h) => h.d)));
@@ -1499,7 +1499,7 @@ function RowMenu({ d }: { d: Deal }) {
               </button>
               <button role="menuitem" className="menu-i" onClick={() => { tk.setMenu(''); tk.setPop(d.id); }}>แก้วันที่ติดต่อ</button>
               <hr />
-              <button role="menuitem" className="menu-i" onClick={pick(() => tk.acts.close(d.id))}>ปิดงาน<small>{ready ? 'ย้ายไปแท็บปิดงาน' : 'ยังไม่ครบ ปิดเองได้ (ถามยืนยัน)'}</small></button>
+              <button role="menuitem" className="menu-i" onClick={pick(() => tk.acts.close(d.id))}>ปิดงาน<small>{hid ? 'ปิดทั้งใบเสนอราคาร่วม (ถามยืนยัน)' : ready ? 'ย้ายไปแท็บปิดงาน' : 'ยังไม่ครบ ปิดเองได้ (ถามยืนยัน)'}</small></button>
             </>
           )}
           {/* ค่าใช้จ่ายของงาน: whoever records expenses on this deal (an account without ดีลและขั้นตอน too) */}
@@ -1728,7 +1728,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: Track; list: Kid[] }) {
         </th>
         <td className="sl-rule" colSpan={4}>
           <span className="sl-clamp">
-            {closingRule(cv.state, P, ps, ro)} · <button type="button" className="lnk" onClick={() => tk.openPanel(d.id)}>รายละเอียดทั้งหมด</button>
+            {closingRule(cv.state, P, ps, ro, cv.lead)} · <button type="button" className="lnk" onClick={() => tk.openPanel(d.id)}>รายละเอียดทั้งหมด</button>
           </span>
         </td>
         <td className="k-m2" colSpan={2}>
@@ -1892,7 +1892,7 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
 
 /** The closing row's sentence (the lead phrase 500); `ro` (an account that can only read): the lead
  *  phrase alone, without the steps it has no buttons for. */
-function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnType<typeof planOf>, ps: ReturnType<typeof payState>, ro: boolean): ReactNode {
+function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnType<typeof planOf>, ps: ReturnType<typeof payState>, ro: boolean, lead = ''): ReactNode {
   if (ro) {
     switch (state) {
       case 'no':
@@ -1904,7 +1904,7 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
       case 'nopay':
         return <b>ได้งานแล้ว</b>;
       case 'joint':
-        return <b>ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม</b>;
+        return <b>{lead || 'ชำระผ่านใบเสนอราคาร่วม'}</b>;
       case 'done':
         return <b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b>;
       default:
@@ -1921,7 +1921,7 @@ function closingRule(state: ReturnType<typeof closingView>['state'], P: ReturnTy
     case 'nopay':
       return <><b>ได้งานแล้ว</b> ตารางนี้ไม่มีขั้นชำระเงิน (PAY) กดปิดงานเมื่องานจบ</>;
     case 'joint':
-      return <><b>ได้งานแล้ว · ชำระผ่านใบเสนอราคาร่วม</b> ปิดได้เมื่อผู้จ่ายชำระครบ หรือปิดทั้งกลุ่มที่ใบเสนอราคาร่วม</>;
+      return <><b>{lead || 'ชำระผ่านใบเสนอราคาร่วม'}</b> ปิดงานพร้อมกันทั้งใบเสนอราคาร่วม</>;
     case 'done':
       return <><b>ได้งานและรับชำระครบ{P ? 'ทุกงวดตามแผน' : ''}แล้ว</b> กดปิดงานเพื่อย้ายไปแท็บปิดงาน</>;
     default:

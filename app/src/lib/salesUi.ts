@@ -192,7 +192,8 @@ export function statusView(s: SalesState, d: Deal, today: string): StatusView {
     if (ps.left.length) return v('yes', 'ok', 'ได้งาน', ps.left.length > 1 ? `รอชำระ ${ps.left.length} งวด` : `รอชำระงวด ${ps.pays.indexOf(ps.left[0]) + 1}`);
     return v('yes', 'ok', ps.pays.length ? 'ได้งาน · รับครบ' : 'ได้งาน', 'พร้อมปิดงาน');
   }
-  if (r === 'NO') return v('no', 'bad', 'ไม่ได้งาน', 'พร้อมปิดงาน');
+  // (a company that withdrew from a joint quotation closes with it)
+  if (r === 'NO') return v('no', 'bad', 'ไม่ได้งาน', ready || jointRole(s, d) !== 'member' ? 'พร้อมปิดงาน' : 'ปิดพร้อมใบเสนอราคาร่วม');
   if (r === 'WAIT') return v('wait', 'warn', 'รอผล', stepOf(s, d.id, DEAL_STAGE).n.trim());
   if (dealStatus(s, d).started) {
     const t = stageTrack(s, d, today), last = s.cfg.stages.filter((p) => t.states[p] === 'done').pop() || lastStage(s, d);
@@ -346,16 +347,20 @@ export const CLOSE_TITLE = 'ปิดงาน · ย้ายงานที่
  * '' when ready: the button shows); `progress` = "รับแล้ว 50% · เหลือ 53,500" on the plan total, else the Forecast.
  * `ro`: an account that can only read gets where it stands, without the steps it has no buttons for.
  */
-export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null }
+export interface ClosingView { ready: boolean; state: 'none' | 'no' | 'plan' | 'pays' | 'nopay' | 'done' | 'joint'; text: string; hint: string; waitFor: string[]; progress: { pct: number; got: number; base: number; left: number } | null; /** 'joint': the lead phrase (the table's closing row) */ lead?: string }
 export function closingView(s: SalesState, d: Deal, today: string, ro = false): ClosingView {
   const r = dealResult(s, d), ready = closeReady(s, d, today);
-  // a won member of a joint quotation (`joint`): its money is the header's; it closes once the payer has paid
-  // (or with the whole group, from the joint quotation)
-  if (r === 'YES' && !ready && jointRole(s, d) === 'member') {
-    const h = s.deals[jointHeadOf(s, d.id)], P = h ? payState(s, h, today).plan : null;
+  // a company of a joint quotation (`joint`): its money is the header's, and it closes with the whole
+  // quotation, once the payer has paid in full (or said NO); closing records the payer's result for it when it
+  // has none (engine.closeJoint)
+  if (jointRole(s, d) === 'member') {
+    const h = s.deals[jointHeadOf(s, d.id)], P = h ? payState(s, h, today).plan : null, hr = h ? dealResult(s, h) : '';
     const progress = P && P.total ? { pct: Math.min(100, Math.round((P.got / P.total) * 100)), got: P.got, base: P.total, left: Math.max(0, P.total - P.got) } : null;
-    const paid = P ? ` · ผู้จ่ายชำระ ${P.paidN} จาก ${P.n} งวด` : '';
-    return { ready, state: 'joint', text: `ได้งานแล้ว · ${JOINT_PAID}${paid}${ro ? '' : ' ปิดงานได้เมื่อผู้จ่ายชำระครบ หรือปิดทั้งกลุ่มที่ใบเสนอราคาร่วม'}`, hint: 'ปิดได้เมื่อผู้จ่ายชำระครบ', waitFor: [], progress };
+    const own = r === 'YES' ? 'ได้งานแล้ว' : r === 'NO' ? 'ไม่ได้งาน (ถอนตัว)' : 'ยังไม่มีผลของบริษัทนี้';
+    const lead = ready ? `${own} · ${hr === 'NO' ? 'ผู้จ่ายตอบว่าไม่ได้งาน' : 'ผู้จ่ายชำระครบแล้ว'}` : `${own} · ${JOINT_PAID}${P ? ` · ผู้จ่ายชำระ ${P.paidN} จาก ${P.n} งวด` : ''}`;
+    const fill = r !== 'YES' && r !== 'NO' && (ready || hr === 'YES') ? ` บริษัทที่ยังไม่มีผลจะได้ผลตามผู้จ่าย` : '';
+    const rest = ro ? '' : ready ? ` ปิดงานพร้อมกันทั้งใบเสนอราคาร่วม${fill}` : ` ปิดงานพร้อมกันทั้งใบเสนอราคาร่วมเมื่อผู้จ่ายชำระครบ${fill}`;
+    return { ready, state: 'joint', text: lead + rest, lead, hint: ready ? '' : hr === 'YES' ? 'ปิดได้เมื่อผู้จ่ายชำระครบ' : 'รอผลจากผู้จ่าย', waitFor: [], progress };
   }
   if (r === 'NO') return { ready, state: 'no', text: ro ? 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ' : 'ผลการขายเป็น NO แล้ว ไม่ต้องติดตามต่อ กดปิดงานเพื่อย้ายไปแท็บ “ปิดงาน” (เปิดกลับได้ ยอดยังนับในสรุปปี)', hint: '', waitFor: [], progress: null };
   if (r !== 'YES') return { ready, state: 'none', text: ro ? 'ยังไม่มีผลการขาย' : 'ยังไม่มีผลการขาย เมื่อบันทึก CLOSED DEAL เป็น NO หรือ YES และรับชำระครบทุกงวด ระบบจะขึ้นปุ่มปิดงาน', hint: 'รอผลการขาย', waitFor: [], progress: null };
