@@ -357,7 +357,7 @@ function setup() {
   // the e-mail notifications too, so an owner who runs setup after pasting new code has them as well
   try {
     installNotify_();
-    Logger.log('การแจ้งเตือนทางอีเมลพร้อมใช้งาน (ตรวจทุก ' + NOTIFY_EVERY_MIN + ' นาที)');
+    Logger.log('การแจ้งเตือนทางอีเมลพร้อมใช้งาน (ใบเสนอราคาส่งทันทีที่แนบหรือแก้ เรื่องอื่นตรวจทุก ' + NOTIFY_EVERY_MIN + ' นาที)');
   } catch (err) {
     Logger.log('ยังเปิดการแจ้งเตือนทางอีเมลไม่ได้: ' + String((err && err.message) || err) + ' — เลือก setupNotify แล้วกด Run และกดอนุญาต');
   }
@@ -372,14 +372,16 @@ function setup() {
 
 /**
  * กด Run ฟังก์ชันนี้ครั้งเดียวหลังวางโค้ดเวอร์ชันนี้ (ก่อน Deploy) แล้วกด "อนุญาต": Google จะขอสิทธิ์ส่งอีเมลในนามคุณ
- * และสิทธิ์ทำงานเมื่อคุณไม่ได้เปิดอยู่ สคริปต์จะตั้งเวลาตรวจทุก 10 นาที และสร้างแท็บ "notify" (บันทึกอีเมลที่ส่ง)
+ * และสิทธิ์ทำงานเมื่อคุณไม่ได้เปิดอยู่ ใบเสนอราคาจะส่งอีเมลทันทีที่แนบหรือแก้ ส่วนงวดเงิน นัดหมาย สรุปประจำวัน
+ * และอีเมลที่ส่งไม่ทัน สคริปต์จะตั้งเวลาตรวจทุก 10 นาที และสร้างแท็บ "notify" (บันทึกอีเมลที่ส่ง)
  * Run ซ้ำได้ ไม่มีอะไรซ้ำ และไม่ส่งอีเมลย้อนหลังของข้อมูลที่มีอยู่ก่อน
  */
 function setupNotify() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('สคริปต์นี้ต้องสร้างจากไฟล์ Google Sheet: เปิดไฟล์ชีต → ส่วนขยาย (Extensions) → Apps Script แล้ววางโค้ดที่นั่น');
   const r = installNotify_();
-  const msg = 'การแจ้งเตือนทางอีเมลพร้อมใช้งาน: ตรวจทุก ' + NOTIFY_EVERY_MIN + ' นาที วันนี้ส่งได้อีก ' + r.quota +
+  const msg = 'การแจ้งเตือนทางอีเมลพร้อมใช้งาน: ใบเสนอราคาส่งทันทีที่แนบหรือแก้ เรื่องอื่น (งวดเงิน นัดหมาย สรุปประจำวัน) ตรวจทุก ' +
+    NOTIFY_EVERY_MIN + ' นาที วันนี้ส่งได้อีก ' + r.quota +
     ' ฉบับ ขั้นต่อไป: Deploy → Manage deployments → Edit → Version: New version';
   Logger.log(msg);
   try {

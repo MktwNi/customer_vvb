@@ -131,7 +131,7 @@ describe('setupNotify', () => {
     expect(s.triggers.map((t) => [t.getHandlerFunction(), t.every])).toEqual([['notifyTick', 10]]);
     expect(s.sheetOf('notify')!.rows[0]).toEqual(['at', 'kind', 'u', 'key', 'fp', 'result']);
     expect(s.props).toMatchObject({ NOTIFY_ON: '1', NOTIFY_SINCE: '2026-10-12', NOTIFY_SEQ: '2' });
-    expect(s.logs.at(-1)).toMatch(/^การแจ้งเตือนทางอีเมลพร้อมใช้งาน: ตรวจทุก 10 นาที วันนี้ส่งได้อีก 100 ฉบับ/);
+    expect(s.logs.at(-1)).toMatch(/^การแจ้งเตือนทางอีเมลพร้อมใช้งาน: ใบเสนอราคาส่งทันทีที่แนบหรือแก้ เรื่องอื่น \(งวดเงิน นัดหมาย สรุปประจำวัน\) ตรวจทุก 10 นาที วันนี้ส่งได้อีก 100 ฉบับ/);
     expect(s.post({ action: 'hello', cv: 4 })).toMatchObject({ notify: { on: 1, since: '2026-10-12' } });
     // again, two days and some rows later: still one trigger, the go-live day and the position stay
     at(2 * DAY);
@@ -145,7 +145,7 @@ describe('setupNotify', () => {
     const s = mk();
     s.bootstrapAdmin({ u: 'lead', name: 'หัวหน้า', pw: 'lead-password-1' });
     expect(s.triggers).toHaveLength(1);
-    expect(s.logs).toContain('การแจ้งเตือนทางอีเมลพร้อมใช้งาน (ตรวจทุก 10 นาที)');
+    expect(s.logs).toContain('การแจ้งเตือนทางอีเมลพร้อมใช้งาน (ใบเสนอราคาส่งทันทีที่แนบหรือแก้ เรื่องอื่นตรวจทุก 10 นาที)');
     s.stats.propRead = 0;
     expect(s.post({ action: 'hello', cv: 4 })).toMatchObject({ mode: 'accounts', notify: { on: 1, since: '2026-10-12' } });
     expect(s.stats.propRead).toBe(0);
