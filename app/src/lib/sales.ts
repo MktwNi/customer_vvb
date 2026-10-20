@@ -597,21 +597,21 @@ export function dealStatus(s: SalesState, d: Deal) {
  *  deal ready to close (lost, or won and paid: it needs closing, not a call), nor for a won deal with a
  *  payment plan (followed by its due dates: "เลยกำหนด" on the installment). A joint quotation's header is
  *  not a customer (its members are followed up), and a won member is paid through it. */
-export function overdueDays(s: SalesState, d: Deal, today: string) {
+export function overdueDays(s: SalesState, d: Deal, today: string, t?: DealSteps) {
   if (d.jobStatus === 'closed') return null;
   const jr = jointRole(s, d);
   if (jr === 'header') return null;
   // (a company that withdrew from a joint quotation waits for it to close: nothing to follow up)
-  if (dealResult(s, d) === 'NO' || closeReady(s, d, today) || (dealResult(s, d) === 'YES' && (jr === 'member' || hasPlan(s, d.id)))) return null;
+  if (dealResult(s, d) === 'NO' || closeReady(s, d, today, t) || (dealResult(s, d) === 'YES' && (jr === 'member' || hasPlan(s, d.id)))) return null;
   const lc = lastContact(s, d, today) || (d.at || '').slice(0, 10);
   if (!lc || lc > today) return null;
   const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(lc + 'T00:00:00')) / 864e5);
   return isFinite(n) && n > OVERDUE_DAYS ? n : null;
 }
 
-/** The code of the last step done (CONTACT, FOLLOW, CLOSE …), '' when none is. */
-export function lastStage(s: SalesState, d: Deal, today = todayISO()) {
-  const t = dealSteps(s, d, today);
+/** The code of the last step done (CONTACT, FOLLOW, CLOSE …), '' when none is. `t`: the deal's steps when the
+ *  caller has them (a table row works them out once: dealSteps). */
+export function lastStage(s: SalesState, d: Deal, today = todayISO(), t = dealSteps(s, d, today)) {
   return [...t.steps].reverse().find((v) => v.counted && DONE.includes(v.state))?.code || '';
 }
 
@@ -652,6 +652,9 @@ export interface StepView extends StepDef {
   /** its date: a planned one ahead; else the newest of its records and contacts up to today; an installment's
    *  received day, else its due date ('' none) */
   date: string;
+  /** CONTACT / FOLLOW done and a date booked ahead as well (CALL1 done, CALL2 planned): the next call, "นัด 14 ต.ค.";
+   *  the step stays done, and is the next step while nothing after it is done */
+  ahead?: string;
   /** the record at `id` (what the step's editor edits) */
   own: DealStep;
   /** the newest of the records read into it (its own or an older stage's): the step's one-line note */
@@ -668,6 +671,10 @@ export interface StepView extends StepDef {
   /** no plan, won, paid in part (by the money the deal shows): what is still owed on this installment, which
    *  stands in for the rest of the payment */
   short?: number;
+  /** no plan: the rest of the payment ("PAY ส่วนที่เหลือ"), never a numbered installment. Derived while the money
+   *  shows part of the Forecast received (`short`), or nothing to tell it by (no Actual, or a session without
+   *  ดูยอดเงิน); kept for what it holds once recorded (PAY2 of the eight-stage list) */
+  rest?: boolean;
 }
 export interface DealSteps {
   /** every step in order, the uncounted ones included */
@@ -687,19 +694,25 @@ const NO_STEP: DealStep = { d: '', n: '' };
 const isFilled = (x: DealStep | undefined): x is DealStep => !!x && !!(x.d || x.n.trim());
 /** "ชำระงวดที่ 3" for PAY3; any other installment name "ชำระเงิน". */
 const payTh = (p: string) => (isPayKey(p) ? 'ชำระงวดที่ ' + payNo(p) : 'ชำระเงิน');
+/** The second PAY step of a deal without a plan: the rest of the payment, never "งวดที่ 2" of a plan it has not. */
+export const REST_TH = 'ส่วนที่เหลือ';
 
 /**
  * A deal's steps, its next step and how far it is (lib/steps.ts): what the panel, the table, the phone card, the
  * plan list, the Dashboard, the filters and closing all read.
  * - CONTACT, FOLLOW read their older stages (CALL2, CALL1; FOLLOW2, FOLLOW1): the newest date wins, the older
- *   records are entries; a contact record up to today completes them. QUOTATION, CLOSE and the team's own stages
- *   read their own record; a contact there is an entry and completes nothing.
- * - PAY: with a plan (also before YES, as a draft), one step per installment; without one a single PAY step
- *   (the list's first PAY name, PAY1), and another installment holding a record or a payment shows and counts
- *   too. A won deal without a plan that shows only part of its money received (Actual below the Forecast, both
- *   known, more than a withholding tax) at its single PAY step has the rest as one more installment, owed
- *   (`short`). An installment the plan no longer has but which holds something stays, not counted ("นอกแผนชำระ");
- *   a joint quotation's company pays through it (its payment is not counted); after NO a single PAY "ไม่ต้องทำ".
+ *   records are entries; a record or a contact record up to today completes them, and a date booked ahead as
+ *   well is their `ahead` (the next call: they are the next step while nothing after them is done). QUOTATION,
+ *   CLOSE and the team's own stages read their own record; a contact there is an entry and completes nothing.
+ * - PAY: with a plan (also before YES, as a draft), one step per installment, PAY1 … PAYn ("ชำระงวดที่ n"; a plan
+ *   of one: PAY); without one a single "PAY ชำระเงิน" step (the list's first PAY name, PAY1), and another holding
+ *   a record or a payment shows and counts too: the second is "PAY ส่วนที่เหลือ" (`rest`), more than two are
+ *   numbered as stored. A won deal without a plan whose single PAY step is done has the rest as one more, owed,
+ *   while it cannot be told paid in full: the money shows part of the Forecast received (Actual below it by more
+ *   than a withholding tax: `short`), or the Forecast is known and no Actual is (`short` the whole Forecast), or
+ *   the session sees no money (no amount). An installment the plan no longer has but which holds something
+ *   stays, not counted ("นอกแผนชำระ"); a joint quotation's company pays through it (its payment is not
+ *   counted); after NO a single PAY "ไม่ต้องทำ".
  */
 export function dealSteps(s: SalesState, d: Deal, today: string): DealSteps {
   const c = ix && ix.s === s ? ix.steps : null, k = d.id + '|' + today;
@@ -742,15 +755,19 @@ function buildSteps(s: SalesState, d: Deal, today: string): DealSteps {
     pays = [first, ...[...keys].filter((p) => p !== first && (isFilled(rec(p)) || money(p))).sort(byNo)].map((id) => ({ id, line: null, outside: 'joint' as const }));
   } else {
     pays = [first, ...[...keys].filter((p) => p !== first && (isFilled(rec(p)) || money(p))).sort(byNo)].map((id) => ({ id, line: null }));
-    // paid in part at its single installment: the rest is one more, owed (as PAY2 was in the eight-stage list)
-    if (res === 'YES' && !hide && pays.length === 1 && paidOwn(first)) {
-      const m = dealMoney(s, d);
-      if (m.forecast != null && m.actual != null && m.actual < m.forecast && whtRate(m.forecast, m.actual) == null) {
-        pays.push({ id: 'PAY' + (Math.max(1, payNo(first)) + 1), line: null, short: Math.round((m.forecast - m.actual) * 100) / 100 });
-      }
+    // its single PAY step done, but not known to be paid in full: the rest is one more, owed (as PAY2 was in the
+    // eight-stage list, which every deal without a plan had). A session without ดูยอดเงิน cannot tell, so it
+    // says what the eight-stage list said: the rest is still to record. Both kinds of session agree on a deal
+    // paid in part; one paid in full at a single PAY is ready only where the money shows it.
+    if (res === 'YES' && pays.length === 1 && paidOwn(first)) {
+      const m = hide ? null : dealMoney(s, d);
+      const owed = !m ? null : m.forecast == null ? 0 : m.actual == null ? m.forecast : m.actual < m.forecast && whtRate(m.forecast, m.actual) == null ? m.forecast - m.actual : 0;
+      if (owed !== 0) pays.push({ id: 'PAY' + (Math.max(1, payNo(first)) + 1), line: null, ...(owed != null ? { short: Math.round(owed * 100) / 100 } : {}) });
     }
   }
   const nPay = pays.filter((p) => !p.outside).length;
+  // without a plan: one PAY, then the rest; more than two only from records (an old tracker's PAY3): numbered
+  const noPlan = !plan && !planned.length && !jm;
 
   // ---- where each contact record and document shows
   const stepIds = new Set(defs.filter((x) => x.kind !== 'pay').map((x) => x.id)), payIds = pays.map((p) => p.id);
@@ -789,24 +806,32 @@ function buildSteps(s: SalesState, d: Deal, today: string): DealSteps {
     const entries = [...b.acts.map(actEntry), ...recs.filter((r) => r.stage !== def.id).map((r): StepEntry => ({ kind: 'old', d: r.d, at: '', stage: r.stage, step: { d: r.d, n: r.n } }))].sort(
       (x, y) => y.d.localeCompare(x.d) || y.at.localeCompare(x.at),
     );
-    let state: StageState = 'future', date = '', filled = isFilled(own);
+    let state: StageState = 'future', date = '', filled = isFilled(own), ahead = '';
     if (def.kind === 'close') {
       if (filled) state = res === 'YES' ? 'yes' : res === 'NO' ? 'no' : res === 'WAIT' ? 'wait' : own.d > today ? 'planned' : 'next';
       date = own.d;
     } else if (def.kind === 'contact' || def.kind === 'follow') {
       filled = recs.length > 0 || b.acts.length > 0;
+      // done by anything up to today (a record, a note without a date, a contact); a date booked ahead as well
+      // is the next call (CALL1 done, CALL2 planned: one step, done, "นัด 14 ต.ค.")
       const past = [...recs.map((r) => (r.d <= today ? r.d : '')), ...b.acts.map((a) => (a.d <= today ? a.d : ''))].filter(Boolean).sort();
-      if (top.d > today) (state = 'planned'), (date = top.d);
-      else if (past.length || recs.length) (state = 'done'), (date = past[past.length - 1] || '');
+      const before = past.length > 0 || recs.some((r) => !r.d);
+      if (top.d > today && !before) (state = 'planned'), (date = top.d);
+      else if (before) {
+        state = 'done';
+        date = past[past.length - 1] || '';
+        if (top.d > today) ahead = top.d;
+      }
     } else if (filled) {
       state = own.d > today ? 'planned' : 'done';
       date = own.d;
     }
-    views.push({ ...def, aliases: def.aliases.slice(), state, counted: true, filled, date, own, top, entries, docs: b.docs, line: null });
+    views.push({ ...def, aliases: def.aliases.slice(), state, counted: true, filled, date, ...(ahead ? { ahead } : {}), own, top, entries, docs: b.docs, line: null });
   }
   function payView(p: Pay): StepView {
     const own = rec(p.id) || NO_STEP, b = bag(p.id), l = p.line;
-    const single = !p.outside ? nPay === 1 : p.outside === 'joint' && p.id === first;
+    const single = !p.outside ? nPay === 1 || (noPlan && nPay === 2 && pays[0] === p) : p.outside === 'joint' && p.id === first;
+    const rest = !p.outside && noPlan && nPay === 2 && pays[1] === p;
     let state: StageState = 'future', date = own.d;
     if (p.outside || res === 'NO') state = paidOwn(p.id) ? 'done' : own.d > today ? 'planned' : 'off';
     else if (l && l.status === 'paid') (state = 'done'), (date = l.rcvDate || today);
@@ -815,9 +840,9 @@ function buildSteps(s: SalesState, d: Deal, today: string): DealSteps {
     else if (own.d > today) state = 'planned';
     else if (l) date = l.due;
     return {
-      id: p.id, code: single ? PAY_SLOT.code : p.id, th: single ? PAY_SLOT.th : payTh(p.id), kind: 'pay', aliases: [p.id],
+      id: p.id, code: single || rest ? PAY_SLOT.code : p.id, th: single ? PAY_SLOT.th : rest ? REST_TH : payTh(p.id), kind: 'pay', aliases: [p.id],
       state, counted: !p.outside, filled: state === 'done' || isFilled(own), date, own, top: { ...own, stage: p.id },
-      entries: b.acts.map(actEntry), docs: b.docs, line: l, ...(p.outside ? { outside: p.outside } : {}), ...(p.short != null ? { short: p.short } : {}),
+      entries: b.acts.map(actEntry), docs: b.docs, line: l, ...(p.outside ? { outside: p.outside } : {}), ...(p.short != null ? { short: p.short } : {}), ...(rest ? { rest } : {}),
     };
   }
 
@@ -832,7 +857,8 @@ function buildSteps(s: SalesState, d: Deal, today: string): DealSteps {
   else if (res !== 'NO') {
     let lastDone = -1;
     seq.forEach((v, i) => ['done', 'yes', 'wait'].includes(v.state) && (lastDone = i));
-    next = seq.findIndex((v, i) => i > lastDone && (v.state === 'planned' || v.state === 'future' || v.state === 'next'));
+    // the furthest step done has a call booked ahead (CONTACT, FOLLOW): that call is what comes next
+    next = lastDone >= 0 && seq[lastDone].ahead ? lastDone : seq.findIndex((v, i) => i > lastDone && (v.state === 'planned' || v.state === 'future' || v.state === 'next'));
     // not decided yet: the result is asked for before anything after it (payments, a stage of the team's)
     if (dIx >= 0 && res !== 'YES' && (next < 0 || next > dIx)) next = dIx;
     // won: the first installment not received, also one still owed before a later one that came in
@@ -869,6 +895,12 @@ export function stepLabel(s: SalesState, d: Deal | null, stage: string, today: s
     if (v) return { code: v.code, th: v.th };
   }
   return { code: stage, th: STAGE_TH[stage] || (isPayKey(stage) ? payTh(stage) : '') };
+}
+/** An installment in a few words, as the steps name it: PAY, PAY2, and the rest of a payment without a plan
+ *  "PAY ส่วนที่เหลือ" (what is left, Cashflow's lines, the closing words). Any other stage: its code (stepLabel). */
+export function stepCode(s: SalesState, d: Deal | null, stage: string, today: string) {
+  const w = stepLabel(s, d, stage, today);
+  return w.th === REST_TH ? `${w.code} ${w.th}` : w.code;
 }
 /** A step's record as one: the newest of the records read into it (CONTACT, CALL2, CALL1: the newest date wins);
  *  `stage` is where it is stored. A stage no step reads into: its own record. */
@@ -1126,11 +1158,12 @@ export function planCsv(s: SalesState, d: Deal, today: string): string {
 // ------------------------------------------------------------------ payments and closing
 
 /** The deal's installments and which are paid. With a plan: its installments, paid when received in full or
- *  counted complete. Without one: its PAY steps (dealSteps: a single PAY, another installment holding a record
- *  or a payment, the rest of a payment received in part), paid when done (dated today or earlier, or a note) or
+ *  counted complete. Without one: its PAY steps (dealSteps: a single PAY, then the rest while it cannot be told
+ *  paid in full, or a step holding a record or a payment), paid when done (dated today or earlier, or a note) or
  *  holding an Actual document — a planned date alone is not paid. A joint quotation's member is paid through its
- *  header: the header's payments are its own (ready to close, รอชำระเงิน). */
-export function payState(s: SalesState, d: Deal, today: string): { pays: string[]; paid: string[]; left: string[]; plan: PlanView | null } {
+ *  header: the header's payments are its own (ready to close, รอชำระเงิน). `t`: the deal's steps when the caller
+ *  has them (dealSteps; a table row works them out once). */
+export function payState(s: SalesState, d: Deal, today: string, t?: DealSteps): { pays: string[]; paid: string[]; left: string[]; plan: PlanView | null } {
   if (jointRole(s, d) === 'member') {
     const h = s.deals[jointHeadOf(s, d.id)];
     if (h) return payState(s, h, today);
@@ -1142,7 +1175,7 @@ export function payState(s: SalesState, d: Deal, today: string): { pays: string[
   }
   // (without ดูยอดเงิน, no amounts here: the plan's installments when there is one, and what came in by what
   // carries no amount: a receipt recorded, the step done, a receipt attached there; dealSteps)
-  const ps = dealSteps(s, d, today).steps.filter((v) => v.kind === 'pay' && v.counted);
+  const ps = (t || dealSteps(s, d, today)).steps.filter((v) => v.kind === 'pay' && v.counted);
   const pays = ps.map((v) => v.id), paid = ps.filter((v) => v.state === 'done').map((v) => v.id);
   return { pays, paid, left: pays.filter((p) => !paid.includes(p)), plan: null };
 }
@@ -1151,13 +1184,13 @@ export function payState(s: SalesState, d: Deal, today: string): { pays: string[
  *  Installments outside the plan, and a plan total off the Forecast, don't matter.
  *  A joint quotation closes as one (its header and every company together, engine.closeJoint): a company of
  *  it is ready when its quotation is (the payer said NO, or YES and paid in full), whatever its own result. */
-export function closeReady(s: SalesState, d: Deal, today: string): boolean {
+export function closeReady(s: SalesState, d: Deal, today: string, t?: DealSteps): boolean {
   if (jointRole(s, d) === 'member') {
     const h = s.deals[jointHeadOf(s, d.id)];
     if (h) return closeReady(s, h, today);
   }
   const r = dealResult(s, d);
-  return r === 'NO' || (r === 'YES' && payState(s, d, today).left.length === 0);
+  return r === 'NO' || (r === 'YES' && payState(s, d, today, t).left.length === 0);
 }
 
 /** What a document attaches as: its kind, amount, what it counts toward, date; `stage` = where the user
@@ -1785,7 +1818,8 @@ export interface CashLine {
     part?: number; keep?: string[];
   };
   stage: string; n: number; of: number;
-  /** the installment as the deal's steps name it: PAY (a single one), PAY1 … PAYn; '' for no stage */
+  /** the installment as the deal's steps name it: PAY (a single one), PAY1 … PAYn, the rest of a payment without a
+   *  plan "PAY ส่วนที่เหลือ"; '' for no stage */
   code: string;
   amt: number;
   kind: 'got' | 'owed';
@@ -1828,7 +1862,8 @@ function cashPass(s: SalesState, deals: Iterable<Deal>, today: string): CashLine
       }
       continue;
     }
-    const code = (p: string) => (p ? stepLabel(s, d, p, today).code : '');
+    // (no plan: "PAY", and "PAY ส่วนที่เหลือ" for the rest of it, so "รับที่ …" says which)
+    const code = (p: string) => (p ? stepCode(s, d, p, today) : '');
     receivedOf(s, d, today, null).forEach((x, i) =>
       out.push({ ...base, id: `${d.id}/${x.doc?.id || x.src}/${i}`, stage: x.stage, code: code(x.stage), n: 0, amt: x.amt, kind: 'got', date: x.date, due: '', rcv: x.date, status: 'paid', src: x.src as 'doc' | 'typed', doc: x.doc }),
     );

@@ -27,8 +27,10 @@ export function reachedOf(steps: Pick<StepView, 'state'>[]) {
  *  quiet "not needed" one, whatever it holds ("นอกแผนชำระ" says why). */
 export const beadOf = (v: Pick<StepView, 'state' | 'outside'>): StageState => (v.outside === 'plan' ? 'off' : v.state);
 
-/** "CONTACT ทำแล้ว · QUOTATION ทำแล้ว · … · PAY ยังไม่ถึง": every circle's state in words. */
-export const trackWords = (steps: Pick<StepView, 'id' | 'code' | 'state'>[], next: string) => steps.map((v) => `${v.code} ${v.id === next ? 'ถัดไป' : STATE_WORD[v.state]}`).join(' · ');
+/** "CONTACT ทำแล้ว · QUOTATION ทำแล้ว · … · PAY ยังไม่ถึง": every circle's state in words (a step done with a call
+ *  booked ahead, which is next: "ทำแล้ว มีนัด"). */
+export const trackWords = (steps: Pick<StepView, 'id' | 'code' | 'state'>[], next: string) =>
+  steps.map((v) => `${v.code} ${v.id === next ? (v.state === 'done' ? 'ทำแล้ว มีนัด' : 'ถัดไป') : STATE_WORD[v.state]}`).join(' · ');
 
 /**
  * The counted steps' circles on a line in a row or a card, then "3/5" (dealSteps: an installment outside the

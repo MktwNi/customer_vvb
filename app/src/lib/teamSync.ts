@@ -170,12 +170,14 @@ const ERR_TH: Record<string, string> = {
   mail_failed: 'ส่งอีเมลไม่สำเร็จ ลองใหม่ภายหลัง ถ้ายังไม่ได้ ให้เจ้าของสคริปต์ดูหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน',
   bad_notify: 'การตั้งค่าการแจ้งเตือนไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ (F5)',
   notify_off: 'ระบบส่งอีเมลยังไม่เปิดใช้ ให้เจ้าของสคริปต์ทำตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน',
-  // a build older than the script (the version gate: cv below 4); the script sends this sentence itself
+  // a build older than the script (the version gate: cv below CLIENT_V); the script sends this sentence itself
   'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)': 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)',
 };
-/** The client version every request says it is: 4 = configurable roles (the script refuses writes from
- *  an older build with "มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)"; pulls stay open to it). */
-export const CV = 4;
+/** The client version every request says it is: 4 = configurable roles, 5 = the five steps (CONTACT, FOLLOW:
+ *  an older build would not show them, and could delete their contacts as stale). A script that knows a newer
+ *  version refuses writes from an older build with "มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)" (pulls stay open to it);
+ *  an older script takes this build's writes as before. */
+export const CV = 5;
 /** The error the script would answer with `code`, in its Thai words (for an engine that re-words a reply). */
 export const codeError = (code: string, extra: Record<string, unknown> = {}) => new TeamSyncError(ERR_TH[code] || code, code, extra);
 /**

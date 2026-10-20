@@ -47,8 +47,8 @@ function mk(teamKey = ''): GasSim {
   };
   return s;
 }
-const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 4, tok, ...extra });
-const login = (s: GasSim, u: string, pw: string) => s.post({ action: 'login', cv: 4, u, pk: s.pk(u, pw), rm: true });
+const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 5, tok, ...extra });
+const login = (s: GasSim, u: string, pw: string) => s.post({ action: 'login', cv: 5, u, pk: s.pk(u, pw), rm: true });
 /** A team whose lead (admin "lead", หัวหน้า) is signed in. */
 function team() {
   const s = mk();
@@ -608,16 +608,16 @@ describe('the web app before job expenses (cv 4, no xp) against this script', ()
     call(s, admin, 'push', { ops: [...DEALS, { k: 'dexp/d1/a', v: exp() }, { k: 'dchk/d1/exp.a', v: { s: 'ok', amt: 3500, d: '2026-10-06', f: '' } }, { k: 'mclose/2026-10/out', v: { n: 1, amt: 3500 } }] });
     // what the older build sends: its records, and checks of income; it reads them back
     const ops = [{ k: 'stage/1', v: 'won' }, { k: 'dpay/d1/PAY1', v: { amt: 100000, rcv: '2026-10-05' } }, { k: 'dlog/l1', v: { action: 'รับชำระ PAY1', by: 'x' } }];
-    expect(s.post({ action: 'push', cv: 4, tok: sales, ops })).toMatchObject({ ok: true, n: 3, denied: [] });
-    expect(s.post({ action: 'push', cv: 4, tok: acct, ops: [{ k: 'dchk/d1/PAY1', v: { s: 'ok', amt: 100000, d: '2026-10-05', f: '' } }, { k: 'mclose/2026-10', v: { n: 1, amt: 100000 } }] })).toMatchObject({ ok: true, n: 2 });
-    const g = byKey(s.post({ action: 'pull', cv: 4, tok: acct, since: 0 }));
+    expect(s.post({ action: 'push', cv: 5, tok: sales, ops })).toMatchObject({ ok: true, n: 3, denied: [] });
+    expect(s.post({ action: 'push', cv: 5, tok: acct, ops: [{ k: 'dchk/d1/PAY1', v: { s: 'ok', amt: 100000, d: '2026-10-05', f: '' } }, { k: 'mclose/2026-10', v: { n: 1, amt: 100000 } }] })).toMatchObject({ ok: true, n: 2 });
+    const g = byKey(s.post({ action: 'pull', cv: 5, tok: acct, since: 0 }));
     expect(g['dchk/d1/exp.a']).toMatchObject({ v: null, del: true });
     expect(g['dchk/d1/PAY1']).toMatchObject({ del: false, v: { s: 'ok', by: 'ฝน' } });
     // these it skips by their keys (no dexp/ case; a month close's key is YYYY-MM only)
     expect(g['dexp/d1/a'].del).toBe(false);
     expect(g['mclose/2026-10/out'].del).toBe(false);
     // its me: the capabilities it does not know are there, and ignored by it
-    expect(meCaps(s.post({ action: 'me', cv: 4, tok: sales }))).toMatchObject({ 'view.exp': 1, 'edit.exp': 'own' });
+    expect(meCaps(s.post({ action: 'me', cv: 5, tok: sales }))).toMatchObject({ 'view.exp': 1, 'edit.exp': 'own' });
     expect(s.post({ action: 'push', cv: 3, tok: sales, ops })).toMatchObject({ ok: false, error: 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)' });
   });
 });

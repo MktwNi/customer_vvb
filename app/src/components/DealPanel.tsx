@@ -4,11 +4,11 @@ import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
   ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, dealSteps, docMismatch, docsOf, dueOf, fmtMoney, kindForStage,
-  lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stepLabel, stepOf, whtRate, wonDate,
+  lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stepCode, stepLabel, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState, type StepView,
 } from '../lib/sales';
 import { OLD_TH } from '../lib/steps';
-import { CLOSE_TITLE, JOINT_PAID, acFig, actualSource, closingView, diffText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, type FigView } from '../lib/salesUi';
+import { CLOSE_TITLE, JOINT_PAID, acFig, actualSource, closingView, diffText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, stepEdit, type FigView } from '../lib/salesUi';
 import { DocAttach, SHOWABLE, openDocFile, type AttachMore } from './DocAttach';
 import { DocThumb } from './DocThumb';
 import { QtCard } from './QtCard';
@@ -351,8 +351,8 @@ export function DealPanel() {
   const m = dealMoney(S, d);
   const t = dealSteps(S, d, today);
   const ps = payState(S, d, today), P = ps.plan, r = t.result, won = r === 'YES';
-  // installments in the deal's words: PAY (a single one), PAY1 … PAYn
-  const codes = (ids: string[]) => ids.map((p) => stepLabel(S, d, p, today).code).join(', ');
+  // installments in the deal's words: PAY (a single one), PAY1 … PAYn, "PAY ส่วนที่เหลือ" (the rest without a plan)
+  const codes = (ids: string[]) => ids.map((p) => stepCode(S, d, p, today)).join(', ');
   const od = overdueDays(S, d, today);
   const ready = d.jobStatus === 'open' && closeReady(S, d, today);
   const c = d.gid != null ? e.company(d.gid) : undefined;
@@ -497,7 +497,8 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
   // the stored stage being recorded: the one chosen with "แก้ไข" (a step's own, or an older stage's record read
   // into it), else the next step. Once the user is in its fields it is held (pick): a teammate's sync that moves
   // "next" on must not swap the card away under their typing (they are asked about the change when they save)
-  const cardStage = !ro ? pick || t.next?.id || '' : '';
+  // (a step done with a call booked ahead: the record holding that date, an older stage's in place)
+  const cardStage = !ro ? pick || (t.next?.ahead ? t.next.top.stage : t.next?.id) || '' : '';
   const isCard = (v: StepView) => !!cardStage && (v.id === cardStage || v.aliases.includes(cardStage));
   // the quick-add of a contact: null = closed, '' = the card's own (under its heading), a step = in that step
   const [actAt, setActAt] = useState<string | null>(null);
@@ -527,7 +528,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
     v.state === 'future' && v.counted && v.id !== next && !isCard(v) && !v.line && !v.own.n.trim() && !v.entries.length && !v.docs.length && actAt !== v.id;
   const futs = views.filter(emptyFuture);
   const reached = reachedOf(views.map((v) => ({ state: beadOf(v) })));
-  const cv = closingView(S, d, today, ro);
+  const cv = closingView(S, d, today, ro, t);
   const asking = ui.slPrompt === d.id && cv.ready && d.jobStatus === 'open';
   const jm = jointRole(S, d) === 'member';
   const canPlan = money && e.canDeal('edit.pay', d);
@@ -570,6 +571,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
             v.outside === 'plan' ? <span className="sl-tl-d">นอกแผนชำระ</span>
             : st === 'off' ? <span className="sl-tl-d">{jm || v.outside === 'joint' ? JOINT_PAID : 'ไม่ต้องทำ'}</span>
             : v.kind === 'pay' && pl ? (s.d ? <span className="sl-tl-d">{s.d > today ? 'นัด ' : ''}{isoTh(s.d)}</span> : null)
+            : v.ahead ? <span className="sl-tl-d">{v.date ? isoTh(v.date) + ' · ' : ''}นัด {isoTh(v.ahead)}</span>
             : v.date ? <span className="sl-tl-d">{st === 'planned' ? 'นัด ' : ''}{isoTh(v.date)}</span>
             : st === 'skipped' ? <span className="sl-tl-d">ข้าม</span>
             : v.kind === 'pay' && !won && !P ? <span className="sl-tl-d">หลังได้งาน</span>
@@ -580,7 +582,13 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
               แผน {pl.line.amt != null ? fmtMoney(pl.amt) + ' บาท' : 'ยังไม่ใส่ยอด'}{lineMeta(pl.line) ? ' · ' + lineMeta(pl.line) : ''}{!won && pl.line.rel != null && !pl.line.due ? ' · ' + relText(pl.line) : ''}
             </p>
           );
-          const edit = ro || card ? null : <button type="button" className="lnk sl-tl-e" onClick={() => setPick(v.id)} aria-label={`แก้ไข ${v.code} ${thShort(v.th)}`}>แก้ไข</button>;
+          // what the step's line shows (stepEdit): its own record, an older stage's in place, or one more contact
+          const se = stepEdit(v);
+          const edit = ro || card || (se.act && actAt === v.id) ? null : (
+            <button type="button" className="lnk sl-tl-e" data-act-at={se.act ? v.id : undefined} onClick={() => (se.act ? setActAt(v.id) : setPick(se.stage))} aria-label={se.act ? `บันทึกการติดต่อเพิ่มที่ ${v.code}` : se.old ? `แก้ไขบันทึกเดิม ${se.stage} ในขั้น ${v.code}` : `แก้ไข ${v.code} ${thShort(v.th)}`}>
+              {se.label}
+            </button>
+          );
           let body: ReactNode;
           if (card) {
             body = (
@@ -606,7 +614,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
                   <p className="sl-tl-plan">ตั้งแผนชำระกี่งวดก็ได้ แต่ละงวดเป็นขั้น PAY1, PAY2 … ของตัวเองตามแผน</p>
                 )}
                 {money && v.short != null && (
-                  <p className="sl-tl-plan">ยังค้างรับ {fmtMoney(v.short)} บาท · Actual {fmtMoney(m.actual)} จาก Forecast {fmtMoney(m.forecast)}</p>
+                  <p className="sl-tl-plan">{m.actual == null ? `ยังไม่มียอดที่รับ (Actual) · ค้างรับ ${fmtMoney(v.short)} บาท จาก Forecast` : `ยังค้างรับ ${fmtMoney(v.short)} บาท · Actual ${fmtMoney(m.actual)} จาก Forecast ${fmtMoney(m.forecast)}`}</p>
                 )}
                 {v.outside === 'plan' && (
                   <p className="sl-tl-plan">
@@ -771,7 +779,13 @@ function StepEdit({ d, p, v, won, doc, qt, attach, onHold, onDone }: { d: Deal; 
       {line && line.status !== 'paid' && (
         <p className="sl-tl-plan">แผน {line.line.amt != null ? fmtMoney(line.amt) + ' บาท' : 'ยังไม่ใส่ยอด'}{lineMeta(line.line) ? ' · ' + lineMeta(line.line) : ''}</p>
       )}
-      {own && v.short != null && e.can('view.money') && <p className="sl-tl-plan">ยังค้างรับ {fmtMoney(v.short)} บาท · แนบใบเสร็จของส่วนที่เหลือ หรือพิมพ์โน้ตถ้าตกลงลดยอดแล้ว</p>}
+      {own && v.short != null && e.can('view.money') && (
+        <p className="sl-tl-plan">
+          {dealMoney(S, d).actual == null
+            ? `ยังไม่มียอดที่รับ (Actual) · ค้างรับ ${fmtMoney(v.short)} บาท · แนบใบเสร็จ หรือใส่ยอด Actual ที่แถบด้านบนถ้ารับครบแล้ว`
+            : `ยังค้างรับ ${fmtMoney(v.short)} บาท · แนบใบเสร็จของส่วนที่เหลือ หรือพิมพ์โน้ตถ้าตกลงลดยอดแล้ว`}
+        </p>
+      )}
       {!own && <p className="sl-tl-plan">บันทึกเดิมที่ {p}{OLD_TH[p] ? ' ' + OLD_TH[p] : ''} · แก้ที่เดิม ยังอยู่ในขั้น {v.code}</p>}
       <div className="sl-fgrid" onFocus={onHold}>
         <span style={labelCol}>

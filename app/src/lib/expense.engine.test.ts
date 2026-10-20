@@ -118,7 +118,7 @@ async function member(L: Tab, u: string, name: string, role: Role) {
 }
 /** The admin writes records straight to the script (the expense screens come in the next step). */
 const put = (L: Tab, ops: { k: string; v?: unknown; del?: boolean }[]) => {
-  const r = sim.post({ action: 'push', cv: 4, tok: L.e.session!.tok, ops });
+  const r = sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops });
   expect(r).toMatchObject({ ok: true, denied: [] });
 };
 const pulls = () => sent.filter((b) => b.action === 'pull');
@@ -228,7 +228,7 @@ describe('job expenses in the engine (Code.gs v4 with expenses)', () => {
     expect(expensesOf(L.e.sales, d.id)).toEqual([]);
     await settle(L, S);
     expect(expensesOf(S.e.sales, d.id)).toEqual([]);
-    const rows = sim.post({ action: 'pull', since: 0, cv: 4, xp: 1, tok: L.e.session!.tok }).rows!;
+    const rows = sim.post({ action: 'pull', since: 0, cv: 5, xp: 1, tok: L.e.session!.tok }).rows!;
     expect(rows.filter((r) => r.k === `dexp/${d.id}/e1`).at(-1)).toMatchObject({ del: true });
     // one deletion row for it: the web app's own, the script adds none on top
     expect(rows.filter((r) => r.k === `dexp/${d.id}/e1` && r.del)).toHaveLength(1);

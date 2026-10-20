@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptySales, filterDeals, newDeal, planOf, salesStats, type Deal, type PayLine, type SalesState } from './sales';
+import { emptySales, filterDeals, newDeal, planOf, salesStats, setMoneyHidden, type Deal, type PayLine, type SalesState } from './sales';
 import {
   actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, trackerFields, winRateBySource, yearOptions,
 } from './salesUi';
@@ -111,8 +111,8 @@ describe('deal status words (dot + word + one grey line)', () => {
     {
       const { S, d } = one({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } });
       d.forecast = 250000;
-      d.actual = 125000; // paid in part: the rest is the next installment
-      expect(statusView(S, d, TODAY)).toMatchObject({ word: 'ได้งาน', sub: 'รอชำระงวด 2', ready: false });
+      d.actual = 125000; // paid in part: the rest of it is still to come (no plan: never "งวด 2")
+      expect(statusView(S, d, TODAY)).toMatchObject({ word: 'ได้งาน', sub: 'รอชำระเงิน', ready: false });
     }
     expect(w(YES)).toEqual(['ok', 'ได้งาน', 'รอชำระเงิน', false]);
     expect(w(YES, {}, { PAY1: 1, PAY2: 1 })).toEqual(['ok', 'ได้งาน · รับครบ', 'พร้อมปิดงาน', true]);
@@ -135,8 +135,9 @@ describe('the next-step pill', () => {
     expect(n({ 'x/CLOSED DEAL': { d: '2026-10-01', n: 'NO' } })).toEqual(['no', '', 'ไม่ต้องติดตามต่อ']);
     expect(n(YES, {}, { PAY1: 1, PAY2: 1 })).toEqual(['done', '', 'ครบทุกขั้น']);
     expect(n({})).toEqual(['next', 'CONTACT', 'ติดต่อประสานงาน']);
-    // a call booked ahead (an older build's CALL2): CONTACT is planned
-    expect(n({ 'x/CALL1': { d: '2026-10-07', n: 'x' }, 'x/CALL2': { d: '2026-10-12', n: '' } })).toEqual(['planned', 'CONTACT', 'นัด 12 ต.ค.']);
+    // a call booked ahead (an older build's CALL2) on a CONTACT done: planned, its editor opens CALL2 in place
+    expect(n({ 'x/CALL1': { d: '2026-10-07', n: 'x' }, 'x/CALL2': { d: '2026-10-12', n: '' } })).toEqual(['planned', 'CALL2', 'นัด 12 ต.ค.']);
+    expect(n({ 'x/CALL2': { d: '2026-10-12', n: '' } })).toEqual(['planned', 'CONTACT', 'นัด 12 ต.ค.']);
     expect(n({ 'x/CALL1': { d: '2026-09-01', n: 'x' } })).toEqual(['overdue', 'QUOTATION', 'ส่งใบเสนอราคา']);
     expect(n({ 'x/CALL1': { d: '2026-10-07', n: 'x' } })).toEqual(['next', 'QUOTATION', 'ส่งใบเสนอราคา']);
     expect(n({ 'x/CONTACT': { d: '2026-10-07', n: 'x' }, 'x/QUOTATION': { d: '2026-10-07', n: 'QT' } })).toEqual(['next', 'FOLLOW', 'ติดตามผล']);
@@ -145,11 +146,11 @@ describe('the next-step pill', () => {
     // CLOSE is stored as CLOSED DEAL: the pill names it CLOSE, its editor writes CLOSED DEAL
     const c = one({ 'x/CONTACT': { d: '2026-10-07', n: 'x' }, 'x/CLOSED DEAL': { d: '2026-10-20', n: '' } });
     expect(nextStepView(c.S, c.d, TODAY)).toMatchObject({ kind: 'planned', stage: 'CLOSED DEAL', code: 'CLOSE', date: '2026-10-20', hint: 'นัด 20 ต.ค.', label: 'ถัดไป CLOSE นัด 20 ต.ค. — บันทึกวันที่และโน้ต' });
-    // paid in part without a plan: the rest is the next installment, what is owed says so
+    // paid in part without a plan: the rest of it is next ("PAY ส่วนที่เหลือ", written to PAY2), what is owed says so
     const part = one({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } });
     part.d.forecast = 250000;
     part.d.actual = 125000;
-    expect(nextStepView(part.S, part.d, TODAY)).toMatchObject({ stage: 'PAY2', code: 'PAY2', hint: 'ค้าง 125,000' });
+    expect(nextStepView(part.S, part.d, TODAY)).toMatchObject({ stage: 'PAY2', code: 'PAY', th: 'ส่วนที่เหลือ', hint: 'ค้าง 125,000' });
   });
   it('a won deal with a plan: the next installment, coloured when due soon, part paid or late', () => {
     const p = (pays: Record<string, Partial<PayLine>>, docs: Record<string, number> = {}) => {
@@ -254,8 +255,16 @@ describe('closing', () => {
     {
       const { S, d } = one({ ...YES, 'x/PAY1': { d: '2026-09-01', n: 'โอน' } });
       d.forecast = 250000;
-      d.actual = 125000; // paid in part, no plan: the rest is PAY2
-      expect(closingView(S, d, TODAY)).toMatchObject({ ready: false, state: 'pays', hint: 'ปิดได้เมื่อรับ PAY2', waitFor: ['PAY2'], text: 'ได้งานแล้ว · รับชำระ 1 จาก 2 งวด เมื่อแนบเอกสาร PAY2 ระบบจะชวนให้ปิดงาน' });
+      d.actual = 125000; // paid in part, no plan: the rest of it (stored at PAY2), never "งวด 2 of 2"
+      expect(closingView(S, d, TODAY)).toMatchObject({
+        ready: false, state: 'pays', hint: 'ปิดได้เมื่อรับส่วนที่เหลือ', waitFor: ['PAY2'], lead: 'ได้งานแล้ว · ค้างรับ 125,000 บาท',
+        text: 'ได้งานแล้ว · ค้างรับ 125,000 บาท เมื่อแนบใบเสร็จของส่วนที่เหลือ ระบบจะชวนให้ปิดงาน',
+      });
+      expect(closingView(S, d, TODAY, true).text).toBe('ได้งานแล้ว · ค้างรับ 125,000 บาท');
+      d.actual = null; // the Forecast and no Actual: all of it, said why
+      expect(closingView(S, d, TODAY).text).toBe('ได้งานแล้ว · ยังไม่มียอดที่รับ (Actual) ค้างรับ 250,000 บาท เมื่อแนบใบเสร็จหรือใส่ยอด Actual ระบบจะชวนให้ปิดงาน');
+      setMoneyHidden(S, true); // no money in this session: nothing to say an amount with
+      expect(closingView(S, d, TODAY, true)).toMatchObject({ ready: false, lead: 'ได้งานแล้ว · รอบันทึกรับส่วนที่เหลือ', text: 'ได้งานแล้ว · รอบันทึกรับส่วนที่เหลือ' });
     }
     // a single PAY, not received yet (also with a list that has no PAY stage: every deal has one)
     for (const list of [undefined, ['CALL1', 'CLOSED DEAL']])

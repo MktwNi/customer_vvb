@@ -149,7 +149,8 @@ export function recordersOf(s: SalesState, l: CashLine, logs: Map<string, DealLo
   if (l.src === 'plan') {
     const pl = (s.pays || {})[`${l.deal.id}/${l.stage}`];
     if (pl?.rcv && (!docs.length || pl.add)) {
-      const row = rows.find((x) => x.action === 'รับชำระ ' + l.stage);
+      // ("รับชำระ PAY1"; a plan of one is named as the screens show it, "รับชำระ PAY", since the steps changed)
+      const row = rows.find((x) => x.action === 'รับชำระ ' + l.stage || (!!l.code && x.action === 'รับชำระ ' + l.code));
       who.push(row ? { by: row.by, at: row.at || '' } : { by: pl.by, at: pl.at || '' });
     }
   }

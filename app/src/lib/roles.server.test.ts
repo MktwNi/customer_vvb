@@ -98,8 +98,8 @@ function mk(): GasSim {
   };
   return s;
 }
-const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 4, tok, ...extra });
-const login = (s: GasSim, u: string, pw: string) => s.post({ action: 'login', cv: 4, u, pk: s.pk(u, pw), rm: true });
+const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 5, tok, ...extra });
+const login = (s: GasSim, u: string, pw: string) => s.post({ action: 'login', cv: 5, u, pk: s.pk(u, pw), rm: true });
 /** A team whose lead (admin "lead", หัวหน้า) is signed in. */
 function team() {
   const s = mk();
@@ -522,13 +522,14 @@ describe('pull without view.money / view.comm', () => {
 
 // ------------------------------------------------------------------ 6. older builds (version gate)
 
-describe('tabs open on a build from before capabilities (cv < 4)', () => {
+describe('tabs open on a build from before the five steps (cv < 5; before capabilities cv < 4)', () => {
   it('may read, but push, upload and delfile answer the refresh message, and nothing is stored', () => {
     const { s, admin } = team();
     const tok = member(s, admin, 'somchai', 'สมชาย', 'sales');
     const fileId = String(call(s, admin, 'upload', upload).fileId);
     call(s, admin, 'push', { ops: [{ k: 'stage/1', v: 'won' }] });
-    for (const cv of [3, undefined, '3', 0]) {
+    // (4: the builds before the five steps, which would not show CONTACT / FOLLOW and could delete their contacts)
+    for (const cv of [3, undefined, '3', 0, 4, '4']) {
       const old = (action: string, extra: Record<string, unknown> = {}) => s.post({ action, tok, ...(cv === undefined ? {} : { cv }), ...extra });
       expect(old('push', { ops: [{ k: 'stage/2', v: 'won' }] })).toMatchObject({ ok: false, error: REFRESH, me: { u: 'somchai', role: 'sales' } });
       expect(old('upload', { ...upload, docId: 'x' })).toMatchObject({ ok: false, error: REFRESH });
@@ -543,7 +544,7 @@ describe('tabs open on a build from before capabilities (cv < 4)', () => {
     expect(s.post({ action: 'push', tok: v, cv: 3, ops: [] }).error).toBe(REFRESH);
     expect(Number(s.props.SEQ)).toBe(1);
     expect(s.drive.list().filter((x) => x.kind === 'file' && !x.trashed)).toHaveLength(1);
-    expect(s.post({ action: 'push', tok, cv: '4', ops: [{ k: 'stage/2', v: 'won' }] })).toMatchObject({ ok: true, n: 1 });
+    expect(s.post({ action: 'push', tok, cv: '5', ops: [{ k: 'stage/2', v: 'won' }] })).toMatchObject({ ok: true, n: 1 });
     // the team code (no accounts) works as before, whatever cv says
     const legacy = createGasSim({ teamKey: 'test-key-123' });
     expect(legacy.post({ action: 'push', key: 'test-key-123', cv: 3, ops: [{ k: 'stage/1', v: 'won' }] })).toMatchObject({ ok: true, n: 1 });
@@ -666,7 +667,7 @@ describe('roles (set.users)', () => {
     for (const action of ['users', 'user_save', 'role_save', 'role_del', 'grant_save', 'grant_del', 'req_decide']) expect([action, call(s, tok, action, { u: 'lead', n: 'x', c: {} }).error]).toEqual([action, 'forbidden']);
     // legacy team code: account actions need a sign-in
     const legacy = createGasSim({ teamKey: 'test-key-123' });
-    for (const action of ['req_send', 'req_cancel', 'req_ack', 'role_save', 'grant_save', 'req_decide']) expect(legacy.post({ action, key: 'test-key-123', cv: 4 }).error).toBe('login_required');
+    for (const action of ['req_send', 'req_cancel', 'req_ack', 'role_save', 'grant_save', 'req_decide']) expect(legacy.post({ action, key: 'test-key-123', cv: 5 }).error).toBe('login_required');
   });
 });
 

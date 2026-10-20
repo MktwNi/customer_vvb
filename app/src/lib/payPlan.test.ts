@@ -231,10 +231,13 @@ describe('paid stages and ready to close', () => {
     // "ถือว่ารับครบ" counts as received too; without a plan the list's PAY stages and their steps, as before
     a.s.pays['x/PAY3'] = L({ full: true });
     expect(closeReady(a.s, a.d, TODAY)).toBe(true);
-    // without a plan a single PAY step (another installment shows once something is recorded there)
+    // without a plan a single PAY step; once it is done, the rest of it stays to record: this session cannot tell
+    // paid in full from paid in part (as the eight-stage list's PAY2, and as a session with the money says on a
+    // deal paid in part)
     const b = mk({ steps: { ...YES, PAY1: '2026-09-01' } });
     setMoneyHidden(b.s, true);
-    expect(payState(b.s, b.d, TODAY)).toMatchObject({ pays: ['PAY1'], paid: ['PAY1'], left: [] });
+    expect(payState(b.s, b.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1'], left: ['PAY2'] });
+    expect(closeReady(b.s, b.d, TODAY)).toBe(false);
     const b2 = mk({ steps: { ...YES, PAY1: '2026-09-01' }, docs: [{ stage: 'PAY2', kind: 'receipt', amount: null, target: 'none' }] });
     setMoneyHidden(b2.s, true);
     b2.s.steps['x/PAY2'] = { d: '2026-10-20', n: '' };

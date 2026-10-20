@@ -6,9 +6,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   BASE_STEPS, CONTACT_STEP, DEAL_STAGE, FOLLOW_STEP, coveredStage, dealSteps, emptySales, isOldStage, isPayKey, isStepKey, listPays, newDeal, payState, closeReady,
-  quickMatch, readStep, stageTrack, stepIdOf, stepKeys, stepLabel, stepWords, teamSteps, trackerStatus, dealStatus, lastContactInfo, withActIndex,
+  quickMatch, readStep, stageTrack, stepIdOf, stepKeys, stepLabel, stepWords, teamSteps, trackerStatus, dealStatus, lastContactInfo, withActIndex, lastStage,
+  cashLines, receivables, setMoneyHidden,
   type DealAct, type DealDoc, type PayLine, type SalesState,
 } from './sales';
+import { nextStepView, stepEdit, stepLines, statusView, closingView } from './salesUi';
+import { dmTh } from './format';
 
 const TODAY = '2026-10-12';
 const L = (p: Partial<PayLine> = {}): PayLine => ({ amt: null, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', rcv: '', got: null, full: false, fullAt: null, add: false, at: '', by: '', ...p });
@@ -86,12 +89,40 @@ describe('CONTACT and FOLLOW read their older stages', () => {
     expect(readStep(s, 'x', 'CONTACT').stage).toBe('CONTACT');
   });
 
-  it('a date ahead is planned (a call booked); undated notes count as done', () => {
-    const { s } = mk({ steps: { CALL1: ['2026-09-01', 'โทร'], CALL2: ['2026-10-20', ''] } });
+  it('a date ahead alone is planned (a call booked); undated notes count as done', () => {
+    const { s } = mk({ steps: { CALL2: ['2026-10-20', ''] } });
     expect(view(s, 'CONTACT')).toMatchObject({ state: 'planned', date: '2026-10-20' });
+    expect(view(s, 'CONTACT').ahead).toBeUndefined();
     expect(dealSteps(s, s.deals.x, TODAY).next?.id).toBe('CONTACT');
     const u = mk({ steps: { FOLLOW1: ['', 'ส่งอีเมลแล้ว'] } });
     expect(view(u.s, 'FOLLOW')).toMatchObject({ state: 'done', date: '', filled: true });
+  });
+
+  it('done and a call booked ahead (CALL1 done, CALL2 planned): done, counted, the booked call next', () => {
+    // the eight-stage tracker's usual pattern: base read it 1/8 done, ขั้นล่าสุด CALL2, next CALL2 planned
+    const p1 = mk({ steps: { CALL1: ['2026-10-05', 'โทรแนะนำ'], CALL2: ['2026-10-14', 'โทรตาม'] } });
+    const t1 = dealSteps(p1.s, p1.d, TODAY);
+    expect(view(p1.s, 'CONTACT')).toMatchObject({ state: 'done', date: '2026-10-05', ahead: '2026-10-14', top: { stage: 'CALL2' } });
+    expect([t1.done, t1.total, t1.next?.id]).toEqual([1, 5, 'CONTACT']);
+    expect(lastStage(p1.s, p1.d, TODAY)).toBe('CONTACT');
+    expect(trackerStatus(p1.s, p1.d, TODAY)).toBe('กำลังดำเนินการ · ขั้นล่าสุด CONTACT');
+    // the pill says the booked call, its editor opens the record holding the date (CALL2, in place); the Plan page lists it
+    expect(nextStepView(p1.s, p1.d, TODAY)).toMatchObject({ kind: 'planned', stage: 'CALL2', code: 'CONTACT', date: '2026-10-14', hint: 'นัด ' + dmTh('2026-10-14') });
+    // a contact record up to today does it too; the step's own record booked ahead
+    const c = mk({ steps: { CONTACT: ['2026-10-16', 'นัดคุย'] }, acts: [{ d: '2026-10-08', stage: 'CONTACT', note: 'โทรครั้งแรก' }] });
+    expect(view(c.s, 'CONTACT')).toMatchObject({ state: 'done', date: '2026-10-08', ahead: '2026-10-16' });
+    expect(nextStepView(c.s, c.d, TODAY)).toMatchObject({ kind: 'planned', stage: 'CONTACT', date: '2026-10-16' });
+    // p2: … FOLLOW1 done 20 Sep, FOLLOW2 booked 14 Oct: base 4/8, ขั้นล่าสุด FOLLOW2
+    const p2 = mk({ steps: { CALL1: '2026-09-01', CALL2: '2026-09-05', QUOTATION: '2026-09-10', FOLLOW1: ['2026-09-20', 'ตาม'], FOLLOW2: ['2026-10-14', ''] } });
+    const t2 = dealSteps(p2.s, p2.d, TODAY);
+    expect([t2.done, t2.total, t2.next?.id, lastStage(p2.s, p2.d, TODAY)]).toEqual([3, 5, 'FOLLOW', 'FOLLOW']);
+    expect(view(p2.s, 'FOLLOW')).toMatchObject({ state: 'done', date: '2026-09-20', ahead: '2026-10-14' });
+    // a step done further on: the call booked at an earlier step is not what comes next
+    const q = mk({ steps: { CALL1: '2026-10-01', CALL2: ['2026-10-20', ''], QUOTATION: '2026-10-05' } });
+    expect(dealSteps(q.s, q.d, TODAY).next?.id).toBe('FOLLOW');
+    // the result asked: a booked follow-up stays before CLOSE, a decided deal goes on from CLOSE
+    const y = mk({ steps: { ...YES, FOLLOW1: '2026-08-12', FOLLOW2: ['2026-10-20', ''] } });
+    expect(dealSteps(y.s, y.d, TODAY).next?.id).toBe('PAY1');
   });
 
   it('contact records complete CONTACT and FOLLOW (up to today), never QUOTATION, CLOSE or a payment', () => {
@@ -133,7 +164,10 @@ describe('a deal from the eight-stage tracker', () => {
       },
     });
     const t = dealSteps(s, d, TODAY);
-    expect(t.steps.map((v) => [v.code, v.state])).toEqual([['CONTACT', 'done'], ['QUOTATION', 'done'], ['FOLLOW', 'done'], ['CLOSE', 'yes'], ['PAY1', 'done'], ['PAY2', 'done']]);
+    // (no plan: PAY1 the payment, PAY2 the rest of it, never "งวดที่ 2" of a plan the deal has not)
+    expect(t.steps.map((v) => [v.code, v.th, v.state])).toEqual([
+      ['CONTACT', 'ติดต่อประสานงาน', 'done'], ['QUOTATION', 'ส่งใบเสนอราคา', 'done'], ['FOLLOW', 'ติดตามผล', 'done'], ['CLOSE', 'ผลการขาย (YES / NO)', 'yes'], ['PAY', 'ชำระเงิน', 'done'], ['PAY', 'ส่วนที่เหลือ', 'done'],
+    ]);
     expect([t.done, t.total, t.next]).toEqual([6, 6, null]);
     expect(closeReady(s, d, TODAY)).toBe(true);
     expect(quickMatch(s, d, 'ready', TODAY)).toBe(true);
@@ -142,7 +176,7 @@ describe('a deal from the eight-stage tracker', () => {
     for (const k of Object.keys(s.steps)) expect(shown.has(k.slice(2))).toBe(true);
     expect(stepKeys(s, d).sort()).toEqual(expect.arrayContaining(['CALL1', 'CALL2', 'FOLLOW1', 'FOLLOW2', 'PAY1', 'PAY2']));
     expect(trackerStatus(s, d, TODAY)).toBe('ได้งาน');
-    expect(lastContactInfo(s, d, TODAY)).toEqual({ date: '2026-09-01', from: 'PAY2' });
+    expect(lastContactInfo(s, d, TODAY)).toEqual({ date: '2026-09-01', from: 'PAY' });
   });
 
   it('stepLabel: a stored stage in words, by the deal\'s steps', () => {
@@ -197,8 +231,11 @@ describe('PAY follows the payment plan', () => {
 
   it('no plan: a single PAY written to PAY1; another installment holding a record or a payment shows and counts', () => {
     expect(pays(mk({ steps: YES }).s)).toEqual([['PAY1', 'PAY', 'next', true, '']]);
-    expect(pays(mk({ steps: { ...YES, PAY1: '2026-09-01', PAY3: '2026-09-15' } }).s)).toEqual([['PAY1', 'PAY1', 'done', true, ''], ['PAY3', 'PAY3', 'done', true, '']]);
-    expect(pays(mk({ steps: YES, docs: [{ stage: 'PAY2', amount: 500 }] }).s)).toEqual([['PAY1', 'PAY1', 'next', true, ''], ['PAY2', 'PAY2', 'done', true, '']]);
+    // (the second one, whatever it is stored as, is the rest of the payment; more than two keep their numbers)
+    expect(pays(mk({ steps: { ...YES, PAY1: '2026-09-01', PAY3: '2026-09-15' } }).s)).toEqual([['PAY1', 'PAY', 'done', true, ''], ['PAY3', 'PAY', 'done', true, '']]);
+    expect(view(mk({ steps: { ...YES, PAY1: '2026-09-01', PAY3: '2026-09-15' } }).s, 'PAY3')).toMatchObject({ th: 'ส่วนที่เหลือ', rest: true });
+    expect(pays(mk({ steps: YES, docs: [{ stage: 'PAY2', amount: 500 }] }).s)).toEqual([['PAY1', 'PAY', 'next', true, ''], ['PAY2', 'PAY', 'done', true, '']]);
+    expect(pays(mk({ steps: { ...YES, PAY1: '2026-09-01', PAY2: '2026-09-05', PAY3: '2026-09-15' } }).s).map((x) => x[1])).toEqual(['PAY1', 'PAY2', 'PAY3']);
     // a contact or a document that is not a payment at an installment no step has: under the first PAY
     const o = mk({ steps: YES, acts: [{ stage: 'PAY2' }], docs: [{ stage: 'PAY3', kind: 'other', target: 'none' }] });
     expect(pays(o.s)).toEqual([['PAY1', 'PAY', 'next', true, '']]);
@@ -208,26 +245,60 @@ describe('PAY follows the payment plan', () => {
   it('no plan, paid in part (the money says so): the rest is one more installment, owed; demo3 is not ready to close', () => {
     // demo3: 125,000 of 250,000 received at PAY1
     const { s, d } = mk({ steps: { ...YES, PAY1: ['2026-09-10', 'รับงวดแรก'] }, docs: [{ stage: 'PAY1', amount: 125000 }], forecast: 250000 });
-    expect(pays(s)).toEqual([['PAY1', 'PAY1', 'done', true, ''], ['PAY2', 'PAY2', 'next', true, '']]);
-    expect(view(s, 'PAY2').short).toBe(125000);
+    expect(pays(s)).toEqual([['PAY1', 'PAY', 'done', true, ''], ['PAY2', 'PAY', 'next', true, '']]);
+    expect(view(s, 'PAY2')).toMatchObject({ short: 125000, rest: true, th: 'ส่วนที่เหลือ' });
+    expect(view(s, 'PAY1').th).toBe('ชำระเงิน');
+    expect(stepLabel(s, d, 'PAY2', TODAY)).toEqual({ code: 'PAY', th: 'ส่วนที่เหลือ' });
     expect(payState(s, d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1'], left: ['PAY2'] });
     expect(closeReady(s, d, TODAY)).toBe(false);
     expect(quickMatch(s, d, 'payment', TODAY)).toBe(true);
     // recorded at PAY2 (a receipt, or a note: "ส่วนลด ไม่ต้องรับเพิ่ม"): done, no third one
     s.steps['x/PAY2'] = { d: '2026-10-01', n: 'ส่วนลดตามที่ตกลง' };
-    expect(pays(s)).toEqual([['PAY1', 'PAY1', 'done', true, ''], ['PAY2', 'PAY2', 'done', true, '']]);
+    expect(pays(s)).toEqual([['PAY1', 'PAY', 'done', true, ''], ['PAY2', 'PAY', 'done', true, '']]);
+    expect(view(s, 'PAY2').th).toBe('ส่วนที่เหลือ'); // the same name once recorded
     expect(closeReady(s, d, TODAY)).toBe(true);
   });
 
-  it('no plan, short by a withholding tax only (or the money unknown): paid in full', () => {
+  it('no plan, short by a withholding tax only, or no Forecast to compare: paid in full', () => {
     // 107,000 with 3% withheld on 100,000: 104,000 came in
     const w = mk({ steps: { ...YES, PAY1: '2026-09-10' }, forecast: 107000, actual: 104000 });
     expect(pays(w.s)).toEqual([['PAY1', 'PAY', 'done', true, '']]);
     expect(closeReady(w.s, w.d, TODAY)).toBe(true);
-    const u = mk({ steps: { ...YES, PAY1: '2026-09-10' }, forecast: 107000 });
-    expect(closeReady(u.s, u.d, TODAY)).toBe(true);
     const more = mk({ steps: { ...YES, PAY1: '2026-09-10' }, forecast: 107000, actual: 107000 });
     expect(closeReady(more.s, more.d, TODAY)).toBe(true);
+    const none = mk({ steps: { ...YES, PAY1: '2026-09-10' } });
+    expect(closeReady(none.s, none.d, TODAY)).toBe(true);
+  });
+
+  it('no plan, PAY noted, a Forecast and no Actual: the rest is the whole Forecast, owed, as base kept PAY2 (x1)', () => {
+    // review x1: YES, PAY1 "โอนแล้ว", Forecast 100,000, no Actual: base had PAY2 left and a Cashflow line of 100,000 owed
+    const u = mk({ steps: { ...YES, PAY1: ['2026-09-10', 'โอนแล้ว'] }, forecast: 100000 });
+    expect(pays(u.s)).toEqual([['PAY1', 'PAY', 'done', true, ''], ['PAY2', 'PAY', 'next', true, '']]);
+    expect(view(u.s, 'PAY2')).toMatchObject({ short: 100000, rest: true });
+    expect(closeReady(u.s, u.d, TODAY)).toBe(false);
+    expect([quickMatch(u.s, u.d, 'payment', TODAY), quickMatch(u.s, u.d, 'ready', TODAY)]).toEqual([true, false]);
+    expect(cashLines(u.s, [u.d], TODAY).map((l) => [l.id, l.amt, l.kind, l.code])).toEqual([['x/rest', 100000, 'owed', 'PAY ส่วนที่เหลือ']]);
+    expect(receivables(u.s, [u.d], TODAY).receivable).toBe(100000);
+    // the Actual typed in full: ready, nothing owed
+    u.s.deals.x = { ...u.d, actual: 100000 };
+    expect(closeReady(u.s, u.s.deals.x, TODAY)).toBe(true);
+    expect(cashLines(u.s, [u.s.deals.x], TODAY).filter((l) => l.kind === 'owed')).toEqual([]);
+  });
+
+  it('a session without ดูยอดเงิน: the rest of a payment without a plan stays to record, as both sessions agree on a part paid deal', () => {
+    // review: demo3 (125,000 of 250,000) and x3 (50,000 of 100,000) were ready without money, not with it
+    const part = mk({ steps: { ...YES, PAY1: ['2026-09-10', 'รับงวดแรก'] }, docs: [{ stage: 'PAY1', amount: 125000 }], forecast: 250000 });
+    expect(closeReady(part.s, part.d, TODAY)).toBe(false);
+    setMoneyHidden(part.s, true);
+    expect(pays(part.s)).toEqual([['PAY1', 'PAY', 'done', true, ''], ['PAY2', 'PAY', 'next', true, '']]);
+    expect(view(part.s, 'PAY2').short).toBeUndefined(); // no amount: it never got one
+    expect(closeReady(part.s, part.d, TODAY)).toBe(false);
+    expect(quickMatch(part.s, part.d, 'ready', TODAY)).toBe(false);
+    // recorded at the rest: ready in both
+    part.s.steps['x/PAY2'] = { d: '2026-10-01', n: 'รับครบ' };
+    expect(closeReady(part.s, part.d, TODAY)).toBe(true);
+    setMoneyHidden(part.s, false);
+    expect(closeReady(part.s, part.d, TODAY)).toBe(true);
   });
 
   it('after NO: a single PAY "ไม่ต้องทำ" (a plan typed before is not followed)', () => {
@@ -269,5 +340,50 @@ describe('next step, readiness and the passes over many deals', () => {
     // outside a pass nothing is kept: a change shows at once
     s.steps['x/FOLLOW'] = { d: '2026-10-01', n: 'ตาม' };
     expect(view(s, 'FOLLOW').state).toBe('done');
+  });
+});
+
+describe("a step's own button edits what its line shows (stepEdit)", () => {
+  it('CONTACT / FOLLOW: the own record, an older stage in place (from its date), or one more contact; never a blank record over a shown one', () => {
+    // review: every live deal has only CALL1 / CALL2 / FOLLOW1 / FOLLOW2 or contacts: "แก้ไข" opened a blank CONTACT dated today
+    const old = mk({ steps: { CALL1: ['2026-09-17', 'โทรแนะนำ'], CALL2: ['2026-09-25', 'ขอใบเสนอราคา'] } });
+    const c = view(old.s, 'CONTACT');
+    expect(stepLines(c)[0]).toMatchObject({ kind: 'old', stage: 'CALL2', note: 'ขอใบเสนอราคา', d: '2026-09-25' });
+    expect(stepEdit(c)).toEqual({ stage: 'CALL2', act: false, old: true, label: 'แก้ไข' });
+    // demo3's CONTACT: "โทร นัดประชุม · รวม 2 ครั้ง": the newest line is a contact record, which has no editor
+    const act = mk({ steps: { CALL1: ['2026-08-20', 'โทรครั้งแรก'] }, acts: [{ d: '2026-08-28', stage: 'CALL1', type: 'call', note: 'นัดประชุม' }] });
+    expect(stepLines(view(act.s, 'CONTACT')).map((l) => [l.kind, l.note])).toEqual([['act', 'นัดประชุม'], ['old', 'โทรครั้งแรก']]);
+    expect(stepEdit(view(act.s, 'CONTACT'))).toEqual({ stage: 'CONTACT', act: true, old: false, label: 'บันทึกเพิ่ม' });
+    // the step's own record newest: edited as on any step (first on its day)
+    const own = mk({ steps: { CONTACT: ['2026-10-02', 'คุยรายละเอียด'], CALL1: '2026-09-17' }, acts: [{ d: '2026-10-02', stage: 'CONTACT', note: 'โทร' }] });
+    expect(stepEdit(view(own.s, 'CONTACT'))).toEqual({ stage: 'CONTACT', act: false, old: false, label: 'แก้ไข' });
+    // a call booked ahead at an older stage is the newest line: its record, in place
+    const ahead = mk({ steps: { FOLLOW1: '2026-09-20', FOLLOW2: ['2026-10-14', 'โทรตาม'] } });
+    expect(stepEdit(view(ahead.s, 'FOLLOW'))).toMatchObject({ stage: 'FOLLOW2', old: true });
+    // an empty step, and every other step: its own record
+    expect(stepEdit(view(mk().s, 'CONTACT'))).toEqual({ stage: 'CONTACT', act: false, old: false, label: 'แก้ไข' });
+    expect(stepEdit(view(old.s, 'QUOTATION'))).toEqual({ stage: 'QUOTATION', act: false, old: false, label: 'แก้ไข' });
+    expect(stepEdit(view(mk({ steps: YES }).s, 'CLOSED DEAL')).stage).toBe('CLOSED DEAL');
+  });
+});
+
+describe('a row works its steps out once (review: the table re-rendered at twice the cost)', () => {
+  it('the helpers given the row\'s steps answer as they do alone', () => {
+    const cases = [
+      mk({ steps: { CALL1: ['2026-10-05', 'โทร'], CALL2: ['2026-10-14', ''] } }),
+      mk({ steps: { ...YES, PAY1: ['2026-09-10', 'รับ'] }, docs: [{ stage: 'PAY1', amount: 125000 }], forecast: 250000 }),
+      mk({ steps: YES, pays: { PAY1: { amt: 1000, due: '2026-10-01' }, PAY2: { amt: 1000, due: '2026-11-01' } } }),
+      mk({ steps: { 'CLOSED DEAL': ['2026-10-01', 'NO'] } }),
+      mk({ steps: { CALL1: '2026-08-01' } }),
+    ];
+    for (const { s, d } of cases) {
+      const t = dealSteps(s, d, TODAY);
+      expect(nextStepView(s, d, TODAY, t)).toEqual(nextStepView(s, d, TODAY));
+      expect(statusView(s, d, TODAY, t)).toEqual(statusView(s, d, TODAY));
+      expect(closingView(s, d, TODAY, false, t)).toEqual(closingView(s, d, TODAY));
+      expect(payState(s, d, TODAY, t)).toEqual(payState(s, d, TODAY));
+      expect(closeReady(s, d, TODAY, t)).toBe(closeReady(s, d, TODAY));
+      expect(lastStage(s, d, TODAY, t)).toBe(lastStage(s, d, TODAY));
+    }
   });
 });

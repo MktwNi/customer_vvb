@@ -197,7 +197,7 @@ describe('the five steps between browsers (real Code.gs)', () => {
     D.dispose();
   });
 
-  it('CSV: a date and a note per step (CLOSE: its result), the older stages\' notes after the step\'s own, the contacts, what no step reads', () => {
+  it('CSV: a date and a note per step (CLOSE: its result), the older stages\' notes after the step\'s own with their dates, the contacts, what no step reads', () => {
     const E = mk('อี');
     const d = mkDeal(E);
     E.setStep(d.id, 'CALL1', { d: '2026-09-01', n: 'โทร 1' });
@@ -215,12 +215,62 @@ describe('the five steps between browsers (real Code.gs)', () => {
     ]);
     expect(head).not.toContain('CALL1 วันที่');
     const r = rows[0];
+    // the date is the one of the note shown first (the contact on the 12th is in ติดต่อล่าสุด and the count); an
+    // older record keeps its own date
     expect([r['CONTACT วันที่'], r['CONTACT โน้ต'], r['FOLLOW วันที่'], r['FOLLOW โน้ต'], r['CLOSE วันที่'], r['CLOSE ผล']]).toEqual([
-      '2026-09-12', 'คุยรายละเอียด; CALL1: โทร 1', '2026-09-20', 'FOLLOW2: ตาม', '2026-09-25', 'YES',
+      '2026-09-10', 'คุยรายละเอียด; CALL1 2026-09-01: โทร 1', '2026-09-20', 'FOLLOW2: ตาม', '2026-09-25', 'YES',
     ]);
+    expect(r['ติดต่อล่าสุด']).toBe('2026-10-03');
+    // (no plan: the payment and the rest of it, as the steps name them)
     expect([r['PAY วันที่'], r['PAY โน้ต'], r['การติดต่อ (ครั้ง)'], r['ขั้นตอนอื่น']]).toEqual([
-      'PAY1 2026-10-01; PAY2 2026-10-03', 'PAY1: รับงวด 1; PAY2: รับงวด 2', '4', 'OLDSTAGE: 2026-08-01 ขั้นที่ถูกลบออกจากรายการ',
+      'PAY 2026-10-01; PAY ส่วนที่เหลือ 2026-10-03', 'PAY: รับงวด 1; PAY ส่วนที่เหลือ: รับงวด 2', '4', 'OLDSTAGE: 2026-08-01 ขั้นที่ถูกลบออกจากรายการ',
     ]);
+    E.dispose();
+  });
+
+  it('CSV of the eight-stage tracker\'s records: no date lost (review: big3 lost 5 Oct and 11 Oct, big9 showed a contact\'s date by its note)', () => {
+    const E = mk('อี');
+    const big3 = mkDeal(E);
+    // (the review's team drive on 12 Oct, a week earlier here: today is 6 Oct)
+    E.setStep(big3.id, 'CALL1', { d: '2026-09-29', n: 'โทรแนะนำ (เก่า)' });
+    E.setStep(big3.id, 'CALL2', { d: '2026-10-02', n: 'โทรครั้งที่สอง (เก่า)' });
+    E.setStep(big3.id, 'FOLLOW1', { d: '2026-10-05', n: 'ตามผล (เก่า)' });
+    E.setStep(big3.id, 'FOLLOW2', { d: '2026-10-08', n: '' }); // booked ahead
+    const big9 = mkDeal(E);
+    E.setStep(big9.id, 'CONTACT', { d: '2026-09-30', n: 'ติดต่อครั้งแรก (ใหม่)' });
+    E.addAct(big9.id, { type: 'meet', note: 'นัดพบ', d: '2026-10-02', stage: 'CONTACT' });
+    const [a, b] = parseCsv(E.salesCsv([E.sales.deals[big3.id], E.sales.deals[big9.id]]));
+    expect([a['CONTACT วันที่'], a['CONTACT โน้ต'], a['FOLLOW วันที่'], a['FOLLOW โน้ต']]).toEqual([
+      '2026-10-02', 'CALL2: โทรครั้งที่สอง (เก่า); CALL1 2026-09-29: โทรแนะนำ (เก่า)', '2026-10-08', 'FOLLOW2; FOLLOW1 2026-10-05: ตามผล (เก่า)',
+    ]);
+    // every stored date is in the file
+    for (const x of ['2026-09-29', '2026-10-02', '2026-10-05', '2026-10-08']) expect(Object.values(a).join('|')).toContain(x);
+    expect([b['CONTACT วันที่'], b['CONTACT โน้ต'], b['ติดต่อล่าสุด'], b['การติดต่อ (ครั้ง)']]).toEqual(['2026-09-30', 'ติดต่อครั้งแรก (ใหม่)', '2026-10-02', '2']);
+    E.dispose();
+  });
+
+  it('the history names an installment as the screens do: a plan of one is PAY (review: "รับชำระ PAY1" by "บันทึกรับเงิน PAY")', () => {
+    const E = mk('อี');
+    const d = mkDeal(E);
+    E.updateDeal(d.id, { forecast: 65000 });
+    E.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    E.quickPlan(d.id, 1);
+    const log = () => Object.values(E.sales.log).filter((l) => l.deal === d.id).sort((x, y) => x.at.localeCompare(y.at)).map((l) => [l.action, l.detail]);
+    E.markPaid(d.id, 'PAY1', { date: '2026-10-05', amount: 60000, how: 'transfer' });
+    E.setPayFull(d.id, 'PAY1', true);
+    E.setPayFull(d.id, 'PAY1', false);
+    E.unmarkPaid(d.id, 'PAY1');
+    const acts = log().map((x) => x[0]);
+    expect(acts).toEqual(expect.arrayContaining(['รับชำระ PAY', 'ถือว่ารับครบ PAY', 'ยกเลิกการรับ PAY']));
+    expect(acts.join('|')).not.toMatch(/PAY1/);
+    expect(log().find((x) => x[0] === 'แก้แผนชำระ' && /ยังค้างรับ/.test(x[1]))?.[1]).toBe('PAY ยังค้างรับ');
+    // a plan of two keeps the numbers
+    const e = mkDeal(E);
+    E.updateDeal(e.id, { forecast: 2000 });
+    E.setStep(e.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
+    E.quickPlan(e.id, 2);
+    E.markPaid(e.id, 'PAY2', { date: '2026-10-05', amount: 1000, how: 'transfer' });
+    expect(Object.values(E.sales.log).filter((l) => l.deal === e.id).map((l) => l.action)).toContain('รับชำระ PAY2');
     E.dispose();
   });
 });

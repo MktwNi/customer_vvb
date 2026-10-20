@@ -2065,7 +2065,8 @@ export class GccEngine {
       S.pays[k] = n;
       this.op(keyOf.dpay(dealId, stage), { ...n }, { f: [...f, 'at', 'by'] });
       if (!stepOf(S, dealId, stage).n.trim()) this.setStep(dealId, stage, { d: n.rcv, n: paidNote(n) }, true, true);
-      this.salesLog(d, 'รับชำระ ' + stage, [`${fmtMoney(n.got ?? n.amt ?? 0)} บาท`, n.how ? HOW_TH[n.how] : '', n.full ? 'ถือว่าครบ' : ''].filter(Boolean).join(' · '));
+      // (in the history as the screens name it: a plan of one is "PAY", payCheck reads both)
+      this.salesLog(d, 'รับชำระ ' + stepLabel(S, d, stage, today).code, [`${fmtMoney(n.got ?? n.amt ?? 0)} บาท`, n.how ? HOW_TH[n.how] : '', n.full ? 'ถือว่าครบ' : ''].filter(Boolean).join(' · '));
     });
     this.saveSales();
     return !was && closeReady(S, d, today);
@@ -2075,12 +2076,12 @@ export class GccEngine {
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
     if (!this.canDeal('edit.pay', d)) return this.deny();
     if (!d || !cur || (!cur.rcv && cur.got == null && !cur.full)) return;
-    const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur);
+    const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur), code = stepLabel(S, d, stage, todayISO()).code;
     this.batchOps(() => {
       S.pays[k] = { ...cur, rcv: '', got: null, full: false, fullAt: null, add: false, at: new Date().toISOString(), by: this.me() };
       this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['rcv', 'got', 'full', 'fullAt', 'add', 'at', 'by'] });
       if (auto) this.setStep(dealId, stage, { d: st.d !== cur.rcv ? st.d : '', n: '' }, true, true); // a date the user corrected stays
-      this.salesLog(d, 'ยกเลิกการรับ ' + stage);
+      this.salesLog(d, 'ยกเลิกการรับ ' + code);
     });
     this.saveSales();
   }
@@ -2093,12 +2094,12 @@ export class GccEngine {
     if (!d || !cur) return false;
     const fullAt = full ? this.gotWith(d, stage, cur) : null;
     if (cur.full === full && cur.fullAt === fullAt) return false;
-    const today = todayISO(), was = closeReady(S, d, today);
+    const today = todayISO(), was = closeReady(S, d, today), code = stepLabel(S, d, stage, today).code;
     this.batchOps(() => {
       S.pays[k] = { ...cur, full, fullAt, at: new Date().toISOString(), by: this.me() };
       this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['full', 'fullAt', 'at', 'by'] });
-      if (full) this.salesLog(d, 'ถือว่ารับครบ ' + stage);
-      else this.salesLog(d, 'แก้แผนชำระ', stage + ' ยังค้างรับ');
+      if (full) this.salesLog(d, 'ถือว่ารับครบ ' + code);
+      else this.salesLog(d, 'แก้แผนชำระ', code + ' ยังค้างรับ');
     });
     this.saveSales();
     return !was && closeReady(S, d, today);
@@ -3466,9 +3467,11 @@ export class GccEngine {
   }
   /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns.
    *  The steps are the team's (teamSteps): a date and a note each (CLOSE: its result); CONTACT and FOLLOW give
-   *  their date as the screens do and their own note, then the older stages' ("CALL2: …; CALL1: …"); PAY gives
-   *  every installment's ("PAY1 2026-08-22; PAY2 …", one alone without its code); then how many contacts
-   *  (records and older stages' records, as the panel counts them), and "ขั้นตอนอื่น": what no step reads. */
+   *  the date of the record whose note comes first (the newest of their records, a call booked ahead too) and
+   *  every record they read, newest first, each other one with where it is stored and its own date ("CALL2: …;
+   *  CALL1 2026-10-05: …"), so no date of an older stage is lost; PAY gives every installment's ("PAY1
+   *  2026-08-22; PAY2 …", one alone without its code); then how many contacts (records and older stages'
+   *  records, as the panel counts them; their dates are in ติดต่อล่าสุด), and "ขั้นตอนอื่น": what no step reads. */
   salesCsv(deals: Deal[], rows?: ClosedCsvRow[]) {
     // (each deal's steps read its documents and contacts: indexed once for the whole file)
     return withActIndex(this.sales, () => this.csvOf(deals, rows));
@@ -3497,16 +3500,26 @@ export class GccEngine {
           const ps = t.steps.filter((v) => v.kind === 'pay'), one = ps.length === 1;
           ps.forEach((v) => read.add(v.id));
           const has = ps.filter((v) => v.own.d || v.own.n.trim());
+          // (no plan: "PAY" and "PAY ส่วนที่เหลือ", as the steps name them)
+          const name = (v: (typeof ps)[number]) => (v.rest ? `${v.code} ${v.th}` : v.code);
           return one
             ? [ps[0].own.d, ps[0].own.n]
-            : [has.filter((v) => v.own.d).map((v) => `${v.code} ${v.own.d}`).join('; '), has.filter((v) => v.own.n.trim()).map((v) => `${v.code}: ${v.own.n}`).join('; ')];
+            : [has.filter((v) => v.own.d).map((v) => `${name(v)} ${v.own.d}`).join('; '), has.filter((v) => v.own.n.trim()).map((v) => `${name(v)}: ${v.own.n}`).join('; ')];
         }
         const v = t.steps.find((x) => x.id === def.id);
         def.aliases.forEach((a) => read.add(a));
         if (!v) return ['', ''];
         if (def.kind !== 'contact' && def.kind !== 'follow') return [v.own.d, v.own.n];
-        const older = v.aliases.slice(1).map((a) => [a, stepOf(S, d.id, a).n.trim()]).filter(([, n]) => n).map(([a, n]) => `${a}: ${n}`);
-        return [v.date || v.top.d, [v.own.n.trim(), ...older].filter(Boolean).join('; ')];
+        // every record read into the step, newest first (the step's own first on its day: dealSteps' top)
+        const all = v.aliases.map((a) => ({ stage: a, ...stepOf(S, d.id, a) })).filter((r) => r.d || r.n.trim());
+        const recs = [...all.filter((r) => r.stage === v.top.stage), ...all.filter((r) => r.stage !== v.top.stage).sort((a, b) => b.d.localeCompare(a.d))];
+        const words = recs.map((r, i) => {
+          const n = r.n.trim(), where = r.stage === def.id ? '' : r.stage;
+          // the first one's date is the date column; any other one keeps its own
+          const head = [i ? where || def.code : where, i ? r.d : ''].filter(Boolean).join(' ');
+          return head ? head + (n ? ': ' + n : '') : n;
+        });
+        return [v.top.d, words.filter(Boolean).join('; ')];
       });
       // ticks and notes no step reads are kept (removing a list item keeps them on the deals)
       const otherSteps = Object.entries(S.steps)
