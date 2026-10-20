@@ -5,7 +5,8 @@ import { TH_M, addMonths, dtTh, fmtN, isoTh, pad, ymTh } from '../lib/format';
 import type { Cert } from '../lib/types';
 import { feedMeta } from '../lib/feeds';
 import type { Company, Dicts, FeedKey } from '../lib/types';
-import { PageHead, SectionHead, card, tabular } from '../components/ui';
+import { SectionHead, card, tabular } from '../components/ui';
+import { FollowList } from './TrackFollow';
 
 /** A feed row's grey context (lib/feeds.ts words it). */
 export const feedLine = (D: Dicts, k: FeedKey, c: Company) => feedMeta(D, k, c);
@@ -16,7 +17,7 @@ const panelT: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 500 };
 const pairGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,400px),1fr))', gap: 16, alignItems: 'stretch' };
 
 export function Track() {
-  const { engine: e, ui, set, setF, go, open } = useApp();
+  const { engine: e, ui, set, setF, open } = useApp();
   const v = useEngineVersion();
   const { oInd, oProv, oExpM, oFy, oSt } = ui;
   const CD = e.B.CD, D = e.B.D, W = e.W;
@@ -118,21 +119,32 @@ export function Track() {
   const goTable = () => setF({ view: 'cert', tgt: '', cfo: oSt, expM: oExpM, cInd: oInd, cFy: oFy, cProv: oProv, sort: oExpM || oSt === 'soon' ? 'exp' : 'ap' });
   const goSoon = () => setF({ view: 'cert', tgt: '', cfo: 'soon', expM: '', cInd: oInd, cFy: oFy, cProv: oProv, sort: 'exp' });
 
-  // ---- company-level feeds
+  // ---- company-level feeds from the registry (the companies followed have their own list, on top:
+  // tabs/TrackFollow.tsx, so the watch feed is not one of these cards)
   const feeds = useMemo(
-    () => FEEDS.map(([k, label, , desc]) => ({ k, label, desc, all: e.feedItems(k) })),
+    () => FEEDS.filter(([k]) => k !== 'watch').map(([k, label, , desc]) => ({ k, label, desc, all: e.feedItems(k) })),
     [e, v],
   );
   const mon = e.monCfg();
+  // what a registry card's ดูทั้งหมด leads to: the list in ค้นหา, where the select-all bar follows its companies
+  // or sends them to the tracker (lib/bulk.ts bulkActs: the same capabilities), which puts them in แผนติดต่อ
+  const pickActs = [e.can('edit.cust') && 'ติดตาม', e.can('edit.deal') && e.can('view.sales') && 'ส่งเข้า Sales Tracker'].filter(Boolean).join(' หรือ ');
+  const pickHint = pickActs ? `เปิดรายชื่อในหน้าค้นหา กด เลือกทั้งหมด หรือติ๊กบางบริษัท แล้วกด ${pickActs} ที่แถบเหนือรายการ จึงจะขึ้นในแผนติดต่อ` : undefined;
 
   return (
     <>
-      <PageHead title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
+      {/* the companies the team follows first, in full; then the CFO overview; the registry's lists last */}
+      <FollowList />
+      {/* the CFO overview in one block: its filter line stays under the top only while the overview is in view */}
+      <section className="tr-ov" aria-label="ใบรับรอง CFO ที่ต้องติดตาม">
+      <div className="tr-ovh">
+        <SectionHead title="ใบรับรอง CFO ที่ต้องติดตาม" sub={`${fmtN(ob.count)} ใบรับรอง · สถานะ ณ ${isoTh(e.ref)}`} />
+      </div>
       <div className="tr-bar">
         {chips.map((c) => (
           <button key={c.label} onClick={() => set(c.p)} className="ftag">{c.label} ×</button>
         ))}
-        {!chips.length && <span className="t-meta" style={{ fontSize: 13 }}>คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองทั้งหน้า</span>}
+        {!chips.length && <span className="t-meta" style={{ fontSize: 13 }}>คลิกแท่งกราฟ สถานะ หรือเดือน เพื่อกรองภาพรวมใบรับรอง</span>}
         {chips.length > 0 && <button onClick={() => set({ oInd: '', oProv: '', oExpM: '', oFy: '', oSt: '' })} className="quiet">ล้างทั้งหมด</button>}
         <span style={{ flex: 1 }} />
         <button onClick={goTable} className="btn sm">ดูรายชื่อ {fmtN(ob.count)} รายการในตาราง</button>
@@ -142,7 +154,7 @@ export function Track() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>หมดอายุใน 12 เดือนข้างหน้า</h2>
-            <span className="t-meta" style={{ fontSize: 13 }} title="คลิกที่เดือนเพื่อกรองทั้งหน้า">{`${isoTh(e.ref)} ถึง ${isoTh(ob.endISO)} · สีเหลือง = ภายใน ${W} วัน`}</span>
+            <span className="t-meta" style={{ fontSize: 13 }} title="คลิกที่เดือนเพื่อกรองภาพรวมใบรับรอง">{`${isoTh(e.ref)} ถึง ${isoTh(ob.endISO)} · สีเหลือง = ภายใน ${W} วัน`}</span>
           </div>
           <div style={{ display: 'flex', gap: 28 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
@@ -262,21 +274,24 @@ export function Track() {
           <Bars bars={ob.provBars} labelW={130} onPick={(k, on) => set({ oProv: on ? '' : k })} />
         </div>
       </section>
+      </section>
 
-      <div style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>
-        <SectionHead title="รายการติดตามระดับบริษัท" sub={`ใกล้หมดอายุ = ${W} วัน · นับหลังตัดข้อมูลซ้ำ`} />
+      {/* secondary: lists worked out from public data, quieter than the companies followed */}
+      <div className="tr-regh">
+        <h2>เฝ้าดูจากทะเบียน (ข้อมูลสาธารณะ)</h2>
+        <span className="t-meta" style={{ fontSize: 13 }}>{`บริษัทที่เข้าเงื่อนไขในข้อมูล อบก. GI กรอ. และ SET · ใกล้หมดอายุ = ${W} วัน · นับหลังตัดข้อมูลซ้ำ`}</span>
       </div>
-      <section style={pairGrid}>
+      <section className="tr-reg" aria-label="เฝ้าดูจากทะเบียน">
         {feeds.map(({ k, label, desc, all }) => {
           const months = k === 'newFac' ? Object.entries(all.reduce<Record<string, number>>((m, c) => ((m[c.newYm] = (m[c.newYm] || 0) + 1), m), {})).sort((a, b) => b[0].localeCompare(a[0])) : [];
           return (
-            <div key={k} style={{ ...card, padding: 22, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', boxSizing: 'border-box' }}>
+            <div key={k} className="tr-feed">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                  <h3 style={panelT}>{label}</h3>
-                  <span className="t-meta" style={{ fontSize: 13, textWrap: 'pretty' }}>{k === 'cfoSoon' ? `ใบล่าสุดจะหมดอายุภายใน ${W} วัน` : desc}</span>
+                  <h3 className="tr-feed-t">{label}</h3>
+                  <span className="t-meta" style={{ textWrap: 'pretty' }}>{k === 'cfoSoon' ? `ใบล่าสุดจะหมดอายุภายใน ${W} วัน` : desc}</span>
                 </div>
-                <span style={{ fontSize: 18, fontWeight: all.length ? 500 : 400, color: all.length ? 'var(--ink)' : 'var(--muted)', ...tabular }}>{fmtN(all.length)}</span>
+                <span className={'tr-feed-n' + (all.length ? '' : ' zero')}>{fmtN(all.length)}</span>
               </div>
               {months.length > 0 && (
                 <div className="no-scrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
@@ -286,19 +301,20 @@ export function Track() {
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                {all.slice(0, 5).map((c) => (
-                  <button key={c.id} className="hv" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '9px 8px', margin: '0 -8px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: 'var(--ink)' }}>
-                    <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                    <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{feedLine(D, k, c)}</span>
+                {all.slice(0, 3).map((c) => (
+                  <button key={c.id} className="hv tr-feed-r" onClick={() => open(c.id)} title={c.name}>
+                    <span className="co-name dense">{c.name}</span>
+                    <span className="t-meta">{feedLine(D, k, c)}</span>
                   </button>
                 ))}
-                {!all.length && <span className="empty" style={{ borderTop: '1px solid var(--divider)', paddingTop: 9 }}>{k === 'watch' ? 'กด ติดตาม ในหน้าบริษัทเพื่อเพิ่ม' : k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
+                {!all.length && <span className="empty" style={{ borderTop: '1px solid var(--divider)', paddingTop: 9 }}>{k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
               </div>
               {all.length > 0 && (
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 4 }}>
-                  <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="lnk">ดูทั้งหมด {fmtN(all.length)}</button>
-                  <button onClick={() => go('plan', { plFeed: k, picked: {}, plLim: 60 })} className="lnk">วางแผนติดต่อ</button>
-                  {k === 'watch' && e.can('edit.deal') && e.can('view.sales') && <button onClick={() => set({ sendIds: all.map((c) => c.id) })} className="lnk">ส่งเข้า Sales Tracker</button>}
+                  {/* แผนติดต่อ lists only what the team works on: the followed companies go there; a registry list is
+                      opened in ค้นหา (one link), where เลือกทั้งหมด or a few ticks, then ติดตาม or ส่งเข้า Sales Tracker on the
+                      bar over the list, put its companies there */}
+                  <button onClick={() => setF({ feed: k, tgt: '', view: 'co', sort: k === 'cfoSoon' || k === 'cfoExp' ? 'exp' : k === 'newFac' ? 'invest' : 'default' })} className="lnk" title={pickHint}>ดูทั้งหมด {fmtN(all.length)}</button>
                 </div>
               )}
             </div>
@@ -324,7 +340,7 @@ export function Track() {
               const [tag] = EV_LBL[x.t] || ['เหตุการณ์'];
               return (
                 <button key={i} onClick={() => c && open(c.id)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', border: 0, borderTop: '1px solid var(--divider)', padding: '9px 8px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 14, color: 'var(--ink)' }}>{c ? c.name : String(x.id)}</span>
+                  <span className="co-name dense">{c ? c.name : String(x.id)}</span>
                   <span className="t-meta">{`${tag} · ${c && c.cfoEx ? 'CFO หมดอายุ ' + isoTh(c.cfoEx) + ' · ' : ''}บันทึก ${dtTh(x.at)}`}</span>
                 </button>
               );
@@ -338,13 +354,13 @@ export function Track() {
 
 function CertRow({ ct, onOpen, badge, sub, right }: { ct: Cert; onOpen: () => void; badge: React.ReactNode; sub: string; right: string }) {
   return (
-    <button onClick={onOpen} className="hv" style={{ cursor: 'pointer', border: 0, borderBottom: '1px solid var(--divider)', padding: '11px 8px', margin: '0 -8px', display: 'grid', gridTemplateColumns: '56px minmax(0,1fr) auto', gap: 12, alignItems: 'center', textAlign: 'left', color: 'var(--ink)' }}>
+    <button onClick={onOpen} className="hv tr-cert" title={ct.org}>
       {badge}
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ct.org}</span>
-        <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{sub}</span>
+      <span className="tr-cert-t">
+        <span className="co-name dense">{ct.org}</span>
+        <span className="t-sec">{sub}</span>
       </span>
-      <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{right}</span>
+      <span className="tr-cert-d">{right}</span>
     </button>
   );
 }

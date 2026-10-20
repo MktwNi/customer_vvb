@@ -38,12 +38,16 @@ import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, type JointGroup } from './sales';
 import { canMergeFrom, isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
 import {
-  QT_NOTE_MAX, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, qtCheckOf, toQtCheck,
-  type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type Scope,
+  QT_NOTE_MAX, dirPeople, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, toQtCheck,
+  type MailPerson, type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type QtSentCtx, type Scope,
 } from './notify';
 import { PAY_NOTE_MAX, canClose, canUndo, closeRecord, lineLabel, parsePayChkCfg, splitKey, teamMonth, toMonthClose, toPayCheck, ymTh, type ChkRow, type MonthClose, type PayCheck, type PayChkCfg } from './payCheck';
 // the month check of money out (job expenses in the money views)
 import { expTeamMonth, expWhat, rowWhat, type XRow } from './expenseMoney';
+// many companies at once (the search page's selection)
+import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
+// บริษัทที่ติดตาม: a follow on any id of a company is the company's
+import { followIdsOf } from './follow';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -245,6 +249,8 @@ export class GccEngine {
   };
   getVersion = () => this.version;
   emit() {
+    // inside bulk(): once, at its end
+    if (this.deferred) return void (this.deferred.emit = true);
     // a session without ดูยอดเงิน works nothing out from the amounts it never received (lib/sales.ts)
     setMoneyHidden(this.sales, !this.can('view.money'));
     this.version++;
@@ -437,6 +443,8 @@ export class GccEngine {
     this.emit();
   }
   persist(k: string, v: unknown) {
+    // inside bulk(): each store written once, at its end (its latest value)
+    if (this.deferred) return void this.deferred.keys.set(k, v);
     this.store.set(k, v).then(
       () => this.unstored.delete(k),
       () => this.unstored.add(k),
@@ -540,7 +548,8 @@ export class GccEngine {
     this.minYm = minYm;
     const ns = this.setSnap?.newSyms || {};
     const nsCut = addDays(todayISO(), -180);
-    const watch = new Set(this.crm.watch);
+    // followed: any of its ids (a follow made on a row since merged into it is the company's)
+    const watch = new Set(this.crm.watch.map((id) => this.canonical(id)));
     B.companies.forEach((c) => {
       status(c, T, W);
       c.code = gccCode(c.id);
@@ -966,9 +975,77 @@ export class GccEngine {
     if (i >= 0) w.splice(i, 1);
     else w.push(id);
     this.op(keyOf.watch(id), i < 0 ? 1 : undefined);
-    const c = this.B.byId.get(id);
-    if (c) c.fl.watch = i < 0;
+    const c = this.company(id);
+    if (c) c.fl.watch = w.some((x) => this.canonical(x) === c.id);
     this.saveCrm();
+  }
+  /** Follow (or stop following) many companies at once (the search page's selection): one batch, each
+   *  company once; those already so are left as they are and counted. A follow made on a row since merged
+   *  into a company is that company's (lib/follow.ts followIdsOf, as บริษัทที่ติดตาม and toggleWatch read it):
+   *  it counts as followed, and stopping removes every id of it. */
+  setWatchMany(ids: readonly number[], on: boolean) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return { changed: 0, same: 0, local: 0 };
+    }
+    const W = this.crm.watch, has = new Set(W.map((id) => this.canonical(id))), done = new Set<number>(), gone = new Set<number>();
+    let changed = 0, same = 0, local = 0;
+    this.bulk(() => {
+      ids.forEach((id0) => {
+        const c = this.company(id0);
+        if (!c || done.has(c.id)) return;
+        done.add(c.id);
+        if (has.has(c.id) === on) return void same++;
+        if (on) {
+          W.push(c.id);
+          this.op(keyOf.watch(c.id), 1);
+        } else
+          followIdsOf(W, c.id, (id) => this.canonical(id)).forEach((id) => {
+            gone.add(id);
+            this.op(keyOf.watch(id), undefined);
+          });
+        c.fl.watch = on;
+        changed++;
+        if (this.staysHere(c.id)) local++;
+      });
+      // in place: the list is the one every page reads
+      if (gone.size) {
+        const keep = W.filter((x) => !gone.has(x));
+        W.length = 0;
+        keep.forEach((x) => W.push(x));
+      }
+      if (changed) this.saveCrm();
+    });
+    return { changed, same, local };
+  }
+  /** A company whose ติดตาม, ผู้รับผิดชอบ and นัด never reach the connected team (from the TGO website sync:
+   *  its id is this browser's, lib/teamSync.ts isLocalOnly). The bulk results count these apart. */
+  private staysHere(id: number) {
+    return !!this.teamCfg && isLocalId(id);
+  }
+  /** One ผู้รับผิดชอบ for many companies (the search page's selection; '' = none); `onlyEmpty` leaves the
+   *  companies that have one. Each changed company gets its history line, as setOwner gives. */
+  setOwners(ids: readonly number[], v: string, onlyEmpty = false) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return { changed: 0, same: 0, kept: 0, local: 0 };
+    }
+    const done = new Set<number>();
+    let changed = 0, same = 0, kept = 0, local = 0;
+    this.bulk(() =>
+      ids.forEach((id0) => {
+        const c = this.company(id0);
+        if (!c || done.has(c.id)) return;
+        done.add(c.id);
+        const cur = this.crm.owners[c.id] || '';
+        if (cur === v) return void same++;
+        if (onlyEmpty && cur) return void kept++;
+        this.setOwner(c.id, v);
+        changed++;
+        if (this.staysHere(c.id)) local++;
+      }),
+    );
+    return { changed, same, kept, local };
   }
   /** `pid`: the person (ผู้ติดต่อ) it was with. */
   addLog(id: number, type: string, result: string, text: string, pid?: string) {
@@ -1037,23 +1114,27 @@ export class GccEngine {
     this.op(keyOf.task(t.id), { ...t }, { f: [...f] });
     this.saveCrm();
   }
-  /** Create one task per company; with `perDay` > 0 spread them across working days. */
+  /** Create one task per company; with `perDay` > 0 spread them across working days (lib/bulk.ts
+   *  taskDates). All in one batch (the search page plans thousands at once). Returns how many and the
+   *  first and last day. */
   addTasks(ids: number[], p: { type: TaskType; date: string; time: string; note: string }, perDay = 0, pid?: string) {
-    if (!this.can('edit.task')) return this.deny();
-    let d = p.date, n = 0;
-    ids.forEach((id) => {
-      const c = this.company(id);
-      if (perDay && n >= perDay) {
-        d = nextWork(addDays(d, 1));
-        n = 0;
-      }
-      if (perDay && n === 0) d = nextWork(d);
-      n++;
-      const t: Task = { id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: d, time: p.time, note: cap(p.note), done: false, ...(pid ? { pid } : {}) };
-      this.crm.tasks.push(t);
-      this.op(keyOf.task(t.id), { ...t });
+    if (!this.can('edit.task')) {
+      this.deny();
+      return { n: 0, first: '', last: '', local: 0 };
+    }
+    const days = taskDates(p.date, ids.length, perDay);
+    let local = 0;
+    this.bulk(() => {
+      ids.forEach((id, i) => {
+        const c = this.company(id);
+        const t: Task = { id: uid(), gid: id, title: c ? c.name : String(id), type: p.type, date: days[i], time: p.time, note: cap(p.note), done: false, ...(pid ? { pid } : {}) };
+        this.crm.tasks.push(t);
+        this.op(keyOf.task(t.id), { ...t });
+        if (this.staysHere(id)) local++;
+      });
+      this.saveCrm();
     });
-    this.saveCrm();
+    return { n: ids.length, first: days[0] || '', last: days[days.length - 1] || '', local };
   }
   autoPlan(list: Company[], perDay: number) {
     if (!this.can('edit.task')) return this.deny();
@@ -1582,27 +1663,89 @@ export class GccEngine {
   addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
     if (!this.can('edit.deal')) {
       this.deny();
-      return { added: 0, skipped: 0 };
+      return { added: 0, skipped: 0, ids: [] as string[], k: '' };
     }
-    return this.batchOps(() => this.addDealsFrom(ids, opts));
+    const r = this.bulk(() => this.addDealsFrom(ids, opts));
+    // what เลิกทำ may take back: these rows as they were made
+    const k = r.ids.length ? uid() : '';
+    this.lastSent = k ? { k, at: Date.now(), sig: Object.fromEntries(r.ids.map((id) => [id, dealSig(this.sales.deals[id])])) } : null;
+    return { ...r, k };
+  }
+  /** The rows the last send to the Sales Tracker added (`k` names that send, `sig` each row as it was made). */
+  lastSent: { k: string; at: number; sig: Record<string, string> } | null = null;
+  /**
+   * "เลิกทำ" after a send (the search page's toast): the rows send `k` added are deleted for the whole team,
+   * within UNDO_SEND_MS, by an account that may delete deals (the script asks del.rec for it). A row that
+   * someone changed since, or gave a step, a document, a payment line, a contact, an expense or a joint
+   * quotation, stays: that is someone's work. `late`: too long ago, or another send since.
+   */
+  undoSent(k: string) {
+    const L = this.lastSent;
+    if (!L || L.k !== k || Date.now() - L.at > UNDO_SEND_MS) return { removed: 0, kept: 0, late: true };
+    if (!this.can('del.rec')) {
+      this.deny();
+      return { removed: 0, kept: 0 };
+    }
+    let removed = 0, kept = 0;
+    this.bulk(() =>
+      Object.entries(L.sig).forEach(([id, sig]) => {
+        const d = this.sales.deals[id];
+        if (!d) return; // a teammate deleted it already
+        if (dealSig(d) !== sig || this.dealHasWork(id)) return void kept++;
+        this.deleteDealNow(d, 'เลิกส่งเข้า Sales Tracker');
+        removed++;
+      }),
+    );
+    this.lastSent = null;
+    if (removed) this.saveSales();
+    return { removed, kept };
+  }
+  /** Anything recorded on a deal besides its row: steps, documents, payment lines, contacts, expenses, a
+   *  joint quotation (the records dropDealRecords would take with it). */
+  private dealHasWork(id: string) {
+    const S = this.sales, pre = id + '/';
+    const under = (bag?: Record<string, unknown>) => !!bag && Object.keys(bag).some((k) => k.startsWith(pre));
+    return under(S.steps) || under(S.pays) || under(S.acts) || under(S.exp) || !!S.jqt?.[id] || !!S.shares?.[id]
+      || Object.keys(S.jqm || {}).some((k) => k.startsWith(pre) || k.endsWith('/' + id))
+      || Object.values(S.docs).some((x) => x.deal === id);
+  }
+  /**
+   * Does a company have its own row in the Sales Tracker of `year`? As dealsOf finds a company's deals (by
+   * its id, or by name for a company from the TGO website sync), worked out once for the whole table: the
+   * send dialog asks it of thousands of companies. A joint quotation's header is the payer's row for that
+   * quotation, not the company's own row of the year. `add`: count a row added since.
+   */
+  trackedIn(year: string) {
+    const S = this.sales, byG = new Set<number>(), byN = new Set<string>();
+    Object.values(S.deals).forEach((d) => {
+      if (d.year !== year || jointRole(S, d) === 'header') return;
+      if (d.gid != null) byG.add(this.canonical(d.gid));
+      else byN.add(norm(d.client));
+    });
+    const has = (c: Company) => (isLocalId(c.id) ? !!norm(c.name) && byN.has(norm(c.name)) : byG.has(this.canonical(c.id)));
+    const add = (d: Deal) => (d.gid != null ? byG.add(this.canonical(d.gid)) : byN.add(norm(d.client)));
+    return Object.assign(has, { add });
   }
   private addDealsFrom(ids: number[], opts: { section?: string; year?: string }) {
     const year = opts.year || beYear();
     const seen = new Set<number>();
+    const has = this.trackedIn(year);
     let added = 0, skipped = 0;
+    const made: string[] = [];
     ids.forEach((id) => {
       const c = this.company(id);
       if (!c || seen.has(c.id)) return;
       seen.add(c.id);
-      // a joint quotation's header is the payer's row for that quotation, not the company's own row of the year
-      if (this.dealsOf(c.id).some((d) => d.year === year && jointRole(this.sales, d) !== 'header')) {
+      if (has(c)) {
         skipped++;
         return;
       }
-      this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) });
+      const d = this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) });
+      has.add(d);
+      made.push(d.id);
       added++;
     });
-    return { added, skipped };
+    return { added, skipped, ids: made };
   }
   updateDeal(id: string, patch: Partial<Deal>, opt: { keepJoint?: boolean } = {}) {
     const d = this.sales.deals[id];
@@ -3412,6 +3555,24 @@ export class GccEngine {
     const o = this.pending.get(keyOf.deal(id));
     return !!o && !o.del && !o.f && !o.nx;
   }
+  /** Set inside bulk(): the stores to write at its end (latest value each) and whether to emit then. */
+  private deferred: { keys: Map<string, unknown>; emit: boolean } | null = null;
+  /**
+   * Many changes made together (the search page's bulk actions over thousands of companies): the sync queue
+   * written once (batchOps), each local store once with its final value, and one emit at the end, so a
+   * thousand records cost about what one does. The changes go out as usual, 300 per push.
+   */
+  bulk<T>(fn: () => T): T {
+    if (this.deferred) return fn();
+    const d = (this.deferred = { keys: new Map<string, unknown>(), emit: false });
+    try {
+      return this.batchOps(fn);
+    } finally {
+      this.deferred = null;
+      d.keys.forEach((v, k) => this.persist(k, v));
+      if (d.emit) this.emit();
+    }
+  }
   /** Run `fn` storing all the changes it queues in one write: an import of hundreds of records
    *  would otherwise rewrite the stored queue once per record. */
   batchOps<T>(fn: () => T): T {
@@ -4151,9 +4312,9 @@ export class GccEngine {
       batch.forEach((o) => (o.sent = at));
       await this.writePending(this.qk(cfg), (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
       if (!live()) return;
-      let r: { rejected?: string[]; denied?: string[] };
+      let r: { rejected?: string[]; denied?: string[]; qt?: unknown };
       try {
-        r = await call<{ rejected?: string[]; denied?: string[] }>(this.transport, cfg.url, this.cred(cfg), { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+        r = await call<{ rejected?: string[]; denied?: string[]; qt?: unknown }>(this.transport, cfg.url, this.cred(cfg), { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
       } catch (e) {
         // the sheet answered and refused (busy, wrong code): these were certainly not delivered
         if (e instanceof TeamSyncError && e.code) {
@@ -4163,6 +4324,7 @@ export class GccEngine {
         throw e;
       }
       this.meta(cfg, r);
+      this.heardQt(r, batch);
       rejected += (r.rejected || []).length;
       // changes this account may not make (the script decides): dropped below with the batch, and the
       // team's value put back by the next round
@@ -4255,7 +4417,7 @@ export class GccEngine {
         if (c && e) this.patchContact(c, e);
       });
       if (fx.watch.size) {
-        const w = new Set(this.crm.watch);
+        const w = new Set(this.crm.watch.map((id) => this.canonical(id)));
         this.B.companies.forEach((c) => (c.fl.watch = w.has(c.id)));
       }
     }
@@ -4872,6 +5034,8 @@ export class GccEngine {
         }
     prefs.del(PREF.peopleHide);
     prefs.del(PREF.peopleGone);
+    prefs.del(PREF.qtSent);
+    this.dirMemo = null;
     if (dropUnsent) {
       await this.store.del(this.qk(cfg)).catch(() => {});
       await this.store.del(pendKey(cfg.url)).catch(() => {});
@@ -4943,6 +5107,8 @@ export class GccEngine {
     const s = this.session, cfg = this.teamCfg;
     if (!s || !cfg || cfg.mode !== 'accounts') throw new Error('ยังไม่ได้เข้าสู่ระบบ');
     let r: Record<string, unknown>;
+    // a change to the accounts: who checks and gets mail is read again when next needed (heardQt)
+    if (/^(user_save|role_save|role_del|grant_save|grant_del|req_decide)$/.test(String(body.action))) this.dirMemo = null;
     try {
       r = await call<Record<string, unknown>>(this.transport, cfg.url, { tok: s.tok }, body);
     } catch (x) {
@@ -4964,7 +5130,7 @@ export class GccEngine {
       this.knownRoles = parseRoles(r.roles);
       this.noteRoles(r.roles);
     }
-    return {
+    const dir: TeamDir = {
       users: (Array.isArray(r.users) ? r.users : []) as TeamUser[],
       roles: parseRoles(r.roles),
       grants: parseGrants(r.grants),
@@ -4972,6 +5138,9 @@ export class GccEngine {
       audit: parseAudit(r.audit),
       v4,
     };
+    // who checks and gets mail, for what attaching tells an admin (heardQt)
+    this.dirMemo = { key: (this.teamCfg?.url || '') + '|' + (this.session?.u || ''), at: Date.now(), people: dirPeople(dir, todayISO()) };
+    return dir;
   }
   /** A new account with a temporary password made here (shown once to the admin, never stored).
    *  `em`: its notification e-mail (a script with notifications sends it a code to confirm). */
@@ -5129,6 +5298,110 @@ export class GccEngine {
     this.emit();
     this.flushSoon();
   }
+  // ---- who heard of a quotation this account attached or edited (lib/notify.ts QtSent)
+  private qtSentM: { key: string; m: Record<string, QtSent> } | null = null;
+  /** What the script said, per document, for the signed-in account on this team (kept in this browser). */
+  qtSentAll(): Record<string, QtSent> {
+    const cfg = this.teamCfg, s = this.session;
+    const key = cfg && s && cfg.mode === 'accounts' ? cfg.url + '|' + s.u : '';
+    if (!this.qtSentM || this.qtSentM.key !== key) {
+      const p = prefs.get<{ key?: string; m?: Record<string, QtSent> } | null>(PREF.qtSent, null);
+      this.qtSentM = { key, m: key && p && p.key === key && p.m && typeof p.m === 'object' ? p.m : {} };
+    }
+    return this.qtSentM.m;
+  }
+  /** What happened to this version of a quotation this account attached or edited: who was mailed, or why
+   *  nobody was (null: nothing heard here, or the document changed since). */
+  qtSentFor(doc: Pick<DealDoc, 'id' | 'amount' | 'docNo' | 'docDate' | 'name' | 'size'>): QtSent | null {
+    const o = this.qtSentAll()[doc.id];
+    return o && o.fp === qtFpKey(doc) ? o : null;
+  }
+  /** The latest outcome worth the bottom message after attaching or editing (SalesMessages shows it once). */
+  qtFresh: { id: string; n: number } | null = null;
+  /** How this account reads who heard of a quotation (lib/notify.ts qtSentView): it manages users, it checks
+   *  quotations, the team lets whoever attached or changed one check it. */
+  qtSentCtx(): QtSentCtx {
+    return { admin: this.can('set.users'), checker: this.can('qt.check'), self: this.notifyCfg().self };
+  }
+  /**
+   * A push reply: what the script did about the quotations the push carried (`qt`, see Code.gs "E-mail"). A
+   * script that says nothing gets this browser's own word for a quotation that just entered the check: no
+   * notifications in the script ('script'), not set up ('off'), or the release before immediate mail (hello has
+   * no `now`): its timer mails the other checkers it can, which this browser cannot name ('tick'), except for an
+   * admin, who reads the team's accounts (qtLocalOutcome: who it mails, or why nobody). A script that does say
+   * `now` and said nothing about a quotation had none of them in its check.
+   */
+  private heardQt(r: { qt?: unknown }, batch: SyncOp[]) {
+    const cfg = this.teamCfg, s = this.session;
+    if (!cfg || cfg.mode !== 'accounts' || !s) return;
+    const pushed = new Map(batch.filter((o) => o.k.startsWith('ddoc/') && !o.del && !!o.v && typeof o.v === 'object').map((o) => [o.k, o.v as DealDoc]));
+    if (!pushed.size) return;
+    const at = new Date().toISOString(), outs: QtSent[] = [];
+    if (Array.isArray(r.qt)) {
+      for (const x of r.qt) {
+        const p = parseQtOut(x), v = p && pushed.get(p.k);
+        if (p && v) outs.push({ ...p.o, fp: qtFpKey(v), at });
+      }
+      return this.noteQtSent(outs);
+    }
+    const live = this.notifyLive;
+    if (live?.on && live.now !== undefined) return;
+    const docs: DealDoc[] = [];
+    pushed.forEach((v, k) => {
+      const doc = this.sales.docs[k.slice(5)];
+      // only one that is news: confirmed in the last 2 days (as the script decides), as it is here now
+      const t = Date.parse(doc?.cAt || doc?.at || '') || 0;
+      if (!doc || qtFpKey(doc) !== qtFpKey(v) || Date.now() - t > 2 * DAY || !needsCheck(this.sales, doc, live?.since || '') || qtCheckOf(this.checks()[doc.id], doc).status !== 'wait') return;
+      docs.push(doc);
+    });
+    if (!docs.length) return;
+    const local = (doc: DealDoc, o: Pick<QtSent, 'to' | 'later' | 'bell' | 'skip' | 'why'>): QtSent => ({ id: doc.id, fp: qtFpKey(doc), at, what: sameName(doc.by, s.name) ? 'new' : 'edit', ...o, local: true });
+    const none = (why: QtSent['why']) => ({ to: [], later: [], bell: [], skip: [], why });
+    if (!live || !live.on || !this.can('set.users')) return this.noteQtSent(docs.map((doc) => local(doc, none(!live ? 'script' : !live.on ? 'off' : 'tick'))));
+    // an admin: who that timer mails, from the team's accounts (read once in a while; offline: 'tick')
+    const key = this.qtSentM?.key, me = s.name, self = this.notifyCfg().self;
+    this.teamPeople().then(
+      (people) => this.qtSentM?.key === key && this.noteQtSent(docs.map((doc) => local(doc, qtLocalOutcome({ people, me, by: doc.by, self })))),
+      () => this.qtSentM?.key === key && this.noteQtSent(docs.map((doc) => local(doc, none('tick')))),
+    );
+  }
+  /** The team's active accounts as this admin last read them (adminDir), at most a few minutes old. */
+  private async teamPeople(): Promise<MailPerson[]> {
+    const key = (this.teamCfg?.url || '') + '|' + (this.session?.u || '');
+    const m = this.dirMemo;
+    if (m && m.key === key && Date.now() - m.at < 5 * 60000) return m.people;
+    await this.adminDir();
+    return this.dirMemo?.key === key ? this.dirMemo.people : [];
+  }
+  private dirMemo: { key: string; at: number; people: MailPerson[] } | null = null;
+  /** Keep what heardQt said, per document (the same version pushed again keeps who was told). */
+  private noteQtSent(outs: QtSent[]) {
+    if (!outs.length) return;
+    const M = this.qtSentAll();
+    let fresh = '';
+    outs.forEach((o) => {
+      const was = M[o.id];
+      if (qtSentNews(was, o)) fresh = o.id;
+      // the same version pushed again (its Drive id, a stage note): whoever was told before stays told
+      M[o.id] = was && was.fp === o.fp ? { ...o, to: [...new Set([...was.to, ...o.to])], at: o.to.some((n) => !was.to.includes(n)) || o.why !== was.why ? o.at : was.at } : o;
+    });
+    // the newest 60 of the last 30 days
+    const cut = new Date(Date.now() - 30 * DAY).toISOString();
+    Object.keys(M)
+      .sort((a, b) => M[b].at.localeCompare(M[a].at))
+      .forEach((id, i) => (i >= 60 || M[id].at < cut) && delete M[id]);
+    prefs.set(PREF.qtSent, { key: this.qtSentM!.key, m: M });
+    if (fresh) this.qtFresh = { id: fresh, n: (this.qtFresh?.n || 0) + 1 };
+    this.emit();
+  }
+  /** Pull now, unless one ran in the last few seconds (the bell opened): a teammate's new quotation shows
+   *  without waiting for the next poll. */
+  teamPoke() {
+    if (!this.teamCfg || Date.now() - this.pokedAt < 5000) return;
+    this.pokedAt = Date.now();
+    this.teamSync();
+  }
+  private pokedAt = 0;
   /** This account's notification settings as the script last sent them (me.notify), else the defaults. */
   myNotify(): MyNotify {
     return this.session?.nf || myNotify0(this.can('set.users'));
@@ -5507,7 +5780,8 @@ export class GccEngine {
     this.hidden = new Set();
     this.others = [];
   }
-  /** Poll every 30 s while the page is visible, and right away on focus / reconnect. */
+  /** Poll every 30 s while the page is visible, and right away on focus, when the tab is shown again, and on
+   *  reconnect (the bell also asks when it opens, teamPoke). */
   private startTeam(now = true) {
     this.stopTeam();
     this.teamTimer = setInterval(this.teamWake, 30000);
@@ -5515,6 +5789,7 @@ export class GccEngine {
       window.addEventListener('focus', this.teamWake);
       window.addEventListener('online', this.teamWake);
     }
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', this.teamWake);
     if (now) this.teamSync();
   }
   private stopTeam() {
@@ -5526,6 +5801,7 @@ export class GccEngine {
       window.removeEventListener('focus', this.teamWake);
       window.removeEventListener('online', this.teamWake);
     }
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', this.teamWake);
   }
 
   // ---- details

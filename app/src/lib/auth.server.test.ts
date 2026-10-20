@@ -216,7 +216,7 @@ describe('hello', () => {
     const fresh = mk({ teamKey: '' });
     const h = fresh.post({ action: 'hello', cv: 3 });
     // notify: the e-mail trigger is not installed yet (setupNotify, see notify.server.test.ts)
-    expect(h).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'setup', tid: expect.stringMatching(/^[0-9a-f]{16}$/), it: 1000, notify: { on: 0, since: '' } });
+    expect(h).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'setup', tid: expect.stringMatching(/^[0-9a-f]{16}$/), it: 1000, notify: { on: 0, since: '', now: 0 } });
     // created on first use, then permanent
     expect(fresh.props.TEAM_ID).toBe(h.tid);
     expect(fresh.props.AUTH_SECRET).toMatch(/^[0-9a-f-]{72}$/);
@@ -224,7 +224,7 @@ describe('hello', () => {
     expect(mk({ teamKey: KEY }).post({ action: 'hello', cv: 3 })).toMatchObject({ ok: true, v: 4, files: true, mode: 'legacy', it: 1000 });
     const { s } = team();
     const a = s.post({ action: 'hello', cv: 3 });
-    expect(a).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'accounts', tid: s.props.TEAM_ID, it: 1000, notify: { on: 1, since: '2026-10-08' } });
+    expect(a).toEqual({ ok: true, app: 'gcc-team-sync', v: 4, files: true, mode: 'accounts', tid: s.props.TEAM_ID, it: 1000, notify: { on: 1, since: '2026-10-08', now: 1 } });
     expect(JSON.stringify(a)).not.toMatch(/lead|หัวหน้า/);
     // a real script starts at 200000 iterations
     const real = mk({ teamKey: '' });

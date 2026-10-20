@@ -443,7 +443,7 @@ function XName({ S, r }: { S: SalesState; r: XRow }) {
       <CoAvatar name={c?.name || d?.client || 'งาน'} web={c?.web} set={c?.set} size={32} />
       <span className="cf-nm">
         <span className="cf-nm-l">
-          {d ? <button type="button" className="cf-nm-b hv-tx" onClick={() => set({ deal: d.id })} title={`${d.client} เปิดรายละเอียด`}>{name}</button> : <span className="cf-nm-b">{name}</span>}
+          {d ? <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={`${d.client} เปิดรายละเอียด`}>{name}</button> : <span className="cf-nm-b co-name dense">{name}</span>}
         </span>
         <span className="cf-nm-s">{sub}{d?.resp ? ` · ${d.resp}` : ''}</span>
       </span>
@@ -553,7 +553,7 @@ function PhoneRow({ S: _S, r, today, ctl }: { S: SalesState; r: XRow; today: str
   return (
     <div className={'mc-mi' + (on ? ' xo-sel' : '')}>
       <div className="cf-mi-1">
-        {r.deal ? <button type="button" className="cf-nm-b hv-tx" onClick={() => set({ deal: r.deal!.id })}>{shortName(r.deal.client)}</button> : <span className="cf-nm-b">งานที่ถูกลบ</span>}
+        {r.deal ? <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: r.deal!.id })} title={r.deal.client}>{shortName(r.deal.client)}</button> : <span className="cf-nm-b co-name dense">งานที่ถูกลบ</span>}
         <span className="cf-amt">{m0(r.amt)}</span>
       </div>
       <div className="cf-mi-2"><span>{x ? x.c || NO_CAT : 'รายการที่ลบแล้ว'}{x?.n ? ` · ${x.n}` : ''}</span></div>

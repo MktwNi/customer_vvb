@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import { useApp, useEngineVersion, useNarrow } from '../state';
 import { todayISO } from '../lib/format';
 import { bellEmpty, bellItems, dayTh, type BellRow } from '../lib/notify';
+import { planDayLink } from '../lib/planCal';
 import type { GccEngine } from '../lib/engine';
 import { payBackBell, returnedTo } from '../lib/payCheck';
 import { expBackBell } from '../lib/expenseMoney';
@@ -22,7 +23,9 @@ export function mailLine(e: GccEngine) {
  * The bell in the top bar (package notify): how many things need doing now, and a list of them in groups
  * — quotations waiting for this checker (รอตรวจ) or this person's own sent back (ใบเสนอราคาของฉัน),
  * money this person recorded that accounting sent back (รับเงินที่บัญชีส่งกลับ, lib/payCheck.ts returnedTo),
- * instalments late or due soon (งวดเงิน), appointments due today or late (นัดหมาย). Worked out from what
+ * instalments late or due soon (งวดเงิน), appointments due today or late (นัดหมาย). My quotations waiting say
+ * who the team script mailed, or why nobody was (lib/notify.ts qtSentView; a link to fix it for an admin). Opening
+ * the bell pulls from the team's sheet (engine.teamPoke). Worked out from what
  * this browser holds (lib/notify.ts bellItems), so it works offline and before the team script has
  * notifications (then quotations are left out). A row opens what it is about; "ตั้งค่า" opens
  * การแจ้งเตือนของฉัน. On a phone the list is a sheet under the top bar.
@@ -46,24 +49,27 @@ export function Bell() {
         back: payBackBell(returnedTo(e.sales, e.payChecks(), e.payChkCfg().since, e.me(), today)),
         // job expenses sent back (only for those who see them)
         xback: e.can('view.exp') ? expBackBell(e.sales, e.expChecks(), e.payChkCfg().since, e.me()) : [],
+        // who was told about my quotations, or why nobody was
+        sent: e.qtSentAll(),
       }),
     [v, today, scope], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // the list takes the keyboard: its first row (or ตั้งค่า when it is empty)
   useEffect(() => {
     if (!open) return;
-    const raf = requestAnimationFrame(() => pop.current?.querySelector<HTMLElement>('.nf-i, .nf-foot .lnk')?.focus());
+    const raf = requestAnimationFrame(() => pop.current?.querySelector<HTMLElement>('.nf-i, .nf-act, .nf-foot .lnk')?.focus());
     return () => cancelAnimationFrame(raf);
   }, [open]);
   const pick = (row: BellRow) => {
     btn.current?.focus();
-    if (row.go.day) return go('plan', { calDay: row.go.day, calM: row.go.day.slice(0, 7), bell: false });
+    // the day with every customer and type shown: a legend filter pressed earlier would hide the row's entry
+    if (row.go.day) return go('plan', { ...planDayLink(row.go.day), bell: false });
     // a quotation to check opens over its deal; mine sent back opens the deal (the note is on its card)
     set({ bell: false, deal: row.go.deal || null, ...(row.kind === 'chk' && row.go.doc ? { qtCheck: row.go.doc, qtSig: '' } : {}) });
   };
   const keys = (ev: KeyboardEvent<HTMLDivElement>) => {
     if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
-    const all = [...(pop.current?.querySelectorAll<HTMLElement>('.nf-i, .nf-foot .lnk') || [])];
+    const all = [...(pop.current?.querySelectorAll<HTMLElement>('.nf-i, .nf-act, .nf-foot .lnk') || [])];
     const i = all.indexOf(document.activeElement as HTMLElement);
     all[(i + (ev.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]?.focus();
     ev.preventDefault();
@@ -77,7 +83,11 @@ export function Bell() {
         ref={btn}
         type="button"
         className="tb-round nf-bell"
-        onClick={() => set({ bell: !open })}
+        onClick={() => {
+          // opening asks the team's sheet for anything new (a teammate's quotation just attached)
+          if (!open) e.teamPoke();
+          set({ bell: !open });
+        }}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={n ? `การแจ้งเตือน ${n} รายการ` : 'การแจ้งเตือน ไม่มีรายการ'}
@@ -101,11 +111,18 @@ export function Bell() {
                   {g.n > 0 && <span className="n">{g.n}</span>}
                 </div>
                 {g.rows.map((row) => (
-                  <button key={row.key} type="button" className="nf-i" onClick={() => pick(row)}>
-                    <span className="nf-t">{row.title}</span>
-                    <span className="nf-s">{row.sub}</span>
-                    <span className="nf-r">{row.right.chip != null ? <span className={'chip' + (row.right.chip ? ' ' + row.right.chip : '')}>{row.right.text}</span> : row.right.text}</span>
-                  </button>
+                  <div key={row.key} className="nf-ir">
+                    <button type="button" className="nf-i" onClick={() => pick(row)}>
+                      <span className="nf-t co-name dense" title={row.title}>{row.title}</span>
+                      <span className={'nf-s' + (row.wrap ? ' wrap' : '')}>{row.sub}</span>
+                      <span className="nf-r">{row.right.chip != null ? <span className={'chip' + (row.right.chip ? ' ' + row.right.chip : '')}>{row.right.text}</span> : row.right.text}</span>
+                    </button>
+                    {row.act && (
+                      <button type="button" className="lnk nf-act" onClick={() => (btn.current?.focus(), go('users', { usersSec: row.act!.to, bell: false }))}>
+                        {row.act.label}
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             ))

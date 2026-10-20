@@ -1,0 +1,101 @@
+/* ---- ติดตาม (tabs/Track.tsx): บริษัทที่ติดตาม first and in full (tabs/TrackFollow.tsx), then the CFO
+   overview, then the registry's lists, quiet (เฝ้าดูจากทะเบียน) */
+
+/* the page head's two buttons */
+.fw-pacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* its name stays on a phone, at a section's size, as the overview's below (page titles give way to the
+   top bar's there) */
+@media (max-width:900px){.fw-head .pg-h h2{display:block;font-size:var(--fs-section)}}
+/* the search page's "ดูบริษัทที่ติดตาม" scrolls here: its heading clear of the sticky top bar (a phone's) */
+.fw-head{scroll-margin-top:calc(var(--sticky-top) + 16px)}
+
+/* the list: one card, a summary line, a light header, a row per company; the cells stack (with their
+   column's name) when the card is narrow, and each company is a card of its own on a phone */
+.fw{display:flex;flex-direction:column;overflow:hidden;container-type:inline-size}
+.fw-top{display:flex;justify-content:space-between;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:16px 24px 14px}
+.fw-top-t{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fw-sum{margin:0;display:flex;flex-wrap:wrap;align-items:baseline;font-size:var(--fs-body);color:var(--ink);line-height:1.5}
+.fw-sum>span{white-space:nowrap}
+/* the dot after each part, so a wrapped line never starts with one */
+.fw-sum>span:not(:last-child)::after{content:'\00B7';margin:0 8px;color:var(--muted)}
+.fw-q{height:var(--ctl-tool);width:min(300px,100%);background-color:var(--card)}
+.fw-th,.fw-r{display:grid;gap:14px;align-items:center;padding:0 24px}
+.fw-th{padding-top:9px;padding-bottom:9px;border-top:1px solid var(--line)}
+.fw-r{padding-top:12px;padding-bottom:12px;border-bottom:1px solid var(--divider);cursor:pointer;font-size:var(--fs-sec);color:var(--ink);line-height:1.45;transition:background-color .12s}
+.fw-list>.fw-r:last-child{border-bottom:0}
+@media (hover:hover){.fw-r:hover{background-color:var(--tint)}}
+.fw-r:has(:focus-visible){background-color:var(--tint)}
+.fw-name{cursor:pointer;border:0;background:transparent;padding:0;font:inherit;text-align:left;display:flex;gap:12px;align-items:center;min-width:0;color:var(--ink)}
+.fw-name-t{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fw-name .co-name{text-wrap:pretty;overflow-wrap:anywhere;line-height:1.4}
+.fw-c{position:relative;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0;overflow-wrap:anywhere}
+/* a cell's column name: read out with the cell in the table (the header row is for the eye), shown when
+   the cells stack */
+.fw-lbl{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;font-size:var(--fs-meta);color:var(--muted)}
+.fw-when,.fw-gi{font-size:var(--fs-meta)}
+.fw-nw{white-space:nowrap}
+.fw-a{font-size:var(--fs-sec)}
+.fw-acts{display:flex;gap:4px 8px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
+.fw-empty{padding:28px 24px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.fw-none{padding:20px 24px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;border-top:1px solid var(--divider)}
+.fw-more{padding:12px 24px 14px;border-top:1px solid var(--divider)}
+.fw-undo{display:flex;gap:6px 12px;align-items:baseline;flex-wrap:wrap;padding:10px 24px;background:var(--tint);font-size:var(--fs-sec);color:var(--ink-2)}
+@media (prefers-reduced-motion:reduce){.fw-r{transition:none}}
+@media (forced-colors:active){.fw-r:is(:hover,:has(:focus-visible)){outline:2px solid Highlight;outline-offset:-2px}}
+
+/* a narrower card (the icon rail, a tablet): the name and the buttons on one line, the facts under it */
+@container (max-width:980px){
+  .fw-th{display:none}
+  .fw-r{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 18px}
+  /* the name and the buttons fill the first line, so the facts always start a line of their own */
+  .fw-name{flex:1 1 calc(100% - 200px);order:0}
+  .fw-r:not(:has(.fw-acts)) .fw-name{flex-basis:100%}
+  .fw-acts{flex:0 0 auto;order:1;margin-left:auto}
+  .fw-c{flex:1 1 150px;order:2}
+  .fw-lbl{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto;white-space:normal}
+  .fw-top{border-bottom:1px solid var(--line)}
+}
+/* a phone's width: the buttons go under the facts */
+@container (max-width:520px){
+  .fw-name{flex-basis:100%}
+  .fw-c{flex-basis:calc(50% - 9px)}
+  .fw-acts{order:3;flex-basis:100%;justify-content:flex-start;gap:4px 16px}
+}
+/* a phone: each company a card of its own on the page */
+@media (max-width:760px){
+  .fw.card{background:transparent;border:0;box-shadow:none;overflow:visible;border-radius:0}
+  .fw-top{padding:0 0 12px;border-bottom:0}
+  .fw-list{display:flex;flex-direction:column;gap:10px}
+  .fw-r,.fw-list>.fw-r:last-child{background-color:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);box-shadow:var(--sh-card);padding:14px 16px}
+  .fw-empty,.fw-none{background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);padding:18px 16px}
+  .fw-more{padding:12px 0;border-top:0}
+  .fw-undo{border-radius:var(--r-field);padding:10px 14px;margin-bottom:10px}
+}
+
+/* ---- the CFO overview: one block (the gap of the page between its parts), so its sticky filter line
+   (.tr-bar) lets go once the overview has scrolled past */
+.tr-ov{display:flex;flex-direction:column;gap:24px;min-width:0}
+.tr-ovh{padding-top:8px}
+
+/* ---- เฝ้าดูจากทะเบียน: the registry's lists under a quieter heading, as flat cards (no shadow), three
+   names each, so they do not compete with the companies followed */
+.tr-regh{display:flex;flex-direction:column;gap:2px;padding-top:16px;border-top:1px solid var(--line)}
+/* (a section heading's size, over its cards' 16px titles; the grey keeps it quieter than บริษัทที่ติดตาม) */
+.tr-regh h2{margin:0;font-size:var(--fs-section);font-weight:500;line-height:1.4;color:var(--ink-2)}
+.tr-reg{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px;align-items:stretch;margin-top:-10px}
+.tr-feed{background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);padding:16px 18px;display:flex;flex-direction:column;gap:10px;height:100%;min-width:0}
+/* a card's title is a size up from its 14px/600 names (.co-name dense), as on the app's other panels */
+.tr-feed-t{margin:0;font-size:var(--fs-card);font-weight:500;line-height:1.45;color:var(--ink)}
+.tr-feed-n{font-size:var(--fs-card);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tr-feed-n.zero{color:var(--muted)}
+/* a list's first names: one line each, the name cut with … (its tooltip has it whole), the fact at the end */
+.tr-feed-r{cursor:pointer;border:0;border-top:1px solid var(--divider);text-align:left;padding:9px 8px;margin:0 -8px;display:flex;justify-content:space-between;gap:10px;align-items:baseline;font:inherit;color:var(--ink)}
+.tr-feed-r .co-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-feed-r .t-meta{white-space:nowrap}
+
+/* the CFO overview's certificate rows: the days or ใหม่, the organisation (cut with …, whole in its tooltip)
+   over its certificate, the date */
+.tr-cert{cursor:pointer;border:0;border-bottom:1px solid var(--divider);padding:11px 8px;margin:0 -8px;display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;font:inherit;color:var(--ink)}
+.tr-cert-t{display:flex;flex-direction:column;gap:1px;min-width:0}
+.tr-cert-t .co-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-cert-d{font-size:var(--fs-sec);color:var(--muted);white-space:nowrap}

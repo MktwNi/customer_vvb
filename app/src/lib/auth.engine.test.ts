@@ -984,7 +984,7 @@ describe('viewers and new deals', () => {
     L.e.toggleWatch(id);
     await settle(L);
     const V = await member(L, 'vee', 'วี', 'viewer');
-    expect(V.e.addDealsFromCompanies([id], { year: '2569' })).toEqual({ added: 0, skipped: 0 });
+    expect(V.e.addDealsFromCompanies([id], { year: '2569' })).toMatchObject({ added: 0, skipped: 0 });
     const d = V.e.addDeal({ gid: id, year: '2569' });
     await settle(V);
     expect(V.e.sales.deals[d.id]).toBeUndefined();

@@ -182,8 +182,8 @@ describe('Sales Tracker: concurrent edits between browsers', () => {
       A.rebuild();
     }
     const c = local || A.company(900777)!;
-    expect(A.addDealsFromCompanies([c.id], { year: '2564' })).toEqual({ added: 1, skipped: 0 });
-    expect(A.addDealsFromCompanies([c.id], { year: '2564' })).toEqual({ added: 0, skipped: 1 });
+    expect(A.addDealsFromCompanies([c.id], { year: '2564' })).toMatchObject({ added: 1, skipped: 0 });
+    expect(A.addDealsFromCompanies([c.id], { year: '2564' })).toMatchObject({ added: 0, skipped: 1 });
     expect(A.dealsOf(c.id).map((d) => d.gid)).toEqual([null]);
   });
 

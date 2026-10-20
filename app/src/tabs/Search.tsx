@@ -9,8 +9,13 @@ import { Icon } from '../components/icons';
 import { useSlide } from '../components/useSlide';
 import { FilterBar, ReadChip, type FField, type FVal } from '../components/FilterBar';
 import { Select } from '../components/Select';
+import { TickBox } from '../components/MonthCheck';
+import { BulkBar, searchSel, useSel } from '../components/BulkBar';
+import { useSalesActs } from '../components/SalesToast';
+import { allWord, clearedWord, keyView, pruneSel, selKey, selView, toggleAll, toggleKey } from '../lib/bulk';
 
 const empty = (text: string) => <div className="empty" style={{ padding: '24px 20px' }}>{text}</div>;
+const NONE: ReadonlySet<number> = new Set();
 /** A CFO status as dot + word; "ใกล้หมดอายุ" is the one that needs action now, so it is a tinted chip. */
 const cfoStatus = (st: CfoStatus, label: string) =>
   st === 'soon' ? <Status kind="warn" chip>{label}</Status> : <Status kind={st === 'active' ? 'ok' : st === 'expired' ? 'bad' : 'neutral'}>{label}</Status>;
@@ -32,6 +37,35 @@ export function Search() {
   const fs: Filters = useMemo(() => ({ ...(JSON.parse(restKey) as Omit<Filters, 'q'>), q }), [restKey, q]);
   const F = useMemo(() => filterAll(e, fs), [e, fs, v]);
   const D = e.B.D, CD = e.B.CD, C = e.crm, W = e.W;
+  const { say } = useSalesActs();
+
+  // ---- picking rows for the bulk actions (components/BulkBar.tsx): every result, not only this page;
+  // kept while paging, sorting, opening a company or another page; let go (and said) when the rows change
+  const key = selKey(fs);
+  const S = useSel();
+  const sel = S.key === key ? S.ids : NONE;
+  const sv = useMemo(() => selView(sel, F.out), [sel, F.out]);
+  useEffect(() => {
+    const cur = searchSel.get();
+    if (cur.key !== key) {
+      if (cur.ids.size && cur.key) say(clearedWord(cur.ids.size, keyView(cur.key)));
+      searchSel.set({ key, ids: new Set() });
+    } else {
+      // a picked company that left the results (e.g. เลิกติดตาม with the ติดตาม filter on) is let go
+      const p = pruneSel(cur.ids, F.out);
+      if (p !== cur.ids) searchSel.set({ key, ids: p });
+    }
+  }, [key, F.out]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pick = (k: number) => searchSel.set({ key, ids: toggleKey(sel, k) });
+  const pickAll = () => searchSel.set({ key, ids: toggleAll(sel, F.out) });
+  /** A row's box. Its whole cell picks the row (`cell`: on the desktop rows, out to the row's edges: its full
+   *  height, its left padding, half the gap), so a near miss never opens the company; the box itself is the
+   *  control a keyboard or a screen reader uses. */
+  const tick = (k: number, name: string, cell?: React.CSSProperties) => (
+    <span className="sx-tk" style={cell} onClick={(ev) => (ev.stopPropagation(), pick(k))}>
+      <TickBox on={sel.has(k)} label={'เลือก ' + name} onClick={() => pick(k)} />
+    </span>
+  );
 
   const counts = useMemo(() => {
     const cnt = (k: 'ind' | 'prov' | 'type') => {
@@ -46,7 +80,9 @@ export function Search() {
   const pages = Math.max(1, Math.ceil(F.out.length / ps));
   const page = Math.min(ui.page, pages - 1);
   const sl = F.out.slice(page * ps, page * ps + ps);
-  const rowPad = CONFIG.density === 'compact' ? '8px 20px' : '12px 20px';
+  const rowPy = CONFIG.density === 'compact' ? 8 : 12;
+  const rowPad = `${rowPy}px 20px`;
+  const tickCell: React.CSSProperties = { margin: `-${rowPy}px -7px -${rowPy}px -20px`, padding: `${rowPy}px 7px ${rowPy}px 20px` };
 
   const dictOpts = (arr: string[], m: Record<number, number>, byName?: boolean) =>
     arr.map((l, i) => ({ v: String(i), label: `${l} (${fmtN(m[i] || 0)})`, l, n: m[i] || 0 }))
@@ -108,13 +144,15 @@ export function Search() {
     ? [['ap', 'อนุมัติล่าสุด'], ['exp', 'หมดอายุก่อน'], ['name', 'ชื่อ ก–ฮ']]
     : [['default', 'กลุ่มเป้าหมาย'], ['exp', 'CFO หมดอายุก่อน'], ['invest', 'เงินลงทุนโรงงานใหม่สูงสุด'], ['gi', 'GI ระดับสูงสุด'], ['fac', 'จำนวนโรงงานมากสุด'], ['name', 'ชื่อ ก–ฮ']];
 
-  // following a company (the team's watch list) is done on its page; a followed row says so in grey
-  const watched = (id: number) => C.watch.includes(id);
+  // following a company (the team's watch list): on its page, or many at once with the bar; a followed row says so in grey
+  // (followed by any of its ids: a follow made on a row since merged into it is the company's, lib/follow.ts)
+  const watchSet = useMemo(() => new Set(C.watch.map((id) => e.canonical(id))), [e, v]); // eslint-disable-line react-hooks/exhaustive-deps
+  const watched = (id: number) => watchSet.has(e.canonical(id));
   const cfoView = (c: Company) => ({ st: c.cfoSt, t: CST[c.cfoSt][0], sub: c.cfoSt === 'none' ? '' : c.cfoSt === 'soon' ? `เหลือ ${fmtN(c.days)} วัน · ${isoTh(c.cfoEx)}` : c.cfoEx ? isoTh(c.cfoEx) : '' });
   const rndText = (c: Company) => (c.rnd ? (c.cfoSt === 'expired' ? 'ยื่นใหม่รอบ ' : 'ยื่นรอบ ') + c.rnd : '');
   /** A click anywhere on a result row opens the company (not on its buttons, nor when text was selected). */
   const rowOpen = (ev: React.MouseEvent, id: number) => {
-    if ((ev.target as HTMLElement).closest('button, a, input, select, label')) return;
+    if ((ev.target as HTMLElement).closest('button, a, input, select, label, .sx-tk')) return;
     if (window.getSelection()?.toString()) return;
     open(id);
   };
@@ -139,8 +177,11 @@ export function Search() {
   // certificates only concern groups 1–4 (the others have no CFO)
   const chipsShown = tgtChips.filter((c) => s.view !== 'cert' || c.i == null || c.i < 4);
 
-  const coCols = 'minmax(0,2.3fr) minmax(0,1.2fr) 120px 170px 72px minmax(0,1.2fr)';
-  const ctCols = '150px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 140px';
+  const coCols = '22px minmax(0,2.3fr) minmax(0,1.2fr) 120px 170px 72px minmax(0,1.2fr)';
+  const ctCols = '22px 150px minmax(0,2.2fr) minmax(96px,1fr) 110px 150px 140px';
+  const unitN = F.out.length;
+  /** The header's box: every result (not only this page), with the count in its name. */
+  const headTick = <TickBox on={sv.all} mixed={sv.mixed} label={allWord(s.view, unitN)} onClick={pickAll} />;
 
   return (
     <>
@@ -205,10 +246,24 @@ export function Search() {
               <b>{fmtN(F.out.length)}</b> {s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}
               {s.view !== 'cert' && <span className="sx-sub">มีเบอร์โทร {fmtN(F.ph)}</span>}
             </span>
-            <Select variant="tool" prefix="เรียงตาม" label="เรียงตาม" value={s.sort} onChange={(v) => setF({ sort: v })} options={sortOpts.map(([v, label]) => ({ v, label }))} search={false} width={260} align="end" />
+            <span className="sx-foot-r">
+              {unitN > 0 && (
+                <button type="button" role="checkbox" aria-checked={sv.mixed ? 'mixed' : sv.all} className="bk-all hv" onClick={pickAll}>
+                  <span className={'ckb' + (sv.all || sv.mixed ? ' on' : '')} aria-hidden="true">
+                    {sv.mixed ? <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" focusable="false"><path d="M6.5 12h11" /></svg> : sv.all ? <Icon name="check" size={14} /> : null}
+                  </span>
+                  {allWord(s.view, unitN)}
+                </button>
+              )}
+              <Select variant="tool" prefix="เรียงตาม" label="เรียงตาม" value={s.sort} onChange={(v) => setF({ sort: v })} options={sortOpts.map(([v, label]) => ({ v, label }))} search={false} width={260} align="end" />
+            </span>
           </div>
         </div>
       </section>
+
+      {/* always in its place while there are results (a quiet line until something is picked): ticking the
+          first row never moves the list */}
+      {unitN > 0 && <BulkBar view={s.view} rows={F.out} sel={sel} n={sv.n} />}
 
       {s.view === 'co' && narrow && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -216,12 +271,15 @@ export function Search() {
             const cv = cfoView(c);
             const src = srcWords(c.src).map((t) => (t === 'GI' && c.giLive ? 'GI ' + c.giLive : t)).join(' · ');
             return (
-              <div key={c.id} className="sx-mcard card">
-                <button onClick={() => open(c.id)} className="hv-tx sx-mname">
-                  <span className="t-name">{c.name}</span>
-                  <span className="t-meta">{[c.code, D.prov[c.prov] || '—', 'กลุ่ม ' + (c.tgt + 1), watched(c.id) ? 'ติดตามอยู่' : ''].filter(Boolean).join(' · ')}</span>
-                  {src && <span className="t-meta">{src}</span>}
-                </button>
+              <div key={c.id} className={'sx-mcard card' + (sel.has(c.id) ? ' on' : '')}>
+                <div className="sx-mtop">
+                  {tick(c.id, c.name)}
+                  <button onClick={() => open(c.id)} className="hv-tx sx-mname">
+                    <span className="co-name">{c.name}</span>
+                    <span className="t-sec">{[c.code, D.prov[c.prov] || '—', 'กลุ่ม ' + (c.tgt + 1), watched(c.id) ? 'ติดตามอยู่' : ''].filter(Boolean).join(' · ')}</span>
+                    {src && <span className="t-meta">{src}</span>}
+                  </button>
+                </div>
                 <div className="sx-mgrid">
                   <span className="sx-mcol">
                     <span className="t-meta">CFO</span>
@@ -244,14 +302,19 @@ export function Search() {
       {s.view === 'cert' && narrow && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {(sl as Cert[]).map((ct) => (
-            <button key={ct.cid} onClick={() => open(ct.gid)} className="sx-mcard card hv">
-              <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                <span className="t-sec">{ct.cert || '—'}</span>
-                {cfoStatus(ct.st, CST[ct.st][0])}
-              </span>
-              <span className="t-name">{ct.org}</span>
-              <span className="t-meta">{ct.provTxt || CD.prov[ct.prov] || '—'} · อนุมัติ {isoTh(ct.ap)} · หมดอายุ {isoTh(ct.ex)}</span>
-            </button>
+            <div key={ct.cid} className={'sx-mcard card' + (sel.has(ct.cid) ? ' on' : '')}>
+              <div className="sx-mtop">
+                {tick(ct.cid, ct.org)}
+                <button onClick={() => open(ct.gid)} className="hv-tx sx-mname">
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                    <span className="t-sec">{ct.cert || '—'}</span>
+                    {cfoStatus(ct.st, CST[ct.st][0])}
+                  </span>
+                  <span className="co-name">{ct.org}</span>
+                  <span className="t-meta">{ct.provTxt || CD.prov[ct.prov] || '—'} · อนุมัติ {isoTh(ct.ap)} · หมดอายุ {isoTh(ct.ex)}</span>
+                </button>
+              </div>
+            </div>
           ))}
           {!F.out.length && <div className="card">{empty('ไม่พบรายการตามเงื่อนไข')}</div>}
         </section>
@@ -261,14 +324,16 @@ export function Search() {
         <section style={{ ...card, overflowX: 'auto' }}>
           <div style={{ minWidth: 900 }}>
             <div className="sx-head thead" style={{ gridTemplateColumns: coCols }}>
+              {headTick}
               <span>บริษัท</span><span>จังหวัด · อุตสาหกรรม</span><span>แหล่งข้อมูล</span><span>CFO</span><span>GI</span><span>ติดต่อ · สถานะการขาย</span>
             </div>
             {(sl as Company[]).map((c) => {
               const cv = cfoView(c), rt = rndText(c);
               return (
-                <div key={c.id} className="sxr" onClick={(ev) => rowOpen(ev, c.id)} style={{ gridTemplateColumns: coCols, padding: rowPad }}>
+                <div key={c.id} className={'sxr' + (sel.has(c.id) ? ' on' : '')} onClick={(ev) => rowOpen(ev, c.id)} style={{ gridTemplateColumns: coCols, padding: rowPad }}>
+                  {tick(c.id, c.name, tickCell)}
                   <button onClick={() => open(c.id)} className="sxr-name">
-                    <span className="t-name">{c.name}</span>
+                    <span className="co-name dense">{c.name}</span>
                     <span className="t-sec sxr-sub">
                       {['กลุ่ม ' + (c.tgt + 1), c.code, D.type[c.type], c.set || '', c.ids.length > 1 ? `รวม ${c.ids.length} แถว` : ''].filter(Boolean).join(' · ')}
                       {watched(c.id) && <span className="t-meta"> · ติดตามอยู่</span>}
@@ -301,15 +366,17 @@ export function Search() {
         <section style={{ ...card, overflowX: 'auto' }}>
           <div style={{ minWidth: 900 }}>
             <div className="sx-head thead" style={{ gridTemplateColumns: ctCols }}>
+              {headTick}
               <span>เลขที่ใบรับรอง</span><span>องค์กร · กิจกรรม</span><span>จังหวัด</span><span>วันที่อนุมัติ</span><span>วันหมดอายุ</span><span>สถานะ</span>
             </div>
             {(sl as Cert[]).map((ct) => {
               const rt = ct.isLatest && !ct.bad && ct.co ? rndText(ct.co) : '';
               return (
-                <div key={ct.cid} className="sxr" onClick={(ev) => rowOpen(ev, ct.gid)} style={{ gridTemplateColumns: ctCols, padding: rowPad }}>
+                <div key={ct.cid} className={'sxr' + (sel.has(ct.cid) ? ' on' : '')} onClick={(ev) => rowOpen(ev, ct.gid)} style={{ gridTemplateColumns: ctCols, padding: rowPad }}>
+                  {tick(ct.cid, ct.org, tickCell)}
                   <span className="t-sec">{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} className="sxr-name">
-                    <span className="t-name">{ct.org}</span>
+                    <span className="co-name dense">{ct.org}</span>
                     <span className="t-sec sxr-sub">{ct.act}{watched(ct.gid) && <span className="t-meta"> · ติดตามอยู่</span>}</span>
                   </button>
                   <span>{ct.provTxt || CD.prov[ct.prov] || '—'}</span>

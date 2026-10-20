@@ -74,10 +74,30 @@
 .pl-wrap .pl-task>.ckb{margin-top:8px}
 .pl-wrap .pl-task-act{flex-basis:100%;justify-content:flex-end}
 
+/* ---- service types (lib/svcType.ts, components/SvcChips.tsx). "แยกสีตาม ประเภทบริการ" puts the TYPE's mark in
+   `--c` / `--cb` on the same chips, dots, stripes and bars (Plan.tsx markVars), so nothing else changes shape;
+   installments keep their status outline. In both modes a company's types are written beside its name. */
+/* "แยกสีตาม ลูกค้า | ประเภทบริการ" beside the month (the nav stays at the right) */
+.pl-colorby{display:flex;align-items:center;gap:8px;margin-right:auto;min-width:0}
+.pl-colorby-l{font-size:13px;color:var(--ink-2);white-space:nowrap}
+.pl-colorby .seg>button{height:30px;padding:0 12px;font-size:13px}
+/* a type chip: its word in its ink on its tint, a rectangle with 6px corners (never a pill: a status chip is
+   one), 12/400; several sit side by side in list order */
+.svts{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;vertical-align:middle}
+.svt{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:6px;background:var(--kb);color:var(--k);font-size:12px;font-weight:400;line-height:1;white-space:nowrap;flex:none}
+/* the name and its chips on one line; the chips go under a name too long for both */
+.pl-nm-row,.pl-up-n{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0}
+@media (max-width:760px){
+  /* phones: the month and its buttons first; "แยกสีตาม" with its toggle on a line of its own under them, the
+     label kept so the toggle reads as a choice of colour, not a filter */
+  .pl-colorby{order:3;flex-basis:100%;margin-right:0}
+}
+
 /* high contrast: the marks become outlines and the names carry the meaning */
 @media (forced-colors:active){
   .pl-ev{border:1px solid CanvasText}
   .pl-ev::before{background:CanvasText}
   .pl-ev.pay.late{border-width:2px}
   .pl-dot,.pl-lg i,.pl-filt i,.pl-bar,.pl-task.cc::before{forced-color-adjust:none}
+  .svt{border:1px solid CanvasText}
 }

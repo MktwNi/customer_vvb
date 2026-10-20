@@ -74,7 +74,7 @@ export function Dedup() {
                 <div className="dd-cmp" style={{ gridTemplateColumns: cols }}>
                   <span />
                   {rows.map((r, k) => (
-                    <button key={g.ids[k]} onClick={() => open(g.ids[k])} className="hv-tx dd-name">{r.name}</button>
+                    <button key={g.ids[k]} onClick={() => open(g.ids[k])} className="hv-tx dd-name co-name">{r.name}</button>
                   ))}
                   {facts.map(([k, v]) => {
                     const same = v.every((x) => x === v[0]);

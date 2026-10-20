@@ -1,6 +1,7 @@
 /* ---- design system "Soft brand, quiet content" (simple-design/final/design-system.md): two weights
-   (400 to read, 500 to name and count; 600 only on the หมวด band name), eight sizes, colour only when it
-   means something. The tokens are on :root below; src/design.guard.test.ts keeps the code on them. */
+   (400 to read, 500 to name and count; 600 only on the หมวด band name and on a company's name where it is
+   the title of a row, card or panel: .co-name at the end), eight sizes, colour only when it means
+   something. The tokens are on :root below; src/design.guard.test.ts keeps the code on them. */
 body{margin:0;background:var(--frame);color:var(--ink);font-family:'Kanit',sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
 input,select,button,textarea{font-family:inherit}
 /* an unstyled button would draw 13.333px black text */
@@ -203,7 +204,7 @@ button.kpi{cursor:pointer}
 /* ---- company drawer (components/CompanyDrawer.tsx): a white head on the page colour */
 .dr-head{background:#fff;border-bottom:1px solid var(--line);padding:20px 28px 18px;display:flex;flex-direction:column;gap:10px}
 .dr-meta{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:var(--fs-sec);color:var(--muted)}
-.dr-name{margin:0;font-size:var(--fs-title);font-weight:500;line-height:1.35;color:var(--ink);text-wrap:pretty;min-width:0}
+.dr-name{margin:0;line-height:1.35;text-wrap:pretty;min-width:0}
 .dr-line{font-size:var(--fs-sec);color:var(--ink-2)}
 .dr-line b{font-weight:400;color:var(--ink)}
 .dr-tabs{position:sticky;top:0;z-index:2;background:var(--frame);padding:4px 28px 0}
@@ -248,7 +249,7 @@ button.kpi{cursor:pointer}
 
 /* ---- ตรวจข้อมูลซ้ำ (tabs/Dedup.tsx): a compact comparison, what differs stands out */
 .dd-cmp{display:grid;gap:6px 14px;align-items:baseline;font-size:var(--fs-body)}
-.dd-name{cursor:pointer;border:0;padding:0;text-align:left;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-wrap:pretty}
+.dd-name{cursor:pointer;border:0;padding:0;text-align:left;font:inherit;line-height:1.4;text-wrap:pretty}
 .dd-v{font-weight:500;color:var(--ink);word-break:break-word}
 .dd-v.same{font-weight:400;color:var(--muted)}
 
@@ -365,7 +366,7 @@ button.kpi{cursor:pointer}
   --hero:linear-gradient(135deg,#1745B8 0%,#1F5BD8 100%);
   --on-hero-2:#E3EAFB;
 
-  /* ---- type: eight sizes, two weights (600 only on the หมวด band name) */
+  /* ---- type: eight sizes, two weights (600 only on the หมวด band name and .co-name) */
   --fs-meta:12px; --fs-sec:13px; --fs-body:14px; --fs-card:16px;
   --fs-section:18px; --fs-title:24px; --fs-kpi:28px; --fs-hero:40px;
   --fw-read:400; --fw-name:500; --fw-band:600;
@@ -591,6 +592,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
   .plan-row>:nth-child(2),.plan-row>:nth-child(3){grid-column:2/4}
   .plan-row>:nth-child(4){grid-column:2}
   .plan-row>:nth-child(5){grid-column:3}
+  .plan-row>.ckb{align-self:start;margin-top:2px}
 }
 
 /* ---- search page (tabs/Search.tsx): a white search band, quiet group tiles, folded filters, flat results */
@@ -647,7 +649,7 @@ body{background:radial-gradient(900px 520px at -8% -12%,rgba(255,255,255,.2),tra
 @media (hover:hover){.sxr:hover{background:var(--tint)}}
 .sxr:has(:focus-visible){background:var(--tint)}
 .sxr-name{cursor:pointer;border:0;background:transparent;text-align:left;padding:0;display:flex;flex-direction:column;gap:2px;min-width:0;color:var(--ink);font:inherit}
-.sxr-name .t-name{text-wrap:pretty}
+.sxr-name .co-name{text-wrap:pretty}
 .sxr-sub{line-height:1.45}
 .sxr-col{display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0}
 /* phones: one card per company */
@@ -714,24 +716,48 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 @media (hover:hover){.pl-cell.sel:hover{background:var(--tint-2)}}
 /* a day's appointments and installments: custcolor.css (.pl-ev chips, phone dots, the legend) */
 .pl-pay{cursor:pointer;display:flex;justify-content:space-between;align-items:baseline;gap:4px 10px;flex-wrap:wrap;border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 12px;font:inherit;font-size:var(--fs-body);color:var(--ink);text-align:left;background-color:var(--card)}
-.pl-pay small{font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap}
+.pl-pay-t{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pl-pay>small{font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap}
 /* in งานที่กำลังจะถึง it is one more line of the list */
 .pl-day>.pl-pay.up{margin:0 4px;padding:8px;border:0;border-top:1px solid var(--divider);border-radius:0}
-.pl-pay.late small{color:var(--bad)}
+/* its date reads as the appointments' beside it (.pl-up-when); a late one stays red (the next rule) */
+.pl-pay.up>small{font-size:var(--fs-sec);color:var(--muted)}
+.pl-pay.late>small{color:var(--bad)}
 .pl-day{padding:0 0 16px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
 .pl-day>*:not(.pl-day-head){margin:0 18px}
 .pl-day-head{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px}
 .pl-day-dn{width:48px;height:48px;flex:none;border-radius:var(--r-inner);background:var(--tint);color:var(--link);display:flex;align-items:center;justify-content:center;font-size:var(--fs-section);font-weight:500}
 .pl-day-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.4}
-.pl-day-t b{font-size:var(--fs-card);font-weight:500}
+/* the day's heading: a size up from the 16px/600 names of its cards */
+.pl-day-t b{font-size:var(--fs-section);font-weight:500}
 .pl-day-t span{font-size:var(--fs-sec);color:var(--ink-2)}
 .pl-empty{font-size:var(--fs-body);color:var(--ink-2);padding:6px 0}
 .pl-task{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 12px;background:#fff}
 .pl-task-act{display:flex;gap:6px;flex:none;align-items:center}
+.pl-task-t{flex:1 1 180px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pl-task-n{cursor:pointer;border:0;padding:0;text-align:left;line-height:1.4;overflow-wrap:anywhere}
+.pl-task.done-t .pl-task-n{text-decoration:line-through}
+.pl-up-when{font-size:var(--fs-sec);color:var(--muted);white-space:nowrap}
 .pl-up-h{font-size:var(--fs-card);font-weight:500;padding-top:8px;color:var(--ink)}
 .pl-up{align-items:center}
 /* the stage in the list: a cell picker that reads as plain text until the pointer is on it */
 .sel-btn.cell.pl-stage{font-size:var(--fs-sec);color:var(--ink-2);margin-left:0;max-width:100%}
+/* "รายชื่อที่ต้องติดต่อ" (lib/planList.ts): the name, then where it comes from as calm tags (ติดตาม, the tracker
+   job's next step, which opens the job), what is late in words, and the grey context */
+.pl-who{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.pl-who>:first-child{margin-top:1px}
+.pl-who-t{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pl-who-n{cursor:pointer;border:0;padding:0;text-align:left;font:inherit;line-height:1.4;align-self:flex-start;max-width:100%;overflow-wrap:anywhere}
+.pl-src{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.4}
+.pl-src .chip{flex:none}
+.pl-src .pl-tag{cursor:pointer;border:0;border-radius:11px;font:inherit;font-size:var(--fs-meta);color:var(--neutral);height:auto;min-height:22px;padding:3px 10px;line-height:1.35;white-space:normal;text-align:left;flex:0 1 auto;max-width:100%}
+.pl-warn{color:var(--warn)}
+.pl-meta{min-width:0;color:var(--muted)}
+/* in the stage column: its text starts where a cell picker's does (its 1px border and 6px padding) */
+.pl-nolink{font-size:var(--fs-sec);color:var(--muted);padding-left:7px}
+.pl-none{display:flex;flex-direction:column;gap:6px;padding:16px 0 4px;border-top:1px solid var(--divider);font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
+.pl-none b{font-size:var(--fs-card);font-weight:500;color:var(--ink)}
+.pl-none-a{display:flex;flex-wrap:wrap;gap:6px 20px}
 @media (max-width:760px){
   .pl-sum{gap:12px 0}
   .pl-segs{flex-wrap:wrap;flex-basis:100%}
@@ -1092,7 +1118,8 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-nmw{display:flex;align-items:center;gap:10px;min-width:0}
 .sl-row.cur .co-ava,.sl-mc.cur .co-ava{background:#fff}
 .sl-nm{display:flex;flex-direction:column;align-items:flex-start;min-width:0;gap:1px;flex:1}
-.sl-nm-b{cursor:pointer;border:0;padding:0;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.45}
+/* a customer's name: .co-name gives its type (dense in a table); this rule only its layout */
+.sl-nm-b{cursor:pointer;border:0;padding:0;font:inherit;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.45}
 @media (hover:hover){.sl-nm-b:hover{color:var(--link)}}
 .sl-nm-s{font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap;display:flex;gap:6px;align-items:baseline;line-height:1.5;min-width:0;max-width:100%;overflow:hidden}
 .sl-nm-s>.sl-ct{overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -1474,6 +1501,7 @@ button.sl-amt{cursor:pointer}
 .dp-top{display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0}
 .dp-crumb{font-size:var(--fs-sec);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dp-acts{display:flex;gap:8px;align-items:center;flex:none}
+/* (a customer's name: .co-name title on top; a joint quotation's title: this) */
 .dp-name{margin:0 0 0 -4px;width:calc(100% + 4px);min-width:0;font:inherit;font-size:var(--fs-title);font-weight:500;line-height:1.3;color:var(--ink);border:0;border-bottom:1px dashed transparent;border-radius:8px 8px 0 0;padding:2px 4px}
 @media (hover:hover){input.dp-name:hover{border-bottom-color:var(--field)}}
 input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);background-color:var(--tint)}
@@ -2231,4 +2259,19 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .t-meta{font-size:var(--fs-meta);color:var(--muted)}
 .t-sec{font-size:var(--fs-sec);color:var(--ink-2)}
 .t-name{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
+/* a company's name where it is the title of a row, a card or a panel: the one thing there in 600 and the
+   darkest ink, a size up from the row's text (16px in lists, cards, panels and phone cards). Dense tables
+   (.dense: the Sales Tracker, the search results, Cashflow, a bell row) keep 14px, so their rows keep
+   their height, and so do the Sales Tracker's and Cashflow's phone cards, under their 16px/600 section
+   bands (a name the band's size would read as another band). A heading over names stays a size up from
+   them (.tr-feed-t, .pl-day-t). The line under a name is .t-sec (13px, dark grey: the company's code,
+   province and group read the same on ค้นหา, its phone cards and บริษัทที่ติดตาม), further details .t-meta
+   (12px, light grey); status words and service-type chips keep their colours. The element's own rule
+   sets only its layout (wrapping, an ellipsis), never its size, weight or colour. design.guard.test.ts
+   allows 600 here and on the band name only. */
+.co-name{font-size:var(--fs-card);font-weight:600;color:var(--ink)}
+.co-name.dense{font-size:var(--fs-body)}
+/* the name heading a company's or a job's panel keeps the page title's size (a phone's job panel: 18px) */
+.co-name.title{font-size:var(--fs-title)}
+@media (max-width:560px){.dp-name.co-name.title{font-size:var(--fs-section)}}
 .t-ok{color:var(--ok)}.t-warn{color:var(--warn)}.t-bad{color:var(--bad)}.t-muted{color:var(--muted)}.t-link{color:var(--link)}

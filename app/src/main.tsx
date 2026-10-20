@@ -12,6 +12,8 @@ import './cashflow.css';
 import './quotes.css';
 // per-customer colours on แผนติดต่อ (lib/custColor.ts)
 import './custcolor.css';
+// ติดตาม: บริษัทที่ติดตาม on top (tabs/TrackFollow), the registry's lists below in quiet cards
+import './track.css';
 // configurable roles and permission requests: the Users page's sections, the request dialog, สิทธิ์ของฉัน
 import './roles.css';
 // notifications and the quotation check: the bell, the check sheet, การแจ้งเตือนของฉัน and the admin section
@@ -27,6 +29,8 @@ import './paycheck.css';
 import './expense.css';
 // job expenses in the money views: Cashflow's money out, the out side of the month check, the Dashboard's card
 import './expense-money.css';
+// many search results at once: the boxes, เลือกทั้งหมด and the bar over the list (components/BulkBar)
+import './bulk.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

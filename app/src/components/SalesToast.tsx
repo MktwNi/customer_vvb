@@ -4,6 +4,9 @@ import { todayISO } from '../lib/format';
 import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
+import { docById, qtSentView } from '../lib/notify';
+import { undoSentNote } from '../lib/bulk';
+import { planDayLink } from '../lib/planCal';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -75,18 +78,44 @@ export function SalesMessages() {
   useEngineVersion();
   const acts = useSalesActs();
   const t = ui.slToast;
-  const held = useRef(false);
-  // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves)
+  const box = useRef<HTMLDivElement>(null);
+  // what the team script did about a quotation this account just attached or edited: who was mailed, or why
+  // nobody was (a question waiting at the bottom keeps its place: the bell has it too)
+  const fresh = e.qtFresh;
+  useEffect(() => {
+    if (!fresh) return;
+    const doc = docById(e.sales, fresh.id), o = doc && e.qtSentFor(doc);
+    if (!doc || !o || (ui.slToast && !ui.slToast.ms)) return;
+    const ctx = e.qtSentCtx(), admin = ctx.admin;
+    const w = qtSentView(o, ctx);
+    acts.say(`${doc.docNo || 'ใบเสนอราคา'} · ${w.text}`, { ms: 9000, ...(w.fix && admin ? { acts: [{ label: w.fix === 'checker' ? 'ตั้งผู้ตรวจ' : 'ดูการแจ้งเตือน', act: 'notify' as const }, { label: 'ปิด', act: 'dismiss' as const }] } : {}) });
+  }, [fresh?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a message goes after its time unless the pointer or the keyboard is on it (then when it leaves). Asked
+  // of the message itself at each tick: a flag set on mouseenter / focus would stay set when the message is
+  // removed under the pointer (its link clicked: ดูบริษัทที่ติดตาม, ดูตารางปี …), and hold every later one.
   useEffect(() => {
     if (!t || !t.ms) return;
     const n = t.n;
-    const h = setInterval(() => !held.current && set((s) => (s.slToast?.n === n ? { slToast: null } : {})), t.ms);
+    const h = setInterval(() => !box.current?.matches(':hover, :focus-within') && set((s) => (s.slToast?.n === n ? { slToast: null } : {})), t.ms);
     return () => clearInterval(h);
   }, [t?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const run = (a: ToastAct) => {
     if (a.act === 'close' && a.deal) return acts.close(a.deal);
     if (a.act === 'closedTab') return go('sales', { slView: 'closed', slToast: null });
+    // the search page's bulk actions: where the companies went
+    // (บริษัทที่ติดตาม, first on the ติดตาม page: tabs/TrackFollow.tsx, id track-watch; a day of แผนติดต่อ with
+    // every customer and type shown, lib/planCal.ts planDayLink)
+    if (a.act === 'goTrack') {
+      go('track', { slToast: null, sel: null });
+      return void requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('track-watch')?.scrollIntoView({ block: 'start' })));
+    }
+    // a send just made, taken back (engine.undoSent: within 10 minutes, rows nobody has worked on since)
+    if (a.act === 'sendUndo' && a.k) return acts.say(undoSentNote(e.undoSent(a.k)), { ms: 6000 });
+    if (a.act === 'goSales') return go('sales', { slView: 'table', ...(a.year ? { slYear: a.year } : {}), slToast: null, sel: null });
+    if (a.act === 'goPlan') return go('plan', { ...(a.day ? planDayLink(a.day) : {}), slToast: null, sel: null });
     if (a.act === 'plan' && a.deal) return set({ deal: a.deal, dpPlan: 'edit', slToast: null });
+    // nobody could be told about a quotation: the admin's page says why, and who checks
+    if (a.act === 'notify') return go('users', { usersSec: 'notify', slToast: null, deal: null });
     // a quotation check taken back (the script allows it for 10 minutes, for the checker's own latest)
     if (a.act === 'qtUndo' && a.k) {
       const doc = e.sales.docs[a.k];
@@ -126,7 +155,7 @@ export function SalesMessages() {
       {/* (centred in the deal panel while it is open) */}
       <div className={'sl-live' + (ui.deal ? ' in-dp' : '')} role="status" aria-live="polite">
         {t && (
-          <div className="sl-toast" key={t.n} onMouseEnter={() => (held.current = true)} onMouseLeave={() => (held.current = false)} onFocus={() => (held.current = true)} onBlur={() => (held.current = false)}>
+          <div className="sl-toast" key={t.n} ref={box}>
             <span>{t.text}</span>
             {t.acts?.map((a) => (
               <button key={a.label} type="button" className={a.primary ? 'p' : ''} onClick={() => run(a)}>{a.label}</button>

@@ -547,9 +547,9 @@ function NameCell({ S, r, onOpen, tag }: { S: SalesState; r: ChkRow; onOpen: () 
       <span className="cf-nm">
         <span className="cf-nm-l">
           {r.deal ? (
-            <button type="button" className="cf-nm-b hv-tx" onClick={onOpen} title={`${nameOf(r)} · ${r.deal.client} เปิดรายละเอียด`}>{nameOf(r)}</button>
+            <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={onOpen} title={`${nameOf(r)} · ${r.deal.client} เปิดรายละเอียด`}>{nameOf(r)}</button>
           ) : (
-            <span className="cf-nm-b">{nameOf(r)}</span>
+            <span className="cf-nm-b co-name dense">{nameOf(r)}</span>
           )}
         </span>
         {/* the cross-year chip on the second line: the name (a joint quotation's "มจพ · ใบเสนอราคาร่วม 4 บริษัท")
@@ -583,7 +583,7 @@ function UndatedRow({ S, l }: { S: SalesState; l: CashLine }) {
         <span className="cf-nmw">
           <CoAvatar name={c?.name || l.deal.client} web={c?.web} set={c?.set} size={32} />
           <span className="cf-nm">
-            <span className="cf-nm-l"><button type="button" className="cf-nm-b hv-tx" onClick={() => set({ deal: l.deal.id })}>{payerName(l, shortName)}</button></span>
+            <span className="cf-nm-l"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={l.deal.client}>{payerName(l, shortName)}</button></span>
             <span className="cf-nm-s">{subOf(S, l.deal)}</span>
           </span>
         </span>
@@ -615,7 +615,7 @@ function PhoneList({ S, groups, sumOf, undated, today, ctl }: { S: SalesState; g
             return (
               <div key={r.key} className="mc-mi">
                 <div className="cf-mi-1">
-                  {r.deal ? <button type="button" className="cf-nm-b hv-tx" onClick={() => set({ deal: r.deal!.id })}>{nameOf(r)}</button> : <span className="cf-nm-b">{nameOf(r)}</span>}
+                  {r.deal ? <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: r.deal!.id })} title={r.deal.client}>{nameOf(r)}</button> : <span className="cf-nm-b co-name dense">{nameOf(r)}</span>}
                   <span className="cf-amt">{m0(r.amt)}</span>
                 </div>
                 <div className="cf-mi-2"><span>{inst.text} · {got ? `รับ ${dmTh(r.date)}` : `ครบกำหนด ${dmTh(r.date)}`}{r.kind === 'got' && r.by.length ? ` · บันทึกโดย ${r.by.join(', ')}` : ''}</span></div>
@@ -636,7 +636,7 @@ function PhoneList({ S, groups, sumOf, undated, today, ctl }: { S: SalesState; g
           </div>
           {undated.map((l) => (
             <div key={l.id} className="mc-mi">
-              <div className="cf-mi-1"><button type="button" className="cf-nm-b hv-tx" onClick={() => set({ deal: l.deal.id })}>{payerName(l, shortName)}</button><span className="cf-amt">{m0(l.amt)}</span></div>
+              <div className="cf-mi-1"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={l.deal.client}>{payerName(l, shortName)}</button><span className="cf-amt">{m0(l.amt)}</span></div>
               <div className="cf-mi-2"><span>{instText(l)} · {undatedWhy(S, l)}</span></div>
               <div className="cf-mi-2"><UndatedAct l={l} /></div>
             </div>

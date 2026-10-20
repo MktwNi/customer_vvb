@@ -83,7 +83,7 @@
 .jc-r.ph{min-height:30px;padding-top:6px;padding-bottom:4px;font-size:var(--fs-meta);color:var(--muted);background:#FBFCFF}
 .jc-r.ph .r{text-align:right}
 .jc-nm{display:flex;flex-direction:column;min-width:0;line-height:1.4}
-.jc-nm b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jc-nm b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .jc-nm small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .jc-r .fld{height:34px;text-align:right;padding:0 10px;width:100%;box-sizing:border-box}
 .jc-pct{text-align:right;color:var(--ink-2);font-size:var(--fs-sec)}
@@ -108,7 +108,8 @@
 .jp-r .r{text-align:right}
 .jp-co{display:flex;gap:10px;align-items:center;min-width:0}
 .jp-nm{display:flex;flex-direction:column;min-width:0;line-height:1.4}
-.jp-nm button{cursor:pointer;border:0;padding:0;background:none;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* (no font shorthand: .co-name gives the name its type) */
+.jp-nm button{cursor:pointer;border:0;padding:0;background:none;line-height:inherit;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .jp-nm small{font-size:var(--fs-meta);color:var(--muted)}
 .jp-sh{display:flex;flex-direction:column;align-items:flex-end;line-height:1.4}
 .jp-sh small{font-size:var(--fs-meta);color:var(--muted)}
@@ -153,7 +154,7 @@
 .jm-list{display:flex;flex-direction:column;border-top:1px solid var(--divider)}
 .jm-r{cursor:pointer;display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;border:0;border-bottom:1px solid var(--divider);background:transparent;padding:10px 2px;font:inherit;text-align:left;color:var(--ink)}
 .jm-t{display:flex;flex-direction:column;min-width:0;line-height:1.4}
-.jm-t b{font-size:var(--fs-body);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jm-t b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .jm-t small,.jm-a small{font-size:var(--fs-meta);color:var(--muted)}
 .jm-a{display:flex;flex-direction:column;align-items:flex-end;line-height:1.4;font-size:var(--fs-body);color:var(--muted)}
 .jm-f{display:flex;justify-content:space-between;gap:10px;align-items:baseline;font-size:var(--fs-meta);color:var(--muted)}

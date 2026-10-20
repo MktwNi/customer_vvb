@@ -1,0 +1,52 @@
+/* ---- many search results at once (tabs/Search.tsx, components/BulkBar.tsx): a box on every row, "เลือกทั้งหมด"
+   for every result (not only the page shown), and a calm bar over the list that stays under the top while the
+   list scrolls */
+.sx-foot-r{display:flex;align-items:center;justify-content:flex-end;gap:8px 12px;flex-wrap:wrap}
+.bk-all{cursor:pointer;display:inline-flex;align-items:center;gap:10px;height:var(--ctl-tool);padding:0 12px 0 8px;border:0;border-radius:var(--r-pill);font:inherit;font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap}
+.bk-all .ckb{width:20px;height:20px;background-color:var(--bg)}
+.bk-all:is([aria-checked=true],[aria-checked=mixed]){color:var(--link)}
+
+/* The bar is one row of the same height before and after the first tick (a quiet line, then the count and
+   the actions), so ticking never moves the list under the pointer; buttons that do not fit become one menu. */
+.bk-bar{position:sticky;top:calc(var(--sticky-top) + 8px);z-index:7;box-sizing:border-box;min-height:calc(var(--ctl-tool) + 18px);display:flex;align-items:center;gap:12px;flex-wrap:nowrap;margin-bottom:-10px;padding:8px 10px 8px 18px;border-radius:18px;background:#fff;border:1px solid var(--tint-line);box-shadow:var(--sh-card)}
+/* the strip above it, while it is stuck, hides the rows passing under it */
+.bk-bar::before{content:'';position:absolute;left:-2px;right:-2px;top:-10px;height:9px;background:var(--frame);pointer-events:none}
+/* nothing picked yet: the same box, without its card, in its place in the page (not stuck) */
+.bk-bar.idle{position:relative;top:auto;z-index:auto;background:transparent;border-color:transparent;box-shadow:none}
+.bk-bar.idle::before{display:none}
+.bk-bar.idle .bk-n{font-size:var(--fs-sec);font-weight:400;color:var(--muted)}
+.bk-n{flex:0 1 auto;min-width:0;margin-right:4px;font-size:var(--fs-body);font-weight:500;color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.bk-acts{flex:none;display:flex;flex-wrap:nowrap;gap:8px}
+.bk-why{flex:1 1 0;min-width:0;font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-clear{flex:none;margin-left:auto;height:var(--ctl-tool);white-space:nowrap}
+.bk-menu{flex:none}
+.bk-menu svg{flex:none}
+/* the hidden copy the one-row choice is measured on */
+/* (a zero-size, clipped box: never widens the page; its items keep their natural widths) */
+.bk-meas{position:absolute;left:0;top:0;display:flex;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;white-space:nowrap}
+.bk-meas>*{flex:none}
+.bk-mn{font-size:var(--fs-body);font-weight:500;font-variant-numeric:tabular-nums}
+.bk-mw{font-size:var(--fs-sec)}
+.bk-mlist{display:flex;flex-direction:column;gap:1px}
+.bk-mwhy{margin:0 0 6px;padding:4px 10px 8px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5;border-bottom:1px solid var(--divider)}
+@media (max-width:760px){
+  .bk-bar{gap:8px;padding:8px 8px 8px 14px}
+}
+
+/* a row's box: the whole leading cell (the row's full height, from its left edge into the gap) picks the row,
+   so a near miss never opens the company; the box takes the hover then */
+.sx-tk{cursor:pointer;align-self:stretch;display:flex;align-items:center}
+@media (hover:hover){.sx-tk:hover>.ckb:not(.on){border-color:var(--brand)}}
+@supports (color:color-mix(in srgb,red,blue)){@media (hover:hover){.sx-tk:hover>.ckb.on{background-color:color-mix(in srgb,var(--bg) 80%,#06165A)}}}
+/* phones: a padded target of at least 44px around the 22px box */
+.sx-mtop>.sx-tk{align-self:flex-start;align-items:flex-start;margin:-12px -6px -10px -14px;padding:13px 6px 10px 14px}
+
+/* a picked row keeps the light tint (hover a shade deeper) */
+.sxr.on{background:var(--tint)}
+@media (hover:hover){.sxr.on:hover{background:var(--tint-2)}}
+.sx-mtop{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.sx-mtop>.sx-mname{flex:1;min-width:0}
+.sx-mcard.on{border-color:var(--tint-line);background:var(--tint)}
+@media (forced-colors:active){.sxr.on,.sx-mcard.on{outline:2px solid Highlight;outline-offset:-2px}}
+/* phones: เลือกทั้งหมด on the left, near the cards' boxes */
+@media (max-width:760px){.sx-foot-r{flex:1 1 100%;justify-content:space-between}}

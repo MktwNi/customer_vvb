@@ -16,6 +16,7 @@ import { useDialog } from './useDialog';
 // joint quotations (package quotes, item 7): the payer's header and a member's line
 import { jointOf, jointRole } from '../lib/sales';
 import { jointTitle } from '../lib/joint';
+import { followIdsOf } from '../lib/follow';
 
 const box: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10 };
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
@@ -70,7 +71,9 @@ export function CompanyDrawer() {
   const multi = c.ids.length > 1;
   const from = (src: number) => (multi ? 'จาก ' + gccCode(src) : '');
   const st = stageOf(C.stages[c.id]);
-  const watched = C.watch.includes(c.id);
+  // followed by any of its ids (a follow made on a row since merged into it); unfollowing removes them all
+  const watchIds = followIdsOf(C.watch, c.id, (id) => e.canonical(id));
+  const watched = watchIds.length > 0;
   const certs = (e.certsBy.get(c.id) || []).slice().sort((a, b) => (b.ex || '').localeCompare(a.ex || ''));
   const logs = (C.log[c.id] || []).slice().sort((a, b) => b.at.localeCompare(a.at));
   const lastC = logs.find((l) => ['call', 'email', 'meet', 'follow'].includes(l.type));
@@ -194,13 +197,13 @@ export function CompanyDrawer() {
           <div className="dr-meta">
             <span>{[c.code, D.type[c.type], 'กลุ่ม ' + (c.tgt + 1), srcWords(c.src).join(' · ')].filter(Boolean).join(' · ')}</span>
             <span style={{ display: 'flex', gap: 8, flex: 'none' }}>
-              {!ro && <button onClick={() => e.toggleWatch(c.id)} aria-pressed={watched} className="btn sm">{watched ? 'ติดตามอยู่' : 'ติดตาม'}</button>}
+              {!ro && <button onClick={() => (watched ? watchIds.forEach((id) => e.toggleWatch(id)) : e.toggleWatch(c.id))} aria-pressed={watched} className="btn sm">{watched ? 'ติดตามอยู่' : 'ติดตาม'}</button>}
               <button onClick={close} aria-label="ปิด" className="dlg-x"><Icon name="close" size={18} /></button>
             </span>
           </div>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
             <CoAvatar name={c.name} web={c.web} set={c.set} size={44} />
-            <h2 className="dr-name">{c.name}</h2>
+            <h2 className="dr-name co-name title">{c.name}</h2>
           </div>
           <span className="dr-line">
             {owner ? <>ผู้รับผิดชอบ <b>{owner}</b></> : 'ยังไม่มีผู้รับผิดชอบ'}

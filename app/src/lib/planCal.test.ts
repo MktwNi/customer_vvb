@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust, planDayLink } from './planCal';
 
@@ -88,11 +91,35 @@ describe('plan calendar: the legend and its filter', () => {
     expect(activeCust('', keys)).toBe('');
   });
   it('a link to a day from another page shows every customer (the legend filter is cleared)', () => {
-    expect(planDayLink('2026-10-19')).toEqual({ tab: 'plan', calM: '2026-10', calDay: '2026-10-19', plCust: '' });
+    expect(planDayLink('2026-10-19')).toEqual({ tab: 'plan', calM: '2026-10', calDay: '2026-10-19', plCust: '', plOnlyT: '' });
     // what the day then shows: all of its entries, not the customer pressed earlier
     const before: { plCust: string } = { plCust: '26' };
     const ui = { ...before, ...planDayLink('2026-10-12') };
     const only = activeCust(ui.plCust, T.map((x) => x.ck));
     expect(onlyCust(T, only).filter((x) => x.date === ui.calDay).map((x) => x.ck)).toEqual(['26', '301']);
+  });
+  it('a bell row or an e-mail link to a day clears the type pressed in the legend too', () => {
+    // the bell's day row: planDayLink plus the bell closing
+    const before = { plCust: '', plOnlyT: 'plt', plColor: 'type' as const, bell: true };
+    const ui = { ...before, ...planDayLink('2026-10-12'), bell: false };
+    expect(ui).toMatchObject({ calDay: '2026-10-12', calM: '2026-10', plCust: '', plOnlyT: '', bell: false });
+    // the colour mode is the person's choice and stays
+    expect(ui.plColor).toBe('type');
+  });
+  it('every page that opens แผนติดต่อ on a day goes through planDayLink (none sets calDay itself)', () => {
+    // the bell (components/Bell.tsx) and the e-mail link #go=plan&d= (App.tsx) once set calDay directly and
+    // kept a legend filter that hid the entry they pointed to. Only the plan page moves its own day; the
+    // app's state starts it empty.
+    const SRC = fileURLToPath(new URL('..', import.meta.url));
+    const walk = (d: string): string[] =>
+      readdirSync(d).flatMap((f) => {
+        const p = join(d, f);
+        return statSync(p).isDirectory() ? walk(p) : /\.tsx?$/.test(f) && !/\.test\./.test(f) ? [p] : [];
+      });
+    const OWN = new Set(['lib/planCal.ts', 'tabs/Plan.tsx', 'state.tsx']);
+    const files = walk(SRC).map((p) => ({ rel: relative(SRC, p).replace(/\\/g, '/'), src: readFileSync(p, 'utf8') }));
+    const bad = files.filter((f) => !OWN.has(f.rel) && /\bcalDay\s*:/.test(f.src)).map((f) => f.rel);
+    expect(bad).toEqual([]);
+    for (const rel of ['components/Bell.tsx', 'App.tsx']) expect(files.find((f) => f.rel === rel)?.src).toMatch(/planDayLink\(/);
   });
 });

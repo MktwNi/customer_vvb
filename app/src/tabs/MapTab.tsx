@@ -293,8 +293,8 @@ const Panel = memo(function Panel({ list, name, refISO, D, onClear, onOpen, onTa
             <h3 style={h3}>ต้องติดต่อก่อน (กลุ่ม 1–2)</h3>
             <div>
               {orgs.map((r) => (
-                <button key={r.id} className="map-org hv" onClick={() => onOpen(r.id)} style={{ display: 'flex', flexDirection: 'column', padding: '10px 8px', margin: '0 -8px', border: 0, borderBottom: '1px solid var(--divider)', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: 'calc(100% + 16px)', minWidth: 0 }}>
-                  <span className="on" style={{ fontSize: 14, fontWeight: 500, ...ell }}>{r.name}</span>
+                <button key={r.id} className="map-org hv" onClick={() => onOpen(r.id)} title={r.name} style={{ display: 'flex', flexDirection: 'column', padding: '10px 8px', margin: '0 -8px', border: 0, borderBottom: '1px solid var(--divider)', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: 'calc(100% + 16px)', minWidth: 0 }}>
+                  <span className="on co-name dense" style={ell}>{r.name}</span>
                   <span className="t-meta">{r.tgt === 0 && r.days != null ? `เหลือ ${fmtN(r.days)} วัน · หมดอายุ ${isoTh(r.cfoEx)}` : `หมดอายุ ${isoTh(r.cfoEx)}`}</span>
                 </button>
               ))}
