@@ -106,7 +106,7 @@ async function member(L: Tab, u: string, name: string, role: Role) {
   return M;
 }
 /** What the script holds for key k (the last row, as an admin pulls it). */
-const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
+const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 5, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
 const line = (stage: string, amt: number, o: Partial<PlanInput> = {}): PlanInput => ({ stage, amt, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '', ...o });
 /** The month card's rows as this browser has them. */
 const rowsOf = (t: Tab) => chkRows(t.e.sales, cashLines(t.e.sales, Object.values(t.e.sales.deals), TODAY), t.e.payChecks(), t.e.payChkCfg().since);
@@ -134,7 +134,7 @@ describe('the month check against the team script', () => {
     expect(S.e.payCheckBlock(rowOf(S, key))).toBe('cap');
     expect(S.e.checkPays([rowOf(S, key)])).toEqual([]);
     expect(S.e.canWriteKey('dchk/' + key, false)).toBe(false);
-    const forged = sim.post({ action: 'push', cv: 4, tok: S.e.session!.tok, ops: [{ k: 'dchk/' + key, v: { s: 'ok', by: 'ฝน', at: 'x', amt: 107000, d: '2026-09-28', f: '' } }] });
+    const forged = sim.post({ action: 'push', cv: 5, tok: S.e.session!.tok, ops: [{ k: 'dchk/' + key, v: { s: 'ok', by: 'ฝน', at: 'x', amt: 107000, d: '2026-09-28', f: '' } }] });
     expect(forged.denied).toEqual(['dchk/' + key]);
     // accounting checks it: the record is in ฝน's name at the script's time, with a history row
     vi.setSystemTime(new Date('2026-10-15T04:00:00Z'));

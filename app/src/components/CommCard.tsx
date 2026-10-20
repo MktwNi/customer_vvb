@@ -22,11 +22,11 @@ const rateTip = (x: CommRow) => {
   return ps.length > 1 ? ps.map(partWords).join(' · ') : '';
 };
 
-/** One received amount behind a unit's figure: "PAY2 รับ 15 ส.ค. · 60% ของ 120,000". */
+/** One received amount behind a unit's figure: "PAY2 รับ 15 ส.ค. · 60% ของ 120,000" (a single installment: "PAY"). */
 // a joint quotation's company: its part of the quotation's payment ("QT ร่วม · PAY1 รับ 10 ส.ค. · 33.3% ของ 963,000"),
 // the payment itself counted once in the total
 const itemWords = (x: ContribItem) =>
-  (x.deal.id !== x.line.deal.id ? 'QT ร่วม · ' : '') + [x.line.stage, x.line.date ? `รับ ${dmTh(x.line.date)}` : ''].filter(Boolean).join(' ') + ` · ${x.p}% ของ ${m0(x.line.amt)}`;
+  (x.deal.id !== x.line.deal.id ? 'QT ร่วม · ' : '') + [x.line.code || x.line.stage, x.line.date ? `รับ ${dmTh(x.line.date)}` : ''].filter(Boolean).join(' ') + ` · ${x.p}% ของ ${m0(x.line.amt)}`;
 
 /**
  * "% Contribution และค่าคอมมิชชั่น" (dash impl-note §4, mockups 01, 04, 10): money received in a quarter (or the

@@ -23,8 +23,8 @@ import {
   type AuditRow, type CapAsk, type CapDef, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
 } from './caps';
 import {
-  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
-  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
+  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, coveredStage, dealSteps, isPayAt, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts, stepLabel, teamSteps,
+  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf, withActIndex,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
@@ -85,6 +85,8 @@ export interface ReqInput { k: 'role' | 'caps'; role?: string; caps?: CapAsk[]; 
 const OLD_SCRIPT = 'สคริปต์ของทีมยังไม่รองรับบทบาทและคำขอสิทธิ์ — ให้ผู้ดูแลระบบอัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่';
 /** The same for the notification actions (qt_check, notify_*). */
 const OLD_NOTIFY = 'สคริปต์ของทีมยังไม่รองรับการแจ้งเตือนและการตรวจใบเสนอราคา — ให้ผู้ดูแลระบบอัปเดต Code.gs ตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน';
+/** How long a script found unable to store files is taken at its word before the upload round asks again. */
+export const FILES_RECHECK_MS = 60000;
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -221,8 +223,12 @@ export class GccEngine {
   private teamGen = 0;
   private teamTimer: ReturnType<typeof setInterval> | null = null;
   private teamFlush: ReturnType<typeof setTimeout> | null = null;
-  private teamWake = () => {
-    if (this.teamCfg && !(typeof document !== 'undefined' && document.hidden)) this.teamSync();
+  /** The 30 s timer (no event), or focus / the tab shown again / back online (an event). */
+  private teamWake = (ev?: Event) => {
+    if (!this.teamCfg || (typeof document !== 'undefined' && document.hidden)) return;
+    // someone coming back to the page (told the lead has deployed) sees held files go up at once
+    if (ev) this.filesRecheck();
+    this.teamSync();
   };
   private teamPrefsChanged = (e: StorageEvent) => {
     if (e.key === PREF.wipe) {
@@ -1236,10 +1242,11 @@ export class GccEngine {
       // Sales Tracker + customers added by hand: add what this browser doesn't have
       const IS = (d.sales || {}) as Partial<SalesState>, S = this.sales;
       // lists: keep ours, add the backup's extra sections / SOURCE / Services / stages (notes in a
-      // stage that is not in the list would be hidden)
+      // stage no step reads would be hidden; one the steps read anyway, CALL1 or PAY3, is not added: an
+      // older build would show it as one more stage)
       if (IS.cfg)
         (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
-          const extra = (Array.isArray(IS.cfg![k]) ? IS.cfg![k] : []).map(String).filter((x) => x && !S.cfg[k].includes(x));
+          const extra = (Array.isArray(IS.cfg![k]) ? IS.cfg![k] : []).map(String).filter((x) => x && !S.cfg[k].includes(x) && !(k === 'stages' && coveredStage(x)));
           if (extra.length) this.setSalesList(k, [...S.cfg[k], ...extra]);
         });
       // every record checked (toDeal…): a hand-edited backup must not break the screen for the team
@@ -1779,7 +1786,8 @@ export class GccEngine {
     if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     this.saveSales();
   }
-  /** Stage date + note; a note without a date gets today's date. Only the step record is written —
+  /** A step's date + note at the stored stage `stage` (a step's id; an older stage, CALL2, when its own record
+   *  is edited in place); a note without a date gets today's date. Only the step record is written —
    *  the last contact is derived from it (lastContact), so a note never rewrites the deal. The payer's
    *  result recorded by hand on a joint quotation already closed is its companies' too (those without one,
    *  as at the closing: fillJoint); returns how many companies got it. */
@@ -1807,7 +1815,7 @@ export class GccEngine {
       const f = auto ? undefined : (['d', 'n'] as const).filter((x) => (x === 'd' ? date : n) !== cur[x]);
       this.op(keyOf.dstep(id, stage), { d: date, n }, { base, f });
     }
-    if (!quiet) this.salesLog(d, 'อัปเดต ' + stage, n.trim().slice(0, 120) || isoTh(date));
+    if (!quiet) this.salesLog(d, 'อัปเดต ' + stepLabel(this.sales, d, stage, todayISO()).code, n.trim().slice(0, 120) || isoTh(date));
     let filled = 0;
     if (!auto && stage === DEAL_STAGE && d.jobStatus === 'closed' && this.sales.jqt?.[id]) {
       const g = jointOf(this.sales, d);
@@ -2045,25 +2053,28 @@ export class GccEngine {
   }
   /**
    * "รับเงินแล้ว" without a document: the date, the amount (null = as planned), how, and whether a short
-   * amount counts as complete ("ถือว่ารับครบงวดนี้"). An empty note of the stage is filled in as a
-   * document's would be ("รับชำระแล้ว 53,500 บาท · โอน", on the date received), so builds without the
-   * plan see the stage done too. A document attached there later takes over the amount. Returns true
-   * when this made the deal ready to close (the UI then offers ปิดงาน).
+   * amount counts as complete ("ถือว่ารับครบงวดนี้"). An empty note of its step (every installment is
+   * one, PAY3 too) is filled in as a document's would be ("รับชำระแล้ว 53,500 บาท · โอน", on the date
+   * received), so builds without the plan see the stage done too. A document attached there later takes
+   * over the amount. `add`: the money is kept on top of the documents counted there (PayLine.add: one tap on
+   * "PAY ส่วนที่เหลือ", whose receipt so far is at the single PAY). Returns true when this made the deal ready to
+   * close (the UI then offers ปิดงาน).
    */
-  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean {
+  markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean; add?: boolean }): boolean {
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
     if (!this.canDeal('edit.pay', d)) return this.deny(), false;
     if (!d || !cur) return false;
     const today = todayISO(), was = closeReady(S, d, today);
-    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, fullAt: null, ...(r.how !== undefined ? { how: r.how } : {}), at: new Date().toISOString(), by: this.me() })!;
+    const n = toPay({ ...cur, rcv: r.date, got: r.amount, full: !!r.full, fullAt: null, ...(r.how !== undefined ? { how: r.how } : {}), ...(r.add !== undefined ? { add: r.add } : {}), at: new Date().toISOString(), by: this.me() })!;
     n.rcv = n.rcv || today;
     if (n.full) n.fullAt = this.gotWith(d, stage, n); // counted complete for what came in now
-    const f = (['rcv', 'got', 'full', 'fullAt', 'how'] as const).filter((x) => n[x] !== cur[x]);
+    const f = (['rcv', 'got', 'full', 'fullAt', 'how', 'add'] as const).filter((x) => n[x] !== cur[x]);
     this.batchOps(() => {
       S.pays[k] = n;
       this.op(keyOf.dpay(dealId, stage), { ...n }, { f: [...f, 'at', 'by'] });
-      if (S.cfg.stages.includes(stage) && !stepOf(S, dealId, stage).n.trim()) this.setStep(dealId, stage, { d: n.rcv, n: paidNote(n) }, true, true);
-      this.salesLog(d, 'รับชำระ ' + stage, [`${fmtMoney(n.got ?? n.amt ?? 0)} บาท`, n.how ? HOW_TH[n.how] : '', n.full ? 'ถือว่าครบ' : ''].filter(Boolean).join(' · '));
+      if (!stepOf(S, dealId, stage).n.trim()) this.setStep(dealId, stage, { d: n.rcv, n: paidNote(n) }, true, true);
+      // (in the history as the screens name it: a plan of one is "PAY", payCheck reads both)
+      this.salesLog(d, 'รับชำระ ' + stepLabel(S, d, stage, today).code, [`${fmtMoney(n.got ?? n.amt ?? 0)} บาท`, n.how ? HOW_TH[n.how] : '', n.full ? 'ถือว่าครบ' : ''].filter(Boolean).join(' · '));
     });
     this.saveSales();
     return !was && closeReady(S, d, today);
@@ -2073,14 +2084,53 @@ export class GccEngine {
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
     if (!this.canDeal('edit.pay', d)) return this.deny();
     if (!d || !cur || (!cur.rcv && cur.got == null && !cur.full)) return;
-    const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur);
+    const st = stepOf(S, dealId, stage), auto = st.n === paidNote(cur), code = stepLabel(S, d, stage, todayISO()).code;
     this.batchOps(() => {
       S.pays[k] = { ...cur, rcv: '', got: null, full: false, fullAt: null, add: false, at: new Date().toISOString(), by: this.me() };
       this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['rcv', 'got', 'full', 'fullAt', 'add', 'at', 'by'] });
       if (auto) this.setStep(dealId, stage, { d: st.d !== cur.rcv ? st.d : '', n: '' }, true, true); // a date the user corrected stays
-      this.salesLog(d, 'ยกเลิกการรับ ' + stage);
+      this.salesLog(d, 'ยกเลิกการรับ ' + code);
     });
     this.saveSales();
+  }
+  /**
+   * "เลิกทำ" of "รับเงินแล้ว" in one tap (lib/attachPlan receiveNow / undoReceive): the deal's installments as
+   * they were just before it — a line the tap set up is removed (a received one the new plan carried in too),
+   * a line it wrote gets its earlier fields back (the date, the amount, how, the planned amount typed when it
+   * asked), and the stage note it filled in goes. Only while every line, and that note, is still as the tap
+   * left it: a change since (a teammate's correction synced in, an edit here) is never undone over — `stale`
+   * then names those stages and nothing is changed.
+   */
+  undoPays(dealId: string, u: { before: Record<string, PayLine>; after: Record<string, PayLine>; step?: { stage: string; before: DealStep; after: DealStep } }): { stale: string[] } {
+    const S = this.sales, d = S.deals[dealId];
+    if (!this.canDeal('edit.pay', d)) return this.deny(), { stale: [] };
+    if (!d) return { stale: [] };
+    const F = ['amt', 'pct', 'due', 'rel', 'how', 'howT', 'note', 'rcv', 'got', 'full', 'fullAt', 'add'] as const;
+    const key = (l: PayLine | undefined) => (l ? JSON.stringify([...F.map((x) => l[x]), l.at, l.by]) : '');
+    const stages = Object.keys(u.after).filter((st) => key(u.before[st]) !== key(u.after[st]));
+    const stale = stages.filter((st) => key(S.pays[`${dealId}/${st}`]) !== key(u.after[st]));
+    if (stale.length) return { stale };
+    const at = new Date().toISOString(), by = this.me();
+    this.batchOps(() => {
+      stages.forEach((st) => {
+        const k = `${dealId}/${st}`, was = u.before[st], cur = S.pays[k];
+        if (!was) {
+          delete S.pays[k];
+          this.op(keyOf.dpay(dealId, st));
+          return;
+        }
+        const n: PayLine = { ...was, at, by };
+        const f = F.filter((x) => n[x] !== cur[x]);
+        S.pays[k] = n;
+        this.op(keyOf.dpay(dealId, st), { ...n }, { f: [...f, 'at', 'by'] });
+      });
+      // the note the tap filled in (an empty stage gets "รับชำระแล้ว … บาท"), while nobody has changed it
+      const w = u.step, sk = (x: DealStep) => x.d + '\n' + x.n;
+      if (w && sk(stepOf(S, dealId, w.stage)) === sk(w.after) && sk(w.before) !== sk(w.after)) this.setStep(dealId, w.stage, w.before, true, true);
+      this.salesLog(d, 'เลิกทำรับชำระ', stages.map((st) => stepLabel(S, d, st, todayISO()).code).join(', '));
+    });
+    this.saveSales();
+    return { stale: [] };
   }
   /** Count a short installment as complete (withholding tax, rounding) or open it again. It holds for
    *  what has come in now (PayLine.fullAt): a receipt deleted or changed later opens it again. Returns
@@ -2091,12 +2141,12 @@ export class GccEngine {
     if (!d || !cur) return false;
     const fullAt = full ? this.gotWith(d, stage, cur) : null;
     if (cur.full === full && cur.fullAt === fullAt) return false;
-    const today = todayISO(), was = closeReady(S, d, today);
+    const today = todayISO(), was = closeReady(S, d, today), code = stepLabel(S, d, stage, today).code;
     this.batchOps(() => {
       S.pays[k] = { ...cur, full, fullAt, at: new Date().toISOString(), by: this.me() };
       this.op(keyOf.dpay(dealId, stage), { ...S.pays[k] }, { f: ['full', 'fullAt', 'at', 'by'] });
-      if (full) this.salesLog(d, 'ถือว่ารับครบ ' + stage);
-      else this.salesLog(d, 'แก้แผนชำระ', stage + ' ยังค้างรับ');
+      if (full) this.salesLog(d, 'ถือว่ารับครบ ' + code);
+      else this.salesLog(d, 'แก้แผนชำระ', code + ' ยังค้างรับ');
     });
     this.saveSales();
     return !was && closeReady(S, d, today);
@@ -2108,8 +2158,9 @@ export class GccEngine {
   }
 
   // ---- contacts beyond the stages: one record each, dact/<deal>/<id> (lib/sales.ts DealAct)
-  /** "บันทึกการติดต่อ": a call, e-mail or meeting on `d` (default today) at `stage` (default where the
-   *  deal is, actStage). Never rewrites the deal or a stage: the last contact is derived (lastContact). */
+  /** "บันทึกการติดต่อ": a call, e-mail or meeting on `d` (default today) at `stage` (default the step the
+   *  deal is at, actStage: CONTACT, FOLLOW …). Never rewrites the deal or a step: the last contact is derived
+   *  (lastContact). */
   addAct(dealId: string, a: { type: ActType; note: string; d?: string; stage?: string; pid?: string }): DealAct | null {
     const S = this.sales, deal = S.deals[dealId];
     if (!this.canDeal('edit.deal', deal)) return this.deny(), null;
@@ -2121,7 +2172,7 @@ export class GccEngine {
     (S.acts || (S.acts = {}))[`${dealId}/${id}`] = act;
     this.batchOps(() => {
       this.op(keyOf.dact(dealId, id), v);
-      this.salesLog(deal, 'บันทึกการติดต่อ', [ACT_TH[act.type], act.stage, act.note.slice(0, 120)].filter(Boolean).join(' · '));
+      this.salesLog(deal, 'บันทึกการติดต่อ', [ACT_TH[act.type], act.stage && stepLabel(S, deal, act.stage, today).code, act.note.slice(0, 120)].filter(Boolean).join(' · '));
     });
     this.saveSales();
     return act;
@@ -2246,7 +2297,7 @@ export class GccEngine {
     const S = this.sales, today = todayISO();
     if (total != null) this.updateDeal(hid, { forecast: total });
     const st = stepOf(S, hid, QUOTE_STAGE);
-    if (S.cfg.stages.includes(QUOTE_STAGE) && !st.d && !st.n.trim()) this.setStep(hid, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
+    if (!st.d && !st.n.trim()) this.setStep(hid, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
   }
   /** Why picks may not join ('' = they may): another person's row this account may not edit (rowFate
    *  'locked'). `skip`: the deal "รวมเป็นใบเสนอราคาร่วม" comes from (its quotation moves first, then it joins). */
@@ -2283,7 +2334,7 @@ export class GccEngine {
       this.op(keyOf.jqm(h.id, d.id), { ...m });
       // QUOTATION is done for every member by the joint quotation (a note of the row's own stays)
       const st = stepOf(S, d.id, QUOTE_STAGE);
-      if (S.cfg.stages.includes(QUOTE_STAGE) && !st.d && !st.n.trim()) this.setStep(d.id, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
+      if (!st.d && !st.n.trim()) this.setStep(d.id, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
       this.salesLog(d, 'เข้าร่วมใบเสนอราคาร่วม', [title, docNo].filter(Boolean).join(' · '));
     });
   }
@@ -2578,7 +2629,8 @@ export class GccEngine {
    * gets the document's note; a stage with the user's note keeps it and only its date moves.
    * `info.replace` = the counted Actual document at that stage the new one replaces ("ใช้ยอดนี้แทน"): it
    * stays as evidence, no longer counted, and its stage note passes to the new one — so an installment
-   * is never counted twice. Without it, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
+   * is never counted twice; `info.drop`: other counted copies of the same document, which stop counting
+   * too. Without them, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
    * receipt adds up with the new one too (else the document replaces it). Only a document counted as
    * money received replaces anything. `info.kept`: the user kept their figure (`amount`) against the
    * document's own (`detected`, "คงยอดเดิม").
@@ -2587,7 +2639,7 @@ export class GccEngine {
    * earlier version filled in (its date, the first send, stays); the earlier versions stay as history,
    * no longer counted. Only a quotation for the Forecast with an amount revises anything.
    */
-  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean; revise?: string }) {
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; drop?: string[]; addHand?: boolean; kept?: boolean; revise?: string }) {
     if (!this.can('docs.up')) throw new Error('บัญชีของคุณแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
@@ -2597,10 +2649,10 @@ export class GccEngine {
     const S = this.sales, today = todayISO();
     // a joint quotation's member holds no money of its own (its quotation and payments are the joint
     // quotation's): what is attached there is kept as a document that is not counted, at no stage
-    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, addHand: false, revise: undefined, kept: false };
+    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, drop: undefined, addHand: false, revise: undefined, kept: false };
     const id = uid();
+    // (a stage some step reads, attachStage: every one has its record, an installment PAY3 too)
     const stage = attachStage(S, d, info, today);
-    const inList = !!stage && S.cfg.stages.includes(stage); // an extra installment (PAY3) has no step record
     // a revision is numbered after every version, also when this computer's clock is behind the one that attached the last
     const at = info.revise != null ? this.stampAfter(qtVersions(S, d).map((x) => x.at)) : new Date().toISOString();
     const cAt = this.stampAfter([d.fcAt, ...docsOf(S, dealId).map((x) => x.cAt || x.at)]);
@@ -2613,8 +2665,8 @@ export class GccEngine {
     // fill the stage the document stands for when it is empty, or has only a planned date, and remember
     // the note so it can follow the document (edited amount, deleted document)
     const ad = info.docDate && info.docDate <= today ? info.docDate : today;
-    // at a PAY stage only a counted payment completes it: a contract filed there is evidence, not money
-    const st = inList && (!isPayStage(S.cfg, stage) || countsActual(doc)) ? stepOf(S, dealId, stage) : null;
+    // at an installment only a counted payment completes it: a contract filed there is evidence, not money
+    const st = stage && (!isPayAt(S, dealId, stage) || countsActual(doc)) ? stepOf(S, dealId, stage) : null;
     // (a joint quotation made without its file noted its QUOTATION for it: the file takes that note over)
     const noted = !!st?.n.trim() && !(isQtVersion(doc) && isJointNote(st.n) && jointRole(S, d) === 'header');
     if (st && !noted) doc.auto = { stage, n: this.autoNote(doc), d: ad };
@@ -2633,6 +2685,8 @@ export class GccEngine {
     const k = `${dealId}/${id}`;
     // a document that is not money received (no amount, not Actual) replaces nothing
     const old = info.replace && countsActual(doc) ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    // the other counted copies of the same document ("ใช้ยอดนี้แทน" on a deal that counts it twice): they stop counting too
+    const drops = countsActual(doc) ? (info.drop || []).map((x) => S.docs[`${dealId}/${x}`]).filter((x): x is DealDoc => !!x && x.id !== old?.id && countsActual(x)) : [];
     // a revised quotation: the versions before it (as this browser has them now, after the file was stored)
     const revising = info.revise != null && isQtVersion(doc) && doc.target === 'forecast';
     const earlier = revising ? qtVersions(S, d) : [];
@@ -2649,6 +2703,8 @@ export class GccEngine {
         if (old.stage === stage && this.autoStillThere(old)) this.handOverAuto(old, S.docs[k], true);
         this.updateDoc(dealId, old.id, { target: 'none' });
       }
+      // (each gives up the PAY stage it completed unless a counted document there takes it over: updateDoc)
+      drops.forEach((x) => this.updateDoc(dealId, x.id, { target: 'none' }));
       if (revising) {
         // the QUOTATION note a version filled in ("ใบเสนอราคา QT-1 · 192,600 บาท") now names this one
         const owner = earlier.find((x) => x.auto?.stage === stage && this.autoStillThere(x));
@@ -2663,7 +2719,7 @@ export class GccEngine {
       }
     });
     this.saveSales();
-    this.uploadDocs();
+    this.uploadDocs(true);
     return S.docs[k];
   }
   /** An ISO time now, but after every given one: the order of "typed forecast" and "confirmed
@@ -2739,9 +2795,9 @@ export class GccEngine {
     if (opt.log !== false) this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
     this.saveSales();
   }
-  /** Whether the stage note a document filled in is a PAY stage's (an installment, also an extra one). */
+  /** Whether the stage note a document filled in is an installment's. */
   private payAuto(doc: DealDoc) {
-    return !!doc.auto && (isPayStage(this.sales.cfg, doc.auto.stage) || isExtraPay(this.sales.cfg, doc.auto.stage));
+    return !!doc.auto && isPayAt(this.sales, doc.deal, doc.auto.stage);
   }
   /** `doc` (deleted, or no longer counted) gives up the stage note it filled in, unless someone has
    *  written in it since: another document for the same stage (a revised quotation, a second invoice)
@@ -2821,7 +2877,7 @@ export class GccEngine {
     });
     this.dropDocFile(old);
     this.saveSales();
-    this.uploadDocs();
+    this.uploadDocs(true);
     return S.docs[k];
   }
   private dropDocFile(doc: DealDoc) {
@@ -2904,11 +2960,34 @@ export class GccEngine {
   private docRefused = new Set<string>();
   /** Documents whose file is not in this browser (attached on another device). */
   private docsAway = new Set<string>();
+  /** Documents whose file this browser was found to hold (not looked up again each round). */
+  private docsHere = new Set<string>();
+  /** When the script was last asked whether it stores files (0: ask at the next round). */
   private teamFilesAt = 0;
+  /**
+   * Files attached in this browser held here because the team's link answers as a script that cannot
+   * store files (the Sales tab's notice says what the team lead does). Follows the files themselves: it is
+   * 0 once they went up from another tab, were deleted, or another account signed in.
+   */
+  get docsHeld() {
+    return this.teamCfg && this.teamFiles === false ? this.docsUnsent : 0;
+  }
+  /** Ask the script again at the next round instead of waiting FILES_RECHECK_MS (the lead may have
+   *  deployed the new version meanwhile). */
+  private filesRecheck() {
+    if (this.teamFiles === false) this.teamFilesAt = 0;
+  }
+  /** Whether a document or bill the script refused for good is still here, waiting: its message stays. */
+  private refusedHere(cfg: TeamCfg | null) {
+    return Object.values(this.sales.docs).some((d) => !d.fileId && this.docRefused.has(d.id) && this.sales.deals[d.deal]) || this.billsWaiting(cfg).some((x) => this.docRefused.has(expDocId(x.id)));
+  }
   /** The upload run in flight: a caller that needs it done (signing out) waits for it. */
   private docRun: Promise<void> | null = null;
-  async uploadDocs() {
+  /** `fresh`: a new file was just attached (or this is the last try at signing out): a script last found
+   *  unable to store files is asked again now. */
+  async uploadDocs(fresh = false) {
     const cfg = this.teamCfg;
+    if (fresh) this.filesRecheck();
     if (!cfg || !this.filesUp()) return;
     if (this.docRun) return this.docRun;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
@@ -2929,18 +3008,34 @@ export class GccEngine {
       await this.flushDocDeletes(cfg);
       // only documents of deals that still exist, and that this browser has the file of
       // with accounts, only this account's files: another person's unsent file on a shared browser is theirs to send
-      const todo = !this.can('docs.up') ? [] : Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
+      const mine = !this.can('docs.up') ? [] : Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
+      // one attached on another device (no copy here) is that device's to upload, and not held here either:
+      // looked up once, before the script is asked anything
+      for (const d of mine) {
+        if (this.docsAway.has(d.id) || this.docsHere.has(d.id)) continue;
+        if (await this.store.get(this.docBlobKey(d.id))) this.docsHere.add(d.id);
+        else this.docsAway.add(d.id);
+      }
+      const todo = mine.filter((d) => !this.docsAway.has(d.id));
       // expenses' bills attached here go up the same way (docId exp_<expId>, uploadBills)
       const bills = this.billsWaiting(cfg).filter((x) => !this.docRefused.has(expDocId(x.id)));
-      if ((!todo.length && !bills.length) || Date.now() < this.docRetryAt) return;
-      // "old script" is checked again every 10 minutes: the lead may deploy the new one meanwhile
-      if (this.teamFiles === false && Date.now() - this.teamFilesAt > 10 * 60000) this.teamFiles = null;
+      if (!todo.length && !bills.length) {
+        // nothing of this browser's waits (uploaded from another tab, deleted, another account signed in): a
+        // message about waiting files is out of date; one naming a refused file stays while that file is here
+        if (!this.refusedHere(cfg)) this.docMsg = '';
+        return;
+      }
+      if (Date.now() < this.docRetryAt) return;
+      // a script that cannot store files is asked again a minute later, and at once when the tab is shown
+      // again or a file is attached (filesRecheck): the lead may deploy the new version meanwhile
+      if (this.teamFiles === false && Date.now() - this.teamFilesAt >= FILES_RECHECK_MS) this.teamFiles = null;
       if (this.teamFiles == null) {
         this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, this.cred(cfg));
         this.teamFilesAt = Date.now();
       }
       if (!this.teamFiles) {
-        this.docMsg = 'สคริปต์ของทีมยังเป็นเวอร์ชันเก่า เอกสารจึงเก็บไว้ในเครื่องนี้ — อัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่ (ดูคู่มือ) เพื่อเก็บใน Drive ของทีม';
+        // the files stay here: the Sales tab's notice (docsHeld) says so and what the team lead does
+        this.docMsg = '';
         return;
       }
       for (const doc of todo) {
@@ -3140,7 +3235,7 @@ export class GccEngine {
     this.billHere(expId, fid ? null : { deal: dealId, by: this.me() });
     this.docRefused.delete(expDocId(expId));
     this.saveSales();
-    this.uploadDocs();
+    this.uploadDocs(true);
     return { ...x, id: expId, deal: dealId };
   }
   /** Take an expense's bill off (the expense stays): this browser's copy goes, the team's file to the trash. */
@@ -3331,11 +3426,13 @@ export class GccEngine {
     let deals = 0, skipped = 0, linked = 0, ambiguous = 0, inexact = 0;
     const listsAdded: Partial<Record<keyof SalesCfg, string[]>> = {};
     data.forEach((t) => {
-      // lists: keep ours, add what the file has that we don't (remembered, so an undo can take them out)
+      // lists: keep ours, add what the file has that we don't (remembered, so an undo can take them out). The
+      // old tracker's stages CALL1 … PAY2 (and PAY3 …) are read into the five steps as they are (dealSteps),
+      // so only a stage of its own is added (it becomes a step after the one it followed: teamSteps)
       (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
-        const extra = (t.cfg[k] || []).filter((x) => !S.cfg[k].includes(x));
+        const extra = (t.cfg[k] || []).filter((x) => !S.cfg[k].includes(x) && !(k === 'stages' && coveredStage(x)));
         if (k === 'sections') t.clients.forEach((c) => c.section && !S.cfg.sections.includes(c.section) && !extra.includes(c.section) && extra.push(c.section));
-        if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !extra.includes(p) && extra.push(p)));
+        if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !coveredStage(p) && !extra.includes(p) && extra.push(p)));
         if (!extra.length) return;
         this.setSalesList(k, [...S.cfg[k], ...extra]);
         (listsAdded[k] || (listsAdded[k] = [])).push(...extra.filter((x) => S.cfg[k].includes(x)));
@@ -3459,11 +3556,21 @@ export class GccEngine {
   closedCsv(deals: Deal[], attr: boolean, t: WorkTally = this.workTally(deals, { attr })) {
     return this.salesCsv(deals, closedCsvRows(this.sales, deals, attr, t));
   }
-  /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns. */
+  /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns.
+   *  The steps are the team's (teamSteps): a date and a note each (CLOSE: its result); CONTACT and FOLLOW give
+   *  the date of the record whose note comes first (the newest of their records, a call booked ahead too) and
+   *  every record they read, newest first, each other one with where it is stored and its own date ("CALL2: …;
+   *  CALL1 2026-10-05: …"), so no date of an older stage is lost; PAY gives every installment's ("PAY1
+   *  2026-08-22; PAY2 …", one alone without its code); then how many contacts (records and older stages'
+   *  records, as the panel counts them; their dates are in ติดต่อล่าสุด), and "ขั้นตอนอื่น": what no step reads. */
   salesCsv(deals: Deal[], rows?: ClosedCsvRow[]) {
-    const S = this.sales, C = S.cfg, today = todayISO();
+    // (each deal's steps read its documents and contacts: indexed once for the whole file)
+    return withActIndex(this.sales, () => this.csvOf(deals, rows));
+  }
+  private csvOf(deals: Deal[], rows?: ClosedCsvRow[]) {
+    const S = this.sales, C = S.cfg, today = todayISO(), steps = teamSteps(C);
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
-      .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
+      .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], steps.flatMap((x) => [x.code + ' วันที่', x.code + (x.kind === 'close' ? ' ผล' : ' โน้ต')]), ['การติดต่อ (ครั้ง)', 'ขั้นตอนอื่น'])
       .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ'])
       .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : []);
     const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
@@ -3477,18 +3584,43 @@ export class GccEngine {
       const sh = jr === 'member' ? shareOf(S, d) : null;
       const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท${x.part != null ? ` · นับส่วนของ ${x.part} บริษัทตามตัวกรอง` : ''}` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
-      // ticks and notes no longer in the lists are kept (removing a list item keeps them on the deals)
+      // the steps' cells, and every stored stage they read
+      const t = dealSteps(S, d, today), read = new Set<string>();
+      const stepCells = steps.flatMap((def) => {
+        if (def.kind === 'pay') {
+          const ps = t.steps.filter((v) => v.kind === 'pay'), one = ps.length === 1;
+          ps.forEach((v) => read.add(v.id));
+          const has = ps.filter((v) => v.own.d || v.own.n.trim());
+          // (no plan: "PAY" and "PAY ส่วนที่เหลือ", as the steps name them)
+          const name = (v: (typeof ps)[number]) => (v.rest ? `${v.code} ${v.th}` : v.code);
+          return one
+            ? [ps[0].own.d, ps[0].own.n]
+            : [has.filter((v) => v.own.d).map((v) => `${name(v)} ${v.own.d}`).join('; '), has.filter((v) => v.own.n.trim()).map((v) => `${name(v)}: ${v.own.n}`).join('; ')];
+        }
+        const v = t.steps.find((x) => x.id === def.id);
+        def.aliases.forEach((a) => read.add(a));
+        if (!v) return ['', ''];
+        if (def.kind !== 'contact' && def.kind !== 'follow') return [v.own.d, v.own.n];
+        // every record read into the step, newest first (the step's own first on its day: dealSteps' top)
+        const all = v.aliases.map((a) => ({ stage: a, ...stepOf(S, d.id, a) })).filter((r) => r.d || r.n.trim());
+        const recs = [...all.filter((r) => r.stage === v.top.stage), ...all.filter((r) => r.stage !== v.top.stage).sort((a, b) => b.d.localeCompare(a.d))];
+        const words = recs.map((r, i) => {
+          const n = r.n.trim(), where = r.stage === def.id ? '' : r.stage;
+          // the first one's date is the date column; any other one keeps its own
+          const head = [i ? where || def.code : where, i ? r.d : ''].filter(Boolean).join(' ');
+          return head ? head + (n ? ': ' + n : '') : n;
+        });
+        return [v.top.d, words.filter(Boolean).join('; ')];
+      });
+      // ticks and notes no step reads are kept (removing a list item keeps them on the deals)
       const otherSteps = Object.entries(S.steps)
-        .filter(([k]) => k.startsWith(d.id + '/') && !C.stages.includes(k.slice(d.id.length + 1)))
+        .filter(([k]) => k.startsWith(d.id + '/') && !read.has(k.slice(d.id.length + 1)))
         .map(([k, x]) => `${k.slice(d.id.length + 1)}: ${[x.d, x.n].filter(Boolean).join(' ')}`);
       return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(d.contactName), csvPhone(d.phone), csvCell(d.email), csvCell(d.resp), csvCell(d.referral),
         csvCell(d.contactDate), csvCell(lastContact(S, d, today)), csvCell(d.jobStatus === 'closed' ? 'ปิดงาน ' + (d.closedDate || '') : 'เปิด'), csvCell(st.overall)]
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(d.service.includes(x) ? '✓' : '')), [csvCell(d.service.filter((x) => !C.services.includes(x)).join(', '))])
-        .concat(C.stages.flatMap((p) => {
-          const x = stepOf(S, d.id, p);
-          return [csvCell(x.d), csvCell(x.n)];
-        }), [csvCell(otherSteps.join(' | '))])
+        .concat(stepCells.map(csvCell), [csvCell(t.contacts), csvCell(otherSteps.join(' | '))])
         .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
         .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
         .join(',');
@@ -4667,6 +4799,8 @@ export class GccEngine {
     this.caps = { ...c, url };
     this.capsAt = Date.now();
     if (c.v === 3) this.heardNotify(url, c.nf ?? null);
+    // the script says it stores files: one found unable to is asked again at the next round
+    if (c.files && this.teamCfg?.url === url) this.filesRecheck();
   }
   /** The script's public values for hashing a password (team id, rounds); they never change. */
   private async capsFor(url: string) {
@@ -5112,7 +5246,7 @@ export class GccEngine {
       this.docRetryAt = 0; // a last try for files waiting after a failed upload, too
       const flush = async () => {
         await this.teamSyncNow().catch(() => {});
-        await this.uploadDocs();
+        await this.uploadDocs(true);
       };
       await Promise.race([flush(), new Promise((r) => setTimeout(r, 10000))]);
     }
@@ -5901,7 +6035,10 @@ export class GccEngine {
     this.delivered = new Map();
     this.teamNeedKey = false;
     this.teamFiles = null;
+    this.teamFilesAt = 0;
     this.docRetryAt = this.docFails = 0;
+    // a message about this session's uploads is not the next one's (a refused file's stays while it is here)
+    if (!this.refusedHere(null)) this.docMsg = '';
     this.hidden = new Set();
     this.others = [];
   }

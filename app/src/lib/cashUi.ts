@@ -45,12 +45,12 @@ export function crossYearTag(lines: CashLine[], be: string) {
 
 /** "งวด 1/3", or "ไม่มีแผน" for money without a plan. */
 export const instText = (l: CashLine) => (l.n > 0 ? `งวด ${l.n}/${l.of}` : 'ไม่มีแผน');
-/** The grey line under it: the stage ("PAY3 · งวดเพิ่ม"), or where money without a plan comes from
- *  ("รับที่ PAY1 · พิมพ์เอง", "ใบเสร็จ RC-1", "ส่วนที่ยังไม่รับ"). */
+/** The grey line under it: the installment's step ("PAY3", "PAY" for a plan of one), or where money without a
+ *  plan comes from ("รับที่ PAY · พิมพ์เอง", "ใบเสร็จ RC-1", "ส่วนที่ยังไม่รับ"). */
 export function instSub(l: CashLine) {
-  if (l.src === 'plan') return l.stage + (l.extra ? ' · งวดเพิ่ม' : '');
+  if (l.src === 'plan') return l.code || l.stage;
   if (l.src === 'doc') return l.doc ? `${KIND_TH[l.doc.kind]}${l.doc.docNo ? ' ' + l.doc.docNo : ''}` : 'เอกสาร';
-  if (l.src === 'typed') return (l.stage ? `รับที่ ${l.stage} · ` : '') + 'พิมพ์เอง';
+  if (l.src === 'typed') return (l.stage ? `รับที่ ${l.code || l.stage} · ` : '') + 'พิมพ์เอง';
   return 'ส่วนที่ยังไม่รับ';
 }
 /** The status in words (the list, the CSV): รับแล้ว / เลยกำหนด / ถึงกำหนด / รอรับ; undated owed money:

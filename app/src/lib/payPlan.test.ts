@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  PLAN_FIELDS, attachPreview, attachStage, closeReady, countedAt, dealMoney, dueOf, emptySales, filterDeals, hasPlan, isExtraPay, kindForStage, lastContactInfo, lineView, newDeal, overdueDays,
+  PLAN_FIELDS, attachPreview, attachStage, closeReady, countedAt, dealMoney, dealSteps, dueOf, emptySales, filterDeals, hasPlan, isExtraPay, isPayStage, kindForStage, lastContactInfo, lineView, newDeal, overdueDays,
   moneyHidden, payDue, payStageFor, payStages, payState, planCsv, planLines, planOf, quickMatch, receivables, salesStats, setMoneyHidden, splitAmounts, stageDocs, stageTh, stageTrack,
   targetForStage, toPay, trackerStatus, whtRate, wonDate, type DealDoc, type PayLine, type SalesState,
 } from './sales';
@@ -70,7 +70,7 @@ describe('the installment record (dpay/<deal>/<stage>)', () => {
 });
 
 describe('stages: PAY list, kinds and targets, documents by stage', () => {
-  it('payStages: the PAY stages after CLOSED DEAL', () => {
+  it('payStages: the PAY names of the list after CLOSED DEAL; every PAY<n> is an installment (no "งวดเพิ่ม")', () => {
     const cfg = emptySales().cfg;
     expect(payStages(cfg)).toEqual(['PAY1', 'PAY2']);
     expect(payStages({ ...cfg, stages: [...cfg.stages, 'PAY3'] })).toEqual(['PAY1', 'PAY2', 'PAY3']);
@@ -79,9 +79,10 @@ describe('stages: PAY list, kinds and targets, documents by stage', () => {
     expect(payStages({ ...cfg, stages: ['CALL1', 'PAY1'] })).toEqual([]);
     expect(payStageFor(cfg, 2)).toBe('PAY2');
     expect(payStageFor(cfg, 3)).toBe('PAY3');
-    expect(isExtraPay(cfg, 'PAY3')).toBe(true);
-    expect(isExtraPay(cfg, 'PAY2')).toBe(false);
-    expect(isExtraPay(cfg, 'PAYX')).toBe(false);
+    // an installment beyond the list is one like the others: a step of its own
+    expect(['PAY1', 'PAY3', 'PAY12', 'PAYX', 'CALL1'].map((p) => isPayStage(cfg, p))).toEqual([true, true, true, false, false]);
+    expect(isPayStage({ ...cfg, stages: ['CALL1', 'CLOSED DEAL', 'pay1'] }, 'pay1')).toBe(true);
+    expect([isExtraPay(cfg, 'PAY3'), isExtraPay(cfg, 'PAY2')]).toEqual([false, false]);
     expect([stageTh('PAY2'), stageTh('PAY3'), stageTh('PAY12'), stageTh('MEETING')]).toEqual(['ชำระงวดที่ 2', 'ชำระงวดที่ 3', 'ชำระงวดที่ 12', '']);
   });
 
@@ -230,21 +231,36 @@ describe('paid stages and ready to close', () => {
     // "ถือว่ารับครบ" counts as received too; without a plan the list's PAY stages and their steps, as before
     a.s.pays['x/PAY3'] = L({ full: true });
     expect(closeReady(a.s, a.d, TODAY)).toBe(true);
+    // without a plan a single PAY step; once it is done, the rest of it stays to record: this session cannot tell
+    // paid in full from paid in part (as the eight-stage list's PAY2, and as a session with the money says on a
+    // deal paid in part)
     const b = mk({ steps: { ...YES, PAY1: '2026-09-01' } });
     setMoneyHidden(b.s, true);
     expect(payState(b.s, b.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1'], left: ['PAY2'] });
+    expect(closeReady(b.s, b.d, TODAY)).toBe(false);
+    const b2 = mk({ steps: { ...YES, PAY1: '2026-09-01' }, docs: [{ stage: 'PAY2', kind: 'receipt', amount: null, target: 'none' }] });
+    setMoneyHidden(b2.s, true);
+    b2.s.steps['x/PAY2'] = { d: '2026-10-20', n: '' };
+    expect(payState(b2.s, b2.d, TODAY)).toMatchObject({ pays: ['PAY1', 'PAY2'], paid: ['PAY1', 'PAY2'], left: [] }); // a receipt at PAY2
     // marked per state: another tracker, and this one unmarked, work the plan out again
     setMoneyHidden(a.s, false);
     expect(planOf(a.s, a.d, TODAY)).not.toBeNull();
   });
 
-  it('NO is ready; WAIT and no result are not; YES with no PAY stage is', () => {
+  it('NO is ready; WAIT and no result are not; YES waits for its PAY step, also with a list that has none', () => {
     expect(closeReady(mk({ steps: { 'CLOSED DEAL': ['2026-09-01', 'NO'] } }).s, mk().d, TODAY)).toBe(true);
     const w = mk({ steps: { 'CLOSED DEAL': ['2026-09-01', 'รอผู้บริหาร'] } });
     expect(closeReady(w.s, w.d, TODAY)).toBe(false);
     expect(closeReady(mk().s, mk().d, TODAY)).toBe(false);
+    // every deal has a PAY step: a list without PAY stages (an admin's) no longer closes on the result alone
     const none = mk({ steps: YES, stages: ['CALL1', 'QUOTATION', 'CLOSED DEAL'] });
+    expect(closeReady(none.s, none.d, TODAY)).toBe(false);
+    none.s.steps['x/PAY1'] = { d: '2026-09-01', n: 'รับครบ' };
     expect(closeReady(none.s, none.d, TODAY)).toBe(true);
+    // without a plan a single PAY: PAY1 recorded is paid in full when no amount says otherwise (PAY2 was asked for)
+    const one = mk({ steps: { ...YES, PAY1: '2026-09-01' } });
+    expect(payState(one.s, one.d, TODAY)).toMatchObject({ pays: ['PAY1'], paid: ['PAY1'], left: [] });
+    expect(closeReady(one.s, one.d, TODAY)).toBe(true);
   });
 
   it('with a plan of fewer installments than PAY stages, the unused one is not needed', () => {
@@ -265,11 +281,13 @@ describe('paid stages and ready to close', () => {
     expect(closeReady(s, d, TODAY)).toBe(true);
   });
 
-  it('the track of a won deal with a plan: received = done, due later = planned, late = next (never skipped), unused = off', () => {
+  it('the track of a won deal with a plan: received = done, due later = planned, late = next (never skipped); one PAY step per installment', () => {
     const late = mk({ steps: YES, pays: { PAY1: { amt: 1000, due: '2026-09-30' } }, docs: [] });
     const t = stageTrack(late.s, late.d, TODAY);
-    expect(t.states).toMatchObject({ PAY1: 'next', PAY2: 'off' });
+    expect(t.states).toMatchObject({ PAY1: 'next' });
+    expect(t.states.PAY2).toBeUndefined(); // a plan of one installment: no PAY2 "ไม่มีงวดนี้ในแผน"
     expect(t.next).toBe('PAY1');
+    expect(dealSteps(late.s, late.d, TODAY).steps.filter((v) => v.kind === 'pay').map((v) => [v.id, v.code, v.th])).toEqual([['PAY1', 'PAY', 'ชำระเงิน']]);
     const two = mk({ steps: YES, docs: [{ stage: 'PAY1', amount: 1000 }], pays: { PAY1: { amt: 1000 }, PAY2: { amt: 1000, due: '2026-11-01' } } });
     const t2 = stageTrack(two.s, two.d, TODAY);
     expect(t2.states).toMatchObject({ PAY1: 'done', PAY2: 'planned' });
@@ -278,9 +296,9 @@ describe('paid stages and ready to close', () => {
     const out = mk({ steps: YES, docs: [{ stage: 'PAY2', amount: 1000 }], pays: { PAY1: { amt: 1000, due: '2026-09-01' }, PAY2: { amt: 1000 } } });
     const t3 = stageTrack(out.s, out.d, TODAY);
     expect(t3.states).toMatchObject({ PAY1: 'next', PAY2: 'done' });
-    // before YES the plan changes nothing
-    const draft = mk({ steps: { CALL1: '2026-09-01' }, pays: { PAY1: { amt: 1 } } });
-    expect(stageTrack(draft.s, draft.d, TODAY).states.PAY2).toBe('future');
+    // before YES the plan already says the installments (a draft): still to come
+    const draft = mk({ steps: { CALL1: '2026-09-01' }, pays: { PAY1: { amt: 1 }, PAY2: { amt: 1 } } });
+    expect(dealSteps(draft.s, draft.d, TODAY).steps.filter((v) => v.kind === 'pay').map((v) => [v.code, v.state])).toEqual([['PAY1', 'future'], ['PAY2', 'future']]);
   });
 
   it('no follow-up reminder once ready to close, or for a won deal followed by its plan', () => {
@@ -288,7 +306,9 @@ describe('paid stages and ready to close', () => {
     expect(overdueDays(no.s, no.d, TODAY)).toBeNull();
     const paid = mk({ steps: { ...YES, PAY1: '2026-08-21', PAY2: '2026-08-22' } });
     expect(overdueDays(paid.s, paid.d, TODAY)).toBeNull();
-    const left = mk({ steps: { ...YES, PAY1: '2026-09-18' } });
+    // paid in part without a plan (Actual below the Forecast): the rest is still to come, followed up
+    const left = mk({ steps: { ...YES, PAY1: '2026-09-18' }, forecast: 100000 });
+    left.d.actual = 50000;
     expect(overdueDays(left.s, left.d, TODAY)).toBe(20);
     const plan = mk({ steps: { ...YES, PAY1: '2026-09-18' }, pays: { PAY2: { amt: 1, due: '2026-09-20' } } });
     expect(overdueDays(plan.s, plan.d, TODAY)).toBeNull();
@@ -317,7 +337,7 @@ describe('paid stages and ready to close', () => {
 
   it('the last contact says where it came from; a planned date does not count', () => {
     const { s, d } = mk({ steps: { CALL1: '2026-09-01', CALL2: ['2026-10-20', 'นัด'] } });
-    expect(lastContactInfo(s, d, TODAY)).toEqual({ date: '2026-09-01', from: 'CALL1' });
+    expect(lastContactInfo(s, d, TODAY)).toEqual({ date: '2026-09-01', from: 'CONTACT' }); // CALL1 is read into CONTACT
     d.contactDate = '2026-09-05';
     expect(lastContactInfo(s, d, TODAY)).toEqual({ date: '2026-09-05', from: 'typed' });
     expect(lastContactInfo(mk().s, mk().d, TODAY)).toEqual({ date: '', from: '' });
@@ -333,23 +353,25 @@ describe('paid stages and ready to close', () => {
 });
 
 describe('where a document goes, and what attaching it would change', () => {
-  it('attached at a stage: that stage, if configured or an installment of the plan', () => {
-    const { s, d } = mk({ steps: YES, pays: { PAY3: { amt: 1 } } });
+  it('attached at a stage: that stage, if a step reads it (an older stage, an installment) or a line of the plan', () => {
+    const { s, d } = mk({ steps: YES, pays: { PAY3: { amt: 1 }, 'งวดพิเศษ': { amt: 1 } } });
     const at = (stage: string) => attachStage(s, d, { kind: 'invoice', target: 'actual', stage }, TODAY);
-    expect([at('PAY2'), at('PAY3'), at('PAY4'), at('PAYX'), at('')]).toEqual(['PAY2', 'PAY3', '', '', '']);
+    expect([at('PAY2'), at('PAY3'), at('PAY4'), at('งวดพิเศษ'), at('PAYX'), at('')]).toEqual(['PAY2', 'PAY3', 'PAY4', 'งวดพิเศษ', '', '']);
+    expect([at('CONTACT'), at('CALL1'), at('FOLLOW'), at('XYZ')]).toEqual(['CONTACT', 'CALL1', 'FOLLOW', '']);
   });
 
-  it('not at a stage: QUOTATION for a quotation (when configured); Actual to the first installment not received', () => {
+  it('not at a stage: QUOTATION for a quotation; Actual to the first installment not received', () => {
     const auto = (s: SalesState, target: 'forecast' | 'actual' | 'none', kind: 'quotation' | 'invoice' | 'other' = 'invoice') => attachStage(s, s.deals.x, { kind, target }, TODAY);
     expect(auto(mk().s, 'forecast', 'quotation')).toBe('QUOTATION');
     expect(auto(mk().s, 'none', 'quotation')).toBe('QUOTATION');
-    expect(auto(mk({ stages: ['CALL1', 'CLOSED DEAL', 'PAY1'] }).s, 'forecast', 'quotation')).toBe('');
+    expect(auto(mk({ stages: ['CALL1', 'CLOSED DEAL', 'PAY1'] }).s, 'forecast', 'quotation')).toBe('QUOTATION'); // QUOTATION is always a step
     expect(auto(mk().s, 'none', 'other')).toBe('');
     // no plan: a planned-only PAY1 is the first not paid (it used to go to PAY2)
     expect(auto(mk({ steps: { ...YES, PAY1: ['2026-10-20', ''] } }).s, 'actual')).toBe('PAY1');
+    // without a plan the PAY steps are those holding a payment: paid at PAY1 and PAY2, the last one
     const three = mk({ steps: YES, stages: [...emptySales().cfg.stages, 'PAY3'], docs: [{ stage: 'PAY1', amount: 1 }, { stage: 'PAY2', amount: 1 }] });
-    expect(auto(three.s, 'actual')).toBe('PAY3');
-    expect(auto(mk({ steps: YES, stages: ['CALL1', 'CLOSED DEAL'] }).s, 'actual')).toBe('');
+    expect(auto(three.s, 'actual')).toBe('PAY2');
+    expect(auto(mk({ steps: YES, stages: ['CALL1', 'CLOSED DEAL'] }).s, 'actual')).toBe('PAY1'); // every deal has a PAY step
     // all paid: the last one
     expect(auto(mk({ steps: { ...YES, PAY1: '2026-09-01', PAY2: '2026-09-02' } }).s, 'actual')).toBe('PAY2');
     // a plan: its first line not received, an extra one too

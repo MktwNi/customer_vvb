@@ -14,7 +14,8 @@
  * ต้อง Run setupNotify ก่อน Deploy เสมอ ถ้าสลับกัน ทั้งทีมจะซิงก์ไม่ได้จนกว่าจะกดอนุญาต (ดู README)
  *
  * Protocol v4 (POST, body = JSON text, Content-Type: text/plain to avoid a CORS preflight).
- * The web app sends `cv: 4` with every request (builds before the capabilities sent `cv: 3`). A team
+ * The web app sends `cv: 5` with every request (builds before the five steps sent `cv: 4`, before the
+ * capabilities `cv: 3`; a build below CLIENT_V may read, not write: it would hide what newer ones write). A team
  * works in one of three modes (see hello):
  *   legacy   — no accounts yet and TEAM_KEY is set: every request carries `key` (the team code), as in v2
  *   setup    — no accounts and no TEAM_KEY: only hello and claim work
@@ -167,7 +168,7 @@ const DOC_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', '
 
 // accounts (protocol v3), capabilities (protocol v4)
 const API_V = 4;
-const CLIENT_V = 4; // web app builds before this one may read, but not write (see doPost)
+const CLIENT_V = 5; // web app builds before this one may read, but not write (see doPost): 5 = the five steps
 const NEW_VERSION_MSG = 'มีเวอร์ชันใหม่ กรุณารีเฟรชหน้าเว็บ (F5)';
 const KDF_ITER_DEFAULT = 200000; // PBKDF2 iterations the browser uses to turn a password into pk
 const TOKEN_LONG_S = 2592000; // "remember me": 30 days, renewed while in use
@@ -3747,18 +3748,54 @@ function tasksOf_(L) {
   return out.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.title.localeCompare(b.title));
 }
 
-/** Deal stages dated today or tomorrow on open deals (a won deal's planned instalments are payments instead). */
+// The web app's five steps (app/src/lib/steps.ts): CONTACT · QUOTATION · FOLLOW · CLOSE (stored as CLOSED DEAL) ·
+// PAY per instalment. Builds since then write CONTACT and FOLLOW and read the eight stages of older records into
+// them (CALL1, CALL2 → CONTACT; FOLLOW1, FOLLOW2 → FOLLOW); the team's stored list (scfg/stages) keeps the eight.
+const STEP_OF = { CALL1: 'CONTACT', CALL2: 'CONTACT', FOLLOW1: 'FOLLOW', FOLLOW2: 'FOLLOW' };
+const STEP_WORDS = { CONTACT: ['CONTACT', 'ติดต่อประสานงาน'], QUOTATION: ['QUOTATION', 'ส่งใบเสนอราคา'], FOLLOW: ['FOLLOW', 'ติดตามผล'], 'CLOSED DEAL': ['CLOSE', 'ผลการขาย (YES / NO)'] };
+
+/** An instalment as the web app names it: "PAY" for a plan of one, else its stage (PAY2). */
+function payCode_(S, d, stage) {
+  const L = planLines_(S, d);
+  return L && L.length === 1 && L[0].stage === stage ? 'PAY' : stage;
+}
+
+/**
+ * A stored stage as the web app's steps name it, [code, words]: CALL2 → CONTACT ติดต่อประสานงาน, FOLLOW1 → FOLLOW
+ * ติดตามผล, CLOSED DEAL → CLOSE; an instalment of a plan of one "PAY ชำระเงิน", of a longer plan "PAY2 ชำระงวดที่ 2";
+ * without a plan the first "PAY ชำระเงิน" and the next "PAY ส่วนที่เหลือ"; a team's own stage its name.
+ */
+function stepName_(S, deal, stage) {
+  const w = STEP_WORDS[STEP_OF[stage] || stage];
+  if (w) return w;
+  if (/^PAY\d+$/i.test(stage)) {
+    const L = planLines_(S, deal);
+    if (L) return L.length === 1 && L[0].stage === stage ? ['PAY', 'ชำระเงิน'] : [stage, stageTh_(stage)];
+    const first = payStages_(S.cfg)[0] || 'PAY1', no = +first.replace(/\D/g, '') || 1;
+    if (stage === first) return ['PAY', 'ชำระเงิน'];
+    if (+stage.slice(3) === no + 1) return ['PAY', 'ส่วนที่เหลือ'];
+  }
+  return [stage, stageTh_(stage)];
+}
+
+/** Deal stages dated today or tomorrow on open deals (a won deal's planned instalments are payments instead): a
+ *  stage of the team's list, or one of the web app's steps (CONTACT, FOLLOW: what builds since the five steps
+ *  write), once per deal, step and day. */
 function stepsDue_(c) {
-  const S = c.S, ck = c.ck, out = [];
+  const S = c.S, ck = c.ck, out = [], seen = {};
   const pays = payStages_(S.cfg);
   Object.keys(S.steps).forEach((key) => {
     const j = key.indexOf('/');
     const deal = S.deals[key.slice(0, j)], stage = key.slice(j + 1), st = S.steps[key];
-    if (!deal || deal.jobStatus === 'closed' || S.cfg.stages.indexOf(stage) < 0) return;
+    if (!deal || deal.jobStatus === 'closed' || (S.cfg.stages.indexOf(stage) < 0 && !STEP_WORDS[stage])) return;
     if (st.d !== ck.today && st.d !== ck.tomorrow) return;
     // dated today with something written (a call logged, a document attached) is done, not to do
     if (st.d === ck.today && String(st.n || '').trim()) return;
     if (pays.indexOf(stage) >= 0 && dealResult_(S, deal) === 'YES' && planLines_(S, deal)) return;
+    // (CALL2 and CONTACT both booked for tomorrow: one CONTACT)
+    const once = deal.id + '|' + (STEP_OF[stage] || stage) + '|' + st.d;
+    if (seen[once]) return;
+    seen[once] = 1;
     out.push({ deal: deal, stage: stage, d: st.d });
   });
   return out.sort((a, b) => a.d.localeCompare(b.d) || a.deal.client.localeCompare(b.deal.client));
@@ -4288,19 +4325,19 @@ function digestMail_(c, x, D) {
     const jointN = (d) => Object.keys(c.S.jqm).filter((k) => k.indexOf(d.id + '/') === 0).length;
     const payRow = (e, chip) => {
       const d = e.deal, l = e.line, jn = jointRole_(c.S, d) === 'header' ? jointN(d) : 0;
-      return mRow_(d.client + (jn ? ' · ใบเสนอราคาร่วม ' + jn + ' บริษัท' : ''), go_(cfg, 'go=deal&id=' + encodeURIComponent(d.id)), l.stage + ' · ครบกำหนด ' + thDay_(l.due, l.due > today ? { wd: 'short' } : null) + (d.resp ? ' · ' + d.resp : ''), baht_(l.left) + ' บาท', chip(l));
+      return mRow_(d.client + (jn ? ' · ใบเสนอราคาร่วม ' + jn + ' บริษัท' : ''), go_(cfg, 'go=deal&id=' + encodeURIComponent(d.id)), payCode_(c.S, d, l.stage) + ' · ครบกำหนด ' + thDay_(l.due, l.due > today ? { wd: 'short' } : null) + (d.resp ? ' · ' + d.resp : ''), baht_(l.left) + ' บาท', chip(l));
     };
     body += mSec_('งวดเงิน', 'รวม ' + baht_(P.total) + ' บาท');
     body += mSub_('เลยกำหนด') + (P.late.length ? list(P.late, (e) => payRow(e, (l) => mChip_('เลยกำหนด ' + l.lateDays + ' วัน', MC.bad, MC.badBg))) : mNone_('ไม่มี'));
     body += mSub_('ครบกำหนดวันนี้') + (P.today.length ? list(P.today, (e) => payRow(e, () => mChip_('ครบกำหนดวันนี้', MC.warn, MC.warnBg))) : mNone_('ไม่มี'));
     body += mSub_('ภายใน ' + cfg.pre + ' วัน') + (P.soon.length ? list(P.soon, (e) => payRow(e, (l) => mChip_('ถึงกำหนด ' + daysBetween_(today, l.due) + ' วัน', MC.warn, MC.warnBg))) : mNone_('ไม่มี'));
     text.push('งวดเงิน ' + n.pay + ' รายการ รวม ' + baht_(P.total) + ' บาท');
-    P.late.concat(P.today, P.soon).slice(0, LIST_MAX).forEach((e) => text.push('- ' + e.deal.client + ' · ' + e.line.stage + ' · ครบกำหนด ' + thDay_(e.line.due) + ' · ' + baht_(e.line.left) + ' บาท'));
+    P.late.concat(P.today, P.soon).slice(0, LIST_MAX).forEach((e) => text.push('- ' + e.deal.client + ' · ' + payCode_(c.S, e.deal, e.line.stage) + ' · ครบกำหนด ' + thDay_(e.line.due) + ' · ' + baht_(e.line.left) + ' บาท'));
   }
   if (D.appt) {
     const A = D.appt;
     const apptRow = (e, late) => {
-      if (e.s) return mRow_(e.s.deal.client, go_(cfg, 'go=deal&id=' + encodeURIComponent(e.s.deal.id)), [e.s.stage + (stageTh_(e.s.stage) ? ' ' + stageTh_(e.s.stage) : ''), e.s.deal.resp].filter(Boolean).join(' · '), 'ไม่ระบุเวลา', '');
+      if (e.s) return mRow_(e.s.deal.client, go_(cfg, 'go=deal&id=' + encodeURIComponent(e.s.deal.id)), [stepName_(c.S, e.s.deal, e.s.stage).filter(Boolean).join(' '), e.s.deal.resp].filter(Boolean).join(' · '), 'ไม่ระบุเวลา', '');
       const t = e.t;
       return mRow_(t.title || 'นัดหมาย', go_(cfg, 'go=plan&d=' + t.date), [TASK_TH[t.type] || 'นัดหมาย', t.note, t.resp].filter(Boolean).join(' · '), late ? thDay_(t.date) + (t.time ? ' ' + t.time : '') : t.time || 'ไม่ระบุเวลา', late ? mChip_('เกินกำหนด ' + daysBetween_(t.date, today) + ' วัน', MC.bad, MC.badBg) : '');
     };
@@ -4309,7 +4346,7 @@ function digestMail_(c, x, D) {
     if (cfg.appt === 'today+1') body += mSub_('พรุ่งนี้ · ' + thDay_(ck.tomorrow, { wd: 'short' })) + (A.tomorrow.length ? list(A.tomorrow, (e) => apptRow(e, false)) : mNone_('ไม่มีนัด'));
     body += mSub_('เลยมาแล้ว ยังไม่ได้ทำ') + (A.late.length ? list(A.late, (e) => apptRow(e, true)) : mNone_('ไม่มี'));
     text.push('นัดหมาย ' + n.appt + ' รายการ');
-    A.today.concat(A.tomorrow, A.late).slice(0, LIST_MAX).forEach((e) => text.push('- ' + (e.s ? e.s.deal.client + ' · ' + e.s.stage + ' · ' + thDay_(e.s.d) : (e.t.title || 'นัดหมาย') + ' · ' + thDay_(e.t.date) + (e.t.time ? ' ' + e.t.time : ''))));
+    A.today.concat(A.tomorrow, A.late).slice(0, LIST_MAX).forEach((e) => text.push('- ' + (e.s ? e.s.deal.client + ' · ' + stepName_(c.S, e.s.deal, e.s.stage)[0] + ' · ' + thDay_(e.s.d) : (e.t.title || 'นัดหมาย') + ' · ' + thDay_(e.t.date) + (e.t.time ? ' ' + e.t.time : ''))));
   }
   body += mBtnRow_('เปิดเว็บ Sales Tracker', go_(cfg, '')).replace('padding:16px 28px 2px', 'padding:22px 28px 26px') || '<tr><td style="padding:0 0 22px"></td></tr>';
   const foot = esc_('ส่งถึง ' + x.n + ' ทุกวันจันทร์–ศุกร์ ' + x.nf.t + ' · ' + scope + ' · วันไหนไม่มีเรื่องจะไม่ส่ง') + '<br>' + (cfg.site ? esc_('กดชื่อบริษัทเพื่อเปิดในเว็บ') + ' · ' : '') + mSettings_(cfg);

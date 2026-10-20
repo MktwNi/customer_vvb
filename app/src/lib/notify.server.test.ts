@@ -38,8 +38,8 @@ function mk(opts: Parameters<typeof createGasSim>[0] = {}): GasSim {
   };
   return s;
 }
-const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 4, tok, ...extra });
-const login = (s: GasSim, u: string, pw: string) => s.post({ action: 'login', cv: 4, u, pk: s.pk(u, pw), rm: true });
+const call = (s: GasSim, tok: string, action: string, extra: Record<string, unknown> = {}) => s.post({ action, cv: 5, tok, ...extra });
+const login = (s: GasSim, u: string, pw: string) => s.post({ action: 'login', cv: 5, u, pk: s.pk(u, pw), rm: true });
 function member(s: GasSim, admin: string, u: string, name: string, role: string) {
   expect(call(s, admin, 'user_save', { create: true, u, name, role, pk: s.pk(u, 'temp-' + u) })).toMatchObject({ ok: true });
   const t = login(s, u, 'temp-' + u);
@@ -125,17 +125,17 @@ afterEach(() => {
 describe('setupNotify', () => {
   it('installs one trigger and the notify tab, never mails what the sheet already holds, and is safe to run again', () => {
     const s = mk({ teamKey: 'test-key-123' });
-    expect(s.post({ action: 'hello', cv: 4 })).toMatchObject({ notify: { on: 0, since: '' } });
-    s.post({ action: 'push', key: 'test-key-123', cv: 4, ops: [{ k: 'stage/1', v: 'won' }, { k: 'stage/2', v: 'lost' }] });
+    expect(s.post({ action: 'hello', cv: 5 })).toMatchObject({ notify: { on: 0, since: '' } });
+    s.post({ action: 'push', key: 'test-key-123', cv: 5, ops: [{ k: 'stage/1', v: 'won' }, { k: 'stage/2', v: 'lost' }] });
     s.run('setupNotify');
     expect(s.triggers.map((t) => [t.getHandlerFunction(), t.every])).toEqual([['notifyTick', 10]]);
     expect(s.sheetOf('notify')!.rows[0]).toEqual(['at', 'kind', 'u', 'key', 'fp', 'result']);
     expect(s.props).toMatchObject({ NOTIFY_ON: '1', NOTIFY_SINCE: '2026-10-12', NOTIFY_SEQ: '2' });
     expect(s.logs.at(-1)).toMatch(/^การแจ้งเตือนทางอีเมลพร้อมใช้งาน: ใบเสนอราคาส่งทันทีที่แนบหรือแก้ เรื่องอื่น \(งวดเงิน นัดหมาย สรุปประจำวัน\) ตรวจทุก 10 นาที วันนี้ส่งได้อีก 100 ฉบับ/);
-    expect(s.post({ action: 'hello', cv: 4 })).toMatchObject({ notify: { on: 1, since: '2026-10-12' } });
+    expect(s.post({ action: 'hello', cv: 5 })).toMatchObject({ notify: { on: 1, since: '2026-10-12' } });
     // again, two days and some rows later: still one trigger, the go-live day and the position stay
     at(2 * DAY);
-    s.post({ action: 'push', key: 'test-key-123', cv: 4, ops: [{ k: 'stage/3', v: 'won' }] });
+    s.post({ action: 'push', key: 'test-key-123', cv: 5, ops: [{ k: 'stage/3', v: 'won' }] });
     s.run('setupNotify');
     expect(s.triggers).toHaveLength(1);
     expect(s.props).toMatchObject({ NOTIFY_SINCE: '2026-10-12', NOTIFY_SEQ: '2' });
@@ -147,7 +147,7 @@ describe('setupNotify', () => {
     expect(s.triggers).toHaveLength(1);
     expect(s.logs).toContain('การแจ้งเตือนทางอีเมลพร้อมใช้งาน (ใบเสนอราคาส่งทันทีที่แนบหรือแก้ เรื่องอื่นตรวจทุก 10 นาที)');
     s.stats.propRead = 0;
-    expect(s.post({ action: 'hello', cv: 4 })).toMatchObject({ mode: 'accounts', notify: { on: 1, since: '2026-10-12' } });
+    expect(s.post({ action: 'hello', cv: 5 })).toMatchObject({ mode: 'accounts', notify: { on: 1, since: '2026-10-12' } });
     expect(s.stats.propRead).toBe(0);
     // without the mail permission setup still does its own work and says what to do; no trigger is left half-made
     const n = mk({ teamKey: '' });
@@ -157,7 +157,7 @@ describe('setupNotify', () => {
     expect(n.ownerCode()).toMatch(/^\d{4}-\d{4}$/);
     expect(n.triggers).toEqual([]);
     expect(() => n.run('setupNotify')).toThrow('permission');
-    expect(n.post({ action: 'hello', cv: 4 })).toMatchObject({ notify: { on: 0 } });
+    expect(n.post({ action: 'hello', cv: 5 })).toMatchObject({ notify: { on: 0 } });
   });
 
   it('a run without accounts, or before setup, mails nothing', () => {
@@ -241,7 +241,7 @@ describe('notify_me / notify_verify (one\'s own address and choices)', () => {
     const mc = String(login(t.s, 'newbie', 'temp-1').tok);
     for (const a of ['notify_me', 'notify_verify', 'notify_test', 'qt_check']) expect(call(t.s, mc, a, { em: 'n@example.com' })).toMatchObject({ ok: false, error: 'must_change_password' });
     const legacy = mk({ teamKey: 'test-key-123' });
-    for (const a of ['notify_me', 'notify_verify', 'notify_test', 'notify_status', 'qt_check']) expect(legacy.post({ action: a, cv: 4, key: 'test-key-123' })).toEqual({ ok: false, error: 'login_required' });
+    for (const a of ['notify_me', 'notify_verify', 'notify_test', 'notify_status', 'qt_check']) expect(legacy.post({ action: a, cv: 5, key: 'test-key-123' })).toEqual({ ok: false, error: 'login_required' });
   });
 
   it('an admin sets an account\'s address (user_save em): the code goes to that address, the account verifies it', () => {
@@ -372,7 +372,7 @@ describe('qt_check', () => {
     expect(call(t.s, t.lead, 'push', { ops: [op] })).toMatchObject({ ok: true, n: 0, denied: ['qchk/q1'] });
     expect(call(t.s, t.mint, 'push', { ops: [op] })).toMatchObject({ ok: true, n: 0, denied: ['qchk/q1'] });
     const legacy = mk({ teamKey: 'test-key-123' });
-    expect(legacy.post({ action: 'push', key: 'test-key-123', cv: 4, ops: [op] })).toMatchObject({ ok: true, n: 0, rejected: ['qchk/q1'] });
+    expect(legacy.post({ action: 'push', key: 'test-key-123', cv: 5, ops: [op] })).toMatchObject({ ok: true, n: 0, rejected: ['qchk/q1'] });
   });
 
   it('the attacher, or whoever wrote the record last, may not check it, unless the team allows it', () => {
@@ -747,7 +747,7 @@ const pushPend = (s: GasSim) =>
 describe('a push mails a new quotation\'s checkers at once (the timer is the safety net)', () => {
   it('right after saving, outside the lock: every checker but the attacher; the reply says who; notifyTick sends nothing more', () => {
     const t = crew({ now: true });
-    expect(t.s.post({ action: 'hello', cv: 4 })).toMatchObject({ notify: { on: 1, now: 1 } });
+    expect(t.s.post({ action: 'hello', cv: 5 })).toMatchObject({ notify: { on: 1, now: 1 } });
     push(t.s, t.lead, [deal('d1', { email: 'customer@example.com' })]);
     at(2 * MIN);
     const r = push(t.s, t.ek, [qt('d1', 'q1')]);
@@ -1053,7 +1053,7 @@ describe('a push mails a new quotation\'s checkers at once (the timer is the saf
     // the team code (no accounts) never mails from a push
     const legacy = mk({ teamKey: 'test-key-123' });
     legacy.run('setupNotify');
-    const lr = legacy.post({ action: 'push', key: 'test-key-123', cv: 4, ops: [deal('d1'), qt('d1', 'q1')] });
+    const lr = legacy.post({ action: 'push', key: 'test-key-123', cv: 5, ops: [deal('d1'), qt('d1', 'q1')] });
     expect(lr).toMatchObject({ ok: true });
     expect(lr.qt).toBeUndefined();
     expect(legacy.mail.sent).toEqual([]);
@@ -1254,13 +1254,59 @@ describe('notifyTick: the weekday digest "สรุปวันนี้"', () =
     expect(h).toContain('ถึงกำหนด 3 วัน');
     expect(h).not.toContain('ไม่ได้งาน');
     expect(h).toContain('โทร · ตามผลบอร์ด · เอก');
-    expect(h).toContain('FOLLOW1 ติดตามครั้งที่ 1 · หัวหน้า');
+    // (an older stage's planned follow-up, named as the web app's steps name it: FOLLOW1 → FOLLOW)
+    expect(h).toContain('FOLLOW ติดตามผล · หัวหน้า');
+    expect(h).not.toContain('FOLLOW1');
     expect(h).not.toContain('QUOTATION'); // the stage written today is done
     expect(h).toContain('เกินกำหนด 3 วัน');
     expect(h).not.toContain('ทำแล้ว');
     expect(h).toContain(SITE + '#go=deal&amp;id=d1');
     expect(h).toContain(SITE + '#go=plan&amp;d=2026-10-09');
     expect(m.body).toContain('งวดเงิน 4 รายการ รวม 146,250 บาท');
+  });
+
+  it('the five steps: planned CONTACT / FOLLOW (what builds since then write) are listed, named as the web app names them', () => {
+    // review: stepsDue_ kept only the stored list's stages (CALL1 … PAY2), so a call or a follow-up planned with a
+    // build of the five steps (dstep/<deal>/CONTACT, FOLLOW) never reached the digest
+    const t = crew();
+    push(t.s, t.lead, [
+      deal('d1', { client: 'บริษัท เก่าหนึ่ง จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d1/FOLLOW1', v: { d: '2026-10-13', n: '' } }, // an older tab's planned follow-up
+      deal('d2', { client: 'บริษัท ใหม่สอง จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d2/FOLLOW', v: { d: '2026-10-13', n: '' } },
+      deal('d3', { client: 'บริษัท ใหม่สาม จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d3/CONTACT', v: { d: '2026-10-12', n: '' } },
+      deal('d4', { client: 'บริษัท เก่าสี่ จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d4/CALL2', v: { d: '2026-10-12', n: '' } },
+      // both stores of one step planned for the same day: listed once
+      deal('d5', { client: 'บริษัท สองที่ จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d5/CALL2', v: { d: '2026-10-13', n: '' } },
+      { k: 'dstep/d5/CONTACT', v: { d: '2026-10-13', n: 'นัดโทร' } },
+      // done today (a note): not to do; a stage nobody reads: not listed
+      deal('d6', { client: 'บริษัท ทำแล้ว จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d6/CONTACT', v: { d: '2026-10-12', n: 'โทรแล้ว' } },
+      { k: 'dstep/d6/WHATEVER', v: { d: '2026-10-13', n: '' } },
+      // a plan of one instalment: "PAY", as the web app names it
+      deal('d7', { client: 'บริษัท งวดเดียว จำกัด', resp: 'เอก' }),
+      { k: 'dstep/d7/CLOSED DEAL', v: { d: '2026-09-01', n: 'YES' } },
+      { k: 'dpay/d7/PAY1', v: { amt: 5000, due: '2026-10-14' } },
+    ]);
+    call(t.s, t.lead, 'notify_me', { t: '07:30' });
+    push(t.s, t.lead, [{ k: 'scfg/notify.cfg', v: { site: SITE, appt: 'today+1' } }]);
+    at(95 * MIN);
+    tick(t.s);
+    const m = digest(t, 'lead')!;
+    expect(m.subject).toBe('สรุปวันนี้ จ. 12 ต.ค.: งวดเงิน 1 · นัดหมาย 5');
+    const h = m.htmlBody!;
+    for (const c of ['เก่าหนึ่ง', 'ใหม่สอง', 'ใหม่สาม', 'เก่าสี่', 'สองที่']) expect(h).toContain('บริษัท ' + c + ' จำกัด');
+    expect(h).not.toContain('ทำแล้ว จำกัด');
+    expect(h).toContain('FOLLOW ติดตามผล · เอก');
+    expect(h).toContain('CONTACT ติดต่อประสานงาน · เอก');
+    expect(h).not.toMatch(/CALL2|FOLLOW1|WHATEVER/);
+    expect(h.split('บริษัท สองที่ จำกัด').length - 1).toBe(1);
+    expect(h).toContain('PAY · ครบกำหนด พ. 14 ต.ค. · เอก');
+    expect(m.body).toContain('- บริษัท ใหม่สอง จำกัด · FOLLOW · 13 ต.ค.');
+    expect(m.body).toContain('- บริษัท งวดเดียว จำกัด · PAY · ครบกำหนด 14 ต.ค.');
   });
 
   it('own work only for sales (scope mine), no quotation section without qt.check; the team scope on request', () => {

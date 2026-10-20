@@ -3,8 +3,8 @@ import { useApp, useEngineVersion } from '../state';
 import { norm } from '../lib/core';
 import { dmTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
-  DEAL_STAGE, QUOTE_STAGE, closeReady, dealMoney, dealResult, fmtMoney, jointOf, jointSplit, parseAmount, payState, stageTrack, stepOf,
-  type Deal, type DealDoc, type DocKind, type JointGroup, type SalesState,
+  DEAL_STAGE, QUOTE_STAGE, closeReady, dealMoney, dealResult, fmtMoney, jointOf, jointSplit, parseAmount, payState, dealSteps, stepOf,
+  type Deal, type DealDoc, type JointGroup, type SalesState,
 } from '../lib/sales';
 import { JOINT_PAID, nextStepView, shortName, statusView } from '../lib/salesUi';
 import { jointCloseCount } from '../lib/workUi';
@@ -30,7 +30,7 @@ import { QtCheckLine } from './QtCheckSheet';
 import { checkedLine, waitShort } from '../lib/notify';
 import { useSalesActs } from './SalesToast';
 import { LensMoney } from '../tabs/SalesCash';
-import type { AttachMore } from './DocAttach';
+import type { AttachEntry } from '../lib/attachPlan';
 
 /**
  * The joint quotation (ใบเสนอราคาร่วม, package quotes item 7) on screen: making one ("สร้างใบเสนอราคาร่วม",
@@ -610,7 +610,7 @@ export function JointCard({ b, attr, onOpen }: { b: Extract<JRow, { k: 'band' }>
           return (
             <button key={d.id} type="button" className="jm-r hv" onClick={() => onOpen(d.id)} aria-label={`${d.client} เปิดแถวติดตาม`}>
               <CoAvatar name={c?.name || d.client} web={c?.web} set={c?.set} size={30} />
-              <span className="jm-t"><b className="co-name dense" title={d.client}>{shortName(d.client)}</b><small>{[d.resp, nx.stage ? 'ถัดไป ' + nx.stage : nx.hint].filter(Boolean).join(' · ')}</small></span>
+              <span className="jm-t"><b className="co-name dense" title={d.client}>{shortName(d.client)}</b><small>{[d.resp, nx.code ? 'ถัดไป ' + nx.code : nx.hint].filter(Boolean).join(' · ')}</small></span>
               {money && sh && <span className="jm-a">{sh.out ? <><span>—</span><small>ถอนตัว</small></> : <><span>{sh.amt != null ? fmtMoney(sh.amt) : sh.pct + '%'}</span><small>ส่วนแบ่ง {sh.pct}%</small></>}</span>}
             </button>
           );
@@ -687,7 +687,7 @@ function TitleBox({ value, onSave }: { value: string; onSave: (v: string) => voi
   );
 }
 
-type Attach = (stage?: string, kind?: DocKind, file?: File, more?: AttachMore) => void;
+type Attach = (entry: AttachEntry, file?: File) => void;
 /**
  * The joint quotation's panel (the header deal's): its name, number, payer, owner and companies; สถานะ /
  * Forecast / Actual / ค้างรับ; the companies with their parts, next steps and states ("แก้ไขรายชื่อ"); the
@@ -780,7 +780,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
                 <div className="jp-r ph" role="row"><span role="columnheader">บริษัท</span>{money && <span role="columnheader" className="r">ส่วนแบ่ง (บาท)</span>}<span role="columnheader">ขั้นตอน</span><span role="columnheader">สถานะ</span></div>
                 {g.members.map((x, i) => {
                   const c = x.deal.gid != null ? e.company(x.deal.gid) : undefined;
-                  const t = stageTrack(S, x.deal, today), nx = nextStepView(S, x.deal, today), sv = statusView(S, x.deal, today), sh = shares[i];
+                  const t = dealSteps(S, x.deal, today), nx = nextStepView(S, x.deal, today), sv = statusView(S, x.deal, today), sh = shares[i];
                   return (
                     <div key={x.deal.id} className="jp-r" role="row">
                       <span className="jp-co" role="cell">
@@ -793,7 +793,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
                       {money && <span className="jp-sh" role="cell">{sh.out ? <><span className="t-muted">—</span><small>{outWord(S, x.deal)}</small></> : <><span>{sh.amt != null ? fmtMoney(sh.amt) : '—'}</span><small>{sh.pct}%</small></>}</span>}
                       {/* (paid in full by the payer, a company has nothing left but ปิดงาน: "ครบทุกขั้น" beside
                           "ทำแล้ว 2 จาก 6 ขั้น" would contradict itself when it skipped stages) */}
-                      <span className="jp-nx" role="cell"><span>{nx.kind === 'done' ? (x.deal.jobStatus === 'closed' ? 'ปิดงานแล้ว' : 'พร้อมปิดงาน') : nx.stage ? 'ถัดไป ' + nx.stage : nx.hint}</span><small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small></span>
+                      <span className="jp-nx" role="cell"><span>{nx.kind === 'done' ? (x.deal.jobStatus === 'closed' ? 'ปิดงานแล้ว' : 'พร้อมปิดงาน') : nx.code ? 'ถัดไป ' + nx.code : nx.hint}</span><small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small></span>
                       <span role="cell"><Status kind={sv.kind}>{sv.word}</Status>{x.deal.jobStatus === 'closed' && <small className="t-meta"> · ปิดแล้ว</small>}</span>
                     </div>
                   );
@@ -810,11 +810,11 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
           <section className="dp-card" aria-labelledby="jp-q">
             <div className="dp-h"><h3 id="jp-q">ใบเสนอราคา</h3><span>ใบเดียวสำหรับทั้ง {fmtN(g.members.length)} บริษัท</span></div>
             {qtView(S, d).head ? (
-              <QtCard d={d} onRevise={(id) => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast', revise: id })} />
+              <QtCard d={d} onRevise={(id) => attach({ at: 'quote', revise: id })} />
             ) : (
               <div className="sl-pc-empty">
                 <span>ยังไม่มีไฟล์ใบเสนอราคา แนบแล้วยอดในใบจะเป็น Forecast ของใบเสนอราคาร่วม (นับครั้งเดียว)</span>
-                {e.canQuote(d) && <button type="button" className="btn xs" onClick={() => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast' })}>แนบใบเสนอราคา</button>}
+                {e.canQuote(d) && <button type="button" className="btn xs" onClick={() => attach({ at: 'quote' })}>แนบใบเสนอราคา</button>}
               </div>
             )}
           </section>

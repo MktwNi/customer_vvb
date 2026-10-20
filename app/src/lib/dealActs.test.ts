@@ -40,7 +40,7 @@ describe('a contact record (dact/<deal>/<id>)', () => {
   it('counts toward the last contact (a later one wins, a planned one does not), so ค้าง goes away', () => {
     const d = deal({ id: 'x', contactDate: '2026-08-01' });
     const S = state([d], { 'x/CALL1': { d: '2026-08-20', n: 'โทรแล้ว' } });
-    expect(lastContactInfo(S, d, TODAY)).toEqual({ date: '2026-08-20', from: 'CALL1' });
+    expect(lastContactInfo(S, d, TODAY)).toEqual({ date: '2026-08-20', from: 'CONTACT' }); // CALL1 read into CONTACT
     expect(overdueDays(S, d, TODAY)).toBe(49);
     S.acts = { 'x/a1': act('x', 'a1', '2026-10-06', { type: 'meet' }), 'x/a2': act('x', 'a2', '2026-10-20') };
     const lc = lastContactInfo(S, d, TODAY);
@@ -59,14 +59,17 @@ describe('a contact record (dact/<deal>/<id>)', () => {
     expect(filterDeals(S, { year: '2569', date: { basis: 'contact', preset: 'custom', from: '2026-07-14', to: '2026-07-14' } }, TODAY).map((x) => x.id)).toEqual(['x']);
   });
 
-  it('belongs by default to the stage the deal is at: the last one done, else the next one', () => {
+  it('belongs by default to the step the deal is at: the last one done, else the next one', () => {
     const d = deal({ id: 'x' });
     const S = state([d]);
-    expect(actStage(S, d, TODAY)).toBe('CALL1'); // nothing done yet
+    expect(actStage(S, d, TODAY)).toBe('CONTACT'); // nothing done yet
     S.steps = { 'x/CALL1': { d: '2026-09-01', n: 'a' }, 'x/CALL2': { d: '2026-09-10', n: 'b' } };
-    expect(actStage(S, d, TODAY)).toBe('CALL2'); // a third call is one more after CALL2
+    expect(actStage(S, d, TODAY)).toBe('CONTACT'); // a third call is one more contact at CONTACT (CALL1, CALL2 read into it)
     S.steps['x/QUOTATION'] = { d: '2026-12-01', n: 'นัดส่ง' }; // planned only: not done yet
-    expect(actStage(S, d, TODAY)).toBe('CALL2');
+    expect(actStage(S, d, TODAY)).toBe('CONTACT');
+    S.steps['x/QUOTATION'] = { d: '2026-09-15', n: 'ส่ง QT' };
+    S.steps['x/FOLLOW1'] = { d: '2026-09-25', n: 'โทรตาม' };
+    expect(actStage(S, d, TODAY)).toBe('FOLLOW');
     S.steps['x/CLOSED DEAL'] = { d: '2026-09-20', n: 'NO' };
     expect(actStage(S, d, TODAY)).toBe('CLOSED DEAL');
   });

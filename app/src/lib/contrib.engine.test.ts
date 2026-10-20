@@ -111,7 +111,7 @@ async function member(L: Tab, u: string, name: string, role: Role) {
   return M;
 }
 /** What the script holds for key k (as an admin pulls it). */
-const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
+const stored = (L: Tab, k: string) => sim.post({ action: 'pull', since: 0, cv: 5, tok: L.e.session!.tok }).rows!.filter((r) => r.k === k).at(-1);
 
 /** The lead's setup: two units with their people, a won deal of เอก paid 100,000 on 15 ส.ค., split 60/40. */
 async function setUp(L: Tab) {
@@ -169,7 +169,7 @@ describe('units and splits with this release\'s team script', () => {
     expect(S.e.canWriteKey('scfg/unitm.' + staffKey('เอก'), false)).toBe(false);
     S.e.saveUnit(sale, { n: 'ฝ่ายขายของเอก', r: 50, svc: {} });
     expect(S.e.sales.units![sale].n).toBe('ฝ่ายขาย');
-    const forced = sim.post({ action: 'push', cv: 4, tok: S.e.session!.tok, ops: [{ k: 'dshare/' + d.id, v: { lines: [{ u: sale, p: 100 }] } }, { k: 'scfg/unit.' + sale, v: { n: 'x', c: 1, o: 0, rates: [{ from: '', r: 50 }] } }] });
+    const forced = sim.post({ action: 'push', cv: 5, tok: S.e.session!.tok, ops: [{ k: 'dshare/' + d.id, v: { lines: [{ u: sale, p: 100 }] } }, { k: 'scfg/unit.' + sale, v: { n: 'x', c: 1, o: 0, rates: [{ from: '', r: 50 }] } }] });
     expect(forced.denied).toEqual(['dshare/' + d.id, 'scfg/unit.' + sale]);
     expect(stored(L, 'dshare/' + d.id)!.v).toMatchObject({ lines: [{ u: sale, p: 60 }, { u: cons, p: 40 }] });
   });

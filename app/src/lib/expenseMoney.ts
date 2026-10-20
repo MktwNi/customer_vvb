@@ -298,8 +298,8 @@ export function expByPerson(s: SalesState, lines: ExpLine[], r?: Range | null): 
 export function asCashLine(x: ExpLine): CashLine {
   const joint = x.joint?.role === 'header' ? { members: x.joint.members, title: x.joint.title, ...(x.joint.keep ? { part: x.joint.part, keep: x.joint.keep } : {}) } : undefined;
   return {
-    id: 'exp:' + x.id, deal: x.deal, ...(joint ? { joint } : {}), stage: '', n: 0, of: 0, amt: x.amt, kind: 'got', date: x.date, due: '', rcv: x.date,
-    status: 'paid', lateDays: 0, dealYear: x.dealYear, src: 'typed', doc: null, extra: false,
+    id: 'exp:' + x.id, deal: x.deal, ...(joint ? { joint } : {}), stage: '', code: '', n: 0, of: 0, amt: x.amt, kind: 'got', date: x.date, due: '', rcv: x.date,
+    status: 'paid', lateDays: 0, dealYear: x.dealYear, src: 'typed', doc: null,
   };
 }
 /** Paid expenses in a range by unit ('' = ยังไม่ระบุหน่วยงาน): each through its job's สัดส่วนรายได้ on the day it

@@ -170,7 +170,7 @@ export function Plan() {
   };
   const upcoming = pick(tasksK).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || '')).slice(0, 8);
   const upPays = pick(paysK).filter((x) => x.line.due >= today).slice(0, 4);
-  /** "กรีนวัลเลย์ ฟู้ดส์" with its deal's service types, "รับชำระ PAY2 · 53,500 บาท" under it: opens the deal (the
+  /** "กรีนวัลเลย์ ฟู้ดส์" with its deal's service types, "รับชำระ PAY2 · 53,500 บาท" ("PAY" for a single installment) under it: opens the deal (the
    *  receipt is recorded there). It keeps its status look in both colour modes. In งานที่กำลังจะถึง (`when`) the
    *  name is 14px, as the appointments there: a short list under the day's 16px cards. */
   const payItem = (x: PayK, when?: boolean) => (
@@ -178,7 +178,7 @@ export function Plan() {
       {/* the customer's name is the title (as on an appointment); what is due under it */}
       <span className="pl-pay-t">
         <span className="pl-nm-row"><span className={'co-name' + (when ? ' dense' : '')}>{shortName(x.deal.client)}</span>{sees && <SvcChips ct={x.ct} />}</span>
-        <span className="t-sec">รับชำระ {x.line.stage} · {fmtMoney(x.line.left || x.line.amt)} บาท</span>
+        <span className="t-sec">รับชำระ {x.line.code} · {fmtMoney(x.line.left || x.line.amt)} บาท</span>
       </span>
       <small>{x.line.lateDays ? `เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : when ? isoTh(x.line.due) : x.line.due === today ? 'ครบกำหนดวันนี้' : `อีก ${fmtN(daysBetween(today, x.line.due))} วัน`}</small>
     </button>
@@ -198,7 +198,7 @@ export function Plan() {
   /** A day's installment in its cell: outlined in its status colour (late: red) with the word รับเงิน, never
    *  in a customer or a type colour, so it does not read as an appointment. */
   const payChip = (x: PayK) => (
-    <span key={x.deal.id + x.line.stage} className={'pl-ev pay' + (x.line.lateDays ? ' late' : '')} title={`รับชำระ ${x.line.stage} · ${shortName(x.deal.client)}${mode === 'type' ? ' · ' + typeWords(x.types) : ''} · ${fmtMoney(x.line.left || x.line.amt)} บาท${x.line.lateDays ? ` · เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : ''}`}>
+    <span key={x.deal.id + x.line.stage} className={'pl-ev pay' + (x.line.lateDays ? ' late' : '')} title={`รับชำระ ${x.line.code} · ${shortName(x.deal.client)}${mode === 'type' ? ' · ' + typeWords(x.types) : ''} · ${fmtMoney(x.line.left || x.line.amt)} บาท${x.line.lateDays ? ` · เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : ''}`}>
       <span className="pl-ev-k">รับเงิน</span>
       <span className="pl-ev-n">{chipName(x.deal.client)}</span>
     </span>

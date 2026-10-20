@@ -224,6 +224,6 @@ describe('a joint quotation\'s companies given the payer\'s result at closing ar
     expect([followsPayer(e.sales, 'm2'), followsPayer(e.sales, 'm3'), followsPayer(e.sales, 'h'), followsPayer(e.sales, 'c1')]).toEqual([false, false, false, false]);
     const own = weekContacts(e.sales, ids, T);
     expect([own.perDay, own.lastWeek]).toEqual([{ [T]: 2 }, after.lastWeek + 1]);
-    expect(lastContactInfo(e.sales, e.sales.deals.m2, T)).toMatchObject({ date: '2026-10-05', from: DEAL_STAGE });
+    expect(lastContactInfo(e.sales, e.sales.deals.m2, T)).toMatchObject({ date: '2026-10-05', from: 'CLOSE' }); // CLOSED DEAL, as its step shows
   });
 });

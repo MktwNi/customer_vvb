@@ -197,7 +197,7 @@ describe('the bell', () => {
       ['บริษัท ไทยออยล์ เอนเนอร์ยี่ จำกัด', { text: 'เลยกำหนด 4 วัน', chip: 'bad' }],
       ['บริษัท เบทาโกร ฟู้ด จำกัด', { text: 'ถึงกำหนด 3 วัน', chip: 'warn' }],
     ]);
-    expect(pay.rows[0].sub).toBe(`PAY1 · 80,250 บาท · ครบกำหนด ${dmTh('2026-10-08')} · เอก`);
+    expect(pay.rows[0].sub).toBe(`PAY · 80,250 บาท · ครบกำหนด ${dmTh('2026-10-08')} · เอก`); // a plan of one installment: PAY
     expect(appt.rows.map((x) => [x.title, x.right, x.go.day])).toEqual([
       ['ฝาจีบ', { text: 'เกินกำหนด 4 วัน', chip: 'bad' }, '2026-10-08'],
       ['บริษัท ซากิโนมิยะ ประเทศไทย จำกัด', { text: 'เกินกำหนด 3 วัน', chip: 'bad' }, '2026-10-09'],
@@ -225,7 +225,7 @@ describe('the bell', () => {
     expect(mine[0].sub.endsWith('…')).toBe(true);
     expect(mine[1].sub).toBe(`QT-q3 · มินท์ ตรวจแล้ว ${dmTh('2026-10-08')}`);
     // the instalment of their own deal, without the name (it is theirs)
-    expect(r.groups[1].rows[0].sub).toBe(`PAY1 · 80,250 บาท · ครบกำหนด ${dmTh('2026-10-08')}`);
+    expect(r.groups[1].rows[0].sub).toBe(`PAY · 80,250 บาท · ครบกำหนด ${dmTh('2026-10-08')}`);
     expect(r.count).toBe(2);
     // a check older than 7 days is no longer shown
     expect(bellItems({ ...base, me: 'เอก', caps: SALES, scope: 'mine', today: '2026-10-20' }).groups[0].rows.map((x) => x.go.doc)).toEqual(['q1']);

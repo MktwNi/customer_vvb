@@ -109,7 +109,7 @@ async function settle(...es: GccEngine[]) {
 }
 /** The record as the sheet has it now (null: deleted; undefined: never written). */
 function sheet(k: string, tok?: string): unknown {
-  const r = sim.post({ action: 'pull', since: 0, ...(tok ? { tok, cv: 4 } : { key: KEY }) }).rows!.filter((x) => x.k === k);
+  const r = sim.post({ action: 'pull', since: 0, ...(tok ? { tok, cv: 5 } : { key: KEY }) }).rows!.filter((x) => x.k === k);
   const l = r[r.length - 1];
   return !l ? undefined : l.del ? null : l.v;
 }

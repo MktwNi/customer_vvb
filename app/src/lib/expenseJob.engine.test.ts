@@ -114,7 +114,7 @@ async function member(L: Tab, u: string, name: string, role: Role) {
   return M;
 }
 /** The rows the sheet holds for a key, oldest first. */
-const rows = (k: string) => sim.post({ action: 'pull', since: 0, cv: 4, xp: 1, tok: tabs[0].e.session!.tok }).rows!.filter((r: { k: string }) => r.k === k);
+const rows = (k: string) => sim.post({ action: 'pull', since: 0, cv: 5, xp: 1, tok: tabs[0].e.session!.tok }).rows!.filter((r: { k: string }) => r.k === k);
 const pdf = (name: string, body = name) => Object.assign(new Blob(['%PDF-1.4 ' + body], { type: 'application/pdf' }), { name });
 const files = () => sim.drive.list().filter((x) => x.kind === 'file');
 const LINE = { c: 'ค่าเดินทาง', amt: 3500, d: '2026-10-05' };
@@ -290,7 +290,7 @@ describe('recording job expenses (engine, Code.gs in the simulator)', () => {
     const fid = L.e.sales.exp![`${d.id}/${x.id}`].file!.id;
     expect(fid).toBeTruthy();
     // accounting checked it
-    expect(sim.post({ action: 'push', cv: 4, tok: L.e.session!.tok, ops: [{ k: `dchk/${d.id}/exp.${x.id}`, v: { s: 'ok', amt: 3500, d: '2026-10-06', f: fid } }] })).toMatchObject({ ok: true });
+    expect(sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ k: `dchk/${d.id}/exp.${x.id}`, v: { s: 'ok', amt: 3500, d: '2026-10-06', f: fid } }] })).toMatchObject({ ok: true });
     await settle(L, S);
     L.e.deleteDeal(d.id);
     await settle(L, S);

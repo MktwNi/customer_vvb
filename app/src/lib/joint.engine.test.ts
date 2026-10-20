@@ -534,7 +534,7 @@ describe('review: an account limited to its own deals', () => {
       expect(jointRole(E.sales, E.sales.deals[other.id])).toBe('plain');
       expect(salesStats(E.sales, Object.values(E.sales.deals), TODAY).forecast).toBe(f0 + 10);
       // the sheet: the joint quotation and its own member only
-      const rows = sim.post({ action: 'pull', since: 0, cv: 4, tok: E.session!.tok }).rows!.filter((r) => r.k.startsWith('jqm/')).map((r) => r.k);
+      const rows = sim.post({ action: 'pull', since: 0, cv: 5, tok: E.session!.tok }).rows!.filter((r) => r.k.startsWith('jqm/')).map((r) => r.k);
       expect(rows).toEqual([`jqm/${hid}/${mine.id}`]);
       // a role with สร้างใบเสนอราคาร่วม but no ดีลและขั้นตอน makes none
       const P = mk('');

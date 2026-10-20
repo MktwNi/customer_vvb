@@ -706,7 +706,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
         key: `p:${d.id}/${l.stage}`,
         kind: 'pay',
         title: d.client,
-        sub: [l.stage, amt ? fmtMoney(amt) + ' บาท' : '', 'ครบกำหนด ' + dmTh(l.due), team && d.resp ? d.resp : ''].filter(Boolean).join(' · '),
+        sub: [l.code, amt ? fmtMoney(amt) + ' บาท' : '', 'ครบกำหนด ' + dmTh(l.due), team && d.resp ? d.resp : ''].filter(Boolean).join(' · '),
         right: late ? { text: `เลยกำหนด ${l.lateDays} วัน`, chip: 'bad' } : { text: l.due === today ? 'ถึงกำหนดวันนี้' : `ถึงกำหนด ${daysBetween(today, l.due)} วัน`, chip: 'warn' },
         count: true,
         go: { deal: d.id },

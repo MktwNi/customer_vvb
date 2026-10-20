@@ -335,11 +335,11 @@ describe('against the team script of this release (notifications set up)', () =>
     L.e.saveNotifyCfg({ ...NOTIFY_CFG0, pre: 3, late: 'mon', sender: 'ทีมขาย GCC' });
     await settle(L, S);
     expect(S.e.notifyCfg()).toMatchObject({ pre: 3, late: 'mon', appt: 'today+1', sender: 'ทีมขาย GCC' });
-    expect(sim.post({ action: 'pull', since: 0, cv: 4, tok: L.e.session!.tok }).rows!.some((r) => r.k === 'scfg/notify.cfg')).toBe(true);
+    expect(sim.post({ action: 'pull', since: 0, cv: 5, tok: L.e.session!.tok }).rows!.some((r) => r.k === 'scfg/notify.cfg')).toBe(true);
     S.e.saveNotifyCfg({ ...NOTIFY_CFG0, pre: 14 });
     expect(S.e.teamNote).toBe('บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้');
     expect(S.e.notifyCfg().pre).toBe(3);
-    const forged = sim.post({ action: 'push', cv: 4, tok: L.e.session!.tok, ops: [{ k: 'qchk/' + doc.id, v: { st: 'ok', by: 'หมิว', at: '2026-10-12T03:00:00Z', fp: fpOf(doc) } }] });
+    const forged = sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ k: 'qchk/' + doc.id, v: { st: 'ok', by: 'หมิว', at: '2026-10-12T03:00:00Z', fp: fpOf(doc) } }] });
     expect(forged.denied).toEqual(['qchk/' + doc.id]);
   });
 
