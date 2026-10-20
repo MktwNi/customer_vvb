@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FocusEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, dupCounted, fmtMoney, isPayStage, kindForStage,
+  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, dupCounted, fmtMoney, isPayStage,
   lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stageActs, stageDocs, stageTh, stageTrack, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState,
 } from '../lib/sales';
 import { CLOSE_TITLE, acFig, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, type FigView } from '../lib/salesUi';
-import { DocAttach, SHOWABLE, openDocFile, type AttachMore } from './DocAttach';
+import { SHOWABLE, openDocFile } from './DocAttach';
+import { useAttach } from './AttachProvider';
+import { panelEntry, recvPlan, type AttachEntry } from '../lib/attachPlan';
 import { DocThumb } from './DocThumb';
 import { QtCard } from './QtCard';
 import { isQtVersion, qtView } from '../lib/quotes';
@@ -31,7 +33,7 @@ import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 import { ShareCard } from './ShareCard';
 // the month check (cash follow-up): the chips on received lines, the question before a checked line changes
 import { PayChip, PayNoPlan, PayNote, PayStripChip, askPay, useDealChecks, usePayGuard } from './PayChk';
-import { attachLines, invoiceOnly, planCheckWords, previewOf } from '../lib/payCheck';
+import { invoiceOnly, planCheckWords, previewOf } from '../lib/payCheck';
 // ค่าใช้จ่ายของงาน (job expenses), after the payment plan: only with ดูค่าใช้จ่ายและกำไรของงาน
 import { ExpCard, dealGoneCheckWords } from './ExpCard';
 import { expensesOf } from '../lib/expense';
@@ -314,17 +316,15 @@ function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boole
 
 // ------------------------------------------------------------------ the panel
 
-type AttachReq = { stage?: string; kind?: DocKind; file?: File; more?: AttachMore };
-/** Open the attach dialog: at a stage, of a kind, with a dropped file; `more` presets what the document
- *  backs (the figure it was attached from: its target and the figure it is checked against). */
-type Attach = (stage?: string, kind?: DocKind, file?: File, more?: AttachMore) => void;
+/** Attach a document: the button's entry (lib/attachPlan) says what it is; with a dropped `file` the dialog
+ *  opens with it, else the file picker opens straight from the click (components/AttachProvider). */
+type Attach = (entry: AttachEntry, file?: File) => void;
 
 export function DealPanel() {
   const { engine: e, ui, set } = useApp();
   useEngineVersion();
   const d = ui.deal ? e.sales.deals[ui.deal] : undefined;
-  const [att, setAtt] = useState<AttachReq | null>(null);
-  useEffect(() => setAtt(null), [ui.deal]);
+  const at = useAttach();
   const ref = useRef<HTMLElement>(null);
   const acts = useSalesActs();
   const guard = usePayGuard();
@@ -355,9 +355,8 @@ export function DealPanel() {
   const od = overdueDays(S, d, today);
   const ready = d.jobStatus === 'open' && closeReady(S, d, today);
   const c = d.gid != null ? e.company(d.gid) : undefined;
-  // a document for the Actual at a stage accounting checked (or of a closed month): asked first
-  const attach: Attach = (stage, kind, file, more) =>
-    guard.ask({ d, lines: attachLines(S, d.id, stage, kind, more?.target), kind: 'attach', title: 'แนบเอกสาร' + (stage ? ' ' + stage : ''), verb: 'แนบเอกสาร', run: () => setAtt({ stage, kind, file, more }) });
+  // (a document for the Actual at a stage accounting checked, or of a closed month: asked first, useAttach)
+  const attach: Attach = (entry, file) => (file ? at.drop(d, entry, file) : at.open(d, entry));
   const planFirst = won || ui.dpPlan !== '';
   // a joint quotation's header has its own panel (this one hosts it: keyboard, Escape, the attach dialog);
   // a member has no money or plan of its own
@@ -366,7 +365,6 @@ export function DealPanel() {
     return (
       <>
         <JointPanel d={d} panelRef={ref} close={close} attach={attach} plan={<><PlanCard d={d} attach={attach} /><ExpCard d={d} /><ShareCard key={'sh' + d.id} d={d} /></>} info={<ContactCard d={d} ro={ro} title="ข้อมูลใบเสนอราคา" />} history={<HistoryCard d={d} />} />
-        {att && <DocAttach deal={d} stage={att.stage} kind={att.kind} file={att.file} {...att.more} onClose={() => setAtt(null)} />}
       </>
     );
 
@@ -381,16 +379,24 @@ export function DealPanel() {
   // "แนบเอกสาร" at the figures: a quotation for the Forecast (checked against the typed one), an invoice
   // or receipt for the Actual at the installment it pays (checked against the plan or the typed Actual)
   const fv = fcFig(S, d), av = acFig(S, d);
-  const attachFc = () => attach(C.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', undefined, { target: 'forecast' });
-  // (the stage is the app's choice, the first installment not received: a receipt may be another one's)
-  const attachAc = () => attach(attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', undefined, { target: 'actual', auto: true });
+  const attachFc = () => attach({ at: 'quote' });
+  // (the installment is the app's choice, the first not received: a receipt may be another one's)
+  const attachAc = () => attach({ at: 'pay' });
+  // a file dropped anywhere on the panel goes to the current step (lib/attachPlan panelEntry)
+  const canDrop = !ro && e.can('docs.up');
+  const dropOn = (ev: DragEvent<HTMLElement>) => {
+    const f = ev.dataTransfer.files?.[0];
+    if (!canDrop || !f) return;
+    ev.preventDefault();
+    attach(panelEntry(S, d, t.next, today), f);
+  };
   // one document counted more than once (an old double count, two teammates attaching the same receipt)
   const dups = money && jr !== 'member' ? dupCounted(S, d) : [];
 
   return (
     <>
       <div onClick={close} className="dp-back" />
-      <aside ref={ref} className="panel dp" tabIndex={-1} role="dialog" aria-modal="true" aria-label={d.client}>
+      <aside ref={ref} className="panel dp" tabIndex={-1} role="dialog" aria-modal="true" aria-label={d.client} onDragOver={(ev) => canDrop && ev.dataTransfer.types.includes('Files') && ev.preventDefault()} onDrop={dropOn}>
         <div className="dp-head">
           <div className="dp-top">
             <span className="dp-crumb">Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}{c ? ' · ' + c.code : ''}</span>
@@ -472,7 +478,6 @@ export function DealPanel() {
           )}
         </div>
       </aside>
-      {att && <DocAttach deal={d} stage={att.stage} kind={att.kind} file={att.file} {...att.more} onClose={() => setAtt(null)} />}
     </>
   );
 }
@@ -606,10 +611,10 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
                 ) : null}
                 {planLine}
                 {jm && <MemberStage d={d} stage={p} pay={false} />}
-                {qts.length > 0 && <QtCard d={d} onRevise={(id) => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast', revise: id })} />}
+                {qts.length > 0 && <QtCard d={d} onRevise={(id) => attach({ at: 'quote', revise: id })} />}
                 {docs.filter((z) => !qts.includes(z)).map((z) => <DocCard key={z.id} d={d} doc={z} inUse={z.target === 'forecast' ? m.fcDoc?.id === z.id : z.target === 'actual' && z.amount != null} />)}
                 {!ro && !jm && !doc && !qts.length && st !== 'off' && !unused && !(pl && won) && ((p === QUOTE_STAGE && st === 'done') || (isPayStage(S.cfg, p) && won && !P)) && (
-                  <button type="button" className="btn xs sl-tl-att" onClick={() => attach(p)}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ / ใบเสร็จ'}</button>
+                  <button type="button" className="btn xs sl-tl-att" onClick={() => attach(p === QUOTE_STAGE ? { at: 'quote' } : { at: 'pay', stage: p })}>แนบ{p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>
                 )}
                 {actsAt(p, unused, st === 'off')}
               </>
@@ -696,7 +701,7 @@ function ResultBig({ d, st, date, onPick }: { d: Deal; st: StageState; date?: st
  *  drop the document (on QUOTATION with a quotation `qt` already, a revised one). What was typed is saved
  *  also when the panel closes (as the panel's fields always did). */
 function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d: Deal; p: string; st: StageState; line: LineView | null; won: boolean; doc: boolean; qt?: DealDoc; attach: Attach; onHold: () => void; onDone: () => void }) {
-  const { engine: e, set } = useApp();
+  const { engine: e } = useApp();
   const acts = useSalesActs();
   const today = todayISO();
   const S = e.sales;
@@ -716,7 +721,9 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
   const live = stepOf(S, d.id, p);
   useEffect(() => follow(), [live.d, live.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [over, setOver] = useState(false);
-  const fileIn = useRef<HTMLInputElement>(null);
+  const at = useAttach();
+  // "รับเงินแล้ว (ไม่มีไฟล์)" with no plan and no Forecast: the amount is asked for here (two taps)
+  const [recvAsk, setRecvAsk] = useState<string | null>(null);
   const dirty = stepTyped(ed, fields);
   // saved (or cleared) already: leaving the card writes nothing more
   const done = useRef(false);
@@ -745,12 +752,21 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
   const isMoney = p === QUOTE_STAGE || isPayStage(S.cfg, p) || !!line;
   // a joint quotation's member: its quotation and payments are the joint quotation's (nothing to attach here)
   const drop = isMoney && (p === QUOTE_STAGE || won) && (!doc || !!qt) && jointRole(S, d) !== 'member';
-  const kind = kindForStage(S.cfg, p);
   // a file attached from here: the card's work is done, it closes (the step shows the document and the
   // note it wrote); with something typed it stays open, and saving that does not ask about the document's note
   const attached = () => (latest.current.dirty ? latest.current.follow(true) : onDone());
-  // a revised quotation: compared with the one there, which stays as "ฉบับเดิม"
-  const more: AttachMore = qt ? { target: 'forecast', revise: qt.id, onSaved: attached } : { onSaved: attached };
+  // the card says what the document is: the quotation (a revised one when there is one: it follows that
+  // version, which stays as "ฉบับเดิม"), else the receipt / invoice of this installment
+  const entry: AttachEntry = p === QUOTE_STAGE ? { at: 'quote', ...(qt ? { revise: qt.id } : {}), onSaved: attached } : { at: 'pay', stage: p, onSaved: attached };
+  const P = planOf(S, d, today);
+  // one tap: with a plan the installment not received yet; without one, a won deal's PAY stage
+  const canRecv = p !== QUOTE_STAGE && won && (line ? line.status !== 'paid' && !!recvPlan(S, d, p, today) : !P && isPayStage(S.cfg, p));
+  const recv = (typed?: number | null) => {
+    const r = at.recv(d, p, typed);
+    if (r === 'ask') setRecvAsk('');
+    else if (r === 'done') setRecvAsk(null);
+  };
+  const fc = dealMoney(S, d).forecast;
   return (
     <>
       {p === DEAL_STAGE && <ResultBig d={d} st={st} date={date} onPick={() => ((done.current = true), follow(true))} />}
@@ -782,19 +798,37 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
           onDrop={(ev) => {
             ev.preventDefault();
             setOver(false);
+            ev.stopPropagation(); // (not the panel's own drop as well)
             const f = ev.dataTransfer.files?.[0];
-            if (f) attach(p, kind, f, more);
+            if (f) attach(entry, f);
           }}
         >
           <span className="sl-drop-t">
-            <span>{qt ? `แนบฉบับแก้ไข${qt.docNo ? ' ของ ' + qt.docNo : ''}` : 'แนบ' + (p === QUOTE_STAGE ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ / ใบเสร็จ ของงวดนี้')}</span>
-            <small>{qt ? 'ลากไฟล์มาวาง หรือเลือกไฟล์ · ระบบเทียบยอดกับฉบับเดิมให้ · ฉบับเดิมเก็บไว้ ไม่นับยอด' : `ลากไฟล์มาวาง หรือเลือกไฟล์ · ระบบอ่านยอดให้ คุณตรวจแล้วกดยืนยัน · ${p === QUOTE_STAGE ? 'เป็น Forecast' : 'รวมเข้า Actual'}`}</small>
+            <span>{p === QUOTE_STAGE ? (qt ? `แนบฉบับแก้ไข${qt.docNo ? 'ของ ' + qt.docNo : ''}` : 'แนบใบเสนอราคา') : `แนบใบเสร็จ / ใบแจ้งหนี้${P && P.n > 1 ? ' ของ ' + p : ''}`}</span>
+            <small>
+              <span className="oa-wide">ลากไฟล์มาวาง หรือกดเลือกไฟล์</span>
+              <span className="oa-narrow">ถ่ายรูปหรือเลือกไฟล์</span>
+              {' · '}
+              {p !== QUOTE_STAGE ? 'นับเงินที่เข้าบัญชีจริง (หลังหัก ณ ที่จ่าย)' : qt && fc != null ? `ยอดใหม่จะแทน Forecast ${fmtMoney(fc)}` : 'ยอดในใบนี้เป็น Forecast ของงาน'}
+            </small>
           </span>
           <span className="sl-drop-b">
-            {line && line.status !== 'paid' && <button type="button" className="btn xs" onClick={() => set({ dpPlan: `recv:${p}` })}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
-            <button type="button" className="btn xs" onClick={() => fileIn.current?.click()}>เลือกไฟล์</button>
-            <input ref={fileIn} type="file" hidden onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) attach(p, kind, f, more); }} />
+            {canRecv && recvAsk == null && <button type="button" className="btn xs" onClick={() => recv()}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
+            <button type="button" className="btn xs sl-drop-pick" onClick={() => attach(entry)}>
+              <span className="oa-wide">เลือกไฟล์</span>
+              <span className="oa-narrow">{p === QUOTE_STAGE ? 'เลือกไฟล์' : 'ถ่ายรูป / เลือกไฟล์'}</span>
+            </button>
           </span>
+          {recvAsk != null && (
+            <span className="sl-drop-ask">
+              <label style={labelCol}>
+                ยอดที่รับ (บาท)
+                <input className="fld num" autoFocus inputMode="decimal" value={recvAsk} placeholder="เช่น 53,500" onChange={(ev) => setRecvAsk(ev.target.value)} onKeyDown={(ev) => ev.key === 'Enter' && recv(parseAmount(recvAsk))} />
+              </label>
+              <button type="button" className="quiet" onClick={() => setRecvAsk(null)}>ยกเลิก</button>
+              <button type="button" className="btn pri xs" disabled={!(parseAmount(recvAsk) ?? 0)} onClick={() => recv(parseAmount(recvAsk))}>บันทึก</button>
+            </span>
+          )}
         </div>
       )}
       <div className="sl-tl-acts">
@@ -819,6 +853,7 @@ function PlanCard({ d, attach }: { d: Deal; attach: Attach }) {
 function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
+  const at = useAttach();
   // the month check: each received line's check, and the question before a checked one changes
   const chk = useDealChecks(d);
   const guard = usePayGuard();
@@ -885,28 +920,32 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
           const hand = l.status === 'paid' && l.hand;
           // received on an invoice only (it counts as money in): its receipt replaces it, as accounting asks
           const invOnly = l.status === 'paid' && !hand && invoiceOnly(S, d.id, l.stage);
-          // every installment takes its document: an invoice or receipt for that stage, checked against its plan
-          const att = (label: string, add = false) => <button type="button" className="lnk" onClick={() => attach(l.stage, 'receipt', undefined, { target: 'actual', add })}>{label}</button>;
+          // every installment takes its receipt (or invoice) with one button: whether it replaces what is counted
+          // there or is the rest of it, the dialog says in one sentence (lib/attachPlan)
+          const att = <button type="button" className="lnk" onClick={() => attach({ at: 'pay', stage: l.stage })}>แนบใบเสร็จ</button>;
+          const editRecv = <button type="button" className="lnk" onClick={() => set({ dpPlan: `recv:${l.stage}` })}>แก้ยอด / วันที่</button>;
           const unmark = <button type="button" className="quiet" onClick={() => guard.ask({ d, lines: [l.stage], kind: 'cancel', title: 'ยกเลิกการรับเงิน ' + l.stage, verb: 'ยกเลิกการรับ', plain: `ยกเลิกการรับ ${l.stage}? (${fmtMoney(l.handGot)} บาท ที่บันทึกเอง)`, run: () => e.unmarkPaid(d.id, l.stage) })}>ยกเลิกการรับ</button>;
           const row = chk.find((r) => r.kind === 'got' && r.lineId === l.stage);
           const lineActs = ro || !won || recv === l.stage ? null : l.status === 'part' ? (
             <>
               <button type="button" className="btn xs" onClick={() => (e.setPayFull(d.id, l.stage, true) ? acts.prompt(d, 'payment') : acts.say(`ถือว่ารับครบ ${l.stage} แล้ว`))}>ถือว่ารับครบ</button>
-              {att('แนบใบเสร็จเพิ่ม', true)}
+              {att}
               {l.hand && unmark}
             </>
           ) : l.status !== 'paid' && l.status !== 'off' ? (
             <>
-              <button type="button" className="btn xs" onClick={() => set({ dpPlan: `recv:${l.stage}` })}>รับเงินแล้ว</button>
-              {att('แนบเอกสาร')}
+              {/* one tap: recorded at once, with "แก้ยอด / วันที่" and "เลิกทำ" in the message */}
+              <button type="button" className="btn xs" onClick={() => at.recv(d, l.stage)}>รับเงินแล้ว</button>
+              {att}
             </>
           ) : hand ? (
             <>
-              {att('แนบใบเสร็จ')}
+              {att}
+              {editRecv}
               {unmark}
             </>
           ) : invOnly ? (
-            att('แนบใบเสร็จแทนใบแจ้งหนี้')
+            att
           ) : l.status === 'paid' && l.full && l.got < l.amt ? (
             <button type="button" className="quiet" onClick={() => e.setPayFull(d.id, l.stage, false)}>ยกเลิกถือว่าครบ</button>
           ) : null;
@@ -955,8 +994,10 @@ function RecvForm({ d, l, attach }: { d: Deal; l: LineView; attach: Attach }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const today = todayISO();
-  const [date, setDate] = useState(today);
-  const [amt, setAmt] = useState(fmtMoney(l.amt || null));
+  // "แก้ยอด / วันที่" of money recorded by hand: as it was recorded
+  const byHand = !!l.line.rcv && l.hand;
+  const [date, setDate] = useState(byHand ? l.line.rcv : today);
+  const [amt, setAmt] = useState(fmtMoney(byHand ? l.line.got ?? l.amt : l.amt || null));
   const [how, setHow] = useState<PayHow>(l.line.how || 'transfer');
   const got = parseAmount(amt);
   const short = got != null && got > 0 && l.amt > 0 ? l.amt - got : 0;
@@ -968,23 +1009,15 @@ function RecvForm({ d, l, attach }: { d: Deal; l: LineView; attach: Attach }) {
     box.current?.querySelector<HTMLInputElement>('input.num')?.focus();
   }, []);
   const ok = got !== undefined && (got == null ? l.amt > 0 : got > 0);
-  // the receipt in place of the hand entry: its figure is checked against the amount typed here (a
-  // document always wins over a hand receipt, so nothing counts twice); the method typed here is kept
-  const attachRecv = () => {
-    const typed = got ?? (l.amt || null);
-    set({ dpPlan: '' });
-    attach(l.stage, 'receipt', undefined, {
-      target: 'actual',
-      check: typed != null && typed > 0 ? { what: 'ยอดที่รับ', value: typed } : undefined,
-      onSaved: () => how !== l.line.how && e.updatePayLine(d.id, l.stage, { how }),
-    });
-  };
-  const save = () => {
+  // "มีใบเสร็จ?": the money typed here is saved first, then its receipt is picked; the dialog finds it is the
+  // receipt of that money (lib/attachPlan R5c: in its place, nothing counts twice)
+  const save = (thenAttach = false) => {
     if (!ok) return;
     // a part-paid line accounting checked, or money landing in a closed month: asked first
     askPay(e, { d, after: previewOf.pay(e.sales, d.id, l.stage, { rcv: date || today, got: got ?? null, full: fullOn }), kind: 'edit', title: 'บันทึกรับเงิน ' + l.stage, verb: 'บันทึกรับเงิน', run: () => {
       const ready = e.markPaid(d.id, l.stage, { date, amount: got ?? null, how, full: fullOn });
       set({ dpPlan: '' });
+      if (thenAttach) return attach({ at: 'pay', stage: l.stage });
       if (ready) acts.prompt(d, 'payment');
       else acts.say(`บันทึกรับเงิน ${l.stage} ${fmtMoney(got ?? l.amt)} บาทแล้ว`);
     } });
@@ -1007,10 +1040,10 @@ function RecvForm({ d, l, attach }: { d: Deal; l: LineView; attach: Attach }) {
       )}
       <div className="sl-rf-a">
         <span className="sl-rf-tip">
-          มีใบเสร็จ? <button type="button" className="lnk" onClick={attachRecv}>แนบเอกสาร</button> ระบบอ่านยอดแล้วเทียบกับยอดที่รับ
+          มีใบเสร็จ? <button type="button" className="lnk" disabled={!ok} onClick={() => save(true)}>บันทึกแล้วแนบใบเสร็จ</button>
         </span>
         <button type="button" className="quiet" onClick={() => set({ dpPlan: '' })}>ยกเลิก</button>
-        <button type="button" className="btn pri" disabled={!ok} onClick={save}>บันทึกรับเงิน</button>
+        <button type="button" className="btn pri" disabled={!ok} onClick={() => save()}>บันทึกรับเงิน</button>
       </div>
     </div>
   );
@@ -1155,13 +1188,7 @@ function PlanEditor({ d, attach }: { d: Deal; attach: Attach }) {
               <button
                 type="button"
                 className="lnk"
-                onClick={() =>
-                  attach(cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', undefined, {
-                    target: 'forecast',
-                    check: total != null ? { what: 'ยอดรวมที่พิมพ์', value: total } : undefined,
-                    onSaved: (r) => !r.kept && r.docFig != null && setTypedTotal(fmtMoney(r.docFig)),
-                  })
-                }
+                onClick={() => attach({ at: 'quote', plan: true, onSaved: (r) => r.docFig != null && setTypedTotal(fmtMoney(r.docFig)) })}
               >
                 แนบเอกสาร
               </button>
@@ -1253,7 +1280,7 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
       <div className="sl-acc">
         <h3 id="dp-other">เอกสารอื่น</h3>
         <small>{n ? `${n} ฉบับ` : 'สัญญา / PO / เอกสารที่ไม่นับยอด'}</small>
-        {e.can('docs.up') && <button type="button" className="btn xs" onClick={() => attach('', 'other')}>แนบเอกสารอื่น</button>}
+        {e.can('docs.up') && <button type="button" className="btn xs" onClick={() => attach({ at: 'other' })}>แนบเอกสารอื่น</button>}
       </div>
       {stray.map((doc) => <DocCard key={doc.id} d={d} doc={doc} inUse={false} stray />)}
       {other.map((doc) => <DocCard key={doc.id} d={d} doc={doc} inUse={doc.target === 'forecast' ? fcDoc?.id === doc.id : doc.target === 'actual' && doc.amount != null} />)}

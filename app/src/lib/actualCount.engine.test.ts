@@ -12,10 +12,11 @@ import { analyzeDocText, proposedAmount, type DocFacts } from './docExtract';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import {
-  attachPreview, attachStage, closeReady, countAs, countGuard, dealMoney, docsOf, dupCounted, planOf, stepOf, targetForStage, withDoc,
+  attachPreview, attachStage, closeReady, countAs, countGuard, dealMoney, docsOf, dupCounted, planOf, stageTrack, stepOf, targetForStage, withDoc,
   type AttachInfo, type CountMode, type Deal, type DealDoc,
 } from './sales';
 import { acFig } from './salesUi';
+import { attachPlan, panelEntry, type AttachEntry } from './attachPlan';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -361,5 +362,56 @@ describe('a whole-job document on top of money already counted', () => {
     const b = await attach(e, id, { amount: 74900, basis: 'manual', name: 'RC-0903.pdf', docNo: 'RC2026-0903', docDate: '2026-10-15' });
     expect(b.g).toMatchObject({ modes: [], over: null, rest: null });
     expect(actual(e, id)).toBe(107000);
+  });
+});
+
+describe('the one-screen attach (lib/attachPlan): the 121,730.77 replay through every entry', () => {
+  // the owner's deal: Forecast 61,730.77 (the quotation's total), one installment, the receipt counted at
+  // 60,000 by the old dialog with the installment left "รับบางส่วน" (short by exactly the withholding tax)
+  async function owners(e: GccEngine) {
+    const d = e.addDeal({ client: 'บริษัท พีเอ็ม ' + ++n + ' จำกัด', section: 'Partner', resp: 'หมิว', year: '2569' } as Partial<Deal>);
+    await e.attachDoc(d.id, pdf('QT.pdf'), { kind: 'quotation', amount: 61730.77, target: 'forecast', basis: 'total', detected: 61730.77, docNo: 'QT2026080001', docDate: '2026-08-20', stage: 'QUOTATION' });
+    e.setStep(d.id, 'CLOSED DEAL', { d: '2026-08-25', n: 'YES' });
+    e.quickPlan(d.id, 1);
+    await e.attachDoc(d.id, pdf('INV2026090004.pdf'), { kind: 'receipt', amount: 60000, target: 'actual', basis: 'netPay', detected: 60000, docNo: 'INV2026090004', docDate: '2026-09-28', stage: 'PAY1' });
+    expect(planOf(e.sales, deal(e, d.id), TODAY)!.lines[0].status).toBe('part');
+    return d.id;
+  }
+  /** what the dialog's button does with the plan (components/DocAttach save) */
+  async function viaDialog(e: GccEngine, id: string, entry: AttachEntry, file = pdf('INV2026090004.pdf')) {
+    const p = attachPlan(e.sales, deal(e, id), entry, { facts: fx, name: file.name, size: file.size }, {}, TODAY);
+    if (p.noSave) {
+      if (p.full) e.setPayFull(id, p.fullStage, true);
+    } else {
+      await e.attachDoc(id, file, p.save!);
+      if (p.full) e.setPayFull(id, p.fullStage, true);
+    }
+    return p;
+  }
+  const entries: [string, (e: GccEngine, id: string) => AttachEntry][] = [
+    ['the PAY card', () => ({ at: 'pay', stage: 'PAY1' })],
+    ['the plan row "แนบใบเสร็จ"', () => ({ at: 'pay', stage: 'PAY1' })],
+    ['the Actual figure', () => ({ at: 'pay' })],
+    ['a file dropped on the panel', (e, id) => panelEntry(e.sales, deal(e, id), stageTrack(e.sales, deal(e, id), TODAY).next, TODAY)],
+  ];
+  for (const [where, entry] of entries) {
+    it(`the same receipt again from ${where}: nothing stored, Actual 60,000, the installment received in full`, async () => {
+      const e = mk(), id = await owners(e);
+      const before = Object.keys(e.sales.docs).length;
+      const p = await viaDialog(e, id, entry(e, id));
+      expect(p).toMatchObject({ noSave: true, full: true, notice: { tag: 'ใบซ้ำ' } });
+      expect(Object.keys(e.sales.docs).length).toBe(before);
+      expect(actual(e, id)).toBe(60000);
+      expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ status: 'paid', got: 60000 });
+      expect(closeReady(e.sales, deal(e, id), TODAY)).toBe(true);
+    });
+  }
+  it('a re-scan of it (another file, the same number): kept as evidence, Actual 60,000, received in full', async () => {
+    const e = mk(), id = await owners(e);
+    const p = await viaDialog(e, id, { at: 'pay', stage: 'PAY1' }, pdf('INV2026090004 scan.pdf'));
+    expect(p).toMatchObject({ count: 'none', full: true });
+    expect(actual(e, id)).toBe(60000);
+    expect(receipts(e, id)).toEqual(['PAY1:actual:60000', 'PAY1:none:60000']);
+    expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0].status).toBe('paid');
   });
 });

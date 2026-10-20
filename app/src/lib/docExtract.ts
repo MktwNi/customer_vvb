@@ -12,6 +12,8 @@
  * would take the whole app down once the UI imports this file.
  */
 
+import { WHT_RATES, netOf, proposedAmount as proposedOf } from './docAmount';
+
 export type DocKind = 'quotation' | 'invoice' | 'receipt' | 'other';
 export interface AmountCandidate { value: number; label: string; source: 'words' | 'keyword' | 'vat' | 'largest'; score: number; line: string }
 export interface DocFacts {
@@ -826,7 +828,6 @@ const vatTol = (base: number) => Math.max(0.06, Math.abs(base) * 0.0003);
 const display = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 200);
 
 const EXCL_VAT = ['ยังไม่รวมภาษี', 'ไม่รวมภาษีมูลค่าเพิ่ม', 'ราคาไม่รวมvat', 'ไม่รวมvat', 'excludingvat', 'exclusiveofvat', 'vatexcluded', 'plusvat', '+vat'].map(key);
-const WHT_RATES = [0.01, 0.015, 0.02, 0.03, 0.05, 0.1];
 
 /** Rate printed next to a VAT / WHT label ("ภาษีมูลค่าเพิ่ม 7%"), as a fraction. */
 function rateOn(line: string) {
@@ -939,53 +940,15 @@ export function analyzeDocText(text: string): DocFacts {
   }
 }
 
-type NetFacts = Pick<DocFacts, 'total' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'deduct'>;
-/** Withholding tax at a usual rate (1–10 %) of what it is taken from — the amount before VAT, or the
- *  total for a seller outside VAT, less a deposit already paid — within a baht (rounded on the document). */
-function whtFits(w: number, f: NetFacts, dd: number) {
-  const T = f.total!, vat = f.vat ?? (f.subtotal != null ? T - f.subtotal : null);
-  const bases = [f.subtotal, vat != null ? T - vat : null, T / 1.07, T].filter((b): b is number => b != null && b > 0);
-  return bases.flatMap((b) => (dd ? [b, b - dd, b - dd / 1.07] : [b])).some((b) => b > 0 && WHT_RATES.some((r) => Math.abs(b * r - w) <= Math.max(1, b * r * 0.005)));
-}
-/**
- * What the customer pays now, as the document shows it, when its figures add up: the total less withholding
- * tax at a usual rate and/or less money already paid (หักเงินมัดจำ), equal to the amount payable printed (or
- * the balance line) to the satang. null otherwise — no deduction shown, a "WHT" that is a rate or a form
- * number in a note, or an amount payable misread — and the total is then the safer figure.
- */
-export function netOf(f: NetFacts): { wht: number; deduct: number; net: number } | null {
-  const T = f.total, N = f.netPay;
-  if (T == null || N == null || !(N > 0) || N > T - 0.005) return null;
-  const w = f.wht != null && f.wht > 0 ? f.wht : 0, dd = f.deduct != null && f.deduct > 0 ? f.deduct : 0;
-  if (!w && !dd) return null;
-  if (Math.abs(T - w - dd - N) > 0.02) return null;
-  if (w && !whtFits(w, f, dd)) return null;
-  return { wht: w, deduct: dd, net: N };
-}
-
-/**
- * The figure proposed for a document: what the customer actually pays. When the document shows
- * withholding tax and / or a deposit already paid, and the amount payable after them, and the three add up
- * ("61,730.77 − หัก ณ ที่จ่าย 1,730.77 = ยอดชำระ 60,000": netOf), that net amount — the money that comes in;
- * else the total including VAT; without one, the best amount found ('manual'). The same rule for a
- * quotation (Forecast) as for an invoice or receipt (Actual), so the two stay comparable: a job quoted at
- * 60,000 after withholding is received as 60,000.
- * `follow`: the quotation version a revision follows ("แนบฉบับแก้ไข"): the figure equal to its amount, else
- * the one at its basis, so the same price at the same basis never reads as a price change.
- */
+// the figure a document is counted at (netOf, proposedAmount) lives in lib/docAmount, so the attach
+// dialog's rules (lib/attachPlan) use it without loading the reader; here as before
+export { netOf };
+/** The figure proposed for a document (lib/docAmount proposedAmount): what the customer actually pays. */
 export function proposedAmount(
-  f: NetFacts & Pick<DocFacts, 'candidates'>,
+  f: Pick<DocFacts, 'total' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'deduct' | 'candidates'>,
   follow?: { basis: 'total' | 'subtotal' | 'netPay' | 'manual'; amount: number | null },
-): { basis: 'total' | 'subtotal' | 'netPay' | 'manual'; value: number | null } {
-  if (follow) {
-    const by = { netPay: f.netPay, total: f.total, subtotal: f.subtotal } as const;
-    const same = (['total', 'netPay', 'subtotal'] as const).find((b) => by[b] != null && follow.amount != null && Math.abs(by[b]! - follow.amount) < 0.005);
-    if (same) return { basis: same, value: by[same] };
-    if (follow.basis !== 'manual' && by[follow.basis] != null) return { basis: follow.basis, value: by[follow.basis] };
-  }
-  if (netOf(f)) return { basis: 'netPay', value: f.netPay };
-  if (f.total != null) return { basis: 'total', value: f.total };
-  return { basis: 'manual', value: f.candidates[0]?.value ?? null };
+) {
+  return proposedOf(f, follow);
 }
 
 function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' | 'prev'): Amounts {

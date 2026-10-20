@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { dealMoney, emptySales, newDeal, salesStats, type DealDoc, type SalesState } from './sales';
-import { attachCheck, attachKind0, attachRevision, isQtVersion, qtDelText, qtDiffText, qtFigWords, qtPrev, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtVersions, qtView, swapCheck, thList } from './quotes';
+import { attachRevision, isQtVersion, qtDelText, qtDiffText, qtFigWords, qtPrev, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtVersions, qtView, swapCheck, thList } from './quotes';
 import type { DocFacts } from './docExtract';
 import { dmTh } from './format';
 import { HELP_TOPICS, searchHelp } from './helpContent';
+import { attachPlan } from './attachPlan';
 
 const TODAY = '2026-10-12';
 /** A deal with its documents (by id: `at`, `cAt` and the rest given per document). */
@@ -170,21 +171,17 @@ describe('the attach dialog', () => {
     ]);
   const won = <T extends { s: SalesState }>(w: T) => ((w.s.steps['d1/CLOSED DEAL'] = { d: '2026-10-10', n: 'YES' }), w);
 
-  it('starts as the type asked for, the stage\'s, or (no stage) a quotation until the deal is won with one', () => {
-    const { s, d } = two();
-    expect(attachKind0(s, d, { kind: 'receipt' })).toBe('receipt');
-    expect(attachKind0(s, d, { stage: 'QUOTATION' })).toBe('quotation');
-    expect(attachKind0(s, d, { stage: 'PAY1' })).toBe('invoice');
-    // "แนบเอกสาร · ระบบเลือกขั้นให้": a quotation is in use but the deal is not won yet
-    expect(attachKind0(s, d, {})).toBe('quotation');
-    // won, with a quotation counted: the next document is the invoice
+  it('is what the button pressed says: a quotation (a revision while there is one), the installment\'s receipt, evidence', () => {
     const w = won(two());
-    expect(attachKind0(w.s, w.d, {})).toBe('invoice');
-    // won with no quotation (the Forecast typed): still a quotation first
-    const typed = won(world([], 150000));
-    expect(attachKind0(typed.s, typed.d, {})).toBe('quotation');
-    // a revision asked for is a quotation whatever the caller's type
-    expect(attachKind0(w.s, w.d, { revise: 'v2', kind: 'invoice', stage: 'PAY1' })).toBe('quotation');
+    const file = { name: 'x.pdf', size: 1000 };
+    const QT = facts({ kind: 'quotation', total: 182970 });
+    // the QUOTATION card / the Forecast figure: a quotation, here a revision of the one in use
+    expect(attachPlan(w.s, w.d, { at: 'quote' }, { facts: QT, ...file }, {}, TODAY)).toMatchObject({ mode: 'quote', kind: 'quotation', revise: 'v2' });
+    // a PAY card: the receipt of that installment, whatever the reader thinks it is (an invoice keeps its word)
+    expect(attachPlan(w.s, w.d, { at: 'pay', stage: 'PAY1' }, { facts: facts({ kind: null, total: 100000 }), ...file }, {}, TODAY)).toMatchObject({ mode: 'pay', kind: 'receipt', stage: 'PAY1' });
+    expect(attachPlan(w.s, w.d, { at: 'pay', stage: 'PAY1' }, { facts: facts({ kind: 'invoice', total: 100000 }), ...file }, {}, TODAY)).toMatchObject({ mode: 'pay', kind: 'invoice', target: 'actual' });
+    // "เอกสารอื่น": evidence at no stage
+    expect(attachPlan(w.s, w.d, { at: 'other' }, { facts: null, ...file }, {}, TODAY)).toMatchObject({ mode: 'other', target: 'none', stage: '' });
   });
 
   it('is a revision when asked for, or when a quotation for the Forecast goes to QUOTATION while there is one', () => {
@@ -212,20 +209,11 @@ describe('the attach dialog', () => {
     expect(attachRevision(noQ.s, noQ.d, q, TODAY)).toBeNull();
   });
 
-  it('checks the figure the caller gave, also on a revision (a typed plan total is never replaced silently)', () => {
-    const { s, d } = two();
-    const rev = attachRevision(s, d, { kind: 'quotation', target: 'forecast', stage: 'QUOTATION' }, TODAY);
-    const typed = { what: 'ยอดรวมที่พิมพ์', value: 200000 };
-    let asked = 0;
-    const own = () => (asked++, { what: 'Forecast ที่พิมพ์ไว้', value: 150000 });
-    expect(attachCheck(typed, rev, own)).toBe(typed);
-    expect(attachCheck(typed, null, own)).toBe(typed);
-    // a revision without one: compared with the version it follows, not with the stage's figure
-    expect(attachCheck(undefined, rev, own)).toBeNull();
-    expect(asked).toBe(0);
-    // neither: the stage's own figure
-    expect(attachCheck(undefined, null, own)).toEqual({ what: 'Forecast ที่พิมพ์ไว้', value: 150000 });
-    expect(attachCheck(null, null, () => null)).toBeNull();
+  it('the plan editor\'s quotation says what the typed total becomes (it is never replaced silently)', () => {
+    const { s, d } = world([]);
+    const p = attachPlan(s, d, { at: 'quote', plan: true }, { facts: facts({ kind: 'quotation', total: 200000 }), name: 'qt.pdf', size: 1 }, {}, TODAY);
+    expect(p.after).toBe('ยอดรวมแผนเป็น 200,000 บาท ตามใบเสนอราคา');
+    expect(p.primary).toBe('บันทึก Forecast 200,000 บาท');
   });
 });
 

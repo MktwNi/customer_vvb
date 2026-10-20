@@ -105,8 +105,10 @@ export interface UIState {
  *  (components/SalesToast.tsx). */
 export interface ToastAct {
   label: string;
-  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify' | 'goTrack' | 'goSales' | 'goPlan' | 'sendUndo';
-  deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`); sendUndo: the send (engine.lastSent.k) */ k?: string;
+  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify' | 'goTrack' | 'goSales' | 'goPlan' | 'sendUndo' | 'recvEdit' | 'recvUndo';
+  deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`); sendUndo: the send (engine.lastSent.k); recvEdit / recvUndo: the installment */ k?: string;
+  /** recvUndo: the one tap set up the plan too (it goes with the money) */
+  made?: boolean;
   /** goSales: the table's year; goPlan: the day the calendar opens at */
   year?: string; day?: string;
 }

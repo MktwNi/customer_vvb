@@ -1060,7 +1060,7 @@ export interface CountGuard {
 /** A job counts as already paid at 90% of its plan / Forecast (withholding tax short of it); Actual
  *  going more than 5% past it on top of that is money counted twice more likely than an extra. */
 const PAID_SHARE = 0.9, OVER_SHARE = 1.05, SAME_WEEK = 7;
-const docNoKey = (no: string) => (no || '').replace(/[\s\-/_.#:]/g, '').toUpperCase();
+export const docNoKey = (no: string) => (no || '').replace(/[\s\-/_.#:]/g, '').toUpperCase();
 /** One document attached twice: the same number, or the same file (name and size). */
 const sameDocument = (a: Pick<DealDoc, 'docNo' | 'name' | 'size'>, b: Pick<DealDoc, 'docNo' | 'name' | 'size'>) => {
   const k = docNoKey(a.docNo);
@@ -1131,7 +1131,9 @@ export function countGuard(
   if (!countsActual(info)) return g;
   const counted = docsOf(s, d.id).filter(countsActual);
   const no = docNoKey(info.docNo);
-  const byNo = no.length >= 3 ? counted.filter((x) => docNoKey(x.docNo) === no) : [];
+  // the same number on a receipt and an invoice is not one document twice: some vendors number both
+  // alike (INV2026090004), and the receipt then pays that invoice (it replaces it, below)
+  const byNo = no.length >= 3 ? counted.filter((x) => docNoKey(x.docNo) === no && x.kind === info.kind) : [];
   const byFile = info.size > 0 ? counted.filter((x) => x.size === info.size && x.name === info.name) : [];
   g.sames = counted.filter((x) => byNo.includes(x) || byFile.includes(x));
   g.sameBy = byNo.length ? 'no' : byFile.length ? 'file' : '';
@@ -1152,7 +1154,7 @@ export function countGuard(
   if (info.kind === 'receipt' && !g.sames.length) {
     const refs = new Set((info.refs || []).map(docNoKey).filter((k) => k.length >= 3));
     const invs = counted.filter((x) => x.kind === 'invoice' && !!x.stage && x.stage !== stage && counted.every((y) => y.stage !== x.stage || y.kind === 'invoice'));
-    const byRef = invs.find((x) => refs.has(docNoKey(x.docNo)));
+    const byRef = invs.find((x) => refs.has(docNoKey(x.docNo)) || (no.length >= 3 && docNoKey(x.docNo) === no));
     g.inv = byRef || invs.find((x) => figs.some((f) => eq(f, x.amount))) || null;
     if (g.inv) {
       // named by the receipt, or attached from the Actual figure: its invoice's installment; at an

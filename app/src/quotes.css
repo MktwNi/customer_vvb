@@ -46,34 +46,15 @@
 .qt-form-n{margin:0;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
 .qt-form-f{display:flex;align-items:center;justify-content:flex-end;gap:12px}
 
-/* "แนบฉบับแก้ไข": the old and the new version side by side, and what attaching does */
-.qt-cmp{border:1px solid var(--line);border-radius:var(--r-inner);padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
-.qt-cmp-h{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
-.qt-cmp table{width:100%;border-collapse:collapse;font-size:var(--fs-body);font-variant-numeric:tabular-nums}
-.qt-cmp thead th{font-weight:400;font-size:var(--fs-meta);color:var(--muted);text-align:right;padding:0 0 6px 8px}
-.qt-cmp tbody th{font-weight:400;font-size:var(--fs-sec);color:var(--ink-2);text-align:left;padding:6px 8px 6px 0;border-top:1px solid var(--divider)}
-.qt-cmp td{padding:6px 0 6px 8px;border-top:1px solid var(--divider);text-align:right;color:var(--ink)}
-.qt-cmp thead td{border-top:0;padding:0}
-.qt-cmp td.old{color:var(--ink-2)}
-.qt-cmp .qt-nw{white-space:nowrap}
-.qt-cmp tr.sum td{font-weight:500}
-.qt-cmp tr.sum td.old{font-weight:400}
-.qt-diff{font-size:var(--fs-sec);color:var(--ink-2)}
+/* "เปลี่ยนไฟล์" with a file that can't be read: what changing it does */
 .qt-next{border-radius:var(--r-inner);padding:10px 14px;background:var(--tint);color:var(--ink-2);font-size:var(--fs-sec);line-height:1.6}
 .qt-next b{color:var(--ink);font-weight:500}
 
 /* "เปลี่ยนไฟล์" */
 .qt-swap{display:flex;flex-direction:column;gap:12px}
-.qt-swap-p{margin:0;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
 .qt-swap-r{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;font-size:var(--fs-body);color:var(--ink)}
 .qt-swap-l{font-size:var(--fs-sec);color:var(--ink-2)}
 .qt-swap-v{min-width:0;overflow-wrap:anywhere}
-.qt-swap-f{display:flex;gap:10px;align-items:center;min-width:0}
-.qt-swap-f .btn{flex:none}
-.qt-swap-f .t-sec{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qt-swap-w{gap:4px}
-.qt-swap-w span{color:var(--ink);font-size:var(--fs-sec);line-height:1.6}
-.qt-swap-w .lnk{font-size:var(--fs-sec)}
 
 /* the table's QUOTATION row: its note, then "แนบฉบับแก้ไข" */
 .qt-kn{display:flex;align-items:center;gap:10px;min-width:0}
@@ -109,6 +90,5 @@
   .qt-h .sl-docc-a{align-items:flex-start;text-align:left}
   .qt-acts{gap:8px 16px}
   .qt-acts>.btn{flex:1 0 100%}
-  .qt-cmp thead th,.qt-cmp td{padding-left:6px}
   .qt-swap-r{grid-template-columns:minmax(0,1fr)}
 }

@@ -4,7 +4,7 @@ import { norm } from '../lib/core';
 import { dmTh, fmtN, isoTh, todayISO } from '../lib/format';
 import {
   DEAL_STAGE, QUOTE_STAGE, closeReady, dealMoney, dealResult, fmtMoney, jointOf, jointSplit, parseAmount, payState, stageTrack, stepOf,
-  type Deal, type DealDoc, type DocKind, type JointGroup, type SalesState,
+  type Deal, type DealDoc, type JointGroup, type SalesState,
 } from '../lib/sales';
 import { JOINT_PAID, nextStepView, shortName, statusView } from '../lib/salesUi';
 import { jointCloseCount } from '../lib/workUi';
@@ -30,7 +30,7 @@ import { QtCheckLine } from './QtCheckSheet';
 import { checkedLine, waitShort } from '../lib/notify';
 import { useSalesActs } from './SalesToast';
 import { LensMoney } from '../tabs/SalesCash';
-import type { AttachMore } from './DocAttach';
+import type { AttachEntry } from '../lib/attachPlan';
 
 /**
  * The joint quotation (ใบเสนอราคาร่วม, package quotes item 7) on screen: making one ("สร้างใบเสนอราคาร่วม",
@@ -687,7 +687,7 @@ function TitleBox({ value, onSave }: { value: string; onSave: (v: string) => voi
   );
 }
 
-type Attach = (stage?: string, kind?: DocKind, file?: File, more?: AttachMore) => void;
+type Attach = (entry: AttachEntry, file?: File) => void;
 /**
  * The joint quotation's panel (the header deal's): its name, number, payer, owner and companies; สถานะ /
  * Forecast / Actual / ค้างรับ; the companies with their parts, next steps and states ("แก้ไขรายชื่อ"); the
@@ -810,11 +810,11 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
           <section className="dp-card" aria-labelledby="jp-q">
             <div className="dp-h"><h3 id="jp-q">ใบเสนอราคา</h3><span>ใบเดียวสำหรับทั้ง {fmtN(g.members.length)} บริษัท</span></div>
             {qtView(S, d).head ? (
-              <QtCard d={d} onRevise={(id) => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast', revise: id })} />
+              <QtCard d={d} onRevise={(id) => attach({ at: 'quote', revise: id })} />
             ) : (
               <div className="sl-pc-empty">
                 <span>ยังไม่มีไฟล์ใบเสนอราคา แนบแล้วยอดในใบจะเป็น Forecast ของใบเสนอราคาร่วม (นับครั้งเดียว)</span>
-                {e.canQuote(d) && <button type="button" className="btn xs" onClick={() => attach(QUOTE_STAGE, 'quotation', undefined, { target: 'forecast' })}>แนบใบเสนอราคา</button>}
+                {e.canQuote(d) && <button type="button" className="btn xs" onClick={() => attach({ at: 'quote' })}>แนบใบเสนอราคา</button>}
               </div>
             )}
           </section>

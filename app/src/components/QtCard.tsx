@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useApp } from '../state';
-import { dmTh, downloadBlob, isoTh, localDay } from '../lib/format';
-import { KIND_TH, QUOTE_STAGE, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, type Deal, type DealDoc, type DocKind } from '../lib/sales';
+import { downloadBlob, isoTh } from '../lib/format';
+import { KIND_TH, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, type Deal, type DealDoc, type DocKind } from '../lib/sales';
 import { fcFig } from '../lib/salesUi';
-import { qtDelText, qtFacts, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, thList, type QtVersion, type QtView } from '../lib/quotes';
+import { qtDelText, qtFacts, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, type QtVersion, type QtView } from '../lib/quotes';
 import type { DocFacts } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
 import { DocAttach, SHOWABLE, openDocFile } from './DocAttach';
+import { figureRows } from '../lib/attachPlan';
 import { DocThumb } from './DocThumb';
 import { Modal } from './Dialog';
 import { SelField } from './Select';
@@ -18,7 +19,6 @@ import { QtBack, QtCheckLine } from './QtCheckSheet';
 import { canMergeFrom } from '../lib/joint';
 
 const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
-const BASIS_LONG: [DealDoc['basis'], string][] = [['total', 'รวมทั้งสิ้น (รวม VAT)'], ['subtotal', 'ก่อน VAT'], ['netPay', 'หลังหัก ณ ที่จ่าย']];
 const BASIS_WORD: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
 
 /** Delete the version the quotation's card is about, after saying what that does to the Forecast;
@@ -49,7 +49,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
   // without ดูยอดเงิน the card names the quotation and nothing it counts toward (its amount never came)
   const money = e.can('view.money'), opens = e.can('docs.open');
   const [form, setForm] = useState(false);
-  const [swap, setSwap] = useState(false);
+  const [swap, setSwap] = useState<File | null>(null);
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState('');
   const v = qtView(e.sales, d), h = v.head;
@@ -116,7 +116,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
         <div className="qt-acts">
           <button type="button" className="btn xs" onClick={() => onRevise(doc.id)}>แนบฉบับแก้ไข</button>
           <button type="button" className="lnk" onClick={() => setForm(true)}>แก้ไขข้อมูล</button>
-          <button type="button" className="lnk" onClick={() => setSwap(true)}>เปลี่ยนไฟล์</button>
+          <SwapPick onFile={setSwap} />
           {busy && <span className="qt-busy" role="status">{busy}</span>}
           <QtMenu
             label={'เพิ่มเติม ใบเสนอราคา' + (doc.docNo ? ' ' + doc.docNo : '')}
@@ -144,8 +144,19 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
           ))}
         </div>
       )}
-      {swap && <QtSwap d={d} doc={doc} n={h.n} onClose={() => setSwap(false)} />}
+      {swap && <QtSwap d={d} doc={doc} n={h.n} file={swap} onClose={() => setSwap(null)} />}
     </div>
+  );
+}
+
+/** "เปลี่ยนไฟล์": the browser's picker straight from the click; `wide` = the phone card's button. */
+function SwapPick({ onFile, wide }: { onFile: (f: File) => void; wide?: boolean }) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button type="button" className={wide ? 'btn' : 'lnk'} onClick={() => ((input.current!.value = ''), input.current?.click())}>เปลี่ยนไฟล์</button>
+      <input ref={input} type="file" accept={DOC_ACCEPT} hidden onChange={(ev) => { const f = ev.target.files?.[0]; if (f) onFile(f); }} />
+    </>
   );
 }
 
@@ -222,8 +233,8 @@ export function QtForm({ d, doc, n, onDone }: { d: Deal; doc: DealDoc; n: number
     return () => abort.current?.abort();
   }, []);
   const parsed = parseAmount(amount);
-  const opts = facts ? BASIS_LONG.map(([b, label]) => [b, label, facts[b as 'total' | 'subtotal' | 'netPay']] as const).filter((x): x is readonly [DealDoc['basis'], string, number] => x[2] != null) : [];
-  const whtPct = facts && facts.wht != null && facts.subtotal ? Math.round((facts.wht / facts.subtotal) * 100) : null;
+  // the same figures, the same words, as the attach dialog's "ใช้ยอดอื่น" (lib/attachPlan figureRows)
+  const opts = facts ? figureRows(facts, doc.basis).filter((x): x is typeof x & { key: 'netPay' | 'total' | 'subtotal' } => typeof x.key === 'string').map((x) => [x.key, x.label, x.value] as const) : [];
   const reread = async () => {
     abort.current?.abort();
     const ctl = new AbortController();
@@ -287,7 +298,7 @@ export function QtForm({ d, doc, n, onDone }: { d: Deal; doc: DealDoc; n: number
           {opts.map(([b, label, val]) => (
             <label key={b} className="hv-tx">
               <input type="radio" name={'qtb-' + doc.id} checked={parsed === val && (basis === b || (basis === 'manual' && opts.find((o) => o[2] === parsed)?.[0] === b))} onChange={() => (setBasis(b), setAmount(fmtMoney(val)))} />
-              <span>{label}{b === 'netPay' && whtPct ? ` ${whtPct}%` : ''}</span>
+              <span>{label}</span>
               <b>{fmtMoney(val)} บาท</b>
             </label>
           ))}
@@ -308,105 +319,78 @@ export function QtForm({ d, doc, n, onDone }: { d: Deal; doc: DealDoc; n: number
 }
 
 /**
- * "เปลี่ยนไฟล์": the same quotation with another file (a wrong file attached, the signed copy). The new
- * file is read and compared with what is stored (amount, number, date): a match says so; a difference
- * suggests a revision instead ("แนบเป็นฉบับแก้ไขแทน" takes the file there). The values stay as they are;
- * the old file goes to the team Drive's trash (engine.replaceDocFile). `onSaved`: after the swap, or the
- * revision attached instead.
+ * "เปลี่ยนไฟล์": the same quotation with another file (a wrong file attached, the signed copy), picked
+ * straight from the button. The new file is read and compared with what is stored (amount, number, date):
+ * the same figures swap the file at once (a message says so); other figures are a revised quotation, so the
+ * attach dialog opens as one, with nothing asked; a file that can't be read is checked by eye (one question).
+ * The values stay as they are; the old file goes to the team Drive's trash (engine.replaceDocFile).
+ * `onSaved`: after the swap, or the revision attached instead.
  */
-export function QtSwap({ d, doc, n, onClose, onSaved }: { d: Deal; doc: DealDoc; n: number; onClose: () => void; onSaved?: () => void }) {
+export function QtSwap({ d, doc, n, file, onClose, onSaved }: { d: Deal; doc: DealDoc; n: number; file: File; onClose: () => void; onSaved?: () => void }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
-  const [file, setFile] = useState<File | null>(null);
   const [facts, setFacts] = useState<DocFacts | null>(null);
-  const [prog, setProg] = useState('');
+  const [prog, setProg] = useState('กำลังอ่านไฟล์ใหม่');
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState('');
   const [asRev, setAsRev] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
-  const pick = async (f: File) => {
-    abort.current?.abort();
-    setFile(null);
-    setFacts(null);
-    setErr('');
-    setSaving('');
-    const bad = f.size > DOC_MAX_BYTES ? 'ไฟล์ใหญ่เกิน 10 MB' : !docMime(f) ? 'รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)' : '';
-    if (bad) {
-      setErr(`${bad} — เลือกไฟล์อื่น (${f.name})`);
-      if (input.current) input.current.value = '';
-      return;
-    }
-    setFile(f);
-    const ctl = new AbortController();
-    abort.current = ctl;
-    setProg('กำลังเปิดไฟล์');
-    try {
-      const [{ readDocText }, { analyzeDocText, factsScore }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]);
-      const t = await readDocText(f, { signal: ctl.signal, onProgress: (msg) => setProg(msg), judge: (x) => factsScore(analyzeDocText(x)) });
-      if (ctl.signal.aborted) return;
-      setFacts(analyzeDocText(t.text));
-    } catch {
-      // nothing read: the file can still be swapped, checked by eye
-    } finally {
-      if (!ctl.signal.aborted) setProg('');
-    }
-  };
-  if (asRev && file) return <DocAttach deal={d} stage={QUOTE_STAGE} kind="quotation" target="forecast" revise={doc.id} file={file} onClose={onClose} onSaved={() => onSaved?.()} />;
-  const c = swapCheck(doc, facts);
-  const read = [c.amount != null ? fmtMoney(c.amount) + ' บาท' : '', c.docNo, c.docDate ? isoTh(c.docDate) : ''].filter(Boolean).join(' · ');
-  const save = async () => {
-    if (!file) return;
+  const swap = async (fx: DocFacts | null, said: string) => {
     setSaving('กำลังบันทึก');
     try {
       const x = await e.replaceDocFile(d.id, doc.id, file);
-      if (facts) qtFacts.set(x.id, facts);
+      if (fx) qtFacts.set(x.id, fx);
       onClose();
       onSaved?.();
-      acts.say(`เปลี่ยนไฟล์ของใบเสนอราคา${doc.docNo ? ' ' + doc.docNo : ''} ฉบับที่ ${n} แล้ว`);
+      acts.say(said);
     } catch (x) {
       setSaving('บันทึกไม่สำเร็จ: ' + ((x as Error)?.message || x));
     }
   };
+  useEffect(() => {
+    const bad = file.size > DOC_MAX_BYTES ? 'ไฟล์ใหญ่เกิน 10 MB' : !docMime(file) ? 'รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)' : '';
+    if (bad) return void (setErr(`${bad} · ${file.name}`), setProg(''));
+    const ctl = new AbortController();
+    abort.current = ctl;
+    (async () => {
+      let fx: DocFacts | null = null;
+      try {
+        const [{ readDocText }, { analyzeDocText, factsScore }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]);
+        const t = await readDocText(file, { signal: ctl.signal, onProgress: (msg) => setProg(msg), judge: (x) => factsScore(analyzeDocText(x)) });
+        if (ctl.signal.aborted) return;
+        fx = analyzeDocText(t.text);
+      } catch {
+        // nothing read: the file can still be swapped, checked by eye
+      }
+      if (ctl.signal.aborted) return;
+      setFacts(fx);
+      setProg('');
+      const c = swapCheck(doc, fx);
+      if (c.tone === 'ok') void swap(fx, `เปลี่ยนไฟล์ของใบเสนอราคา${doc.docNo ? ' ' + doc.docNo : ''} ฉบับที่ ${n} แล้ว · ยอด เลขที่ และวันที่ตรงกับเดิม`);
+      else if (c.tone === 'warn') setAsRev(true);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (asRev) return <DocAttach deal={d} entry={{ at: 'quote', revise: doc.id, onSaved: () => onSaved?.() }} file={file} onClose={onClose} />;
   const kb = (b: number) => (b / 1024).toFixed(0) + ' KB';
+  const unread = !prog && !err && swapCheck(doc, facts).tone === 'none';
   return (
-    <Modal title={`เปลี่ยนไฟล์ · ${doc.docNo || 'ใบเสนอราคา'} ฉบับที่ ${n}`} onClose={onClose} width={560}>
+    <Modal title={`เปลี่ยนไฟล์ · ${doc.docNo || 'ใบเสนอราคา'} ฉบับที่ ${n}`} onClose={onClose} width={520}>
       <span className="sl-dlg-sub">{d.client}</span>
       <div className="qt-swap">
-        <p className="qt-swap-p">ใช้เมื่อแนบไฟล์ผิด เช่น แนบไฟล์ของลูกค้ารายอื่น หรือได้ไฟล์ที่เซ็นแล้ว ยอด เลขที่ และวันที่ยังเหมือนเดิม ถ้าลูกค้าได้ใบที่แก้ราคาแล้ว ให้ใช้ “แนบฉบับแก้ไข” แทน</p>
-        <div className="qt-swap-r">
-          <span className="qt-swap-l">ไฟล์ตอนนี้</span>
-          <span className="qt-swap-v">{doc.name} · {kb(doc.size)} · แนบ {doc.at ? dmTh(localDay(doc.at)) : ''} โดย {doc.by || 'ไม่ระบุ'}</span>
-        </div>
         <div className="qt-swap-r">
           <span className="qt-swap-l">ไฟล์ใหม่</span>
-          <span className="qt-swap-f">
-            <button type="button" className="btn sm" onClick={() => input.current?.click()} autoFocus>{file ? 'เลือกไฟล์อื่น' : 'เลือกไฟล์'}</button>
-            {file && <span className="t-sec" title={file.name}>{file.name} · {kb(file.size)}</span>}
-          </span>
-          <input ref={input} type="file" accept={DOC_ACCEPT} hidden onChange={(ev) => { const f = ev.target.files?.[0]; if (f) pick(f); }} />
+          <span className="qt-swap-v">{file.name} · {kb(file.size)}</span>
         </div>
         {prog && <span className="qt-form-n" role="status">{prog}</span>}
         {err && <Notice kind="error" role="alert">{err}</Notice>}
-        {file && !prog && (
-          c.tone === 'ok' ? (
-            <p className="sl-xchk ok" role="status">ระบบอ่านไฟล์ใหม่ได้ <b>{read}</b> ตรงกับข้อมูลเดิม</p>
-          ) : c.tone === 'warn' ? (
-            <div className="sl-xchk warn qt-swap-w" role="status">
-              <span>ไฟล์ใหม่อ่านได้ {read} · {thList(c.differs)}ไม่ตรงกับข้อมูลเดิม ({[doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '', doc.docNo, doc.docDate ? isoTh(doc.docDate) : ''].filter(Boolean).join(' · ')})</span>
-              <span>ถ้าเป็นใบที่แก้ราคาแล้ว ใช้ “แนบฉบับแก้ไข” ฉบับนี้จะเก็บไว้เป็นฉบับเดิม · <button type="button" className="lnk" onClick={() => setAsRev(true)}>แนบเป็นฉบับแก้ไขแทน</button></span>
-            </div>
-          ) : (
-            <p className="qt-form-n">อ่านยอดจากไฟล์ใหม่ไม่ได้ ตรวจด้วยตาว่าเป็นใบเดียวกับฉบับที่ {n}</p>
-          )
-        )}
-        <div className="qt-next">หลังเปลี่ยน: {doc.fileId ? 'ไฟล์เดิมย้ายไปถังขยะของ Drive ทีม (เจ้าของสคริปต์กู้คืนได้ใน 30 วัน)' : 'ไฟล์เดิมยังไม่ได้อัปโหลด จะลบออกจากเครื่องนี้'} · ยอด เลขที่ และวันที่ของฉบับที่ {n} เหมือนเดิม</div>
+        {unread && <p className="qt-form-n">อ่านยอดจากไฟล์ใหม่ไม่ได้ ตรวจด้วยตาว่าเป็นใบเดียวกับฉบับที่ {n} (ยอด เลขที่ และวันที่เหมือนเดิม)</p>}
+        {unread && <div className="qt-next">หลังเปลี่ยน: {doc.fileId ? 'ไฟล์เดิมย้ายไปถังขยะของ Drive ทีม (เจ้าของสคริปต์กู้คืนได้ใน 30 วัน)' : 'ไฟล์เดิมยังไม่ได้อัปโหลด จะลบออกจากเครื่องนี้'} · ยอด เลขที่ และวันที่ของฉบับที่ {n} เหมือนเดิม</div>}
       </div>
       {saving && <span role="status" className={saving.startsWith('บันทึกไม่') ? 't-bad qt-form-n' : 'qt-form-n'}>{saving}</span>}
       <div className="dlg-act">
         <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
-        <button type="button" className="btn pri" disabled={!file || !!prog || saving === 'กำลังบันทึก'} onClick={save}>เปลี่ยนไฟล์</button>
+        {unread && <button type="button" className="btn pri" disabled={saving === 'กำลังบันทึก'} onClick={() => void swap(facts, `เปลี่ยนไฟล์ของใบเสนอราคา${doc.docNo ? ' ' + doc.docNo : ''} ฉบับที่ ${n} แล้ว`)}>เปลี่ยนไฟล์</button>}
       </div>
     </Modal>
   );
@@ -422,7 +406,7 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const [form, setForm] = useState(false);
-  const [swap, setSwap] = useState(false);
+  const [swap, setSwap] = useState<File | null>(null);
   const [tick, setTick] = useState(0);
   const h = v.head!;
   const doc = h.doc;
@@ -457,7 +441,7 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
           <button type="button" className="btn wide" onClick={() => onRevise(doc.id)}>แนบฉบับแก้ไข</button>
           <span className="qt-m2">
             <button type="button" className="btn" onClick={() => setForm(true)}>แก้ไขข้อมูล</button>
-            <button type="button" className="btn" onClick={() => setSwap(true)}>เปลี่ยนไฟล์</button>
+            <SwapPick onFile={setSwap} wide />
           </span>
         </>
       )}
@@ -470,7 +454,7 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
           </span>
         </div>
       ))}
-      {swap && <QtSwap d={d} doc={doc} n={h.n} onClose={() => setSwap(false)} onSaved={onChange} />}
+      {swap && <QtSwap d={d} doc={doc} n={h.n} file={swap} onClose={() => setSwap(null)} onSaved={onChange} />}
     </>
   );
 }

@@ -19,6 +19,7 @@ import { Sales } from './tabs/Sales';
 import { DealPanel } from './components/DealPanel';
 import { SalesMessages } from './components/SalesToast';
 import { PayGuardHost } from './components/PayChk';
+import { AttachHost } from './components/AttachProvider';
 import { AddCustomer, SendToTracker } from './components/AddCustomer';
 import { AddPerson, People } from './tabs/People';
 import { Users } from './tabs/Users';
@@ -255,6 +256,8 @@ export default function App() {
       {ready && <SalesMessages />}
       {/* the question before money accounting checked is changed (the panel, the table, the editors) */}
       {ready && <PayGuardHost />}
+      {/* one file picker and the attach dialog for every attach button (components/AttachProvider) */}
+      {ready && <AttachHost />}
       {ready && ui.sel != null && (
         <ErrorBoundary resetKey={String(ui.sel)}>
           <CompanyDrawer />
