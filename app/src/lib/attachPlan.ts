@@ -239,6 +239,12 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
   let mode: AttachMode = jm ? 'other' : choice.kind ?? want;
   let notice: AttachNotice | null = null;
   const money = fk === 'receipt' || fk === 'invoice';
+  // "นับเป็นเงินรับขั้น …": the step the pay screen then counts it at (the next one to receive; a document this
+  // deal counts twice already is counted once where its payment starts, countGuard's home)
+  const payLink = () => {
+    const g = readAmt != null && money ? countGuard(s, d, { kind: fk === 'invoice' ? 'invoice' : 'receipt', amount: readAmt, target: 'actual', docDate, docNo, name: read.name.slice(0, 120), size: read.size }, today) : null;
+    return `นับเป็นเงินรับขั้น ${code(s, d, g?.home || nextPay, today) || 'PAY'}`;
+  };
   if (!jm && !choice.kind) {
     if (want === 'pay' && fk === 'quotation') {
       mode = 'other';
@@ -248,14 +254,14 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
       notice = {
         tone: 'warn', tag: 'ไม่ใช่ใบเสนอราคา',
         text: `ไฟล์นี้อ่านได้ว่าเป็น${WORD[fk!]}${readAmt != null ? ' ' + N(readAmt) + ' บาท' : ''} · แนบไว้เป็นหลักฐาน${won ? 'ก่อน' : ''}`,
-        alts: won ? [{ label: `นับเป็นเงินรับขั้น ${code(s, d, nextPay, today) || 'PAY'}`, choice: { kind: 'pay' } }] : [],
+        alts: won ? [{ label: payLink(), choice: { kind: 'pay' } }] : [],
       };
     } else if (want === 'other' && (money || fk === 'quotation') && readAmt != null) {
       notice = fk === 'quotation'
         ? { tone: 'info', tag: 'เป็นใบเสนอราคา', text: `ไฟล์นี้เป็นใบเสนอราคา ${N(readAmt)} บาท · ถ้าเป็นใบเสนอราคาของงานนี้`, alts: [{ label: 'ใช้เป็นใบเสนอราคา (Forecast)', choice: { kind: 'quote' } }] }
         : {
             tone: 'info', tag: `เป็น${WORD[fk!]}`, text: `ไฟล์นี้เป็น${WORD[fk!]} ${N(readAmt)} บาท (${reasonOf(f!, prop0!.basis, false).split(' · ')[0]})${won ? ' · ถ้าเป็นเงินที่ได้รับของงานนี้' : ''}`,
-            alts: won ? [{ label: `นับเป็นเงินรับขั้น ${code(s, d, nextPay, today) || 'PAY'}`, choice: { kind: 'pay' } }] : [],
+            alts: won ? [{ label: payLink(), choice: { kind: 'pay' } }] : [],
           };
     }
   }

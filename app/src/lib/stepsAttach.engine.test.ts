@@ -407,6 +407,9 @@ describe('review of batch 7: one rule for what is owed, one tap on the rest, a d
     // (not a job to call either: its money is in, only counted twice)
     expect(overdueDays(e.sales, deal(e, id), TODAY)).toBeNull();
     expect(payDone(e.sales, deal(e, id), TODAY)).toBe(true);
+    // (from "เอกสารอื่น", as a phone does it: the link names the step the pay screen then counts it once at)
+    expect(plan(e, id, { at: 'other' }, RCT()).notice!.alts.map((a) => a.label)).toEqual(['นับเป็นเงินรับขั้น PAY']);
+    expect(plan(e, id, { at: 'other' }, RCT(), { kind: 'pay' })).toMatchObject({ title: 'ใบเสร็จ · ขั้น PAY ชำระเงิน', primary: 'บันทึกรับเงิน 60,000 บาท' });
     await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(ready(e, id)).toBe(true);
     expect(closingView(e.sales, deal(e, id), TODAY).state).toBe('done');
