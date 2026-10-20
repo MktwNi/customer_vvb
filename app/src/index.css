@@ -789,6 +789,17 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sd-stat small{font-size:12px;color:var(--muted)}
 .sd-stat.pri .sd-stat-v b{color:var(--link)}
 .sd-stat.warn .sd-stat-l svg,.sd-stat.warn .sd-stat-v b{color:var(--bad)}
+/* the cards stay beside the greeting on a wide page (the ทำงานให้ card made the row longer): first the
+   greeting's line wraps under its name, then the ทำงานให้ card's small line takes a second line, and only then
+   do the cards go under the greeting, as before. The other cards keep their size; narrower pages as before. */
+@container (min-width:1000px){
+  .sd-hello{flex:1 1 0;min-width:auto}
+  .sd-hello h3{white-space:nowrap}
+  .sd-heroes{flex:1000 1 0;min-width:min-content;max-width:max-content;flex-wrap:nowrap}
+  .sd-heroes>.sd-stat:not(.work){flex:none;width:max-content}
+  .sd-heroes>.sd-stat.work{flex:0 1 auto}
+  .sd-stat.work .sd-stat-v,.sd-stat.work small>span{white-space:nowrap}
+}
 /* แผนติดต่อ and แผนที่: a view picker, two filter pills and the auto-plan picker in one row */
 .pl-tools,.map-tools{display:flex;gap:8px 10px;flex-wrap:wrap;align-items:center;min-width:0}
 .map-tools{padding:14px 16px}
@@ -932,6 +943,9 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
   .sd-stat:first-child{padding-left:0}
   .sd-stat-v b{font-size:30px}
   .sd-stat small{display:none}
+  /* ทำงานให้ (mockup m7): a row of its own over รับเงินแล้ว, its small line kept (it says what is counted) */
+  .sd-heroes .sd-stat.work{grid-column:1/-1;border-left:0;border-top:1px solid #DCE2EE;margin-top:12px;padding:12px 0 0}
+  .sd-heroes .sd-stat.work small{display:block}
   .sd-stage{min-width:calc(50% - 4px)}
   .sd-top{min-height:0}
   .sd-wk-r{grid-template-columns:40px repeat(7,minmax(0,1fr));gap:3px}
@@ -1424,10 +1438,14 @@ button.sl-amt{cursor:pointer}
 /* ---- ปิดงาน and ประวัติการแก้ไข */
 .sl-closed-sum{margin:0;display:flex;flex-direction:column;gap:2px;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
 .sl-closed-sum b{color:var(--ink)}
-.sl-list{padding:6px 16px 10px;min-width:0}
+.sl-list{padding:6px 16px 10px;min-width:0;container:sl-list/inline-size}
 .sl-list-empty{padding:16px 4px;font-size:var(--fs-body);color:var(--ink-2);line-height:1.6}
 .sl-ltable{width:100%;table-layout:fixed;border-collapse:collapse;font-size:var(--fs-body);color:var(--ink)}
-.sl-ltable col.w-sec{width:15%}.sl-ltable col.w-resp{width:12%}.sl-ltable col.w-res{width:112px}.sl-ltable col.w-m{width:118px}.sl-ltable col.w-dt{width:120px}.sl-ltable col.w-act{width:132px}
+.sl-ltable col.w-sec{width:15%}.sl-ltable col.w-resp{width:12%}.sl-ltable col.w-res{width:112px}.sl-ltable col.w-m{width:118px}.sl-ltable col.w-dt{width:120px}.sl-ltable col.w-act{width:96px}
+/* the company's whole name (owner: every company of a joint quotation listed): a long one takes a second line
+   rather than being cut; below 1400px the หมวด, ผู้รับผิดชอบ and date columns give the names room */
+.sl-ltable .sl-nm-b{white-space:normal}
+@media (max-width:1400px){.sl-ltable col.w-sec{width:12%}.sl-ltable col.w-resp{width:10%}.sl-ltable col.w-dt{width:104px}}
 .sl-ltable th{height:44px;font-size:var(--fs-meta);font-weight:400;color:var(--muted);text-align:left;border-bottom:1px solid var(--line);padding:0 8px}
 .sl-ltable td{padding:10px 8px;border-bottom:1px solid var(--divider);vertical-align:middle;overflow:hidden;text-overflow:ellipsis}
 .sl-ltable tr:last-child td{border-bottom:0}
@@ -1438,7 +1456,24 @@ button.sl-amt{cursor:pointer}
 .sl-reopen{font-size:var(--fs-sec);opacity:0}
 .sl-ltable tr:hover .sl-reopen,.sl-reopen:focus-visible{opacity:1}
 @media (hover:none){.sl-reopen{opacity:1}}
-@media (max-width:760px){.sl-ltable .c-opt{display:none}.sl-ltable col.w-res{width:96px}.sl-ltable col.w-m{width:96px}.sl-ltable col.w-act{width:84px}.sl-list{padding:4px 10px 8px}}
+@media (max-width:760px){.sl-list{padding:4px 10px 8px}}
+/* ปิดงาน in a narrow list (a phone, a tablet, a narrow window: below 860px the table's name column would be too
+   narrow to read, mockups m6 / m6b): each row two lines, the company's whole name over its result, the Forecast
+   at the right; no column heads, no หมวด / ผู้รับผิดชอบ / Actual / date. Reopening is in the row's panel (the
+   reopen cell goes). The joint quotation's band and companies: joint.css. */
+@container sl-list (max-width:860px){
+  .sl-ltable .c-opt{display:none}
+  .sl-ltable,.sl-ltable tbody{display:block;width:100%}
+  .sl-ltable colgroup,.sl-ltable thead{display:none}
+  .sl-ltable tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n f" "r f";column-gap:12px;row-gap:4px;align-items:start;padding:12px 2px;border-bottom:1px solid var(--divider)}
+  .sl-ltable tbody tr:last-child{border-bottom:0}
+  .sl-ltable tbody tr>td{display:block;padding:0;border:0;height:auto;min-width:0}
+  .sl-ltable tbody tr>td:last-child{display:none}
+  .sl-ltable tbody tr>td:first-child{grid-area:n}
+  .sl-ltable tbody tr>td:nth-child(4){grid-area:r}
+  .sl-ltable tbody tr>td:nth-child(5){grid-area:f}
+  .sl-ltable tbody .sl-nm-b{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
+}
 /* the history search sits alone in the page's column: its own size, not the toolbar's flex basis */
 .sl-log-q{flex:none;align-self:flex-start;width:100%;max-width:360px;margin-left:0}
 .sl-log-day h3{margin:10px 0 4px;font-size:var(--fs-sec);font-weight:500;color:var(--ink-2)}

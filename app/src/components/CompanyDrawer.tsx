@@ -491,7 +491,8 @@ function SalesBox({ c }: { c: Company }) {
         const fv = fcFig(e.sales, d);
         const jr = jointRole(e.sales, d), jg = jr === 'plain' ? null : jointOf(e.sales, d);
         const more = [
-          jg && (jr === 'header' ? `ผู้จ่ายใบเสนอราคาร่วม ${jointTitle(e.sales, jg)} · ${jg.members.length} บริษัท` : `อยู่ในใบเสนอราคาร่วม ${jointTitle(e.sales, jg)}`),
+          // (the title starts with "ใบเสนอราคาร่วม" already)
+          jg && (jr === 'header' ? `ผู้จ่าย ${jointTitle(e.sales, jg)} · ${jg.members.length} บริษัท` : `อยู่ใน ${jointTitle(e.sales, jg)}`),
           d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc),
           money && jr !== 'member' && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : ''),
         ].filter(Boolean);

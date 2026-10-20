@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
-import { todayISO } from '../lib/format';
-import { closeReady, dealResult, hasPlan, jointRole, planOf, type Deal } from '../lib/sales';
+import { fmtN, todayISO } from '../lib/format';
+import { closeReady, dealResult, hasPlan, jointOf, jointRole, planOf, type Deal } from '../lib/sales';
+import { jointCloseOf, jointShort } from '../lib/joint';
 import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
 import { docById, qtSentView } from '../lib/notify';
@@ -18,35 +19,43 @@ export function useSalesActs() {
   const { engine: e, set } = useApp();
   /** One message at the bottom; `ms` 0 = it stays until acted on. */
   const say = (text: string, o: { acts?: ToastAct[]; ms?: number } = {}) => set((s) => ({ slToast: { text, acts: o.acts, ms: o.ms ?? 4000, n: (s.slToast?.n || 0) + 1 } }));
-  /** "รับชำระครบทุกงวดแล้ว ปิดงาน X เลยไหม?" with ปิดงาน / ไว้ก่อน; the deal's panel asks in its closing card too. */
+  /** "รับชำระครบทุกงวดแล้ว ปิดงาน X เลยไหม?" with ปิดงาน / ไว้ก่อน; the deal's panel asks in its closing card too.
+   *  A joint quotation's payer is named as the quotation and its companies: they close as one (its ปิดงาน opens
+   *  the joint dialog), as the message after closing says. */
   const prompt = (d: Deal, via: 'result' | 'payment') => {
-    say(closePrompt(e.sales, d, shortName(d.client), via), { ms: 0, acts: [{ label: 'ปิดงาน', act: 'close', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
+    const g = jointRole(e.sales, d) === 'header' ? jointOf(e.sales, d) : null;
+    const open = g ? g.members.filter((x) => x.deal.jobStatus === 'open').length : 0;
+    const name = g ? `ใบเสนอราคาร่วม ${jointShort(g)}${open ? ` และ ${fmtN(open)} บริษัท` : ''}` : shortName(d.client);
+    say(closePrompt(e.sales, d, name, via), { ms: 0, acts: [{ label: 'ปิดงาน', act: 'close', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     set({ slPrompt: d.id });
   };
-  /** After this user's own change: ask to close when it just made the deal ready, else say `done`. */
+  /** After this user's own change: ask to close when it just made the deal ready, else say `done`. A
+   *  company of a joint quotation is never asked about on its own: it closes with the whole quotation. */
   const after = (d: Deal, wasReady: boolean, via: 'result' | 'payment', done = '') => {
-    if (!wasReady && d.jobStatus === 'open' && closeReady(e.sales, d, todayISO())) prompt(d, via);
+    if (!wasReady && d.jobStatus === 'open' && jointRole(e.sales, d) !== 'member' && closeReady(e.sales, d, todayISO())) prompt(d, via);
     else if (done) say(done);
   };
   /** The result was just saved: NO (or a won deal with nothing left to receive) asks to close; a win
    *  without a plan offers to set one up; a win with a plan says its due dates now count from today. */
   const afterResult = (d: Deal, wasReady: boolean) => {
-    const today = todayISO();
-    if (!wasReady && closeReady(e.sales, d, today)) return prompt(d, 'result');
-    if (dealResult(e.sales, d) !== 'YES') return;
-    // a company in a joint quotation has no plan of its own: the payer pays the whole quotation
-    if (jointRole(e.sales, d) === 'member') return say('ได้งานแล้ว · การชำระเงินอยู่ที่ใบเสนอราคาร่วม (ผู้จ่ายชำระทั้งใบ)');
+    const today = todayISO(), r = dealResult(e.sales, d);
+    // a company in a joint quotation has no plan of its own (the payer pays the whole quotation), and closes
+    // with the whole quotation: never on its own, so it is not asked about
+    if (jointRole(e.sales, d) === 'member') return r === 'YES' || r === 'NO' ? say(`${r === 'YES' ? 'ได้งานแล้ว' : 'บันทึกว่าไม่ได้งานแล้ว'} · ปิดงานพร้อมกันทั้งใบเสนอราคาร่วม`) : undefined;
+    if (!wasReady && d.jobStatus === 'open' && closeReady(e.sales, d, today)) return prompt(d, 'result');
+    if (r !== 'YES') return;
     if (!hasPlan(e.sales, d.id)) {
       if (!e.canDeal('edit.pay', d)) return;
       say('ได้งานแล้ว ตั้งแผนชำระเลยไหม? (ผลการขายยังไม่ใช่การปิดงาน)', { ms: 0, acts: [{ label: 'ตั้งแผนชำระ', act: 'plan', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     } else say(`ได้งานแล้ว · แผนชำระ ${planOf(e.sales, d, today)?.n} งวดเริ่มนับวันครบกำหนดจากวันนี้`);
   };
   /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. A joint quotation
-   *  always asks: it closes its companies too (components/JointQt.tsx JointClose). */
+   *  always asks, from its header or any of its companies: it closes as one (components/JointQt.tsx JointClose). */
   const close = (id: string) => {
     const d = e.sales.deals[id];
     if (!d || !e.canDeal('edit.deal', d)) return;
-    if (jointRole(e.sales, d) === 'header') return set({ jqDlg: { k: 'close', hid: id }, slPrompt: null, slToast: null });
+    const hid = jointCloseOf(e.sales, d);
+    if (hid) return set({ jqDlg: { k: 'close', hid }, slPrompt: null, slToast: null });
     if (closeReady(e.sales, d, todayISO())) closeNow(id);
     else set({ slConfirm: id });
   };
@@ -127,9 +136,10 @@ export function SalesMessages() {
         );
       return;
     }
+    // the joint quotation just closed here: back as it was (the companies' results recorded then too)
     if (a.act === 'jqUndo' && a.deal) {
-      e.reopenJoint(a.deal);
-      return acts.say('เปิดใบเสนอราคาร่วมและบริษัทที่ปิดพร้อมกันอีกครั้งแล้ว', { ms: 3000 });
+      const n = e.undoCloseJoint(a.deal);
+      return acts.say(n ? 'เปิดใบเสนอราคาร่วมและบริษัทที่ปิดพร้อมกันอีกครั้งแล้ว' : e.teamNote || 'ไม่มีรายการให้เปิดอีกครั้ง', { ms: n ? 3000 : 6000 });
     }
     // the month check: this account's checks just made (engine.lastPayChecks), for 10 minutes
     if (a.act === 'payUndo') {

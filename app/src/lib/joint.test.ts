@@ -307,12 +307,19 @@ describe('a member follows up on its own row and is paid through the joint quota
     expect(statusView(s, b2, T).sub).toBe('พร้อมปิดงาน');
     expect(nextStepView(s, b2, T).kind).toBe('done');
   });
-  it('a member that withdrew closes alone; the header is not a customer to follow up', () => {
+  it('a member that withdrew waits for the joint quotation (it closes as one) and is not followed up; the header is not a customer to follow up', () => {
     const s = world();
     s.steps['b4/CLOSED DEAL'] = { d: '2026-08-02', n: 'NO' };
-    expect(closeReady(s, s.deals.b4, T)).toBe(true);
+    expect(closeReady(s, s.deals.b4, T)).toBe(false);
+    expect(overdueDays(s, s.deals.b4, '2026-12-31')).toBeNull();
+    expect(statusView(s, s.deals.b4, T)).toMatchObject({ word: 'ไม่ได้งาน', sub: 'ปิดพร้อมใบเสนอราคาร่วม', ready: false });
+    expect(closingView(s, s.deals.b4, T)).toMatchObject({ state: 'joint', ready: false, lead: 'ไม่ได้งาน (ถอนตัว) · ชำระผ่านใบเสนอราคาร่วม' });
     expect(overdueDays(s, s.deals.h, '2026-12-31')).toBeNull();
     expect(overdueDays(s, s.deals.b1, '2026-12-31')).not.toBeNull();
+    // the payer says NO: the whole quotation (every company, whatever its own result) is ready to close
+    s.steps['h/CLOSED DEAL'] = { d: '2026-10-08', n: 'NO' };
+    expect(['h', 'b1', 'b4'].map((id) => closeReady(s, s.deals[id], T))).toEqual([true, true, true]);
+    expect(closingView(s, s.deals.b1, T)).toMatchObject({ state: 'joint', ready: true, lead: 'ยังไม่มีผลของบริษัทนี้ · ผู้จ่ายตอบว่าไม่ได้งาน' });
   });
 });
 

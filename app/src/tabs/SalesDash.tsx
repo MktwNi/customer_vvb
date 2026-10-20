@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { addDays, dow, fmtN, isoTh } from '../lib/format';
 import { DEAL_STAGE, STAGE_TH, dealMoney, dealResult, filterDeals, fmtMoney, lastContact, normSalesFilter, overdueDays, salesStats, stepOf, type Deal, type SalesFilter, type SalesState, type SalesStats } from '../lib/sales';
-import { liveCount, monthCounts, trackerFields, winRateBySource, withoutDate } from '../lib/salesUi';
+import { liveCount, monthCounts, trackerFields, weekContacts, winRateBySource, withoutDate } from '../lib/salesUi';
 import { rangeTh, resolveDate } from '../lib/dateRange';
 import { FilterBar, type FVal } from '../components/FilterBar';
 import { DateFilter, dateWords } from '../components/DateFilter';
@@ -20,6 +20,7 @@ import { thisQuarter } from '../lib/dateRange';
 import { payIn, payMonthCounts } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
 import { customersOf, jointAttr, jointCashLines, jointRole } from '../lib/sales';
+import { workCardRows, workCardSub } from '../lib/workUi';
 import { shareOf } from '../lib/joint';
 // units, % contribution and commission (package dash, items 8 and 9b)
 import { commPeriod0, unitQuarters, unitsOf, type CommPeriod } from '../lib/contrib';
@@ -42,7 +43,6 @@ const baht = (n: number) => {
   const r = Math.round(n);
   return r >= 999500 ? `${(n / 1e6).toLocaleString('en-US', { maximumFractionDigits: 1 })}M` : r >= 9950 ? `${Math.round(n / 1e3).toLocaleString('en-US')}K` : fmtN(r);
 };
-const mondayOf = (iso: string) => addDays(iso, -((dow(iso) + 6) % 7));
 
 /** Bar list; rows at 0 are left out unless `keepZero` (the items are then already the ones to show). */
 function Bars({ items, fmt = fmtN, unit = '', keepZero }: { items: [string, number][]; fmt?: (n: number) => string; unit?: string; keepZero?: boolean }) {
@@ -172,6 +172,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
     setCq(qPick ? qPick - 1 : commPeriod0(year, today));
   }
   const payCount = (p: PayF) => customersOf(S, filterDeals(S, { ...F, quick: '', pay: p || undefined }, today)).length;
+  // ทำงานให้: the companies won and closed, each once (workTally, as the ปิดงาน tab counts them), a range read on
+  // the day each job closed and not narrowed by การรับเงิน (lib/workUi workCardRows)
+  const worked = e.workTally(workCardRows(S, F, today), { attr }).worked;
   // the year's undated money: the same bucket as the Cashflow card "ยังไม่กำหนดวันรับ"
   const undated = { amt: Y.undated.reduce((a, l) => a + l.amt, 0), deals: new Set(Y.undated.map((l) => l.deal.id)).size };
   // การรับเงิน, pinned after ผู้รับผิดชอบ: its choices count the money of the range
@@ -188,19 +191,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
     .sort((a, b) => b[1].actual - a[1].actual || b[1].forecast - a[1].forecast || b[1].n - a[1].n);
   const top = sellers[0];
 
-  // steps and contact records dated this week (Monday to today: a later date is a plan, not a contact
-  // yet), compared with the same days of last week
-  const mon = mondayOf(today);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
-  const ids = new Set(list.map((d) => d.id));
-  const perDay: Record<string, number> = {};
-  let lastWeek = 0;
-  const prevMon = addDays(mon, -7), prevToday = addDays(today, -7);
-  [...Object.entries(S.steps), ...Object.entries(S.acts || {})].forEach(([k, x]) => {
-    if (!x.d || !ids.has(k.slice(0, k.indexOf('/')))) return;
-    if (x.d >= mon && x.d <= today) perDay[x.d] = (perDay[x.d] || 0) + 1;
-    else if (x.d >= prevMon && x.d <= prevToday) lastWeek++;
-  });
+  // steps and contact records dated this week, compared with the same days of last week (lib/salesUi)
+  const { mon, days, perDay, lastWeek } = weekContacts(S, new Set(list.map((d) => d.id)), today);
   const weekN = days.reduce((a, d) => a + (perDay[d] || 0), 0);
   const peak = days.reduce((best, d, i) => ((perDay[d] || 0) > (perDay[days[best]] || 0) ? i : best), 0);
   const shownDay = hover ?? (weekN ? peak : null);
@@ -258,11 +250,13 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
       <div className="sd-head">
         <div className="sd-hello">
           <h3>{me ? `สวัสดี, ${me}` : 'สวัสดีทีมขาย'}</h3>
-          <span>{date ? `ภาพรวมการขาย · ${dateWords(date.f, date.r).field} ${rangeTh(date.r)} · ตามตัวกรอง` : `ภาพรวมการขาย ปี ${year}${filtered ? ' · ตามตัวกรอง' : ''}`}</span>
+          {/* (a range keeps its two ends on one line when the greeting gives the cards room: ".sd-hello" in index.css) */}
+          <span>{date ? `ภาพรวมการขาย · ${dateWords(date.f, date.r).field} ${rangeTh(date.r).replace(/ – /g, '\u00a0–\u2060\u00a0')} · ตามตัวกรอง` : `ภาพรวมการขาย ปี ${year}${filtered ? ' · ตามตัวกรอง' : ''}`}</span>
         </div>
         <div className="sd-heroes">
           {([
-            ['user', st.total, 'ลูกค้า', 'ราย', `เปิดงาน ${fmtN(st.open)} · ปิดงาน ${fmtN(st.closed)}`, ''],
+            // rows in ราย (each company of a joint quotation one): not to be read against the ปิดงาน tab's jobs
+            ['user', st.total, 'ลูกค้า', 'ราย', `เปิด ${fmtN(st.open)} · ปิดแล้ว ${fmtN(st.closed)} ราย`, ''],
             ['sales', st.yes, 'ปิดการขายได้', 'ราย', st.decided ? `Win rate ${st.winRate}%` : 'ยังไม่มีลูกค้าที่รู้ผล', 'pri'],
             ['plan', st.overdue, 'ค้างติดตาม', 'ราย', 'ไม่ได้ติดต่อเกิน 14 วัน', st.overdue ? 'warn' : ''],
           ] as const).map(([ic, n, l, unit, sub2, tone]) => (
@@ -272,6 +266,13 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               <small>{sub2}</small>
             </div>
           ))}
+          {/* the companies we worked for (owner: the work volume; mockups m4 / m7): won and closed, each once */}
+          <div className="sd-stat work">
+            <span className="sd-stat-l"><Icon name="company" />ทำงานให้</span>
+            <span className="sd-stat-v"><b>{fmtN(worked)}</b> บริษัท</span>
+            {/* (when the row is short of room this line takes two, between its two phrases, never inside one) */}
+            <small>{workCardSub(qPick, !!date).split(' · ').map((x, i, a) => <Fragment key={i}>{i > 0 && ' '}<span>{x}{i < a.length - 1 ? '\u00a0·' : ''}</span></Fragment>)}</small>
+          </div>
           {money && <CashStat lines={lines} pay={F.pay || ''} r={moneyR} ranged={!!date} when={qPick ? ` · ไตรมาส ${qPick}` : date ? ' · ในช่วงนี้' : ''} />}
         </div>
       </div>

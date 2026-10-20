@@ -24,7 +24,7 @@ import { DateField, Status, labelCol } from './ui';
 import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
 // joint quotations (package quotes, item 7): the header's own panel, a member's line and stages
-import { jointOf, jointRole } from '../lib/sales';
+import { jointHeadOf, jointOf, jointRole } from '../lib/sales';
 import { isJointNote, jointNo, strayDocs } from '../lib/joint';
 import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 // สัดส่วนรายได้ (package dash, items 8 and 9b)
@@ -394,9 +394,14 @@ export function DealPanel() {
             <span className="dp-acts">
               {!ro &&
                 (d.jobStatus === 'closed' ? (
-                  <button type="button" className="btn xs" onClick={() => up({ jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>
+                  // a company of a joint quotation reopens with the whole quotation (it closed as one)
+                  jr === 'member' ? (
+                    <button type="button" className="btn xs" onClick={() => acts.say(e.reopenJoint(jointHeadOf(S, d.id)) ? 'เปิดใบเสนอราคาร่วมอีกครั้งแล้ว' : e.teamNote || 'ไม่มีรายการให้เปิดอีกครั้ง', { ms: 6000 })} title="เปิดกลับทั้งใบเสนอราคาและทุกบริษัท">เปิดใบเสนอราคาร่วมอีกครั้ง</button>
+                  ) : (
+                    <button type="button" className="btn xs" onClick={() => up({ jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>
+                  )
                 ) : (
-                  <button type="button" className="btn xs" onClick={() => acts.close(d.id)} title={ready ? 'ย้ายไปแท็บปิดงาน' : 'ยังไม่ครบ ปิดเองได้ (ถามยืนยัน)'}>ปิดงาน</button>
+                  <button type="button" className="btn xs" onClick={() => acts.close(d.id)} title={jr === 'member' ? 'ปิดทั้งใบเสนอราคาร่วมและทุกบริษัท (ถามยืนยัน)' : ready ? 'ย้ายไปแท็บปิดงาน' : 'ยังไม่ครบ ปิดเองได้ (ถามยืนยัน)'}>ปิดงาน</button>
                 ))}
               <button type="button" onClick={close} aria-label="ปิด" className="dlg-x"><Icon name="close" size={18} /></button>
             </span>

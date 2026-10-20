@@ -481,13 +481,34 @@ export function stageActs(s: SalesState, d: Deal): { by: Record<string, DealAct[
   return { by, other };
 }
 
+/**
+ * A joint quotation's company whose result is the payer's, on the payer's day: what closing the quotation
+ * records for a company without a result (lib/joint jointFill, engine fillJoint), or the same typed by hand.
+ * It is the team's word on the quotation, not a contact with that company: its date is not a contact
+ * (stepContactDay). It still dates the result (the date filter's ได้ผลการขาย).
+ */
+export function followsPayer(s: SalesState, id: string): boolean {
+  const x = s.steps[`${id}/${DEAL_STAGE}`];
+  const r = x?.d ? x.n.trim().toUpperCase() : '';
+  if (r !== 'YES' && r !== 'NO') return false;
+  const hid = jointHeadOf(s, id), h = hid ? s.steps[`${hid}/${DEAL_STAGE}`] : undefined;
+  return !!h && h.d === x!.d && h.n.trim().toUpperCase() === r;
+}
+/** A stage's date as a contact with the company: '' when it has none, or when it is not a contact
+ *  (followsPayer: a joint quotation's company given the payer's result). */
+export function stepContactDay(s: SalesState, id: string, p: string): string {
+  const x = s.steps[`${id}/${p}`]?.d || '';
+  return x && p === DEAL_STAGE && followsPayer(s, id) ? '' : x;
+}
+
 /** Last contact: the typed contact date, the latest stage date or the latest contact record, whichever
  *  is later ('' when there is none), and where it came from: 'typed' (deal.contactDate), the stage, or
- *  'act' (then `act` is that record). A date in the future (a planned call) does not count. */
+ *  'act' (then `act` is that record). A date in the future (a planned call) does not count, nor a joint
+ *  quotation's company's result recorded from the payer's (stepContactDay). */
 export function lastContactInfo(s: SalesState, d: Deal, today: string): { date: string; from: string; act?: DealAct } {
   let date = d.contactDate && d.contactDate <= today ? d.contactDate : '', from = date ? 'typed' : '';
   for (const p of s.cfg.stages) {
-    const x = s.steps[`${d.id}/${p}`]?.d;
+    const x = stepContactDay(s, d.id, p);
     if (x && x <= today && x > date) {
       date = x;
       from = p;
@@ -531,7 +552,8 @@ export function overdueDays(s: SalesState, d: Deal, today: string) {
   if (d.jobStatus === 'closed') return null;
   const jr = jointRole(s, d);
   if (jr === 'header') return null;
-  if (closeReady(s, d, today) || (dealResult(s, d) === 'YES' && (jr === 'member' || hasPlan(s, d.id)))) return null;
+  // (a company that withdrew from a joint quotation waits for it to close: nothing to follow up)
+  if (dealResult(s, d) === 'NO' || closeReady(s, d, today) || (dealResult(s, d) === 'YES' && (jr === 'member' || hasPlan(s, d.id)))) return null;
   const lc = lastContact(s, d, today) || (d.at || '').slice(0, 10);
   if (!lc || lc > today) return null;
   const n = Math.floor((Date.parse(today + 'T00:00:00') - Date.parse(lc + 'T00:00:00')) / 864e5);
@@ -890,8 +912,14 @@ export function payState(s: SalesState, d: Deal, today: string): { pays: string[
 }
 /** When to offer "ปิดงาน": the result is NO; or it is YES and every installment of the plan is received
  *  (in full or counted complete) — without a plan, every PAY stage is paid; a list without PAY stages
- *  needs nothing more. PAY stages the plan does not use, and a plan total off the Forecast, don't matter. */
-export function closeReady(s: SalesState, d: Deal, today: string) {
+ *  needs nothing more. PAY stages the plan does not use, and a plan total off the Forecast, don't matter.
+ *  A joint quotation closes as one (its header and every company together, engine.closeJoint): a company of
+ *  it is ready when its quotation is (the payer said NO, or YES and paid in full), whatever its own result. */
+export function closeReady(s: SalesState, d: Deal, today: string): boolean {
+  if (jointRole(s, d) === 'member') {
+    const h = s.deals[jointHeadOf(s, d.id)];
+    if (h) return closeReady(s, h, today);
+  }
   const r = dealResult(s, d);
   return r === 'NO' || (r === 'YES' && payState(s, d, today).left.length === 0);
 }
@@ -973,6 +1001,8 @@ export type QuickView = '' | 'overdue' | 'notstarted' | 'active' | 'payment' | '
 export function quickMatch(s: SalesState, d: Deal, q: QuickView, today: string) {
   if (!q) return true;
   if (q === 'overdue') return overdueDays(s, d, today) != null;
+  // (a joint quotation is ready as one: its header and its companies when its payer is, closeReady; the
+  // view counts it once, workTally jobs)
   if (q === 'ready') return d.jobStatus === 'open' && closeReady(s, d, today);
   const st = dealStatus(s, d);
   if (q === 'notstarted') return !st.started;
@@ -1059,7 +1089,8 @@ export interface BasisDate { d: string; what: string; amt?: number; tone?: 'ok' 
 /**
  * A deal's dates on a basis, newest first:
  * - contact: what the last contact counts (lastContactInfo): the typed contact date, every stage date and
- *   every contact record, up to today (a planned call is not a contact yet);
+ *   every contact record, up to today (a planned call is not a contact yet; nor a joint quotation's company
+ *   given the payer's result, stepContactDay);
  * - added: the day it was added to the table (local day);
  * - result: the CLOSED DEAL date once the result is YES or NO;
  * - paid: when each installment came in (with a plan); without a plan, each paid PAY stage dated up to today;
@@ -1076,7 +1107,7 @@ export function basisDates(s: SalesState, d: Deal, basis: DateBasis, today: stri
   if (basis === 'contact') {
     if (d.contactDate && d.contactDate <= today) out.push({ d: d.contactDate, what: 'วันที่ติดต่อ' });
     for (const p of s.cfg.stages) {
-      const x = s.steps[`${d.id}/${p}`]?.d;
+      const x = stepContactDay(s, d.id, p);
       if (x && x <= today) out.push({ d: x, what: p });
     }
     for (const a of actsOf(s, d.id)) if (a.d && a.d <= today) out.push({ d: a.d, what: ACT_TH[a.type] + (a.stage ? ' · ' + a.stage : '') });
@@ -1334,6 +1365,76 @@ setPartsHook(jointPartsOf);
 export const payerDeal = (s: SalesState, d: Deal): Deal => (jointRole(s, d) === 'member' && s.deals[jointHeadOf(s, d.id)]) || d;
 /** The deals that count as customers (a joint quotation's header is not one: its members are). */
 export const customersOf = (s: SalesState, deals: Deal[]) => deals.filter((d) => jointRole(s, d) !== 'header');
+
+/**
+ * The work a list holds (the owner's "how many companies we worked for"): the one count behind the ปิดงาน
+ * line and its tab, the closing dialog, the Dashboard's ทำงานให้ card, the CSV's two columns and the
+ * พร้อมปิดงาน view, so every screen says the same.
+ * - `jobs` (งาน): a plain row is one job; a joint quotation is one job however many companies it has, with its
+ *   payer's row or any company of it in the list. Under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter (`attr`,
+ *   jointAttr) it is a job of the list only with a company of it there (as its money, moneyHolds), so it is
+ *   one job for each person with a company in it. `joint`: how many of the jobs are joint quotations.
+ * - `worked` (บริษัทที่ทำงานให้): the companies with a row in the list whose result is YES and whose job is
+ *   closed (`closedOnly` false: any job), each once (`key`: the registry company, else the name; a row without
+ *   a link merges with a linked row of the same name, `alias` giving a linked row's other names). A joint
+ *   quotation's companies count each; its payer never (it pays, the work is for its companies).
+ * - `lost`: companies closed with NO (and not worked); `noResult`: closed company rows without YES or NO.
+ * - `jobRow` / `workRow`: the rows that carry each count, for the CSV's "นับเป็นงาน" and "นับเป็นบริษัทที่ทำงาน
+ *   ให้" (1 on these rows, so a SUM equals the screen): a joint quotation's job on its payer's row (which the
+ *   export lists with it, also when filtered out), a company on its first counted row in list order.
+ * Money is not here: moneySum (a joint quotation once, or its kept parts).
+ */
+export interface WorkTally { jobs: number; joint: number; worked: number; lost: number; noResult: number; jobRow: Set<string>; workRow: Set<string> }
+export interface WorkOpts { key?: (d: Deal) => string; alias?: (d: Deal) => string[]; closedOnly?: boolean; attr?: boolean }
+/** A company's key for workTally without the registry at hand: its link, else its name. */
+export const workKey = (d: Pick<Deal, 'gid' | 'client'>) => (d.gid != null ? 'g' + d.gid : 'n' + norm(d.client));
+export function workTally(s: SalesState, deals: Deal[], o: WorkOpts = {}): WorkTally {
+  const key = o.key || workKey, closedOnly = o.closedOnly !== false;
+  const ids = new Set(deals.map((d) => d.id));
+  const role = new Map(deals.map((d) => [d.id, jointRole(s, d)]));
+  // a company without a registry link and a linked row of the same name are one company
+  const alias = new Map<string, string>();
+  for (const d of deals) {
+    if (role.get(d.id) === 'header' || d.gid == null) continue;
+    const k = key(d);
+    ['n' + norm(d.client), ...(o.alias ? o.alias(d) : [])].forEach((a) => a.length > 1 && !alias.has(a) && alias.set(a, k));
+  }
+  const kOf = (d: Deal) => {
+    const k = key(d);
+    return alias.get(k) || k;
+  };
+  const jobRow = new Set<string>(), workRow = new Set<string>(), seen = new Set<string>(), worked = new Set<string>(), lost = new Set<string>();
+  let joint = 0, noResult = 0;
+  for (const d of deals) {
+    const r = role.get(d.id)!;
+    if (r === 'plain') jobRow.add(d.id);
+    else {
+      const hid = r === 'header' ? d.id : jointHeadOf(s, d.id);
+      if (!seen.has(hid)) {
+        seen.add(hid);
+        const g = jointOf(s, { id: hid });
+        // (under a filter that apportions its money, only with a company of it in the list, as moneyHolds)
+        const counts = !g ? r === 'header' : !o.attr || !g.members.length ? true : g.members.some((x) => ids.has(x.deal.id));
+        if (counts) {
+          jobRow.add(hid);
+          joint++;
+        }
+      }
+      if (r === 'header') continue;
+    }
+    if (closedOnly && d.jobStatus !== 'closed') continue;
+    const res = dealResult(s, d);
+    if (res === 'YES') {
+      const k = kOf(d);
+      if (!worked.has(k)) {
+        worked.add(k);
+        workRow.add(d.id);
+      }
+    } else if (res === 'NO') lost.add(kOf(d));
+    else noResult++;
+  }
+  return { jobs: jobRow.size, joint, worked: worked.size, lost: [...lost].filter((k) => !worked.has(k)).length, noResult, jobRow, workRow };
+}
 
 /**
  * The filters a joint quotation's money is apportioned under: ผู้รับผิดชอบ, SOURCE and REFERRAL, the

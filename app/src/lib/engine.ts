@@ -35,8 +35,8 @@ import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
 import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
-import { QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, type JointGroup } from './sales';
-import { canMergeFrom, isJointNote, jointNo, jointNote, jointTitle, rowFate, shareOf, type JointNew, type JointPick } from './joint';
+import { DEAL_STAGE, QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, workTally, type JointGroup, type WorkOpts, type WorkTally } from './sales';
+import { canMergeFrom, closedCsvRows, isJointNote, jointFill, jointNo, jointNote, jointTitle, rowFate, shareOf, type ClosedCsvRow, type JointNew, type JointPick } from './joint';
 import {
   QT_NOTE_MAX, dirPeople, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, toQtCheck,
   type MailPerson, type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type QtSentCtx, type Scope,
@@ -1780,19 +1780,21 @@ export class GccEngine {
     this.saveSales();
   }
   /** Stage date + note; a note without a date gets today's date. Only the step record is written —
-   *  the last contact is derived from it (lastContact), so a note never rewrites the deal. */
-  setStep(id: string, stage: string, st: DealStep, quiet = false, auto = false) {
+   *  the last contact is derived from it (lastContact), so a note never rewrites the deal. The payer's
+   *  result recorded by hand on a joint quotation already closed is its companies' too (those without one,
+   *  as at the closing: fillJoint); returns how many companies got it. */
+  setStep(id: string, stage: string, st: DealStep, quiet = false, auto = false): number {
     const d = this.sales.deals[id];
-    if (!d) return;
+    if (!d) return 0;
     // the note a receipt or a document fills in is the deal's (dstep/): an account that may record money
     // or attach documents but not edit this deal (บัญชี/การเงิน) leaves the stage as it is, rather than
     // have every receipt come back refused
-    if (auto && !this.canDeal('edit.deal', d)) return;
+    if (auto && !this.canDeal('edit.deal', d)) return 0;
     const k = `${id}/${stage}`;
     const n = (st.n || '').slice(0, NOTE_MAX);
     const date = st.d || (n.trim() ? todayISO() : '');
     const cur = this.sales.steps[k] || { d: '', n: '' };
-    if (cur.d === date && cur.n === n) return;
+    if (cur.d === date && cur.n === n) return 0;
     // a note written for a document (auto) only replaces what this browser saw there: a teammate who
     // wrote in the stage meanwhile keeps their note (rebaseOp)
     const base = auto ? (cur.d || cur.n ? { d: cur.d, n: cur.n } : null) : undefined;
@@ -1806,7 +1808,13 @@ export class GccEngine {
       this.op(keyOf.dstep(id, stage), { d: date, n }, { base, f });
     }
     if (!quiet) this.salesLog(d, 'อัปเดต ' + stage, n.trim().slice(0, 120) || isoTh(date));
+    let filled = 0;
+    if (!auto && stage === DEAL_STAGE && d.jobStatus === 'closed' && this.sales.jqt?.[id]) {
+      const g = jointOf(this.sales, d);
+      if (g) filled = this.batchOps(() => Object.keys(this.fillJoint(g, todayISO()).prev).length);
+    }
     this.saveSales();
+    return filled;
   }
   /** Move a deal to another section and/or before another deal (null = end of the section). */
   moveDeal(id: string, section: string, beforeId: string | null) {
@@ -2407,37 +2415,136 @@ export class GccEngine {
     });
     this.saveSales();
   }
-  /** "ปิดงานทั้ง N บริษัท": the header and every member still open move to ปิดงาน in one batch (a row this
-   *  account may not edit stays). Returns how many closed. */
+  /**
+   * Why this account may not close (`how` 'close') or reopen joint quotation `hid` ('' = it may): it closes
+   * and reopens as one, so every row it would change (the header and companies to move, the companies whose
+   * result closing records) must be one this account may edit; else the group would be left split. Names
+   * the row and its owner, as jointYearBlock does.
+   */
+  jointCloseBlock(hid: string, how: 'close' | 'reopen' = 'close'): string {
+    const S = this.sales, g = jointOf(S, { id: hid });
+    if (!g) return '';
+    const st = how === 'close' ? 'open' : 'closed', fill = how === 'close' ? new Set(jointFill(S, g).ids) : new Set<string>();
+    const rows = [g.head, ...g.members.map((x) => x.deal)].filter((d) => d.jobStatus === st || fill.has(d.id));
+    const x = rows.find((d) => !this.canDeal('edit.deal', d));
+    if (!x) return '';
+    const verb = how === 'close' ? 'ปิดงาน' : 'เปิดงานอีกครั้ง';
+    return x.id === hid
+      ? `${verb}ไม่ได้: ใบเสนอราคาร่วมนี้เป็นงานของ ${x.resp || 'คนอื่น'} บัญชีของคุณแก้ไขแถวนั้นไม่ได้`
+      : `${verb}ไม่ได้: ${x.client} เป็นงานของ ${x.resp || 'คนอื่น'} บัญชีของคุณแก้ไขแถวนั้นไม่ได้ ใบเสนอราคาร่วม${how === 'close' ? 'ปิด' : 'เปิดกลับ'}พร้อมกันทั้งใบ ให้ผู้รับผิดชอบแถวนั้นหรือหัวหน้า${verb}`;
+  }
+  /** The last joint quotation this browser closed, for the message's "เลิกทำ" (undoCloseJoint): the rows it
+   *  closed, and each company's result before the payer's was recorded for it (`prev`, null = none) and what
+   *  was written (`v`). */
+  private jointUndo: { hid: string; closed: string[]; prev: Record<string, DealStep | null>; v: DealStep } | null = null;
+  /**
+   * The payer's result (YES or NO) recorded for the companies of joint quotation `g` that have none (lib/joint
+   * jointFill: a NO stays NO), dated as the payer's (else `today`), quietly. Written as a document's note is
+   * (setStep auto): only over what this browser saw, so a result a teammate saved meanwhile wins (rebaseOp).
+   * Existing records only (dstep/<member>/CLOSED DEAL, as the panel's YES writes). Returns what each had.
+   */
+  private fillJoint(g: JointGroup, today: string): { prev: Record<string, DealStep | null>; v: DealStep } {
+    const S = this.sales, f = jointFill(S, g), v = { d: f.d || today, n: f.r }, prev: Record<string, DealStep | null> = {};
+    if (!f.r) return { prev, v };
+    f.ids.forEach((id) => {
+      const d = S.deals[id];
+      if (!d || !this.canDeal('edit.deal', d)) return;
+      const cur = S.steps[`${id}/${DEAL_STAGE}`];
+      prev[id] = cur ? { ...cur } : null;
+      this.setStep(id, DEAL_STAGE, v, true, true);
+    });
+    const n = Object.keys(prev).length;
+    if (n) this.salesLog(g.head, 'บันทึกผล', `${f.r === 'YES' ? 'ได้งาน' : 'ไม่ได้งาน'} ${n} บริษัทตามผู้จ่าย`);
+    return { prev, v };
+  }
+  /**
+   * "ปิดงานทั้ง N บริษัท": the joint quotation closes as one, in one batch: the companies without a result get
+   * the payer's (fillJoint), then the header and every company still open move to ปิดงาน. Refused, said why
+   * (teamNote), when a row it changes is one this account may not edit (jointCloseBlock). Returns how many
+   * closed.
+   */
   closeJoint(hid: string): number {
     const g = jointOf(this.sales, { id: hid });
     if (!g) return 0;
-    let n = 0;
-    this.batchOps(() =>
+    const why = this.jointCloseBlock(hid);
+    if (why) {
+      this.teamNote = why;
+      this.emit();
+      return 0;
+    }
+    const closed: string[] = [];
+    const fill = this.batchOps(() => {
+      const f = this.fillJoint(g, todayISO());
       [g.head, ...g.members.map((x) => x.deal)].forEach((d) => {
-        if (d.jobStatus !== 'open' || !this.canDeal('edit.deal', d)) return;
+        if (this.sales.deals[d.id]?.jobStatus !== 'open' || !this.canDeal('edit.deal', d)) return;
         this.updateDeal(d.id, { jobStatus: 'closed' });
-        if (this.sales.deals[d.id]?.jobStatus === 'closed') n++;
-      }),
-    );
+        if (this.sales.deals[d.id]?.jobStatus === 'closed') closed.push(d.id);
+      });
+      return f;
+    });
+    this.jointUndo = { hid, closed, ...fill };
+    return closed.length;
+  }
+  /** "เลิกทำ" right after closing joint quotation `hid` here: the rows that closing moved come back, and each
+   *  company's result is put back as it was, unless it was changed since (by anyone). Without that record
+   *  (another close since, a reload): reopenJoint. Returns how many rows came back. */
+  undoCloseJoint(hid: string): number {
+    const u = this.jointUndo;
+    if (!u || u.hid !== hid) return this.reopenJoint(hid);
+    this.jointUndo = null;
+    const S = this.sales;
+    let n = 0;
+    this.batchOps(() => {
+      u.closed.forEach((id) => {
+        const d = S.deals[id];
+        if (!d || d.jobStatus !== 'closed' || !this.canDeal('edit.deal', d)) return;
+        this.updateDeal(id, { jobStatus: 'open' });
+        n++;
+      });
+      Object.entries(u.prev).forEach(([id, p]) => {
+        const cur = stepOf(S, id, DEAL_STAGE);
+        if (cur.d === u.v.d && cur.n === u.v.n) this.setStep(id, DEAL_STAGE, p || { d: '', n: '' }, true, true);
+      });
+    });
     return n;
   }
-  /** Back from ปิดงาน: the header and the members closed with it (on its day; one closed alone earlier, such
-   *  as a company that withdrew, stays closed). */
+  /** Back from ปิดงาน as one: the header and every company of it that is closed (also one closed on another
+   *  day, such as alone by an older build), so the group is never left split; the results recorded stay.
+   *  Refused, said why, as closeJoint is. Returns how many rows came back. */
   reopenJoint(hid: string): number {
     const g = jointOf(this.sales, { id: hid });
     if (!g) return 0;
-    const day = g.head.closedDate;
-    const back = [g.head, ...g.members.map((x) => x.deal).filter((d) => d.jobStatus === 'closed' && (!day || d.closedDate === day))];
+    const why = this.jointCloseBlock(hid, 'reopen');
+    if (why) {
+      this.teamNote = why;
+      this.emit();
+      return 0;
+    }
+    const back = [g.head, ...g.members.map((x) => x.deal)].filter((d) => d.jobStatus === 'closed');
     let n = 0;
     this.batchOps(() =>
       back.forEach((d) => {
-        if (d.jobStatus !== 'closed' || !this.canDeal('edit.deal', d)) return;
+        if (!this.canDeal('edit.deal', d)) return;
         this.updateDeal(d.id, { jobStatus: 'open' });
         n++;
       }),
     );
+    if (this.jointUndo?.hid === hid) this.jointUndo = null;
     return n;
+  }
+  /** workTally (lib/sales) with the registry: a company is its registry entry after any merge (canonical), a
+   *  row without a link the same company as a linked row of its name or of its entry's name. `s`: another
+   *  state (a preview, lib/joint closedJoint). */
+  workTally(deals: Deal[], o: Omit<WorkOpts, 'key' | 'alias'> & { s?: SalesState } = {}): WorkTally {
+    const B = this.B;
+    return workTally(o.s || this.sales, deals, {
+      ...o,
+      key: (d) => (d.gid != null ? 'g' + (B ? this.canonical(d.gid) : d.gid) : 'n' + norm(d.client)),
+      alias: (d) => {
+        const c = d.gid != null && B ? this.company(d.gid) : undefined;
+        return c ? ['n' + norm(c.name)] : [];
+      },
+    });
   }
   /** "ยกเลิกใบเสนอราคาร่วม": the header goes with its documents (the quotation's file to the team Drive's
    *  trash), plan and memberships; the member rows stay, without the QUOTATION note it wrote. */
@@ -3341,17 +3448,34 @@ export class GccEngine {
     const text = cashCsv(cashRows(this.sales, year, cashYear(lines, year), mode, undated));
     downloadBlob(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }), `Cashflow_${year}_${todayISO()}.csv`);
   }
-  salesCsv(deals: Deal[]) {
+  /** The ปิดงาน tab's export (its menu: "ส่งออก CSV · งานที่ปิดแล้ว"): closedCsv of the tab's rows. The file's name
+   *  stays ASCII (Chromium dropped a Thai one and saved the file as "download", without .csv). */
+  exportClosedCsv(year: string, deals: Deal[], attr: boolean) {
+    downloadBlob(new Blob(['﻿' + this.closedCsv(deals, attr)], { type: 'text/csv;charset=utf-8' }), `Sales_Tracker_${year}_Closed_${todayISO()}.csv`);
+  }
+  /** The ปิดงาน tab's rows as CSV (lib/joint closedCsvRows): in list order, a joint quotation's payer's row with
+   *  the money the view counts of it, and the columns "นับเป็นงาน" and "นับเป็นบริษัทที่ทำงานให้" (1 on the rows
+   *  that carry them, workTally), so the sums in Excel are the tab's line, under its filters too (`attr`). */
+  closedCsv(deals: Deal[], attr: boolean, t: WorkTally = this.workTally(deals, { attr })) {
+    return this.salesCsv(deals, closedCsvRows(this.sales, deals, attr, t));
+  }
+  /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns. */
+  salesCsv(deals: Deal[], rows?: ClosedCsvRow[]) {
     const S = this.sales, C = S.cfg, today = todayISO();
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
-      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ']);
-    const lines = deals.map((d, i) => {
+      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ'])
+      .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : []);
+    const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
+    const lines = list.map((x, i) => {
+      const d = x.d;
       const st = dealStatus(S, d), jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
-      // a joint quotation counts once: its header carries the money, a member's cells stay empty (its share said)
-      const m = jr === 'member' ? { forecast: null, actual: null, fcConfirmed: false, acConfirmed: false } : dealMoney(S, d);
+      // a joint quotation counts once: its header carries the money, a member's cells stay empty (its share said);
+      // in the ปิดงาน export the payer's row carries what the view counts (the parts of the companies listed)
+      const m0 = jr === 'member' ? { forecast: null, actual: null, fcConfirmed: false, acConfirmed: false } : dealMoney(S, d);
+      const m = x.fc !== undefined ? { ...m0, forecast: x.fc, actual: x.ac ?? null } : m0;
       const sh = jr === 'member' ? shareOf(S, d) : null;
-      const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
+      const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท${x.part != null ? ` · นับส่วนของ ${x.part} บริษัทตามตัวกรอง` : ''}` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
       // ticks and notes no longer in the lists are kept (removing a list item keeps them on the deals)
       const otherSteps = Object.entries(S.steps)
@@ -3366,6 +3490,7 @@ export class GccEngine {
           return [csvCell(x.d), csvCell(x.n)];
         }), [csvCell(otherSteps.join(' | '))])
         .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
+        .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
         .join(',');
     });
     return [head.map(csvCell).join(','), ...lines].join('\r\n');
