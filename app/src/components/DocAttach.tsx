@@ -8,7 +8,7 @@ import {
 } from '../lib/sales';
 import { attachCheck, attachKind0, attachRevision, qtDiffText, qtFacts, qtView } from '../lib/quotes';
 import { jointHeadOf, jointRole } from '../lib/sales';
-import type { DocFacts } from '../lib/docExtract';
+import type { DocFacts, netOf } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { Modal } from './Dialog';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
@@ -53,8 +53,10 @@ export interface DocSaved { doc: DealDoc; docFig: number | null; kept: boolean }
 /** Where an attach comes from: the figure it backs presets what it counts toward (`target`) and what it
  *  is checked against (`check`; without it the stage's figure is used, see DocAttach); `add`: more for a
  *  part-paid installment ("แนบใบเสร็จเพิ่ม"), so it adds to what came in unless the user picks "ใช้ยอดนี้แทน";
- *  `revise`: the quotation version a revised one follows ("แนบฉบับแก้ไข", lib/quotes). */
-export interface AttachMore { target?: DocTarget; check?: DocCheck; add?: boolean; revise?: string; onSaved?: (r: DocSaved) => void }
+ *  `revise`: the quotation version a revised one follows ("แนบฉบับแก้ไข", lib/quotes); `auto`: the stage was
+ *  the app's choice (the Actual figure's "แนบเอกสาร": the first installment not received), not the user's,
+ *  so a receipt there may well be another installment's (lib/sales countGuard). */
+export interface AttachMore { target?: DocTarget; check?: DocCheck; add?: boolean; revise?: string; auto?: boolean; onSaved?: (r: DocSaved) => void }
 const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
 
 /**
@@ -65,26 +67,34 @@ const BASIS_TH: Record<DealDoc['basis'], string> = { total: 'รวม VAT', sub
  */
 function countWords(g: CountGuard, choice: CountMode, before: number | null, after: number | null, noPlan: boolean) {
   const at = g.stage, docName = (x: DealDoc) => KIND_TH[x.kind] + (x.docNo ? ' ' + x.docNo : '');
-  const elsewhere = !!g.same && !!g.same.stage && g.same.stage !== at;
-  const legend = g.same
-    ? `${g.sameBy === 'file' ? 'ไฟล์ ' + g.same.name : docName(g.same)} นี้นับยอด${elsewhere ? 'ที่ ' + g.same.stage + ' ' : ''}แล้ว ${fmtMoney(g.same.amount)} บาท`
+  // "แผน" reads on; the Latin word "Forecast" is set off by a space ("เกิน Forecast")
+  const vs = (what: string) => (/^[A-Za-z]/.test(what) ? ' ' : '') + what;
+  const twice = g.sames.length > 1, elsewhere = !twice && !!g.same && !!g.same.stage && g.same.stage !== at;
+  const legend = twice
+    ? `${g.sameBy === 'file' ? 'ไฟล์ ' + g.same!.name : docName(g.same!)} นี้นับยอดซ้ำอยู่แล้ว ${g.sames.length} ครั้ง: ${g.sames.map((x) => `${x.stage || 'ไม่ระบุขั้น'} ${fmtMoney(x.amount)}`).join(' · ')} บาท`
+    : g.same ? `${g.sameBy === 'file' ? 'ไฟล์ ' + g.same.name : docName(g.same)} นี้นับยอด${elsewhere ? 'ที่ ' + g.same.stage + ' ' : ''}แล้ว ${fmtMoney(g.same.amount)} บาท`
+    : g.inv ? `${g.inv.stage} นับยอดจาก${docName(g.inv)} ${fmtMoney(g.inv.amount)} บาท ยังไม่มีใบเสร็จ`
     : g.old ? `${at} นับยอดจาก${docName(g.old)} ${fmtMoney(g.old.amount)} บาท อยู่แล้ว`
     : g.handPart ? `${at} บันทึกรับเงินเองไว้ ${fmtMoney(g.handPart.got)} บาท ยังไม่มีเอกสาร`
-    : g.over ? `งานนี้รับเงินแล้ว ${fmtMoney(g.over.before)} บาท จาก${g.over.what} ${fmtMoney(g.over.cap)} บาท`
+    : g.over ? `งานนี้รับเงินแล้ว ${fmtMoney(g.over.before)} บาท จาก${vs(g.over.what)} ${fmtMoney(g.over.cap)} บาท`
     : g.hand ? `${g.hand.stage} บันทึกรับเงินเองไว้ ${fmtMoney(g.hand.handGot)} บาท${g.hand.line.rcv ? ' เมื่อ ' + isoTh(g.hand.line.rcv) : ''} ยังไม่มีใบเสร็จ`
     : '';
+  const mv = g.inv?.stage || g.hand?.stage;
   const words: Record<CountMode, [string, string]> = {
-    replace: ['ใช้ยอดนี้แทน', elsewhere ? `นับที่ ${at} แทน ใบที่ ${g.same!.stage} เก็บไว้เป็นหลักฐาน ไม่นับยอด` : g.same || g.old ? 'ใบเดิมเก็บไว้เป็นหลักฐาน ไม่นับยอด' : 'ใบนี้เป็นใบเสร็จของเงินก้อนนั้น'],
-    move: [`เป็นใบเสร็จของเงินที่ ${g.hand?.stage}`, `แนบที่ ${g.hand?.stage} แทนยอดที่บันทึกเอง`],
+    replace: ['ใช้ยอดนี้แทน', twice ? `นับใบนี้ครั้งเดียวที่ ${at} ใบเดิมทั้ง ${g.sames.length} ใบเก็บไว้เป็นหลักฐาน ไม่นับยอด` : elsewhere ? `นับที่ ${at} แทน ใบที่ ${g.same!.stage} เก็บไว้เป็นหลักฐาน ไม่นับยอด` : g.same || g.old ? 'ใบเดิมเก็บไว้เป็นหลักฐาน ไม่นับยอด' : 'ใบนี้เป็นใบเสร็จของเงินก้อนนั้น'],
+    move: g.inv
+      ? [`เป็นใบเสร็จของ${docName(g.inv)}`, `แนบที่ ${mv} แทนใบแจ้งหนี้ ใบแจ้งหนี้เก็บไว้เป็นหลักฐาน ไม่นับยอด`]
+      : [`เป็นใบเสร็จของเงินที่ ${mv}`, `แนบที่ ${mv} แทนยอดที่บันทึกเอง`],
+    rest: [`นับเฉพาะส่วนที่ยังไม่ได้รับ ${fmtMoney(g.rest)} บาท`, `ยอดในใบนี้รวมเงิน ${fmtMoney(g.over?.before)} บาท ที่นับไปแล้ว`],
     none: ['ไม่นับยอดซ้ำ', `แนบไว้เป็นหลักฐาน Actual เท่าเดิม${before != null ? ' ' + fmtMoney(before) : ''}`],
     add: ['นับเพิ่ม', g.same ? 'เป็นเงินคนละก้อน' : g.old ? 'งวดนี้จ่ายหลายครั้ง' : g.handPart ? 'ใบนี้คือส่วนที่เหลือ รวมกับยอดที่บันทึกไว้' : `เป็นเงินอีกก้อน นับที่ ${at}`],
   };
   return {
     legend,
-    warn: !!(g.same || g.over || g.hand || (g.overAdd && choice === 'add')),
+    warn: !!(g.same || g.over || g.hand || g.inv || (g.overAdd && choice === 'add')),
     opts: g.modes.map((x) => [x, ...words[x]] as const),
-    over: g.overAdd && choice === 'add' && g.modes.length > 0 ? `นับเพิ่มแล้ว Actual จะเป็น ${fmtMoney(after ?? g.overAdd.after)} บาท เกิน${g.overAdd.what} ${fmtMoney(g.overAdd.cap)} บาท` : '',
-    hint: elsewhere && noPlan ? `งานที่รับเงินครั้งเดียวไม่ต้องแนบใบเดิมซ้ำที่ ${at} ตั้งแผนชำระ 1 งวด แล้วปิดงานได้` : '',
+    over: g.overAdd && choice === 'add' && g.modes.length > 0 ? `นับเพิ่มแล้ว Actual จะเป็น ${fmtMoney(after ?? g.overAdd.after)} บาท เกิน${vs(g.overAdd.what)} ${fmtMoney(g.overAdd.cap)} บาท` : '',
+    hint: (elsewhere || twice) && noPlan ? `งานที่รับเงินครั้งเดียวไม่ต้องแนบใบเดิมซ้ำที่ PAY อื่น ตั้งแผนชำระ 1 งวด แล้วปิดงานได้` : '',
   };
 }
 
@@ -102,7 +112,7 @@ function countWords(g: CountGuard, choice: CountMode, before: number | null, aft
  * compared instead of the typed-Forecast check (a `check` the caller gave, such as a typed plan total, is
  * still asked about), and the old version stays as "ฉบับเดิม", not counted. The rules: lib/quotes attach*.
  */
-export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, onClose, target: target0, check, add: add0, revise: revise0, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
+export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, onClose, target: target0, check, add: add0, revise: revise0, auto: auto0, onSaved }: { deal: Deal; kind?: DocKind; stage?: string; file?: File; onClose: () => void } & AttachMore) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const cfg = e.sales.cfg, today = todayISO();
@@ -120,6 +130,9 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
   const [url, setUrl] = useState('');
   const [prog, setProg] = useState<{ msg: string; pct?: number } | null>(null);
   const [facts, setFacts] = useState<DocFacts | null>(null);
+  // the money it is, as the document shows it, when its figures add up (lib/docExtract netOf, read with the
+  // file: the reader is loaded only when a file is picked): ยอดรวม · หักมัดจำ · หัก ณ ที่จ่าย · ยอดชำระ
+  const [net, setNet] = useState<ReturnType<typeof netOf>>(null);
   const [method, setMethod] = useState('');
   const [readErr, setReadErr] = useState('');
   const [kind, setKind] = useState<DocKind>(kind0);
@@ -160,6 +173,7 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
     setFile(null);
     setUrl('');
     setFacts(null);
+    setNet(null);
     setMethod('');
     setReadErr('');
     setSaving('');
@@ -189,7 +203,7 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
     abort.current = ctl;
     setProg({ msg: 'กำลังเปิดไฟล์…' });
     try {
-      const [{ readDocText }, { analyzeDocText, factsScore, proposedAmount }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]).catch((e) => {
+      const [{ readDocText }, { analyzeDocText, factsScore, netOf, proposedAmount }] = await Promise.all([import('../lib/docText'), import('../lib/docExtract')]).catch((e) => {
         // offline, or this page is older than the site (its chunks were replaced by a new version)
         throw new Error('โหลดตัวอ่านเอกสารไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้านี้', { cause: e });
       });
@@ -197,6 +211,7 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
       if (ctl.signal.aborted) return;
       const fx = analyzeDocText(t.text);
       setFacts(fx);
+      setNet(netOf(fx));
       setMethod(t.method);
       // (a revision asked for from the quotation's card stays a quotation, whatever the file looks like)
       if (fx.kind && revise == null) {
@@ -205,9 +220,13 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
       }
       setDocNo(fx.docNo);
       setDocDate(fx.docDate);
-      // what the customer actually pays: after withholding tax when the document shows it, else the
-      // total including VAT — for a quotation as for a receipt, so Forecast and Actual compare
-      const { basis: b, value: best } = proposedAmount(fx);
+      // what the customer actually pays: after withholding tax (or a deposit already paid) when the
+      // document shows it and the figures add up, else the total including VAT — for a quotation as for a
+      // receipt, so Forecast and Actual compare. A revision keeps the figure of the version it follows (the
+      // same amount, else the same basis), so the same price never reads as a price change
+      const k = !forceOcr && fx.kind && revise == null ? fx.kind : forceOcr ? kind : kind0;
+      const rv = attachRevision(e.sales, deal, { kind: k, target: forceOcr ? target : defaultTarget(k), stage: stage1, revise }, today);
+      const { basis: b, value: best } = proposedAmount(fx, rv ? { basis: rv.doc.basis, amount: rv.doc.amount } : undefined);
       setBasis(b);
       setProp(b);
       setAmount(best != null ? String(best) : '');
@@ -237,7 +256,10 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
   // received (Actual, with an amount) is asked about
   const base: AttachInfo = { kind, amount: amt, target: tgt0, docDate, stage: stage1 };
   const g: CountGuard | null = file && tgt0 === 'actual'
-    ? countGuard(e.sales, deal, { ...base, add: add0, docNo, name: (file.name || 'เอกสาร').slice(0, 120), size: file.size, figures: facts ? [facts.total, facts.netPay, facts.subtotal] : [] }, today)
+    ? countGuard(e.sales, deal, {
+        ...base, add: add0, pinned: stage1 !== undefined && !auto0, docNo, name: (file.name || 'เอกสาร').slice(0, 120), size: file.size,
+        figures: facts ? [facts.total, facts.netPay, facts.subtotal] : [], refs: facts?.refs,
+      }, today)
     : null;
   const choice: CountMode = g && mode && g.modes.includes(mode) ? mode : g ? g.pick : 'add';
   const how = g ? countAs(g, choice, base) : base;
@@ -256,17 +278,20 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
   // the figure this document should match: given by the figure it was attached from (also on a revision),
   // else none on a revision, else the typed Forecast, the installment's plan (or what was received by
   // hand), or the typed Actual
+  // 'rest': only what is left of the job counts (the document's total takes in money already counted)
+  const rest = choice === 'rest' && g?.rest != null ? g.rest : null;
   const chk: DocCheck | null = attachCheck(check, rev, () =>
     tgt === 'forecast' ? (!m0.fcDoc && m0.forecast != null ? { what: 'Forecast ที่พิมพ์ไว้', value: m0.forecast } : null)
     : tgt !== 'actual' ? null
     : line ? (line.hand && !line.docs.length && !addHand ? { what: 'ยอดที่รับ', value: line.got } : line.amt > 0 ? (adding ? { what: 'ยอดที่ยังขาดตามแผน', value: Math.max(0, line.amt - line.got) } : { what: 'แผน', value: line.amt }) : null)
     : !m0.acDocs && !m0.hand && deal.actual != null ? { what: 'Actual ที่พิมพ์ไว้', value: deal.actual } : null);
   const same = !!chk && amt != null && Math.abs(amt - chk.value) < 0.005;
-  const differs = !!chk && amt != null && !same && tgt !== 'none';
-  // the figure confirmed: the document's, or the user's own when they keep it (the document is attached either way)
-  const fin = differs && keep ? chk!.value : amt;
+  const differs = !!chk && amt != null && !same && tgt !== 'none' && rest == null;
+  // the figure confirmed: the document's, the part not counted yet ('rest'), or the user's own when they
+  // keep it (the document is attached either way)
+  const fin = rest ?? (differs && keep ? chk!.value : amt);
   // what attaching changes: the installment of the plan, the Actual, and whether the job becomes ready to close
-  const pv = file && fin != null && tgt !== 'none' ? attachPreview(e.sales, deal, { kind, amount: fin, target: tgt, docDate, stage, replace, addHand }, today) : null;
+  const pv = file && fin != null && tgt !== 'none' ? attachPreview(e.sales, deal, { kind, amount: fin, target: tgt, docDate, stage, replace, drop: how.drop, addHand }, today) : null;
   const short = !!pv?.line && pv.short > 0 && pv.line.got > 0;
   const fullOn = short && (full ?? pv?.wht != null);
   const ad = docDate && docDate <= today ? docDate : today;
@@ -281,16 +306,23 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
             ? `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Forecast จะเป็น ${fmtMoney(fin)}`
             : `หลังแนบ: ${pv.stage ? pv.stage + ' ทำแล้ว ' + isoTh(ad) + ' · ' : ''}Actual จะเป็น ${fmtMoney(pv.actual)}${pv.fcFull ? ' (ครบตาม Forecast)' : ''}`,
         pv.ready || (fullOn && pv.readyIfFull) ? (pv.line ? 'รับครบทุกงวดแล้ว งานนี้จะพร้อมปิดงาน' : 'งานนี้จะพร้อมปิดงาน') : '',
+        pv.unpaid.length ? `${pv.unpaid.join(', ')} จะกลับเป็นยังไม่ได้รับ` : '',
       ].filter(Boolean).join(' · ');
   const save = async () => {
     if (!file || badAmt) return;
     setSaving('กำลังบันทึก…');
     try {
       const was = closeReady(e.sales, deal, today);
-      const kept = differs && keep;
+      // 'rest' counts a figure the document shows (its amount payable after the deposit) at that basis, else
+      // one worked out, kept against the document's ("ไม่ตรงเอกสาร" with both figures)
+      const restAt = rest != null ? opts.find((o) => o[2] != null && Math.abs(o[2] - rest) < 0.005) : undefined;
+      const kept = (differs && keep) || (rest != null && !restAt);
       // `detected` keeps the document's own figure: a kept one differs from it ("ไม่ตรงเอกสาร", docMismatch)
       const revising = rev && tgt === 'forecast' ? rev.doc.id : undefined;
-      const doc = await e.attachDoc(deal.id, file, { kind, amount: fin, target: tgt, basis: amt == null || kept ? 'manual' : basis, detected: amt, docNo, docDate, stage, replace, addHand, kept, revise: revising });
+      const doc = await e.attachDoc(deal.id, file, {
+        kind, amount: fin, target: tgt, basis: restAt ? restAt[0] : amt == null || kept ? 'manual' : basis, detected: restAt ? rest : amt,
+        docNo, docDate, stage, replace, drop: how.drop, addHand, kept, revise: revising,
+      });
       // what the reader found: the quotation's edit form offers its figures without reading the file again
       if (facts) qtFacts.set(doc.id, facts);
       // a short payment counted complete (withholding tax): the installment is received
@@ -317,8 +349,6 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
         .filter((x) => x[2] != null)
         .sort((a, b) => (prop === 'netPay' ? 0 : (a[0] === 'netPay' ? 1 : 0) - (b[0] === 'netPay' ? 1 : 0)))
     : [];
-  // the money it is, as the document shows it: ยอดรวม · หัก ณ ที่จ่าย · ยอดชำระ
-  const whtRow = facts && facts.wht != null && facts.total != null && facts.netPay != null && facts.netPay < facts.total;
   // the question when this document may be money already counted (lib/sales countGuard)
   const ask = g && g.modes.length > 0 && amt != null ? countWords(g, choice, m0.actual, pv?.actual ?? null, !planOf(e.sales, deal, today)) : null;
   const others = facts ? facts.candidates.filter((c) => !opts.some((o) => o[2] === c.value)).slice(0, 5) : [];
@@ -397,9 +427,17 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
                   <b style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(v)} บาท</b>
                 </label>
               ))}
-              {whtRow && <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>ยอดรวม {fmtMoney(facts.total)} · หัก ณ ที่จ่าย {fmtMoney(facts.wht)} · ยอดชำระ {fmtMoney(facts.netPay)}</span>}
-              {whtRow && prop === 'netPay' && <span className="t-meta">ระบบเลือกยอดชำระ เพราะเป็นเงินที่{target === 'forecast' ? 'จะได้รับจริง เทียบกับ Actual ได้' : 'ได้รับจริงหลังลูกค้าหัก ณ ที่จ่าย'}</span>}
-              {facts.vat != null && <span className="t-meta">VAT {fmtMoney(facts.vat)} บาท{facts.wht != null && !whtRow ? ` · หัก ณ ที่จ่าย ${fmtMoney(facts.wht)} บาท` : ''}</span>}
+              {net && (
+                <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                  ยอดรวม {fmtMoney(facts.total)}{net.deduct ? ` · หักเงินที่ชำระแล้ว ${fmtMoney(net.deduct)}` : ''}{net.wht ? ` · หัก ณ ที่จ่าย ${fmtMoney(net.wht)}` : ''} · ยอดชำระ {fmtMoney(net.net)}
+                </span>
+              )}
+              {net && prop === 'netPay' && (
+                <span className="t-meta">
+                  ระบบเลือกยอดชำระ เพราะเป็นเงินที่{target === 'forecast' ? 'จะได้รับจริง เทียบกับ Actual ได้' : net.deduct && !net.wht ? 'ได้รับครั้งนี้ ส่วนที่หักคือเงินที่รับไปแล้ว' : net.deduct ? 'ได้รับครั้งนี้หลังหักเงินที่รับไปแล้วและภาษี ณ ที่จ่าย' : 'ได้รับจริงหลังลูกค้าหัก ณ ที่จ่าย'}
+                </span>
+              )}
+              {facts.vat != null && <span className="t-meta">VAT {fmtMoney(facts.vat)} บาท{facts.wht != null && !net?.wht ? ` · หัก ณ ที่จ่าย ${fmtMoney(facts.wht)} บาท` : ''}</span>}
               {wordsOk && <span className="t-ok" style={{ fontSize: 12 }}>ตรงกับจำนวนเงินตัวอักษรในเอกสาร</span>}
               {facts.copies ? <span className="t-meta">ไฟล์นี้มีทั้งต้นฉบับและสำเนา อ่านยอดชุดเดียว ไม่นับสำเนาซ้ำ</span> : null}
               {others.length > 0 && (
@@ -451,7 +489,7 @@ export function DocAttach({ deal, kind: kindIn, stage: stage0, file: dropped, on
               <DateField value={docDate} onChange={setDocDate} placeholder="ไม่ระบุ" />
             </label>
           </div>
-          {chk && amt != null && tgt !== 'none' && (
+          {chk && amt != null && tgt !== 'none' && rest == null && (
             same ? (
               <p className="sl-xchk ok" role="status"><b>ตรงกับเอกสาร</b> <span>{chk.what} {fmtMoney(chk.value)} บาท · {BASIS_TH[basis]}</span></p>
             ) : (

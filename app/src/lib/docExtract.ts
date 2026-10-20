@@ -38,6 +38,12 @@ export interface DocFacts {
   /** pages (blocks of text) left out as repeats of an earlier one: the สำเนา / Copy of a document
    *  printed as a set ("ต้นฉบับ" + "สำเนา" in one file); absent when there were none */
   copies?: number;
+  /** money already paid that the document takes off its total (หักเงินมัดจำ, หักชำระแล้ว, Less deposit):
+   *  `netPay` is then what is left to pay; absent when there is none */
+  deduct?: number;
+  /** other documents' numbers it mentions ("ชำระตามใบแจ้งหนี้เลขที่ INV-0601"): the invoice a receipt
+   *  pays; absent when there are none */
+  refs?: string[];
 }
 
 // ------------------------------------------------------------------ text normalisation
@@ -225,6 +231,9 @@ const MASKS: [RegExp, RegExp | null][] = [
   [/\d{1,2}[:.]\d{2}\s?(?:น\.?|นาฬิกา|hrs?\.?|am|pm)/gi, /\d/], // times
   [/\d{1,2}:\d{2}(?::\d{2})?/g, /\d/],
   [/\d+(?:[.,]\d+)?\s?%/g, /[\d.,]/], // rates: VAT 7%, หัก 3%, มัดจำ 50%
+  [/ร้อยละ\s?\d+(?:[.,]\d+)?/g, null], // rates in words: หักภาษี ณ ที่จ่ายร้อยละ 3
+  [/\d+(?:[.,]\d+)?\s?(?:เปอร์เซ็นต์|เปอร์เซนต์|percent|pct)(?![A-Za-z])/gi, /[\d.,]/],
+  [/(?:ภ\s?\.?\s?ง\s?\.?\s?ด\s?\.?|pnd\.?|มาตรา)\s?\d+/gi, /[A-Za-z]/], // tax forms and sections: ภ.ง.ด.53, PND 3, มาตรา 3 เตรส
   [/\d[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d(?!\d)/g, /\d/], // 13-digit tax id
   [/(?:\+66[-\s]?|0)\d{1,2}[-\s]?\d{3}[-\s]?\d{3,4}(?!\d)(?![,.]\d)/g, /[\d,.]/], // phones
   [/\d+(?:-\d+){2,}/g, /[\d,.]/], // bank accounts, codes
@@ -277,7 +286,8 @@ function readNums(m: string): Num[] {
 
 // ------------------------------------------------------------------ labels
 
-type Field = 'total' | 'sum' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'discount' | 'deposit' | 'ignore';
+/** `less`: money already paid taken off the total (หักเงินมัดจำ); `balance`: what is left to pay after it */
+type Field = 'total' | 'sum' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'discount' | 'deposit' | 'less' | 'balance' | 'ignore';
 /** [field, weight, phrases, anchored]. Longer phrases win (matched first, then consumed); an
  *  anchored phrase only counts at the start of a line or column (bare "รวม", "Total"). */
 const RULES: [Field, number, string[], boolean?][] = [
@@ -297,7 +307,9 @@ const RULES: [Field, number, string[], boolean?][] = [
   ['netPay', 90, ['ยอดชำระสุทธิ', 'ยอดเงินชำระสุทธิ', 'จำนวนเงินชำระสุทธิ', 'ยอดชำระเงินสุทธิ', 'ยอดสุทธิที่ต้องชำระ', 'จำนวนเงินที่ต้องชำระ', 'ยอดเงินที่ต้องชำระ', 'ยอดที่ต้องชำระ', 'ชำระสุทธิ', 'net amount payable', 'net payable', 'amount payable', 'net payment', 'net amount to pay', 'total payable']],
   ['netPay', 75, ['ยอดชำระ', 'จำนวนเงินที่ชำระ', 'จำนวนเงินที่ได้รับ', 'ได้รับเงินจำนวน', 'รับเงินจำนวน', 'amount received', 'amount paid']],
   ['discount', 80, ['ส่วนลดพิเศษ', 'หักส่วนลด', 'ส่วนลด', 'discount']],
-  ['deposit', 60, ['หักเงินมัดจำ', 'หักมัดจำ', 'เงินมัดจำ', 'มัดจำ', 'deposit', 'down payment', 'advance payment', 'เงินล่วงหน้า', 'งวดที่', 'installment', 'ชำระแล้ว', 'less amount paid', 'less amount received', 'less payments', 'less payment', 'less paid', 'paid', 'ยอดคงเหลือ', 'คงเหลือ', 'ส่วนที่เหลือ', 'balance due', 'balance', 'remaining']],
+  ['less', 60, ['หักเงินมัดจำ', 'หักมัดจำ', 'หักเงินชำระแล้ว', 'หักชำระแล้ว', 'หักยอดชำระแล้ว', 'หักเงินรับล่วงหน้า', 'หักเงินล่วงหน้า', 'หักเงินงวดก่อน', 'หักงวดก่อน', 'less deposit', 'less advance payment', 'less advance', 'less down payment', 'less amount paid', 'less amount received', 'less payments', 'less payment', 'less paid']],
+  ['balance', 60, ['คงเหลือชำระ', 'ยอดคงเหลือ', 'คงเหลือ', 'ส่วนที่เหลือ', 'ยอดค้างชำระ', 'balance due', 'remaining balance', 'balance', 'remaining']],
+  ['deposit', 60, ['เงินมัดจำ', 'มัดจำ', 'deposit', 'down payment', 'advance payment', 'เงินล่วงหน้า', 'งวดที่', 'installment', 'ชำระแล้ว', 'paid']],
   ['ignore', 0, ['ราคาต่อหน่วย', 'ราคา/หน่วย', 'หน่วยละ', 'unit price', 'price/unit', 'จำนวน', 'qty', 'quantity', 'เลขประจำตัวผู้เสียภาษีอากร', 'เลขประจำตัวผู้เสียภาษี', 'เลขผู้เสียภาษี', 'tax id', 'taxpayer id', 'vat reg', 'vat registration', 'vat no', 'vat id', 'เลขที่', 'no', 'number', 'วันที่', 'date', 'โทรศัพท์', 'โทรสาร', 'โทร', 'tel', 'fax', 'แฟกซ์', 'มือถือ', 'mobile', 'phone', 'สาขา', 'branch', 'เลขที่บัญชี', 'บัญชี', 'account', 'a/c', 'อ้างอิง', 'ref', 'po', 'เครดิต', 'credit', 'ยืนราคา', 'ลำดับ', 'item', 'รหัส', 'code', 'หมู่', 'moo', 'ซอย', 'soi']],
 ];
 /** `bi` = the phrase's character pairs, to skip fuzzy matching on lines that cannot contain it */
@@ -313,7 +325,7 @@ function compile(rules: [Field, number, string[], boolean?][]): Phrase[] {
   return out.sort((a, b) => b.k.length - a.k.length);
 }
 const PHRASES = compile(RULES);
-const FAMILY: Record<Field, string> = { total: 'T', sum: 'T', subtotal: 'S', vat: 'V', wht: 'W', netPay: 'N', discount: 'D', deposit: 'P', ignore: '' };
+const FAMILY: Record<Field, string> = { total: 'T', sum: 'T', subtotal: 'S', vat: 'V', wht: 'W', netPay: 'N', discount: 'D', deposit: 'P', less: 'L', balance: 'B', ignore: '' };
 
 interface Lab { f: Field; w: number; s: number; e: number; text: string; fuzzy: boolean; val?: Num; vli?: number; pen: number }
 interface Hit { s: number; e: number; p: Phrase; fuzzy: boolean }
@@ -714,6 +726,28 @@ function findDocNo(lines: string[], kindHint: DocKind | null): string {
   return '';
 }
 
+/** A coded number anywhere ("INV2026-0601", "IV 69/0012"), and the number after a เลขที่ / No. label. */
+const REF_CODE = /(^|[^A-Za-z0-9])([A-Za-z]{1,6}[-/#]?\s?\d[A-Za-z0-9\-/]*)/g;
+const REF_LABEL = /(?:เลขที่|no\.?|number)\s*[:#.]?\s*([A-Za-z0-9][A-Za-z0-9\-/_.]*)/gi;
+const refKey = (s: string) => s.replace(/[\s\-/_.#:]/g, '').toUpperCase();
+/**
+ * Other documents' numbers a document mentions besides its own: the invoice a receipt pays ("ชำระตาม
+ * ใบแจ้งหนี้เลขที่ INV2026-0601"), a quotation it follows. Only ever matched against the deal's own
+ * documents (lib/sales countGuard), so a purchase-order or standard number picked up too does no harm.
+ */
+function findRefs(lines: string[], own: string): string[] {
+  const out = new Map<string, string>(), mine = refKey(own);
+  const add = (t: string) => {
+    const v = cleanDocNo(t.replace(/\s/g, ''));
+    if (v && /\d{2}/.test(v) && refKey(v) !== mine && out.size < 20) out.set(refKey(v), v);
+  };
+  for (const line of lines) {
+    eachMatch(line, REF_CODE, null, (m) => add(m[2]));
+    eachMatch(line, REF_LABEL, /[A-Za-z]/, (m) => add(m[1]));
+  }
+  return [...out.values()];
+}
+
 const DATE_LABELS = ['วันที่ออก', 'วันที่เอกสาร', 'ลงวันที่', 'วันที่', 'issue date', 'invoice date', 'quotation date', 'document date', 'date', 'dated'].map(key);
 const DATE_NOT = ['ครบกำหนด', 'กำหนดชำระ', 'กำหนดส่ง', 'ส่งของ', 'ส่งมอบ', 'ยืนราคา', 'ใช้ได้ถึง', 'หมดอายุ', 'due', 'valid', 'expir', 'delivery', 'ship', 'เริ่ม', 'สิ้นสุด', 'start', 'end'].map(key);
 
@@ -784,8 +818,8 @@ function findParty(lines: string[]): string {
 // ------------------------------------------------------------------ resolution
 
 /** `w` = weight of the label's rule, `score` = w less pairing / number-shape penalties; `under` =
- *  printed totals a worked-out total must rank below */
-interface Cand { f: Field | 'words' | 'derived' | 'largest'; w: number; value: number; score: number; label: string; line: string; li: number; under?: Cand[] }
+ *  printed totals a worked-out total must rank below; `q` = how money-like the number is (readNums) */
+interface Cand { f: Field | 'words' | 'derived' | 'largest'; w: number; value: number; score: number; label: string; line: string; li: number; under?: Cand[]; q?: number }
 const near = (a: number, b: number, tol = 0.011) => Math.abs(a - b) <= tol;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const vatTol = (base: number) => Math.max(0.06, Math.abs(base) * 0.0003);
@@ -801,7 +835,7 @@ function rateOn(line: string) {
   return r > 0 && r <= 0.2 ? r : null;
 }
 
-type Amounts = Pick<DocFacts, 'total' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'words' | 'candidates' | 'confidence'> & { quality: number };
+type Amounts = Pick<DocFacts, 'total' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'words' | 'candidates' | 'confidence' | 'deduct'> & { quality: number };
 
 /** Lines analysed at most; longer texts (a 50-page PDF has 2,000+ lines) keep the first HEAD_LINES
  *  (title, number, date, customer) and the last PAGE_TAIL lines of each page, where totals sit —
@@ -898,21 +932,58 @@ export function analyzeDocText(text: string): DocFacts {
     const { quality: _q, ...best } = b.quality > a.quality + 1e-9 ? b : a;
     const docNo0 = findDocNo(raw, null);
     const kind = findKind(raw, docNo0);
-    return { kind, docNo: kind ? findDocNo(raw, kind) : docNo0, docDate: findDocDate(raw), ...best, party: findParty(raw), ...(copies ? { copies } : {}) };
+    const docNo = kind ? findDocNo(raw, kind) : docNo0, refs = findRefs(raw, docNo);
+    return { kind, docNo, docDate: findDocDate(raw), ...best, party: findParty(raw), ...(copies ? { copies } : {}), ...(refs.length ? { refs } : {}) };
   } finally {
     keyMemo = null;
   }
 }
 
+type NetFacts = Pick<DocFacts, 'total' | 'subtotal' | 'vat' | 'wht' | 'netPay' | 'deduct'>;
+/** Withholding tax at a usual rate (1–10 %) of what it is taken from — the amount before VAT, or the
+ *  total for a seller outside VAT, less a deposit already paid — within a baht (rounded on the document). */
+function whtFits(w: number, f: NetFacts, dd: number) {
+  const T = f.total!, vat = f.vat ?? (f.subtotal != null ? T - f.subtotal : null);
+  const bases = [f.subtotal, vat != null ? T - vat : null, T / 1.07, T].filter((b): b is number => b != null && b > 0);
+  return bases.flatMap((b) => (dd ? [b, b - dd, b - dd / 1.07] : [b])).some((b) => b > 0 && WHT_RATES.some((r) => Math.abs(b * r - w) <= Math.max(1, b * r * 0.005)));
+}
+/**
+ * What the customer pays now, as the document shows it, when its figures add up: the total less withholding
+ * tax at a usual rate and/or less money already paid (หักเงินมัดจำ), equal to the amount payable printed (or
+ * the balance line) to the satang. null otherwise — no deduction shown, a "WHT" that is a rate or a form
+ * number in a note, or an amount payable misread — and the total is then the safer figure.
+ */
+export function netOf(f: NetFacts): { wht: number; deduct: number; net: number } | null {
+  const T = f.total, N = f.netPay;
+  if (T == null || N == null || !(N > 0) || N > T - 0.005) return null;
+  const w = f.wht != null && f.wht > 0 ? f.wht : 0, dd = f.deduct != null && f.deduct > 0 ? f.deduct : 0;
+  if (!w && !dd) return null;
+  if (Math.abs(T - w - dd - N) > 0.02) return null;
+  if (w && !whtFits(w, f, dd)) return null;
+  return { wht: w, deduct: dd, net: N };
+}
+
 /**
  * The figure proposed for a document: what the customer actually pays. When the document shows
- * withholding tax and the amount payable after it ("หักภาษี ณ ที่จ่าย 3% 1,730.77 · ยอดชำระ 60,000"), that
- * net amount — the money that comes in; else the total including VAT; without one, the best amount
- * found ('manual'). The same rule for a quotation (Forecast) as for an invoice or receipt (Actual), so the
- * two stay comparable: a job quoted at 60,000 after withholding is received as 60,000.
+ * withholding tax and / or a deposit already paid, and the amount payable after them, and the three add up
+ * ("61,730.77 − หัก ณ ที่จ่าย 1,730.77 = ยอดชำระ 60,000": netOf), that net amount — the money that comes in;
+ * else the total including VAT; without one, the best amount found ('manual'). The same rule for a
+ * quotation (Forecast) as for an invoice or receipt (Actual), so the two stay comparable: a job quoted at
+ * 60,000 after withholding is received as 60,000.
+ * `follow`: the quotation version a revision follows ("แนบฉบับแก้ไข"): the figure equal to its amount, else
+ * the one at its basis, so the same price at the same basis never reads as a price change.
  */
-export function proposedAmount(f: Pick<DocFacts, 'total' | 'wht' | 'netPay' | 'candidates'>): { basis: 'total' | 'netPay' | 'manual'; value: number | null } {
-  if (f.wht != null && f.wht > 0 && f.netPay != null && f.netPay > 0 && (f.total == null || f.netPay < f.total)) return { basis: 'netPay', value: f.netPay };
+export function proposedAmount(
+  f: NetFacts & Pick<DocFacts, 'candidates'>,
+  follow?: { basis: 'total' | 'subtotal' | 'netPay' | 'manual'; amount: number | null },
+): { basis: 'total' | 'subtotal' | 'netPay' | 'manual'; value: number | null } {
+  if (follow) {
+    const by = { netPay: f.netPay, total: f.total, subtotal: f.subtotal } as const;
+    const same = (['total', 'netPay', 'subtotal'] as const).find((b) => by[b] != null && follow.amount != null && Math.abs(by[b]! - follow.amount) < 0.005);
+    if (same) return { basis: same, value: by[same] };
+    if (follow.basis !== 'manual' && by[follow.basis] != null) return { basis: follow.basis, value: by[follow.basis] };
+  }
+  if (netOf(f)) return { basis: 'netPay', value: f.netPay };
   if (f.total != null) return { basis: 'total', value: f.total };
   return { basis: 'manual', value: f.candidates[0]?.value ?? null };
 }
@@ -931,7 +1002,7 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
       const q = l.val.q;
       const score = l.w - l.pen - (q >= 3 ? 0 : q === 2 ? 2 : q === 1 ? 6 : 12) - (l.fuzzy ? 5 : 0);
       if (l.f === 'vat' && vatRate === null) vatRate = rateOn(L.raw);
-      cands.push({ f: l.f, w: l.w, value: l.val.v, score, label: l.text, line: display(vl === L.i ? L.raw : `${L.raw} … ${lines[vl].raw}`), li: L.i });
+      cands.push({ f: l.f, w: l.w, value: l.val.v, score, label: l.text, line: display(vl === L.i ? L.raw : `${L.raw} … ${lines[vl].raw}`), li: L.i, q });
     }
   const rate = vatRate ?? 0.07;
   const of = (...fs: Cand['f'][]) => cands.filter((c) => fs.includes(c.f));
@@ -939,7 +1010,10 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
   const T = of('total', 'sum', 'netPay').filter((c) => c.value > 0);
   const S = cands.filter((c) => c.f === 'subtotal' || c.f === 'sum' || (c.f === 'total' && c.w < 90));
   const V = of('vat');
-  const W = of('wht').filter((c) => c.value > 0);
+  // a withholding amount is money-shaped: a bare small number by the label is a rate or a form named in a
+  // note ("หักภาษี ณ ที่จ่าย 3", "ภ.ง.ด. 53", "1 ฉบับ") unless it is that rate of the amount (checked below)
+  const W0 = of('wht').filter((c) => c.value > 0);
+  const W = W0.filter((c) => (c.q ?? 0) >= 1);
   const N = of('netPay').filter((c) => c.value > 0);
   const byScore = (cs: Cand[]) => [...cs].sort((a, b) => b.score - a.score)[0] as Cand | undefined;
 
@@ -1029,21 +1103,39 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
   // withholding tax and the amount payable after it
   let wht: number | null = null, netPay: number | null = null;
   const sub0 = subtotal;
-  const wBest = W.filter((w) => total === null || w.value < total).sort((a, b) => {
-    const ok = (w: Cand) => (total !== null && N.some((x) => near(total - w.value, x.value, 0.02)) ? 20 : 0) + (sub0 !== null && WHT_RATES.some((r) => near(sub0 * r, w.value, vatTol(sub0 * r))) ? 10 : 0);
+  const atRate = (v: number, base: number | null) => base !== null && base > 0 && WHT_RATES.some((r) => near(base * r, v, vatTol(base * r)));
+  // (a bare number by a WHT label only when it is a withholding rate of the amount before VAT)
+  const wBest = W0.filter((w) => (total === null || w.value < total) && (W.includes(w) || atRate(w.value, sub0))).sort((a, b) => {
+    const ok = (w: Cand) => (total !== null && N.some((x) => near(total - w.value, x.value, 0.02)) ? 20 : 0) + (atRate(w.value, sub0) ? 10 : 0);
     return b.score + ok(b) - (a.score + ok(a));
   })[0];
   if (wBest) wht = wBest.value;
   const wht0 = wht;
+  // money already paid taken off the total (หักเงินมัดจำ 32,100 · ยอดชำระ 74,900): the one that makes the
+  // amount payable, or the balance line, add up; else the best labelled
+  const B = of('balance').filter((c) => c.value > 0 && (total === null || c.value < total));
+  const Ls = of('less').filter((c) => c.value > 0 && (total === null || c.value < total));
+  let deduct: number | null = null;
+  if (total !== null && Ls.length) {
+    const fits = (x: Cand, w: number) => [...N, ...B].some((n) => near(total - w - x.value, n.value, 0.02));
+    deduct = (Ls.find((x) => fits(x, wht0 ?? 0)) || Ls.find((x) => fits(x, 0)) || byScore(Ls)!).value;
+  }
+  const ded0 = deduct ?? 0;
   const nBest = [...N].sort((a, b) => {
-    const ok = (x: Cand) => (total !== null && wht0 !== null && near(total - wht0, x.value, 0.02) ? 20 : 0) + (wht0 === null && total !== null && near(total, x.value) ? 10 : 0);
+    const ok = (x: Cand) => (total !== null && (wht0 !== null || ded0) && near(total - (wht0 ?? 0) - ded0, x.value, 0.02) ? 20 : 0) + (wht0 === null && !ded0 && total !== null && near(total, x.value) ? 10 : 0);
     return b.score + ok(b) - (a.score + ok(a));
   })[0];
   if (nBest && !(best?.t === nBest && wht !== null)) netPay = nBest.value;
-  if (wht !== null && total !== null && (netPay === null || near(netPay, total))) netPay = r2(total - wht);
-  if (wht === null && netPay !== null && total !== null && netPay < total && sub0 !== null) {
-    const d = r2(total - netPay);
-    if (WHT_RATES.some((r) => near(sub0 * r, d, vatTol(sub0 * r)))) wht = d;
+  // no amount payable printed after a deduction: the balance line ("คงเหลือชำระ", "Balance due") is it
+  if (deduct !== null && total !== null && (netPay === null || near(netPay, total))) {
+    const bal = B.find((n) => near(total - (wht ?? 0) - ded0, n.value, 0.02));
+    if (bal) netPay = bal.value;
+  }
+  if (wht !== null && total !== null && (netPay === null || near(netPay, total))) netPay = r2(total - wht - ded0);
+  if (wht === null && netPay !== null && total !== null && netPay < total - ded0 && sub0 !== null) {
+    const d = r2(total - ded0 - netPay);
+    // (withholding on what is left after a deposit: that share of the amount before VAT)
+    if (atRate(d, sub0) || (ded0 && atRate(d, r2(sub0 - ded0 / (1 + rate))))) wht = d;
   }
 
   // confidence: a labelled total that something else confirms is high
@@ -1063,7 +1155,7 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
   const pool: AmountCandidate[] = [
     ...T.map((c) => ({ c, score: finals.get(c) ?? c.score })),
     // other amounts rank below every total: the price before VAT first (often what a deal is worth)
-    ...cands.filter((c) => !T.includes(c)).map((c) => ({ c, score: c.score * (c.f === 'subtotal' ? 0.6 : c.f === 'deposit' || c.f === 'discount' ? 0.3 : 0.45) })),
+    ...cands.filter((c) => !T.includes(c)).map((c) => ({ c, score: c.score * (c.f === 'subtotal' ? 0.6 : c.f === 'deposit' || c.f === 'discount' || c.f === 'less' || c.f === 'balance' ? 0.3 : 0.45) })),
   ]
     .filter(({ c }) => c.value > 0)
     .map(({ c, score }) => ({ value: c.value, label: c.label, source: src(c), score: Math.max(0, Math.min(100, Math.round(score))), line: c.line }))
@@ -1088,6 +1180,7 @@ function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' |
     words: wordsBest ? wordsBest.v : null,
     candidates,
     confidence,
+    ...(deduct !== null ? { deduct } : {}),
     quality: best ? best.final + (best.checked ? 30 : 0) : 0,
   };
 }

@@ -2471,7 +2471,8 @@ export class GccEngine {
    * gets the document's note; a stage with the user's note keeps it and only its date moves.
    * `info.replace` = the counted Actual document at that stage the new one replaces ("ใช้ยอดนี้แทน"): it
    * stays as evidence, no longer counted, and its stage note passes to the new one — so an installment
-   * is never counted twice. Without it, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
+   * is never counted twice; `info.drop`: other counted copies of the same document, which stop counting
+   * too. Without them, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
    * receipt adds up with the new one too (else the document replaces it). Only a document counted as
    * money received replaces anything. `info.kept`: the user kept their figure (`amount`) against the
    * document's own (`detected`, "คงยอดเดิม").
@@ -2480,7 +2481,7 @@ export class GccEngine {
    * earlier version filled in (its date, the first send, stays); the earlier versions stay as history,
    * no longer counted. Only a quotation for the Forecast with an amount revises anything.
    */
-  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean; revise?: string }) {
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; drop?: string[]; addHand?: boolean; kept?: boolean; revise?: string }) {
     if (!this.can('docs.up')) throw new Error('บัญชีของคุณแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
@@ -2490,7 +2491,7 @@ export class GccEngine {
     const S = this.sales, today = todayISO();
     // a joint quotation's member holds no money of its own (its quotation and payments are the joint
     // quotation's): what is attached there is kept as a document that is not counted, at no stage
-    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, addHand: false, revise: undefined, kept: false };
+    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, drop: undefined, addHand: false, revise: undefined, kept: false };
     const id = uid();
     const stage = attachStage(S, d, info, today);
     const inList = !!stage && S.cfg.stages.includes(stage); // an extra installment (PAY3) has no step record
@@ -2526,6 +2527,8 @@ export class GccEngine {
     const k = `${dealId}/${id}`;
     // a document that is not money received (no amount, not Actual) replaces nothing
     const old = info.replace && countsActual(doc) ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    // the other counted copies of the same document ("ใช้ยอดนี้แทน" on a deal that counts it twice): they stop counting too
+    const drops = countsActual(doc) ? (info.drop || []).map((x) => S.docs[`${dealId}/${x}`]).filter((x): x is DealDoc => !!x && x.id !== old?.id && countsActual(x)) : [];
     // a revised quotation: the versions before it (as this browser has them now, after the file was stored)
     const revising = info.revise != null && isQtVersion(doc) && doc.target === 'forecast';
     const earlier = revising ? qtVersions(S, d) : [];
@@ -2542,6 +2545,8 @@ export class GccEngine {
         if (old.stage === stage && this.autoStillThere(old)) this.handOverAuto(old, S.docs[k], true);
         this.updateDoc(dealId, old.id, { target: 'none' });
       }
+      // (each gives up the PAY stage it completed unless a counted document there takes it over: updateDoc)
+      drops.forEach((x) => this.updateDoc(dealId, x.id, { target: 'none' }));
       if (revising) {
         // the QUOTATION note a version filled in ("ใบเสนอราคา QT-1 · 192,600 บาท") now names this one
         const owner = earlier.find((x) => x.auto?.stage === stage && this.autoStillThere(x));

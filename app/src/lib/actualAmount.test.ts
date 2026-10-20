@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { analyzeDocText, dropCopies, proposedAmount, repairThaiText } from './docExtract';
+import { analyzeDocText, dropCopies, netOf, proposedAmount, repairThaiText } from './docExtract';
 
 const TEXT = readFileSync(join(__dirname, '__fixtures__', 'INV2026090004.txt'), 'utf8');
 const pages = TEXT.split('\n\n');
@@ -46,9 +46,9 @@ describe('the sample receipt (ต้นฉบับ + สำเนา, หัก
 });
 
 describe('proposedAmount', () => {
-  const facts = (o: Partial<Parameters<typeof proposedAmount>[0]>) => ({ total: null, wht: null, netPay: null, candidates: [], ...o });
+  const facts = (o: Partial<Parameters<typeof proposedAmount>[0]>) => ({ total: null, subtotal: null, vat: null, wht: null, netPay: null, candidates: [], ...o });
   it('is the net amount when the document shows withholding tax, else the total including VAT', () => {
-    expect(proposedAmount(facts({ total: 107000, wht: 3000, netPay: 104000 }))).toEqual({ basis: 'netPay', value: 104000 });
+    expect(proposedAmount(facts({ total: 107000, subtotal: 100000, wht: 3000, netPay: 104000 }))).toEqual({ basis: 'netPay', value: 104000 });
     expect(proposedAmount(facts({ total: 107000 }))).toEqual({ basis: 'total', value: 107000 });
     // a "ยอดชำระ" equal to the total, no withholding: the total
     expect(proposedAmount(facts({ total: 107000, netPay: 107000 }))).toEqual({ basis: 'total', value: 107000 });
@@ -86,5 +86,99 @@ describe('dropCopies', () => {
   });
   it('repairs sara am written as ำ + า', () => {
     expect(repairThaiText('ยอดชำาระ จำานวนเงิน')).toBe('ยอดชำระ จำนวนเงิน');
+  });
+});
+
+const RECEIPT = ['ใบกำกับภาษี/ใบเสร็จรับเงิน', 'เลขที่ INV2026090004', 'รวมเป็นเงิน   57,692.33', 'ภาษีมูลค่าเพิ่ม 7%   4,038.44', 'จำนวนเงินรวมทั้งสิ้น   61,730.77'];
+const QUOTE = ['ใบเสนอราคา', 'เลขที่ QT2026-1001', 'วันที่ 01/10/2026', 'ค่าที่ปรึกษาจัดทำคาร์บอนฟุตพริ้นท์องค์กร   1   งาน   100,000.00   100,000.00', 'รวมเป็นเงิน   100,000.00', 'ภาษีมูลค่าเพิ่ม 7%   7,000.00', 'จำนวนเงินรวมทั้งสิ้น   107,000.00', '(หนึ่งแสนเจ็ดพันบาทถ้วน)'];
+
+describe('the amount payable is proposed only when the figures add up', () => {
+  it('a withholding note with a rate or a form number is not an amount: the quotation proposes its total', () => {
+    for (const note of [
+      'หมายเหตุ 1. ลูกค้านิติบุคคลหักภาษี ณ ที่จ่ายร้อยละ 3',
+      'เงื่อนไข: ชำระภายใน 30 วัน หลังส่งมอบงาน หักภาษี ณ ที่จ่าย ร้อยละ 3 ของค่าบริการ',
+      'ผู้ว่าจ้างหักภาษี ณ ที่จ่าย 3 เปอร์เซ็นต์',
+      'ภาษีหัก ณ ที่จ่าย 1 ฉบับ',
+      'หักภาษี ณ ที่จ่าย ภ.ง.ด. 3',
+      'หักภาษี ณ ที่จ่าย 3% (ภ.ง.ด.53)',
+      'หักภาษี ณ ที่จ่ายตามมาตรา 3 เตรส',
+      'WHT (Form PND 53)',
+      'Withholding tax 3 percent to be deducted by the customer',
+    ]) {
+      const f = analyzeDocText(doc(...QUOTE, note));
+      expect({ note, total: f.total, wht: f.wht, netPay: f.netPay }).toEqual({ note, total: 107000, wht: null, netPay: null });
+      expect(proposedAmount(f)).toEqual({ basis: 'total', value: 107000 });
+    }
+  });
+
+  it('an amount payable or a withholding amount misread (OCR) leaves the total proposed', () => {
+    for (const tail of [
+      ['หักภาษี ณ ที่จ่าย 3%   1,730.77', 'ยอดชำระ   6,000.00'],
+      ['หักภาษี ณ ที่จ่าย 3%   1,730.77', 'ยอดชำระ   50,000.00'],
+      ['หักภาษี ณ ที่จ่าย 3%   7,730.77', 'ยอดชำระ   60,000.00'],
+    ]) {
+      const f = analyzeDocText(doc(...RECEIPT, ...tail));
+      expect(netOf(f)).toBeNull();
+      expect(proposedAmount(f)).toEqual({ basis: 'total', value: 61730.77 });
+    }
+    // the same lines read right: the amount payable
+    const ok = analyzeDocText(doc(...RECEIPT, 'หักภาษี ณ ที่จ่าย 3%   1,730.77', 'ยอดชำระ   60,000.00'));
+    expect(netOf(ok)).toEqual({ wht: 1730.77, deduct: 0, net: 60000 });
+  });
+
+  it('a withholding amount printed without decimals counts when it is the rate of the amount', () => {
+    const f = analyzeDocText(doc('ใบเสร็จรับเงิน', 'รวมเป็นเงิน   10,000.00', 'ภาษีมูลค่าเพิ่ม 7%   700.00', 'รวมทั้งสิ้น   10,700.00', 'หัก ณ ที่จ่าย 3%   300', 'ยอดชำระ   10,400.00'));
+    expect(f).toMatchObject({ total: 10700, wht: 300, netPay: 10400 });
+    expect(proposedAmount(f)).toEqual({ basis: 'netPay', value: 10400 });
+  });
+});
+
+describe('a deposit already paid taken off the total', () => {
+  it('the final receipt proposes what is left to pay, in Thai and English', () => {
+    for (const lines of [
+      ['ใบกำกับภาษี/ใบเสร็จรับเงิน', 'เลขที่ RC2026-0902', 'รวมเป็นเงิน   100,000.00', 'ภาษีมูลค่าเพิ่ม 7%   7,000.00', 'จำนวนเงินรวมทั้งสิ้น   107,000.00', 'หักเงินมัดจำ (ใบเสร็จ RC2026-0901)   32,100.00', 'ยอดชำระ   74,900.00'],
+      ['ใบแจ้งหนี้', 'เลขที่ INV2026-0902', 'รวมเป็นเงิน   100,000.00', 'ภาษีมูลค่าเพิ่ม 7%   7,000.00', 'รวมทั้งสิ้น   107,000.00', 'หักชำระแล้ว   32,100.00', 'คงเหลือชำระ   74,900.00'],
+      ['TAX INVOICE', 'Invoice No. INV-0902', 'Sub Total   100,000.00', 'VAT 7%   7,000.00', 'Grand Total   107,000.00', 'Less Deposit   32,100.00', 'Balance Due   74,900.00'],
+    ]) {
+      const f = analyzeDocText(doc(...lines));
+      expect(f).toMatchObject({ total: 107000, deduct: 32100, netPay: 74900, wht: null });
+      expect(netOf(f)).toEqual({ wht: 0, deduct: 32100, net: 74900 });
+      expect(proposedAmount(f)).toEqual({ basis: 'netPay', value: 74900 });
+    }
+  });
+
+  it('a deposit and withholding tax on the rest', () => {
+    const f = analyzeDocText(doc('ใบกำกับภาษี/ใบเสร็จรับเงิน', 'รวมเป็นเงิน   100,000.00', 'ภาษีมูลค่าเพิ่ม 7%   7,000.00', 'จำนวนเงินรวมทั้งสิ้น   107,000.00', 'หักเงินมัดจำ   32,100.00', 'หักภาษี ณ ที่จ่าย 3%   2,100.00', 'ยอดชำระ   72,800.00'));
+    expect(netOf(f)).toEqual({ wht: 2100, deduct: 32100, net: 72800 });
+    expect(proposedAmount(f)).toEqual({ basis: 'netPay', value: 72800 });
+  });
+
+  it('the deposit invoice itself (มัดจำ 30% · ยอดคงเหลือ) is not a deduction', () => {
+    const f = analyzeDocText(doc('ใบแจ้งหนี้', 'เลขที่ INV2026-0901', 'รวมเป็นเงิน   100,000.00', 'ภาษีมูลค่าเพิ่ม 7%   7,000.00', 'จำนวนเงินรวมทั้งสิ้น   107,000.00', 'เงินมัดจำ 30%   32,100.00', 'ยอดคงเหลือ   74,900.00'));
+    expect(f.deduct).toBeUndefined();
+    expect(proposedAmount(f)).toEqual({ basis: 'total', value: 107000 });
+  });
+});
+
+describe('the documents a document names', () => {
+  it('a receipt names the invoice it pays, not its own number', () => {
+    const f = analyzeDocText(doc('ใบเสร็จรับเงิน', 'เลขที่ RC2026-0701', 'วันที่ 10/10/2026', 'ชำระตามใบแจ้งหนี้เลขที่ INV2026-0601   จำนวนเงิน   53,500.00', 'รวมทั้งสิ้น   53,500.00'));
+    expect(f).toMatchObject({ kind: 'receipt', docNo: 'RC2026-0701', total: 53500, refs: ['INV2026-0601'] });
+    expect(analyzeDocText(TEXT).refs ?? []).not.toContain('INV2026090004');
+  });
+});
+
+describe('a revised quotation keeps the figure of the version it follows', () => {
+  const f = analyzeDocText(TEXT);
+  it('the same amount at whatever basis, else the same basis', () => {
+    // counted at the total before (the old default): the same price, not a cut of 1,730.77
+    expect(proposedAmount(f, { basis: 'total', amount: 61730.77 })).toEqual({ basis: 'total', value: 61730.77 });
+    // typed 60,000 before: the amount payable is that figure
+    expect(proposedAmount(f, { basis: 'manual', amount: 60000 })).toEqual({ basis: 'netPay', value: 60000 });
+    // a new price: at the basis of the version it follows
+    expect(proposedAmount(f, { basis: 'total', amount: 50000 })).toEqual({ basis: 'total', value: 61730.77 });
+    expect(proposedAmount(f, { basis: 'netPay', amount: 58000 })).toEqual({ basis: 'netPay', value: 60000 });
+    // typed before at another figure: as a first quotation
+    expect(proposedAmount(f, { basis: 'manual', amount: 58000 })).toEqual({ basis: 'netPay', value: 60000 });
   });
 });

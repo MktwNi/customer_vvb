@@ -2,7 +2,7 @@
 import { daysBetween, dmTh, localDay } from './format';
 import { basisDates, customersOf, filterDeals, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
-  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
+  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, dupCounted, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
 } from './sales';
 import type { FField, FOpt } from '../components/FilterBar';
@@ -279,8 +279,9 @@ export function lineStatusView(l: LineView, today: string): { kind: StatusKind |
 /**
  * The word under a money figure (request: documents at every figure): `ok` "จากเอกสาร <docNo>" when a
  * document backs it; `warn` "ไม่ตรงเอกสาร" when a document disagrees and the figure kept is the user's
- * (`title` has the numbers); `typed` "พิมพ์เอง" (offer "แนบเอกสาร"); `hand` "บันทึกเอง" (received
- * without a document); '' when there is no figure. Derived from the records, never stored.
+ * (`title` has the numbers), or "นับซ้ำ" when one document is counted more than once; `typed` "พิมพ์เอง"
+ * (offer "แนบเอกสาร"); `hand` "บันทึกเอง" (received without a document); '' when there is no figure.
+ * Derived from the records, never stored (so a teammate's copy that arrives with a pull shows at once).
  */
 export interface FigView { kind: 'ok' | 'warn' | 'typed' | 'hand' | ''; word: string; docNo: string; title: string; doc: DealDoc | null }
 const fig = (kind: FigView['kind'], word: string, title = '', doc: DealDoc | null = null): FigView => ({ kind, word, docNo: doc ? doc.docNo || KIND_TH[doc.kind] : '', title, doc });
@@ -299,8 +300,16 @@ export function fcFig(s: SalesState, d: Deal): FigView {
   if (q) return q.amount === m.forecast ? docFig(q) : fig('warn', 'ไม่ตรงเอกสาร', `${KIND_TH[q.kind]}${q.docNo ? ' ' + q.docNo : ''}: ${mismatchText(q.amount!, m.forecast, 'Forecast ที่พิมพ์ไว้')}`, q);
   return fig('typed', 'พิมพ์เอง', 'Forecast พิมพ์เอง แนบใบเสนอราคาเพื่อตรวจยอด');
 }
-/** The Actual: its documents (one that disagrees comes first), what was received by hand, or typed. */
+/** One document counted more than once: "INV2026090004 นับยอดซ้ำ 2 ครั้ง (PAY1 61,730.77 · PAY2 60,000 บาท)". */
+export function dupText(gr: DealDoc[]) {
+  const x = gr[gr.length - 1], name = x.docNo || x.name;
+  return `${name} นับยอดซ้ำ ${gr.length} ครั้ง (${gr.map((y) => `${y.stage || 'ไม่ระบุขั้น'} ${fmtMoney(y.amount)}`).join(' · ')} บาท)`;
+}
+/** The Actual: one document counted twice first, then its documents (one that disagrees comes first), what
+ *  was received by hand, or typed. */
 export function acFig(s: SalesState, d: Deal): FigView {
+  const dup = dupCounted(s, d)[0];
+  if (dup) return fig('warn', 'นับซ้ำ', dupText(dup) + ' · ตั้งใบที่ซ้ำเป็น "ไม่นับยอด"', dup[dup.length - 1]);
   const m = dealMoney(s, d);
   const docs = docsOf(s, d.id).filter((x) => x.target === 'actual' && x.amount != null);
   const bad = docs.filter((x) => docMismatch(x));

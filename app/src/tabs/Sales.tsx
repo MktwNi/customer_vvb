@@ -1305,7 +1305,7 @@ function TypedMoney({ value, label, onSave }: { value: number | null; label: str
  *  "แนบเอกสาร" while the row is pointed at or has the keyboard (the cell holds one short line). */
 function FigSub({ v, onAttach }: { v: FigView; onAttach?: () => void }) {
   if (v.kind === 'ok') return <small className="ok" title={v.title}>จากเอกสาร</small>;
-  if (v.kind === 'warn') return <small className="warn" title={v.title}>ไม่ตรงเอกสาร</small>;
+  if (v.kind === 'warn') return <small className="warn" title={v.title}>{v.word}</small>;
   if (!v.kind) return null;
   return (
     <small className={'sl-fig' + (onAttach ? ' has-a' : '')} title={v.title}>
@@ -1352,7 +1352,7 @@ function MoneyAc({ d }: { d: Deal }) {
   if (jointRole(S, d) === 'member') return <JointShare S={S} d={d} col="ac" />;
   const m = dealMoney(S, d), r = dealResult(S, d), ps = payState(S, d, today), P = ps.plan, v = acFig(S, d);
   // an invoice or receipt for the installment due next (or the first PAY stage not paid)
-  const att = ro ? undefined : () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' });
+  const att = ro ? undefined : () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual', auto: true });
   if (P && r === 'YES')
     return (
       <span className="sl-mn">
@@ -2255,15 +2255,15 @@ function DealCard({ d }: { d: Deal }) {
   const money = e.can('view.money'); // without ดูยอดเงิน the card has no figures at all
   // the figures' words: from a document, against one ("ไม่ตรงเอกสาร"), or typed with "แนบเอกสาร"
   const fv = fcFig(S, d), av = acFig(S, d);
-  const word = (v: FigView, none: string) => (v.kind === 'ok' ? 'จากเอกสาร ' + v.docNo : v.kind === 'warn' ? 'ไม่ตรงเอกสาร' : v.word || none);
+  const word = (v: FigView, none: string) => (v.kind === 'ok' ? 'จากเอกสาร ' + v.docNo : v.kind === 'warn' ? v.word : v.word || none);
   const tone = (v: FigView) => (v.kind === 'ok' ? 'ok' : v.kind === 'warn' ? 'warn' : '');
   const attFc = !ro && (fv.kind === 'typed' || !fv.kind) ? () => tk.attach(d, S.cfg.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', { target: 'forecast' }) : null;
-  const attAc = !ro && (av.kind === 'typed' || av.kind === 'hand' || (!av.kind && won)) ? () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' }) : null;
+  const attAc = !ro && (av.kind === 'typed' || av.kind === 'hand' || (!av.kind && won)) ? () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual', auto: true }) : null;
   const acTile = P && won ? (
     <>
       <b className={P.got ? '' : 'none'}>{P.got ? fmtMoney(P.got) : '—'}</b>
       {av.kind === 'warn' && !P.late.length ? (
-        <small className="warn" title={av.title}>ไม่ตรงเอกสาร</small>
+        <small className="warn" title={av.title}>{av.word}</small>
       ) : (
         <small className={P.left ? (P.late.length ? 'bad' : '') : 'ok'}>{P.left ? `ค้าง ${fmtMoney(P.left)}${P.next?.due ? ' · ' + (P.next.lateDays ? 'เลยกำหนด' : dmTh(P.next.due)) : ''}` : 'รับครบ'}</small>
       )}

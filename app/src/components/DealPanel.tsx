@@ -3,11 +3,11 @@ import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, fmtMoney, isPayStage, kindForStage,
+  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dealMoney, dealResult, docMismatch, dueOf, dupCounted, fmtMoney, isPayStage, kindForStage,
   lastContactInfo, mismatchText, overdueDays, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stageActs, stageDocs, stageTh, stageTrack, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type LineView, type PayHow, type PlanInput, type StageState,
 } from '../lib/sales';
-import { CLOSE_TITLE, acFig, closingView, diffText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, type FigView } from '../lib/salesUi';
+import { CLOSE_TITLE, acFig, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, type FigView } from '../lib/salesUi';
 import { DocAttach, SHOWABLE, openDocFile, type AttachMore } from './DocAttach';
 import { DocThumb } from './DocThumb';
 import { QtCard } from './QtCard';
@@ -138,13 +138,13 @@ function StripMoney({ label, value, onSave }: { label: string; value: number | n
   );
 }
 
-/** The word under a figure of the summary strip (salesUi FigView): "จากเอกสาร QT-1" (ok), "ไม่ตรงเอกสาร"
- *  (warn, the numbers in its title and on the document's card), or "พิมพ์เอง · แนบเอกสาร". `none`: what
+/** The word under a figure of the summary strip (salesUi FigView): "จากเอกสาร QT-1" (ok), "ไม่ตรงเอกสาร" or
+ *  "นับซ้ำ" (warn, the numbers in its title and on the document's card), or "พิมพ์เอง · แนบเอกสาร". `none`: what
  *  shows without a figure (read-only), `extra`: a second fact after it ("บันทึกเอง"). */
 function FigLine({ v, ro, onAttach, none, extra }: { v: FigView; ro: boolean; onAttach: () => void; none: string; extra?: string }) {
   const tail = extra ? ' · ' + extra : '';
   if (v.kind === 'ok') return <small className="ok" title={v.title}>จากเอกสาร {v.docNo}{tail}</small>;
-  if (v.kind === 'warn') return <small className="warn" title={v.title}>ไม่ตรงเอกสาร{tail}</small>;
+  if (v.kind === 'warn') return <small className="warn" title={v.title}>{v.word}{tail}</small>;
   if (ro) return <small>{v.word || none}</small>;
   return (
     <small title={v.title || undefined}>
@@ -382,7 +382,10 @@ export function DealPanel() {
   // or receipt for the Actual at the installment it pays (checked against the plan or the typed Actual)
   const fv = fcFig(S, d), av = acFig(S, d);
   const attachFc = () => attach(C.stages.includes(QUOTE_STAGE) ? QUOTE_STAGE : undefined, 'quotation', undefined, { target: 'forecast' });
-  const attachAc = () => attach(attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', undefined, { target: 'actual' });
+  // (the stage is the app's choice, the first installment not received: a receipt may be another one's)
+  const attachAc = () => attach(attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', undefined, { target: 'actual', auto: true });
+  // one document counted more than once (an old double count, two teammates attaching the same receipt)
+  const dups = money && jr !== 'member' ? dupCounted(S, d) : [];
 
   return (
     <>
@@ -439,6 +442,10 @@ export function DealPanel() {
         </div>
 
         <div className="dp-body">
+          {dups.map((gr) => (
+            // (the panel's warning box, as a short payment's)
+            <div key={gr[0].id} className="sl-rf-short" role="status">{dupText(gr)} · เงินก้อนเดียวควรนับครั้งเดียว ที่ใบที่ซ้ำ กด "แก้ยอด / ประเภท" แล้วเลือกนับเป็น "ไม่นับยอด"</div>
+          ))}
           {/* the plan is amounts: an account without ดูยอดเงิน follows payments by the PAY stages below */}
           {money && planFirst && jr !== 'member' && <PlanCard d={d} attach={attach} />}
           {money && planFirst && <ExpCard d={d} />}
