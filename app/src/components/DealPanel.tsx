@@ -626,7 +626,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
                 ) : null}
                 {planLine}
                 {v.kind === 'pay' && v.state === 'future' && !won && !P && t.result !== 'NO' && v.counted && (
-                  <p className="sl-tl-plan">ตั้งแผนชำระกี่งวดก็ได้ แต่ละงวดเป็นขั้น PAY1, PAY2 … ของตัวเองตามแผน</p>
+                  <p className="sl-tl-plan">ตั้งแผนกี่งวด ขั้น PAY จะขึ้นตามจำนวนงวด</p>
                 )}
                 {money && v.short != null && (
                   <p className="sl-tl-plan">{m.actual == null ? `ยังไม่มียอดที่รับ (Actual) · ค้างรับ ${fmtMoney(v.short)} บาท จาก Forecast` : `ยังค้างรับ ${fmtMoney(v.short)} บาท · Actual ${fmtMoney(m.actual)} จาก Forecast ${fmtMoney(m.forecast)}`}</p>
