@@ -8,7 +8,7 @@ import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
 import { customersOf, jointRole, payerDeal } from '../lib/sales';
 import { fmtN } from '../lib/format';
-import { BIG, TRACKER_MAX, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
+import { BIG, TRACKER_MAX, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { useSalesActs } from './SalesToast';
 
 /** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
@@ -223,6 +223,8 @@ export function SendToTracker() {
         <span className="t-meta">
           {`${fmtN(cos.length)} บริษัท`}
           {inYear ? ` · มีในตารางปี ${year} แล้ว ${fmtN(inYear)} บริษัท จะข้ามไป` : ''}
+          {/* the first TRACKER_MAX of the followed companies (บริษัทที่ติดตาม's ส่งเข้า Sales Tracker ทั้งหมด) */}
+          {ui.sendMore > 0 ? ` · ${followedMoreWord(ui.sendMore)}` : ''}
         </span>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>

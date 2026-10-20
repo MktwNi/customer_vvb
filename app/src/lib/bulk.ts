@@ -169,6 +169,34 @@ export const trackerWarn = (n: number, year: string, team: boolean) => `จะ�
 export const trackerCapWord = (n: number, team: boolean) =>
   `ส่งเข้า Sales Tracker ได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท ตอนนี้จะเพิ่ม ${fmtN(n)} แถว ตารางที่ยาวมากจะเปิดช้า${team ? 'สำหรับทุกคนในทีม' : ''} ` +
   'ติ๊กออกให้เหลือไม่เกินนี้ หรือกรองในหน้าค้นหาให้แคบลงแล้วส่งทีละชุด (ส่งออก CSV ได้)';
+/**
+ * "Send every followed company" (บริษัทที่ติดตาม's ส่งเข้า Sales Tracker ทั้งหมด, the Sales Tracker's เพิ่มลูกค้า →
+ * ส่งบริษัทที่ติดตามอยู่): `ids` are the followed companies not in the year's table yet, in the list's order
+ * (what needs doing first). One send adds at most TRACKER_MAX rows, so past that the button sends the first
+ * TRACKER_MAX and the dialog says how many are left (`more`) for the next press. Without it a followed list
+ * over the cap (a registry card's ดูทั้งหมด → เลือกทั้งหมด → ติดตาม: 907) opened a dialog with nothing to send
+ * and advice to narrow a search the button never came from.
+ */
+export function followedBatch(ids: number[]) {
+  const more = Math.max(0, ids.length - TRACKER_MAX);
+  return { ids: more ? ids.slice(0, TRACKER_MAX) : ids, more };
+}
+/** Its button on บริษัทที่ติดตาม: "ส่งเข้า Sales Tracker ทั้งหมด (166)", past the cap "… 300 บริษัทแรก". */
+export const followedSendWord = (n: number) =>
+  n > TRACKER_MAX ? `ส่งเข้า Sales Tracker ${fmtN(TRACKER_MAX)} บริษัทแรก` : `ส่งเข้า Sales Tracker ทั้งหมด (${fmtN(n)})`;
+/** Its tooltip there, and the second line of the Sales Tracker's menu item. */
+export const followedSendTip = (n: number, year: string) =>
+  `${fmtN(n)} บริษัทที่ยังไม่อยู่ในตารางปี ${year}` +
+  (n > TRACKER_MAX ? ` ส่งได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท ตามลำดับในรายการ แล้วกดอีกครั้งเพื่อส่งชุดถัดไป` : '');
+/** The Sales Tracker's เพิ่มลูกค้า menu item for them: its words and the line under them (one line in the
+ *  menu; the dialog then says the cap and how many are left). */
+export const followedMenuWords = (n: number) =>
+  n > TRACKER_MAX
+    ? { label: `ส่งบริษัทที่ติดตามอยู่ ${fmtN(TRACKER_MAX)} บริษัทแรก`, sub: `จาก ${fmtN(n)} บริษัทที่ยังไม่อยู่ในตารางปีนี้` }
+    : { label: `ส่งบริษัทที่ติดตามอยู่ (${fmtN(n)})`, sub: 'ที่ยังไม่อยู่ในตารางปีนี้' };
+/** The send dialog's line when it holds a first batch of them. */
+export const followedMoreWord = (more: number) =>
+  `ส่งได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท อีก ${fmtN(more)} บริษัทที่ติดตามส่งได้ในครั้งถัดไป`;
 /** The ผู้รับผิดชอบ dialog's line under its title. */
 export const ownerSub = (n: number, team: boolean) => `ให้ ${fmtN(n)} บริษัทที่เลือก · ${team ? 'ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท' : 'ชื่อนี้ขึ้นในหน้าบริษัท'} และใช้กรองได้`;
 /** The appointment dialog's warning for many: "จะสร้าง 2,228 นัดในแผนติดต่อของทีม". */

@@ -3,6 +3,7 @@ import {
   BIG, MAX_BULK, TIMED_MAX, TRACKER_MAX, allWord, bulkActs, clearedWord, confirmWords, createSel, dealSig, followNote, followSplit, hintWord, keyView, localWord,
   noTimeWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, planNote, planWarn, pruneSel, rowCo, rowFits, rowKey, selKey, selView, selWord, spread,
   taskDates, timedOk, toggleAll, toggleKey, tooManyWord, trackerCapWord, trackerNote, trackerWarn, undoSentNote, unfollowNote,
+  followedBatch, followedMenuWords, followedMoreWord, followedSendTip, followedSendWord,
 } from './bulk';
 import { newDeal } from './sales';
 import { EMPTY_FILTERS, type Filters } from './search';
@@ -193,6 +194,41 @@ describe('the Sales Tracker: one send adds at most TRACKER_MAX rows, and can be 
     expect(undoSentNote({ removed: 13, kept: 2 })).toBe('เอาออกจาก Sales Tracker แล้ว 13 ราย (2 รายที่มีคนแก้หรือเพิ่มข้อมูลแล้วยังอยู่)');
     expect(undoSentNote({ removed: 0, kept: 2 })).toBe('2 รายที่มีคนแก้หรือเพิ่มข้อมูลแล้วยังอยู่');
     expect(undoSentNote({ removed: 0, kept: 0, late: true })).toMatch(/^เลิกทำได้ภายใน 10 นาทีหลังส่ง/);
+  });
+});
+
+describe('sending every followed company: at most TRACKER_MAX a press (review: 907 followed opened a dialog with nothing to send)', () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+  it('up to the cap: all of them, nothing left', () => {
+    expect(followedBatch([])).toEqual({ ids: [], more: 0 });
+    expect(followedBatch(ids(166))).toEqual({ ids: ids(166), more: 0 });
+    expect(followedBatch(ids(300))).toEqual({ ids: ids(300), more: 0 });
+  });
+  it('past it: the first TRACKER_MAX in the list\'s order, and how many wait for the next press', () => {
+    const b = followedBatch(ids(907));
+    expect(b.ids).toEqual(ids(300));
+    expect(b.more).toBe(607);
+    expect(followedBatch(ids(301))).toEqual({ ids: ids(300), more: 1 });
+    // pressed again after each send (the sent ones are in the table now): 607 → 300 + 307 → 300 + 7 → 7
+    let left = ids(907), presses = 0;
+    while (left.length) {
+      const x = followedBatch(left);
+      expect(x.ids.length).toBeLessThanOrEqual(TRACKER_MAX);
+      left = left.filter((id) => !x.ids.includes(id));
+      expect(x.more).toBe(left.length);
+      presses++;
+    }
+    expect(presses).toBe(4);
+  });
+  it('the buttons say what they send; the dialog says what is left', () => {
+    expect(followedSendWord(166)).toBe('ส่งเข้า Sales Tracker ทั้งหมด (166)');
+    expect(followedSendWord(300)).toBe('ส่งเข้า Sales Tracker ทั้งหมด (300)');
+    expect(followedSendWord(907)).toBe('ส่งเข้า Sales Tracker 300 บริษัทแรก');
+    expect(followedSendTip(166, '2569')).toBe('166 บริษัทที่ยังไม่อยู่ในตารางปี 2569');
+    expect(followedSendTip(907, '2569')).toBe('907 บริษัทที่ยังไม่อยู่ในตารางปี 2569 ส่งได้ครั้งละไม่เกิน 300 บริษัท ตามลำดับในรายการ แล้วกดอีกครั้งเพื่อส่งชุดถัดไป');
+    expect(followedMenuWords(12)).toEqual({ label: 'ส่งบริษัทที่ติดตามอยู่ (12)', sub: 'ที่ยังไม่อยู่ในตารางปีนี้' });
+    expect(followedMenuWords(1478)).toEqual({ label: 'ส่งบริษัทที่ติดตามอยู่ 300 บริษัทแรก', sub: 'จาก 1,478 บริษัทที่ยังไม่อยู่ในตารางปีนี้' });
+    expect(followedMoreWord(607)).toBe('ส่งได้ครั้งละไม่เกิน 300 บริษัท อีก 607 บริษัทที่ติดตามส่งได้ในครั้งถัดไป');
   });
 });
 

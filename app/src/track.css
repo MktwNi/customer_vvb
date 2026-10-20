@@ -80,10 +80,12 @@
 /* ---- เฝ้าดูจากทะเบียน: the registry's lists under a quieter heading, as flat cards (no shadow), three
    names each, so they do not compete with the companies followed */
 .tr-regh{display:flex;flex-direction:column;gap:2px;padding-top:16px;border-top:1px solid var(--line)}
-.tr-regh h2{margin:0;font-size:var(--fs-card);font-weight:500;line-height:1.4;color:var(--ink-2)}
+/* (a section heading's size, over its cards' 16px titles; the grey keeps it quieter than บริษัทที่ติดตาม) */
+.tr-regh h2{margin:0;font-size:var(--fs-section);font-weight:500;line-height:1.4;color:var(--ink-2)}
 .tr-reg{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px;align-items:stretch;margin-top:-10px}
 .tr-feed{background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);padding:16px 18px;display:flex;flex-direction:column;gap:10px;height:100%;min-width:0}
-.tr-feed-t{margin:0;font-size:var(--fs-body);font-weight:500;line-height:1.45;color:var(--ink)}
+/* a card's title is a size up from its 14px/600 names (.co-name dense), as on the app's other panels */
+.tr-feed-t{margin:0;font-size:var(--fs-card);font-weight:500;line-height:1.45;color:var(--ink)}
 .tr-feed-n{font-size:var(--fs-card);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .tr-feed-n.zero{color:var(--muted)}
 /* a list's first names: one line each, the name cut with … (its tooltip has it whole), the fact at the end */

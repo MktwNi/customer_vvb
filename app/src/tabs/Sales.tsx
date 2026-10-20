@@ -40,6 +40,9 @@ import { canMergeFrom, jointNo, jointRows, rowDeals, type JRow } from '../lib/jo
 import { JointBand, JointCard, JointClosedRows, JointShare } from '../components/JointQt';
 // units (package dash): the หน่วยงาน filter's set-up link
 import { UnitsDialog } from '../components/UnitsDialog';
+// เพิ่มลูกค้า → ส่งบริษัทที่ติดตามอยู่: บริษัทที่ติดตาม's list, at most TRACKER_MAX a send
+import { followRows } from '../lib/follow';
+import { followedBatch, followedMenuWords } from '../lib/bulk';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
 export { Modal } from '../components/Dialog';
@@ -256,8 +259,10 @@ function useMenu() {
 function AddMenu() {
   const { engine: e, ui, set, go } = useApp();
   const { open, setOpen, close, btn, wrap, cls } = useMenu();
-  // companies being followed that are not in this year's table yet
-  const starred = e.crm.watch.map((id) => e.company(id)).filter((c) => c && !e.dealsOf(c.id).some((d) => d.year === ui.slYear && jointRole(e.sales, d) !== 'header'));
+  // companies being followed that are not in this year's table yet, in บริษัทที่ติดตาม's order (what needs doing
+  // first; worked out while the menu is open): one send takes at most TRACKER_MAX of them (lib/bulk.ts)
+  const notIn = open ? followRows(e, ui.slYear || beYear(), todayISO()).filter((r) => !r.deal).map((r) => r.c.id) : [];
+  const batch = followedBatch(notIn), fw = followedMenuWords(notIn.length);
   return (
     <div {...wrap} className="sl-menuw">
       <button ref={btn} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} className="btn pri">เพิ่มลูกค้า</button>
@@ -266,9 +271,9 @@ function AddMenu() {
           <button role="menuitem" className="menu-i" onClick={() => { close(); go('search'); setTimeout(() => document.getElementById('search-q')?.focus(), 60); }}>
             ค้นหาบริษัทในทะเบียน<small>แล้วส่งเข้า Sales Tracker</small>
           </button>
-          {starred.length > 0 && (
-            <button role="menuitem" className="menu-i" onClick={() => { close(); set({ sendIds: starred.map((c) => c!.id) }); }}>
-              ส่งบริษัทที่ติดตามอยู่ ({fmtN(starred.length)})<small>ที่ยังไม่อยู่ในตารางปีนี้</small>
+          {notIn.length > 0 && (
+            <button role="menuitem" className="menu-i" onClick={() => { close(); set({ sendIds: batch.ids, sendMore: batch.more }); }}>
+              {fw.label}<small>{fw.sub}</small>
             </button>
           )}
           <button role="menuitem" className="menu-i" onClick={() => { close(); set({ addCust: { deal: true } }); }}>
@@ -2280,7 +2285,7 @@ function DealCard({ d }: { d: Deal }) {
       <div className="sl-mc-h">
         <CoAvatar name={c?.name || d.client} web={c?.web} set={c?.set} size={34} />
         <div className="sl-mc-t">
-          <button type="button" className="sl-nm-b hv-tx co-name" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
+          <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
           <span className="sl-nm-s">
             {cur && <span className="sl-tg">เปิดล่าสุด</span>}
             {tk.cash && d.year !== tk.year && <span className="sl-tg">งานปี {d.year}</span>}

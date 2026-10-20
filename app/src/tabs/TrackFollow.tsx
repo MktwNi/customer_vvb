@@ -4,6 +4,7 @@ import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { beYear } from '../lib/sales';
 import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followIdsOf, followMatch, followMeta, followRows, type FollowRow } from '../lib/follow';
+import { followedBatch, followedSendTip, followedSendWord } from '../lib/bulk';
 import type { CfoStatus, Task } from '../lib/types';
 import { PageHead, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
@@ -72,6 +73,12 @@ export function FollowList() {
     if (window.getSelection()?.toString()) return;
     open(id);
   };
+  /** ส่งเข้า Sales Tracker ทั้งหมด: the ones not in the year's table, at most TRACKER_MAX a send (the dialog says how
+   *  many are left for the next press). */
+  const sendAll = () => {
+    const b = followedBatch(notIn.map((r) => r.c.id));
+    set({ sendIds: b.ids, sendMore: b.more });
+  };
   const toSearch = () => {
     go('search');
     setTimeout(() => document.getElementById('search-q')?.focus(), 60);
@@ -97,8 +104,9 @@ export function FollowList() {
         right={rows.length > 0 && pageActs ? (
           <div className="fw-pacts">
             {canSend && notIn.length > 0 && (
-              <button onClick={() => set({ sendIds: notIn.map((r) => r.c.id) })} className="btn sm" title={`${fmtN(notIn.length)} บริษัทที่ยังไม่อยู่ในตารางปี ${year}`}>
-                ส่งเข้า Sales Tracker ทั้งหมด ({fmtN(notIn.length)})
+              // one send adds at most TRACKER_MAX rows: past that, the first ones in the list's order (lib/bulk.ts)
+              <button onClick={sendAll} className="btn sm" title={followedSendTip(notIn.length, year)}>
+                {followedSendWord(notIn.length)}
               </button>
             )}
             {canPlan && <button onClick={() => go('plan', { plFeed: 'watch', picked: {}, plLim: 60 })} className="btn sm pri">วางแผนติดต่อทั้งหมด</button>}
@@ -163,7 +171,7 @@ export function FollowList() {
                     <CoAvatar name={r.c.name} web={r.c.web} set={r.c.set} size={32} />
                     <span className="fw-name-t">
                       <span className="co-name">{r.c.name}</span>
-                      <span className="t-meta" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
+                      <span className="t-sec" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
                     </span>
                   </button>
                   <Cell label="CFO · GI">

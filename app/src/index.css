@@ -720,13 +720,16 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .pl-pay>small{font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap}
 /* in งานที่กำลังจะถึง it is one more line of the list */
 .pl-day>.pl-pay.up{margin:0 4px;padding:8px;border:0;border-top:1px solid var(--divider);border-radius:0}
+/* its date reads as the appointments' beside it (.pl-up-when); a late one stays red (the next rule) */
+.pl-pay.up>small{font-size:var(--fs-sec);color:var(--muted)}
 .pl-pay.late>small{color:var(--bad)}
 .pl-day{padding:0 0 16px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
 .pl-day>*:not(.pl-day-head){margin:0 18px}
 .pl-day-head{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px}
 .pl-day-dn{width:48px;height:48px;flex:none;border-radius:var(--r-inner);background:var(--tint);color:var(--link);display:flex;align-items:center;justify-content:center;font-size:var(--fs-section);font-weight:500}
 .pl-day-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.4}
-.pl-day-t b{font-size:var(--fs-card);font-weight:500}
+/* the day's heading: a size up from the 16px/600 names of its cards */
+.pl-day-t b{font-size:var(--fs-section);font-weight:500}
 .pl-day-t span{font-size:var(--fs-sec);color:var(--ink-2)}
 .pl-empty{font-size:var(--fs-body);color:var(--ink-2);padding:6px 0}
 .pl-task{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 12px;background:#fff}
@@ -2259,10 +2262,13 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 /* a company's name where it is the title of a row, a card or a panel: the one thing there in 600 and the
    darkest ink, a size up from the row's text (16px in lists, cards, panels and phone cards). Dense tables
    (.dense: the Sales Tracker, the search results, Cashflow, a bell row) keep 14px, so their rows keep
-   their height. The line under it is .t-sec (13px, dark grey), details .t-meta (12px, light grey); status
-   words and service-type chips keep their colours. The element's own rule sets only its layout (wrapping,
-   an ellipsis), never its size, weight or colour. design.guard.test.ts allows 600 here and on the band
-   name only. */
+   their height, and so do the Sales Tracker's and Cashflow's phone cards, under their 16px/600 section
+   bands (a name the band's size would read as another band). A heading over names stays a size up from
+   them (.tr-feed-t, .pl-day-t). The line under a name is .t-sec (13px, dark grey: the company's code,
+   province and group read the same on ค้นหา, its phone cards and บริษัทที่ติดตาม), further details .t-meta
+   (12px, light grey); status words and service-type chips keep their colours. The element's own rule
+   sets only its layout (wrapping, an ellipsis), never its size, weight or colour. design.guard.test.ts
+   allows 600 here and on the band name only. */
 .co-name{font-size:var(--fs-card);font-weight:600;color:var(--ink)}
 .co-name.dense{font-size:var(--fs-body)}
 /* the name heading a company's or a job's panel keeps the page title's size (a phone's job panel: 18px) */

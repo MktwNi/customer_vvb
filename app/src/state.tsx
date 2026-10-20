@@ -71,6 +71,9 @@ export interface UIState {
   /** That dialog was opened from the search page's selection: sending stays there and says what was sent
    *  (with a link to the table) instead of opening the Sales Tracker. Set together with sendIds only. */
   sendStay: boolean;
+  /** That dialog holds the first TRACKER_MAX of the followed companies (lib/bulk.ts followedBatch): how many
+   *  more are left for the next send (0: none). Set together with sendIds only. */
+  sendMore: number;
   /** One-line result shown at the top of the Sales Tracker (e.g. after sending companies to it). */
   slNote: string;
   /** People (ผู้ติดต่อ): the person whose page is open, list search / view / page. */
@@ -126,7 +129,7 @@ const initial = (): UIState => {
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
-    deal: null, dpPlan: '', addCust: null, sendIds: null, sendStay: false, slNote: '',
+    deal: null, dpPlan: '', addCust: null, sendIds: null, sendStay: false, sendMore: 0, slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
     bell: false, qtCheck: null, qtSig: '', jqDlg: null,
   };
@@ -175,6 +178,8 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
         if (n.person && n.person !== s.person) n.last = { ...n.last, person: n.person };
         // the send dialog stays on the search page only when opened from there (sendStay with sendIds)
         if ('sendIds' in patch && !('sendStay' in patch)) n.sendStay = false;
+        // …and says how many followed companies wait for the next send only when opened with that count
+        if ('sendIds' in patch && !('sendMore' in patch)) n.sendMore = 0;
         // another year of the tracker (the year picker, ส่งเข้า Sales Tracker, an import's "ดูตารางปี"): a date
         // range goes back to the whole year, the other filters stay (filters spec §7.6)
         if (n.slYear !== s.slYear) n.slF = withoutDate(n.slF);

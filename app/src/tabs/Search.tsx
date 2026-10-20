@@ -276,7 +276,7 @@ export function Search() {
                   {tick(c.id, c.name)}
                   <button onClick={() => open(c.id)} className="hv-tx sx-mname">
                     <span className="co-name">{c.name}</span>
-                    <span className="t-meta">{[c.code, D.prov[c.prov] || '—', 'กลุ่ม ' + (c.tgt + 1), watched(c.id) ? 'ติดตามอยู่' : ''].filter(Boolean).join(' · ')}</span>
+                    <span className="t-sec">{[c.code, D.prov[c.prov] || '—', 'กลุ่ม ' + (c.tgt + 1), watched(c.id) ? 'ติดตามอยู่' : ''].filter(Boolean).join(' · ')}</span>
                     {src && <span className="t-meta">{src}</span>}
                   </button>
                 </div>

@@ -14,8 +14,8 @@ import { followIdsOf, followRows } from './follow';
 import { openJob, planRows, rowsOf, srcCounts, type PlanSrc } from './planList';
 import { custTypes, typesOf } from './svcType';
 import { custKey, dealKey } from './custColor';
-import { followSplit, unfollowNote, confirmWords } from './bulk';
-import { searchHelp } from './helpContent';
+import { TRACKER_MAX, followSplit, followedBatch, unfollowNote, confirmWords } from './bulk';
+import { HELP_TOPICS, searchHelp } from './helpContent';
 import { memoryStore } from './storage';
 import type { Company, Dataset, RoundRaw } from './types';
 
@@ -123,6 +123,42 @@ describe('the search page bar feeds บริษัทที่ติดตา�
     expect(p.counts.watch).toBe(0);
     // the two sent keep their (open job) row, without the ติดตาม tag
     expect(p.rows.filter((x) => picked.includes(x.c!.id)).length).toBe(2);
+  });
+});
+
+describe('บริษัทที่ติดตาม over TRACKER_MAX: ส่งเข้า Sales Tracker ทั้งหมด sends them in parts (review: 907 followed, nothing to send)', () => {
+  const e = engine();
+  it('each press sends the first TRACKER_MAX not in the table, in the list\'s order, until none is left', () => {
+    // a registry card's ดูทั้งหมด → เลือกทั้งหมด → ติดตาม (CFO หมดอายุแล้วยังไม่ต่อ)
+    const many = e.feedItems('cfoExp').filter((c) => !e.crm.watch.includes(c.id) && !e.dealsOf(c.id).length).slice(0, 650).map((c) => c.id);
+    expect(many.length).toBe(650);
+    e.setWatchMany(many, true);
+    // as tabs/TrackFollow.tsx and the Sales Tracker's เพิ่มลูกค้า menu read them
+    const notIn = () => followRows(e, YEAR, TODAY).filter((r) => !r.deal).map((r) => r.c.id);
+    expect(notIn().length).toBe(650);
+    const added: number[] = [];
+    for (let i = 0; i < 5 && notIn().length; i++) {
+      const before = notIn();
+      const b = followedBatch(before);
+      expect(b.ids).toEqual(before.slice(0, b.ids.length));
+      // what the send dialog counts before it offers its button (components/AddCustomer.tsx SendToTracker)
+      const has = e.trackedIn(YEAR);
+      expect(b.ids.filter((id) => !has(e.company(id)!)).length).toBeLessThanOrEqual(TRACKER_MAX);
+      added.push(e.addDealsFromCompanies(b.ids, { year: YEAR }).added);
+      // the dialog said how many were left: that many still to send
+      expect(notIn().length).toBe(b.more);
+    }
+    expect(added).toEqual([300, 300, 50]);
+    expect(notIn()).toEqual([]);
+  });
+});
+
+describe('help says which rows carry ยังไม่ระบุประเภท (review: a job sent from the bar has no Services yet)', () => {
+  it('the bar\'s topic names jobs without Services, those just sent included', () => {
+    const tip = HELP_TOPICS.find((t) => t.id === 'search-bulk')!.tips.find((x) => x.includes('ยังไม่ระบุประเภท'))!;
+    expect(tip).toContain('งานที่ยังไม่ได้เลือก Services');
+    expect(tip).toContain('รวมงานที่เพิ่งส่งจากแถบนี้');
+    expect(tip).not.toContain('ติดตามอย่างเดียวและยังไม่มีงาน');
   });
 });
 
