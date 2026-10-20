@@ -14,6 +14,7 @@ import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { attachStage, countAs, countGuard, dealMoney, dupCounted, planOf, targetForStage, type AttachInfo, type CountMode, type Deal } from './sales';
 import { acFig } from './salesUi';
+import { receiveNow, undoReceive } from './attachPlan';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -155,5 +156,44 @@ describe('team mode: two accounts, one receipt (plan of 1 installment, 60,000)',
     expect(c.pick).toBe('replace');
     await settle(L, A, L);
     for (const t of [A, L]) expect(money(t, id)).toEqual({ actual: 60000, dup: [], word: 'จากเอกสาร', pay1: 'paid' });
+  });
+});
+
+describe('team mode: "รับเงินแล้ว" in one tap, then "เลิกทำ"', () => {
+  async function job() {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    const d = A.e.addDeal({ client: 'บริษัท ตัวอย่างทีม จำกัด', year: '2569', resp: 'เอก' } as Partial<Deal>);
+    A.e.setStep(d.id, 'CLOSED DEAL', { d: '2026-08-25', n: 'YES' });
+    A.e.quickPlan(d.id, 1, [60000]);
+    A.e.updatePayLine(d.id, 'PAY1', { amt: 60000 });
+    await settle(A, L);
+    return { L, A, id: d.id };
+  }
+  const line = (t: Tab, id: string) => {
+    const l = planOf(t.e.sales, t.e.sales.deals[id], TODAY)!.lines[0];
+    return { actual: dealMoney(t.e.sales, t.e.sales.deals[id]).actual, got: l.got, status: l.status, rcv: l.line.rcv };
+  };
+
+  it('synced to a teammate and taken back: both browsers as before the tap', async () => {
+    const { L, A, id } = await job();
+    const before = line(L, id);
+    const x = receiveNow(A.e, id, 'PAY1', TODAY)!;
+    await settle(A, L);
+    expect(line(L, id)).toMatchObject({ actual: 60000, status: 'paid', rcv: TODAY });
+    expect(undoReceive(A.e, x.undo)).toEqual({ stale: [] });
+    await settle(A, L, A);
+    for (const t of [A, L]) expect(line(t, id)).toEqual(before);
+  });
+
+  it('a teammate corrected it meanwhile (55,000 on 18 Oct): "เลิกทำ" refuses, the correction stays everywhere', async () => {
+    const { L, A, id } = await job();
+    const x = receiveNow(A.e, id, 'PAY1', TODAY)!;
+    await settle(A, L);
+    L.e.markPaid(id, 'PAY1', { date: '2026-10-18', amount: 55000, how: 'transfer', full: false });
+    await settle(L, A);
+    expect(undoReceive(A.e, x.undo)).toEqual({ stale: ['PAY1'] });
+    await settle(A, L, A);
+    for (const t of [A, L]) expect(line(t, id)).toMatchObject({ actual: 55000, got: 55000, rcv: '2026-10-18' });
   });
 });

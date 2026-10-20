@@ -388,6 +388,9 @@ export function DealPanel() {
     const f = ev.dataTransfer.files?.[0];
     if (!canDrop || !f) return;
     ev.preventDefault();
+    // a bill dropped on the job's expenses is money out, never a receipt of this job (the expense card's
+    // own box takes its bill; anywhere else on that card nothing happens)
+    if ((ev.target as Element | null)?.closest?.('.xp-card')) return;
     attach(panelEntry(S, d, t.next, today), f);
   };
   // one document counted more than once (an old double count, two teammates attaching the same receipt)
@@ -759,13 +762,15 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
   // version, which stays as "ฉบับเดิม"), else the receipt / invoice of this installment
   const entry: AttachEntry = p === QUOTE_STAGE ? { at: 'quote', ...(qt ? { revise: qt.id } : {}), onSaved: attached } : { at: 'pay', stage: p, onSaved: attached };
   const P = planOf(S, d, today);
-  // one tap: with a plan the installment not received yet; without one, a won deal's PAY stage
-  const canRecv = p !== QUOTE_STAGE && won && (line ? line.status !== 'paid' && !!recvPlan(S, d, p, today) : !P && isPayStage(S.cfg, p));
+  // one tap: with a plan the installment not received yet (part received by hand: its form opens, as one
+  // installment keeps one hand receipt and its date); without one, a won deal's PAY stage
+  const canRecv = p !== QUOTE_STAGE && won && (line ? line.status !== 'paid' && line.status !== 'off' && (!!recvPlan(S, d, p, today) || line.handGot > 0) : !P && isPayStage(S.cfg, p));
   const recv = (typed?: number | null) => {
-    const r = at.recv(d, p, typed);
+    const r = at.recv(d, p, typed, { inline: true });
     if (r === 'ask') setRecvAsk('');
     else if (r === 'done') setRecvAsk(null);
   };
+  const askN = recvAsk != null ? parseAmount(recvAsk) : null;
   const fc = dealMoney(S, d).forecast;
   return (
     <>
@@ -826,7 +831,8 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
                 <input className="fld num" autoFocus inputMode="decimal" value={recvAsk} placeholder="เช่น 53,500" onChange={(ev) => setRecvAsk(ev.target.value)} onKeyDown={(ev) => ev.key === 'Enter' && recv(parseAmount(recvAsk))} />
               </label>
               <button type="button" className="quiet" onClick={() => setRecvAsk(null)}>ยกเลิก</button>
-              <button type="button" className="btn pri xs" disabled={!(parseAmount(recvAsk) ?? 0)} onClick={() => recv(parseAmount(recvAsk))}>บันทึก</button>
+              {/* (named for what it saves: the card's own "บันทึก" below saves the date and note) */}
+              <button type="button" className="btn pri xs" disabled={!(askN ?? 0)} onClick={() => recv(askN)}>{askN ? `บันทึกรับเงิน ${fmtMoney(askN)} บาท` : 'บันทึกรับเงิน'}</button>
             </span>
           )}
         </div>
@@ -835,7 +841,8 @@ function StepEdit({ d, p, st, line, won, doc, qt, attach, onHold, onDone }: { d:
         {(init.d || init.n) && (
           <button type="button" className="quiet" onClick={() => askPay(e, { d, after: previewOf.step(e.sales, d.id, p, { d: '', n: '' }), kind: 'edit', title: 'ล้าง ' + p, verb: 'ล้างขั้นนี้', plain: `ล้าง ${p}? วันที่และโน้ตของขั้นนี้จะหายไป`, run: () => ((done.current = true), e.setStep(d.id, p, { d: '', n: '' }), onDone()) })}>ล้างขั้นนี้</button>
         )}
-        <button type="button" className="btn pri xs" onClick={() => save()}>บันทึก</button>
+        {/* (quiet while the amount received is asked for above: one primary at a time) */}
+        <button type="button" className={recvAsk != null ? 'btn xs' : 'btn pri xs'} onClick={() => save()}>บันทึก</button>
       </div>
     </>
   );
@@ -930,6 +937,8 @@ function PlanRead({ d, recv, attach }: { d: Deal; recv: string; attach: Attach }
             <>
               <button type="button" className="btn xs" onClick={() => (e.setPayFull(d.id, l.stage, true) ? acts.prompt(d, 'payment') : acts.say(`ถือว่ารับครบ ${l.stage} แล้ว`))}>ถือว่ารับครบ</button>
               {att}
+              {/* (the rest came in by hand: the amount received, with its date, in the form) */}
+              {l.hand && editRecv}
               {l.hand && unmark}
             </>
           ) : l.status !== 'paid' && l.status !== 'off' ? (
@@ -1017,7 +1026,8 @@ function RecvForm({ d, l, attach }: { d: Deal; l: LineView; attach: Attach }) {
     askPay(e, { d, after: previewOf.pay(e.sales, d.id, l.stage, { rcv: date || today, got: got ?? null, full: fullOn }), kind: 'edit', title: 'บันทึกรับเงิน ' + l.stage, verb: 'บันทึกรับเงิน', run: () => {
       const ready = e.markPaid(d.id, l.stage, { date, amount: got ?? null, how, full: fullOn });
       set({ dpPlan: '' });
-      if (thenAttach) return attach({ at: 'pay', stage: l.stage });
+      // (the receipt of the money just typed: it counts in that money's place, lib/attachPlan R5c)
+      if (thenAttach) return attach({ at: 'pay', stage: l.stage, ofHand: true });
       if (ready) acts.prompt(d, 'payment');
       else acts.say(`บันทึกรับเงิน ${l.stage} ${fmtMoney(got ?? l.amt)} บาทแล้ว`);
     } });

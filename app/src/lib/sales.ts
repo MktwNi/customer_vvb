@@ -1113,9 +1113,9 @@ export function countAs(g: CountGuard, mode: CountMode, info: AttachInfo): Attac
  *   (or count a whole-job document on top of money already in) is not suggested: the receipt of money
  *   counted at another installment goes there ('move'), else only what is left of the job counts ('rest'),
  *   else it is attached without counting ('none'); "นับเพิ่ม" stays a choice.
- * - A receipt dated within a week of money of the same amount recorded by hand at another installment is
- *   suggested as its receipt ('move'), unless the user chose this installment (`pinned`) or the plan
- *   expects that amount here.
+ * - Money of an amount the document shows recorded by hand at another installment, with no document there:
+ *   always asked. Suggested as that money's receipt ('move') unless the user chose this installment
+ *   (`pinned`) or the document is dated more than a week after that money ('add' then, 'move' offered).
  * `info.add`: opened from "แนบใบเสร็จเพิ่ม"; `pinned`: opened at an installment the user chose (not the
  * Actual figure's "แนบเอกสาร", which goes to the first one not received); `figures`: the amounts the
  * document shows (total, net, …); `refs`: other documents' numbers it names (lib/docExtract).
@@ -1189,14 +1189,17 @@ export function countGuard(
     g.pick = g.modes.includes('replace') && !overBy('replace') ? 'replace' : g.inv || g.hand ? 'move' : g.rest != null ? 'rest' : 'none';
     return g;
   }
-  // the receipt of money recorded by hand at another installment, attached at the next one (the Actual
-  // figure's "แนบเอกสาร" goes to the first installment not received): dated within a week of that money.
-  // At an installment the user chose, or one planned at this amount, it is more likely this one's own
-  // receipt: still asked, "นับเพิ่ม" first
-  if (!g.modes.length && info.docDate) {
-    g.hand = handFor((l) => !!l.line.rcv && Math.abs(daysBetween(l.line.rcv, info.docDate)) <= SAME_WEEK);
+  // money recorded by hand at another installment with no document yet, of an amount this document shows:
+  // this may be its receipt, so it is always asked (never counted on top silently). Attached where the app
+  // picked the installment (the Actual figure's "แนบเอกสาร", a file dropped on the panel: the first one not
+  // received) it is suggested as that money's receipt ('move') — "รับเงินแล้ว" in one tap records the day of
+  // the tap, often after the money and its receipt — unless the document is dated more than a week after
+  // that money (then it is the next payment). At an installment the user chose it counts there, "ย้าย" offered.
+  if (!g.modes.length) {
+    const after = (l: LineView) => !!info.docDate && !!l.line.rcv && daysBetween(l.line.rcv, info.docDate) > SAME_WEEK;
+    g.hand = handFor((l) => !after(l)) || handFor(() => true);
     if (g.hand) {
-      const own = !!info.pinned || (!!line && line.amt > 0 && figs.some((f) => eq(f, line.amt)));
+      const own = !!info.pinned || after(g.hand);
       g.modes = own ? ['add', 'move'] : ['move', 'add'];
       natural = own ? 'add' : 'move';
     }

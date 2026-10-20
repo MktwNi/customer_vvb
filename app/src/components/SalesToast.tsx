@@ -8,7 +8,7 @@ import { errText } from '../lib/teamSync';
 import { docById, qtSentView } from '../lib/notify';
 import { undoSentNote } from '../lib/bulk';
 import { planDayLink } from '../lib/planCal';
-import { undoReceive } from '../lib/attachPlan';
+import { recvUndoText, undoReceive } from '../lib/attachPlan';
 import { DialogActions, Modal } from './Dialog';
 
 /**
@@ -153,12 +153,16 @@ export function SalesMessages() {
       return acts.say(n ? `เลิกทำแล้ว ${n} รายการเงินออกกลับเป็น “รอตรวจ”` : 'เลิกทำได้ภายใน 10 นาทีหลังตรวจ และเฉพาะรายการที่คุณตรวจเอง', { ms: 4000 });
     }
     // "รับเงินแล้ว (ไม่มีไฟล์)" in one tap (lib/attachPlan receiveNow): its amount and date in the plan's form,
-    // or taken back (with the plan the tap set up, when it did)
+    // or taken back as it was before (the plan the tap set up, the amount it asked for) — unless the line
+    // was changed since (a teammate's correction synced in): that is never undone over
     if (a.act === 'recvEdit' && a.deal && a.k) return set({ deal: a.deal, dpPlan: `recv:${a.k}`, slToast: null });
-    if (a.act === 'recvUndo' && a.deal && a.k) {
-      undoReceive(e, a.deal, { stage: a.k, madePlan: !!a.made });
+    if (a.act === 'recvUndo' && a.recv) {
+      const u = a.recv, d = e.sales.deals[u.deal];
+      if (!d) return set({ slToast: null });
+      const r = undoReceive(e, u);
       set({ slPrompt: null });
-      return acts.say(`เลิกทำแล้ว · ${a.k} กลับเป็นยังไม่ได้รับ`, { ms: 3000 });
+      if (r.stale.length) return acts.say(recvUndoText(e.sales, d, u, r), { ms: 8000, acts: [{ label: 'แก้ยอด / วันที่', act: 'recvEdit', deal: u.deal, k: u.stage }] });
+      return acts.say(recvUndoText(e.sales, d, u, r), { ms: 4000 });
     }
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });

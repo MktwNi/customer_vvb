@@ -18,8 +18,8 @@ import type { DocFacts } from './docExtract';
 import { jointNo } from './joint';
 import { attachRevision, qtDay, qtView } from './quotes';
 import {
-  QUOTE_STAGE, attachPreview, attachStage, closeReady, countAs, countGuard, countedAt, dealMoney, dealResult, fmtMoney, jointHeadOf, jointOf, jointRole, planOf, stageTh, stepOf, whtRate, withDoc,
-  type AttachInfo, type CountGuard, type CountMode, type Deal, type DealDoc, type DocKind, type DocTarget, type LineView, type PayHow, type SalesState,
+  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countsActual, dealMoney, dealResult, docNoKey, docsOf, fmtMoney, jointHeadOf, jointOf, jointRole, payState, planOf, stageTh, stepOf, whtRate, withDoc,
+  type AttachInfo, type CountGuard, type CountMode, type Deal, type DealDoc, type DealStep, type DocKind, type DocTarget, type LineView, type PayHow, type PayLine, type PlanInput, type PlanView, type SalesState,
 } from './sales';
 import { shortName } from './salesUi';
 
@@ -29,8 +29,10 @@ export type AttachEntry =
    *  typed total (`plan`: the confirmed figure goes into the total, `onSaved`), a joint quotation's head */
   | { at: 'quote'; revise?: string; plan?: boolean; onSaved?: (r: DocSaved) => void }
   /** a PAY card, a plan row, "รับเงินแล้ว"'s receipt (`stage`: the installment chosen); the Actual figure
-   *  (no stage: the next installment not received) */
-  | { at: 'pay'; stage?: string; onSaved?: (r: DocSaved) => void }
+   *  (no stage: the next installment not received). `loose`: the app picked the stage (a file dropped on the
+   *  panel goes to the current step), not the user. `ofHand`: the receipt of the money just recorded by hand
+   *  there (the form's "บันทึกแล้วแนบใบเสร็จ"): it counts in that money's place by default. */
+  | { at: 'pay'; stage?: string; loose?: boolean; ofHand?: boolean; onSaved?: (r: DocSaved) => void }
   /** "เอกสารอื่น"; a joint quotation's member always */
   | { at: 'other' };
 /** What the attach ended with: the document, its figure saved, and whether it is the user's own ("พิมพ์ยอดเอง"). */
@@ -52,6 +54,8 @@ export interface AttachChoice {
   docDate?: string;
   /** "แนบไว้ก่อน ยังไม่นับยอด": no amount read, attached as evidence at the installment for now */
   later?: boolean;
+  /** a receipt larger than its installment that also pays the next one(s): they become one installment */
+  merge?: boolean;
 }
 export type AttachMode = 'quote' | 'pay' | 'other';
 export interface AttachNotice {
@@ -102,6 +106,9 @@ export interface AttachPlan {
   noSave: boolean;
   /** count the installment complete after saving (setPayFull): the short part is withholding tax (R6) */
   full: boolean; fullStage: string;
+  /** "รวม PAY2 เข้ากับ PAY1": the plan to save after the document (engine.setPlan), when the receipt pays the
+   *  next installment(s) too and the person said so (the notice offers it) */
+  merge: { into: string; stages: string[]; amt: number; lines: PlanInput[] } | null;
   /** "ยังค้าง {short} บาท (ไม่ใช่หัก ณ ที่จ่าย)" in "ใช้ยอดอื่น" */
   whtShort: { short: number; rate: number } | null;
   primary: string; primaryOff: boolean; quiet: string;
@@ -197,7 +204,8 @@ export function panelEntry(s: SalesState, d: Deal, step: string, today: string):
   if (jointRole(s, d) === 'member') return { at: 'other' };
   if (step === QUOTE_STAGE) return { at: 'quote' };
   const plan = planOf(s, d, today);
-  if (step && (plan?.lines.some((l) => l.stage === step) || /^PAY/i.test(step) && s.cfg.stages.includes(step))) return { at: 'pay', stage: step };
+  // (the app picked that installment, not the user: a receipt of money recorded at another one is asked about)
+  if (step && (plan?.lines.some((l) => l.stage === step) || /^PAY/i.test(step) && s.cfg.stages.includes(step))) return { at: 'pay', stage: step, loose: true };
   return dealResult(s, d) === 'YES' ? { at: 'pay' } : { at: 'quote' };
 }
 
@@ -254,7 +262,9 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
   const stage = mode === 'quote'
     ? attachStage(s, d, { kind: 'quotation', target: 'forecast' }, today)
     : mode === 'pay' ? attachStage(s, d, { kind, target: 'actual', ...(pickedStage !== undefined ? { stage: pickedStage } : {}) }, today) : '';
-  const pinned = pickedStage !== undefined;
+  // the user chose the installment (its card, its row, a tile) — not the Actual figure or a panel drop
+  const pinned = choice.stage !== undefined || (pickedStage !== undefined && !(entry.at === 'pay' && entry.loose));
+  const ofHand = mode === 'pay' && entry.at === 'pay' && !!entry.ofHand && choice.kind === undefined && choice.stage === undefined;
   const rev = mode === 'quote' ? attachRevision(s, d, { kind: 'quotation', target: 'forecast', stage, revise: entry.at === 'quote' && !choice.kind ? entry.revise : undefined }, today) : null;
   const k = rev ? qtView(s, d).versions.length + 1 : 0;
 
@@ -292,7 +302,7 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
   const line0: LineView | null = mode === 'pay' && stage ? plan0?.lines.find((l) => l.stage === stage) || null : null;
   let title = '', sub = company, subShort = shortName(company), amountLabel = '', after = '', overTag = '', primary = '', quiet = 'ยกเลิก', toast = '';
   let left: AttachPlan['left'] = null;
-  let count: AttachPlan['count'] = null, save: AttachSave | null = null, noSave = false, full = false, fullStage = '', whtShort: AttachPlan['whtShort'] = null;
+  let count: AttachPlan['count'] = null, save: AttachSave | null = null, noSave = false, full = false, fullStage = '', whtShort: AttachPlan['whtShort'] = null, merge: AttachPlan['merge'] = null;
   let links = { other: mode !== 'other', type: !jm && !rev, note: !!stage && s.cfg.stages.includes(stage) };
   const noLabel = docNo ? ' ' + docNo : '';
   const base = (x: Partial<AttachSave>): AttachSave => ({ kind, amount, target: amount == null ? 'none' : 'actual', basis: amount == null ? 'manual' : basis, detected: amount == null ? null : detected, docNo, docDate, stage, kept: kept && amount != null, ...x });
@@ -346,10 +356,11 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     }
     amountLabel = kind === 'invoice' ? 'ยอดเรียกเก็บ · นับเข้า Actual' : 'เงินที่ได้รับ · นับเข้า Actual';
     const info0: AttachInfo = { kind, amount, target: 'actual', docDate, stage };
+    const figs3 = f ? [f.total, f.netPay, f.subtotal] : [];
     const g: CountGuard | null = amount != null
-      ? countGuard(s, d, { ...info0, pinned, docNo, name: read.name.slice(0, 120), size: read.size, figures: f ? [f.total, f.netPay, f.subtotal] : [], refs: f?.refs }, today)
+      ? countGuard(s, d, { ...info0, pinned, docNo, name: read.name.slice(0, 120), size: read.size, figures: figs3, refs: f?.refs }, today)
       : null;
-    const decided = g ? payCount(s, d, g, { kind, amount: amount!, stage, line0, name: read.name.slice(0, 120), size: read.size, figures: f ? [f.total, f.netPay, f.subtotal] : [], pinned }, today) : null;
+    const decided = g ? payCount(s, d, g, { kind, amount: amount!, stage, line0, docNo, name: read.name.slice(0, 120), size: read.size, figures: figs3, pinned, ofHand }, today) : null;
     let cm: AttachPlan['count'] = decided ? decided.def : null;
     if (decided && choice.count && decided.allowed.includes(choice.count)) cm = choice.count;
     count = cm;
@@ -363,20 +374,34 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     }
     if (cm === 'nosave') noSave = true;
     else if (g && cm) {
-      const how = countAs(g, cm, info0);
+      // (a receipt at an installment its invoice counts at takes the invoice's place: payCount names it)
+      const how = countAs(decided!.old ? { ...g, old: decided!.old } : g, cm, info0);
       // money recorded by hand at this installment kept with the document ("ส่วนที่เหลือ", or "นับเพิ่ม")
       if (cm === 'add' && decided!.handHere) how.addHand = true;
-      save = base({ amount: how.amount, target: how.target, stage: how.stage, replace: how.replace, drop: how.drop, addHand: how.addHand || undefined, ...(cm === 'rest' && how.amount !== amount ? { basis: 'manual', kept: true, detected: amount } : {}) });
+      save = base({ amount: how.amount, target: how.target, stage: cm === 'none' && decided!.at ? decided!.at : how.stage, replace: how.replace, drop: how.drop, addHand: how.addHand || undefined, ...(cm === 'rest' && how.amount !== amount ? { basis: 'manual', kept: true, detected: amount } : {}) });
+      // 'rest': only what is left of the job counts — the label and the reason say that figure, not the document's
+      if (cm === 'rest' && how.amount != null && !near(how.amount, amount)) {
+        const o = g.over ?? g.overAdd;
+        amountLabel = 'นับเข้า Actual เฉพาะส่วนที่เหลือ';
+        reason = `ส่วนที่ยังไม่ได้รับ${o ? ` (${o.what} ${N(o.cap)} · รับแล้ว ${N(o.before)})` : ''} · ใบนี้${FIG_WORD[basis]} ${N(amount)} บาท`;
+      }
     } else save = base({ target: 'none' }); // no amount: attached as evidence at the installment for now
-    // R6: an installment short by exactly withholding tax is received in full
-    const S1 = save && save.target === 'actual' ? withDoc(s, d, toInfo(save), today) : s;
+    const counting = !!save && save.target === 'actual';
     const tStage = save?.stage ?? stage;
+    // a receipt larger than its installment: when it pays the next one(s) too, one click makes them one
+    // installment (the plan, saved after the document: engine.setPlan)
+    const S1a = counting ? withDoc(s, d, toInfo(save!), today) : s;
+    const P1a = counting && tStage ? planOf(S1a, d, today) : null;
+    const big = P1a?.lines.find((l) => l.stage === tStage) || null;
+    const cover = big && big.amt > 0 && big.got > big.amt + 0.005 ? coverOf(P1a!, big) : null;
+    if (cover && choice.merge) merge = { into: tStage, stages: cover.stages, amt: cover.amt, lines: mergedLines(planOf(s, d, today)!, tStage, cover) };
+    const S1 = merge ? withMerge(S1a, d.id, merge) : S1a;
+    // R6: an installment short by exactly withholding tax is received in full
     let lineA = tStage ? planOf(S1, d, today)?.lines.find((l) => l.stage === tStage) || null : null;
     if (dup && (cm === 'none' || cm === 'nosave') && g!.same?.stage) {
       fullStage = g!.same.stage;
       lineA = planOf(s, d, today)?.lines.find((l) => l.stage === fullStage) || null;
     } else fullStage = tStage;
-    const counting = !!save && save.target === 'actual';
     if (lineA && lineA.got > 0 && lineA.got < lineA.amt - 0.005 && !lineA.full && (counting || dup)) {
       const r = whtRate(lineA.amt, lineA.got);
       if (r != null) {
@@ -392,23 +417,29 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     if (amount == null) after = '';
     else if (!counting) {
       after = [m0.actual != null ? `Actual ยังเป็น ${N(m0.actual)} บาท` : 'ไม่เปลี่ยน Actual', fullWords, ready1 && !ready0 ? 'งานนี้พร้อมปิดงาน' : ''].filter(Boolean).join(' · ');
-      if (cm === 'none' && !dup && stage) after = `เก็บไว้ที่ขั้น ${pc} เป็นหลักฐาน · ` + after;
+      if (cm === 'none' && !dup && stage) after = `เก็บไว้ที่ขั้น ${code(s, d, save?.stage || stage)} เป็นหลักฐาน · ` + after;
     } else {
       const before = m0.acDocs || m0.hand ? m0.actual : null;
       const replaced = !!(save!.replace || save!.drop?.length || cm === 'move' || (decided?.handHere && !save!.addHand));
       const parts: string[] = [];
       if (replaced && before != null) parts.push(near(before, A) ? `Actual ยังเป็น ${N(A)} บาท` : `Actual จาก ${N(before)} เป็น ${N(A)} บาท`);
       const P1 = planOf(S2, d, today), cap = P1 && P1.total > 0 ? P1.total : mA.forecast;
+      if (merge) parts.push(`รวม ${merge.stages.map((x) => code(s, d, x)).join(', ')} เข้ากับ ${code(s, d, merge.into)} เป็นงวดเดียว ${N(merge.amt)} บาท`);
       if (cap != null && cap > 0 && A != null && A > cap + 0.005 && (before == null || A > before + 0.005)) {
         overTag = `มากกว่า${P1 && P1.total > 0 ? 'แผน' : ' Forecast'}`;
         parts.length = 0;
-        parts.push(`Actual จะเป็น ${N(A)} มากกว่า${P1 && P1.total > 0 ? 'แผน' : ' Forecast'} ${N(A - cap)} บาท · ตรวจว่าใช่เงินที่เข้าบัญชีจริง`);
+        parts.push(`${overWords(A, cap, P1 && P1.total > 0 ? 'แผน' : ' Forecast')} · ตรวจว่าใช่เงินที่เข้าบัญชีจริง`);
       } else if (lineA) {
         const leftN = P1 ? P1.lines.filter((l) => l.status !== 'paid' && l.status !== 'off').length : 0;
         if (fullWords) parts.push(fullWords);
         else if (lineA.got >= lineA.amt - 0.005) {
-          if (lineA.amt > 0 && lineA.got > lineA.amt + 0.005) parts.push(`ขั้น ${lc} รับเกินแผน ${N(lineA.got - lineA.amt)} บาท`);
-          else if (ready1 && !leftN) parts.push(replaced ? 'รับครบตามแผน' : `รับครบตามแผน ${N(P1!.total)} บาท · Actual ${N(A)}${mA.forecast != null ? ' จาก Forecast ' + N(mA.forecast) : ''}`);
+          if (lineA.amt > 0 && lineA.got > lineA.amt + 0.005) {
+            // more than this installment: the next one still shows as owed (it says so, in words and a tag)
+            const nx = P1?.lines.find((l) => l.stage !== lineA!.stage && l.left > 0.005);
+            if (!cover) overTag = 'มากกว่างวดนี้';
+            parts.push(`ขั้น ${lc} รับ ${N(lineA.got)} บาท แผนงวดนี้ ${N(lineA.amt)} บาท`);
+            if (nx) parts.push(`${code(s, d, nx.stage)} ยังค้าง ${N(nx.left)} บาท`);
+          } else if (ready1 && !leftN) parts.push(replaced ? 'รับครบตามแผน' : `รับครบตามแผน ${N(P1!.total)} บาท · Actual ${N(A)}${mA.forecast != null ? ' จาก Forecast ' + N(mA.forecast) : ''}`);
           else if (leftN) parts.push(`ขั้น ${lc} ครบตามแผน ${N(lineA.amt)} บาท · เหลืออีก ${leftN} งวด ${N(P1!.left)} บาท`);
           else parts.push(`ขั้น ${lc} ครบตามแผน ${N(lineA.amt)} บาท`);
         } else parts.push(`ขั้น ${lc} ยังค้าง ${N(lineA.amt - lineA.got)} บาท`);
@@ -417,9 +448,23 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
         if (!replaced) parts.push(`Actual เป็น ${N(A)} บาท${mA.forecast != null && A != null && A >= mA.forecast - 0.005 ? ' · ครบตาม Forecast' : ''}`);
         if (ready1) parts.push('งานนี้พร้อมปิดงาน');
       }
-      const pv = attachPreview(s, d, toInfo(save!), today);
-      if (pv.unpaid.length) parts.push(`${pv.unpaid.join(', ')} จะกลับเป็นยังไม่ได้รับ`);
+      // installments received now and not after saving (a copy at another one stops counting) — against the
+      // state saving leaves, the installment counted complete by withholding tax included
+      const paid1 = payState(S2, d, today).paid, unpaid = payState(s, d, today).paid.filter((p) => !paid1.includes(p));
+      if (unpaid.length) parts.push(`${unpaid.map((p) => code(s, d, p)).join(', ')} จะกลับเป็นยังไม่ได้รับ`);
       after = parts.join(' · ');
+    }
+    // the offer to make the next installment(s) part of this one (or to keep them apart, once chosen)
+    if (cover && big) {
+      const sts = cover.stages.map((x) => code(s, d, x)).join(', '), at0 = code(s, d, big.stage);
+      const alt: AttachNotice['alts'][number] = merge
+        ? { label: 'ไม่รวมงวด', choice: { merge: false } }
+        : { pre: `ถ้าใบนี้รวมเงิน ${sts} ด้วย`, label: 'รวมเป็นงวดเดียว', choice: { merge: true } };
+      const text = merge ? `รวม ${sts} เข้ากับ ${at0} เป็นงวดเดียว ${N(cover.amt)} บาท` : `ขั้น ${at0} จะรับ ${N(big.got)} บาท เกินแผนงวดนี้อยู่ ${N(big.got - big.amt)} บาท (แผน ${N(big.amt)} บาท)`;
+      if (notice) {
+        notice = { ...notice, text: `${notice.text} · ${text}`, alts: [...notice.alts, alt] };
+        if (!merge) overTag = 'มากกว่างวดนี้';
+      } else notice = merge ? { tone: 'info', tag: 'รวมงวด', text, alts: [alt] } : { tone: 'warn', tag: 'มากกว่างวดนี้', text, alts: [alt] };
     }
     // the button names what is saved, and the amount
     const shown = save?.amount ?? amount;
@@ -438,7 +483,7 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
       ? `ไม่นับซ้ำ · Actual ยังเป็น ${N(m0.actual)} บาท${full ? ` · ${lc} ถือว่ารับครบ` : ''}`
       : cm === 'none' || amount == null
         ? `แนบ${WORD[kind]}${noLabel} ไว้เป็นหลักฐานแล้ว · ไม่นับยอด`
-        : `${kind === 'invoice' ? 'บันทึกใบแจ้งหนี้' : 'บันทึกรับเงิน'} ${N(shown)} บาท${at ? ' ที่ขั้น ' + at : ''} แล้ว`;
+        : `${kind === 'invoice' ? 'บันทึกใบแจ้งหนี้' : 'บันทึกรับเงิน'} ${N(shown)} บาท${at ? ' ที่ขั้น ' + at : ''} แล้ว${merge ? ` · รวม ${merge.stages.map((x) => code(s, d, x)).join(', ')} เข้ากับ ${code(s, d, merge.into)}` : ''}`;
   } else {
     title = 'เอกสารอื่น · ไม่นับยอด';
     save = base({ target: 'none', stage: '', amount: readAmt != null && fk && fk !== 'other' ? readAmt : null, basis: prop0?.basis ?? 'manual', detected: readAmt, kept: false });
@@ -479,13 +524,48 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     amount, basis, detected, kept: save?.kept ?? false, proposed: prop?.value ?? null, figures,
     title, sub, subShort, docWord: WORD[kind], docNo, docDate, copies: !!f?.copies,
     amountLabel, reason, figs: f && mode !== 'other' && amount != null && !(links.other === false && mode === 'pay') ? figParts(f) : [], low, scan, chip,
-    notice, after, overTag, count, save: noSave ? null : save, noSave, full, fullStage, whtShort,
+    notice, after, overTag, count, save: noSave ? null : save, noSave, full, fullStage, whtShort, merge,
     primary, primaryOff: mode !== 'other' && amount == null && !choice.later, quiet, left, links, tiles, toast,
-    key: JSON.stringify([notice?.tag, notice?.text, amount, primary, count, save?.stage, save?.target, save?.replace, full]),
+    key: JSON.stringify([notice?.tag, notice?.text, amount, primary, count, save?.stage, save?.target, save?.replace, full, merge?.stages, after]),
   };
 }
 
 const toInfo = (x: AttachSave): AttachInfo => ({ kind: x.kind, amount: x.amount, target: x.target, docDate: x.docDate, stage: x.stage, replace: x.replace, drop: x.drop, addHand: x.addHand });
+/** The document's figure in a word ("ใบนี้ยอดชำระ 60,000 บาท"). */
+const FIG_WORD: Record<DealDoc['basis'], string> = { netPay: 'ยอดชำระ', total: 'ยอดรวม', subtotal: 'ยอดก่อน VAT', manual: 'ยอด' };
+/** Actual past what is expected, said one way everywhere: "Actual จะเป็น 90,000 บาท เกินแผนอยู่ 30,000 บาท
+ *  (แผน 60,000 บาท)" — the excess and the plan (or Forecast) each named, never one number for both. */
+export function overWords(after: number, cap: number, what: string) {
+  const w = what.trim(), sp = /^[A-Za-z]/.test(w) ? ` ${w} ` : w;
+  return `Actual จะเป็น ${N(after)} บาท เกิน${sp}อยู่ ${N(after - cap)} บาท (${w} ${N(cap)} บาท)`;
+}
+/** The installments right after `at`, nothing received there yet, that its money pays too: what came in at
+ *  `at` makes up its plan and theirs (within 1%, or short of it by withholding tax). */
+function coverOf(P: PlanView, at: LineView): { stages: string[]; amt: number } | null {
+  const i = P.lines.findIndex((l) => l.stage === at.stage), stages: string[] = [];
+  let sum = at.amt;
+  for (const l of P.lines.slice(i + 1)) {
+    if (sum >= at.got - 0.005) break;
+    if (l.status === 'paid' || l.status === 'off' || l.got > 0 || !(l.amt > 0)) break;
+    sum = r2(sum + l.amt);
+    stages.push(l.stage);
+  }
+  if (!stages.length) return null;
+  return Math.abs(sum - at.got) <= Math.max(1, sum * 0.01) || whtRate(sum, at.got) != null ? { stages, amt: sum } : null;
+}
+/** The plan with `cover` made part of `into` (its amount the sum, the share typed as % dropped). */
+function mergedLines(P: PlanView, into: string, cover: { stages: string[]; amt: number }): PlanInput[] {
+  return P.lines
+    .filter((l) => !cover.stages.includes(l.stage))
+    .map(({ stage, line: x }) => ({ stage, amt: stage === into ? cover.amt : x.amt, pct: stage === into ? null : x.pct, due: x.due, rel: x.rel, how: x.how, howT: x.howT, note: x.note }));
+}
+/** The tracker as the merge leaves it (the "หลังบันทึก" line reads from it). */
+function withMerge(S: SalesState, id: string, m: NonNullable<AttachPlan['merge']>): SalesState {
+  const pays = { ...S.pays }, k = `${id}/${m.into}`;
+  pays[k] = { ...pays[k], amt: m.amt, pct: null };
+  m.stages.forEach((st) => delete pays[`${id}/${st}`]);
+  return { ...S, pays };
+}
 
 /**
  * How a receipt / invoice counts next to the money already counted (R3–R5), as one default, the other
@@ -495,9 +575,15 @@ const toInfo = (x: AttachSave): AttachInfo => ({ kind: x.kind, amount: x.amount,
  */
 function payCount(
   s: SalesState, d: Deal, g: CountGuard,
-  x: { kind: DocKind; amount: number; stage: string; line0: LineView | null; name: string; size: number; figures: (number | null)[]; pinned: boolean },
+  x: { kind: DocKind; amount: number; stage: string; line0: LineView | null; docNo: string; name: string; size: number; figures: (number | null)[]; pinned: boolean; ofHand: boolean },
   _today: string,
-): { def: CountMode | 'nosave'; allowed: (CountMode | 'nosave')[]; notice: ((cm: CountMode | 'nosave') => AttachNotice | null) | null; handHere: boolean } {
+): {
+  def: CountMode | 'nosave'; allowed: (CountMode | 'nosave')[]; notice: ((cm: CountMode | 'nosave') => AttachNotice | null) | null; handHere: boolean;
+  /** the document it replaces, when not countGuard's own pick (the invoice a receipt pays) */
+  old?: DealDoc;
+  /** where it is kept when it does not count ('none'), when not where it was attached (with its receipt) */
+  at?: string;
+} {
   const pc = code(s, d, g.stage), W = WORD[x.kind], l = x.line0;
   const docName = (z: DealDoc) => `${WORD[z.kind]} ${z.docNo || z.name}`;
   const handHere = !!l && l.hand && !l.docs.length && l.handGot > 0;
@@ -539,10 +625,20 @@ function payCount(
       }),
     };
   }
-  // R3: an invoice after a receipt counted at the installment is evidence
-  const rcpt = x.kind === 'invoice' && g.stage ? countedAt(s, d, g.stage).find((z) => z.kind === 'receipt') : undefined;
-  if (rcpt)
-    return { def: 'none', allowed: ['none'], handHere, notice: () => ({ tone: 'info', tag: 'เก็บเป็นหลักฐาน', text: `ขั้น ${pc} มีใบเสร็จ ${rcpt.docNo || rcpt.name} นับแล้ว · ใบแจ้งหนี้นี้เก็บไว้เป็นหลักฐาน ไม่นับยอด`, alts: [] }) };
+  // R3: an invoice after a receipt counted at the installment is evidence — so is an invoice carrying the
+  // number of a receipt counted anywhere in the deal (one vendor number for both: that receipt's money)
+  if (x.kind === 'invoice') {
+    const no = docNoKey(x.docNo);
+    const rcpt = (g.stage ? countedAt(s, d, g.stage).find((z) => z.kind === 'receipt') : undefined)
+      ?? (no.length >= 3 ? docsOf(s, d.id).find((z) => countsActual(z) && z.kind === 'receipt' && docNoKey(z.docNo) === no) : undefined);
+    if (rcpt) {
+      const rc = code(s, d, rcpt.stage) || pc;
+      return {
+        def: 'none', allowed: ['none'], handHere, at: rcpt.stage || undefined,
+        notice: () => ({ tone: 'info', tag: 'เก็บเป็นหลักฐาน', text: `ขั้น ${rc} มีใบเสร็จ ${rcpt.docNo || rcpt.name} นับแล้ว · ใบแจ้งหนี้นี้เก็บไว้เป็นหลักฐาน ไม่นับยอด`, alts: [] }),
+      };
+    }
+  }
   // R5e: a job already paid: counting it on top would go well past the plan / Forecast (countGuard decides)
   if (g.over) {
     const o = g.overAdd ?? g.over, what = o.what === 'แผน' ? 'แผน' : ' Forecast';
@@ -555,8 +651,8 @@ function payCount(
     return {
       def: g.pick, allowed: g.modes, handHere,
       notice: (cm) => cm === 'add'
-        ? { tone: 'warn', tag: 'นับเพิ่ม', text: `นับเพิ่มแล้ว Actual จะเป็น ${N(o.after)} มากกว่า${what} ${N(o.cap)} บาท`, alts: [{ label: how(g.pick), choice: { count: g.pick } }] }
-        : { tone: 'warn', tag: 'ไม่นับเพิ่ม', text: `นับเพิ่มแล้ว Actual จะเป็น ${N(o.after)} มากกว่า${what} ${N(o.cap)} บาท · จึง${how(cm)}`, alts: [addOther('')] },
+        ? { tone: 'warn', tag: 'นับเพิ่ม', text: `นับเพิ่มแล้ว ${overWords(o.after, o.cap, what)}`, alts: [{ label: how(g.pick), choice: { count: g.pick } }] }
+        : { tone: 'warn', tag: 'ไม่นับเพิ่ม', text: `นับเพิ่มแล้ว ${overWords(o.after, o.cap, what)} · จึง${how(cm)}`, alts: [addOther('')] },
     };
   }
   // the receipt of an invoice counted at another installment (offered, not chosen, at an installment the
@@ -582,27 +678,34 @@ function payCount(
   }
   // R5a/b: another document counted at this installment
   if (g.old) {
-    const old = g.old, ow = WORD[old.kind] + (old.kind === x.kind ? 'เดิม' : '');
-    const add = fits(l?.got ?? 0);
+    // R3: a receipt where an invoice counts is that invoice's money: it counts in the invoice's place (the
+    // newest invoice there), whatever the amounts — "นับเพิ่ม" when it is really more money
+    const inv = x.kind === 'receipt' ? countedAt(s, d, g.stage).filter((z) => z.kind === 'invoice' && !g.sames.includes(z)).pop() : undefined;
+    const old = inv ?? g.old, ow = WORD[old.kind] + (old.kind === x.kind ? 'เดิม' : '');
+    const add = !inv && fits(l?.got ?? 0);
     const sum = r2((l?.got ?? 0) + x.amount);
     return {
-      def: add ? 'add' : 'replace', allowed: ['replace', 'add'], handHere,
+      def: add ? 'add' : 'replace', allowed: ['replace', 'add'], handHere, ...(inv ? { old: inv } : {}),
       notice: (cm) => cm === 'add'
         ? { tone: 'info', tag: 'ส่วนที่เหลือ', text: `ใบนี้คือเงินส่วนที่เหลือของขั้น ${pc} · รวมกับใบเดิม ${old.docNo || old.name} ${N(l?.got ?? old.amount)} เป็น ${N(sum)} บาท${l && sum >= l.amt - 0.005 ? ' ครบตามแผน' : ''}`, alts: [{ label: 'ใบนี้แทนใบเดิม', choice: { count: 'replace' } }] }
         : { tone: 'info', tag: 'นับแทน', text: `${W}นี้นับแทน${WORD[old.kind]} ${old.docNo || old.name} ที่นับไว้ ${N(old.amount)} บาท · ${ow}เก็บไว้เป็นหลักฐาน ไม่นับซ้ำ`, alts: [addOther()] },
     };
   }
-  // R5c: money recorded by hand at this installment, no document yet
+  // R5c: money recorded by hand at this installment, no document yet. Its own amount (or one of the
+  // document's figures equal to it), or the receipt asked for right after recording it (`ofHand`), is that
+  // money's receipt: in its place. Only another amount that makes up the plan with it is "the rest".
   if (handHere) {
     const hg = l!.handGot, when = l!.line.rcv ? ` (${isoTh(l!.line.rcv)})` : '';
-    const add = fits(hg);
     const same = near(x.amount, hg) || x.figures.some((v) => near(v, hg));
+    const add = !same && !x.ofHand && fits(hg);
     return {
       def: add ? 'add' : 'replace', allowed: ['replace', 'add'], handHere,
       notice: (cm) => cm === 'add'
-        ? { tone: 'info', tag: 'ส่วนที่เหลือ', text: `ใบนี้คือเงินส่วนที่เหลือของขั้น ${pc} · รวมกับยอดที่บันทึกไว้ ${N(hg)} เป็น ${N(hg + x.amount)} บาท${hg + x.amount >= l!.amt - 0.005 ? ' ครบตามแผน' : ''}`, alts: [{ label: 'ใบนี้แทนยอดที่บันทึกไว้', choice: { count: 'replace' } }] }
+        ? same || x.ofHand
+          ? { tone: 'warn', tag: 'นับเพิ่ม', text: `ขั้น ${pc} บันทึกรับเงินเองไว้ ${N(hg)} บาท${when} · นับใบนี้เพิ่มเป็น ${N(hg + x.amount)} บาท`, alts: [{ pre: 'ถ้าเป็นใบเสร็จของเงินก้อนนั้น', label: 'ไม่นับซ้ำ', choice: { count: 'replace' } }] }
+          : { tone: 'info', tag: 'ส่วนที่เหลือ', text: `ใบนี้คือเงินส่วนที่เหลือของขั้น ${pc} · รวมกับยอดที่บันทึกไว้ ${N(hg)} เป็น ${N(hg + x.amount)} บาท${hg + x.amount >= l!.amt - 0.005 ? ' ครบตามแผน' : ''}`, alts: [{ label: 'ใบนี้แทนยอดที่บันทึกไว้', choice: { count: 'replace' } }] }
         : same
-          ? { tone: 'info', tag: 'ใบเสร็จของเงินก้อนนี้', text: `ขั้น ${pc} บันทึกรับเงินเองไว้ ${N(hg)} บาท${when} · ใบนี้คือใบเสร็จของเงินก้อนนั้น ไม่นับซ้ำ`, alts: [] }
+          ? { tone: 'info', tag: 'ใบเสร็จของเงินก้อนนี้', text: `ขั้น ${pc} บันทึกรับเงินเองไว้ ${N(hg)} บาท${when} · ใบนี้คือใบเสร็จของเงินก้อนนั้น ไม่นับซ้ำ`, alts: [addOther()] }
           : { tone: 'info', tag: 'นับแทน', text: `${W}นี้นับแทนยอดที่บันทึกเองไว้ ${N(hg)} บาท${when} ไม่นับซ้ำ`, alts: [addOther()] },
     };
   }
@@ -611,40 +714,59 @@ function payCount(
 
 // ------------------------------------------------------------------ "รับเงินแล้ว (ไม่มีไฟล์)": one tap
 
-/** What one tap records at an installment (null: not one tap — received already, or part paid by a
- *  document: the form "แก้ยอด / วันที่" is used instead). `amount` is what markPaid gets (null = as planned;
- *  a part received by hand before is topped up to the plan); `shown` the money that comes in now; `plan`:
- *  no plan yet (a one-installment plan of the Forecast is set first, in the same tap); `ask`: no plan and no
- *  Forecast, so the amount is typed first. */
-export interface RecvPlan { stage: string; amount: number | null; shown: number | null; how: PayHow; plan: boolean; ask: boolean }
+/** What one tap records at an installment (null: not one tap — received already, or part paid, by a
+ *  document or by hand: the form "แก้ยอด / วันที่" is used instead, as one installment holds one hand
+ *  receipt with its own date). `amount` is what markPaid gets (null = as planned); `shown` the money that
+ *  comes in now; `plan`: no plan yet (a one-installment plan of the Forecast is set first, in the same tap);
+ *  `ask`: no amount to record (no plan and no Forecast, or a line with no planned amount), so it is typed
+ *  first; `over`: the job's money already makes up its plan and this would take it well past it (a receipt
+ *  counted whole at an earlier installment, say) — not recorded, the form is offered instead. */
+export interface RecvPlan {
+  stage: string; amount: number | null; shown: number | null; how: PayHow; plan: boolean; ask: boolean;
+  over: { actual: number; cap: number; extra: { stage: string; by: number } | null } | null;
+}
 export function recvPlan(s: SalesState, d: Deal, stage: string, today: string): RecvPlan | null {
   const P = planOf(s, d, today);
   if (P) {
     const l = P.lines.find((x) => x.stage === stage);
-    if (!l || l.status === 'paid' || l.status === 'off' || (l.docs.length && l.got > 0)) return null;
+    if (!l || l.status === 'paid' || l.status === 'off' || (l.docs.length && l.got > 0) || l.handGot > 0) return null;
     const how: PayHow = l.line.how || 'transfer';
-    if (!(l.amt > 0)) return { stage, amount: null, shown: null, how, plan: false, ask: true };
-    return { stage, amount: l.handGot > 0 ? l.amt : null, shown: r2(l.amt - l.handGot), how, plan: false, ask: false };
+    if (!(l.amt > 0)) return { stage, amount: null, shown: null, how, plan: false, ask: true, over: null };
+    // (as countGuard.over for documents: a job paid to 90% of its plan, taken past 105% by this)
+    const m = dealMoney(s, d), A = m.acDocs || m.hand ? m.actual ?? 0 : 0, cap = P.total;
+    const x = P.lines.find((z) => z.amt > 0 && z.got > z.amt + 0.005);
+    const over = cap > 0 && A >= cap * 0.9 && A + l.amt > cap * 1.05 ? { actual: A, cap, extra: x ? { stage: x.stage, by: r2(x.got - x.amt) } : null } : null;
+    return { stage, amount: null, shown: l.amt, how, plan: false, ask: false, over };
   }
   const m = dealMoney(s, d), left = m.forecast != null ? r2(m.forecast - (m.actual || 0)) : null;
-  return { stage, amount: null, shown: left != null && left > 0 ? left : null, how: 'transfer', plan: true, ask: !(left != null && left > 0) };
+  return { stage, amount: null, shown: left != null && left > 0 ? left : null, how: 'transfer', plan: true, ask: !(left != null && left > 0), over: null };
 }
-/** The engine calls one tap makes (lib/engine: markPaid, quickPlan, updatePayLine, unmarkPaid, clearPlan). */
+/** The engine calls one tap makes (lib/engine: markPaid, quickPlan, updatePayLine; undoPays for "เลิกทำ"). */
 export interface RecvEngine {
   sales: SalesState;
   markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean;
   quickPlan(dealId: string, n: number): { stages: string[]; amounts: (number | null)[] } | null;
   updatePayLine(dealId: string, stage: string, patch: { amt?: number | null }): void;
-  unmarkPaid(dealId: string, stage: string): void;
-  clearPlan(dealId: string): { kept: string[] };
+  undoPays(dealId: string, u: Pick<RecvUndo, 'before' | 'after' | 'step'>): { stale: string[] };
 }
+/** What "เลิกทำ" puts back: the deal's installments just before the tap and as it left them (the plan it set
+ *  up, the amount it asked for, the line it marked), and the stage note it may have filled in. */
+export interface RecvUndo {
+  deal: string; stage: string; madePlan: boolean;
+  before: Record<string, PayLine>; after: Record<string, PayLine>;
+  step: { stage: string; before: DealStep; after: DealStep };
+}
+const paysOf = (s: SalesState, id: string): Record<string, PayLine> =>
+  Object.fromEntries(Object.entries(s.pays || {}).filter(([k]) => k.startsWith(id + '/')).map(([k, v]) => [k.slice(id.length + 1), { ...v }]));
 /** Record the money at once (today, the planned amount; `typed` when it had to be asked). Returns where it
- *  went and how much, whether the job is now ready to close, and whether a plan was set for it (undone too). */
-export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: string, typed?: number | null): { stage: string; amount: number; ready: boolean; madePlan: boolean } | null {
+ *  went and how much, whether the job is now ready to close, whether a plan was set for it, and what
+ *  "เลิกทำ" puts back. Nothing when it is not one tap (recvPlan null, `over`, or an amount still to type). */
+export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: string, typed?: number | null): { stage: string; amount: number; ready: boolean; madePlan: boolean; undo: RecvUndo } | null {
   const d = e.sales.deals[dealId];
   if (!d) return null;
   const r = recvPlan(e.sales, d, stage, today);
-  if (!r || (r.ask && !(typed != null && typed > 0))) return null;
+  if (!r || r.over || (r.ask && !(typed != null && typed > 0))) return null;
+  const before = paysOf(e.sales, dealId);
   let at = stage, madePlan = false;
   if (r.plan) {
     const q = e.quickPlan(dealId, 1);
@@ -653,17 +775,35 @@ export function receiveNow(e: RecvEngine, dealId: string, stage: string, today: 
     madePlan = true;
     if (r.ask) e.updatePayLine(dealId, at, { amt: typed! });
   } else if (r.ask) e.updatePayLine(dealId, at, { amt: typed! });
+  const step0 = stepOf(e.sales, dealId, at);
   const ready = e.markPaid(dealId, at, { date: today, amount: r.plan || r.ask ? null : r.amount, how: r.how, full: false });
   const l = planOf(e.sales, e.sales.deals[dealId], today)?.lines.find((x) => x.stage === at);
-  return { stage: at, amount: r.ask ? typed! : r.shown ?? l?.got ?? 0, ready, madePlan };
+  const undo: RecvUndo = { deal: dealId, stage: at, madePlan, before, after: paysOf(e.sales, dealId), step: { stage: at, before: { ...step0 }, after: { ...stepOf(e.sales, dealId, at) } } };
+  return { stage: at, amount: r.ask ? typed! : r.shown ?? l?.got ?? 0, ready, madePlan, undo };
 }
-/** "เลิกทำ": the money recorded by one tap goes, and the plan it set up with it. */
-export function undoReceive(e: RecvEngine, dealId: string, r: { stage: string; madePlan: boolean }) {
-  e.unmarkPaid(dealId, r.stage);
-  if (r.madePlan) e.clearPlan(dealId);
+/** "เลิกทำ": the deal's installments as they were before the tap (the plan it set up goes, a received line
+ *  that plan carried in too; the planned amount it asked for goes back). Refused, changing nothing, when a
+ *  line was changed since (a teammate's correction synced in): `stale` names it. */
+export function undoReceive(e: RecvEngine, u: RecvUndo): { stale: string[] } {
+  return e.undoPays(u.deal, u);
 }
 /** The message after one tap (T-RECV). */
 export const recvToast = (s: SalesState, d: Deal, stage: string, amount: number) => `บันทึกรับเงิน ${code(s, d, stage)} แล้ว ${N(amount)} บาท · วันนี้ · ยังไม่มีใบเสร็จ`;
+/** The message when one tap records nothing (RecvPlan.over): the job's money is in already. */
+export function recvOverText(s: SalesState, d: Deal, r: RecvPlan): string {
+  const o = r.over;
+  if (!o) return '';
+  const head = o.actual >= o.cap - 0.005
+    ? `Actual ${N(o.actual)} บาท ครบตามแผน ${N(o.cap)} บาทแล้ว`
+    : `Actual ${N(o.actual)} บาท บันทึกอีก ${N(r.shown)} บาทจะเกินแผน ${N(o.cap)} บาท`;
+  const x = o.extra ? ` (${code(s, d, o.extra.stage)} รับเกินงวด ${N(o.extra.by)} บาท)` : '';
+  return `ยังไม่ได้บันทึก ${code(s, d, r.stage)} · ${head}${x} · ถ้าได้รับเงินเพิ่มจริง กด “แก้ยอด / วันที่”`;
+}
+/** The message after "เลิกทำ" of one tap: done, or refused because a line was changed since. */
+export function recvUndoText(s: SalesState, d: Deal, u: RecvUndo, r: { stale: string[] }): string {
+  if (r.stale.length) return `เลิกทำไม่ได้ · ${r.stale.map((x) => code(s, d, x)).join(', ')} มีการแก้ไขหลังบันทึก · แก้ที่ “แผนการชำระเงิน” ของงานนี้`;
+  return `เลิกทำแล้ว · ${code(s, d, u.stage)} กลับเป็นยังไม่ได้รับ${u.madePlan ? ' · แผนชำระที่ตั้งให้ถูกลบด้วย' : ''}`;
+}
 
 /** A step's own attach (its row, its card): QUOTATION takes the quotation, an installment its receipt. */
 export const stageEntry = (stage: string): AttachEntry => (stage === QUOTE_STAGE ? { at: 'quote' } : { at: 'pay', stage });

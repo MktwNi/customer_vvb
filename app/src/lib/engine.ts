@@ -2082,6 +2082,45 @@ export class GccEngine {
     });
     this.saveSales();
   }
+  /**
+   * "เลิกทำ" of "รับเงินแล้ว" in one tap (lib/attachPlan receiveNow / undoReceive): the deal's installments as
+   * they were just before it — a line the tap set up is removed (a received one the new plan carried in too),
+   * a line it wrote gets its earlier fields back (the date, the amount, how, the planned amount typed when it
+   * asked), and the stage note it filled in goes. Only while every line, and that note, is still as the tap
+   * left it: a change since (a teammate's correction synced in, an edit here) is never undone over — `stale`
+   * then names those stages and nothing is changed.
+   */
+  undoPays(dealId: string, u: { before: Record<string, PayLine>; after: Record<string, PayLine>; step?: { stage: string; before: DealStep; after: DealStep } }): { stale: string[] } {
+    const S = this.sales, d = S.deals[dealId];
+    if (!this.canDeal('edit.pay', d)) return this.deny(), { stale: [] };
+    if (!d) return { stale: [] };
+    const F = ['amt', 'pct', 'due', 'rel', 'how', 'howT', 'note', 'rcv', 'got', 'full', 'fullAt', 'add'] as const;
+    const key = (l: PayLine | undefined) => (l ? JSON.stringify([...F.map((x) => l[x]), l.at, l.by]) : '');
+    const stages = Object.keys(u.after).filter((st) => key(u.before[st]) !== key(u.after[st]));
+    const stale = stages.filter((st) => key(S.pays[`${dealId}/${st}`]) !== key(u.after[st]));
+    if (stale.length) return { stale };
+    const at = new Date().toISOString(), by = this.me();
+    this.batchOps(() => {
+      stages.forEach((st) => {
+        const k = `${dealId}/${st}`, was = u.before[st], cur = S.pays[k];
+        if (!was) {
+          delete S.pays[k];
+          this.op(keyOf.dpay(dealId, st));
+          return;
+        }
+        const n: PayLine = { ...was, at, by };
+        const f = F.filter((x) => n[x] !== cur[x]);
+        S.pays[k] = n;
+        this.op(keyOf.dpay(dealId, st), { ...n }, { f: [...f, 'at', 'by'] });
+      });
+      // the note the tap filled in (an empty stage gets "รับชำระแล้ว … บาท"), while nobody has changed it
+      const w = u.step, sk = (x: DealStep) => x.d + '\n' + x.n;
+      if (w && sk(stepOf(S, dealId, w.stage)) === sk(w.after) && sk(w.before) !== sk(w.after)) this.setStep(dealId, w.stage, w.before, true, true);
+      this.salesLog(d, 'เลิกทำรับชำระ', stages.join(', '));
+    });
+    this.saveSales();
+    return { stale: [] };
+  }
   /** Count a short installment as complete (withholding tax, rounding) or open it again. It holds for
    *  what has come in now (PayLine.fullAt): a receipt deleted or changed later opens it again. Returns
    *  true when this made the deal ready to close. */

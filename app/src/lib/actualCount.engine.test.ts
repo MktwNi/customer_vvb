@@ -195,17 +195,27 @@ describe('a receipt for money recorded by hand ("รับเงินแล้�
     expect(planOf(e.sales, deal(e, id), TODAY)!.lines.map((l) => [l.stage, l.got, l.status === 'paid'])).toEqual([['PAY1', 30000, true], ['PAY2', 0, false]]);
   });
 
-  it('equal installments paid close together: the second receipt counts at its own installment (still asked)', async () => {
+  it('equal installments paid close together: from the Actual figure it is suggested as the hand money\'s receipt; from PAY2\'s own row it counts there (asked both ways)', async () => {
+    // (the Actual figure picks the first installment not received: after "รับเงินแล้ว" at PAY1 that is PAY2,
+    // while the receipt is most often PAY1's own — equal installments are the plan's default, 50/50)
     for (const pinned of [false, true]) {
       const e = mk(), id = await wonDeal(e);
       e.quickPlan(id, 2); // 30,000 + 30,000
       e.markPaid(id, 'PAY1', { date: '2026-10-01', amount: 30000, how: 'transfer' });
-      // from the Actual figure (the app picks PAY2), and from PAY2's own row
       const b = await attach(e, id, { stage: pinned ? 'PAY2' : undefined, pinned, amount: 30000, basis: 'manual', name: 'RC-0002.pdf', docNo: 'RC-0002', docDate: '2026-10-05' });
-      expect(b.g).toMatchObject({ stage: 'PAY2', hand: { stage: 'PAY1' }, modes: ['add', 'move'], pick: 'add' });
-      expect(actual(e, id)).toBe(60000);
-      expect(planOf(e.sales, deal(e, id), TODAY)!.lines.map((l) => l.status)).toEqual(['paid', 'paid']);
+      expect(b.g).toMatchObject({ stage: 'PAY2', hand: { stage: 'PAY1' }, modes: pinned ? ['add', 'move'] : ['move', 'add'], pick: pinned ? 'add' : 'move' });
+      expect(actual(e, id)).toBe(pinned ? 60000 : 30000);
+      expect(planOf(e.sales, deal(e, id), TODAY)!.lines.map((l) => l.status === 'paid')).toEqual([true, pinned]);
     }
+  });
+
+  it('a hand receipt weeks before the next installment\'s receipt: counted at that installment, and asked (the hand money has no receipt yet)', async () => {
+    const e = mk(), id = await wonDeal(e);
+    e.quickPlan(id, 2);
+    e.markPaid(id, 'PAY1', { date: '2026-09-01', amount: 30000, how: 'transfer' });
+    const b = await attach(e, id, { amount: 30000, basis: 'manual', name: 'RC-2.pdf', docNo: 'RC-2', docDate: '2026-10-15' });
+    expect(b.g).toMatchObject({ stage: 'PAY2', hand: { stage: 'PAY1' }, modes: ['add', 'move'], pick: 'add' });
+    expect(actual(e, id)).toBe(60000);
   });
 
   it('opened at an installment the user chose: not moved by default', async () => {
@@ -231,14 +241,6 @@ describe('real second payments are not questioned', () => {
     expect(closeReady(e.sales, deal(e, id), TODAY)).toBe(true);
   });
 
-  it('a hand receipt weeks before the second installment\'s receipt', async () => {
-    const e = mk(), id = await wonDeal(e);
-    e.quickPlan(id, 2);
-    e.markPaid(id, 'PAY1', { date: '2026-09-01', amount: 30000, how: 'transfer' });
-    const b = await attach(e, id, { amount: 30000, basis: 'manual', name: 'RC-2.pdf', docNo: 'RC-2', docDate: '2026-10-15' });
-    expect(b.g).toMatchObject({ stage: 'PAY2', modes: [], pick: 'add' });
-    expect(actual(e, id)).toBe(60000);
-  });
 });
 
 describe('a deal that already counts the receipt twice (the owner\'s: 61,730.77 at PAY1 and 60,000 at PAY2)', () => {

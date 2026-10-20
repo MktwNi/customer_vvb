@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { isoTh, todayISO } from '../lib/format';
 import { closeReady, fmtMoney, parseAmount, stepOf, type Deal, type DealDoc } from '../lib/sales';
@@ -81,7 +81,11 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
   const again = useRef<HTMLInputElement>(null);
   const pri = useRef<HTMLButtonElement>(null);
   const noRef = useRef<HTMLInputElement>(null);
+  // what the person agreed to: the plan as it read when the file was read, or after their own last change on
+  // this screen — never just the last render (a sync re-renders it). A change underneath shows "เพิ่งเปลี่ยน"
+  // at once, and the first click after it saves nothing.
   const shown = useRef('');
+  const chose = useRef(false);
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => () => {
     if (url) URL.revokeObjectURL(url);
@@ -102,6 +106,8 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
     setReadNote('');
     setThumb('');
     setSaving('');
+    setMoved(false);
+    shown.current = '';
     const why = f.size > DOC_MAX_BYTES ? 'ไฟล์ใหญ่เกิน 10 MB' : !docMime(f) ? 'รองรับเฉพาะ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)' : '';
     setBad(why ? `${why} · ${f.name}` : '');
     if (why) return setProg(null);
@@ -158,10 +164,17 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
   useEffect(() => {
     if (editNo) requestAnimationFrame(() => noRef.current?.focus());
   }, [editNo]);
-  if (!reading) shown.current = plan.key;
+  if (!reading && !bad && (!shown.current || chose.current)) {
+    shown.current = plan.key;
+    chose.current = false;
+  }
+  // the deal changed under the open screen (a sync, a teammate): said at once, before any click
+  // (not while this screen's own save is under way: the document it stores changes the plan too)
+  const changed = !reading && !bad && !saving.startsWith('กำลัง') && plan.key !== shown.current;
 
   const pick = (c: AttachChoice) => {
     setMoved(false);
+    chose.current = true;
     setChoice((x) => ({ ...x, ...c }));
   };
   const save = async (over?: AttachChoice) => {
@@ -172,6 +185,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
     // worked out again on the deal as it is now: a change (a sync, a teammate) shows instead of saving
     const p = attachPlan(e.sales, now, entry, readInfo, c, today);
     if (!over && p.key !== shown.current) {
+      // seen now: the next click saves what is on the screen
       shown.current = p.key;
       setMoved(true);
       return;
@@ -189,6 +203,8 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
       const doc = await e.attachDoc(d.id, file, p.save!);
       // what the reader found: the quotation's edit form offers its figures without reading the file again
       if (facts) qtFacts.set(doc.id, facts);
+      // "รวมเป็นงวดเดียว": the receipt pays the next installment(s) too — the plan says so now
+      if (p.merge) e.setPlan(d.id, p.merge.lines);
       if (p.full && p.fullStage) e.setPayFull(d.id, p.fullStage, true);
       // the note typed here is the step's note (as the document's own note would be)
       const n = note.trim();
@@ -202,6 +218,25 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
     }
   };
 
+  // Enter in a field of this screen saves, as the button does (not while a Thai / IME word is being composed)
+  const enter = (ev: KeyboardEvent<HTMLInputElement>) => {
+    if (ev.key !== 'Enter' || ev.nativeEvent.isComposing) return;
+    ev.preventDefault();
+    if (!plan.primaryOff) void save();
+  };
+  type Tile = AttachPlan['tiles'][number];
+  const pickTile = (t: Tile) => pick({ ...t.choice, count: undefined, stage: t.choice.stage });
+  const tileKey = (ev: KeyboardEvent<HTMLDivElement>) => {
+    const k = ev.key, step = k === 'ArrowRight' || k === 'ArrowDown' ? 1 : k === 'ArrowLeft' || k === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    ev.preventDefault();
+    const box = ev.currentTarget, n = plan.tiles.length, i = Math.max(0, plan.tiles.findIndex((t) => t.on));
+    const j = (i + step + n) % n;
+    pickTile(plan.tiles[j]);
+    requestAnimationFrame(() => box.querySelectorAll<HTMLButtonElement>('[role=radio]')[j]?.focus());
+  };
+  // "รวมเป็นงวดเดียว" changes the plan: offered to an account that may change it
+  const canPlan = e.canDeal('edit.pay', d);
   const isImg = docMime(file).startsWith('image/') && !/hei[cf]/.test(docMime(file)); // browsers can't show HEIC
   const pic = isImg ? url : thumb;
   const open = plan.save?.amount ?? plan.amount;
@@ -220,13 +255,13 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
         </span>
         {/* the document: a picture of its first page, its name, what it is, its number and date */}
         <div className="oa-doc">
-          {pic ? <img src={pic} alt="" /> : <span className="oa-ph" aria-hidden="true">{docMime(file) === 'application/pdf' ? 'PDF' : 'รูป'}</span>}
+          {pic ? <img src={pic} alt="" /> : <span className="oa-ph" aria-hidden="true">{docMime(file) === 'application/pdf' ? 'PDF' : docMime(file).startsWith('image/') ? 'รูป' : 'ไฟล์'}</span>}
           <span className="oa-doc-t">
             <b title={file.name}>{file.name}</b>
             {!reading && !bad && (
               <span>
                 <Nw t={docMeta} />
-                {(plan.mode !== 'other' || plan.docNo) && !scan ? <button type="button" className="lnk" aria-expanded={editNo} onClick={() => setEditNo(!editNo)}>แก้</button> : null}
+                {(plan.mode !== 'other' || plan.docNo) && !scan ? <button type="button" className="lnk" aria-expanded={editNo} aria-label="แก้เลขที่และวันที่" onClick={() => setEditNo(!editNo)}>แก้</button> : null}
               </span>
             )}
             {!reading && plan.copies && <small>ไฟล์มีต้นฉบับและสำเนา อ่านยอดชุดเดียว</small>}
@@ -240,7 +275,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
         </div>
         {editNo && !reading && !scan && (
           <div className="oa-row2">
-            <label>เลขที่<input ref={noRef} className="fld" value={choice.docNo ?? plan.docNo} maxLength={60} onChange={(ev) => pick({ docNo: ev.target.value })} /></label>
+            <label>เลขที่<input ref={noRef} className="fld" value={choice.docNo ?? plan.docNo} maxLength={60} onChange={(ev) => pick({ docNo: ev.target.value })} onKeyDown={enter} /></label>
             <span className="oa-lab">ลงวันที่<DateField value={choice.docDate ?? plan.docDate} onChange={(v) => pick({ docDate: v })} label="ลงวันที่" placeholder="ไม่ระบุ" /></span>
           </div>
         )}
@@ -259,7 +294,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
 
         {!reading && !bad && (
           <>
-            {moved && (
+            {(moved || changed) && (
               <div className="oa-box warn" role="alert"><p><span className="oa-tag">เพิ่งเปลี่ยน</span>งานนี้เพิ่งมีการเปลี่ยนแปลง ตรวจบรรทัดด้านล่างอีกครั้งแล้วกดบันทึก</p></div>
             )}
             {plan.notice && (
@@ -269,7 +304,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
                   {plan.notice.lead && <b><Nw t={plan.notice.lead} /></b>}
                   {plan.notice.lead ? ' · ' : ''}
                   <Nw t={plan.notice.text} />
-                  {plan.notice.alts.map((a) => (
+                  {plan.notice.alts.filter((a) => !a.choice?.merge || canPlan).map((a) => (
                     <span key={a.label}>
                       {' · '}
                       {a.pre ? a.pre + ' ' : ''}
@@ -303,7 +338,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
                         const v = parseAmount(ev.target.value);
                         pick({ figure: 'manual', manual: v ?? null });
                       }}
-                      onKeyDown={(ev) => ev.key === 'Enter' && !plan.primaryOff && void save()}
+                      onKeyDown={enter}
                     />
                   </label>
                   {plan.mode === 'pay' && <span className="oa-hint">ใบเสร็จที่หัก ณ ที่จ่าย พิมพ์ยอดชำระ (ยอดหลังหัก)</span>}
@@ -313,7 +348,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
                     </span>
                   )}
                   <div className="oa-row2">
-                    <label>เลขที่<input className="fld" value={choice.docNo ?? plan.docNo} maxLength={60} onChange={(ev) => pick({ docNo: ev.target.value })} /></label>
+                    <label>เลขที่<input className="fld" value={choice.docNo ?? plan.docNo} maxLength={60} onChange={(ev) => pick({ docNo: ev.target.value })} onKeyDown={enter} /></label>
                     <span className="oa-lab">ลงวันที่<DateField value={choice.docDate ?? plan.docDate} onChange={(v) => pick({ docDate: v })} label="ลงวันที่" placeholder="ไม่ระบุ" /></span>
                   </div>
                 </div>
@@ -348,7 +383,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
             )}
             {alt && !scan && plan.links.other && plan.figures.length > 0 && (
               <div className="oa-alt" role="radiogroup" aria-label="ยอดที่นับ">
-                <span className="oa-alt-h">ใช้ยอดอื่นจากเอกสารนี้<button type="button" className="lnk" onClick={() => setAlt(false)}>ซ่อน</button></span>
+                <span className="oa-alt-h">ใช้ยอดอื่นจากเอกสารนี้<button type="button" className="lnk" aria-label="ซ่อนยอดอื่น" onClick={() => setAlt(false)}>ซ่อน</button></span>
                 {plan.figures.map((x) => {
                   const on = choice.figure === undefined ? x.proposed : choice.figure === x.key;
                   return (
@@ -373,6 +408,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
                     value={manual}
                     onFocus={() => choice.figure !== 'manual' && pick({ figure: 'manual', manual: parseAmount(manual) ?? null })}
                     onChange={(ev) => (setManual(ev.target.value), pick({ figure: 'manual', manual: parseAmount(ev.target.value) ?? null }))}
+                    onKeyDown={enter}
                   />
                 </label>
                 {plan.whtShort && (
@@ -385,10 +421,11 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
             )}
             {type && plan.links.type && (
               <div className="oa-seg">
-                <span className="oa-seg-h">เอกสารนี้คือ<button type="button" className="lnk" onClick={() => setType(false)}>ซ่อน</button></span>
-                <div className="oa-seg-r" role="radiogroup" aria-label="ประเภทเอกสาร">
-                  {plan.tiles.map((t) => (
-                    <button key={t.key} type="button" role="radio" aria-checked={t.on} className={t.on ? 'on' : ''} onClick={() => pick({ ...t.choice, count: undefined, stage: t.choice.stage })}>
+                <span className="oa-seg-h">เอกสารนี้คือ<button type="button" className="lnk" aria-label="ซ่อนประเภทเอกสาร" onClick={() => setType(false)}>ซ่อน</button></span>
+                {/* a radio group: one Tab stop (the chosen tile), the arrow keys move and choose */}
+                <div className="oa-seg-r" role="radiogroup" aria-label="ประเภทเอกสาร" onKeyDown={tileKey}>
+                  {plan.tiles.map((t, i) => (
+                    <button key={t.key} type="button" role="radio" aria-checked={t.on} tabIndex={t.on || (!plan.tiles.some((x) => x.on) && i === 0) ? 0 : -1} className={t.on ? 'on' : ''} onClick={() => pickTile(t)}>
                       <span>{t.label}</span>
                       <small>{t.sub}</small>
                     </button>
@@ -399,7 +436,7 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
             {noteOpen && plan.links.note && (
               <label className="oa-note">
                 โน้ตของขั้นนี้
-                <input className="fld" value={note} maxLength={3000} placeholder={plan.mode === 'quote' ? 'เช่น ส่งใบเสนอราคาทางอีเมลแล้ว' : 'เช่น ลูกค้าโอนเข้าบัญชีแล้ว'} onChange={(ev) => setNote(ev.target.value)} />
+                <input className="fld" value={note} maxLength={3000} placeholder={plan.mode === 'quote' ? 'เช่น ส่งใบเสนอราคาทางอีเมลแล้ว' : 'เช่น ลูกค้าโอนเข้าบัญชีแล้ว'} onChange={(ev) => setNote(ev.target.value)} onKeyDown={enter} />
               </label>
             )}
             {plan.after && (
