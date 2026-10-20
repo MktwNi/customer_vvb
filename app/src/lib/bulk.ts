@@ -197,6 +197,11 @@ export const followedMenuWords = (n: number) =>
 /** The send dialog's line when it holds a first batch of them. */
 export const followedMoreWord = (more: number) =>
   `ส่งได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท อีก ${fmtN(more)} บริษัทที่ติดตามส่งได้ในครั้งถัดไป`;
+/** After such a batch is sent the dialog lands on the year's table: its note then says how many followed
+ *  companies are still not in it (counted after the send, so one unticked in the dialog counts too) and where
+ *  the next batch is (เพิ่มลูกค้า → ส่งบริษัทที่ติดตามอยู่). Nothing when none is left. */
+export const followedLeftWord = (left: number, year: string) =>
+  left > 0 ? ` · อีก ${fmtN(left)} บริษัทที่ติดตามยังไม่อยู่ในตารางปี ${year} กด “เพิ่มลูกค้า” เพื่อส่งชุดถัดไป` : '';
 /** The ผู้รับผิดชอบ dialog's line under its title. */
 export const ownerSub = (n: number, team: boolean) => `ให้ ${fmtN(n)} บริษัทที่เลือก · ${team ? 'ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท' : 'ชื่อนี้ขึ้นในหน้าบริษัท'} และใช้กรองได้`;
 /** The appointment dialog's warning for many: "จะสร้าง 2,228 นัดในแผนติดต่อของทีม". */

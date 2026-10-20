@@ -3,7 +3,7 @@ import {
   BIG, MAX_BULK, TIMED_MAX, TRACKER_MAX, allWord, bulkActs, clearedWord, confirmWords, createSel, dealSig, followNote, followSplit, hintWord, keyView, localWord,
   noTimeWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, planNote, planWarn, pruneSel, rowCo, rowFits, rowKey, selKey, selView, selWord, spread,
   taskDates, timedOk, toggleAll, toggleKey, tooManyWord, trackerCapWord, trackerNote, trackerWarn, undoSentNote, unfollowNote,
-  followedBatch, followedMenuWords, followedMoreWord, followedSendTip, followedSendWord,
+  followedBatch, followedLeftWord, followedMenuWords, followedMoreWord, followedSendTip, followedSendWord,
 } from './bulk';
 import { newDeal } from './sales';
 import { EMPTY_FILTERS, type Filters } from './search';
@@ -229,6 +229,9 @@ describe('sending every followed company: at most TRACKER_MAX a press (review: 9
     expect(followedMenuWords(12)).toEqual({ label: 'ส่งบริษัทที่ติดตามอยู่ (12)', sub: 'ที่ยังไม่อยู่ในตารางปีนี้' });
     expect(followedMenuWords(1478)).toEqual({ label: 'ส่งบริษัทที่ติดตามอยู่ 300 บริษัทแรก', sub: 'จาก 1,478 บริษัทที่ยังไม่อยู่ในตารางปีนี้' });
     expect(followedMoreWord(607)).toBe('ส่งได้ครั้งละไม่เกิน 300 บริษัท อีก 607 บริษัทที่ติดตามส่งได้ในครั้งถัดไป');
+    // the table's note after a batch: how many still wait, and where the next batch is; nothing when none
+    expect(followedLeftWord(607, '2569')).toBe(' · อีก 607 บริษัทที่ติดตามยังไม่อยู่ในตารางปี 2569 กด “เพิ่มลูกค้า” เพื่อส่งชุดถัดไป');
+    expect(followedLeftWord(0, '2569')).toBe('');
   });
 });
 

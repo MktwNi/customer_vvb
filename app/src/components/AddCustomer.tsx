@@ -7,8 +7,9 @@ import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
 import { customersOf, jointRole, payerDeal } from '../lib/sales';
-import { fmtN } from '../lib/format';
-import { BIG, TRACKER_MAX, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
+import { fmtN, todayISO } from '../lib/format';
+import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
+import { followRows } from '../lib/follow';
 import { useSalesActs } from './SalesToast';
 
 /** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
@@ -197,7 +198,9 @@ export function SendToTracker() {
       const d = e.dealsOf(cos[0].id).find((x) => x.year === year && jointRole(e.sales, x) !== 'header');
       set({ sendIds: null, sel: null, deal: d ? d.id : null, slYear: year });
     } else {
-      set({ sendIds: null, sel: null, tab: 'sales', slView: 'table', slYear: year, slNote: note });
+      // a batch of the followed companies (ui.sendMore: opened with more left over): say how many still wait
+      const left = ui.sendMore > 0 ? followRows(e, year, todayISO()).filter((x) => !x.deal).length : 0;
+      set({ sendIds: null, sel: null, tab: 'sales', slView: 'table', slYear: year, slNote: note + followedLeftWord(left, year) });
     }
   };
   const years = [...new Set([beYear(), String(+beYear() + 1), year])].sort();

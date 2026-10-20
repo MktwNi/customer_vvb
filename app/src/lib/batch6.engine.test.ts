@@ -14,7 +14,7 @@ import { followIdsOf, followRows } from './follow';
 import { openJob, planRows, rowsOf, srcCounts, type PlanSrc } from './planList';
 import { custTypes, typesOf } from './svcType';
 import { custKey, dealKey } from './custColor';
-import { TRACKER_MAX, followSplit, followedBatch, unfollowNote, confirmWords } from './bulk';
+import { TRACKER_MAX, followSplit, followedBatch, followedLeftWord, unfollowNote, confirmWords } from './bulk';
 import { HELP_TOPICS, searchHelp } from './helpContent';
 import { memoryStore } from './storage';
 import type { Company, Dataset, RoundRaw } from './types';
@@ -145,8 +145,10 @@ describe('บริษัทที่ติดตาม over TRACKER_MAX: ส่
       const has = e.trackedIn(YEAR);
       expect(b.ids.filter((id) => !has(e.company(id)!)).length).toBeLessThanOrEqual(TRACKER_MAX);
       added.push(e.addDealsFromCompanies(b.ids, { year: YEAR }).added);
-      // the dialog said how many were left: that many still to send
+      // the dialog said how many were left: that many still to send, and the table's note says so after
+      // the send (components/AddCustomer.tsx counts them the same way), nothing after the last batch
       expect(notIn().length).toBe(b.more);
+      expect(followedLeftWord(notIn().length, YEAR)).toBe(b.more ? ` · อีก ${b.more} บริษัทที่ติดตามยังไม่อยู่ในตารางปี ${YEAR} กด “เพิ่มลูกค้า” เพื่อส่งชุดถัดไป` : '');
     }
     expect(added).toEqual([300, 300, 50]);
     expect(notIn()).toEqual([]);
