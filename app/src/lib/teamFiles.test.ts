@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
-import { base64ToBlob, blobToBase64, deleteDocFile, DOC_ACCEPT, DOC_MAX_BYTES, docMime, downloadDocFile, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { base64ToBlob, blobToBase64, deleteDocFile, DOC_ACCEPT, DOC_MAX_BYTES, docMime, downloadDocFile, fileFetchTransport, NOT_SCRIPT, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { call, errText, TeamSyncError, type Transport } from './teamSync';
 
 // the 10 MB cases push ~14 MB of base64 through JSON and the simulator
@@ -276,6 +276,21 @@ describe('attached documents through Code.gs (run in the simulator)', () => {
     await expect(downloadDocFile(ot, URL, KEY, 'abc')).rejects.toThrow('เวอร์ชันเก่า');
     await expect(deleteDocFile(ot, URL, KEY, 'abc')).rejects.toThrow('เวอร์ชันเก่า');
     expect(old.post({ action: 'push', key: KEY, ops: [{ k: 'stage/1', v: 'won' }] }).ok).toBe(true); // team sync is unaffected
+  });
+
+  it('a reply that is not the script\'s (doGet\'s, after a redirect turned the POST into a GET) is an error, not "old script", and no upload counts without a file id', async () => {
+    const got = s.get();
+    expect(got).toMatchObject({ ok: true, app: 'gcc-team-sync' });
+    expect(got).not.toHaveProperty('seq');
+    const doGet: Transport = async () => s.get();
+    const err = await scriptSupportsFiles(doGet, URL, KEY).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamSyncError);
+    expect([err.code, err.message]).toEqual(['not_script', NOT_SCRIPT]);
+    // the live build stored String(undefined) as the Drive file of such a reply: never again
+    const up = await uploadDocFile(doGet, URL, KEY, { docId: 'a', name: 'a.pdf', mime: 'application/pdf', blob: new Blob([PNG]) }).catch((e) => e);
+    expect(up).toBeInstanceOf(TeamSyncError);
+    expect(up.code).toBe('not_script');
+    await expect(uploadDocFile(async () => ({ ok: true, fileId: '' }), URL, KEY, { docId: 'a', name: 'a.pdf', mime: 'application/pdf', blob: new Blob([PNG]) })).rejects.toThrow(NOT_SCRIPT);
   });
 
   it('explains a script whose owner has not allowed Google Drive yet, and sync keeps working', async () => {

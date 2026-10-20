@@ -85,6 +85,8 @@ export interface ReqInput { k: 'role' | 'caps'; role?: string; caps?: CapAsk[]; 
 const OLD_SCRIPT = 'สคริปต์ของทีมยังไม่รองรับบทบาทและคำขอสิทธิ์ — ให้ผู้ดูแลระบบอัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่';
 /** The same for the notification actions (qt_check, notify_*). */
 const OLD_NOTIFY = 'สคริปต์ของทีมยังไม่รองรับการแจ้งเตือนและการตรวจใบเสนอราคา — ให้ผู้ดูแลระบบอัปเดต Code.gs ตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน';
+/** How long a script found unable to store files is taken at its word before the upload round asks again. */
+export const FILES_RECHECK_MS = 60000;
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -221,8 +223,12 @@ export class GccEngine {
   private teamGen = 0;
   private teamTimer: ReturnType<typeof setInterval> | null = null;
   private teamFlush: ReturnType<typeof setTimeout> | null = null;
-  private teamWake = () => {
-    if (this.teamCfg && !(typeof document !== 'undefined' && document.hidden)) this.teamSync();
+  /** The 30 s timer (no event), or focus / the tab shown again / back online (an event). */
+  private teamWake = (ev?: Event) => {
+    if (!this.teamCfg || (typeof document !== 'undefined' && document.hidden)) return;
+    // someone coming back to the page (told the lead has deployed) sees held files go up at once
+    if (ev) this.filesRecheck();
+    this.teamSync();
   };
   private teamPrefsChanged = (e: StorageEvent) => {
     if (e.key === PREF.wipe) {
@@ -2663,7 +2669,7 @@ export class GccEngine {
       }
     });
     this.saveSales();
-    this.uploadDocs();
+    this.uploadDocs(true);
     return S.docs[k];
   }
   /** An ISO time now, but after every given one: the order of "typed forecast" and "confirmed
@@ -2821,7 +2827,7 @@ export class GccEngine {
     });
     this.dropDocFile(old);
     this.saveSales();
-    this.uploadDocs();
+    this.uploadDocs(true);
     return S.docs[k];
   }
   private dropDocFile(doc: DealDoc) {
@@ -2904,11 +2910,34 @@ export class GccEngine {
   private docRefused = new Set<string>();
   /** Documents whose file is not in this browser (attached on another device). */
   private docsAway = new Set<string>();
+  /** Documents whose file this browser was found to hold (not looked up again each round). */
+  private docsHere = new Set<string>();
+  /** When the script was last asked whether it stores files (0: ask at the next round). */
   private teamFilesAt = 0;
+  /**
+   * Files attached in this browser held here because the team's link answers as a script that cannot
+   * store files (the Sales tab's notice says what the team lead does). Follows the files themselves: it is
+   * 0 once they went up from another tab, were deleted, or another account signed in.
+   */
+  get docsHeld() {
+    return this.teamCfg && this.teamFiles === false ? this.docsUnsent : 0;
+  }
+  /** Ask the script again at the next round instead of waiting FILES_RECHECK_MS (the lead may have
+   *  deployed the new version meanwhile). */
+  private filesRecheck() {
+    if (this.teamFiles === false) this.teamFilesAt = 0;
+  }
+  /** Whether a document or bill the script refused for good is still here, waiting: its message stays. */
+  private refusedHere(cfg: TeamCfg | null) {
+    return Object.values(this.sales.docs).some((d) => !d.fileId && this.docRefused.has(d.id) && this.sales.deals[d.deal]) || this.billsWaiting(cfg).some((x) => this.docRefused.has(expDocId(x.id)));
+  }
   /** The upload run in flight: a caller that needs it done (signing out) waits for it. */
   private docRun: Promise<void> | null = null;
-  async uploadDocs() {
+  /** `fresh`: a new file was just attached (or this is the last try at signing out): a script last found
+   *  unable to store files is asked again now. */
+  async uploadDocs(fresh = false) {
     const cfg = this.teamCfg;
+    if (fresh) this.filesRecheck();
     if (!cfg || !this.filesUp()) return;
     if (this.docRun) return this.docRun;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
@@ -2929,18 +2958,34 @@ export class GccEngine {
       await this.flushDocDeletes(cfg);
       // only documents of deals that still exist, and that this browser has the file of
       // with accounts, only this account's files: another person's unsent file on a shared browser is theirs to send
-      const todo = !this.can('docs.up') ? [] : Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
+      const mine = !this.can('docs.up') ? [] : Object.values(this.sales.docs).filter((d) => !d.fileId && this.sales.deals[d.deal] && !this.docRefused.has(d.id) && this.docMine(cfg, d));
+      // one attached on another device (no copy here) is that device's to upload, and not held here either:
+      // looked up once, before the script is asked anything
+      for (const d of mine) {
+        if (this.docsAway.has(d.id) || this.docsHere.has(d.id)) continue;
+        if (await this.store.get(this.docBlobKey(d.id))) this.docsHere.add(d.id);
+        else this.docsAway.add(d.id);
+      }
+      const todo = mine.filter((d) => !this.docsAway.has(d.id));
       // expenses' bills attached here go up the same way (docId exp_<expId>, uploadBills)
       const bills = this.billsWaiting(cfg).filter((x) => !this.docRefused.has(expDocId(x.id)));
-      if ((!todo.length && !bills.length) || Date.now() < this.docRetryAt) return;
-      // "old script" is checked again every 10 minutes: the lead may deploy the new one meanwhile
-      if (this.teamFiles === false && Date.now() - this.teamFilesAt > 10 * 60000) this.teamFiles = null;
+      if (!todo.length && !bills.length) {
+        // nothing of this browser's waits (uploaded from another tab, deleted, another account signed in): a
+        // message about waiting files is out of date; one naming a refused file stays while that file is here
+        if (!this.refusedHere(cfg)) this.docMsg = '';
+        return;
+      }
+      if (Date.now() < this.docRetryAt) return;
+      // a script that cannot store files is asked again a minute later, and at once when the tab is shown
+      // again or a file is attached (filesRecheck): the lead may deploy the new version meanwhile
+      if (this.teamFiles === false && Date.now() - this.teamFilesAt >= FILES_RECHECK_MS) this.teamFiles = null;
       if (this.teamFiles == null) {
         this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, this.cred(cfg));
         this.teamFilesAt = Date.now();
       }
       if (!this.teamFiles) {
-        this.docMsg = 'สคริปต์ของทีมยังเป็นเวอร์ชันเก่า เอกสารจึงเก็บไว้ในเครื่องนี้ — อัปเดต Code.gs แล้ว Deploy เวอร์ชันใหม่ (ดูคู่มือ) เพื่อเก็บใน Drive ของทีม';
+        // the files stay here: the Sales tab's notice (docsHeld) says so and what the team lead does
+        this.docMsg = '';
         return;
       }
       for (const doc of todo) {
@@ -3140,7 +3185,7 @@ export class GccEngine {
     this.billHere(expId, fid ? null : { deal: dealId, by: this.me() });
     this.docRefused.delete(expDocId(expId));
     this.saveSales();
-    this.uploadDocs();
+    this.uploadDocs(true);
     return { ...x, id: expId, deal: dealId };
   }
   /** Take an expense's bill off (the expense stays): this browser's copy goes, the team's file to the trash. */
@@ -4667,6 +4712,8 @@ export class GccEngine {
     this.caps = { ...c, url };
     this.capsAt = Date.now();
     if (c.v === 3) this.heardNotify(url, c.nf ?? null);
+    // the script says it stores files: one found unable to is asked again at the next round
+    if (c.files && this.teamCfg?.url === url) this.filesRecheck();
   }
   /** The script's public values for hashing a password (team id, rounds); they never change. */
   private async capsFor(url: string) {
@@ -5112,7 +5159,7 @@ export class GccEngine {
       this.docRetryAt = 0; // a last try for files waiting after a failed upload, too
       const flush = async () => {
         await this.teamSyncNow().catch(() => {});
-        await this.uploadDocs();
+        await this.uploadDocs(true);
       };
       await Promise.race([flush(), new Promise((r) => setTimeout(r, 10000))]);
     }
@@ -5901,7 +5948,10 @@ export class GccEngine {
     this.delivered = new Map();
     this.teamNeedKey = false;
     this.teamFiles = null;
+    this.teamFilesAt = 0;
     this.docRetryAt = this.docFails = 0;
+    // a message about this session's uploads is not the next one's (a refused file's stays while it is here)
+    if (!this.refusedHere(null)) this.docMsg = '';
     this.hidden = new Set();
     this.others = [];
   }

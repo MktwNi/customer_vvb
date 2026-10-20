@@ -1,6 +1,7 @@
 import { Fragment, createContext, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { useApp, useEngineVersion, type UIState } from '../state';
 import { daysBetween, dmTh, dtTh, fmtN, isoTh, localDay, todayISO } from '../lib/format';
+import { CONFIG } from '../lib/constants';
 import {
   ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, actsOf, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, docMismatch, filterDeals, fmtMoney, isPayStage, lastContactInfo, mismatchText,
   normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payStages, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stageActs, stageDocs, stageTh, stageTrack, stepOf, withActIndex, workTally,
@@ -164,6 +165,7 @@ export function Sales() {
         }
       />
       <span className="sr-only" role="status">{said}</span>
+      <DocsHeldNote />
       {e.docMsg && <Notice kind="error">{e.docMsg}</Notice>}
       <BillsStuckNote />
       {ui.slNote && (
@@ -202,6 +204,33 @@ export function Sales() {
       {view === 'closed' && <ClosedView S={S} F={f} deals={closedRows} facets={yearDeals} total={closedN} today={today} />}
       {view === 'log' && <LogView S={S} year={year} />}
     </>
+  );
+}
+
+/**
+ * Files attached in this browser that wait here because the team's link answers as a script that cannot
+ * store files (engine.docsHeld). Said to the person who attached them, who cannot fix it: their files are
+ * safe and go up by themselves, what not to do meanwhile, and the one thing the team lead does (a new
+ * version of the deployment the site already calls, not a new deployment). It goes as soon as the files do.
+ */
+function DocsHeldNote() {
+  const { engine: e } = useApp();
+  useEngineVersion();
+  const n = e.docsHeld;
+  if (!n) return null;
+  return (
+    <div className="doc-held" role="status">
+      <p className="doc-held-h">
+        ไฟล์ที่แนบ {fmtN(n)} ไฟล์ยังเก็บอยู่ในเบราว์เซอร์นี้ ยังไม่ขึ้น Drive ของทีม · ไฟล์ไม่หาย และจะอัปโหลดให้เองภายใน 2 นาทีหลังสคริปต์ของทีมพร้อม ขณะเปิดเว็บนี้ในเบราว์เซอร์นี้ (รีเฟรชหน้าเว็บเพื่อส่งทันที)
+      </p>
+      <p>ระหว่างนี้อย่าล้างข้อมูลการท่องเว็บ อย่าลบหรือเปลี่ยนไฟล์ที่แนบ และถ้าออกจากระบบ อย่าเลือก “ลบรายการที่ยังไม่ได้ส่งด้วย”</p>
+      <p>
+        สิ่งที่หัวหน้าทีมต้องทำ: ลิงก์ที่เว็บใช้ยังเรียกสคริปต์รุ่นที่เก็บไฟล์ไม่ได้ ใน Apps Script ให้วาง Code.gs รุ่นล่าสุด (ถ้ายังไม่ได้วาง) แล้วกด “การทำให้ใช้งานได้” เลือก “จัดการการทำให้ใช้งานได้” กด “แก้ไข” (รูปดินสอ) ที่รายการเดิม เลือกเวอร์ชันเป็น “เวอร์ชันใหม่” แล้วกด “ทำให้ใช้งานได้” (Deploy, Manage deployments, Edit, New version) ไม่ต้องสร้างรายการใหม่{' '}
+        <a href={CONFIG.teamGuideUrl} target="_blank" rel="noopener noreferrer" className="hv-tx">
+          ดูคู่มือ
+        </a>
+      </p>
+    </div>
   );
 }
 

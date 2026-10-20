@@ -73,7 +73,9 @@ export async function uploadDocFile(t: Transport, url: string, key: Cred, f: { d
   if (!f.blob.size) return refused('empty_file');
   if (f.blob.size > DOC_MAX_BYTES) return refused('file_too_large');
   const r = await call(t, url, key, { action: 'upload', docId: f.docId, name: f.name, mime, data: await blobToBase64(f.blob) });
-  return { fileId: String(r.fileId), size: Number(r.size) };
+  // never mark a document uploaded without the Drive file it is ("undefined" would open nothing, for good)
+  if (typeof r.fileId !== 'string' || !r.fileId) throw new TeamSyncError(NOT_SCRIPT, 'not_script', r);
+  return { fileId: r.fileId, size: Number(r.size) };
 }
 
 export async function downloadDocFile(t: Transport, url: string, key: Cred, fileId: string): Promise<{ blob: Blob; name: string; mime: string }> {
@@ -97,10 +99,16 @@ export async function deleteDocFile(t: Transport, url: string, key: Cred, fileId
   }
 }
 
+/** A reply with ok:true that no version of the script gives to that request: doGet's {ok, app, hint}
+ *  when a redirect turned the POST into a GET, or some other page in between. */
+export const NOT_SCRIPT = 'ลิงก์ของทีมตอบกลับไม่ใช่คำตอบของสคริปต์ — ให้หัวหน้าทีมตรวจว่าเว็บใช้ลิงก์ Web app ที่ลงท้ายด้วย /exec และตั้งให้ "ทุกคน (Anyone)" เข้าถึงได้';
+
 /** Whether the deployed script stores attachments; a script from before this feature has no
- *  `files` flag in its ping (and answers the file actions with unknown_action). */
+ *  `files` flag in its ping (and answers the file actions with unknown_action). Every version answers
+ *  ping with its `seq`: a reply without one is not the script's, and is an error rather than "old". */
 export async function scriptSupportsFiles(t: Transport, url: string, key: Cred): Promise<boolean> {
   const r = await call(t, url, key, { action: 'ping' });
+  if (!('seq' in r)) throw new TeamSyncError(NOT_SCRIPT, 'not_script', r);
   return r.files === true;
 }
 
