@@ -966,7 +966,7 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 /* ---- Sales Tracker (tabs/Sales.tsx; tracker spec v3): KPI cards, one white table card whose deal rows
    open into one child row per stage, the หมวด band, the closing row, the phone cards. Words, not glyphs;
    two weights (the band name is the one 600). */
-:is(.sl-card,.sl-mlist,.dp,.sl-toast,.sl-tabbar,.sl-m-hint,.sl-stagebar,.sl-after,.sl-list,.sl-closed-sum,.sl-empty-card) :is(b,strong){font-weight:500}
+:is(.sl-card,.sl-mlist,.dp,.sl-toast,.sl-tabbar,.sl-m-hint,.sl-list,.sl-closed-sum,.sl-empty-card) :is(b,strong){font-weight:500}
 .sl-ph-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sl-menuw{position:relative}
 .sl-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:min(300px,86vw)}
@@ -1510,28 +1510,8 @@ button.sl-amt{cursor:pointer}
 .sl-toast button:focus-visible{outline-color:#fff}
 @media (max-width:760px){.sl-live{bottom:14px}.sl-toast{flex-wrap:wrap}.sl-toast:has(button:not(.x))>span{flex-basis:100%}.sl-toast:not(:has(button:not(.x))){flex-wrap:nowrap}}
 
-/* ---- DocAttach at a stage (components/DocAttach.tsx) */
+/* ---- a dialog's line under its title (QtSwap, the closing questions); the attach dialog: .oa-* (end of file) */
 .sl-dlg-sub{margin-top:-8px;font-size:var(--fs-sec);color:var(--muted)}
-.sl-stagebar{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--tint);font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
-.sl-stagebar .sl-bd{--s:16px;flex:none}
-.sl-stagebar b{color:var(--ink)}
-.sl-repl{border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 14px 12px;margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
-.sl-repl legend{padding:0 4px;font-size:var(--fs-sec);color:var(--ink-2)}
-.sl-repl label{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:var(--fs-body);cursor:pointer}
-.sl-after{border-radius:var(--r-inner);padding:10px 14px;background:var(--ok-bg);color:var(--ok);font-size:var(--fs-sec);line-height:1.6}
-/* the document's figure against the one it should match: "ตรงกับเอกสาร", or a warning with the two choices
-   (a choice on the amber box takes a deeper amber under the pointer: its --hv) */
-.sl-xchk{margin:0;border-radius:var(--r-inner);font-size:var(--fs-sec);line-height:1.6;min-width:0}
-.sl-xchk.ok{padding:8px 14px;background:var(--ok-bg);color:var(--ink-2)}
-.sl-xchk.ok b{color:var(--ok);font-weight:500}
-.sl-xchk.warn{border:0;background:var(--warn-bg);padding:10px 14px 12px;display:flex;flex-direction:column;gap:6px;--hv:#FCE6BB}
-.sl-xchk.warn legend{float:left;width:100%;padding:0;color:var(--warn);font-size:var(--fs-body);font-weight:500;line-height:1.5}
-.sl-xchk label{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:var(--fs-body);color:var(--ink);cursor:pointer}
-.sl-xchk-b{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:var(--fs-meta);color:var(--ink-2)}
-.sl-xchk-b .btn[aria-pressed=true]{border-color:var(--warn);color:var(--warn)}
-.sl-rf-full{display:flex;gap:8px;align-items:center;font-size:var(--fs-sec);color:var(--ink);background-color:var(--warn-bg);border-radius:12px;padding:8px 12px;cursor:pointer;transition:background-color .12s}
-/* (an amber box of its own, not a text link: under the pointer a deeper amber, never the blue tint and its halo) */
-@media (hover:hover){.sl-rf-full:hover{background-color:#FCE6BB}}
 
 /* ---- the deal panel (components/DealPanel.tsx, design §7.8): a white head with one summary strip on
    the page colour, white cards below */
@@ -2316,3 +2296,94 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .co-name.title{font-size:var(--fs-title)}
 @media (max-width:560px){.dp-name.co-name.title{font-size:var(--fs-section)}}
 .t-ok{color:var(--ok)}.t-warn{color:var(--warn)}.t-bad{color:var(--bad)}.t-muted{color:var(--muted)}.t-link{color:var(--link)}
+
+/* ---------------------------------------------------------------- attaching a document in one screen
+   (components/DocAttach, lib/attachPlan): the document, ONE amount with why, one sentence when money may be
+   counted already (a word tag carries it, never the colour alone), "หลังบันทึก", one button that names the
+   amount. The other figures, the type and a note open in place. Phone: the button bar stays at the bottom
+   while those are open. */
+.oa{display:flex;flex-direction:column;gap:14px;min-width:0}
+.oa-sub{margin-top:-8px;font-size:var(--fs-sec);color:var(--muted);line-height:1.5}
+.oa-narrow{display:none}
+.oa-doc{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-inner);background:#fff;min-width:0}
+.oa-doc>img,.oa-doc>.oa-ph{width:40px;height:54px;object-fit:cover;object-position:top;border:1px solid var(--line);border-radius:6px;flex:none;background:#fff}
+.oa-doc>.oa-ph{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);background:var(--frame)}
+.oa-doc-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;line-height:1.5}
+.oa-doc-t>b{font-weight:500;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oa-doc-t>span{font-size:13px;color:var(--ink-2)}
+.oa-doc-t>small{font-size:12px;color:var(--muted)}
+.oa-doc-t .lnk{font-size:13px;margin-left:6px}
+.oa-doc>.lnk{font-size:13px;flex:none;align-self:flex-start;margin-top:2px}
+.oa-read{display:flex;flex-direction:column;gap:8px;font-size:14px;color:var(--ink-2)}
+.oa-bar{display:block;height:6px;background:var(--bar-track);border-radius:var(--r-pill);overflow:hidden}
+.oa-bar>i{display:block;height:100%;background:var(--bar);transition:width .2s}
+.oa-amt{display:flex;flex-direction:column;gap:2px;padding:2px 2px 0}
+.oa-amt-l{font-size:13px;color:var(--ink-2)}
+.oa-amt-v{font-size:40px;font-weight:500;line-height:1.25;font-variant-numeric:tabular-nums;color:var(--ink);letter-spacing:-.01em}
+.oa-amt-v small{font-size:16px;font-weight:400;color:var(--ink-2);margin-left:8px;letter-spacing:0}
+.oa-why{font-size:14px;color:var(--ink);line-height:1.6}
+.oa-fig{font-size:12px;color:var(--muted);line-height:1.55;font-variant-numeric:tabular-nums}
+.oa .nw{white-space:nowrap}
+.oa-links{display:flex;gap:4px 20px;flex-wrap:wrap;padding:2px 2px 0}
+.oa-links .lnk,.oa-box .lnk,.oa-alt-h .lnk,.oa-seg-h .lnk{font-size:13px}
+.oa-box{border-radius:var(--r-inner);padding:10px 14px;font-size:13px;line-height:1.6;color:var(--ink-2)}
+.oa-box p{margin:0}
+.oa-box b{font-weight:500;color:var(--ink)}
+.oa-box.info{background:var(--tint)}
+.oa-box.warn{background:var(--warn-bg)}
+.oa-box.after{background:var(--frame)}
+.oa-box.after.warn{background:var(--warn-bg)}
+.oa-box.after>p>b:first-child{color:var(--ink-2);margin-right:6px}
+.oa-tag{display:inline-block;font-size:12px;font-weight:500;line-height:1.5;padding:0 8px;border-radius:var(--r-pill);background:#fff;margin-right:8px;vertical-align:1px;white-space:nowrap}
+.oa-box.info .oa-tag{color:var(--link);box-shadow:inset 0 0 0 1px var(--link)}
+.oa-box.warn .oa-tag{color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)}
+.oa-alt{border:1px solid var(--line);border-radius:var(--r-inner);padding:10px 14px 12px;display:flex;flex-direction:column;gap:2px}
+.oa-alt-h,.oa-seg-h{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--ink-2);padding-bottom:4px}
+.oa-alt label{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink);min-height:36px;cursor:pointer}
+.oa-alt label>span{flex:1;min-width:0}
+.oa-alt label em{font-style:normal;font-size:12px;color:var(--muted);margin-left:6px}
+.oa-alt label>b{font-weight:400;font-variant-numeric:tabular-nums}
+.oa-alt label.on>b{font-weight:500}
+.oa-alt input[type=radio],.oa-alt input[type=checkbox]{accent-color:var(--brand);margin:0;flex:none}
+.oa-alt .fld{height:36px;width:150px;text-align:right;flex:none}
+.oa-alt .oa-chk{border-top:1px solid var(--line);margin-top:4px;padding-top:6px}
+.oa-seg{display:flex;flex-direction:column;gap:8px}
+.oa-seg-r{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.oa-seg-r button{position:relative;cursor:pointer;border:1px solid var(--field);background:#fff;border-radius:12px;padding:8px 10px 8px 32px;text-align:left;font:inherit;font-size:13px;color:var(--ink);display:flex;flex-direction:column;gap:1px;line-height:1.45;min-width:0}
+.oa-seg-r button small{font-size:12px;color:var(--muted)}
+.oa-seg-r button::before{content:'';position:absolute;left:11px;top:11px;width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--field);background:#fff}
+.oa-seg-r button.on{border-color:var(--brand);background:var(--tint);box-shadow:inset 0 0 0 1px var(--brand)}
+.oa-seg-r button.on>span{color:var(--link);font-weight:500}
+.oa-seg-r button.on::before{box-shadow:inset 0 0 0 1.5px var(--brand),inset 0 0 0 4px #fff;background:var(--brand)}
+.oa-note,.oa-row2 label,.oa-lab{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2);min-width:0}
+.oa-row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.oa-row2 .fld,.oa-note .fld{width:100%;min-width:0;box-sizing:border-box}
+.oa-evid{margin:0;font-size:14px;color:var(--ink);line-height:1.6}
+.oa-scan{display:grid;grid-template-columns:160px minmax(0,1fr);gap:16px;align-items:start}
+.oa-scan>img{width:160px;height:220px;object-fit:cover;object-position:top;border-radius:12px;border:1px solid var(--line)}
+.oa-scan-f{display:flex;flex-direction:column;gap:10px;min-width:0}
+.oa-scan-f>label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--ink);line-height:1.5}
+.oa .oa-big{height:52px;font-size:24px;font-weight:500;font-variant-numeric:tabular-nums;width:100%;box-sizing:border-box}
+.oa-hint{font-size:12px;color:var(--muted);line-height:1.5}
+.oa-err{font-size:13px;color:var(--bad)}
+.oa-act .lnk.left{margin-right:auto;font-size:13px}
+/* the choices open (the dialog may scroll): the buttons stay in view at the bottom */
+.oa.oa-open .oa-act{position:sticky;bottom:-22px;background:#fff;padding:10px 0 6px;margin-bottom:-6px;z-index:2;box-shadow:0 -1px 0 var(--line)}
+/* the step card's "รับเงินแล้ว (ไม่มีไฟล์)" with no plan and no Forecast: the amount, then บันทึก */
+.sl-drop-ask{flex:1 1 100%;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.sl-drop-ask>label{flex:1 1 160px}
+@media (max-width:760px){
+  .oa-wide{display:none}
+  .oa-narrow{display:inline}
+  .oa{gap:12px}
+  .oa-seg-r{grid-template-columns:minmax(0,1fr)}
+  .oa-scan{grid-template-columns:minmax(0,1fr)}
+  .oa-scan>img{width:100%;height:150px;object-position:center 40%}
+  .oa-alt .fld{width:120px}
+  .oa-act>.btn.pri{flex:1}
+  li.cur-step .sl-tl-h{flex-wrap:wrap;row-gap:2px}
+  li.cur-step .sl-tl-h>span{white-space:normal}
+  li.cur-step .sl-drop-b{flex:1 1 100%;flex-direction:column;gap:8px}
+  li.cur-step .sl-drop-b .btn{width:100%;height:40px}
+  li.cur-step .sl-drop-b .sl-drop-pick{order:-1;border-color:var(--brand);color:var(--link)}
+}

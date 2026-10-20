@@ -5,7 +5,7 @@ import { CONFIG } from '../lib/constants';
 import {
   ACT_TH, DEAL_STAGE, KIND_TH, NOTE_MAX, QUOTE_STAGE, attachStage, beYear, closeReady, dateMatch, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, filterDeals, fmtMoney, lastContactInfo, mismatchText,
   normSalesFilter, overdueDays, owedIn, paidNote, parseAmount, payState, planOf, quickMatch, receivables, receivedIn, salesStats, stepCode, stepOf, withActIndex, workTally,
-  type BasisDate, type Deal, type DealAct, type DealDoc, type DealStep, type DealSteps, type DocKind, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState, type StepKind, type StepView,
+  type BasisDate, type Deal, type DealAct, type DealDoc, type DealStep, type DealSteps, type QuickView, type ResultF, type SalesFilter, type SalesState, type StageState, type StepKind, type StepView,
 } from '../lib/sales';
 import { BASIS_TH, JOINT_PAID, acFig, actualSource, beYearInput, closingView, fcFig, lineMeta, lineStatusView, liveCount, monthCounts, nextStepView, overPlan, relText, shortName, stageFig, statusView, stepEdit, stepLines, trackerFields, yearOptions, type FigView, type NextStepView, type StepLine } from '../lib/salesUi';
 import { rangeTh, resolveDate, type DateBasis, type DateF, type Range } from '../lib/dateRange';
@@ -14,7 +14,9 @@ import { Kpi, Notice, PageHead, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
 import { Icon } from '../components/icons';
 import { Modal } from '../components/Dialog';
-import { DocAttach, openDocFile, type AttachMore } from '../components/DocAttach';
+import { openDocFile } from '../components/DocAttach';
+import { useAttach } from '../components/AttachProvider';
+import type { AttachEntry } from '../lib/attachPlan';
 import { QtPhone, deleteQt } from '../components/QtCard';
 import { QtCheckLine } from '../components/QtCheckSheet';
 import { qtFigWords, qtView } from '../lib/quotes';
@@ -33,7 +35,7 @@ import { SalesDash } from './SalesDash';
 import { CashKpiRow, CashView, LensChip, LensMoney, LensNote } from './SalesCash';
 import { cashLines, cashYear, cashYears } from '../lib/sales';
 import { askPay } from '../components/PayChk';
-import { attachLines, previewOf } from '../lib/payCheck';
+import { previewOf } from '../lib/payCheck';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
 import { customersOf, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
@@ -680,7 +682,10 @@ interface Tk {
   /** `act`: the quick-add of a contact record (at `stage`) instead of the stage's own editor */
   openEditor: (id: string, stage: string, trigger?: HTMLElement | null, act?: boolean) => void;
   closeEditor: () => void;
-  attach: (deal: Deal, stage?: string, kind?: DocKind, more?: AttachMore) => void;
+  /** the file picker for a document of the deal (lib/attachPlan AttachEntry: the button says what it is) */
+  attach: (deal: Deal, entry: AttachEntry) => void;
+  /** "รับเงินแล้ว": recorded in one tap (components/AttachProvider useAttach().recv) */
+  recv: (deal: Deal, stage: string) => void;
   openPanel: (id: string, plan?: UIState['dpPlan']) => void;
   acts: ReturnType<typeof useSalesActs>;
   dup: (d: Deal) => boolean;
@@ -711,7 +716,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const cardRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState('');
   const [pop, setPop] = useState('');
-  const [att, setAtt] = useState<{ deal: Deal; stage?: string; kind?: DocKind; more?: AttachMore } | null>(null);
+  const att = useAttach();
   const trigger = useRef<HTMLElement | null>(null);
   const editSeq = useRef(0);
   // each section's rows: a joint quotation as a band at the top of its header's section with its members
@@ -758,11 +763,15 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   };
   const tk: Tk = {
     e, S, today, ro, team: e.crm.team, date, year: ui.slYear, cash, cur, edit: ui.slEdit, menu, setMenu, pop, setPop, toggle, openEditor, closeEditor, acts,
-    attach: (deal, stage, kind, more) => {
+    attach: (deal, entry) => {
       setMenu('');
       if (ui.slEdit) set({ slEdit: null });
-      // a document for the Actual at a stage accounting checked (or of a closed month): asked first
-      askPay(e, { d: deal, lines: attachLines(S, deal.id, stage, kind, more?.target), kind: 'attach', title: 'แนบเอกสาร' + (stage ? ' ' + stage : ''), verb: 'แนบเอกสาร', run: () => setAtt({ deal, stage, kind, more }) });
+      // (a document for the Actual at a stage accounting checked, or of a closed month: asked first)
+      att.open(deal, entry);
+    },
+    recv: (deal, stage) => {
+      setMenu('');
+      att.recv(deal, stage);
     },
     openPanel: (id, plan = '') => {
       setMenu('');
@@ -1024,7 +1033,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
                       r.k === 'deal' ? (
                         <DealRows key={r.d.id} d={r.d} open={!!ui.slOpen[r.d.id]} />
                       ) : (
-                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} attr={attr} onOpen={(id, plan) => tk.openPanel(id, plan)} onRevise={(id) => tk.attach(r.g.head, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id })}>
+                        <JointBand key={'jq' + r.g.head.id} b={r} folded={!!jqFold[r.g.head.id]} onFold={() => foldJq(r.g.head.id)} ro={ro || !e.canDeal('edit.deal', r.g.head)} cash={cash} attr={attr} onOpen={(id, plan) => tk.openPanel(id, plan)} onRevise={(id) => tk.attach(r.g.head, { at: 'quote', revise: id })}>
                           {!jqFold[r.g.head.id] && r.shown.map((d, i) => <DealRows key={d.id} d={d} open={!!ui.slOpen[d.id]} jm={i === r.shown.length - 1 ? 'last' : 'mid'} />)}
                         </JointBand>
                       ),
@@ -1052,7 +1061,6 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
           </p>
         </>
       )}
-      {att && <DocAttach deal={att.deal} stage={att.stage} kind={att.kind} {...att.more} onClose={() => setAtt(null)} />}
     </TkCtx.Provider>
   );
 }
@@ -1360,7 +1368,7 @@ function TypedMoney({ value, label, onSave }: { value: number | null; label: str
  *  "แนบเอกสาร" while the row is pointed at or has the keyboard (the cell holds one short line). */
 function FigSub({ v, onAttach }: { v: FigView; onAttach?: () => void }) {
   if (v.kind === 'ok') return <small className="ok" title={v.title}>จากเอกสาร</small>;
-  if (v.kind === 'warn') return <small className="warn" title={v.title}>ไม่ตรงเอกสาร</small>;
+  if (v.kind === 'warn') return <small className="warn" title={v.title}>{v.word}</small>;
   if (!v.kind) return null;
   return (
     <small className={'sl-fig' + (onAttach ? ' has-a' : '')} title={v.title}>
@@ -1378,7 +1386,7 @@ function MoneyFc({ d }: { d: Deal }) {
   if (tk.cash) return <LensMoney L={tk.cash} d={d} col="fc" won={dealResult(S, d) === 'YES'} />;
   if (jointRole(S, d) === 'member') return <JointShare S={S} d={d} col="fc" />;
   const m = dealMoney(S, d);
-  const att = ro ? undefined : () => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast' });
+  const att = ro ? undefined : () => tk.attach(d, { at: 'quote' });
   const sub = <FigSub v={fcFig(S, d)} onAttach={att} />;
   const ac2 = m.actual != null && <span className="sl-ac2">Actual <b>{fmtMoney(m.actual)}</b></span>;
   if (m.fcDoc || ro)
@@ -1407,7 +1415,7 @@ function MoneyAc({ d, t }: { d: Deal; t?: DealSteps }) {
   if (jointRole(S, d) === 'member') return <JointShare S={S} d={d} col="ac" />;
   const m = dealMoney(S, d), r = dealResult(S, d), ps = payState(S, d, today, t), P = ps.plan, v = acFig(S, d);
   // an invoice or receipt for the installment due next (or the first PAY stage not paid)
-  const att = ro ? undefined : () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' });
+  const att = ro ? undefined : () => tk.attach(d, { at: 'pay' });
   if (P && r === 'YES')
     return (
       <span className="sl-mn">
@@ -1495,6 +1503,9 @@ function RowMenu({ d }: { d: Deal }) {
   // a quotation there already: its revision is one click from the row
   const qv = open && !tk.ro ? qtView(tk.S, d) : null, qh = qv?.head;
   const hid = open && jointRole(tk.S, d) === 'member' ? jointHeadOf(tk.S, d.id) : '';
+  // won: the receipt of the next installment not received (named, so nothing is chosen behind the menu)
+  const won = open && dealResult(tk.S, d) === 'YES';
+  const payNext = won ? attachStage(tk.S, d, { kind: 'receipt', target: 'actual' }, tk.today) : '';
   return (
     <span
       ref={ref}
@@ -1525,14 +1536,22 @@ function RowMenu({ d }: { d: Deal }) {
               {/* a joint quotation's member holds no money: what it files is evidence (its quotation and
                   payments are the joint quotation's, "เปิดใบเสนอราคาร่วม" above) */}
               {hid ? (
-                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, '', 'other'))}>แนบเอกสารอื่น<small>ไม่นับยอด · ใบเสนอราคาและการชำระอยู่ที่ใบเสนอราคาร่วม</small></button>
+                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, { at: 'other' }))}>แนบเอกสารอื่น<small>ไม่นับยอด · ใบเสนอราคาและการชำระอยู่ที่ใบเสนอราคาร่วม</small></button>
               ) : (
-                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d))}>แนบเอกสาร<small>ระบบเลือกขั้นให้</small></button>
-              )}
-              {qh && !hid && (
-                <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qh.doc.id }))}>
-                  แนบใบเสนอราคาฉบับแก้ไข<small>{qh.doc.docNo || 'ใบเสนอราคา'} · {qv!.cur ? `ตอนนี้ใช้ฉบับที่ ${qv!.cur.n}` : `ล่าสุดฉบับที่ ${qh.n}`}</small>
-                </button>
+                <>
+                  {/* each says what the document is: nothing is chosen for you */}
+                  {qh ? (
+                    <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, { at: 'quote', revise: qh.doc.id }))}>
+                      แนบใบเสนอราคาฉบับแก้ไข<small>{qh.doc.docNo || 'ใบเสนอราคา'} · {qv!.cur ? `ตอนนี้ใช้ฉบับที่ ${qv!.cur.n}` : `ล่าสุดฉบับที่ ${qh.n}`}</small>
+                    </button>
+                  ) : (
+                    <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, { at: 'quote' }))}>แนบใบเสนอราคา<small>ยอดในใบนี้เป็น Forecast</small></button>
+                  )}
+                  {won && payNext && (
+                    <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, { at: 'pay', stage: payNext }))}>แนบใบเสร็จ {stepCode(tk.S, d, payNext, tk.today)}<small>นับเงินที่เข้าบัญชีจริง</small></button>
+                  )}
+                  <button role="menuitem" className="menu-i" onClick={pick(() => tk.attach(d, { at: 'other' }))}>แนบเอกสารอื่น<small>สัญญา / PO · ไม่นับยอด</small></button>
+                </>
               )}
               {qh && tk.e.canJoint() && canMergeFrom(tk.S, d) && (
                 <button role="menuitem" className="menu-i" onClick={pick(() => setUi({ jqDlg: { k: 'new', from: d.id } }))}>
@@ -1718,7 +1737,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: DealSteps; list: StepView[
             <span className="qt-kn">
               {note}
               {qcv && <QtCheckLine doc={qv.head.doc} v={qcv} bare />}
-              {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>}
+              {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, { at: 'quote', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>}
             </span>
           );
         // (CONTACT / FOLLOW done with a call booked ahead: the last one, then the next one under it)
@@ -1734,7 +1753,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: DealSteps; list: StepView[
           const fig = hid ? null : stageFig(S, d, p);
           const slot = !fig && !hid && (v.kind === 'quote' ? isNow || st === 'done' : won && isNow) && !ro;
           moneyCell = fig ? <StageAmount fig={fig} ver={qv ? qtFigWords(qv, fig.doc.id) : null} /> : slot ? (
-            <button type="button" className="lnk" onClick={() => tk.attach(d, p)} title={v.kind === 'quote' ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${v.code}`}>
+            <button type="button" className="lnk" onClick={() => tk.attach(d, v.kind === 'quote' ? { at: 'quote' } : { at: 'pay', stage: p })} title={v.kind === 'quote' ? 'ยอดจะเป็น Forecast' : 'ยอดจะรวมเข้า Actual'} aria-label={`แนบ${v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบแจ้งหนี้ หรือใบเสร็จ'}ที่ ${v.code}`}>
               แนบ{v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบเสร็จ'}
             </button>
           ) : null;
@@ -2078,12 +2097,12 @@ function PayRow({ id, cls, d, v, st, isNow, won, next, nameCell, editBtn, more }
   const acts = !won || ro || !next ? null : x.status === 'part' ? (
     <span className="sl-pk-b">
       <button type="button" className="btn xs" onClick={() => { const r = tk.e.setPayFull(d.id, x.stage, true); if (r) tk.acts.prompt(d, 'payment'); else tk.acts.say(`ถือว่ารับครบ ${x.code} แล้ว`); }}>ถือว่ารับครบ</button>
-      <button type="button" className="lnk" onClick={() => tk.attach(d, x.stage, undefined, { add: true })}>แนบใบเสร็จเพิ่ม</button>
+      <button type="button" className="lnk" onClick={() => tk.attach(d, { at: 'pay', stage: x.stage })}>แนบใบเสร็จ</button>
     </span>
   ) : x.status !== 'paid' ? (
     <span className="sl-pk-b">
-      <button type="button" className="btn xs" onClick={() => tk.openPanel(d.id, `recv:${x.stage}`)}>รับเงินแล้ว</button>
-      <button type="button" className="lnk" onClick={() => tk.attach(d, x.stage)}>แนบใบเสร็จ</button>
+      <button type="button" className="btn xs" onClick={() => tk.recv(d, x.stage)}>รับเงินแล้ว</button>
+      <button type="button" className="lnk" onClick={() => tk.attach(d, { at: 'pay', stage: x.stage })}>แนบใบเสร็จ</button>
     </span>
   ) : null;
   const date =
@@ -2270,7 +2289,7 @@ function KidEditor({ d, stage, code, kind, line, won }: { d: Deal; stage: string
             />
             {/* (the date's own column folds away in a narrow table: it comes here instead) */}
             <span className="sl-qa-date" onKeyDown={ed.keys}><DateChip value={ed.date} onChange={ed.setDate} label={`วันที่ ${code}`} /></span>
-            {line && won && line.status !== 'paid' && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.openPanel(d.id, `recv:${stage}`); }}>รับเงินแล้ว</button>}
+            {line && won && line.status !== 'paid' && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.recv(d, stage); }}>รับเงินแล้ว</button>}
           </span>
           <span className="sl-qa-hint">Enter บันทึก · Esc ยกเลิก</span>
         </span>
@@ -2280,10 +2299,10 @@ function KidEditor({ d, stage, code, kind, line, won }: { d: Deal; stage: string
         <span className="sl-m2">
           <span className="k2-fc">
             {stage === QUOTE_STAGE && !tk.ro && !jm && (qh ? (
-              <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage, 'quotation', { target: 'forecast', revise: qh.doc.id }); }}>แนบฉบับแก้ไข</button>
-            ) : !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสนอราคา</button>)}
+              <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, { at: 'quote', revise: qh.doc.id }); }}>แนบฉบับแก้ไข</button>
+            ) : !hasDoc && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, { at: 'quote' }); }}>แนบใบเสนอราคา</button>)}
           </span>
-          <span className="k2-ac">{isMoney && stage !== QUOTE_STAGE && won && !hasDoc && !jm && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>แนบใบเสร็จ</button>}</span>
+          <span className="k2-ac">{isMoney && stage !== QUOTE_STAGE && won && !hasDoc && !jm && <button type="button" className="btn xs" onClick={() => { ed.cancel(); tk.attach(d, { at: 'pay', stage }); }}>แนบใบเสร็จ</button>}</span>
         </span>
       </td>
       <td className="k-st"><button type="button" className="btn pri xs" onClick={ed.save}>บันทึก</button></td>
@@ -2312,15 +2331,15 @@ function DealCard({ d }: { d: Deal }) {
   const money = e.can('view.money'); // without ดูยอดเงิน the card has no figures at all
   // the figures' words: from a document, against one ("ไม่ตรงเอกสาร"), or typed with "แนบเอกสาร"
   const fv = fcFig(S, d), av = acFig(S, d);
-  const word = (v: FigView, none: string) => (v.kind === 'ok' ? 'จากเอกสาร ' + v.docNo : v.kind === 'warn' ? 'ไม่ตรงเอกสาร' : v.word || none);
+  const word = (v: FigView, none: string) => (v.kind === 'ok' ? 'จากเอกสาร ' + v.docNo : v.kind === 'warn' ? v.word : v.word || none);
   const tone = (v: FigView) => (v.kind === 'ok' ? 'ok' : v.kind === 'warn' ? 'warn' : '');
-  const attFc = !ro && (fv.kind === 'typed' || !fv.kind) ? () => tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast' }) : null;
-  const attAc = !ro && (av.kind === 'typed' || av.kind === 'hand' || (!av.kind && won)) ? () => tk.attach(d, attachStage(S, d, { kind: 'receipt', target: 'actual' }, today) || undefined, 'receipt', { target: 'actual' }) : null;
+  const attFc = !ro && (fv.kind === 'typed' || !fv.kind) ? () => tk.attach(d, { at: 'quote' }) : null;
+  const attAc = !ro && (av.kind === 'typed' || av.kind === 'hand' || (!av.kind && won)) ? () => tk.attach(d, { at: 'pay' }) : null;
   const acTile = P && won ? (
     <>
       <b className={P.got ? '' : 'none'}>{P.got ? fmtMoney(P.got) : '—'}</b>
       {av.kind === 'warn' && !P.late.length ? (
-        <small className="warn" title={av.title}>ไม่ตรงเอกสาร</small>
+        <small className="warn" title={av.title}>{av.word}</small>
       ) : (
         <small className={P.left ? (P.late.length ? 'bad' : '') : 'ok'}>{P.left ? `ค้าง ${fmtMoney(P.left)}${P.next?.due ? ' · ' + (P.next.lateDays ? 'เลยกำหนด' : dmTh(P.next.due)) : ''}` : 'รับครบ'}</small>
       )}
@@ -2471,7 +2490,7 @@ function CardKids({ d, t }: { d: Deal; t: DealSteps }) {
           right = (
             <>
               {right}
-              {fig ? <StageAmount fig={fig} ver={v.kind === 'quote' ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบ{v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
+              {fig ? <StageAmount fig={fig} ver={v.kind === 'quote' ? qtFigWords(qtView(S, d), fig.doc.id) : null} /> : ro ? null : <button type="button" className="lnk" onClick={() => tk.attach(d, v.kind === 'quote' ? { at: 'quote' } : { at: 'pay', stage: p })}>แนบ{v.kind === 'quote' ? 'ใบเสนอราคา' : 'ใบเสร็จ'}</button>}
             </>
           );
         // the quotation's check status (package notify), by its figure
@@ -2530,13 +2549,9 @@ function CardKids({ d, t }: { d: Deal; t: DealSteps }) {
                 {pl.status === 'part' ? (
                   <button type="button" className="btn xs" onClick={() => { const r = tk.e.setPayFull(d.id, p, true); if (r) tk.acts.prompt(d, 'payment'); }}>ถือว่ารับครบ</button>
                 ) : (
-                  <button type="button" className="btn xs" onClick={() => tk.openPanel(d.id, `recv:${p}`)}>รับเงินแล้ว</button>
+                  <button type="button" className="btn xs" onClick={() => tk.recv(d, p)}>รับเงินแล้ว</button>
                 )}
-                {pl.status === 'part' ? (
-                  <button type="button" className="lnk" onClick={() => tk.attach(d, p, undefined, { add: true })}>แนบใบเสร็จเพิ่ม</button>
-                ) : (
-                  <button type="button" className="lnk" onClick={() => tk.attach(d, p)}>แนบใบเสร็จ</button>
-                )}
+                <button type="button" className="lnk" onClick={() => tk.attach(d, { at: 'pay', stage: p })}>แนบใบเสร็จ</button>
               </span>
             </>
           );
@@ -2628,13 +2643,13 @@ function CardEditor({ d, stage, code, kind, line, won }: { d: Deal; stage: strin
       {qv?.head ? (
         <>
           {/* its figures corrected or its file swapped here: the note below follows the new QUOTATION note */}
-          <QtPhone d={d} v={qv} onRevise={(id) => { ed.cancel(); tk.attach(d, QUOTE_STAGE, 'quotation', { target: 'forecast', revise: id }); }} onChange={() => ed.follow(true)} />
+          <QtPhone d={d} v={qv} onRevise={(id) => { ed.cancel(); tk.attach(d, { at: 'quote', revise: id }); }} onChange={() => ed.follow(true)} />
           <span className="sl-or">โน้ตของขั้นนี้</span>
         </>
       ) : isMoney && (kind === 'quote' || won) && (
         <>
-          <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.attach(d, stage); }}>{kind === 'quote' ? 'แนบใบเสนอราคา (Forecast)' : 'แนบใบเสร็จ / ใบแจ้งหนี้ (Actual)'}</button>
-          {line && <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.openPanel(d.id, `recv:${stage}`); }}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
+          <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.attach(d, kind === 'quote' ? { at: 'quote' } : { at: 'pay', stage }); }}>{kind === 'quote' ? 'แนบใบเสนอราคา' : 'แนบใบเสร็จ'}</button>
+          {line && line.status !== 'paid' && <button type="button" className="btn wide" onClick={() => { ed.cancel(); tk.recv(d, stage); }}>รับเงินแล้ว (ไม่มีไฟล์)</button>}
           <span className="sl-or">หรือบันทึกโน้ต</span>
         </>
       )}

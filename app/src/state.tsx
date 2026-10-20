@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, u
 import type { GccEngine } from './lib/engine';
 import type { FeedKey, StageKey } from './lib/types';
 import type { PlanSrc } from './lib/planList';
+import type { RecvUndo } from './lib/attachPlan';
 import { EMPTY_FILTERS, type Filters } from './lib/search';
 import { prefs, PREF } from './lib/storage';
 import { beYear, type SalesFilter } from './lib/sales';
@@ -105,8 +106,10 @@ export interface UIState {
  *  (components/SalesToast.tsx). */
 export interface ToastAct {
   label: string;
-  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify' | 'goTrack' | 'goSales' | 'goPlan' | 'sendUndo';
-  deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`); sendUndo: the send (engine.lastSent.k) */ k?: string;
+  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify' | 'goTrack' | 'goSales' | 'goPlan' | 'sendUndo' | 'recvEdit' | 'recvUndo';
+  deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`); sendUndo: the send (engine.lastSent.k); recvEdit / recvUndo: the installment */ k?: string;
+  /** recvUndo: what the one tap changed, put back as it was (lib/attachPlan undoReceive) */
+  recv?: RecvUndo;
   /** goSales: the table's year; goPlan: the day the calendar opens at */
   year?: string; day?: string;
 }

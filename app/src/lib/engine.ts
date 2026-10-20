@@ -2091,6 +2091,45 @@ export class GccEngine {
     });
     this.saveSales();
   }
+  /**
+   * "เลิกทำ" of "รับเงินแล้ว" in one tap (lib/attachPlan receiveNow / undoReceive): the deal's installments as
+   * they were just before it — a line the tap set up is removed (a received one the new plan carried in too),
+   * a line it wrote gets its earlier fields back (the date, the amount, how, the planned amount typed when it
+   * asked), and the stage note it filled in goes. Only while every line, and that note, is still as the tap
+   * left it: a change since (a teammate's correction synced in, an edit here) is never undone over — `stale`
+   * then names those stages and nothing is changed.
+   */
+  undoPays(dealId: string, u: { before: Record<string, PayLine>; after: Record<string, PayLine>; step?: { stage: string; before: DealStep; after: DealStep } }): { stale: string[] } {
+    const S = this.sales, d = S.deals[dealId];
+    if (!this.canDeal('edit.pay', d)) return this.deny(), { stale: [] };
+    if (!d) return { stale: [] };
+    const F = ['amt', 'pct', 'due', 'rel', 'how', 'howT', 'note', 'rcv', 'got', 'full', 'fullAt', 'add'] as const;
+    const key = (l: PayLine | undefined) => (l ? JSON.stringify([...F.map((x) => l[x]), l.at, l.by]) : '');
+    const stages = Object.keys(u.after).filter((st) => key(u.before[st]) !== key(u.after[st]));
+    const stale = stages.filter((st) => key(S.pays[`${dealId}/${st}`]) !== key(u.after[st]));
+    if (stale.length) return { stale };
+    const at = new Date().toISOString(), by = this.me();
+    this.batchOps(() => {
+      stages.forEach((st) => {
+        const k = `${dealId}/${st}`, was = u.before[st], cur = S.pays[k];
+        if (!was) {
+          delete S.pays[k];
+          this.op(keyOf.dpay(dealId, st));
+          return;
+        }
+        const n: PayLine = { ...was, at, by };
+        const f = F.filter((x) => n[x] !== cur[x]);
+        S.pays[k] = n;
+        this.op(keyOf.dpay(dealId, st), { ...n }, { f: [...f, 'at', 'by'] });
+      });
+      // the note the tap filled in (an empty stage gets "รับชำระแล้ว … บาท"), while nobody has changed it
+      const w = u.step, sk = (x: DealStep) => x.d + '\n' + x.n;
+      if (w && sk(stepOf(S, dealId, w.stage)) === sk(w.after) && sk(w.before) !== sk(w.after)) this.setStep(dealId, w.stage, w.before, true, true);
+      this.salesLog(d, 'เลิกทำรับชำระ', stages.join(', '));
+    });
+    this.saveSales();
+    return { stale: [] };
+  }
   /** Count a short installment as complete (withholding tax, rounding) or open it again. It holds for
    *  what has come in now (PayLine.fullAt): a receipt deleted or changed later opens it again. Returns
    *  true when this made the deal ready to close. */
@@ -2588,7 +2627,8 @@ export class GccEngine {
    * gets the document's note; a stage with the user's note keeps it and only its date moves.
    * `info.replace` = the counted Actual document at that stage the new one replaces ("ใช้ยอดนี้แทน"): it
    * stays as evidence, no longer counted, and its stage note passes to the new one — so an installment
-   * is never counted twice. Without it, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
+   * is never counted twice; `info.drop`: other counted copies of the same document, which stop counting
+   * too. Without them, both add up ("นับเพิ่ม"); `info.addHand`: the installment's hand
    * receipt adds up with the new one too (else the document replaces it). Only a document counted as
    * money received replaces anything. `info.kept`: the user kept their figure (`amount`) against the
    * document's own (`detected`, "คงยอดเดิม").
@@ -2597,7 +2637,7 @@ export class GccEngine {
    * earlier version filled in (its date, the first send, stays); the earlier versions stay as history,
    * no longer counted. Only a quotation for the Forecast with an amount revises anything.
    */
-  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; addHand?: boolean; kept?: boolean; revise?: string }) {
+  async attachDoc(dealId: string, file: Blob & { name: string }, info: { kind: DocKind; amount: number | null; target: DocTarget; basis: DealDoc['basis']; detected: number | null; docNo: string; docDate: string; stage?: string; replace?: string; drop?: string[]; addHand?: boolean; kept?: boolean; revise?: string }) {
     if (!this.can('docs.up')) throw new Error('บัญชีของคุณแนบเอกสารไม่ได้');
     const d = this.sales.deals[dealId];
     if (!d) throw new Error('ไม่พบรายการนี้แล้ว');
@@ -2607,7 +2647,7 @@ export class GccEngine {
     const S = this.sales, today = todayISO();
     // a joint quotation's member holds no money of its own (its quotation and payments are the joint
     // quotation's): what is attached there is kept as a document that is not counted, at no stage
-    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, addHand: false, revise: undefined, kept: false };
+    if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, drop: undefined, addHand: false, revise: undefined, kept: false };
     const id = uid();
     // (a stage some step reads, attachStage: every one has its record, an installment PAY3 too)
     const stage = attachStage(S, d, info, today);
@@ -2643,6 +2683,8 @@ export class GccEngine {
     const k = `${dealId}/${id}`;
     // a document that is not money received (no amount, not Actual) replaces nothing
     const old = info.replace && countsActual(doc) ? S.docs[`${dealId}/${info.replace}`] : undefined;
+    // the other counted copies of the same document ("ใช้ยอดนี้แทน" on a deal that counts it twice): they stop counting too
+    const drops = countsActual(doc) ? (info.drop || []).map((x) => S.docs[`${dealId}/${x}`]).filter((x): x is DealDoc => !!x && x.id !== old?.id && countsActual(x)) : [];
     // a revised quotation: the versions before it (as this browser has them now, after the file was stored)
     const revising = info.revise != null && isQtVersion(doc) && doc.target === 'forecast';
     const earlier = revising ? qtVersions(S, d) : [];
@@ -2659,6 +2701,8 @@ export class GccEngine {
         if (old.stage === stage && this.autoStillThere(old)) this.handOverAuto(old, S.docs[k], true);
         this.updateDoc(dealId, old.id, { target: 'none' });
       }
+      // (each gives up the PAY stage it completed unless a counted document there takes it over: updateDoc)
+      drops.forEach((x) => this.updateDoc(dealId, x.id, { target: 'none' }));
       if (revising) {
         // the QUOTATION note a version filled in ("ใบเสนอราคา QT-1 · 192,600 บาท") now names this one
         const owner = earlier.find((x) => x.auto?.stage === stage && this.autoStillThere(x));
