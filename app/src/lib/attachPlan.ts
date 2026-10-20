@@ -12,13 +12,13 @@
  * No data-model change: what is saved is engine.attachDoc's own info, then setPayFull when `full`.
  */
 import { norm } from './core';
-import { isoTh, localDay } from './format';
+import { isoTh, localDay, todayISO } from './format';
 import { netOf, proposedAmount } from './docAmount';
 import type { DocFacts } from './docExtract';
 import { jointNo } from './joint';
 import { attachRevision, qtDay, qtView } from './quotes';
 import {
-  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countsActual, dealMoney, dealResult, docNoKey, docsOf, fmtMoney, jointHeadOf, jointOf, jointRole, payState, planOf, stageTh, stepOf, whtRate, withDoc,
+  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countsActual, dealMoney, dealResult, dealSteps, docNoKey, docsOf, fmtMoney, isPayAt, jointHeadOf, jointOf, jointRole, payState, planOf, stageOk, stepCode, stepLabel, stepOf, whtRate, withDoc,
   type AttachInfo, type CountGuard, type CountMode, type Deal, type DealDoc, type DealStep, type DocKind, type DocTarget, type LineView, type PayHow, type PayLine, type PlanInput, type PlanView, type SalesState,
 } from './sales';
 import { shortName } from './salesUi';
@@ -126,12 +126,16 @@ const near = (a: number | null | undefined, b: number | null | undefined) => a !
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const N = (x: number | null | undefined) => fmtMoney(x == null ? x : r2(x));
 
-/** A step in words: its code and Thai name ("PAY1" · "ชำระงวดที่ 1"). The one place a step is named here: the
- *  simple-steps work names steps through its stepLabel (a single installment "PAY ชำระเงิน"). */
-export function stepName(_s: SalesState, _d: Deal, stage: string): { code: string; th: string } {
-  return { code: stage, th: stageTh(stage).replace(/\s*\(YES \/ NO\)$/, '') };
+/** A step in words, as the deal's steps name it (lib/sales stepLabel, lib/steps): its code and Thai name — a
+ *  single installment (a plan of one, or no plan) "PAY" · "ชำระเงิน", a plan's "PAY2" · "ชำระงวดที่ 2", the rest
+ *  of a payment without a plan "PAY" · "ส่วนที่เหลือ", an older stage as the step it reads into (CALL2 → CONTACT).
+ *  The one place a step is named here. */
+export function stepName(s: SalesState, d: Deal, stage: string, today = todayISO()): { code: string; th: string } {
+  const w = stepLabel(s, d, stage, today);
+  return { code: w.code, th: w.th.replace(/\s*\(YES \/ NO\)$/, '') };
 }
-const code = (s: SalesState, d: Deal, stage: string) => stepName(s, d, stage).code;
+/** A step in a sentence: "PAY", "PAY2", "PAY ส่วนที่เหลือ", "QUOTATION" (lib/sales stepCode); '' for none. */
+const code = (s: SalesState, d: Deal, stage: string, today = todayISO()) => (stage ? stepCode(s, d, stage, today) : '');
 
 /** Two names refer to the same company? (ignores company-type words and punctuation) */
 export function sameParty(a: string, b: string) {
@@ -205,7 +209,8 @@ export function panelEntry(s: SalesState, d: Deal, step: string, today: string):
   if (step === QUOTE_STAGE) return { at: 'quote' };
   const plan = planOf(s, d, today);
   // (the app picked that installment, not the user: a receipt of money recorded at another one is asked about)
-  if (step && (plan?.lines.some((l) => l.stage === step) || /^PAY/i.test(step) && s.cfg.stages.includes(step))) return { at: 'pay', stage: step, loose: true };
+  // (a PAY step: an installment of the plan; without one the single PAY, or the rest of the payment)
+  if (step && (plan ? plan.lines.some((l) => l.stage === step) : isPayAt(s, d.id, step))) return { at: 'pay', stage: step, loose: true };
   return dealResult(s, d) === 'YES' ? { at: 'pay' } : { at: 'quote' };
 }
 
@@ -240,14 +245,14 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
       notice = {
         tone: 'warn', tag: 'ไม่ใช่ใบเสนอราคา',
         text: `ไฟล์นี้อ่านได้ว่าเป็น${WORD[fk!]}${readAmt != null ? ' ' + N(readAmt) + ' บาท' : ''} · แนบไว้เป็นหลักฐาน${won ? 'ก่อน' : ''}`,
-        alts: won ? [{ label: `นับเป็นเงินรับขั้น ${code(s, d, nextPay) || 'PAY'}`, choice: { kind: 'pay' } }] : [],
+        alts: won ? [{ label: `นับเป็นเงินรับขั้น ${code(s, d, nextPay, today) || 'PAY'}`, choice: { kind: 'pay' } }] : [],
       };
     } else if (want === 'other' && (money || fk === 'quotation') && readAmt != null) {
       notice = fk === 'quotation'
         ? { tone: 'info', tag: 'เป็นใบเสนอราคา', text: `ไฟล์นี้เป็นใบเสนอราคา ${N(readAmt)} บาท · ถ้าเป็นใบเสนอราคาของงานนี้`, alts: [{ label: 'ใช้เป็นใบเสนอราคา (Forecast)', choice: { kind: 'quote' } }] }
         : {
             tone: 'info', tag: `เป็น${WORD[fk!]}`, text: `ไฟล์นี้เป็น${WORD[fk!]} ${N(readAmt)} บาท (${reasonOf(f!, prop0!.basis, false).split(' · ')[0]})${won ? ' · ถ้าเป็นเงินที่ได้รับของงานนี้' : ''}`,
-            alts: won ? [{ label: `นับเป็นเงินรับขั้น ${code(s, d, nextPay) || 'PAY'}`, choice: { kind: 'pay' } }] : [],
+            alts: won ? [{ label: `นับเป็นเงินรับขั้น ${code(s, d, nextPay, today) || 'PAY'}`, choice: { kind: 'pay' } }] : [],
           };
     }
   }
@@ -296,19 +301,19 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
   if (low && reason && !/ไม่แน่ใจ/.test(reason)) reason += ' · ระบบไม่แน่ใจ ตรวจกับไฟล์';
 
   // ---- words common to every mode
-  const pc = stage ? code(s, d, stage) : '';
-  const sn = stage ? stepName(s, d, stage) : null;
+  const pc = stage ? code(s, d, stage, today) : '';
+  const sn = stage ? stepName(s, d, stage, today) : null;
   const where = sn ? `ขั้น ${sn.code}${sn.th ? ' ' + sn.th : ''}` : '';
   const line0: LineView | null = mode === 'pay' && stage ? plan0?.lines.find((l) => l.stage === stage) || null : null;
   let title = '', sub = company, subShort = shortName(company), amountLabel = '', after = '', overTag = '', primary = '', quiet = 'ยกเลิก', toast = '';
   let left: AttachPlan['left'] = null;
   let count: AttachPlan['count'] = null, save: AttachSave | null = null, noSave = false, full = false, fullStage = '', whtShort: AttachPlan['whtShort'] = null, merge: AttachPlan['merge'] = null;
-  let links = { other: mode !== 'other', type: !jm && !rev, note: !!stage && s.cfg.stages.includes(stage) };
+  let links = { other: mode !== 'other', type: !jm && !rev, note: !!stage && stageOk(s, d, stage) };
   const noLabel = docNo ? ' ' + docNo : '';
   const base = (x: Partial<AttachSave>): AttachSave => ({ kind, amount, target: amount == null ? 'none' : 'actual', basis: amount == null ? 'manual' : basis, detected: amount == null ? null : detected, docNo, docDate, stage, kept: kept && amount != null, ...x });
 
   if (mode === 'quote') {
-    title = rev ? `ใบเสนอราคาฉบับแก้ไข · ฉบับที่ ${k}` : `ใบเสนอราคา${stage ? ' · ขั้น ' + stage : ''}`;
+    title = rev ? `ใบเสนอราคาฉบับแก้ไข · ฉบับที่ ${k}` : `ใบเสนอราคา${stage ? ' · ขั้น ' + pc : ''}`;
     if (rev) {
       sub = `${company} · แก้จาก${rev.doc.docNo ? ' ' + rev.doc.docNo : ''} ฉบับที่ ${rev.n}`;
       subShort = `${shortName(company)} · แก้จากฉบับที่ ${rev.n}`;
@@ -331,10 +336,10 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     if (amount != null) {
       const sAfter = withDoc(s, d, { kind, amount, target: 'forecast', docDate, stage }, today);
       const qd = stage ? stepOf(sAfter, d.id, stage).d : '';
-      const done = stage && qd ? ` · ขั้น ${stage} ทำแล้ว ${isoTh(qd)}` : '';
+      const done = stage && qd ? ` · ขั้น ${pc} ทำแล้ว ${isoTh(qd)}` : '';
       const typed = m0.forecast != null && (!m0.fcDoc || m0.fcOverride) ? m0.forecast : null;
       after = rev
-        ? `ฉบับที่ ${rev.n}${qtDay(rev.doc) ? ' (' + isoTh(qtDay(rev.doc)) + ')' : ''} เก็บเป็น “ฉบับเดิม” เปิดดูได้ ไม่นับยอด${stepOf(s, d.id, stage).d ? ` · วันที่ขั้น ${stage} ยังเป็น ${isoTh(stepOf(s, d.id, stage).d)}` : ''}`
+        ? `ฉบับที่ ${rev.n}${qtDay(rev.doc) ? ' (' + isoTh(qtDay(rev.doc)) + ')' : ''} เก็บเป็น “ฉบับเดิม” เปิดดูได้ ไม่นับยอด${stepOf(s, d.id, stage).d ? ` · วันที่ขั้น ${pc} ยังเป็น ${isoTh(stepOf(s, d.id, stage).d)}` : ''}`
         : entry.at === 'quote' && entry.plan
           ? `ยอดรวมแผนเป็น ${N(amount)} บาท ตามใบเสนอราคา`
           : typed != null && !near(typed, amount)
@@ -388,6 +393,11 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     } else save = base({ target: 'none' }); // no amount: attached as evidence at the installment for now
     const counting = !!save && save.target === 'actual';
     const tStage = save?.stage ?? stage;
+    // counted twice on a deal without a plan: it is counted once at the single PAY step, and the title says so
+    if (g?.home && tStage === g.home && g.home !== stage) {
+      const h = stepName(s, d, g.home, today);
+      title = `${WORD[kind]} · ขั้น ${h.code}${h.th ? ' ' + h.th : ''}`;
+    }
     // a receipt larger than its installment: when it pays the next one(s) too, one click makes them one
     // installment (the plan, saved after the document: engine.setPlan)
     const S1a = counting ? withDoc(s, d, toInfo(save!), today) : s;
@@ -412,19 +422,19 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
     const S2 = full && lineA ? { ...S1, pays: { ...S1.pays, [`${d.id}/${lineA.stage}`]: { ...S1.pays[`${d.id}/${lineA.stage}`], full: true, fullAt: lineA.got } } } : S1;
     const ready0 = closeReady(s, d, today), ready1 = closeReady(S2, d, today);
     const mA = dealMoney(S2, d), A = mA.actual;
-    const lc = lineA ? code(s, d, lineA.stage) : pc;
+    const lc = lineA ? code(s, d, lineA.stage, today) : pc;
     const fullWords = full && whtShort ? `ขั้น ${lc} ถือว่ารับครบ เพราะส่วนที่ขาด ${N(whtShort.short)} คือหัก ณ ที่จ่าย ${whtShort.rate}%` : '';
     if (amount == null) after = '';
     else if (!counting) {
       after = [m0.actual != null ? `Actual ยังเป็น ${N(m0.actual)} บาท` : 'ไม่เปลี่ยน Actual', fullWords, ready1 && !ready0 ? 'งานนี้พร้อมปิดงาน' : ''].filter(Boolean).join(' · ');
-      if (cm === 'none' && !dup && stage) after = `เก็บไว้ที่ขั้น ${code(s, d, save?.stage || stage)} เป็นหลักฐาน · ` + after;
+      if (cm === 'none' && !dup && stage) after = `เก็บไว้ที่ขั้น ${code(s, d, save?.stage || stage, today)} เป็นหลักฐาน · ` + after;
     } else {
       const before = m0.acDocs || m0.hand ? m0.actual : null;
       const replaced = !!(save!.replace || save!.drop?.length || cm === 'move' || (decided?.handHere && !save!.addHand));
       const parts: string[] = [];
       if (replaced && before != null) parts.push(near(before, A) ? `Actual ยังเป็น ${N(A)} บาท` : `Actual จาก ${N(before)} เป็น ${N(A)} บาท`);
       const P1 = planOf(S2, d, today), cap = P1 && P1.total > 0 ? P1.total : mA.forecast;
-      if (merge) parts.push(`รวม ${merge.stages.map((x) => code(s, d, x)).join(', ')} เข้ากับ ${code(s, d, merge.into)} เป็นงวดเดียว ${N(merge.amt)} บาท`);
+      if (merge) parts.push(`รวม ${merge.stages.map((x) => code(s, d, x, today)).join(', ')} เข้ากับ ${code(s, d, merge.into, today)} เป็นงวดเดียว ${N(merge.amt)} บาท`);
       if (cap != null && cap > 0 && A != null && A > cap + 0.005 && (before == null || A > before + 0.005)) {
         overTag = `มากกว่า${P1 && P1.total > 0 ? 'แผน' : ' Forecast'}`;
         parts.length = 0;
@@ -438,7 +448,7 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
             const nx = P1?.lines.find((l) => l.stage !== lineA!.stage && l.left > 0.005);
             if (!cover) overTag = 'มากกว่างวดนี้';
             parts.push(`ขั้น ${lc} รับ ${N(lineA.got)} บาท แผนงวดนี้ ${N(lineA.amt)} บาท`);
-            if (nx) parts.push(`${code(s, d, nx.stage)} ยังค้าง ${N(nx.left)} บาท`);
+            if (nx) parts.push(`${code(s, d, nx.stage, today)} ยังค้าง ${N(nx.left)} บาท`);
           } else if (ready1 && !leftN) parts.push(replaced ? 'รับครบตามแผน' : `รับครบตามแผน ${N(P1!.total)} บาท · Actual ${N(A)}${mA.forecast != null ? ' จาก Forecast ' + N(mA.forecast) : ''}`);
           else if (leftN) parts.push(`ขั้น ${lc} ครบตามแผน ${N(lineA.amt)} บาท · เหลืออีก ${leftN} งวด ${N(P1!.left)} บาท`);
           else parts.push(`ขั้น ${lc} ครบตามแผน ${N(lineA.amt)} บาท`);
@@ -450,13 +460,15 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
       }
       // installments received now and not after saving (a copy at another one stops counting) — against the
       // state saving leaves, the installment counted complete by withholding tax included
-      const paid1 = payState(S2, d, today).paid, unpaid = payState(s, d, today).paid.filter((p) => !paid1.includes(p));
-      if (unpaid.length) parts.push(`${unpaid.map((p) => code(s, d, p)).join(', ')} จะกลับเป็นยังไม่ได้รับ`);
+      // (only one still owed then: a step saving takes away — the rest of a payment without a plan, once the money
+      // counted makes up the Forecast — is not one to receive)
+      const ps1 = payState(S2, d, today), unpaid = payState(s, d, today).paid.filter((p) => !ps1.paid.includes(p) && ps1.left.includes(p));
+      if (unpaid.length) parts.push(`${unpaid.map((p) => code(s, d, p, today)).join(', ')} จะกลับเป็นยังไม่ได้รับ`);
       after = parts.join(' · ');
     }
     // the offer to make the next installment(s) part of this one (or to keep them apart, once chosen)
     if (cover && big) {
-      const sts = cover.stages.map((x) => code(s, d, x)).join(', '), at0 = code(s, d, big.stage);
+      const sts = cover.stages.map((x) => code(s, d, x, today)).join(', '), at0 = code(s, d, big.stage, today);
       const alt: AttachNotice['alts'][number] = merge
         ? { label: 'ไม่รวมงวด', choice: { merge: false } }
         : { pre: `ถ้าใบนี้รวมเงิน ${sts} ด้วย`, label: 'รวมเป็นงวดเดียว', choice: { merge: true } };
@@ -476,14 +488,14 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
       quiet = 'ไม่แนบ';
       if (g!.sameBy === 'no' && !g!.sames.some((x) => x.size === read.size && x.name === read.name.slice(0, 120))) left = { label: 'ไม่ใช่ใบเดียวกัน? แก้เลขที่', act: 'editNo' };
     } else if (cm === 'none') primary = 'แนบเป็นหลักฐาน';
-    else if (cm === 'move') primary = `บันทึกรับเงินที่ ${code(s, d, save!.stage || '')} ${N(shown)} บาท`;
+    else if (cm === 'move') primary = `บันทึกรับเงินที่ ${code(s, d, save!.stage || '', today)} ${N(shown)} บาท`;
     else primary = kind === 'invoice' ? `บันทึกใบแจ้งหนี้ ${N(shown)} บาท` : `บันทึกรับเงิน ${N(shown)} บาท`;
-    const at = save?.stage ? code(s, d, save.stage) : pc;
+    const at = save?.stage ? code(s, d, save.stage, today) : pc;
     toast = dup && (cm === 'none' || cm === 'nosave')
       ? `ไม่นับซ้ำ · Actual ยังเป็น ${N(m0.actual)} บาท${full ? ` · ${lc} ถือว่ารับครบ` : ''}`
       : cm === 'none' || amount == null
         ? `แนบ${WORD[kind]}${noLabel} ไว้เป็นหลักฐานแล้ว · ไม่นับยอด`
-        : `${kind === 'invoice' ? 'บันทึกใบแจ้งหนี้' : 'บันทึกรับเงิน'} ${N(shown)} บาท${at ? ' ที่ขั้น ' + at : ''} แล้ว${merge ? ` · รวม ${merge.stages.map((x) => code(s, d, x)).join(', ')} เข้ากับ ${code(s, d, merge.into)}` : ''}`;
+        : `${kind === 'invoice' ? 'บันทึกใบแจ้งหนี้' : 'บันทึกรับเงิน'} ${N(shown)} บาท${at ? ' ที่ขั้น ' + at : ''} แล้ว${merge ? ` · รวม ${merge.stages.map((x) => code(s, d, x, today)).join(', ')} เข้ากับ ${code(s, d, merge.into, today)}` : ''}`;
   } else {
     title = 'เอกสารอื่น · ไม่นับยอด';
     save = base({ target: 'none', stage: '', amount: readAmt != null && fk && fk !== 'other' ? readAmt : null, basis: prop0?.basis ?? 'manual', detected: readAmt, kept: false });
@@ -505,8 +517,8 @@ export function attachPlan(s: SalesState, d: Deal, entry: AttachEntry, read: { f
   if (links.type) {
     tiles.push({ key: 'quote', label: 'ใบเสนอราคา', sub: 'เป็น Forecast', choice: { kind: 'quote' }, on: mode === 'quote' });
     const open = (plan0?.lines || []).filter((l) => l.status !== 'paid' && l.status !== 'off');
-    if (open.length > 1) open.forEach((l) => tiles.push({ key: 'pay:' + l.stage, label: 'ใบเสร็จ / ใบแจ้งหนี้', sub: `เงินรับขั้น ${code(s, d, l.stage)}`, choice: { kind: 'pay', stage: l.stage }, on: mode === 'pay' && stage === l.stage }));
-    else tiles.push({ key: 'pay', label: 'ใบเสร็จ / ใบแจ้งหนี้', sub: `เงินรับขั้น ${code(s, d, mode === 'pay' && stage ? stage : nextPay) || 'PAY'}`, choice: { kind: 'pay' }, on: mode === 'pay' });
+    if (open.length > 1) open.forEach((l) => tiles.push({ key: 'pay:' + l.stage, label: 'ใบเสร็จ / ใบแจ้งหนี้', sub: `เงินรับขั้น ${code(s, d, l.stage, today)}`, choice: { kind: 'pay', stage: l.stage }, on: mode === 'pay' && stage === l.stage }));
+    else tiles.push({ key: 'pay', label: 'ใบเสร็จ / ใบแจ้งหนี้', sub: `เงินรับขั้น ${code(s, d, mode === 'pay' && stage ? stage : nextPay, today) || 'PAY'}`, choice: { kind: 'pay' }, on: mode === 'pay' });
     tiles.push({ key: 'other', label: 'เอกสารอื่น', sub: 'เก็บไว้ ไม่นับยอด', choice: { kind: 'other' }, on: mode === 'other' });
   }
 
@@ -576,7 +588,7 @@ function withMerge(S: SalesState, id: string, m: NonNullable<AttachPlan['merge']
 function payCount(
   s: SalesState, d: Deal, g: CountGuard,
   x: { kind: DocKind; amount: number; stage: string; line0: LineView | null; docNo: string; name: string; size: number; figures: (number | null)[]; pinned: boolean; ofHand: boolean },
-  _today: string,
+  today: string,
 ): {
   def: CountMode | 'nosave'; allowed: (CountMode | 'nosave')[]; notice: ((cm: CountMode | 'nosave') => AttachNotice | null) | null; handHere: boolean;
   /** the document it replaces, when not countGuard's own pick (the invoice a receipt pays) */
@@ -584,7 +596,7 @@ function payCount(
   /** where it is kept when it does not count ('none'), when not where it was attached (with its receipt) */
   at?: string;
 } {
-  const pc = code(s, d, g.stage), W = WORD[x.kind], l = x.line0;
+  const pc = code(s, d, g.stage, today), W = WORD[x.kind], l = x.line0;
   const docName = (z: DealDoc) => `${WORD[z.kind]} ${z.docNo || z.name}`;
   const handHere = !!l && l.hand && !l.docs.length && l.handGot > 0;
   // R5b: what came in at this installment plus this one is the plan (or short of it by withholding tax)
@@ -595,11 +607,14 @@ function payCount(
   if (g.sames.length) {
     const same = g.same!, here = same.stage === g.stage, twice = g.sames.length > 1;
     const identical = g.sames.some((z) => z.size === x.size && z.name === x.name);
-    const at = (z: DealDoc) => `ขั้น ${code(s, d, z.stage) || 'ไม่ระบุ'}`;
+    const at = (z: DealDoc) => `ขั้น ${code(s, d, z.stage, today) || 'ไม่ระบุ'}`;
+    // attached again at "PAY ส่วนที่เหลือ" (no plan: what the money counted leaves of the Forecast): the receipt is
+    // counted at PAY already, and that step is done by a note when the rest is not coming (lib/sales dealSteps)
+    const restHere = !here && !planOf(s, d, today) && dealSteps(s, d, today).steps.some((v) => v.rest && v.id === g.stage);
     if (twice)
       return {
         def: 'replace', allowed: ['replace', 'none'], handHere,
-        notice: () => ({ tone: 'warn', tag: 'ใบซ้ำ', text: `${docName(same)} นับซ้ำอยู่ ${g.sames.length} ครั้ง (${g.sames.map((z) => `${at(z)} ${N(z.amount)}`).join(' · ')} บาท) · บันทึกครั้งนี้นับครั้งเดียวที่ขั้น ${pc} ไม่นับซ้ำ`, alts: [] }),
+        notice: () => ({ tone: 'warn', tag: 'ใบซ้ำ', text: `${docName(same)} นับซ้ำอยู่ ${g.sames.length} ครั้ง (${g.sames.map((z) => `${at(z)} ${N(z.amount)}`).join(' · ')} บาท) · บันทึกครั้งนี้นับครั้งเดียวที่ขั้น ${g.home ? code(s, d, g.home, today) : pc} ไม่นับซ้ำ`, alts: [] }),
       };
     if (here && !near(same.amount, x.amount))
       return {
@@ -617,7 +632,7 @@ function payCount(
         tone: 'warn', tag: 'ใบซ้ำ',
         text: cm === 'replace'
           ? `${docName(same)} นับไว้แล้วที่${at(same)} ${N(same.amount)} บาท · ใช้ไฟล์นี้แทนใบเดิม ยอดเท่าเดิม ไม่นับซ้ำ`
-          : `${docName(same)} นับไปแล้วที่${at(same)} ${N(same.amount)} บาท (แนบ ${isoTh(localDay(same.at))}) · ระบบจะไม่นับซ้ำ${!here && !planOf(s, d, _today) ? ' · งานที่รับเงินครั้งเดียว ตั้งแผนชำระ 1 งวด แล้วปิดงานได้' : ''}`,
+          : `${docName(same)} นับไปแล้วที่${at(same)} ${N(same.amount)} บาท (แนบ ${isoTh(localDay(same.at))}) · ระบบจะไม่นับซ้ำ${restHere ? ` · ถ้าตกลงลดยอดแล้ว พิมพ์โน้ตที่ขั้น ${pc} แล้วปิดงานได้` : ''}`,
         alts: [
           { label: 'ดูใบเดิม', view: same.id },
           ...(here && !identical ? [cm === 'replace' ? { label: 'เก็บไฟล์นี้เป็นหลักฐาน', choice: { count: 'none' as const } } : { label: 'ใช้ไฟล์นี้แทนใบเดิม', choice: { count: 'replace' as const } }] : []),
@@ -632,7 +647,7 @@ function payCount(
     const rcpt = (g.stage ? countedAt(s, d, g.stage).find((z) => z.kind === 'receipt') : undefined)
       ?? (no.length >= 3 ? docsOf(s, d.id).find((z) => countsActual(z) && z.kind === 'receipt' && docNoKey(z.docNo) === no) : undefined);
     if (rcpt) {
-      const rc = code(s, d, rcpt.stage) || pc;
+      const rc = code(s, d, rcpt.stage, today) || pc;
       return {
         def: 'none', allowed: ['none'], handHere, at: rcpt.stage || undefined,
         notice: () => ({ tone: 'info', tag: 'เก็บเป็นหลักฐาน', text: `ขั้น ${rc} มีใบเสร็จ ${rcpt.docNo || rcpt.name} นับแล้ว · ใบแจ้งหนี้นี้เก็บไว้เป็นหลักฐาน ไม่นับยอด`, alts: [] }),
@@ -645,7 +660,7 @@ function payCount(
     const how = (cm: CountMode | 'nosave') =>
       cm === 'replace' && g.old ? `นับแทน${docName(g.old)} ที่นับไว้ ${N(g.old.amount)} บาท`
       : cm === 'replace' ? 'นับแทนใบเดิม'
-      : cm === 'move' ? `แนบที่ขั้น ${code(s, d, (g.inv || g.hand)!.stage)} แทน ไม่นับซ้ำ`
+      : cm === 'move' ? `แนบที่ขั้น ${code(s, d, (g.inv || g.hand)!.stage, today)} แทน ไม่นับซ้ำ`
       : cm === 'rest' ? `นับเฉพาะส่วนที่ยังไม่ได้รับ ${N(g.rest)} บาท`
       : 'เก็บไว้เป็นหลักฐาน ไม่นับยอด';
     return {
@@ -658,7 +673,7 @@ function payCount(
   // the receipt of an invoice counted at another installment (offered, not chosen, at an installment the
   // user picked that already counts money: the rules below come first then)
   if (g.inv && (g.pick === 'move' || (!g.old && !handHere))) {
-    const inv = g.inv, xc = code(s, d, inv.stage);
+    const inv = g.inv, xc = code(s, d, inv.stage, today);
     return {
       def: g.pick, allowed: ['move', 'add'], handHere,
       notice: (cm) => cm === 'move'
@@ -668,7 +683,7 @@ function payCount(
   }
   // money recorded by hand at another installment, of an amount this document shows (R5d)
   if (g.hand) {
-    const h = g.hand, xc = code(s, d, h.stage), when = h.line.rcv ? ` (${isoTh(h.line.rcv)})` : '';
+    const h = g.hand, xc = code(s, d, h.stage, today), when = h.line.rcv ? ` (${isoTh(h.line.rcv)})` : '';
     return {
       def: g.pick, allowed: ['move', 'add'], handHere,
       notice: (cm) => cm === 'move'

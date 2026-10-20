@@ -1263,7 +1263,7 @@ export function withDoc(s: SalesState, d: Deal, info: AttachInfo, today: string)
  */
 export function attachPreview(s: SalesState, d: Deal, info: AttachInfo, today: string) {
   const stage = attachStage(s, d, info, today), after = withDoc(s, d, info, today);
-  const paidAfter = payState(after, d, today).paid;
+  const psAfter = payState(after, d, today);
   const line = (stage && planOf(after, d, today)?.lines.find((l) => l.stage === stage)) || null;
   const m = dealMoney(after, d), was = closeReady(s, d, today);
   const k = `${d.id}/${stage}`, full = line && line.got > 0 && line.got < line.amt ? { ...after, pays: { ...after.pays, [k]: { ...after.pays[k], full: true, fullAt: line.got } } } : after;
@@ -1276,7 +1276,8 @@ export function attachPreview(s: SalesState, d: Deal, info: AttachInfo, today: s
     fcFull: m.forecast != null && m.actual != null && m.actual >= m.forecast,
     ready: !was && closeReady(after, d, today),
     readyIfFull: !was && closeReady(full, d, today),
-    unpaid: payState(s, d, today).paid.filter((p) => !paidAfter.includes(p)),
+    // (still owed after it: the rest of a payment without a plan, gone once the money makes up the Forecast, is not)
+    unpaid: payState(s, d, today).paid.filter((p) => !psAfter.paid.includes(p) && psAfter.left.includes(p)),
   };
 }
 
@@ -1301,6 +1302,10 @@ export interface CountGuard {
   same: DealDoc | null;
   /** every counted copy of it, oldest first; two or more = the deal counts it twice already */
   sames: DealDoc[];
+  /** counted twice already on a deal without a plan: its single PAY step, where "ใช้ยอดนี้แทน" counts it once
+   *  wherever it is attached again (the second PAY step of such a deal, "PAY ส่วนที่เหลือ", is only what the money
+   *  leaves of the Forecast: lib/steps); '' otherwise */
+  home: string;
   sameBy: 'no' | 'file' | '';
   /** the newest other document counted at that stage */
   old: DealDoc | null;
@@ -1357,10 +1362,12 @@ export function dupCounted(s: SalesState, d: Deal): DealDoc[][] {
 export function countAs(g: CountGuard, mode: CountMode, info: AttachInfo): AttachInfo {
   const plain: AttachInfo = { ...info, replace: undefined, drop: undefined, addHand: false };
   if (mode === 'replace') {
-    // the copy at this stage hands its stage note over; every other copy stops counting too
-    const main = g.sames.find((x) => x.stage === g.stage) || g.sames[g.sames.length - 1] || g.old;
+    // the copy at this stage hands its stage note over; every other copy stops counting too (no plan: it is
+    // counted once at the single PAY step, `home`)
+    const at = g.home || g.stage;
+    const main = g.sames.find((x) => x.stage === at) || g.sames[g.sames.length - 1] || g.old;
     const drop = g.sames.filter((x) => x !== main).map((x) => x.id);
-    return { ...plain, replace: main?.id, ...(drop.length ? { drop } : {}) };
+    return { ...plain, ...(g.home ? { stage: g.home } : {}), replace: main?.id, ...(drop.length ? { drop } : {}) };
   }
   if (mode === 'none') return { ...plain, target: 'none' };
   if (mode === 'move' && g.inv) return { ...plain, stage: g.inv.stage, replace: g.inv.id };
@@ -1396,7 +1403,7 @@ export function countGuard(
   today: string,
 ): CountGuard {
   const stage = attachStage(s, d, info, today);
-  const g: CountGuard = { stage, same: null, sames: [], sameBy: '', old: null, handPart: null, hand: null, inv: null, over: null, overAdd: null, rest: null, modes: [], pick: 'add' };
+  const g: CountGuard = { stage, same: null, sames: [], sameBy: '', home: '', old: null, handPart: null, hand: null, inv: null, over: null, overAdd: null, rest: null, modes: [], pick: 'add' };
   if (!countsActual(info)) return g;
   const counted = docsOf(s, d.id).filter(countsActual);
   const no = docNoKey(info.docNo);
@@ -1409,6 +1416,7 @@ export function countGuard(
   g.same = g.sames.find((x) => x.stage === stage) || g.sames[g.sames.length - 1] || null;
   g.old = (stage ? countedAt(s, d, stage).filter((x) => !g.sames.includes(x)) : []).pop() || null;
   const plan = planOf(s, d, today);
+  if (g.sames.length > 1 && !plan) g.home = payState(s, d, today).pays[0] || '';
   const line = stage ? plan?.lines.find((l) => l.stage === stage) : undefined;
   g.handPart = line && line.hand && !line.docs.length && line.status === 'part' ? line : null;
   // the same document at another installment is counted there already: suggested as evidence only, as

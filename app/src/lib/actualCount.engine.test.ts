@@ -259,7 +259,8 @@ describe('a deal that already counts the receipt twice (the owner\'s: 61,730.77 
     expect(dupCounted(e.sales, deal(e, id)).map((gr) => gr.map((x) => `${x.stage}:${x.amount}`))).toEqual([['PAY1:61730.77', 'PAY2:60000']]);
     const v = acFig(e.sales, deal(e, id));
     expect(v).toMatchObject({ kind: 'warn', word: 'นับซ้ำ' });
-    expect(v.title).toContain('INV2026090004 นับยอดซ้ำ 2 ครั้ง (PAY1 61,730.77 · PAY2 60,000 บาท)');
+    // (named as the steps name them: no plan, PAY1 is the single PAY step and PAY2 the rest of the payment)
+    expect(v.title).toContain('INV2026090004 นับยอดซ้ำ 2 ครั้ง (PAY 61,730.77 · PAY ส่วนที่เหลือ 60,000 บาท)');
   });
 
   for (const stage of ['PAY1', 'PAY2']) {
@@ -267,11 +268,13 @@ describe('a deal that already counts the receipt twice (the owner\'s: 61,730.77 
       const e = mk(), id = await counted(e);
       const b = await attach(e, id, { stage, pinned: true });
       expect(b.g.sames.map((x) => x.stage)).toEqual(['PAY1', 'PAY2']);
-      // no plan: the other PAY stage is open again, and the dialog says so
-      expect(b.pv.unpaid).toEqual([stage === 'PAY1' ? 'PAY2' : 'PAY1']);
-      expect(b.g).toMatchObject({ same: { stage }, modes: ['replace', 'none', 'add'], pick: 'replace' });
+      // no plan: counted once at the single PAY step wherever it is attached again; the second PAY step (the rest
+      // of the payment, lib/steps) goes with the money it no longer lacks — nothing turns unpaid, the job is ready
+      expect(b.pv.unpaid).toEqual([]);
+      expect(b.g).toMatchObject({ same: { stage }, home: 'PAY1', modes: ['replace', 'none', 'add'], pick: 'replace' });
       expect(actual(e, id)).toBe(60000);
-      expect(receipts(e, id).filter((x) => x.includes(':actual:'))).toEqual([`${stage}:actual:60000`]);
+      expect(receipts(e, id).filter((x) => x.includes(':actual:'))).toEqual(['PAY1:actual:60000']);
+      expect(closeReady(e.sales, deal(e, id), TODAY)).toBe(true);
       expect(dupCounted(e.sales, deal(e, id))).toEqual([]);
       expect(acFig(e.sales, deal(e, id))).toMatchObject({ kind: 'ok', word: 'จากเอกสาร' });
     });

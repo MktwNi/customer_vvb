@@ -459,7 +459,7 @@ export function DealPanel() {
         <div className="dp-body">
           {dups.map((gr) => (
             // (the panel's warning box, as a short payment's)
-            <div key={gr[0].id} className="sl-rf-short" role="status">{dupText(gr)} · เงินก้อนเดียวควรนับครั้งเดียว ที่ใบที่ซ้ำ กด "แก้ยอด / ประเภท" แล้วเลือกนับเป็น "ไม่นับยอด"</div>
+            <div key={gr[0].id} className="sl-rf-short" role="status">{dupText(gr, (p) => stepCode(S, d, p, today))} · เงินก้อนเดียวควรนับครั้งเดียว ที่ใบที่ซ้ำ กด "แก้ยอด / ประเภท" แล้วเลือกนับเป็น "ไม่นับยอด"</div>
           ))}
           {/* the plan is amounts: an account without ดูยอดเงิน follows payments by the PAY stages below */}
           {money && planFirst && jr !== 'member' && <PlanCard d={d} attach={attach} />}

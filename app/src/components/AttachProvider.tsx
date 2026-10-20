@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { todayISO } from '../lib/format';
-import { attachStage, type Deal } from '../lib/sales';
+import { attachStage, stepCode, type Deal } from '../lib/sales';
 import { receiveNow, recvOverText, recvPlan, recvToast, type AttachEntry } from '../lib/attachPlan';
 import { attachLines, previewOf } from '../lib/payCheck';
 import { DOC_ACCEPT } from '../lib/teamFiles';
@@ -83,7 +83,7 @@ export function useAttach() {
     const S = e.sales;
     const stage = entry.at === 'pay' ? entry.stage ?? (attachStage(S, d, { kind: 'receipt', target: 'actual' }, todayISO()) || undefined) : undefined;
     const lines = entry.at === 'pay' ? attachLines(S, d.id, stage, 'receipt', 'actual') : [];
-    askPay(e, { d, lines, kind: 'attach', title: 'แนบเอกสาร' + (stage ? ' ' + stage : ''), verb: 'แนบเอกสาร', run });
+    askPay(e, { d, lines, kind: 'attach', title: 'แนบเอกสาร' + (stage ? ' ' + stepCode(S, d, stage, todayISO()) : ''), verb: 'แนบเอกสาร', run });
   };
   const open = (d: Deal, entry: AttachEntry) => guard(d, entry, () => host?.pick(d.id, entry));
   const drop = (d: Deal, entry: AttachEntry, file: File) => guard(d, entry, () => host?.show(d.id, entry, file));
@@ -107,7 +107,7 @@ export function useAttach() {
     }
     const ask = r.plan ? { lines: attachLines(S, d.id, undefined, 'receipt', 'actual') } : { after: previewOf.pay(S, d.id, stage, { rcv: today, got: r.ask ? typed! : r.amount, full: false }) };
     askPay(e, {
-      d, ...ask, kind: 'edit', title: 'บันทึกรับเงิน ' + stage, verb: 'บันทึกรับเงิน',
+      d, ...ask, kind: 'edit', title: 'บันทึกรับเงิน ' + stepCode(S, d, stage, today), verb: 'บันทึกรับเงิน',
       run: () => {
         const x = receiveNow(e, d.id, stage, today, typed);
         const dd = e.sales.deals[d.id];

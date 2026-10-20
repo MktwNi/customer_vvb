@@ -132,7 +132,7 @@ describe('the amount: what the customer pays, the same rule for a quotation and 
     expect(p.after).toContain('งานนี้พร้อมปิดงาน');
     const q = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT(), { notWht: true });
     expect(q.full).toBe(false);
-    expect(q.after).toBe('ขั้น PAY1 ยังค้าง 1,730.77 บาท');
+    expect(q.after).toBe('ขั้น PAY ยังค้าง 1,730.77 บาท');
     // saved: the installment is received, Actual 60,000
     await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ status: 'paid', got: 60000, full: true });
@@ -170,7 +170,7 @@ describe('a second document at an installment that counts money already: one sen
     const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, facts({ docNo: 'RC-2', total: 30000, docDate: '2026-10-01' }), {}, pdf('RC-2.pdf'));
     expect(p.count).toBe('add');
     expect(p.notice).toMatchObject({ tag: 'ส่วนที่เหลือ' });
-    expect(p.notice!.text).toBe('ใบนี้คือเงินส่วนที่เหลือของขั้น PAY1 · รวมกับใบเดิม RC-1 30,000 เป็น 60,000 บาท ครบตามแผน');
+    expect(p.notice!.text).toBe('ใบนี้คือเงินส่วนที่เหลือของขั้น PAY · รวมกับใบเดิม RC-1 30,000 เป็น 60,000 บาท ครบตามแผน');
     expect(p.notice!.alts[0]).toMatchObject({ label: 'ใบนี้แทนใบเดิม', choice: { count: 'replace' } });
     const q = plan(e, id, { at: 'pay', stage: 'PAY1' }, facts({ docNo: 'RC-2', total: 40000, docDate: '2026-10-01' }), {}, pdf('RC-2.pdf'));
     expect(q.count).toBe('replace');
@@ -194,7 +194,7 @@ describe('a second document at an installment that counts money already: one sen
     e.markPaid(id, 'PAY1', { date: '2026-09-28', amount: 60000 });
     const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(p.count).toBe('replace');
-    expect(p.notice).toMatchObject({ tag: 'ใบเสร็จของเงินก้อนนี้', text: 'ขั้น PAY1 บันทึกรับเงินเองไว้ 60,000 บาท (28 ก.ย. 2569) · ใบนี้คือใบเสร็จของเงินก้อนนั้น ไม่นับซ้ำ' });
+    expect(p.notice).toMatchObject({ tag: 'ใบเสร็จของเงินก้อนนี้', text: 'ขั้น PAY บันทึกรับเงินเองไว้ 60,000 บาท (28 ก.ย. 2569) · ใบนี้คือใบเสร็จของเงินก้อนนั้น ไม่นับซ้ำ' });
     await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(actual(e, id)).toBe(60000);
 
@@ -249,8 +249,8 @@ describe('the same document again: "ใบซ้ำ", never counted twice', () =
     const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(p).toMatchObject({ noSave: true, count: 'nosave', save: null, amountLabel: 'เงินที่ได้รับ · นับครั้งเดียว', primary: 'ตกลง ไม่นับซ้ำ', quiet: 'ไม่แนบ', full: true, fullStage: 'PAY1' });
     expect(p.notice).toMatchObject({ tone: 'warn', tag: 'ใบซ้ำ' });
-    expect(p.notice!.text).toBe('ใบเสร็จ INV2026090004 นับไปแล้วที่ขั้น PAY1 60,000 บาท (แนบ 20 ต.ค. 2569) · ระบบจะไม่นับซ้ำ');
-    expect(p.after).toBe('Actual ยังเป็น 60,000 บาท · ขั้น PAY1 ถือว่ารับครบ เพราะส่วนที่ขาด 1,730.77 คือหัก ณ ที่จ่าย 3% · งานนี้พร้อมปิดงาน');
+    expect(p.notice!.text).toBe('ใบเสร็จ INV2026090004 นับไปแล้วที่ขั้น PAY 60,000 บาท (แนบ 20 ต.ค. 2569) · ระบบจะไม่นับซ้ำ');
+    expect(p.after).toBe('Actual ยังเป็น 60,000 บาท · ขั้น PAY ถือว่ารับครบ เพราะส่วนที่ขาด 1,730.77 คือหัก ณ ที่จ่าย 3% · งานนี้พร้อมปิดงาน');
     expect(p.reason).toBe('เท่ากับใบเดิม · ยอดชำระหลังหัก ณ ที่จ่าย 3%');
     // no way to add it on top: "นับเพิ่ม" is never offered, and asking for it changes nothing
     expect(plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT(), { count: 'add' }).count).toBe('nosave');
@@ -345,7 +345,7 @@ describe('the button decides what the document is; a file of another type is kep
     expect(plan(e, id, { at: 'pay', stage: 'PAY1' }, QT(), p.notice!.alts[0].choice!, pdf('QT2026080001.pdf')).mode).toBe('quote');
     const q = plan(e, id, { at: 'quote' }, RCT());
     expect(q).toMatchObject({ mode: 'other', target: 'none', notice: { tag: 'ไม่ใช่ใบเสนอราคา' } });
-    expect(q.notice!.alts[0].label).toBe('นับเป็นเงินรับขั้น PAY1');
+    expect(q.notice!.alts[0].label).toBe('นับเป็นเงินรับขั้น PAY');
     expect(plan(e, id, { at: 'quote' }, RCT(), q.notice!.alts[0].choice!)).toMatchObject({ mode: 'pay', stage: 'PAY1', amount: 60000 });
     const r = plan(e, id, { at: 'other' }, RCT());
     expect(r).toMatchObject({ mode: 'other', notice: { tag: 'เป็นใบเสร็จ' }, save: { target: 'none', stage: '', amount: 60000 } });
@@ -406,8 +406,8 @@ describe('nothing read, a number typed, a name that does not match, a change bef
     const e = mk(), id = await job(e, { plan: 1 });
     await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, facts({ kind: 'invoice', docNo: 'BL-9', total: 61730.77, docDate: '2026-09-20' }), {}, pdf('BL-9.pdf'));
-    expect(p).toMatchObject({ count: 'none', primary: 'แนบเป็นหลักฐาน', notice: { tag: 'เก็บเป็นหลักฐาน', text: 'ขั้น PAY1 มีใบเสร็จ INV2026090004 นับแล้ว · ใบแจ้งหนี้นี้เก็บไว้เป็นหลักฐาน ไม่นับยอด' } });
-    expect(p.after).toBe('เก็บไว้ที่ขั้น PAY1 เป็นหลักฐาน · Actual ยังเป็น 60,000 บาท');
+    expect(p).toMatchObject({ count: 'none', primary: 'แนบเป็นหลักฐาน', notice: { tag: 'เก็บเป็นหลักฐาน', text: 'ขั้น PAY มีใบเสร็จ INV2026090004 นับแล้ว · ใบแจ้งหนี้นี้เก็บไว้เป็นหลักฐาน ไม่นับยอด' } });
+    expect(p.after).toBe('เก็บไว้ที่ขั้น PAY เป็นหลักฐาน · Actual ยังเป็น 60,000 บาท');
   });
 
   it('"เปลี่ยนประเภท": a tile per installment still to be received', async () => {
@@ -507,7 +507,7 @@ describe('never counted twice by default (review)', () => {
     const entry: AttachEntry = { at: 'pay', stage: 'PAY1', ofHand: true };
     const p = plan(e, id, entry, RCT());
     expect(p).toMatchObject({ count: 'replace', notice: { tag: 'ใบเสร็จของเงินก้อนนี้' }, primary: 'บันทึกรับเงิน 60,000 บาท' });
-    expect(p.after).toBe('Actual ยังเป็น 60,000 บาท · ขั้น PAY1 ยังค้าง 60,000 บาท');
+    expect(p.after).toBe('Actual ยังเป็น 60,000 บาท · ขั้น PAY ยังค้าง 60,000 บาท');
     await save(e, id, entry, RCT());
     expect(actual(e, id)).toBe(60000);
     expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ status: 'part', got: 60000 });
@@ -612,7 +612,7 @@ describe('never counted twice by default (review)', () => {
     const p = plan(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(p).toMatchObject({ count: 'replace', full: true });
     expect(p.after).not.toContain('ยังไม่ได้รับ');
-    expect(p.after).toBe('Actual จาก 61,730.77 เป็น 60,000 บาท · ขั้น PAY1 ถือว่ารับครบ เพราะส่วนที่ขาด 1,730.77 คือหัก ณ ที่จ่าย 3% · งานนี้พร้อมปิดงาน');
+    expect(p.after).toBe('Actual จาก 61,730.77 เป็น 60,000 บาท · ขั้น PAY ถือว่ารับครบ เพราะส่วนที่ขาด 1,730.77 คือหัก ณ ที่จ่าย 3% · งานนี้พร้อมปิดงาน');
     await save(e, id, { at: 'pay', stage: 'PAY1' }, RCT());
     expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ status: 'paid', full: true });
     // (a copy that does stop counting at another installment is still said: one receipt counted at PAY1 and
@@ -692,7 +692,7 @@ describe('"รับเงินแล้ว" in one tap, and "เลิกท�
     expect(planOf(e.sales, deal(e, id), TODAY)).not.toBeNull();
     const r = undoReceive(e, x.undo);
     expect(r).toEqual({ stale: [] });
-    expect(recvUndoText(e.sales, deal(e, id), x.undo, r)).toBe(`เลิกทำแล้ว · ${x.stage} กลับเป็นยังไม่ได้รับ · แผนชำระที่ตั้งให้ถูกลบด้วย`);
+    expect(recvUndoText(e.sales, deal(e, id), x.undo, r)).toBe(`เลิกทำแล้ว · PAY ส่วนที่เหลือ กลับเป็นยังไม่ได้รับ · แผนชำระที่ตั้งให้ถูกลบด้วย`);
     expect({ plan: planOf(e.sales, deal(e, id), TODAY), owed: owed(), ready: closeReady(e.sales, deal(e, id), TODAY), left: payState(e.sales, deal(e, id), TODAY).left }).toEqual(before);
     expect(Object.keys(e.sales.pays).filter((k) => k.startsWith(id + '/'))).toEqual([]);
   });
@@ -720,7 +720,7 @@ describe('"รับเงินแล้ว" in one tap, and "เลิกท�
     const now = { ...e.sales.pays[`${id}/PAY1`] };
     const r = undoReceive(e, x.undo);
     expect(r).toEqual({ stale: ['PAY1'] });
-    expect(recvUndoText(e.sales, deal(e, id), x.undo, r)).toBe('เลิกทำไม่ได้ · PAY1 มีการแก้ไขหลังบันทึก · แก้ที่ “แผนการชำระเงิน” ของงานนี้');
+    expect(recvUndoText(e.sales, deal(e, id), x.undo, r)).toBe('เลิกทำไม่ได้ · PAY มีการแก้ไขหลังบันทึก · แก้ที่ “แผนการชำระเงิน” ของงานนี้');
     expect(e.sales.pays[`${id}/PAY1`]).toEqual(now);
     expect(actual(e, id)).toBe(55000);
   });

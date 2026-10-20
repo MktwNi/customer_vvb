@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { isoTh, todayISO } from '../lib/format';
-import { closeReady, fmtMoney, parseAmount, stepOf, type Deal, type DealDoc } from '../lib/sales';
+import { closeReady, fmtMoney, parseAmount, stageOk, stepOf, type Deal, type DealDoc } from '../lib/sales';
 import { KEEP_WHOLE, attachPlan, sameParty as sameParty0, type AttachChoice, type AttachEntry, type AttachPlan, type DocSaved as DocSaved0 } from '../lib/attachPlan';
 import { qtFacts } from '../lib/quotes';
 import type { DocFacts } from '../lib/docExtract';
@@ -208,7 +208,8 @@ export function DocAttach({ deal: d0, entry, file: file0, onClose }: { deal: Dea
       if (p.full && p.fullStage) e.setPayFull(d.id, p.fullStage, true);
       // the note typed here is the step's note (as the document's own note would be)
       const n = note.trim();
-      if (n && doc.stage && e.sales.cfg.stages.includes(doc.stage)) e.setStep(d.id, doc.stage, { d: stepOf(e.sales, d.id, doc.stage).d || today, n });
+      // (any step's record: QUOTATION, a single PAY, PAY3 of a plan of three)
+      if (n && doc.stage && stageOk(e.sales, d, doc.stage)) e.setStep(d.id, doc.stage, { d: stepOf(e.sales, d.id, doc.stage).d || today, n });
       onClose();
       if (entry.at !== 'other') entry.onSaved?.({ doc, docFig: p.save!.amount, kept: p.kept });
       const dd = e.sales.deals[d.id];
