@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { attachPreview, closeReady, dealMoney, docMismatch, emptySales, payState, planLines, planOf, receivables, salesStats, stageTrack, toDoc, toPay, type Deal, type DealDoc, type PlanInput } from './sales';
+import { attachPreview, closeReady, dealMoney, dealSteps, docMismatch, emptySales, payState, planLines, planOf, receivables, salesStats, stageTrack, toDoc, toPay, type Deal, type DealDoc, type PlanInput } from './sales';
 import type { SyncOp } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -196,7 +196,7 @@ describe('the payment plan in the engine', () => {
     B.dispose();
   });
 
-  it('attaching at a stage: that stage, done on the document date; a user note stays; extra installments get no step', async () => {
+  it('attaching at a stage: that stage, done on the document date; a user note stays; every installment is a step (PAY3 too)', async () => {
     const [A, B] = await team();
     const d = won(A, 107000);
     const inv = await A.attachDoc(d.id, pdf('inv2.pdf'), doc('invoice', 53500, { stage: 'PAY2', docNo: 'INV-2', docDate: '2026-10-02' }));
@@ -220,15 +220,16 @@ describe('the payment plan in the engine', () => {
     A.deleteDoc(e.id, rc.id);
     expect(A.sales.steps[`${e.id}/PAY2`]).toEqual({ d: '2026-10-03', n: 'วางบิลแล้ว' });
 
-    // without a stage: the first installment of the plan not received — here the extra PAY3, which gets no step
+    // without a stage: the first installment of the plan not received — here PAY3, a step like the others
     const f = won(A, 90000);
     A.quickPlan(f.id, 3);
     await A.attachDoc(f.id, pdf('a.pdf'), doc('receipt', 30000, { stage: 'PAY1' }));
     await A.attachDoc(f.id, pdf('b.pdf'), doc('receipt', 30000, { stage: 'PAY2' }));
     const c = await A.attachDoc(f.id, pdf('c.pdf'), doc('receipt', 30000));
     expect(c.stage).toBe('PAY3');
-    expect(A.sales.steps[`${f.id}/PAY3`]).toBeUndefined();
-    expect((await queued(A)).some((o) => o.k === `dstep/${f.id}/PAY3`)).toBe(false);
+    expect(A.sales.steps[`${f.id}/PAY3`]).toEqual({ d: TODAY, n: 'ใบเสร็จ / ใบกำกับภาษี · 30,000 บาท' });
+    expect((await queued(A)).some((o) => o.k === `dstep/${f.id}/PAY3`)).toBe(true);
+    expect(dealSteps(A.sales, f, TODAY).steps.filter((v) => v.kind === 'pay').map((v) => [v.code, v.state])).toEqual([['PAY1', 'done'], ['PAY2', 'done'], ['PAY3', 'done']]);
     expect(lineOf(A, f, 'PAY3')).toMatchObject({ status: 'paid', got: 30000, rcvDate: TODAY });
     expect(closeReady(A.sales, f, TODAY)).toBe(true);
     // a stage that is neither in the list nor in the plan: none
@@ -250,15 +251,17 @@ describe('the payment plan in the engine', () => {
     B.dispose();
   });
 
-  it('stages that are not configured get no step: a quotation without QUOTATION, an invoice without PAY stages', async () => {
+  it('a team list without QUOTATION or PAY stages (an admin\'s): the five steps are there anyway, the list stays as it is', async () => {
     const C = mk('ซี'); // this browser only
     C.setSalesList('stages', ['CALL1', 'CLOSED DEAL']);
     const d = C.addDeal({ client: 'บริษัท ไม่มีขั้นชำระ จำกัด' });
     C.setStep(d.id, 'CLOSED DEAL', { d: '2026-10-01', n: 'YES' });
-    expect((await C.attachDoc(d.id, pdf('q.pdf'), doc('quotation', 1000))).stage).toBe('');
-    expect((await C.attachDoc(d.id, pdf('i.pdf'), doc('invoice', 1000))).stage).toBe('');
-    expect(Object.keys(C.sales.steps).filter((k) => k.startsWith(d.id + '/'))).toEqual([`${d.id}/CLOSED DEAL`]);
-    expect(closeReady(C.sales, C.sales.deals[d.id], TODAY)).toBe(true); // no PAY stage: won is enough
+    expect(closeReady(C.sales, C.sales.deals[d.id], TODAY)).toBe(false); // won: its PAY step is still to come
+    expect((await C.attachDoc(d.id, pdf('q.pdf'), doc('quotation', 1000))).stage).toBe('QUOTATION');
+    expect((await C.attachDoc(d.id, pdf('i.pdf'), doc('invoice', 1000))).stage).toBe('PAY1');
+    expect(Object.keys(C.sales.steps).filter((k) => k.startsWith(d.id + '/')).sort()).toEqual([`${d.id}/CLOSED DEAL`, `${d.id}/PAY1`, `${d.id}/QUOTATION`]);
+    expect(closeReady(C.sales, C.sales.deals[d.id], TODAY)).toBe(true);
+    expect(C.sales.cfg.stages).toEqual(['CALL1', 'CLOSED DEAL']);
     C.dispose();
   });
 

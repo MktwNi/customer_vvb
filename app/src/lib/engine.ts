@@ -23,8 +23,8 @@ import {
   type AuditRow, type CapAsk, type CapDef, type CapId, type CapSet, type Grants, type ReqPending, type RoleDef,
 } from './caps';
 import {
-  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, isExtraPay, isPayStage, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts,
-  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf,
+  ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, coveredStage, dealSteps, isPayAt, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts, stepLabel, teamSteps,
+  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf, withActIndex,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
@@ -1236,10 +1236,11 @@ export class GccEngine {
       // Sales Tracker + customers added by hand: add what this browser doesn't have
       const IS = (d.sales || {}) as Partial<SalesState>, S = this.sales;
       // lists: keep ours, add the backup's extra sections / SOURCE / Services / stages (notes in a
-      // stage that is not in the list would be hidden)
+      // stage no step reads would be hidden; one the steps read anyway, CALL1 or PAY3, is not added: an
+      // older build would show it as one more stage)
       if (IS.cfg)
         (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
-          const extra = (Array.isArray(IS.cfg![k]) ? IS.cfg![k] : []).map(String).filter((x) => x && !S.cfg[k].includes(x));
+          const extra = (Array.isArray(IS.cfg![k]) ? IS.cfg![k] : []).map(String).filter((x) => x && !S.cfg[k].includes(x) && !(k === 'stages' && coveredStage(x)));
           if (extra.length) this.setSalesList(k, [...S.cfg[k], ...extra]);
         });
       // every record checked (toDeal…): a hand-edited backup must not break the screen for the team
@@ -1779,7 +1780,8 @@ export class GccEngine {
     if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     this.saveSales();
   }
-  /** Stage date + note; a note without a date gets today's date. Only the step record is written —
+  /** A step's date + note at the stored stage `stage` (a step's id; an older stage, CALL2, when its own record
+   *  is edited in place); a note without a date gets today's date. Only the step record is written —
    *  the last contact is derived from it (lastContact), so a note never rewrites the deal. The payer's
    *  result recorded by hand on a joint quotation already closed is its companies' too (those without one,
    *  as at the closing: fillJoint); returns how many companies got it. */
@@ -1807,7 +1809,7 @@ export class GccEngine {
       const f = auto ? undefined : (['d', 'n'] as const).filter((x) => (x === 'd' ? date : n) !== cur[x]);
       this.op(keyOf.dstep(id, stage), { d: date, n }, { base, f });
     }
-    if (!quiet) this.salesLog(d, 'อัปเดต ' + stage, n.trim().slice(0, 120) || isoTh(date));
+    if (!quiet) this.salesLog(d, 'อัปเดต ' + stepLabel(this.sales, d, stage, todayISO()).code, n.trim().slice(0, 120) || isoTh(date));
     let filled = 0;
     if (!auto && stage === DEAL_STAGE && d.jobStatus === 'closed' && this.sales.jqt?.[id]) {
       const g = jointOf(this.sales, d);
@@ -2045,10 +2047,10 @@ export class GccEngine {
   }
   /**
    * "รับเงินแล้ว" without a document: the date, the amount (null = as planned), how, and whether a short
-   * amount counts as complete ("ถือว่ารับครบงวดนี้"). An empty note of the stage is filled in as a
-   * document's would be ("รับชำระแล้ว 53,500 บาท · โอน", on the date received), so builds without the
-   * plan see the stage done too. A document attached there later takes over the amount. Returns true
-   * when this made the deal ready to close (the UI then offers ปิดงาน).
+   * amount counts as complete ("ถือว่ารับครบงวดนี้"). An empty note of its step (every installment is
+   * one, PAY3 too) is filled in as a document's would be ("รับชำระแล้ว 53,500 บาท · โอน", on the date
+   * received), so builds without the plan see the stage done too. A document attached there later takes
+   * over the amount. Returns true when this made the deal ready to close (the UI then offers ปิดงาน).
    */
   markPaid(dealId: string, stage: string, r: { date: string; amount: number | null; how?: PayHow; full?: boolean }): boolean {
     const S = this.sales, d = S.deals[dealId], k = `${dealId}/${stage}`, cur = S.pays[k];
@@ -2062,7 +2064,7 @@ export class GccEngine {
     this.batchOps(() => {
       S.pays[k] = n;
       this.op(keyOf.dpay(dealId, stage), { ...n }, { f: [...f, 'at', 'by'] });
-      if (S.cfg.stages.includes(stage) && !stepOf(S, dealId, stage).n.trim()) this.setStep(dealId, stage, { d: n.rcv, n: paidNote(n) }, true, true);
+      if (!stepOf(S, dealId, stage).n.trim()) this.setStep(dealId, stage, { d: n.rcv, n: paidNote(n) }, true, true);
       this.salesLog(d, 'รับชำระ ' + stage, [`${fmtMoney(n.got ?? n.amt ?? 0)} บาท`, n.how ? HOW_TH[n.how] : '', n.full ? 'ถือว่าครบ' : ''].filter(Boolean).join(' · '));
     });
     this.saveSales();
@@ -2108,8 +2110,9 @@ export class GccEngine {
   }
 
   // ---- contacts beyond the stages: one record each, dact/<deal>/<id> (lib/sales.ts DealAct)
-  /** "บันทึกการติดต่อ": a call, e-mail or meeting on `d` (default today) at `stage` (default where the
-   *  deal is, actStage). Never rewrites the deal or a stage: the last contact is derived (lastContact). */
+  /** "บันทึกการติดต่อ": a call, e-mail or meeting on `d` (default today) at `stage` (default the step the
+   *  deal is at, actStage: CONTACT, FOLLOW …). Never rewrites the deal or a step: the last contact is derived
+   *  (lastContact). */
   addAct(dealId: string, a: { type: ActType; note: string; d?: string; stage?: string; pid?: string }): DealAct | null {
     const S = this.sales, deal = S.deals[dealId];
     if (!this.canDeal('edit.deal', deal)) return this.deny(), null;
@@ -2121,7 +2124,7 @@ export class GccEngine {
     (S.acts || (S.acts = {}))[`${dealId}/${id}`] = act;
     this.batchOps(() => {
       this.op(keyOf.dact(dealId, id), v);
-      this.salesLog(deal, 'บันทึกการติดต่อ', [ACT_TH[act.type], act.stage, act.note.slice(0, 120)].filter(Boolean).join(' · '));
+      this.salesLog(deal, 'บันทึกการติดต่อ', [ACT_TH[act.type], act.stage && stepLabel(S, deal, act.stage, today).code, act.note.slice(0, 120)].filter(Boolean).join(' · '));
     });
     this.saveSales();
     return act;
@@ -2246,7 +2249,7 @@ export class GccEngine {
     const S = this.sales, today = todayISO();
     if (total != null) this.updateDeal(hid, { forecast: total });
     const st = stepOf(S, hid, QUOTE_STAGE);
-    if (S.cfg.stages.includes(QUOTE_STAGE) && !st.d && !st.n.trim()) this.setStep(hid, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
+    if (!st.d && !st.n.trim()) this.setStep(hid, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
   }
   /** Why picks may not join ('' = they may): another person's row this account may not edit (rowFate
    *  'locked'). `skip`: the deal "รวมเป็นใบเสนอราคาร่วม" comes from (its quotation moves first, then it joins). */
@@ -2283,7 +2286,7 @@ export class GccEngine {
       this.op(keyOf.jqm(h.id, d.id), { ...m });
       // QUOTATION is done for every member by the joint quotation (a note of the row's own stays)
       const st = stepOf(S, d.id, QUOTE_STAGE);
-      if (S.cfg.stages.includes(QUOTE_STAGE) && !st.d && !st.n.trim()) this.setStep(d.id, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
+      if (!st.d && !st.n.trim()) this.setStep(d.id, QUOTE_STAGE, { d: docDate && docDate <= today ? docDate : today, n: jointNote(docNo) }, true, true);
       this.salesLog(d, 'เข้าร่วมใบเสนอราคาร่วม', [title, docNo].filter(Boolean).join(' · '));
     });
   }
@@ -2599,8 +2602,8 @@ export class GccEngine {
     // quotation's): what is attached there is kept as a document that is not counted, at no stage
     if (jointRole(S, d) === 'member') info = { ...info, target: 'none', stage: '', replace: undefined, addHand: false, revise: undefined, kept: false };
     const id = uid();
+    // (a stage some step reads, attachStage: every one has its record, an installment PAY3 too)
     const stage = attachStage(S, d, info, today);
-    const inList = !!stage && S.cfg.stages.includes(stage); // an extra installment (PAY3) has no step record
     // a revision is numbered after every version, also when this computer's clock is behind the one that attached the last
     const at = info.revise != null ? this.stampAfter(qtVersions(S, d).map((x) => x.at)) : new Date().toISOString();
     const cAt = this.stampAfter([d.fcAt, ...docsOf(S, dealId).map((x) => x.cAt || x.at)]);
@@ -2613,8 +2616,8 @@ export class GccEngine {
     // fill the stage the document stands for when it is empty, or has only a planned date, and remember
     // the note so it can follow the document (edited amount, deleted document)
     const ad = info.docDate && info.docDate <= today ? info.docDate : today;
-    // at a PAY stage only a counted payment completes it: a contract filed there is evidence, not money
-    const st = inList && (!isPayStage(S.cfg, stage) || countsActual(doc)) ? stepOf(S, dealId, stage) : null;
+    // at an installment only a counted payment completes it: a contract filed there is evidence, not money
+    const st = stage && (!isPayAt(S, dealId, stage) || countsActual(doc)) ? stepOf(S, dealId, stage) : null;
     // (a joint quotation made without its file noted its QUOTATION for it: the file takes that note over)
     const noted = !!st?.n.trim() && !(isQtVersion(doc) && isJointNote(st.n) && jointRole(S, d) === 'header');
     if (st && !noted) doc.auto = { stage, n: this.autoNote(doc), d: ad };
@@ -2739,9 +2742,9 @@ export class GccEngine {
     if (opt.log !== false) this.salesLog(d, 'แก้ไขเอกสาร', `${n.name}${n.amount != null ? ' · ' + fmtMoney(n.amount) + ' บาท' : ''}`);
     this.saveSales();
   }
-  /** Whether the stage note a document filled in is a PAY stage's (an installment, also an extra one). */
+  /** Whether the stage note a document filled in is an installment's. */
   private payAuto(doc: DealDoc) {
-    return !!doc.auto && (isPayStage(this.sales.cfg, doc.auto.stage) || isExtraPay(this.sales.cfg, doc.auto.stage));
+    return !!doc.auto && isPayAt(this.sales, doc.deal, doc.auto.stage);
   }
   /** `doc` (deleted, or no longer counted) gives up the stage note it filled in, unless someone has
    *  written in it since: another document for the same stage (a revised quotation, a second invoice)
@@ -3331,11 +3334,13 @@ export class GccEngine {
     let deals = 0, skipped = 0, linked = 0, ambiguous = 0, inexact = 0;
     const listsAdded: Partial<Record<keyof SalesCfg, string[]>> = {};
     data.forEach((t) => {
-      // lists: keep ours, add what the file has that we don't (remembered, so an undo can take them out)
+      // lists: keep ours, add what the file has that we don't (remembered, so an undo can take them out). The
+      // old tracker's stages CALL1 … PAY2 (and PAY3 …) are read into the five steps as they are (dealSteps),
+      // so only a stage of its own is added (it becomes a step after the one it followed: teamSteps)
       (['sections', 'sources', 'services', 'stages'] as const).forEach((k) => {
-        const extra = (t.cfg[k] || []).filter((x) => !S.cfg[k].includes(x));
+        const extra = (t.cfg[k] || []).filter((x) => !S.cfg[k].includes(x) && !(k === 'stages' && coveredStage(x)));
         if (k === 'sections') t.clients.forEach((c) => c.section && !S.cfg.sections.includes(c.section) && !extra.includes(c.section) && extra.push(c.section));
-        if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !extra.includes(p) && extra.push(p)));
+        if (k === 'stages') t.clients.forEach((c) => Object.keys(c.progress).forEach((p) => !S.cfg.stages.includes(p) && !coveredStage(p) && !extra.includes(p) && extra.push(p)));
         if (!extra.length) return;
         this.setSalesList(k, [...S.cfg[k], ...extra]);
         (listsAdded[k] || (listsAdded[k] = [])).push(...extra.filter((x) => S.cfg[k].includes(x)));
@@ -3459,11 +3464,19 @@ export class GccEngine {
   closedCsv(deals: Deal[], attr: boolean, t: WorkTally = this.workTally(deals, { attr })) {
     return this.salesCsv(deals, closedCsvRows(this.sales, deals, attr, t));
   }
-  /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns. */
+  /** CSV of tracker rows (`deals`, as listed); `rows`: the ปิดงาน export's (closedCsv), with its two count columns.
+   *  The steps are the team's (teamSteps): a date and a note each (CLOSE: its result); CONTACT and FOLLOW give
+   *  their date as the screens do and their own note, then the older stages' ("CALL2: …; CALL1: …"); PAY gives
+   *  every installment's ("PAY1 2026-08-22; PAY2 …", one alone without its code); then how many contacts
+   *  (records and older stages' records, as the panel counts them), and "ขั้นตอนอื่น": what no step reads. */
   salesCsv(deals: Deal[], rows?: ClosedCsvRow[]) {
-    const S = this.sales, C = S.cfg, today = todayISO();
+    // (each deal's steps read its documents and contacts: indexed once for the whole file)
+    return withActIndex(this.sales, () => this.csvOf(deals, rows));
+  }
+  private csvOf(deals: Deal[], rows?: ClosedCsvRow[]) {
+    const S = this.sales, C = S.cfg, today = todayISO(), steps = teamSteps(C);
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
-      .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], C.stages.flatMap((p) => [p + ' วันที่', p + ' โน้ต']), ['ขั้นตอนอื่น'])
+      .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], steps.flatMap((x) => [x.code + ' วันที่', x.code + (x.kind === 'close' ? ' ผล' : ' โน้ต')]), ['การติดต่อ (ครั้ง)', 'ขั้นตอนอื่น'])
       .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ'])
       .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : []);
     const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
@@ -3477,18 +3490,33 @@ export class GccEngine {
       const sh = jr === 'member' ? shareOf(S, d) : null;
       const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท${x.part != null ? ` · นับส่วนของ ${x.part} บริษัทตามตัวกรอง` : ''}` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
-      // ticks and notes no longer in the lists are kept (removing a list item keeps them on the deals)
+      // the steps' cells, and every stored stage they read
+      const t = dealSteps(S, d, today), read = new Set<string>();
+      const stepCells = steps.flatMap((def) => {
+        if (def.kind === 'pay') {
+          const ps = t.steps.filter((v) => v.kind === 'pay'), one = ps.length === 1;
+          ps.forEach((v) => read.add(v.id));
+          const has = ps.filter((v) => v.own.d || v.own.n.trim());
+          return one
+            ? [ps[0].own.d, ps[0].own.n]
+            : [has.filter((v) => v.own.d).map((v) => `${v.code} ${v.own.d}`).join('; '), has.filter((v) => v.own.n.trim()).map((v) => `${v.code}: ${v.own.n}`).join('; ')];
+        }
+        const v = t.steps.find((x) => x.id === def.id);
+        def.aliases.forEach((a) => read.add(a));
+        if (!v) return ['', ''];
+        if (def.kind !== 'contact' && def.kind !== 'follow') return [v.own.d, v.own.n];
+        const older = v.aliases.slice(1).map((a) => [a, stepOf(S, d.id, a).n.trim()]).filter(([, n]) => n).map(([a, n]) => `${a}: ${n}`);
+        return [v.date || v.top.d, [v.own.n.trim(), ...older].filter(Boolean).join('; ')];
+      });
+      // ticks and notes no step reads are kept (removing a list item keeps them on the deals)
       const otherSteps = Object.entries(S.steps)
-        .filter(([k]) => k.startsWith(d.id + '/') && !C.stages.includes(k.slice(d.id.length + 1)))
+        .filter(([k]) => k.startsWith(d.id + '/') && !read.has(k.slice(d.id.length + 1)))
         .map(([k, x]) => `${k.slice(d.id.length + 1)}: ${[x.d, x.n].filter(Boolean).join(' ')}`);
       return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(d.contactName), csvPhone(d.phone), csvCell(d.email), csvCell(d.resp), csvCell(d.referral),
         csvCell(d.contactDate), csvCell(lastContact(S, d, today)), csvCell(d.jobStatus === 'closed' ? 'ปิดงาน ' + (d.closedDate || '') : 'เปิด'), csvCell(st.overall)]
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(d.service.includes(x) ? '✓' : '')), [csvCell(d.service.filter((x) => !C.services.includes(x)).join(', '))])
-        .concat(C.stages.flatMap((p) => {
-          const x = stepOf(S, d.id, p);
-          return [csvCell(x.d), csvCell(x.n)];
-        }), [csvCell(otherSteps.join(' | '))])
+        .concat(stepCells.map(csvCell), [csvCell(t.contacts), csvCell(otherSteps.join(' | '))])
         .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
         .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
         .join(',');

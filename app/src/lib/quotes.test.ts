@@ -206,10 +206,10 @@ describe('the attach dialog', () => {
     const none = world([]);
     expect(attachRevision(none.s, none.d, { ...q, stage: 'QUOTATION' }, TODAY)).toBeNull();
     expect(attachRevision(none.s, none.d, { ...q, stage: 'QUOTATION', revise: 'v1' }, TODAY)).toBeNull();
-    // a stage list without QUOTATION: nothing goes there
+    // a team list without QUOTATION (an admin's): QUOTATION is one of the five steps all the same
     const noQ = two();
     noQ.s.cfg.stages = noQ.s.cfg.stages.filter((p) => p !== 'QUOTATION');
-    expect(attachRevision(noQ.s, noQ.d, q, TODAY)).toBeNull();
+    expect(attachRevision(noQ.s, noQ.d, q, TODAY)).toEqual(attachRevision(two().s, two().d, q, TODAY));
   });
 
   it('checks the figure the caller gave, also on a revision (a typed plan total is never replaced silently)', () => {

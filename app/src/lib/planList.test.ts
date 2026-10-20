@@ -84,7 +84,7 @@ describe('the rows: followed companies and open tracker jobs, one row per compan
     expect(r.jobs.map((j) => j.deal.id)).toEqual(['idle', 'calm']);
     expect(r.jobs[0]).toMatchObject({ late: true, idle: 41, when: '2026-09-15' });
     expect(r.late).toBe(true);
-    expect(jobTag(r.jobs)).toBe('Sales Tracker 2 งาน · ถัดไป CALL1 โทรครั้งที่\u00a01');
+    expect(jobTag(r.jobs)).toBe('Sales Tracker 2 งาน · ถัดไป CONTACT ติดต่อประสานงาน');
   });
 
   it('lists only open jobs of the year: not closed, not lost, not won and fully paid, not another year', () => {
@@ -202,8 +202,8 @@ describe('the order: what needs action first, then the soonest, then what has no
     // the first open appointment (a done one never counts)
     expect(rows.find((r) => r.key === 'c40')!.task?.id).toBe('t40');
     expect(rows.find((r) => r.key === 'c50')!.task).toBeNull();
-    expect(jobTag(rows.find((r) => r.key === 'c30')!.jobs)).toBe(`Sales Tracker · ถัดไป FOLLOW1 นัด\u00a0${dmTh('2026-10-20')}`);
-    expect(jobTag(rows.find((r) => r.key === 'c50')!.jobs)).toBe('Sales Tracker · ถัดไป FOLLOW1 ติดตามครั้งที่\u00a01');
+    expect(jobTag(rows.find((r) => r.key === 'c30')!.jobs)).toBe(`Sales Tracker · ถัดไป FOLLOW นัด\u00a0${dmTh('2026-10-20')}`);
+    expect(jobTag(rows.find((r) => r.key === 'c50')!.jobs)).toBe('Sales Tracker · ถัดไป FOLLOW ติดตามผล');
   });
 
   it('puts companies only followed after the tracker’s jobs when neither has a plan', () => {

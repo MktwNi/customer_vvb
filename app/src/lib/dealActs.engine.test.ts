@@ -85,16 +85,16 @@ describe('contacts beyond the stages (dact records)', () => {
     expect(overdueDays(B.sales, B.sales.deals[d.id], TODAY)).toBe(66);
 
     const a1 = A.addAct(d.id, { type: 'call', note: 'โทรครั้งที่ 3 ขอเอกสารเพิ่ม', d: '2026-10-02' })!;
-    // where the deal is (CALL1 done), a record of its own, not the deal or a stage
-    expect(a1).toMatchObject({ deal: d.id, stage: 'CALL1', type: 'call', by: 'เอ', d: '2026-10-02' });
+    // where the deal is (CALL1 done: the CONTACT step), a record of its own, not the deal or a step
+    expect(a1).toMatchObject({ deal: d.id, stage: 'CONTACT', type: 'call', by: 'เอ', d: '2026-10-02' });
     const q = await queued(A);
     const op = q.find((o) => o.k === `dact/${d.id}/${a1.id}`)!;
-    expect(op.v).toEqual({ d: '2026-10-02', type: 'call', note: 'โทรครั้งที่ 3 ขอเอกสารเพิ่ม', stage: 'CALL1', pid: '', by: 'เอ', at: a1.at });
+    expect(op.v).toEqual({ d: '2026-10-02', type: 'call', note: 'โทรครั้งที่ 3 ขอเอกสารเพิ่ม', stage: 'CONTACT', pid: '', by: 'เอ', at: a1.at });
     expect(op.f).toBeUndefined();
     expect(q.some((o) => o.k.startsWith('deal/') || o.k.startsWith('dstep/'))).toBe(false);
-    expect(Object.values(A.sales.log).filter((l) => l.deal === d.id).pop()).toMatchObject({ action: 'บันทึกการติดต่อ', detail: 'โทร · CALL1 · โทรครั้งที่ 3 ขอเอกสารเพิ่ม' });
+    expect(Object.values(A.sales.log).filter((l) => l.deal === d.id).pop()).toMatchObject({ action: 'บันทึกการติดต่อ', detail: 'โทร · CONTACT · โทรครั้งที่ 3 ขอเอกสารเพิ่ม' });
 
-    // at the same moment on B, before either has synced
+    // at the same moment on B, before either has synced (at CALL1, as a browser on an older build files it)
     const b1 = B.addAct(d.id, { type: 'email', note: 'ส่งโบรชัวร์', d: '2026-10-03', stage: 'CALL1' })!;
     await settle(A, B);
     for (const e of [A, B]) {

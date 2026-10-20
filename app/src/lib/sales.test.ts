@@ -71,8 +71,8 @@ describe('sales tracker rules (same as the original tracker)', () => {
     const st = salesStats(S, ds, '2026-10-06');
     expect(st).toMatchObject({ total: 4, yes: 2, no: 1, none: 1, decided: 3, winRate: 67, forecast: 450 });
     expect(st.bySource.TGO).toEqual({ n: 2, forecast: 400, yes: 1, decided: 2 });
-    expect(st.stages.find((x) => x.name === 'CALL1')!.n).toBe(1);
-    expect(st.stages.find((x) => x.name === 'CLOSED DEAL')!.n).toBe(3);
+    // the five steps (CALL1 counts at CONTACT; CLOSE is stored as CLOSED DEAL; PAY: an installment received)
+    expect(st.stages.map((x) => [x.name, x.code, x.n])).toEqual([['CONTACT', 'CONTACT', 1], ['QUOTATION', 'QUOTATION', 0], ['FOLLOW', 'FOLLOW', 0], ['CLOSED DEAL', 'CLOSE', 3], ['PAY', 'PAY', 0]]);
     expect(st.byResp['(ไม่ระบุ)'].n).toBe(2);
   });
 
@@ -328,12 +328,12 @@ describe('Sales Tracker between two browsers (real Code.gs, real dataset)', () =
     A.updateDeal(d.id, { phone: '021234567' });
     A.updateDeal(d.id, { email: 'a@b.co' });
     A.updateDeal(d.id, { phone: '029999999' });
-    A.setStep(d.id, 'CALL1', { d: '', n: 'โทร' });
-    A.setStep(d.id, 'CALL1', { d: '', n: 'โทรแล้ว นัดพรุ่งนี้' });
+    A.setStep(d.id, 'CONTACT', { d: '', n: 'โทร' });
+    A.setStep(d.id, 'CONTACT', { d: '', n: 'โทรแล้ว นัดพรุ่งนี้' });
     expect(n()).toBe(base + 2);
     const logs = Object.values(A.sales.log).filter((l) => l.deal === d.id);
     expect(logs.find((l) => l.action === 'แก้ไข')!.detail).toBe('เบอร์, อีเมล');
-    expect(logs.find((l) => l.action === 'อัปเดต CALL1')!.detail).toBe('โทรแล้ว นัดพรุ่งนี้');
+    expect(logs.find((l) => l.action === 'อัปเดต CONTACT')!.detail).toBe('โทรแล้ว นัดพรุ่งนี้');
     vi.setSystemTime(Date.now() + 11 * 60000); // the clock only: no sync timers fire
     A.updateDeal(d.id, { phone: '021111111' });
     expect(n()).toBe(base + 3);

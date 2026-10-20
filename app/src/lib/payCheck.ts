@@ -522,7 +522,7 @@ export function basisWord(r: ChkRow): string {
 }
 /** The line in a few words for history rows and dialogs: "PAY1", "ใบเสร็จ RC-1", "รับที่ PAY2 · พิมพ์เอง". */
 export function lineLabel(r: Pick<ChkRow, 'line' | 'lineId'>, s?: SalesState): string {
-  if (r.line) return r.line.src === 'plan' ? r.line.stage : instSub(r.line);
+  if (r.line) return r.line.src === 'plan' ? r.line.code || r.line.stage : instSub(r.line);
   if (r.lineId.startsWith('doc.')) {
     const id = r.lineId.slice(4), doc = s ? Object.values(s.docs).find((x) => x.id === id) : undefined;
     return doc ? docWord(doc) : 'เอกสาร';
@@ -531,7 +531,7 @@ export function lineLabel(r: Pick<ChkRow, 'line' | 'lineId'>, s?: SalesState): s
 }
 /** The installment column: "งวด 1/2" or "ไม่มีแผน", and under it the stage or where the money came in. */
 export function instOf(r: ChkRow, s?: SalesState): { text: string; sub: string } {
-  if (r.line) return { text: instText(r.line), sub: r.line.joint ? 'ผู้จ่าย ' + r.line.deal.client : r.line.src === 'typed' && r.line.stage ? 'รับที่ ' + r.line.stage : instSub(r.line) };
+  if (r.line) return { text: instText(r.line), sub: r.line.joint ? 'ผู้จ่าย ' + r.line.deal.client : r.line.src === 'typed' && r.line.stage ? 'รับที่ ' + (r.line.code || r.line.stage) : instSub(r.line) };
   // an orphan: the stage it was, or the document / typed Actual of a deal without a plan
   const stage = r.lineId !== 'typed' && !r.lineId.startsWith('doc.');
   return { text: stage ? r.lineId : 'ไม่มีแผน', sub: stage ? 'งวดที่ยกเลิก' : lineLabel(r, s) };
@@ -813,7 +813,7 @@ export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owe
     const pl = l.src === 'plan' ? (s.pays || {})[`${d.id}/${l.stage}`] : undefined;
     const held = r.state === 'ok' || r.state === 'back';
     return [
-      ymTh(r.ym, true), l.joint ? `${d.client} (${jointWords(l.joint)})` : d.client, dealMoney(s, d).fcDoc?.docNo || '', instText(l) + (l.src === 'plan' ? ` (${l.stage})` : ''),
+      ymTh(r.ym, true), l.joint ? `${d.client} (${jointWords(l.joint)})` : d.client, dealMoney(s, d).fcDoc?.docNo || '', instText(l) + (l.src === 'plan' ? ` (${l.code || l.stage})` : ''),
       r.amt, basisWord(r), dateCell(l.rcv), dateCell(l.due), moneyWord(r), pl?.how ? HOW_TH[pl.how] : '',
       r.kind === 'got' ? (r.docs.length ? r.docs.map(docWord).join(', ') : 'ไม่มีไฟล์') : '', r.by.join(', '),
       checkWord(r), held ? r.rec!.by : '', held ? dateCell(localDay(r.rec!.at)) : null, r.state === 'back' ? r.rec!.note || '' : '',
