@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { DEAL_STAGE, jointAttr, jointOf, moneySum, normSalesFilter, stepOf, type SalesFilter, type SalesState } from './sales';
+import { DEAL_STAGE, basisDates, customersOf, filterDeals, followsPayer, jointAttr, jointOf, lastContactInfo, moneySum, normSalesFilter, stepOf, type SalesFilter, type SalesState } from './sales';
+import { liveCount, monthCounts, trackerFields, weekContacts } from './salesUi';
 import { closeSummary, closedJoint, closedOrder, payerShort } from './joint';
 import { closedExportSub, closedLine, closedMeta, closedTabRows, jointCloseCount, lineText, workCardRows, workCardSub } from './workUi';
 import { IDS, PAYER, T, b82, none, world, yes10 } from './work.fixture';
@@ -155,5 +156,74 @@ describe('the ปิดงาน line, its counter, the Dashboard card and the e
     const cu = jointCloseCount({ worked: 0, fill: su.fill, filled: 0, waiting: su.rows.filter((x) => !/^(YES|NO)$/.test(x.after)).length, payer: payerShort(gu) });
     expect(cu.count).toBe('ปิดแล้วนับเป็น 1 งาน · ทำงานให้ 0 บริษัท');
     expect(cu.more[0]).toBe('บริษัทที่ยังไม่มีผลจะนับเป็นบริษัทที่ทำงานให้เมื่อบันทึกผลของ มจพ');
+  });
+});
+
+describe('the ปิดงาน tab\'s filter popovers count jobs, as its line does (review: "15 งาน" in its date popover)', () => {
+  const q4 = (basis: DateF['basis']): DateF => ({ basis, preset: 'q4', from: '2026-10-01', to: '2026-12-31' });
+  const month = (i: number): DateF => ({ basis: 'closed', preset: 'custom', from: `2026-${String(i + 1).padStart(2, '0')}-01`, to: `2026-${String(i + 1).padStart(2, '0')}-${new Date(Date.UTC(2026, i + 1, 0)).getUTCDate()}` });
+
+  it('the date popover\'s count and its months: what the line says once the range is picked; the table tab\'s hint "อยู่ในแท็บ ปิดงาน N งาน" too', () => {
+    for (const s of [yes10(), b82(), none()]) {
+      const e = eng(s), S = e.sales, F = normSalesFilter({ year: '2569' });
+      // the whole year: 6 jobs (the 15 rows were said as "15 งาน")
+      expect(liveCount(S, F, 'date', null, 'closed', T)).toBe(6);
+      // closed in Q4: 3 jobs (were "12 งาน"), what the line then says; the ตาราง tab's hint asks the same (job 'closed')
+      expect(liveCount(S, F, 'date', q4('closed'), 'closed', T)).toBe(3);
+      expect(screens(e, { date: q4('closed') }).t.jobs).toBe(3);
+      // a month under the calendar: what picking that month shows
+      const ms = monthCounts(S, F, 'closed', 2026, 'closed', T);
+      ms.forEach((n, i) => expect(n).toBe(screens(e, { date: month(i) }).t.jobs));
+      expect(ms[9]).toBe(3);
+      // the table still counts its rows (ราย), one per company
+      expect(liveCount(S, F, 'date', null, 'open', T)).toBe(customersOf(S, filterDeals(S, { ...F, job: 'open' }, T)).length);
+    }
+  });
+
+  it('a choice\'s count and "เหลือ N งาน" in the value popover: jobs under that filter (หมิว 2, คุณบี 2; YES 4, NO 2)', () => {
+    const e = eng(yes10()), S = e.sales, F = normSalesFilter({ year: '2569' });
+    const fields = trackerFields(S, F, { yearDeals: filterDeals(S, F, T), job: 'closed', me: 'หมิว', today: T });
+    const n = (k: string, v: string) => fields.find((f) => f.key === k)!.options.find((o) => o.v === v)!.n;
+    for (const p of ['หมิว', 'คุณบี', 'ปลา', 'มกร', 'คุณเอ']) {
+      const line = screens(e, { resp: { v: [p] } }).t.jobs;
+      expect(n('resp', p)).toBe(line);
+      expect(liveCount(S, F, 'resp', { v: [p] }, 'closed', T)).toBe(line);
+    }
+    expect([n('resp', 'หมิว'), n('resp', 'คุณบี')]).toEqual([2, 2]);
+    // ผลการขาย: the quotation once under ได้งาน (the payer's row and its 10), the 2 lost plain jobs under ไม่ได้งาน
+    expect([n('result', 'YES'), n('result', 'NO')]).toEqual([screens(e, { result: 'YES' }).t.jobs, screens(e, { result: 'NO' }).t.jobs]);
+    expect([n('result', 'YES'), n('result', 'NO')]).toEqual([4, 2]);
+    // the table's choices still count rows
+    const open = trackerFields(S, F, { yearDeals: filterDeals(S, F, T), job: '', me: 'หมิว', today: T });
+    expect(open.find((f) => f.key === 'resp')!.options.find((o) => o.v === 'หมิว')!.n).toBe(customersOf(S, filterDeals(S, { ...F, resp: { v: ['หมิว'] } }, T)).length);
+  });
+});
+
+describe('a joint quotation\'s companies given the payer\'s result at closing are not contacts (review: +10 "การติดต่อสัปดาห์นี้")', () => {
+  it('closing fills 10 results on the payer\'s day: the week\'s contacts, each company\'s last contact and the มีการติดต่อ range stay as they were', () => {
+    // the payer said YES this week (Mon 12 Oct), the companies have no result yet
+    const s = world({ closed: false });
+    s.steps['h/CLOSED DEAL'] = { d: T, n: 'YES' };
+    s.steps['m1/CALL1'] = { d: '2026-09-20', n: 'โทรคุยแล้ว' };
+    const e = eng(s), ids = new Set(Object.keys(e.sales.deals));
+    const before = weekContacts(e.sales, ids, T), last = lastContactInfo(e.sales, e.sales.deals.m1, T);
+    expect(e.closeJoint('h')).toBe(11);
+    // the fill: YES on the payer's day for all 10
+    expect(IDS.every((id) => followsPayer(e.sales, id) && stepOf(e.sales, id, DEAL_STAGE).d === T)).toBe(true);
+    const after = weekContacts(e.sales, ids, T);
+    expect(after.perDay).toEqual(before.perDay);
+    expect(after.perDay[T]).toBe(1); // the payer's own result, recorded by a person
+    expect(lastContactInfo(e.sales, e.sales.deals.m1, T)).toEqual(last);
+    expect(basisDates(e.sales, e.sales.deals.m1, 'contact', T).map((x) => x.d)).toEqual(['2026-09-20']);
+    // it still dates the result (ได้ผลการขาย)
+    expect(basisDates(e.sales, e.sales.deals.m1, 'result', T).map((x) => x.d)).toEqual([T]);
+    // a result of the company's own (another day, or not the payer's) is a contact as before
+    // (Monday 5 Oct: the same day of last week)
+    e.sales.steps['m2/CLOSED DEAL'] = { d: '2026-10-05', n: 'YES' };
+    e.sales.steps['m3/CLOSED DEAL'] = { d: T, n: 'NO' };
+    expect([followsPayer(e.sales, 'm2'), followsPayer(e.sales, 'm3'), followsPayer(e.sales, 'h'), followsPayer(e.sales, 'c1')]).toEqual([false, false, false, false]);
+    const own = weekContacts(e.sales, ids, T);
+    expect([own.perDay, own.lastWeek]).toEqual([{ [T]: 2 }, after.lastWeek + 1]);
+    expect(lastContactInfo(e.sales, e.sales.deals.m2, T)).toMatchObject({ date: '2026-10-05', from: DEAL_STAGE });
   });
 });

@@ -42,8 +42,9 @@
 .jq-res{font-size:var(--fs-sec);color:var(--ink-2)}
 /* on a phone (mockups m6 / m6b; index.css lays the rows out in two lines): the band is a head of two lines
    (its name across, then its results and the Forecast), its tint and edge on the row; its companies keep the
-   edge down the left. The desktop's per-cell tint, edge and corners are undone. */
-@media (max-width:760px){
+   edge down the left. The desktop's per-cell tint, edge and corners are undone. In a list below 860px, as
+   index.css. */
+@container sl-list (max-width:860px){
   .sl-ltable tbody tr.jq-cband{grid-template-areas:"n n" "r f";row-gap:8px;margin-top:6px;padding:12px 2px 12px 14px;background:#F7F9FE;border-top:1px solid var(--line);border-radius:var(--r-band) var(--r-band) 0 0;box-shadow:inset 3px 0 0 var(--tint-line)}
   .sl-ltable tbody tr.jq-cband>*,.sl-ltable tbody tr.jq-cband>:first-child,.sl-ltable tbody tr.jq-cband>:last-child{height:auto;background:none;border:0;border-radius:0;box-shadow:none}
   .sl-ltable tbody tr.jq-cband>td:nth-child(2){grid-area:r;align-self:center}

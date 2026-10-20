@@ -481,13 +481,34 @@ export function stageActs(s: SalesState, d: Deal): { by: Record<string, DealAct[
   return { by, other };
 }
 
+/**
+ * A joint quotation's company whose result is the payer's, on the payer's day: what closing the quotation
+ * records for a company without a result (lib/joint jointFill, engine fillJoint), or the same typed by hand.
+ * It is the team's word on the quotation, not a contact with that company: its date is not a contact
+ * (stepContactDay). It still dates the result (the date filter's ได้ผลการขาย).
+ */
+export function followsPayer(s: SalesState, id: string): boolean {
+  const x = s.steps[`${id}/${DEAL_STAGE}`];
+  const r = x?.d ? x.n.trim().toUpperCase() : '';
+  if (r !== 'YES' && r !== 'NO') return false;
+  const hid = jointHeadOf(s, id), h = hid ? s.steps[`${hid}/${DEAL_STAGE}`] : undefined;
+  return !!h && h.d === x!.d && h.n.trim().toUpperCase() === r;
+}
+/** A stage's date as a contact with the company: '' when it has none, or when it is not a contact
+ *  (followsPayer: a joint quotation's company given the payer's result). */
+export function stepContactDay(s: SalesState, id: string, p: string): string {
+  const x = s.steps[`${id}/${p}`]?.d || '';
+  return x && p === DEAL_STAGE && followsPayer(s, id) ? '' : x;
+}
+
 /** Last contact: the typed contact date, the latest stage date or the latest contact record, whichever
  *  is later ('' when there is none), and where it came from: 'typed' (deal.contactDate), the stage, or
- *  'act' (then `act` is that record). A date in the future (a planned call) does not count. */
+ *  'act' (then `act` is that record). A date in the future (a planned call) does not count, nor a joint
+ *  quotation's company's result recorded from the payer's (stepContactDay). */
 export function lastContactInfo(s: SalesState, d: Deal, today: string): { date: string; from: string; act?: DealAct } {
   let date = d.contactDate && d.contactDate <= today ? d.contactDate : '', from = date ? 'typed' : '';
   for (const p of s.cfg.stages) {
-    const x = s.steps[`${d.id}/${p}`]?.d;
+    const x = stepContactDay(s, d.id, p);
     if (x && x <= today && x > date) {
       date = x;
       from = p;
@@ -1068,7 +1089,8 @@ export interface BasisDate { d: string; what: string; amt?: number; tone?: 'ok' 
 /**
  * A deal's dates on a basis, newest first:
  * - contact: what the last contact counts (lastContactInfo): the typed contact date, every stage date and
- *   every contact record, up to today (a planned call is not a contact yet);
+ *   every contact record, up to today (a planned call is not a contact yet; nor a joint quotation's company
+ *   given the payer's result, stepContactDay);
  * - added: the day it was added to the table (local day);
  * - result: the CLOSED DEAL date once the result is YES or NO;
  * - paid: when each installment came in (with a plan); without a plan, each paid PAY stage dated up to today;
@@ -1085,7 +1107,7 @@ export function basisDates(s: SalesState, d: Deal, basis: DateBasis, today: stri
   if (basis === 'contact') {
     if (d.contactDate && d.contactDate <= today) out.push({ d: d.contactDate, what: 'วันที่ติดต่อ' });
     for (const p of s.cfg.stages) {
-      const x = s.steps[`${d.id}/${p}`]?.d;
+      const x = stepContactDay(s, d.id, p);
       if (x && x <= today) out.push({ d: x, what: p });
     }
     for (const a of actsOf(s, d.id)) if (a.d && a.d <= today) out.push({ d: a.d, what: ACT_TH[a.type] + (a.stage ? ' · ' + a.stage : '') });

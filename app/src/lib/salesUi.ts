@@ -1,6 +1,6 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
-import { daysBetween, dmTh, localDay } from './format';
-import { basisDates, customersOf, filterDeals, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, withActIndex, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
+import { addDays, daysBetween, dmTh, dow, localDay } from './format';
+import { basisDates, customersOf, filterDeals, jointAttr, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, stepContactDay, withActIndex, workTally, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
   DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, countedAt, dealMoney, dealResult, dealStatus, docMismatch, docsOf, fmtMoney, lastStage, mismatchText, overdueDays, payStages, payState, stageTh, stageTrack, stepOf,
   type Deal, type DealDoc, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats,
@@ -64,22 +64,36 @@ export const RESULT_OPTS: { v: Exclude<ResultF, ''>; label: string; chip: string
 export type ViewJob = 'open' | 'closed' | '';
 const viewOf = (F: SalesFilter, job: ViewJob): SalesFilter => ({ ...F, job, quick: job === 'open' ? F.quick : '' });
 
-/** The rows of the view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date'
- *  takes a date draft). Customers only: a joint quotation's header is not one (its members are). */
-export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string): number {
-  return customersOf(S, filterDeals(S, { ...viewOf(F, job), [key]: draft ?? undefined }, today)).length;
+/**
+ * How many the rows `rows` of a view are, as the view counts them: the ปิดงาน tab counts jobs (a joint quotation
+ * one however many of its companies are listed, workTally under the filters `f`, as its line and its counter
+ * say); the table and the Dashboard count customers, in ราย (a joint quotation's header is not one, its
+ * companies are).
+ */
+export function viewCount(S: SalesState, rows: Deal[], job: ViewJob, f: SalesFilter): number {
+  return job === 'closed' ? workTally(S, rows, { attr: jointAttr(f) }).jobs : customersOf(S, rows).length;
 }
 
-/** How many rows of the view (date filter off) have a date of `basis` in each month of `ceYear`. */
+/** The view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date' takes a date
+ *  draft), counted as the view counts (viewCount). */
+export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string): number {
+  const f = { ...viewOf(F, job), [key]: draft ?? undefined };
+  return viewCount(S, filterDeals(S, f, today), job, f);
+}
+
+/** How many of the view (date filter off) have a date of `basis` in each month of `ceYear`, counted as the view
+ *  counts (viewCount: what the view says once that month is picked). */
 export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceYear: number, job: ViewJob, today: string): number[] {
-  const out = Array(12).fill(0) as number[], y = String(ceYear);
+  const y = String(ceYear), f = { ...viewOf(F, job), date: null };
+  const by: Deal[][] = Array.from({ length: 12 }, () => []);
   withActIndex(S, () =>
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), date: null }, today)).forEach((d) => {
+    // (the ปิดงาน tab's jobs include a joint quotation's header: the payer's row is that job)
+    (job === 'closed' ? filterDeals(S, f, today) : customersOf(S, filterDeals(S, f, today))).forEach((d) => {
       const ms = new Set(basisDates(S, d, basis, today).filter((x) => x.d.startsWith(y)).map((x) => +x.d.slice(5, 7) - 1));
-      ms.forEach((m) => out[m]++);
+      ms.forEach((m) => by[m].push(d));
     }),
   );
-  return out;
+  return by.map((l) => (l.length ? viewCount(S, l, job, f) : 0));
 }
 
 const thCmp = (a: string, b: string) => a.localeCompare(b, 'th');
@@ -101,11 +115,17 @@ export function trackerFields(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FF
 }
 function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
   const { yearDeals, job, me, today } = ctx;
-  const counts = (k: ListKey) => {
-    const m = new Map<string, number>();
-    // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), [k]: undefined }, today)).forEach((d) => listValues(k === 'section' ? payerDeal(S, d) : d, k, S).forEach((v) => m.set(v, (m.get(v) || 0) + 1)));
+  /** each value's rows, counted as the view counts them (viewCount, under the filters with that value picked) */
+  const tally = (rows: Deal[], valuesOf: (d: Deal) => string[], f: (v: string) => SalesFilter) => {
+    const by = new Map<string, Deal[]>(), m = new Map<string, number>();
+    rows.forEach((d) => valuesOf(d).forEach((v) => (by.get(v) || by.set(v, []).get(v)!).push(d)));
+    by.forEach((l, v) => m.set(v, viewCount(S, l, job, f(v))));
     return m;
+  };
+  const counts = (k: ListKey) => {
+    const f = { ...viewOf(F, job), [k]: undefined }, rows = filterDeals(S, f, today);
+    // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
+    return tally(job === 'closed' ? rows : customersOf(S, rows), (d) => listValues(k === 'section' ? payerDeal(S, d) : d, k, S), (v) => ({ ...f, [k]: { v: [v] } }));
   };
   const used = (k: ListKey) => new Set(yearDeals.flatMap((d) => listValues(d, k, S)));
   const opt = (v: string, n: Map<string, number>, sub?: string): FOpt => ({ v, label: v === NONE ? 'ไม่ระบุ' : v, n: n.get(v) || 0, sub });
@@ -149,14 +169,34 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
     });
   }
   if (!ctx.dash) {
-    const n = new Map<string, number>();
-    customersOf(S, filterDeals(S, { ...viewOf(F, job), result: '' }, today)).forEach((d) => {
-      const r = dealResult(S, d) || 'EMPTY';
-      n.set(r, (n.get(r) || 0) + 1);
-    });
+    const f = { ...viewOf(F, job), result: '' as const }, rows = filterDeals(S, f, today);
+    const n = tally(job === 'closed' ? rows : customersOf(S, rows), (d) => [dealResult(S, d) || 'EMPTY'], (v) => ({ ...f, result: v as ResultF }));
     fields.push({ key: 'result', label: 'ผลการขาย', hint: 'ได้งาน / ไม่ได้งาน / รอผล', kind: 'single', all: 'ทั้งหมด', options: RESULT_OPTS.map((o) => ({ ...o, n: n.get(o.v) || 0 })) });
   }
   return fields;
+}
+
+/**
+ * The Dashboard's การติดต่อสัปดาห์นี้: the steps and contact records of the deals `ids` dated this week (Monday
+ * `mon` to today: a later date is a plan, not a contact yet) by day, and how many on the same days of last
+ * week. A joint quotation's company given the payer's result when it closed is not a contact (stepContactDay).
+ */
+export function weekContacts(S: SalesState, ids: Set<string>, today: string) {
+  const mon = addDays(today, -((dow(today) + 6) % 7));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+  const perDay: Record<string, number> = {};
+  let lastWeek = 0;
+  const prevMon = addDays(mon, -7), prevToday = addDays(today, -7);
+  const contact = (day: string) => {
+    if (day >= mon && day <= today) perDay[day] = (perDay[day] || 0) + 1;
+    else if (day >= prevMon && day <= prevToday) lastWeek++;
+  };
+  Object.keys(S.steps).forEach((k) => {
+    const i = k.indexOf('/'), id = k.slice(0, i), day = ids.has(id) ? stepContactDay(S, id, k.slice(i + 1)) : '';
+    if (day) contact(day);
+  });
+  Object.entries(S.acts || {}).forEach(([k, x]) => x.d && ids.has(k.slice(0, k.indexOf('/'))) && contact(x.d));
+  return { mon, days, perDay, lastWeek };
 }
 
 /** Win rate (%) of each SOURCE that has deals with a known result — a channel at 0% is kept. */

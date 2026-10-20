@@ -460,8 +460,11 @@ function ListsModal({ onClose }: { onClose: () => void }) {
 /**
  * Above the rows (filters spec §6.1). Table tab: the quick views and the search, then the filter row: the
  * date chip, ผู้รับผิดชอบ (the same filter as "ของฉัน"), "เฉพาะงวดเลยกำหนด" when reached from ค้างรับ, the
- * chips in use, "เพิ่มตัวกรอง", "ล้างทั้งหมด" and "แสดง 5 จาก 32 งาน". ปิดงาน: no quick views, the search leads
+ * chips in use, "เพิ่มตัวกรอง", "ล้างทั้งหมด" and "แสดง 5 จาก 32 ราย". ปิดงาน: no quick views, the search leads
  * the filter row. Filters are view state only: an account that can only read uses them too.
+ * What is counted: the table counts its rows, one per company, in ราย (a joint quotation's 10 companies are 10,
+ * as the year picker and the Dashboard's ลูกค้า say); พร้อมปิดงาน and the ปิดงาน tab count jobs, งาน (a joint
+ * quotation is one: lib/salesUi viewCount).
  */
 function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: SalesState; F: SalesFilter; yearDeals: Deal[]; base?: Deal[]; today: string; job: 'open' | 'closed'; shown: number; total: number }) {
   const { engine: e, ui, set } = useApp();
@@ -500,6 +503,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   );
   // the closed tab has no quick views: เฉพาะงวดเลยกำหนด is neither shown nor counted there
   const on = narrowed(job === 'open' ? F : { ...F, quick: '' });
+  // the table counts companies (ราย), the ปิดงาน tab jobs (งาน): its counts are workTally's (lib/salesUi viewCount)
+  const unit = job === 'open' ? 'ราย' : 'งาน';
   return (
     <div className="sl-filt">
       {base && (
@@ -515,7 +520,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
               const n = viewN[i];
               const od = (k === 'overdue' && n > 0) || (k === 'payment' && anyLate);
               return (
-                <button key={k || 'all'} type="button" aria-pressed={seg === k} onClick={() => pick(k)}>
+                <button key={k || 'all'} type="button" aria-pressed={seg === k} onClick={() => pick(k)} title={k === 'ready' ? 'นับเป็นงาน ใบเสนอราคาร่วม 1 ใบนับเป็น 1 งาน' : undefined}>
                   {label}<span className={'n' + (od ? ' od' : '')}>{fmtN(n)}</span>
                 </button>
               );
@@ -537,6 +542,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
             onChange={(date) => up({ date })}
             year={F.year}
             today={today}
+            unit={unit}
             count={(draft) => liveCount(S, F, 'date', draft, job, today)}
             monthCounts={(basis, y) => monthCounts(S, F, basis, y, job, today)}
             // open jobs have no closing date: say where the jobs closed in the range are (the KPIs count them)
@@ -549,6 +555,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
         // chips and the search go; the quick view stays (เฉพาะงวดเลยกำหนด goes back to รอชำระเงิน)
         onClearAll={() => set({ slF: job === 'open' ? { quick: quick === 'paylate' ? 'payment' : quick } : { quick: F.quick }, slCollapsed: {} })}
         count={on ? { shown, total } : null}
+        unit={unit}
         liveCount={(k, d) => liveCount(S, F, k, k === 'result' ? ((d?.v[0] || '') as ResultF) : d, job, today)}
       />
     </div>
