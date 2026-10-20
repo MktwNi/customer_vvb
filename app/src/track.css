@@ -27,7 +27,7 @@
 .fw-r:has(:focus-visible){background-color:var(--tint)}
 .fw-name{cursor:pointer;border:0;background:transparent;padding:0;font:inherit;text-align:left;display:flex;gap:12px;align-items:center;min-width:0;color:var(--ink)}
 .fw-name-t{display:flex;flex-direction:column;gap:2px;min-width:0}
-.fw-name .t-name{text-wrap:pretty;overflow-wrap:anywhere}
+.fw-name .co-name{text-wrap:pretty;overflow-wrap:anywhere;line-height:1.4}
 .fw-c{position:relative;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0;overflow-wrap:anywhere}
 /* a cell's column name: read out with the cell in the table (the header row is for the eye), shown when
    the cells stack */
@@ -86,3 +86,14 @@
 .tr-feed-t{margin:0;font-size:var(--fs-body);font-weight:500;line-height:1.45;color:var(--ink)}
 .tr-feed-n{font-size:var(--fs-card);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .tr-feed-n.zero{color:var(--muted)}
+/* a list's first names: one line each, the name cut with … (its tooltip has it whole), the fact at the end */
+.tr-feed-r{cursor:pointer;border:0;border-top:1px solid var(--divider);text-align:left;padding:9px 8px;margin:0 -8px;display:flex;justify-content:space-between;gap:10px;align-items:baseline;font:inherit;color:var(--ink)}
+.tr-feed-r .co-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-feed-r .t-meta{white-space:nowrap}
+
+/* the CFO overview's certificate rows: the days or ใหม่, the organisation (cut with …, whole in its tooltip)
+   over its certificate, the date */
+.tr-cert{cursor:pointer;border:0;border-bottom:1px solid var(--divider);padding:11px 8px;margin:0 -8px;display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;font:inherit;color:var(--ink)}
+.tr-cert-t{display:flex;flex-direction:column;gap:1px;min-width:0}
+.tr-cert-t .co-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-cert-d{font-size:var(--fs-sec);color:var(--muted);white-space:nowrap}

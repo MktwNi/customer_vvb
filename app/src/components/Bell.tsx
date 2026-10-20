@@ -113,7 +113,7 @@ export function Bell() {
                 {g.rows.map((row) => (
                   <div key={row.key} className="nf-ir">
                     <button type="button" className="nf-i" onClick={() => pick(row)}>
-                      <span className="nf-t">{row.title}</span>
+                      <span className="nf-t co-name dense" title={row.title}>{row.title}</span>
                       <span className={'nf-s' + (row.wrap ? ' wrap' : '')}>{row.sub}</span>
                       <span className="nf-r">{row.right.chip != null ? <span className={'chip' + (row.right.chip ? ' ' + row.right.chip : '')}>{row.right.text}</span> : row.right.text}</span>
                     </button>

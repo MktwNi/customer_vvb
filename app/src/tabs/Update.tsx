@@ -138,7 +138,7 @@ export function Update() {
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 280, overflow: 'auto' }}>
               {st.nw.slice(0, 60).map((it, i) => (
                 <div key={i} style={{ borderTop: '1px solid var(--divider)', padding: '8px 0', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 14 }}>{it.org}</span>
+                  <span className="co-name dense">{it.org}</span>
                   <span className="t-meta">{`${it.gid ? 'ผูกกับบริษัทเดิม' : 'บริษัทใหม่'} · ${it.cert} · ${it.prov} · อนุมัติ ${it.apBE}`}</span>
                 </div>
               ))}

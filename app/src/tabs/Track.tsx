@@ -302,9 +302,9 @@ export function Track() {
               )}
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                 {all.slice(0, 3).map((c) => (
-                  <button key={c.id} className="hv" onClick={() => open(c.id)} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '9px 8px', margin: '0 -8px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', color: 'var(--ink)' }}>
-                    <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                    <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{feedLine(D, k, c)}</span>
+                  <button key={c.id} className="hv tr-feed-r" onClick={() => open(c.id)} title={c.name}>
+                    <span className="co-name dense">{c.name}</span>
+                    <span className="t-meta">{feedLine(D, k, c)}</span>
                   </button>
                 ))}
                 {!all.length && <span className="empty" style={{ borderTop: '1px solid var(--divider)', paddingTop: 9 }}>{k === 'setNew' ? 'จะเริ่มนับเมื่ออัปโหลดข้อมูลชุดถัดไป' : 'ไม่มีรายการ'}</span>}
@@ -340,7 +340,7 @@ export function Track() {
               const [tag] = EV_LBL[x.t] || ['เหตุการณ์'];
               return (
                 <button key={i} onClick={() => c && open(c.id)} className="hv" style={{ cursor: 'pointer', textAlign: 'left', border: 0, borderTop: '1px solid var(--divider)', padding: '9px 8px', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 14, color: 'var(--ink)' }}>{c ? c.name : String(x.id)}</span>
+                  <span className="co-name dense">{c ? c.name : String(x.id)}</span>
                   <span className="t-meta">{`${tag} · ${c && c.cfoEx ? 'CFO หมดอายุ ' + isoTh(c.cfoEx) + ' · ' : ''}บันทึก ${dtTh(x.at)}`}</span>
                 </button>
               );
@@ -354,13 +354,13 @@ export function Track() {
 
 function CertRow({ ct, onOpen, badge, sub, right }: { ct: Cert; onOpen: () => void; badge: React.ReactNode; sub: string; right: string }) {
   return (
-    <button onClick={onOpen} className="hv" style={{ cursor: 'pointer', border: 0, borderBottom: '1px solid var(--divider)', padding: '11px 8px', margin: '0 -8px', display: 'grid', gridTemplateColumns: '56px minmax(0,1fr) auto', gap: 12, alignItems: 'center', textAlign: 'left', color: 'var(--ink)' }}>
+    <button onClick={onOpen} className="hv tr-cert" title={ct.org}>
       {badge}
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ct.org}</span>
-        <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{sub}</span>
+      <span className="tr-cert-t">
+        <span className="co-name dense">{ct.org}</span>
+        <span className="t-sec">{sub}</span>
       </span>
-      <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{right}</span>
+      <span className="tr-cert-d">{right}</span>
     </button>
   );
 }

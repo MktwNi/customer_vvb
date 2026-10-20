@@ -275,7 +275,7 @@ export function Search() {
                 <div className="sx-mtop">
                   {tick(c.id, c.name)}
                   <button onClick={() => open(c.id)} className="hv-tx sx-mname">
-                    <span className="t-name">{c.name}</span>
+                    <span className="co-name">{c.name}</span>
                     <span className="t-meta">{[c.code, D.prov[c.prov] || '—', 'กลุ่ม ' + (c.tgt + 1), watched(c.id) ? 'ติดตามอยู่' : ''].filter(Boolean).join(' · ')}</span>
                     {src && <span className="t-meta">{src}</span>}
                   </button>
@@ -310,7 +310,7 @@ export function Search() {
                     <span className="t-sec">{ct.cert || '—'}</span>
                     {cfoStatus(ct.st, CST[ct.st][0])}
                   </span>
-                  <span className="t-name">{ct.org}</span>
+                  <span className="co-name">{ct.org}</span>
                   <span className="t-meta">{ct.provTxt || CD.prov[ct.prov] || '—'} · อนุมัติ {isoTh(ct.ap)} · หมดอายุ {isoTh(ct.ex)}</span>
                 </button>
               </div>
@@ -333,7 +333,7 @@ export function Search() {
                 <div key={c.id} className={'sxr' + (sel.has(c.id) ? ' on' : '')} onClick={(ev) => rowOpen(ev, c.id)} style={{ gridTemplateColumns: coCols, padding: rowPad }}>
                   {tick(c.id, c.name, tickCell)}
                   <button onClick={() => open(c.id)} className="sxr-name">
-                    <span className="t-name">{c.name}</span>
+                    <span className="co-name dense">{c.name}</span>
                     <span className="t-sec sxr-sub">
                       {['กลุ่ม ' + (c.tgt + 1), c.code, D.type[c.type], c.set || '', c.ids.length > 1 ? `รวม ${c.ids.length} แถว` : ''].filter(Boolean).join(' · ')}
                       {watched(c.id) && <span className="t-meta"> · ติดตามอยู่</span>}
@@ -376,7 +376,7 @@ export function Search() {
                   {tick(ct.cid, ct.org, tickCell)}
                   <span className="t-sec">{ct.cert || '—'}</span>
                   <button onClick={() => open(ct.gid)} className="sxr-name">
-                    <span className="t-name">{ct.org}</span>
+                    <span className="co-name dense">{ct.org}</span>
                     <span className="t-sec sxr-sub">{ct.act}{watched(ct.gid) && <span className="t-meta"> · ติดตามอยู่</span>}</span>
                   </button>
                   <span>{ct.provTxt || CD.prov[ct.prov] || '—'}</span>

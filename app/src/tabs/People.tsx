@@ -492,7 +492,7 @@ function SideCard({ p, c, deals, others, last, today }: { p: Person; c: Company 
         <button className="pe-cobox" onClick={() => open(c.id)}>
           <CoAvatar name={c.name} web={c.web} set={c.set} size={40} />
           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
-            <b style={{ fontWeight: 500 }}>{c.name}</b>
+            <b className="co-name">{c.name}</b>
             <span className="pe-sub">{c.code} · เปิดหน้าบริษัท</span>
           </span>
         </button>

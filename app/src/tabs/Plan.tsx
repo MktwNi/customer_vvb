@@ -170,11 +170,16 @@ export function Plan() {
   };
   const upcoming = pick(tasksK).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || '')).slice(0, 8);
   const upPays = pick(paysK).filter((x) => x.line.due >= today).slice(0, 4);
-  /** "รับชำระ PAY2 · กรีนวัลเลย์ ฟู้ดส์ · 53,500 บาท" and its deal's service types: opens the deal (the receipt is
-   *  recorded there). It keeps its status look in both colour modes. */
+  /** "กรีนวัลเลย์ ฟู้ดส์" with its deal's service types, "รับชำระ PAY2 · 53,500 บาท" under it: opens the deal (the
+   *  receipt is recorded there). It keeps its status look in both colour modes. In งานที่กำลังจะถึง (`when`) the
+   *  name is 14px, as the appointments there: a short list under the day's 16px cards. */
   const payItem = (x: PayK, when?: boolean) => (
     <button key={x.deal.id + x.line.stage} className={'pl-pay hv' + (when ? ' up' : '') + (x.line.lateDays ? ' late' : '')} onClick={() => set({ deal: x.deal.id })}>
-      <span className="pl-pay-t">รับชำระ {x.line.stage} · {shortName(x.deal.client)} · {fmtMoney(x.line.left || x.line.amt)} บาท{sees && <SvcChips ct={x.ct} />}</span>
+      {/* the customer's name is the title (as on an appointment); what is due under it */}
+      <span className="pl-pay-t">
+        <span className="pl-nm-row"><span className={'co-name' + (when ? ' dense' : '')}>{shortName(x.deal.client)}</span>{sees && <SvcChips ct={x.ct} />}</span>
+        <span className="t-sec">รับชำระ {x.line.stage} · {fmtMoney(x.line.left || x.line.amt)} บาท</span>
+      </span>
       <small>{x.line.lateDays ? `เลยกำหนด ${fmtN(x.line.lateDays)} วัน` : when ? isoTh(x.line.due) : x.line.due === today ? 'ครบกำหนดวันนี้' : `อีก ${fmtN(daysBetween(today, x.line.due))} วัน`}</small>
     </button>
   );
@@ -362,13 +367,13 @@ export function Plan() {
               <div key={t.id} className={'pl-task cc' + (t.done ? ' done-t' : '')} style={markVars(ck, types)}>
                 <DoneBox t={t} onToggle={() => !ro && e.toggleTask(t)} ro={ro} />
                 {avOf(t.id, t.gid, t.title, 36)}
-                <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <div className="pl-task-t">
                   <span className="pl-nm-row">
-                    <button onClick={() => ti.company && open(ti.company.id)} className="hv-tx" style={{ cursor: 'pointer', border: 0, textAlign: 'left', padding: 0, fontSize: 14, fontWeight: 500, color: 'var(--ink)', textDecoration: t.done ? 'line-through' : 'none' }}>{ti.title}</button>
+                    <button onClick={() => ti.company && open(ti.company.id)} className="hv-tx pl-task-n co-name">{ti.title}</button>
                     {sees && <SvcChips ct={ct} />}
                   </span>
-                  <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{ti.meta}</span>
-                  {t.note && <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{t.note}</span>}
+                  <span className="t-sec">{ti.meta}</span>
+                  {t.note && <span className="t-sec">{t.note}</span>}
                 </div>
                 <div className="pl-task-act">
                   {ti.tel && <a href={ti.tel} className="btn xs">โทร</a>}
@@ -388,8 +393,8 @@ export function Plan() {
             const t = u.t, ti = taskInfo(e, t);
             return (
               <button key={t.id} className="pl-up hv" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '8px', margin: '0 4px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 14, color: 'var(--ink)' }}>
-                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}><i className="pl-bar" style={markVars(u.ck, u.types)} aria-hidden="true" />{avOf(t.id, t.gid, t.title, 28)}<span className="pl-up-n"><span>{ti.title}</span>{sees && <SvcChips ct={u.ct} />}</span></span>
-                <span style={{ color: 'var(--ink-2)', fontSize: 13, whiteSpace: 'nowrap' }}>{ti.when}</span>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}><i className="pl-bar" style={markVars(u.ck, u.types)} aria-hidden="true" />{avOf(t.id, t.gid, t.title, 28)}<span className="pl-up-n"><span className="co-name dense">{ti.title}</span>{sees && <SvcChips ct={u.ct} />}</span></span>
+                <span className="pl-up-when">{ti.when}</span>
               </button>
             );
           })}
@@ -477,7 +482,7 @@ export function Plan() {
                   <CoAvatar name={r.name} web={c?.web} set={c?.set} size={28} />
                   <div className="pl-who-t">
                     <span className="pl-nm-row">
-                      <button onClick={() => (c ? open(c.id) : openDeal())} className="hv-tx pl-who-n" title={c ? 'เปิดหน้าบริษัท' : 'เปิดงานใน Sales Tracker'}>{r.name}</button>
+                      <button onClick={() => (c ? open(c.id) : openDeal())} className="hv-tx pl-who-n co-name" title={c ? 'เปิดหน้าบริษัท' : 'เปิดงานใน Sales Tracker'}>{r.name}</button>
                       {sees && <SvcChips ct={rowCt(r)} />}
                     </span>
                     {/* where it comes from: followed, and/or its tracker job's next step (opens the job) */}

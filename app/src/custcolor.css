@@ -87,7 +87,6 @@
 .svt{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:6px;background:var(--kb);color:var(--k);font-size:12px;font-weight:400;line-height:1;white-space:nowrap;flex:none}
 /* the name and its chips on one line; the chips go under a name too long for both */
 .pl-nm-row,.pl-up-n{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0}
-.pl-pay-t .svts{margin-left:8px}
 @media (max-width:760px){
   /* phones: the month and its buttons first; "แยกสีตาม" with its toggle on a line of its own under them, the
      label kept so the toggle reads as a choice of colour, not a filter */

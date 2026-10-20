@@ -89,7 +89,7 @@ function Field({ label, value, onSave, type = 'text', list, placeholder }: { lab
 /** The customer's name in the panel's head, edited in place. */
 function ClientName({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const box = useEditBox<HTMLInputElement>(value, (v, el) => (v.trim() ? onSave(v) : (el.value = value)), (v) => !!v.trim());
-  return <input {...box} aria-label="ชื่อลูกค้า" onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} className="dp-name hv" />;
+  return <input {...box} aria-label="ชื่อลูกค้า" onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} className="dp-name hv co-name title" />;
 }
 
 /** The last amount a money box refused (closing the panel right after must say so). */
@@ -401,7 +401,7 @@ export function DealPanel() {
               <button type="button" onClick={close} aria-label="ปิด" className="dlg-x"><Icon name="close" size={18} /></button>
             </span>
           </div>
-          {ro ? <h3 className="dp-name ro">{d.client}</h3> : <ClientName value={d.client} onSave={(v) => up({ client: v })} />}
+          {ro ? <h3 className="dp-name ro co-name title">{d.client}</h3> : <ClientName value={d.client} onSave={(v) => up({ client: v })} />}
           <span className="dp-meta">{[d.contactName, d.phone, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : 'ยังไม่มอบหมายผู้รับผิดชอบ'].filter(Boolean).join(' · ')}</span>
           {jr === 'member' && <MemberBanner d={d} />}
           <div className="dp-strip">

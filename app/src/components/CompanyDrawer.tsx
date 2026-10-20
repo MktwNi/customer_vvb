@@ -203,7 +203,7 @@ export function CompanyDrawer() {
           </div>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
             <CoAvatar name={c.name} web={c.web} set={c.set} size={44} />
-            <h2 className="dr-name">{c.name}</h2>
+            <h2 className="dr-name co-name title">{c.name}</h2>
           </div>
           <span className="dr-line">
             {owner ? <>ผู้รับผิดชอบ <b>{owner}</b></> : 'ยังไม่มีผู้รับผิดชอบ'}

@@ -300,7 +300,7 @@ function JointEdit({ from, section, hid, onClose }: { from?: string; section?: s
           <div className="jc-r ph" role="row"><span role="columnheader">บริษัท · แถวใน Sales Tracker</span>{money && <><span role="columnheader" className="r">ส่วนแบ่ง (บาท)</span><span role="columnheader" className="r">%</span></>}<span /></div>
           {rows.map((r, i) => (
             <div key={r.key} className="jc-r" role="row">
-              <span className="jc-nm" role="cell"><b title={r.name}>{shortName(r.name)}</b><small title={r.sub}>{pickLine(S, r.pick, g ? g.head.section : sec, newResp(r.pick))}</small></span>
+              <span className="jc-nm" role="cell"><b className="co-name dense" title={r.name}>{shortName(r.name)}</b><small title={r.sub}>{pickLine(S, r.pick, g ? g.head.section : sec, newResp(r.pick))}</small></span>
               {money && (
                 <>
                   <input className="fld" role="cell" value={r.typed} inputMode="decimal" placeholder={out[i] ? 'ถอนตัว' : parts.amt ? fmtMoney(parts.amt[i]) || '0' : 'เท่ากัน'} aria-label={'ส่วนแบ่ง ' + r.name} aria-invalid={!shares[i]} onChange={(ev) => setRows(rows.map((x, j) => (j === i ? { ...x, typed: ev.target.value } : x)))} />
@@ -374,7 +374,7 @@ function JointClose({ hid, onClose }: { hid: string; onClose: () => void }) {
         <div className="jx-r ph" role="row"><span role="columnheader">บริษัท</span><span role="columnheader">ผล</span><span role="columnheader" className="r">{money ? 'ส่วนแบ่ง (บาท)' : ''}</span></div>
         {sum.rows.map((x) => (
           <div key={x.deal.id} className="jx-r" role="row">
-            <span role="cell">{shortName(x.deal.client)}{x.closed && <small className="t-meta"> · ปิดแล้ว</small>}</span>
+            <span role="cell"><span className="co-name dense" title={x.deal.client}>{shortName(x.deal.client)}</span>{x.closed && <small className="t-meta"> · ปิดแล้ว</small>}</span>
             <span role="cell"><ResultWord r={x.result} /></span>
             <span role="cell" className="r">{money ? (x.share != null && x.result !== 'NO' ? fmtMoney(x.share) : <span className="none">—</span>) : ''}</span>
           </div>
@@ -590,7 +590,7 @@ export function JointCard({ b, attr, onOpen }: { b: Extract<JRow, { k: 'band' }>
           return (
             <button key={d.id} type="button" className="jm-r hv" onClick={() => onOpen(d.id)} aria-label={`${d.client} เปิดแถวติดตาม`}>
               <CoAvatar name={c?.name || d.client} web={c?.web} set={c?.set} size={30} />
-              <span className="jm-t"><b>{shortName(d.client)}</b><small>{[d.resp, nx.stage ? 'ถัดไป ' + nx.stage : nx.hint].filter(Boolean).join(' · ')}</small></span>
+              <span className="jm-t"><b className="co-name dense" title={d.client}>{shortName(d.client)}</b><small>{[d.resp, nx.stage ? 'ถัดไป ' + nx.stage : nx.hint].filter(Boolean).join(' · ')}</small></span>
               {money && sh && <span className="jm-a">{sh.out ? <><span>—</span><small>ถอนตัว</small></> : <><span>{sh.amt != null ? fmtMoney(sh.amt) : sh.pct + '%'}</span><small>ส่วนแบ่ง {sh.pct}%</small></>}</span>}
             </button>
           );
@@ -631,7 +631,7 @@ export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: '
         const r = dealResult(S, d);
         return (
           <tr key={d.id} className={'jq-cm' + (i === b.shown.length - 1 ? ' last' : '')}>
-            <td><button type="button" className="sl-nm-b hv-tx" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button></td>
+            <td><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button></td>
             <td className="c-opt t-sec">{d.section || 'ไม่ระบุหมวด'}</td>
             <td className="c-opt">{d.resp || '—'}</td>
             <td><ResultWord r={r} /></td>
@@ -763,7 +763,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
                       <span className="jp-co" role="cell">
                         <CoAvatar name={c?.name || x.deal.client} web={c?.web} set={c?.set} size={32} />
                         <span className="jp-nm">
-                          <button type="button" className="hv-tx" onClick={() => set({ deal: x.deal.id })} title={`เปิดแถวติดตามของ ${x.deal.client}`}>{shortName(x.deal.client)}</button>
+                          <button type="button" className="hv-tx co-name dense" onClick={() => set({ deal: x.deal.id })} title={`เปิดแถวติดตามของ ${x.deal.client}`}>{shortName(x.deal.client)}</button>
                           <small>ผู้รับผิดชอบ {x.deal.resp || 'ยังไม่ระบุ'}</small>
                         </span>
                       </span>

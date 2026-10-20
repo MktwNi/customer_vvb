@@ -162,7 +162,7 @@ export function FollowList() {
                   <button onClick={() => open(r.c.id)} className="fw-name">
                     <CoAvatar name={r.c.name} web={r.c.web} set={r.c.set} size={32} />
                     <span className="fw-name-t">
-                      <span className="t-name">{r.c.name}</span>
+                      <span className="co-name">{r.c.name}</span>
                       <span className="t-meta" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
                     </span>
                   </button>

@@ -1067,7 +1067,7 @@ function DealRow({ d, open, t, kidIds, stages, jm }: { d: Deal; open: boolean; t
         <span className="sl-nmw">
           <CoAvatar name={c?.name || d.client} web={c?.web} set={c?.set} size={34} />
           <span className="sl-nm">
-            <button type="button" className="sl-nm-b hv-tx" onClick={() => tk.openPanel(d.id)} title={`${d.client} เปิดรายละเอียด`} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
+            <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => tk.openPanel(d.id)} title={`${d.client} เปิดรายละเอียด`} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
             <span className="sl-nm-s">
               {cur && <span className="sl-tg">เปิดล่าสุด</span>}
               {isNew && <span className="sl-tg">ใหม่</span>}
@@ -2280,7 +2280,7 @@ function DealCard({ d }: { d: Deal }) {
       <div className="sl-mc-h">
         <CoAvatar name={c?.name || d.client} web={c?.web} set={c?.set} size={34} />
         <div className="sl-mc-t">
-          <button type="button" className="sl-nm-b hv-tx" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
+          <button type="button" className="sl-nm-b hv-tx co-name" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
           <span className="sl-nm-s">
             {cur && <span className="sl-tg">เปิดล่าสุด</span>}
             {tk.cash && d.year !== tk.year && <span className="sl-tg">งานปี {d.year}</span>}
@@ -2607,7 +2607,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (
                   <tr key={d.id}>
-                    <td><button type="button" className="sl-nm-b hv-tx" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button></td>
+                    <td><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button></td>
                     <td className="c-opt t-sec">{d.section || 'ไม่ระบุหมวด'}</td>
                     <td className="c-opt">{d.resp || '—'}</td>
                     <td><Status kind={r === 'YES' ? 'ok' : r === 'NO' ? 'bad' : 'neutral'}>{r === 'YES' ? 'ได้งาน' : r === 'NO' ? 'ไม่ได้งาน' : 'ไม่ระบุผล'}</Status></td>
