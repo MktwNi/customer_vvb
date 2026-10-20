@@ -35,6 +35,9 @@ export interface DocFacts {
   /** possible amounts for the user to pick from, best first, one per value */
   candidates: AmountCandidate[];
   confidence: 'high' | 'medium' | 'low';
+  /** pages (blocks of text) left out as repeats of an earlier one: the สำเนา / Copy of a document
+   *  printed as a set ("ต้นฉบับ" + "สำเนา" in one file); absent when there were none */
+  copies?: number;
 }
 
 // ------------------------------------------------------------------ text normalisation
@@ -63,6 +66,9 @@ export function repairThaiText(s: string): string {
   return s
     .replace(/[\uF700-\uF71A]/g, (c) => String.fromCharCode(PUA_THAI[c.charCodeAt(0) - 0xf700]))
     .replace(/\u0E4D([\u0E48-\u0E4B]?)\u0E32/g, '$1\u0E33')
+    // sara am drawn as nikhahit + sara aa comes out as both, U+0E33 then U+0E32 (ยอดชำระ, จำนวน read with an
+    // extra sara aa): Thai never writes the two in a row
+    .replace(/\u0E33\u0E32/g, '\u0E33')
     .normalize('NFC');
 }
 
@@ -842,20 +848,73 @@ function splitLong(l: string): string[] {
   return out;
 }
 
+/** A page printed as part of a set: "ต้นฉบับ" (original) or "สำเนา" (copy), in Thai or English. */
+const COPY_MARK = /ต้นฉบับ|สำเนา|(?:^|[^A-Za-z])(?:original|copy|duplicate)(?![A-Za-z])/i;
+const COPY_MARKS = /ต้นฉบับ|สำเนา|เอกสารออกเป็นชุด|(?:^|[^A-Za-z])(?:original|copy|duplicate)(?![A-Za-z])/gi;
+/** A first or last line that differs between the original and its copy without saying anything about
+ *  money: a set or page number alone on its line, "หน้าที่ 1/2", "Page 1 of 2". */
+const PAGE_LINE = /^\s*(?:\d{1,3}|(?:หน้า(?:ที่)?|page)\s*\d{1,3}\s*(?:\/|of|จาก)\s*\d{1,3})\s*$/i;
+
+/**
+ * A tax invoice / receipt printed as a set (ต้นฉบับ + สำเนา) in one file holds every page twice. Only
+ * a document that says so (a copy mark) is touched: each page — a block of lines between blank lines,
+ * as docText joins pages — that repeats an earlier one, apart from the copy mark and its page or set
+ * number, is left out, so the copy is never read as another amount. Returns the lines kept and how
+ * many blocks were left out.
+ */
+export function dropCopies(lines: string[]): { lines: string[]; copies: number } {
+  if (!lines.some((l) => COPY_MARK.test(l))) return { lines, copies: 0 };
+  const blocks: string[][] = [];
+  let cur: string[] = [];
+  for (const l of lines) {
+    if (l.trim()) cur.push(l);
+    else if (cur.length) blocks.push(cur), (cur = []);
+  }
+  if (cur.length) blocks.push(cur);
+  const seen = new Set<string>(), out: string[] = [];
+  let copies = 0;
+  for (const b of blocks) {
+    const sig = b.filter((l, i) => !((i === 0 || i === b.length - 1) && PAGE_LINE.test(l))).map((l) => key(l.replace(COPY_MARKS, ' '))).filter(Boolean).join('\n');
+    if (sig && seen.has(sig)) {
+      copies++;
+      continue;
+    }
+    seen.add(sig);
+    if (out.length) out.push('');
+    out.push(...b);
+  }
+  return { lines: out, copies };
+}
+
 export function analyzeDocText(text: string): DocFacts {
   keyMemo = new Map();
   try {
-    const raw = capLines(normalizeText(text).split('\n').flatMap(splitLong)).map((l) => fixOcrDigits(l.replace(/\s+$/, '')));
+    const all = normalizeText(text).split('\n').flatMap(splitLong);
+    const { lines, copies } = dropCopies(all);
+    const raw = capLines(lines).map((l) => fixOcrDigits(l.replace(/\s+$/, '')));
     const words = findWords(raw);
     const parsed = raw.map(parseLine);
     const a = amounts(parsed, raw, words, 'next'), b = amounts(parsed, raw, words, 'prev');
     const { quality: _q, ...best } = b.quality > a.quality + 1e-9 ? b : a;
     const docNo0 = findDocNo(raw, null);
     const kind = findKind(raw, docNo0);
-    return { kind, docNo: kind ? findDocNo(raw, kind) : docNo0, docDate: findDocDate(raw), ...best, party: findParty(raw) };
+    return { kind, docNo: kind ? findDocNo(raw, kind) : docNo0, docDate: findDocDate(raw), ...best, party: findParty(raw), ...(copies ? { copies } : {}) };
   } finally {
     keyMemo = null;
   }
+}
+
+/**
+ * The figure proposed for a document: what the customer actually pays. When the document shows
+ * withholding tax and the amount payable after it ("หักภาษี ณ ที่จ่าย 3% 1,730.77 · ยอดชำระ 60,000"), that
+ * net amount — the money that comes in; else the total including VAT; without one, the best amount
+ * found ('manual'). The same rule for a quotation (Forecast) as for an invoice or receipt (Actual), so the
+ * two stay comparable: a job quoted at 60,000 after withholding is received as 60,000.
+ */
+export function proposedAmount(f: Pick<DocFacts, 'total' | 'wht' | 'netPay' | 'candidates'>): { basis: 'total' | 'netPay' | 'manual'; value: number | null } {
+  if (f.wht != null && f.wht > 0 && f.netPay != null && f.netPay > 0 && (f.total == null || f.netPay < f.total)) return { basis: 'netPay', value: f.netPay };
+  if (f.total != null) return { basis: 'total', value: f.total };
+  return { basis: 'manual', value: f.candidates[0]?.value ?? null };
 }
 
 function amounts(parsed: Ln[], raw: string[], words: WordsHit[], order: 'next' | 'prev'): Amounts {

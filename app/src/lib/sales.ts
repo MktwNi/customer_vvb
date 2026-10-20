@@ -436,7 +436,8 @@ export function dealMoney(s: SalesState, d: Deal) {
     fcDoc,
     /** a typed forecast overrides a confirmed quotation */
     fcOverride: typed && !!latest,
-    actual: acs.length || hands.length ? acs.reduce((a, x) => a + (x.amount || 0), 0) + hand : d.actual,
+    // (to the satang: 61,730.77 + 60,000 adds up to 121,730.76999… in floating point)
+    actual: acs.length || hands.length ? Math.round((acs.reduce((a, x) => a + (x.amount || 0), 0) + hand) * 100) / 100 : d.actual,
     /** an Actual document exists (a hand receipt alone is not "confirmed by a document") */
     acConfirmed: acs.length > 0,
     acDocs: acs.length,
@@ -779,7 +780,7 @@ export function lineView(s: SalesState, d: Deal, x: PlanEntry, today: string): L
   const docs = docsOf(s, d.id).filter((z) => z.stage === x.stage && z.target === 'actual' && z.amount != null);
   const l = x.line, hand = !!l.rcv && (!docs.length || l.add);
   const handGot = hand ? (l.got ?? l.amt ?? 0) : 0;
-  const got = docs.reduce((a, z) => a + (z.amount || 0), 0) + handGot;
+  const got = Math.round((docs.reduce((a, z) => a + (z.amount || 0), 0) + handGot) * 100) / 100;
   const amt = l.amt ?? 0, res = dealResult(s, d), due = dueOf(l, wonDate(s, d));
   // granted for what had come in then: a receipt deleted or changed since opens the installment again
   const full = l.full && (l.fullAt == null || Math.abs(got - l.fullAt) < 0.005);
@@ -933,10 +934,20 @@ export function withDoc(s: SalesState, d: Deal, info: AttachInfo, today: string)
   };
   const counts = countsActual(info);
   const old = info.replace && counts ? s.docs[`${d.id}/${info.replace}`] : undefined;
-  if (old) docs[`${d.id}/${old.id}`] = { ...old, target: 'none' };
+  const steps = { ...s.steps };
+  if (old) {
+    docs[`${d.id}/${old.id}`] = { ...old, target: 'none' };
+    // replaced at another stage (the same receipt attached again elsewhere): the PAY stage it completed
+    // is empty again unless another counted document there takes it over (engine releaseAuto)
+    const os = old.auto?.stage;
+    if (os && os !== stage && (isPayStage(s.cfg, os) || isExtraPay(s.cfg, os)) && stepOf(s, d.id, os).n === old.auto!.n) {
+      const heir = Object.values(docs).some((x) => x.deal === d.id && x.id !== old.id && x.stage === os && countsActual(x));
+      const st = stepOf(s, d.id, os);
+      if (!heir) steps[`${d.id}/${os}`] = { d: old.auto!.d && st.d !== old.auto!.d ? st.d : '', n: '' };
+    }
+  }
   const k = `${d.id}/${stage}`, pl = (s.pays || {})[k];
   const pays = info.addHand && counts && pl?.rcv ? { ...s.pays, [k]: { ...pl, add: true } } : s.pays;
-  const steps = { ...s.steps };
   if (stage && s.cfg.stages.includes(stage) && (!isPayStage(s.cfg, stage) || counts)) {
     const st = stepOf(s, d.id, stage), ad = info.docDate && info.docDate <= today ? info.docDate : today;
     if (!st.n.trim()) steps[`${d.id}/${stage}`] = { d: ad, n: '·' };
@@ -965,6 +976,116 @@ export function attachPreview(s: SalesState, d: Deal, info: AttachInfo, today: s
     ready: !was && closeReady(after, d, today),
     readyIfFull: !was && closeReady(full, d, today),
   };
+}
+
+/**
+ * How a new Actual document counts next to the money already counted (DocAttach asks):
+ * - 'replace' "ใช้ยอดนี้แทน": the earlier document stays as evidence, no longer counted (or the
+ *   installment's hand receipt gives way to it);
+ * - 'add' "นับเพิ่ม": both count (an installment paid in several parts);
+ * - 'none' "ไม่นับยอดซ้ำ": attached as evidence only;
+ * - 'move': it is the receipt of money already recorded by hand at another installment, and is attached
+ *   there in place of the hand entry.
+ */
+export type CountMode = 'replace' | 'add' | 'none' | 'move';
+export interface CountGuard {
+  /** the stage it goes to */
+  stage: string;
+  /** the same document already counted as Actual in this deal: its number, or the same file (name and size) */
+  same: DealDoc | null;
+  sameBy: 'no' | 'file' | '';
+  /** the newest other document counted at that stage */
+  old: DealDoc | null;
+  /** that stage's installment, part paid by hand ("รับเงินแล้ว" short) with no document */
+  handPart: LineView | null;
+  /** another installment received by hand with no document, for an amount this document shows, when the
+   *  document looks like its receipt: counted on top it would take Actual past the plan, or it is dated
+   *  within a week of that money */
+  hand: LineView | null;
+  /** counting it on top takes Actual well past the plan (or Forecast) of a job already paid: Actual
+   *  before and after, and what it is compared with */
+  over: { before: number; after: number; cap: number; what: string } | null;
+  /** the same for "นับเพิ่ม" (what Actual becomes when the user counts it on top anyway) */
+  overAdd: { before: number; after: number; cap: number; what: string } | null;
+  /** the choices to offer, in display order; [] = nothing to ask (it simply counts) */
+  modes: CountMode[];
+  /** the suggested choice */
+  pick: CountMode;
+}
+/** A job counts as already paid at 90% of its plan / Forecast (withholding tax short of it); Actual
+ *  going more than 5% past it on top of that is money counted twice more likely than an extra. */
+const PAID_SHARE = 0.9, OVER_SHARE = 1.05, SAME_WEEK = 7;
+const docNoKey = (no: string) => (no || '').replace(/[\s\-/_.#:]/g, '').toUpperCase();
+/** What attaching with `mode` sends (DocAttach → attachDoc): the document replaced, the hand receipt
+ *  kept on top of it, what it counts toward, where it goes. */
+export function countAs(g: CountGuard, mode: CountMode, info: AttachInfo): AttachInfo {
+  if (mode === 'replace' && (g.same || g.old)) return { ...info, replace: (g.same || g.old)!.id, addHand: false };
+  if (mode === 'replace') return { ...info, replace: undefined, addHand: false };
+  if (mode === 'none') return { ...info, target: 'none', replace: undefined, addHand: false };
+  if (mode === 'move' && g.hand) return { ...info, stage: g.hand.stage, replace: undefined, addHand: false };
+  return { ...info, replace: undefined, addHand: !!g.handPart };
+}
+/**
+ * Whether a new Actual document would count money twice, and what to ask (CountMode). The same document
+ * already counted (its number or its file) is asked about: at this installment "ใช้ยอดนี้แทน" is suggested,
+ * at another one "ไม่นับยอดซ้ำ" (it is counted there; moving it would leave that installment unpaid); a
+ * document at an installment that has one counted, or a part paid by hand, as before ("ใช้ยอดนี้แทน", or
+ * "นับเพิ่ม" from "แนบใบเสร็จเพิ่ม"). Whatever the case, a choice that would take Actual well past the plan
+ * / Forecast of a job already paid is not suggested: the receipt of money recorded by hand at another
+ * installment goes there ('move'), else it is attached without counting ('none'); "นับเพิ่ม" stays a choice.
+ * `info.add`: opened from "แนบใบเสร็จเพิ่ม"; `figures`: the amounts the document shows (total, net, …).
+ */
+export function countGuard(
+  s: SalesState,
+  d: Deal,
+  info: AttachInfo & { add?: boolean; docNo: string; name: string; size: number; figures?: (number | null | undefined)[] },
+  today: string,
+): CountGuard {
+  const stage = attachStage(s, d, info, today);
+  const g: CountGuard = { stage, same: null, sameBy: '', old: null, handPart: null, hand: null, over: null, overAdd: null, modes: [], pick: 'add' };
+  if (!countsActual(info)) return g;
+  const counted = docsOf(s, d.id).filter(countsActual);
+  const no = docNoKey(info.docNo);
+  const byNo = no.length >= 3 ? counted.filter((x) => docNoKey(x.docNo) === no).pop() : undefined;
+  const byFile = info.size > 0 ? counted.filter((x) => x.size === info.size && x.name === info.name).pop() : undefined;
+  g.same = byNo || byFile || null;
+  g.sameBy = byNo ? 'no' : byFile ? 'file' : '';
+  g.old = (stage ? countedAt(s, d, stage).filter((x) => x.id !== g.same?.id) : []).pop() || null;
+  const plan = planOf(s, d, today);
+  const line = stage ? plan?.lines.find((l) => l.stage === stage) : undefined;
+  g.handPart = line && line.hand && !line.docs.length && line.status === 'part' ? line : null;
+  // the same document at another installment is counted there already: suggested as evidence only, as
+  // moving it ("ใช้ยอดนี้แทน") leaves that installment unpaid; at this installment it replaces itself
+  const elsewhere = !!g.same && g.same.stage !== stage;
+  g.modes = elsewhere ? ['none', 'replace', 'add'] : g.same ? ['replace', 'none', 'add'] : g.old || g.handPart ? ['replace', 'add'] : [];
+  const natural: CountMode = elsewhere ? 'none' : g.same || ((g.old || g.handPart) && !info.add) ? 'replace' : 'add';
+  // money already counted (a typed Actual is replaced by documents, not added to) against what is expected
+  const m = dealMoney(s, d), cap = plan && plan.total > 0 ? plan.total : m.forecast ?? 0;
+  const before = m.acDocs || m.hand ? m.actual ?? 0 : 0;
+  const overBy = (mode: CountMode) => {
+    if (!(cap > 0) || before < cap * PAID_SHARE) return null;
+    const after = dealMoney(withDoc(s, d, countAs(g, mode, info), today), d).actual ?? 0;
+    return after > cap * OVER_SHARE && after > before + 0.005 ? { before, after, cap, what: plan && plan.total > 0 ? 'แผน' : 'Forecast' } : null;
+  };
+  const figs = [info.amount, ...(info.figures || [])].filter((x): x is number => x != null && x > 0);
+  const handFor = (near: (l: LineView) => boolean) =>
+    plan?.lines.find((l) => l.stage !== stage && l.hand && !l.docs.length && l.handGot > 0 && figs.some((f) => Math.abs(f - l.handGot) < 0.005) && near(l)) || null;
+  g.over = overBy(natural);
+  g.overAdd = natural === 'add' ? g.over : overBy('add');
+  if (g.over) {
+    g.hand = handFor(() => true);
+    g.modes = (['replace', 'move', 'none', 'add'] as CountMode[]).filter((x) => (x === 'replace' ? g.modes.includes('replace') : x === 'move' ? !!g.hand : true));
+    g.pick = g.modes.includes('replace') && !overBy('replace') ? 'replace' : g.hand ? 'move' : 'none';
+    return g;
+  }
+  // the receipt of money recorded by hand at another installment, attached at the next one (the Actual
+  // figure's "แนบเอกสาร" goes to the first installment not received): dated within a week of that money
+  if (!g.modes.length && info.docDate) {
+    g.hand = handFor((l) => !!l.line.rcv && Math.abs(daysBetween(l.line.rcv, info.docDate)) <= SAME_WEEK);
+    if (g.hand) g.modes = ['move', 'add'];
+  }
+  g.pick = g.hand ? 'move' : natural;
+  return g;
 }
 
 /** Quick views of the table: what needs doing (combined with the other filters). `paylate` is reached
