@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
-import { base64ToBlob, blobToBase64, deleteDocFile, DOC_ACCEPT, DOC_MAX_BYTES, docMime, downloadDocFile, fileFetchTransport, NOT_SCRIPT, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { base64ToBlob, blobToBase64, deleteDocFile, DOC_ACCEPT, DOC_MAX_BYTES, docMime, downloadDocFile, fileErrText, fileFetchTransport, fileNetFail, fileWaitWhy, NOT_SCRIPT, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { call, errText, TeamSyncError, type Transport } from './teamSync';
 
 // the 10 MB cases push ~14 MB of base64 through JSON and the simulator
@@ -349,6 +349,53 @@ describe('fileFetchTransport', () => {
     await expect(fileFetchTransport(URL, {})).rejects.toThrow('ลิงก์ไม่ถูกต้อง');
     vi.stubGlobal('fetch', async () => new Response('busy', { status: 503 }));
     await expect(fileFetchTransport(URL, {})).rejects.toThrow('HTTP 503');
+  });
+});
+
+describe('which failed file requests are worth a quiet second try (fileNetFail), and the words for the notice', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const httpErr = async (status: number) => {
+    vi.stubGlobal('fetch', async () => new Response('x', { status }));
+    return fileFetchTransport(URL, {}).catch((e) => e);
+  };
+
+  it('no readable answer, a server error, too many requests, the script busy: yes', async () => {
+    // a dropped connection, or Google's own error page without CORS headers: the browser says only TypeError
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const dropped = await fileFetchTransport(URL, {}).catch((e) => e);
+    expect(dropped).toBeInstanceOf(TypeError);
+    expect(fileNetFail(dropped)).toBe(true);
+    for (const st of [500, 502, 503, 429]) expect([st, fileNetFail(await httpErr(st))]).toEqual([st, true]);
+    const busy = await call(async () => ({ ok: false, error: 'busy' }), URL, KEY, {}).catch((e) => e);
+    expect(fileNetFail(busy)).toBe(true);
+  });
+
+  it('a reply the script gave on purpose, a wrong link, a timeout: no (the round ends and the notice says why)', async () => {
+    for (const st of [400, 403, 404]) expect([st, fileNetFail(await httpErr(st))]).toEqual([st, false]);
+    vi.stubGlobal('fetch', async () => new Response('<html>Sign in</html>'));
+    expect(fileNetFail(await fileFetchTransport(URL, {}).catch((e) => e))).toBe(false);
+    for (const code of ['file_too_large', 'bad_file_type', 'forbidden', 'unknown_action', 'drive_permission', 'session_expired']) {
+      const e = await call(async () => ({ ok: false, error: code }), URL, KEY, {}).catch((x) => x);
+      expect([code, fileNetFail(e)]).toEqual([code, false]);
+    }
+    expect(fileNetFail(new TeamSyncError(NOT_SCRIPT, 'not_script'))).toBe(false);
+    expect(fileNetFail(new DOMException('timeout', 'TimeoutError'))).toBe(false);
+    expect(fileNetFail(new Error('x'))).toBe(false);
+  });
+
+  it('says why the files wait in plain words; a reply of the script keeps its own message', async () => {
+    expect(fileWaitWhy(new TypeError('Failed to fetch'))).toBe('การเชื่อมต่อกับ Google ขาดช่วงระหว่างส่ง');
+    vi.stubGlobal('navigator', { onLine: false });
+    expect(fileWaitWhy(new TypeError('Failed to fetch'))).toBe('เครื่องออฟไลน์อยู่');
+    vi.unstubAllGlobals();
+    expect(fileWaitWhy(new DOMException('timeout', 'TimeoutError'))).toBe('ส่งไม่ทันเวลา (ไฟล์ใหญ่หรืออินเทอร์เน็ตช้า)');
+    expect(fileWaitWhy(await httpErr(503))).toBe('Google หรือสคริปต์ของทีมไม่ว่างชั่วคราว');
+    expect(fileWaitWhy(new TeamSyncError(NOT_SCRIPT, 'not_script'))).toBe(NOT_SCRIPT);
+    const perm = await call(async () => ({ ok: false, error: 'drive_permission' }), URL, KEY, {}).catch((x) => x);
+    expect(fileWaitWhy(perm)).toBe(fileErrText(perm));
+    expect(fileWaitWhy(perm)).toMatch(/Run ฟังก์ชัน setup/);
   });
 });
 

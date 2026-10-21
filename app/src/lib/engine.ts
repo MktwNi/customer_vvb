@@ -32,7 +32,7 @@ import { expDocId, purgeExpenses, toExpense, type DealExp, type JobExp } from '.
 import { expChanged, type ExpInput, type ExpKey } from './expenseJob';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
-import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, fileNetFail, fileWaitWhy, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
 import { DEAL_STAGE, QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, workTally, type JointGroup, type WorkOpts, type WorkTally } from './sales';
@@ -87,6 +87,9 @@ const OLD_SCRIPT = 'สคริปต์ของทีมยังไม่ร
 const OLD_NOTIFY = 'สคริปต์ของทีมยังไม่รองรับการแจ้งเตือนและการตรวจใบเสนอราคา — ให้ผู้ดูแลระบบอัปเดต Code.gs ตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน';
 /** How long a script found unable to store files is taken at its word before the upload round asks again. */
 export const FILES_RECHECK_MS = 60000;
+/** An upload that failed while the page was put away (a phone's screen locked, another app opened): the
+ *  round ends without a notice and goes again when the page is back (sendQuiet). */
+class DocAway extends Error {}
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -225,9 +228,17 @@ export class GccEngine {
   private teamFlush: ReturnType<typeof setTimeout> | null = null;
   /** The 30 s timer (no event), or focus / the tab shown again / back online (an event). */
   private teamWake = (ev?: Event) => {
-    if (!this.teamCfg || (typeof document !== 'undefined' && document.hidden)) return;
-    // someone coming back to the page (told the lead has deployed) sees held files go up at once
-    if (ev) this.filesRecheck();
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.hideN++; // the page is put away: an upload failing meanwhile is not told (sendQuiet)
+      return;
+    }
+    if (!this.teamCfg) return;
+    if (ev) {
+      // someone coming back to the page (told the lead has deployed) sees held files go up at once
+      this.filesRecheck();
+      // back online: files waiting after a failed upload go now, not at the next try's time
+      if (ev.type === 'online') this.docRetryAt = 0;
+    }
     this.teamSync();
   };
   private teamPrefsChanged = (e: StorageEvent) => {
@@ -2678,8 +2689,9 @@ export class GccEngine {
       kept = false;
     }
     if (!kept) {
-      if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
-      const r = await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: id, name: doc.name, mime: doc.mime, blob: file });
+      const cfg = this.teamCfg;
+      if (!cfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
+      const r = await this.netTurn(() => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: id, name: doc.name, mime: doc.mime, blob: file }));
       doc.fileId = r.fileId;
     }
     const k = `${dealId}/${id}`;
@@ -2956,6 +2968,24 @@ export class GccEngine {
   /** After a failed upload round the next one waits (1, 2, 4 … up to 30 minutes), not every sync. */
   private docRetryAt = 0;
   private docFails = 0;
+  /**
+   * The waits before an upload that got no readable answer (fileNetFail: a dropped connection, Google's own
+   * error page, the script busy) is sent again within the same round: 3 s, then 10 s. Only when those tries
+   * fail too does the round end with the notice (docsWaitNote); a failure a quiet try fixed is never shown.
+   */
+  docQuiet = [3000, 10000];
+  /** The last upload round's tries all failed (and its files still wait): when the next round tries again,
+   *  and why, in words (fileWaitWhy). null once a round goes through or nothing of this browser's waits. */
+  private docWait: { at: number; why: string } | null = null;
+  /** A round is sending files now, or the person asked for one ("ลองอีกครั้งตอนนี้"): the notice says so. */
+  private docSending = false;
+  private docAsked = false;
+  /** Counted up each time the page is seen put away (teamWake): an upload that fails while the page was away
+   *  is not a failure to tell (sendQuiet). */
+  private hideN = 0;
+  /** The last round was cut while the page was put away: the next one waits until the page is back (a phone
+   *  would cut it again), then goes at once. */
+  private docAway = false;
   /** Documents the script refused for good (too large…): not re-sent until the page is reloaded. */
   private docRefused = new Set<string>();
   /** Documents whose file is not in this browser (attached on another device). */
@@ -2984,21 +3014,75 @@ export class GccEngine {
   /** The upload run in flight: a caller that needs it done (signing out) waits for it. */
   private docRun: Promise<void> | null = null;
   /** `fresh`: a new file was just attached (or this is the last try at signing out): a script last found
-   *  unable to store files is asked again now. */
-  async uploadDocs(fresh = false) {
+   *  unable to store files is asked again now. `wait`: the person asked for this round (retryDocsNow): it
+   *  waits for another tab's round instead of skipping it. */
+  async uploadDocs(fresh = false, wait = false) {
     const cfg = this.teamCfg;
     if (fresh) this.filesRecheck();
     if (!cfg || !this.filesUp()) return;
     if (this.docRun) return this.docRun;
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
-    const run = (locks ? locks.request('gcc-doc-upload', { ifAvailable: true }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)) : this.uploadDocsNow(cfg)).then(
+    const run = (locks ? locks.request('gcc-doc-upload', { ifAvailable: !wait }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)) : this.uploadDocsNow(cfg)).then(
       () => {},
       () => {},
     );
     this.docRun = run;
     await run;
     if (this.docRun === run) this.docRun = null;
+  }
+  /**
+   * "ลองอีกครั้งตอนนี้" on the notice: the files waiting go now instead of at the next try's time. A sync round
+   * first, so a file another tab or device of this account sent meanwhile is known here and not sent again.
+   */
+  async retryDocsNow() {
+    if (!this.teamCfg || this.docAsked) return;
+    this.docRetryAt = 0;
+    this.docAsked = true;
+    this.emit();
+    try {
+      await this.teamSyncNow();
+      await this.uploadDocs(true, true);
+    } finally {
+      this.docAsked = false;
+      this.emit();
+    }
+  }
+  /**
+   * The files of this browser that still wait after an upload round's tries all failed (the Sales tab's
+   * notice): how many, when the next round tries again (ms), why the last try failed, and whether a round is
+   * sending now. null when nothing failed, once they are up (from here, or from another tab or device: the
+   * records then name their Drive file), or while the held-files notice (docsHeld) says it instead. A file
+   * the script refused for good is not counted here: docMsg names it.
+   */
+  get docsWaitNote(): { n: number; at: number; why: string; busy: boolean } | null {
+    const cfg = this.teamCfg, w = this.docWait;
+    if (!cfg || !w || this.docsHeld) return null;
+    const S = this.sales;
+    const docs = !this.can('docs.up') ? 0 : Object.values(S.docs).filter((d) => !d.fileId && S.deals[d.deal] && !this.docsAway.has(d.id) && !this.docRefused.has(d.id) && this.docMine(cfg, d)).length;
+    const bills = this.billsWaiting(cfg).filter((x) => !this.docRefused.has(expDocId(x.id)) && this.canExp(S.deals[x.deal])).length;
+    return docs + bills ? { n: docs + bills, at: w.at, why: w.why, busy: this.docSending || this.docAsked } : null;
+  }
+  /**
+   * One request of an upload round, in its turn with the sync (netTurn), sent again quietly after a failure
+   * with no readable answer (docQuiet: 3 s, then 10 s; the turn is let go while it waits). A try that failed
+   * while the page was put away ends the round as DocAway: on a phone the browser cuts a request when the screen
+   * locks or another app opens, and the round goes again, quietly, as soon as the page is back.
+   */
+  private async sendQuiet<T>(cfg: TeamCfg, send: () => Promise<T>): Promise<T> {
+    for (let i = 0; ; i++) {
+      const h = this.hideN;
+      try {
+        // (signed out while it waited for its turn: nothing is sent for the session that ended)
+        return await this.netTurn(() => (this.teamCfg === cfg ? send() : Promise.reject(new DocAway('ended'))));
+      } catch (e) {
+        if (!fileNetFail(e) || this.teamCfg !== cfg) throw e;
+        if (h !== this.hideN || (typeof document !== 'undefined' && document.hidden)) throw new DocAway('away');
+        if (i >= this.docQuiet.length) throw e;
+        await new Promise((r) => setTimeout(r, this.docQuiet[i]));
+        if (this.teamCfg !== cfg) throw e;
+      }
+    }
   }
   private async uploadDocsNow(cfg: TeamCfg) {
     if (this.docUploading || this.teamCfg !== cfg) return;
@@ -3023,19 +3107,25 @@ export class GccEngine {
         // nothing of this browser's waits (uploaded from another tab, deleted, another account signed in): a
         // message about waiting files is out of date; one naming a refused file stays while that file is here
         if (!this.refusedHere(cfg)) this.docMsg = '';
+        this.docWait = null;
         return;
       }
       if (Date.now() < this.docRetryAt) return;
+      if (this.docAway && typeof document !== 'undefined' && document.hidden) return;
+      this.docAway = false;
+      this.docSending = true;
+      if (this.docWait) this.emit(); // the notice says a try is under way
       // a script that cannot store files is asked again a minute later, and at once when the tab is shown
       // again or a file is attached (filesRecheck): the lead may deploy the new version meanwhile
       if (this.teamFiles === false && Date.now() - this.teamFilesAt >= FILES_RECHECK_MS) this.teamFiles = null;
       if (this.teamFiles == null) {
-        this.teamFiles = await scriptSupportsFiles(this.fileTransport, cfg.url, this.cred(cfg));
+        this.teamFiles = await this.sendQuiet(cfg, () => scriptSupportsFiles(this.fileTransport, cfg.url, this.cred(cfg)));
         this.teamFilesAt = Date.now();
       }
       if (!this.teamFiles) {
         // the files stay here: the Sales tab's notice (docsHeld) says so and what the team lead does
         this.docMsg = '';
+        this.docWait = null;
         return;
       }
       for (const doc of todo) {
@@ -3047,7 +3137,7 @@ export class GccEngine {
         }
         let r: { fileId: string };
         try {
-          r = await uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) });
+          r = await this.sendQuiet(cfg, () => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) }));
         } catch (e) {
           // a file the script refuses for good must not hold back every other upload
           if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data'].includes(e.code ?? '')) {
@@ -3070,16 +3160,35 @@ export class GccEngine {
       await this.uploadBills(cfg, bills, failed);
       this.docFails = 0;
       this.docRetryAt = 0;
-      this.docMsg = failed.length ? 'อัปโหลดเอกสารขึ้น Drive ไม่ได้ — ' + failed.join(' · ') + ' (ไฟล์ยังอยู่ในเครื่องนี้ ลบแล้วแนบไฟล์ใหม่)' : '';
+      this.docWait = null;
+      this.docMsg = this.refusedText(cfg, failed);
     } catch (e) {
+      // signed out meanwhile: not this session's to tell (endTeam has cleared it)
+      if (this.teamCfg !== cfg) return;
+      // a file refused for good before this failure is still named (the red message)
+      this.docMsg = this.refusedText(cfg, failed);
+      // failed while the page was put away: no notice, tried again as soon as the page is back (teamWake)
+      if (e instanceof DocAway) {
+        this.docRetryAt = 0;
+        this.docAway = true;
+        return;
+      }
       this.docFails++;
       const wait = Math.min(30 * 60000, 60000 * 2 ** (this.docFails - 1));
       this.docRetryAt = Date.now() + wait;
-      this.docMsg = 'อัปโหลดเอกสารขึ้น Drive ไม่สำเร็จ: ' + fileErrText(e) + ` (เก็บไว้ในเครื่องนี้ จะลองใหม่ในอีก ${Math.round(wait / 60000)} นาที)`;
+      // the files are safe here: the amber notice says how many wait and when the next try is (docsWaitNote)
+      this.docWait = { at: this.docRetryAt, why: fileWaitWhy(e) };
     } finally {
       this.docUploading = false;
+      this.docSending = false;
       this.emit();
     }
+  }
+  /** The red message: the files the script refused for good in this round, or, with none, the message naming
+   *  one refused earlier while that file is still here (else none). */
+  private refusedText(cfg: TeamCfg, failed: string[]) {
+    if (failed.length) return 'อัปโหลดเอกสารขึ้น Drive ไม่ได้ — ' + failed.join(' · ') + ' (ไฟล์ยังอยู่ในเครื่องนี้ ลบแล้วแนบไฟล์ใหม่)';
+    return this.refusedHere(cfg) ? this.docMsg : '';
   }
 
   // ---- job expenses (ค่าใช้จ่ายของงาน: the records lib/expense.ts, the screens' helpers lib/expenseJob.ts)
@@ -3213,8 +3322,9 @@ export class GccEngine {
     try {
       await this.store.set(this.billKey(expId), { name, mime, data: await file.arrayBuffer(), by: this.me() });
     } catch {
-      if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
-      fid = (await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: expDocId(expId), name, mime, blob: file })).fileId;
+      const cfg = this.teamCfg;
+      if (!cfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
+      fid = (await this.netTurn(() => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: expDocId(expId), name, mime, blob: file }))).fileId;
     }
     // as it is now (a teammate may have deleted it while the file was stored)
     const cur = S.exp?.[k], d = S.deals[dealId];
@@ -3363,7 +3473,7 @@ export class GccEngine {
       let fileId = b.fid || '';
       if (!fileId) {
         try {
-          fileId = (await uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: expDocId(x.id), name: b.name, mime: b.mime, blob: new Blob([b.data], { type: b.mime }) })).fileId;
+          fileId = (await this.sendQuiet(cfg, () => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: expDocId(x.id), name: b.name, mime: b.mime, blob: new Blob([b.data], { type: b.mime }) }))).fileId;
         } catch (e) {
           if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data', 'forbidden'].includes(e.code ?? '')) {
             failed.push(`บิล ${x.c}: ${fileErrText(e)}`);
@@ -4074,7 +4184,7 @@ export class GccEngine {
    * One sync round: pull rows newer than the cursor and apply them (skipping keys with local
    * changes still queued), then push the queue. Until `cfg.seeded`, local records the sheet
    * doesn't know yet are queued for upload first; records the sheet already has take its value.
-   * Rounds are serialized across tabs with the Web Locks API when available.
+   * Rounds take turns with each other and with file uploads, across tabs too (netTurn).
    */
   async teamSync(opts: { first?: boolean } = {}) {
     // a sign-in or out in another tab that this one did not hear of (a page restored from the
@@ -4098,9 +4208,7 @@ export class GccEngine {
     const tok = cfg.mode === 'accounts' ? this.session?.tok || '' : '';
     this.teamBusy = true;
     this.setTeam({ status: this.team.status === 'connecting' ? 'connecting' : 'syncing' });
-    const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
-    const round = () => this.syncRound(cfg, gen, !!opts.first);
-    const run = locks ? locks.request('gcc-team-sync', round) : round();
+    const run = this.netTurn(() => this.syncRound(cfg, gen, !!opts.first));
     this.teamRunning = run.catch(() => {});
     try {
       await run;
@@ -4166,6 +4274,21 @@ export class GccEngine {
   async teamSyncNow() {
     for (let i = 0; i < 3 && this.teamBusy; i++) await this.teamRunning;
     await this.teamSync();
+  }
+  /** The requests that wait for their turn in this tab when the browser has no Web Locks (netTurn). */
+  private netQ: Promise<unknown> = Promise.resolve();
+  /**
+   * Run `fn` when no other sync round or file upload of this browser is talking to the team's script: a sync
+   * round (its pull and push) and each upload take turns, across this browser's tabs (Web Locks) and within this
+   * tab. A push never shares a slow line with a file of several MB, and two uploads never run side by side;
+   * between two files of a round a waiting sync goes first (the locks are granted in order).
+   */
+  private netTurn<T>(fn: () => Promise<T>): Promise<T> {
+    const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+    if (locks) return locks.request('gcc-team-sync', fn) as Promise<T>;
+    const run = this.netQ.then(fn);
+    this.netQ = run.catch(() => {});
+    return run;
   }
 
   /** Pull every row after `since` (in pages). */
@@ -6037,6 +6160,8 @@ export class GccEngine {
     this.teamFiles = null;
     this.teamFilesAt = 0;
     this.docRetryAt = this.docFails = 0;
+    this.docWait = null;
+    this.docAway = false;
     // a message about this session's uploads is not the next one's (a refused file's stays while it is here)
     if (!this.refusedHere(null)) this.docMsg = '';
     this.hidden = new Set();
