@@ -361,6 +361,15 @@ export function targetForStage(cfg: SalesCfg, p: string, kind: DocKind): DocTarg
   if ((kind === 'invoice' || kind === 'receipt') && isPayName(cfg, p)) return 'actual';
   return kind === 'invoice' ? 'actual' : 'none';
 }
+/** What a document of a kind may count toward (a card's "นับเป็น"), its own first: a quotation is an offer
+ *  (Forecast, never money received), a receipt or an invoice is money received (Actual, never a Forecast —
+ *  as one it would replace the quotation and stop counting at its PAY step); another document any. */
+export const docTargets = (kind: DocKind): DocTarget[] =>
+  kind === 'quotation' ? ['forecast', 'none'] : kind === 'receipt' || kind === 'invoice' ? ['actual', 'none'] : ['forecast', 'actual', 'none'];
+/** A document counted toward what its kind never is (a receipt as the Forecast, a quotation as money received:
+ *  an older build's choice), or null. */
+export const targetWrong = (x: Pick<DealDoc, 'kind' | 'target' | 'amount'>): DocTarget | null =>
+  x.amount != null && x.target !== 'none' && !docTargets(x.kind).includes(x.target) ? x.target : null;
 /** A stage a document or a contact may be filed at on this deal: a step's (an older stage read into one too),
  *  an installment, a stage of the team's list, or a line of its plan. */
 export const stageOk = (s: SalesState, d: Pick<Deal, 'id'>, p: string) => !!p && (isStepKey(s.cfg, p) || !!payOf(s, d.id, p));
@@ -980,17 +989,24 @@ export function splitAmounts(total: number, shares: number[]): number[] {
  * (`old` = the day; `amt` = the typed Actual the documents don't cover, shared among such stages, which
  * setPlan then marks received by hand). One paid the old way with nothing to say how much (`amt` null)
  * stays out of the plan, done by its note. `used` = every paid stage: new installments take the others.
+ * One document counted more than once (dupCounted) counts once, by its newest copy: a plan line never
+ * carries a double count on after the copies are set right (61,730.77 + 60,000 of one receipt is not a
+ * PAY of 121,730.77). A stage paid only by an older copy gets no amount (and is never received by hand: the
+ * copy is that money). Sums to the satang.
  */
 export function planStart(s: SalesState, d: Deal, today: string): { lines: { stage: string; amt: number | null; old: string }[]; used: string[] } {
   if (hasPlan(s, d.id)) return { lines: [], used: [] };
-  const paid = payState(s, d, today).paid, acs = docsOf(s, d.id).filter(countsActual);
-  const sum = (xs: DealDoc[]) => xs.reduce((a, x) => a + (x.amount || 0), 0);
+  const all = docsOf(s, d.id).filter(countsActual), extra = new Set(dupCounted(s, d).flatMap((gr) => gr.slice(0, -1)));
+  const paid = payState(s, d, today).paid, acs = all.filter((x) => !extra.has(x));
+  const sum = (xs: DealDoc[]) => Math.round(xs.reduce((a, x) => a + (x.amount || 0), 0) * 100) / 100;
   const byDocs = (p: string) => sum(acs.filter((x) => x.stage === p));
-  const noted = paid.filter((p) => !byDocs(p));
-  const rest = d.actual != null ? Math.max(0, d.actual - sum(acs)) : 0;
+  const held = (p: string) => sum(all.filter((x) => x.stage === p));
+  const noted = paid.filter((p) => !held(p));
+  const rest = d.actual != null ? Math.max(0, d.actual - sum(all)) : 0;
   const shares = rest > 0 && noted.length ? splitAmounts(rest, noted.map(() => 1)) : [];
   const lines = paid.map((p) => {
     if (byDocs(p)) return { stage: p, amt: byDocs(p), old: '' };
+    if (held(p)) return { stage: p, amt: null, old: '' };
     const sd = stepOf(s, d.id, p).d;
     return { stage: p, amt: shares[noted.indexOf(p)] ?? null, old: sd && sd <= today ? sd : today };
   });
@@ -1390,6 +1406,18 @@ export function dupCounted(s: SalesState, d: Deal): DealDoc[][] {
   }
   const at = (x: DealDoc) => x.at || '';
   return groups.filter((gr) => gr.length > 1).map((gr) => gr.sort((a, b) => at(a).localeCompare(at(b))));
+}
+/** Another copy of `doc` (its number, or its file) counted as money received on the deal, or null: what a
+ *  copy that starts to count would double. */
+export const countedCopy = (s: SalesState, d: Pick<Deal, 'id'>, doc: DealDoc): DealDoc | null =>
+  docsOf(s, d.id).find((x) => x.id !== doc.id && countsActual(x) && sameDocument(x, doc)) || null;
+/** What a document card's "นับเป็น" opens on for type `kind`: what it counts toward when its type may,
+ *  else that type's own — Actual for a receipt or an invoice, unless another copy of it counts already
+ *  (then "ไม่นับยอด": counting it would count it twice). */
+export function formTarget(s: SalesState, d: Pick<Deal, 'id'>, doc: DealDoc, kind: DocKind = doc.kind, t: DocTarget = doc.target): DocTarget {
+  const ts = docTargets(kind);
+  if (ts.includes(t)) return t;
+  return ts[0] === 'actual' && countedCopy(s, d, doc) ? 'none' : ts[0];
 }
 /** What attaching with `mode` sends (DocAttach → attachDoc): the document replaced and the other copies
  *  that stop counting, the hand receipt kept on top of it, what it counts toward, where it goes, and the

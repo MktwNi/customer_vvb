@@ -52,16 +52,19 @@ export const qtDay = (doc: Pick<DealDoc, 'docDate' | 'at'>) => doc.docDate || (d
 
 /** "ฉบับที่ 2 · ใช้อยู่" / "ฉบับที่ 2 · ล่าสุด" / "ฉบับที่ 1 · ฉบับเดิม". */
 export const qtVerLabel = (v: QtVersion) => `ฉบับที่ ${v.n} · ${v.state === 'cur' ? 'ใช้อยู่' : v.state === 'last' ? 'ล่าสุด' : 'ฉบับเดิม'}`;
+/** A version counted as money received (an older build's "นับเป็น Actual"): it adds to the Actual whatever
+ *  version is in use, so it never reads "ไม่นับยอด". */
+export const qtInActual = (v: QtVersion) => v.state !== 'cur' && v.doc.target === 'actual' && v.doc.amount != null;
 /** A version's line in the card's list: "9 ต.ค. 2569 · 182,970 บาท · นับเป็น Forecast". */
 export function qtVerText(v: QtVersion, typed: boolean) {
   const day = qtDay(v.doc);
-  const what = v.state === 'cur' ? 'นับเป็น Forecast' : v.state === 'last' && typed && v.doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : 'ไม่นับยอด';
+  const what = v.state === 'cur' ? 'นับเป็น Forecast' : qtInActual(v) ? 'รวมใน Actual' : v.state === 'last' && typed && v.doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : 'ไม่นับยอด';
   return [day ? isoTh(day) : '', v.doc.amount != null ? fmtMoney(v.doc.amount) + ' บาท' : 'ไม่ระบุยอด', what].filter(Boolean).join(' · ');
 }
 /** The same, short, for the phone card: "192,600 · 4 ต.ค. · ไม่นับยอด". */
 export function qtVerShort(v: QtVersion) {
   const day = qtDay(v.doc);
-  return [v.doc.amount != null ? fmtMoney(v.doc.amount) : 'ไม่ระบุยอด', day ? dmTh(day) : '', v.state === 'cur' ? 'นับเป็น Forecast' : 'ไม่นับยอด'].filter(Boolean).join(' · ');
+  return [v.doc.amount != null ? fmtMoney(v.doc.amount) : 'ไม่ระบุยอด', day ? dmTh(day) : '', v.state === 'cur' ? 'นับเป็น Forecast' : qtInActual(v) ? 'รวมใน Actual' : 'ไม่นับยอด'].filter(Boolean).join(' · ');
 }
 
 /** Under a revision's comparison: "ฉบับแก้ไขน้อยกว่าเดิม 9,630 บาท (ลด 5%)"; '' without both figures. */

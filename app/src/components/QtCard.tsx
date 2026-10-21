@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useApp } from '../state';
-import { downloadBlob, isoTh } from '../lib/format';
-import { KIND_TH, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, type Deal, type DealDoc, type DocKind } from '../lib/sales';
+import { downloadBlob, isoTh, todayISO } from '../lib/format';
+import { KIND_TH, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, stepCode, type Deal, type DealDoc, type DocKind } from '../lib/sales';
 import { fcFig } from '../lib/salesUi';
-import { qtDelText, qtFacts, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, type QtVersion, type QtView } from '../lib/quotes';
+import { qtDelText, qtFacts, qtInActual, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, type QtVersion, type QtView } from '../lib/quotes';
 import type { DocFacts } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
@@ -17,6 +17,8 @@ import { Icon } from './icons';
 import { useSalesActs } from './SalesToast';
 import { QtBack, QtCheckLine } from './QtCheckSheet';
 import { canMergeFrom } from '../lib/joint';
+import { usePayGuard } from './PayChk';
+import { previewOf } from '../lib/payCheck';
 
 const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
 const BASIS_WORD: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
@@ -52,6 +54,8 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
   const [swap, setSwap] = useState<File | null>(null);
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState('');
+  // (a change to what a version counts: asked first when accounting checked the money, PayChk)
+  const guard = usePayGuard();
   const v = qtView(e.sales, d), h = v.head;
   if (!h) return null;
   const doc = h.doc;
@@ -72,13 +76,18 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
   const warn = mm ? mismatchText(mm.doc, mm.kept, h.state === 'cur' ? 'Forecast ที่ใช้' : 'ยอดที่นับ') : typedOver ? mismatchText(doc.amount!, m.forecast!, 'Forecast ที่พิมพ์ไว้') : '';
   const useDoc = () => (mm ? e.updateDoc(d.id, doc.id, { amount: mm.doc, basis: 'manual' }) : e.updateDeal(d.id, { forecast: null }));
   const goes = h.state === 'cur' ? TARGET_TH.forecast : v.typed && doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : doc.target === 'forecast' ? 'ไม่ได้ใช้ (มียอดที่ใหม่กว่า)' : TARGET_TH[doc.target];
+  // the Forecast held by a document that is not a version of this quotation (a receipt an older build
+  // counted as the Forecast): named, as nothing on this card can make it count again
+  const fcElse = h.state !== 'cur' && !v.typed && m.fcDoc && !v.versions.some((x) => x.doc.id === m.fcDoc!.id) ? m.fcDoc : null;
+  const notActual = (x: QtVersion) =>
+    guard.ask({ d, after: previewOf.doc(e.sales, d.id, x.doc.id, { target: 'none' }), kind: 'edit', title: `ไม่นับ${qtVerLabel(x).split(' · ')[0]}ใน Actual`, verb: 'ไม่นับยอด', run: () => (e.updateDoc(d.id, x.doc.id, { target: 'none' }), acts.say(`${qtVerLabel(x).split(' · ')[0]} ไม่นับใน Actual แล้ว · Actual ${fmtMoney(dealMoney(e.sales, e.sales.deals[d.id]).actual) || '—'}`)) });
   const meta = [doc.docDate ? 'ลงวันที่ ' + isoTh(doc.docDate) : '', 'แนบโดย ' + (doc.by || 'ไม่ระบุ'), doc.name, doc.fileId ? 'Drive ของทีม' : 'อยู่ในเครื่องที่แนบ รออัปโหลด'].filter(Boolean).join(' · ');
   const olds = v.versions.length > 1 ? [...v.versions].reverse() : [];
   // the check (package notify): its status, and "ตรวจใบนี้" for a checker while it waits
   const cv = e.qtCheckFor(doc);
   const check = cv?.status === 'wait' && !e.checkBlock(doc) ? () => set({ qtCheck: doc.id, qtSig: '' }) : undefined;
   return (
-    <div className={'sl-docc qt' + (warn ? ' warn' : '')}>
+    <div className={'sl-docc qt' + (warn || (money && fcElse) ? ' warn' : '')}>
       <div className="sl-docc-r">
         <DocThumb doc={doc} tick={tick} onOpen={() => open(doc)} />
         <div className="qt-h">
@@ -103,6 +112,11 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
         <p className="sl-docc-w">
           {warn}
           {!ro && <> · <button type="button" className="lnk" onClick={useDoc}>ใช้ยอดจากเอกสาร {fmtMoney(mm ? mm.doc : doc.amount)}</button></>}
+        </p>
+      )}
+      {money && fcElse && (
+        <p className="sl-docc-w">
+          Forecast ตอนนี้มาจาก{KIND_TH[fcElse.kind].split(' / ')[0]} {fcElse.docNo || fcElse.name}{fcElse.stage ? ` ที่ขั้น ${stepCode(e.sales, d, fcElse.stage, todayISO())}` : ''} ไม่ใช่ใบเสนอราคานี้ · แก้ที่การ์ดของใบนั้น
         </p>
       )}
       {ro ? (
@@ -138,8 +152,12 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
           {olds.map((x) => (
             <div key={x.doc.id} className={'qt-ver' + (x === h ? ' cur' : '')} role="listitem">
               <span className="qt-vn">{qtVerLabel(x)}</span>
-              <span className={x === h ? '' : 'qt-vw'}>{qtVerText(x, v.typed)}</span>
-              <span className="r">{x !== h && <button type="button" className="lnk" onClick={() => open(x.doc)} aria-label={`เปิดไฟล์ ${qtVerLabel(x)} ${x.doc.name}`}>เปิดไฟล์</button>}</span>
+              <span className={x === h || qtInActual(x) ? '' : 'qt-vw'}>{qtVerText(x, v.typed)}</span>
+              <span className="r">
+                {/* a version an older build counted as money received: it stops counting here, in one step */}
+                {x !== h && qtInActual(x) && !ro && money && <button type="button" className="lnk" onClick={() => notActual(x)} aria-label={`ไม่นับ ${qtVerLabel(x)} ใน Actual`}>ไม่นับใน Actual</button>}
+                {x !== h && <button type="button" className="lnk" onClick={() => open(x.doc)} aria-label={`เปิดไฟล์ ${qtVerLabel(x)} ${x.doc.name}`}>เปิดไฟล์</button>}
+              </span>
             </div>
           ))}
         </div>
