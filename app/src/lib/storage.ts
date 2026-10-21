@@ -132,6 +132,8 @@ export const PREF = {
   peopleHide: 'gcc-people-hide',
   /** … and those deleted (here or by a teammate). */
   peopleGone: 'gcc-people-gone',
+  /** Pairs of people said "ไม่ใช่คนเดียวกัน" on this browser (people.ts pairKey): not offered to merge again. */
+  peopleNotDup: 'gcc-people-notdup',
   /** The account signed in on this browser (team accounts): {url, u, name, role, tok, exp, rm, mc}. */
   session: 'gcc-team-session',
   /** The last account that chose "จดจำฉัน" ({u, name}), offered on the login screen. */
