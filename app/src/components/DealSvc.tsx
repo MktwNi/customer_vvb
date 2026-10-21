@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useApp } from '../state';
 import { jobServices, jointRole, payerDeal, trackerStatus, type Deal, type SalesState } from '../lib/sales';
-import { jobCoKey, otherJobs, otherWords, repeatWords, repeats, svcClean, svcCommon, svcText } from '../lib/jobs';
+import { jobCoKey, otherJobs, otherWords, repeatWords, repeats, svcChoices, svcClean, svcCommon, svcText } from '../lib/jobs';
 import type { GccEngine } from '../lib/engine';
 import { fmtN } from '../lib/format';
 import { Pop } from './Pop';
@@ -51,7 +51,7 @@ export function DealSvcRow({ d }: { d: Deal }) {
         <Pop anchor={btn} onClose={() => setOpen(false)} label="บริการของงานนี้" title="บริการของงานนี้" kind="dialog" width={520} className="val">
           <div className="dp-svc-pop">
             <span className="t-sec">บริการของงานนี้ เลือกได้หลายบริการ ถ้าอยู่ในใบเสนอราคาเดียวกัน</span>
-            <SvcPick all={S.cfg.services} value={d.service} onChange={(v) => e.updateDeal(d.id, { service: v })} label="บริการของงานนี้" />
+            <SvcPick all={svcChoices(S)} team={S.cfg.services} value={d.service} onChange={(v) => e.updateDeal(d.id, { service: v })} label="บริการ" />
             {rep.length > 0 ? (
               <span className="t-warn" role="status">{repeatWords(svcCommon(d.service, rep.flatMap((o) => jobServices(S, o))), rep.length, d.year)}</span>
             ) : othersSvc.length > 0 ? (
