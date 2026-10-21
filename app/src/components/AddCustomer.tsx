@@ -66,7 +66,8 @@ export function AddCustomer() {
     if (a.link) e.updateDeal(a.link, { gid: c.id });
     if (a.deal) {
       // (a joint quotation's header is the payer's row for that quotation, not the company's own row)
-      const d = e.dealsOf(c.id).find((x) => x.year === ui.slYear && jointRole(e.sales, x) !== 'header') || e.addDeal({ gid: c.id, section, year: ui.slYear });
+      // (a new row: the company's one person on record, if it has one, is its contact)
+      const d = e.dealsOf(c.id).find((x) => x.year === ui.slYear && jointRole(e.sales, x) !== 'header') || e.addDeal({ gid: c.id, section, year: ui.slYear }, undefined, { contact: '' });
       set({ addCust: null, deal: d.id });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: c.id, dTab: 'info' });
@@ -87,6 +88,8 @@ export function AddCustomer() {
     if (a.link) e.updateDeal(a.link, { gid: id });
     if (a.deal) {
       const d = e.addDeal({ gid: id, section, year: ui.slYear || beYear() });
+      // the contact typed here is a person (ผู้ติดต่อ) and the deal's contact: typed once, linked everywhere
+      if (f.contact.trim() && e.canLink(d)) e.saveTypedContact(d.id);
       set({ addCust: null, deal: d.id });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: id, dTab: 'info' });
@@ -165,6 +168,8 @@ export function SendToTracker() {
   useEffect(() => void e.teamSyncNow(), [e]);
   const ro = !e.can('edit.deal');
   const cos = useMemo(() => (ui.sendIds || []).map((id) => e.company(id)).filter(Boolean) as Company[], [ui.sendIds, e, ver]);
+  // opened from a person's page: that person is the deal's contact
+  const from = ui.sendPid && e.can('edit.cust') ? e.people[ui.sendPid] : undefined;
   const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));
   // several companies: by default each goes to the section of where it was found (TGO, SET/mai…)
   const AUTO = '\u0000auto';
@@ -183,7 +188,7 @@ export function SendToTracker() {
   const shown = all ? cos : cos.slice(0, LIST_FIRST);
   const send = () => {
     if (over) return;
-    const r = e.addDealsFromCompanies(chosen.map((c) => c.id), section === AUTO ? { year } : { section, year });
+    const r = e.addDealsFromCompanies(chosen.map((c) => c.id), { ...(section === AUTO ? {} : { section }), year, pid: ui.sendPid });
     const note = `ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`;
     if (ui.sendStay) {
       // from the search page's selection: stay there, say what was sent, link to the table; an account
@@ -206,7 +211,7 @@ export function SendToTracker() {
   const years = [...new Set([beYear(), String(+beYear() + 1), year])].sort();
   return (
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
-      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ</span>}
+      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ · {from ? `ผู้ติดต่อของดีลคือ ${from.name}` : 'บริษัทที่มีผู้ติดต่อในรายชื่อคนเดียว จะใช้คนนั้นเป็นผู้ติดต่อของดีล'}</span>}
       {/* many at once: how many rows the team's table gets, before sending */}
       {!ro && (over ? <Notice kind="warn">{trackerCapWord(toAdd, team)}</Notice> : toAdd > BIG && <Notice kind="warn">{trackerWarn(toAdd, year, team)}</Notice>)}
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

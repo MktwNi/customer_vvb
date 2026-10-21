@@ -10,7 +10,7 @@ import { filterDeals, fmtMoney, type Deal, type SalesFilter, type SalesState, ty
 
 /** The ปิดงาน tab's rows for the table's filters `F`: its closed jobs (the quick views are about open work,
  *  not applied there). Its tab counter is the jobs of these for the year alone ({ year }). */
-export const closedTabRows = (s: SalesState, F: SalesFilter, today: string): Deal[] => filterDeals(s, { ...F, quick: '', job: 'closed' }, today);
+export const closedTabRows = (s: SalesState, F: SalesFilter, today: string, hay?: (d: Deal) => string): Deal[] => filterDeals(s, { ...F, quick: '', job: 'closed' }, today, hay);
 
 /**
  * The Dashboard's ทำงานให้ card's list for its filters `F`: a date range is read on the day each job closed

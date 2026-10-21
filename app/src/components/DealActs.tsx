@@ -4,6 +4,7 @@ import { dmTh, isoTh, todayISO } from '../lib/format';
 import { ACT_TH, ACT_TYPES, NOTE_MAX, actStage, dealSteps, stepLabel, stepWords, type ActType, type Deal, type DealAct, type SalesState, type StepEntry } from '../lib/sales';
 import { OLD_TH, stepIdOf } from '../lib/steps';
 import type { GccEngine } from '../lib/engine';
+import { actPeople } from '../lib/people';
 import { DateChip } from './DateChip';
 import { Select } from './Select';
 
@@ -19,8 +20,12 @@ export function actStages(S: SalesState, d: Deal, today: string): { v: string; l
   return dealSteps(S, d, today).steps.map((v) => ({ v: v.id, label: stepWords({ code: v.code, th: v.th.replace(/\s*\(YES \/ NO\)$/, '') }) }));
 }
 
-/** The quick-add's state: type (โทร), date (today), note, stage (where the deal is) and person. Enter
- *  saves; `save` returns the record (null when nothing was saved). */
+/** Who a contact record of `d` may be with ("กับ"): the deal's contacts first, then the company's other people
+ *  still there; `pid` the default, the deal's main contact (lib/people.ts actPeople). */
+export const actWith = (e: GccEngine, d: Deal) => actPeople(e.dealPeople(d.id), e.dealPool(d));
+
+/** The quick-add's state: type (โทร), date (today), note, stage (where the deal is) and person (the deal's
+ *  contact). Enter saves; `save` returns the record (null when nothing was saved). */
 export function useActForm(d: Deal, stage0?: string) {
   const { engine: e } = useApp();
   const today = todayISO();
@@ -28,7 +33,7 @@ export function useActForm(d: Deal, stage0?: string) {
   const [date, setDate] = useState(today);
   const [note, setNote] = useState('');
   const [stage, setStage] = useState(() => stage0 || actStage(e.sales, d, today));
-  const [pid, setPid] = useState('');
+  const [pid, setPid] = useState(() => actWith(e, d).pid);
   const save = () => e.addAct(d.id, { type, note, d: date, stage, pid });
   return { type, setType, date, setDate, note, setNote, stage, setStage, pid, setPid, save, today };
 }
@@ -59,11 +64,12 @@ export function ActStageSel({ f, d, label = 'ขั้น' }: { f: ActFormState;
 }
 
 /** The form in the deal panel and the phone card: type and date, the note (Enter saves, Escape
- *  cancels), the stage and, when the company has people on record, who it was with. */
+ *  cancels), the stage and, when the deal has a contact or the company has people on record, who it was
+ *  with (the deal's contact to begin with). */
 export function ActForm({ d, stage, onDone, compact }: { d: Deal; stage?: string; onDone: (a: DealAct | null) => void; compact?: boolean }) {
   const { engine: e } = useApp();
   const f = useActForm(d, stage);
-  const people = d.gid != null ? e.peopleOf(d.gid).filter((p) => p.status !== 'left') : [];
+  const people = actWith(e, d).list;
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     input.current?.focus();

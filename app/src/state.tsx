@@ -75,12 +75,17 @@ export interface UIState {
   /** That dialog holds the first TRACKER_MAX of the followed companies (lib/bulk.ts followedBatch): how many
    *  more are left for the next send (0: none). Set together with sendIds only. */
   sendMore: number;
+  /** That dialog was opened from a person's page (ผู้ติดต่อ): the deal it makes has that person as its contact.
+   *  Set together with sendIds only. */
+  sendPid: string;
   /** One-line result shown at the top of the Sales Tracker (e.g. after sending companies to it). */
   slNote: string;
   /** People (ผู้ติดต่อ): the person whose page is open, list search / view / page. */
   person: string | null; pQ: string; pView: 'all' | 'mine' | 'left'; pPage: number;
-  /** "Add a person" dialog (at this company when `gid` is set). */
-  addPerson: { gid?: number } | null;
+  /** "Add a person" dialog (at this company when `gid` is set; `company`: a name, for a client not linked to
+   *  one). `deal`: opened from a deal's contact card, the new person becomes that deal's contact (its main one in
+   *  place of the one it has, with `main`). */
+  addPerson: { gid?: number; company?: string; deal?: string; main?: boolean } | null;
   /** The record being worked on: open, or opened last (marked in its list so you keep your place). */
   last: { deal?: string; person?: string };
   /** Account dialog open over the app (team accounts): change password, sign out, สิทธิ์ของฉัน, or
@@ -132,7 +137,7 @@ const initial = (): UIState => {
     ddF: 'pending', ddPage: 0,
     slView: 'table', slYear: beYear(), slF: {}, slCollapsed: {}, slOpen: {}, slShowAll: {}, slEdit: null, slToast: null, slPrompt: null, slConfirm: null,
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
-    deal: null, dpPlan: '', addCust: null, sendIds: null, sendStay: false, sendMore: 0, slNote: '',
+    deal: null, dpPlan: '', addCust: null, sendIds: null, sendStay: false, sendMore: 0, sendPid: '', slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
     bell: false, qtCheck: null, qtSig: '', jqDlg: null,
   };
@@ -183,6 +188,8 @@ export function AppProvider({ engine, children }: { engine: GccEngine; children:
         if ('sendIds' in patch && !('sendStay' in patch)) n.sendStay = false;
         // …and says how many followed companies wait for the next send only when opened with that count
         if ('sendIds' in patch && !('sendMore' in patch)) n.sendMore = 0;
+        // …and makes the deal's contact a person only when opened from that person's page
+        if ('sendIds' in patch && !('sendPid' in patch)) n.sendPid = '';
         // another year of the tracker (the year picker, ส่งเข้า Sales Tracker, an import's "ดูตารางปี"): a date
         // range goes back to the whole year, the other filters stay (filters spec §7.6)
         if (n.slYear !== s.slYear) n.slF = withoutDate(n.slF);

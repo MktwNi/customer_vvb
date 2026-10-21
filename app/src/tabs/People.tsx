@@ -3,8 +3,9 @@ import { useApp, useEngineVersion } from '../state';
 import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
-import { KIND_TH, dealSteps, docsOf, fmtMoney, trackerStatus, type Deal } from '../lib/sales';
+import { ACT_TH, KIND_TH, dealSteps, docsOf, fmtMoney, trackerStatus, type Deal, type DealAct } from '../lib/sales';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
+import { actCode } from '../components/DealActs';
 import { moneyWords } from '../lib/joint';
 import type { Company, LogEntry, Person, Task } from '../lib/types';
 import { CoAvatar, monoSize } from '../components/CoAvatar';
@@ -73,6 +74,13 @@ function usePeopleIndex(e: Engine, ver: number) {
         if (l.at > x.last) x.last = l.at;
       }),
     );
+    // calls, e-mails and meetings recorded in a deal "กับ" the person (a deal deleted since: not counted)
+    Object.values(e.sales.acts || {}).forEach((a) => {
+      if (!a.pid || !e.sales.deals[a.deal]) return;
+      const x = get(a.pid);
+      x.n++;
+      if (a.d > x.last.slice(0, 10)) x.last = a.d;
+    });
     e.crm.tasks.forEach((t) => {
       if (!t.pid || t.done || t.date < today) return;
       const x = get(t.pid);
@@ -258,16 +266,21 @@ function PersonPage({ id }: { id: string }) {
   const c = e.personCompany(p);
   const logs = e.personLogs(p);
   const contacts = logs.filter((x) => CONTACT.includes(x.l.type));
+  // and the contact records of the deals, "กับ" this person
+  const acts = e.personActs(p.id);
   const notes = logs.filter((x) => x.l.type === 'note');
   const tasks = c ? e.tasksOf(c.id) : e.crm.tasks.filter((t) => t.pid === p.id);
   const upcoming = tasks.filter((t) => !t.done).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   // the profile counts this person's own appointments still ahead (the tab lists the company's)
   const mineAhead = tasks.filter((t) => t.pid === p.id && !t.done && t.date >= today).length;
   const doneTasks = tasks.filter((t) => t.done).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
-  const deals = c ? e.dealsOf(c.id).sort((a, b) => b.year.localeCompare(a.year)) : [];
+  // the company's deals (their documents), and the deals this person is the contact of (the link)
+  const byYear = (a: Deal, b: Deal) => b.year.localeCompare(a.year);
+  const deals = c ? e.dealsOf(c.id).sort(byYear) : [];
+  const linked = e.personDeals(p.id).sort(byYear);
   const others = c ? e.peopleOf(c.id).filter((x) => x.id !== p.id) : [];
   const lineUrl = lineHref(p.line);
-  const openDeals = deals.filter((d) => d.jobStatus === 'open').length;
+  const openDeals = linked.filter((d) => d.jobStatus === 'open').length;
   const startLog = () => {
     setTab('log');
     requestAnimationFrame(() => logRef.current?.focus());
@@ -312,7 +325,7 @@ function PersonPage({ id }: { id: string }) {
             </span>
             {p.status === 'left' && <span className="chip warn">ย้ายงานแล้ว</span>}
             <div className="pe-stats">
-              <span><b>{fmtN(contacts.length)}</b>ติดต่อแล้ว</span>
+              <span><b>{fmtN(contacts.length + acts.length)}</b>ติดต่อแล้ว</span>
               <span><b>{fmtN(mineAhead)}</b>นัดกับคนนี้</span>
               <span><b>{fmtN(openDeals)}</b>ดีลที่เปิด</span>
             </div>
@@ -361,7 +374,7 @@ function PersonPage({ id }: { id: string }) {
         </section>
 
         {/* timeline tabs */}
-        <TabsCard p={p} c={c} tab={tab} setTab={setTab} logRef={logRef} contacts={contacts} upcoming={upcoming} doneTasks={doneTasks} deals={deals} today={today} />
+        <TabsCard p={p} c={c} tab={tab} setTab={setTab} logRef={logRef} contacts={contacts} acts={acts} upcoming={upcoming} doneTasks={doneTasks} deals={deals} linked={linked} today={today} />
         </div>
         <div className="pe-col pe-col-r">
         {/* notes */}
@@ -388,18 +401,28 @@ function PersonPage({ id }: { id: string }) {
   );
 }
 
-function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, deals, today }: {
+/** One entry of a person's history: a contact-log entry (company page) or a deal's contact record "กับ" them. */
+type Hist = { at: string; l: LogEntry; key: string; a?: undefined } | { at: string; a: DealAct; l?: undefined };
+
+function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTasks, deals, linked, today }: {
   p: Person; c: Company | undefined; tab: 'log' | 'tasks' | 'deals'; setTab: (t: 'log' | 'tasks' | 'deals') => void; logRef: React.RefObject<HTMLTextAreaElement | null>;
-  contacts: { l: LogEntry; key: string }[]; upcoming: Task[]; doneTasks: Task[]; deals: Deal[]; today: string;
+  contacts: { l: LogEntry; key: string }[]; acts: DealAct[]; upcoming: Task[]; doneTasks: Task[]; deals: Deal[]; linked: Deal[]; today: string;
 }) {
   const { engine: e, set, openSched } = useApp();
   const ro = !e.can('edit.cust');
   const mayDel = (l: LogEntry) => e.can('del.log', l.by || '');
+  // newest first: a deal's record by its day (its time of writing when written that day)
+  const hist: Hist[] = [
+    ...contacts.map(({ l, key }) => ({ at: l.at, l, key })),
+    ...acts.map((a) => ({ at: localDay(a.at) === a.d ? a.at : a.d + 'T12:00:00', a })),
+  ].sort((x, y) => localDay(y.at).localeCompare(localDay(x.at)) || y.at.localeCompare(x.at));
+  // the company's other deals: listed, not counted (this person is not their contact)
+  const rest = deals.filter((d) => !linked.includes(d));
   return (
     <section className="pe-card pe-tabs" aria-label="ประวัติและนัดหมาย">
       <div role="tablist" className="utabs">
         {/* (a phone leaves out the .pe-long words, so the three tabs fit across it) */}
-        {([['log', <>ประวัติ<span className="pe-long">การติดต่อ</span></>, contacts.length], ['tasks', 'นัดหมาย', upcoming.length], ['deals', <>ดีล<span className="pe-long">ใน Sales Tracker</span></>, deals.length]] as const).map(([k, label, n]) => (
+        {([['log', <>ประวัติ<span className="pe-long">การติดต่อ</span></>, hist.length], ['tasks', 'นัดหมาย', upcoming.length], ['deals', <>ดีล<span className="pe-long">ใน Sales Tracker</span></>, linked.length]] as const).map(([k, label, n]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
             {label} <span className="n">{fmtN(n)}</span>
           </button>
@@ -408,11 +431,13 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
       {tab === 'log' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {!ro && <LogForm pid={p.id} taRef={logRef} />}
-          {!contacts.length ? (
+          {!hist.length ? (
             <span className="empty">ยังไม่มีประวัติ · บันทึกหลังคุยเสร็จ</span>
           ) : (
             <ol className="pe-tl">
-              {contacts.map(({ l, key }) => {
+              {hist.map((h) => {
+                if (h.a) return <ActEntry key={'a' + h.a.deal + h.a.id} a={h.a} />;
+                const { l, key } = h;
                 // the node's colour is the type's only cue besides its word in the grey line
                 const [tag, ink] = logType(l.type);
                 return (
@@ -462,17 +487,28 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, upcoming, doneTasks, de
       )}
       {tab === 'deals' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!c && <span className="empty">ยังไม่ได้เชื่อมกับบริษัท</span>}
-          {c && !deals.length && (
-            <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span className="empty">บริษัทนี้ยังไม่อยู่ใน Sales Tracker</span>
-              {/* a new deal is ดีลและขั้นตอน's, not the person record's (as CompanyDrawer's SalesBox) */}
-              {e.can('edit.deal') && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
-            </span>
-          )}
-          {deals.map((d) => (
+          {/* the deals this person is the contact of (linked in the deal's ผู้ติดต่อ) */}
+          {linked.map((d) => (
             <DealMini key={d.id} d={d} p={p} />
           ))}
+          {!linked.length && (c || !deals.length) && <span className="empty">{c && !deals.length ? 'บริษัทนี้ยังไม่อยู่ใน Sales Tracker' : c ? 'ยังไม่ได้เป็นผู้ติดต่อของดีลใด' : 'ยังไม่ได้เชื่อมกับบริษัท'}</span>}
+          {c && !deals.length && e.can('edit.deal') && (
+            // a new deal is ดีลและขั้นตอน's, not the person record's (as CompanyDrawer's SalesBox); this person is its contact
+            <button onClick={() => set({ sendIds: [c.id], sendPid: p.id })} className="btn sm" style={{ alignSelf: 'flex-start' }}>ส่งเข้า Sales Tracker</button>
+          )}
+          {rest.length > 0 && (
+            <>
+              <span className="pe-k">ดีลอื่นของบริษัทนี้</span>
+              {rest.map((d) => (
+                <div key={d.id} className="pe-deal-w">
+                  <DealMini d={d} p={p} />
+                  {p.status !== 'left' && e.canLink(d) && (
+                    <button type="button" className="lnk pe-deal-use" onClick={() => e.linkPerson(d.id, p.id)}>ใช้ {p.name} เป็นผู้ติดต่อของดีลนี้</button>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </section>
@@ -624,11 +660,34 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
   );
 }
 
+/** A deal's contact record "กับ" the person, in their history: where it was recorded, and the deal to open. */
+function ActEntry({ a }: { a: DealAct }) {
+  const { engine: e, set } = useApp();
+  const d = e.sales.deals[a.deal];
+  const [, ink] = logType(a.type);
+  return (
+    <li className="dr-row">
+      <span className="pe-tl-node" style={{ borderColor: ink }} />
+      <div className="pe-tl-date">
+        <b>{+a.d.slice(8, 10)}</b>
+        <span>{isoTh(a.d).replace(/^\d+\s/, '')}</span>
+      </div>
+      <div className="pe-tl-card">
+        {a.note && <span style={{ whiteSpace: 'pre-line' }}>{a.note}</span>}
+        <span style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <span className="pe-sub"><span style={{ color: ink }}>{ACT_TH[a.type]}</span>{[d ? `ในดีล Sales Tracker ปี ${d.year}` : '', actCode(e.sales, a), a.by || 'ไม่ระบุชื่อ'].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
+          {d && <span className="dr-acts"><button className="lnk" style={{ fontSize: 13 }} onClick={() => set({ deal: d.id })}>เปิดดีล</button></span>}
+        </span>
+      </div>
+    </li>
+  );
+}
+
 function DealMini({ d, p }: { d: Deal; p: Person }) {
   const { engine: e, set } = useApp();
   const S = e.sales;
   const tr = dealSteps(S, d, todayISO());
-  const mine = !!d.contactName && nameKey(d.contactName) === nameKey(p.name);
+  const mine = e.dealPeople(d.id).some((x) => x.id === p.id);
   return (
     <button className="pe-deal" onClick={() => set({ deal: d.id })}>
       <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
@@ -663,8 +722,10 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
     // calls and notes kept under the person (no company the team shares) go with them
     const own = (e.crm.log['p-' + p.id] || []).length;
     const atCo = e.personLogs(p).length - own;
+    const nd = e.personDeals(p.id).length;
     const msg = [
       `ลบ "${p.name}" ออกจากรายชื่อผู้ติดต่อของทั้งทีม?`,
+      nd ? `คนนี้เป็นผู้ติดต่อของ ${fmtN(nd)} ดีลใน Sales Tracker ดีลเหล่านั้นจะไม่มีผู้ติดต่อ` : '',
       atCo ? `ประวัติการติดต่อ ${fmtN(atCo)} รายการยังอยู่ในหน้าบริษัท` : '',
       own ? `ประวัติและโน้ต ${fmtN(own)} รายการที่ไม่ได้อยู่กับบริษัทใดจะถูกลบด้วย` : '',
     ].filter(Boolean).join('\n');
@@ -777,7 +838,10 @@ export function AddPerson() {
   useEngineVersion();
   const a = ui.addPerson!;
   const c0 = a.gid != null ? e.company(a.gid) : undefined;
-  const [f, setF] = useState({ name: '', pos: '', phone: '', email: '', line: '', role: '' as Person['role'], gid: c0 ? c0.id : (null as number | null), company: c0?.name || '' });
+  // opened from a deal's contact card: the new person becomes that deal's contact too
+  const deal = a.deal ? e.sales.deals[a.deal] : undefined;
+  const useIn = (pid: string) => deal && e.linkPerson(deal.id, pid, { main: !!a.main });
+  const [f, setF] = useState({ name: '', pos: '', phone: '', email: '', line: '', role: '' as Person['role'], gid: c0 ? c0.id : (null as number | null), company: c0?.name || a.company || '' });
   const close = () => set({ addPerson: null });
   const up = (k: keyof typeof f) => (ev: { target: { value: string } }) => setF({ ...f, [k]: ev.target.value });
   // the same person already recorded at this company (name, phone or e-mail)
@@ -792,13 +856,16 @@ export function AddPerson() {
     if (!f.name.trim()) return;
     const id = e.addPerson({ ...f, name: f.name.trim() });
     if (!id) return;
-    // from the People page, the new person's page opens; from a company page, it stays there
+    useIn(id);
+    // from the People page, the new person's page opens; from a company page or a deal, it stays there
     set({ addPerson: null });
+    if (deal) return;
     if (ui.tab === 'people' && ui.sel == null) openPerson(id);
   };
   return (
     <Modal title="เพิ่มผู้ติดต่อ" onClose={close} width={620}>
       <form onSubmit={submit} className="pe-form">
+        {deal && <p className="t-sec" style={{ gridColumn: '1 / -1', margin: 0 }}>สำหรับดีลปี {deal.year} · {deal.section || 'ไม่ระบุหมวด'} บันทึกแล้วจะเป็นผู้ติดต่อของดีลนี้ และอยู่ในหน้าผู้ติดต่อด้วย</p>}
         <label style={{ ...labelCol, gridColumn: '1 / -1' }}>ชื่อ *<input value={f.name} onChange={up('name')} required autoFocus maxLength={200} placeholder="เช่น คุณสมชาย ใจดี" className="fld" /></label>
         <div style={{ gridColumn: '1 / -1' }}>
           <CompanyPicker gid={f.gid} company={f.company} onChange={(gid, company) => setF({ ...f, gid, company })} />
@@ -812,13 +879,17 @@ export function AddPerson() {
           <div style={{ gridColumn: '1 / -1' }}>
             <Notice kind="error" role="status">
               มีผู้ติดต่อที่อาจเป็นคนเดียวกันแล้ว: <b style={{ fontWeight: 500 }}>{dup.name}</b>{dup.pos ? ' · ' + dup.pos : ''}{' '}
-              <button type="button" className="pe-act" onClick={() => (set({ addPerson: null }), openPerson(dup.id))}>เปิดดู</button>
+              {deal ? (
+                <button type="button" className="pe-act" onClick={() => (useIn(dup.id), set({ addPerson: null }))}>ใช้คนนี้ในดีลนี้</button>
+              ) : (
+                <button type="button" className="pe-act" onClick={() => (set({ addPerson: null }), openPerson(dup.id))}>เปิดดู</button>
+              )}
             </Notice>
           </div>
         )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
           <button type="button" onClick={close} className="quiet">ยกเลิก</button>
-          <button type="submit" className="btn pri">เพิ่มผู้ติดต่อ</button>
+          <button type="submit" className="btn pri">{deal ? 'เพิ่มและใช้ในดีลนี้' : 'เพิ่มผู้ติดต่อ'}</button>
         </div>
       </form>
     </Modal>

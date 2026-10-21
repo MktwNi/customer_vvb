@@ -96,11 +96,12 @@ export function Sales() {
   // (money by the year it comes in is Cashflow's: without ดู Cashflow the table counts by the deal's year)
   const lens = ui.slLens === 'cash' && e.can('view.cash');
   const fT: SalesFilter = lens ? { ...f, money: 'cash' } : f;
-  const shown = filterDeals(S, fT, today);
+  // (the search reads the deal's contacts too: the people linked to it)
+  const shown = filterDeals(S, fT, today, e.contactHay);
   // the quick views are about open work: their counts come from the other filters, and the closed tab ignores them
-  const noQuick = f.quick || lens ? filterDeals(S, { ...fT, quick: '' }, today) : shown;
+  const noQuick = f.quick || lens ? filterDeals(S, { ...fT, quick: '' }, today, e.contactHay) : shown;
   // the ปิดงาน tab's rows: the table's filters (not the lens nor a quick view), closed jobs only
-  const closedRows = closedTabRows(S, f, today);
+  const closedRows = closedTabRows(S, f, today, e.contactHay);
   // not memoised: the engine changes S.deals in place (an import or a team sync can add a year)
   const all = Object.values(S.deals);
   const v = ui.slView;
@@ -1121,6 +1122,8 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
   const name = shortName(d.client);
   const isNew = !dealStatus(S, d).started && !!d.at && daysBetween(localDay(d.at), today) <= 7;
   const lc = lastContactInfo(S, d, today).date;
+  // the deal's contact: the person linked to it, else what was typed
+  const ct = e.dealContact(d).name;
   const nx = nextStepView(S, d, today, t);
   const late = overdueDays(S, d, today, t) != null || nx.tone === 'late';
   const reached = reachedOf(t.steps.filter((v) => v.counted));
@@ -1141,7 +1144,7 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
               {isNew && <span className="sl-tg">ใหม่</span>}
               {tk.dup(d) && <span className="sl-tg bad" title={`บริษัทนี้มีในตารางปี ${d.year} มากกว่า 1 แถว เปิดแถวที่ซ้ำแล้วลบออก`}>ซ้ำ</span>}
               {tk.cash && d.year !== tk.year && <span className="sl-tg" title={`งานของปี ${d.year} ที่มีงวดเงินในปี ${tk.year}`}>งานปี {d.year}</span>}
-              <span className={'sl-ct' + (d.contactName ? '' : ' none')}>{d.contactName || 'ยังไม่มีผู้ติดต่อ'}</span>
+              <span className={'sl-ct' + (ct ? '' : ' none')}>{ct || 'ยังไม่มีผู้ติดต่อ'}</span>
               <span className="sl-sub-last">· {lc ? dmTh(lc) : 'ยังไม่ได้ติดต่อ'}</span>
             </span>
           </span>
@@ -1958,7 +1961,8 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
             {/* (the date's own column folds away in a narrow table: it comes here instead) */}
             <span className="sl-qa-date"><DateChip value={f.date} onChange={f.setDate} label="วันที่ติดต่อ" /></span>
           </span>
-          <span className="sl-qa-hint">Enter บันทึก · Esc ยกเลิก</span>
+          {/* (who it was with: the deal's contact, as the panel's "กับ" starts) */}
+          <span className="sl-qa-hint">{tk.e.people[f.pid] ? `กับ ${tk.e.people[f.pid].name} · ` : ''}Enter บันทึก · Esc ยกเลิก</span>
         </span>
       </td>
       <td className="k-last"><DateChip value={f.date} onChange={f.setDate} label="วันที่ติดต่อ" /></td>

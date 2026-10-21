@@ -13,6 +13,8 @@ import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, 
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
 import { NOTE_CAP, PERSON_FIELDS, personSuggestions, toPerson, type PersonForm } from './people';
+// a deal's contact: links to people (person/<pid>/<deal>), never a copy of their details
+import { contactChoices, dealContact, linkIndex, linkOrder, linkedPeople, personIdOf, suggestionId, toPLink, typedExtras, typedMatches, type DealContact, type LinkIndex, type PLink } from './people';
 import {
   CUSTOM_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
@@ -128,6 +130,8 @@ export class GccEngine {
   custom: Record<string, CustomCo> = {};
   /** Contact persons at customer companies (people.ts), shared with the team. */
   people: Record<string, Person> = {};
+  /** The deals' contacts: links from a deal to people, keyed `<pid>/<dealId>` (people.ts PLink), shared. */
+  plinks: Record<string, PLink> = {};
 
   // ---- derived
   B!: Built;
@@ -336,7 +340,7 @@ export class GccEngine {
       if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -350,8 +354,10 @@ export class GccEngine {
         this.store.get<Partial<SalesState>>('sales'),
         this.store.get<Record<string, CustomCo>>('customCos'),
         this.store.get<Record<string, Person>>('people'),
+        this.store.get<Record<string, PLink>>('plinks'),
       ]);
       this.people = people || {};
+      this.plinks = plinks || {};
       this.sales = { ...emptySales(), ...(sales || {}), cfg: { ...emptyCfg(), ...((sales && sales.cfg) || {}) } };
       this.custom = custom || {};
       this.base = base;
@@ -1172,7 +1178,7 @@ export class GccEngine {
   // ---- team backup
   exportCrm() {
     if (!this.can('set.data')) return this.deny();
-    const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom, people: this.people };
+    const data = { kind: 'gcc-crm-backup', v: 1, at: new Date().toISOString(), by: this.me(), crm: this.crm, contacts: this.contacts, dedup: this.dec, sales: this.sales, custom: this.custom, people: this.people, plinks: this.plinks };
     downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), 'GCC_ข้อมูลทีม_' + todayISO() + '.json');
   }
   /** Merge a teammate's backup into local data — never deletes; newer contact edits win. */
@@ -1347,9 +1353,18 @@ export class GccEngine {
           n++;
         }
       });
+      // the deals' contacts: a link this browser does not have yet (never one it has: its own is as new)
+      Object.entries((d.plinks || {}) as Record<string, unknown>).forEach(([k, v]) => {
+        const l = toPLink(v), i = k.indexOf('/');
+        if (l && i > 0 && i < k.length - 1 && !k.includes('/', i + 1) && !this.plinks[k]) {
+          this.plinks[k] = l;
+          n++;
+        }
+      });
       this.persist('sales', S);
       this.persist('customCos', this.custom);
       this.persist('people', this.people);
+      this.persist('plinks', this.plinks);
       Object.entries((d.dedup || {}) as Record<string, string>).forEach(([k, v]) => {
         if (!(k in this.dec)) {
           this.dec[k] = v;
@@ -1552,6 +1567,14 @@ export class GccEngine {
     Object.entries(this.crm.log).forEach(([key, a]) => (a || []).forEach((l) => l.pid === p.id && out.push({ l, key })));
     return out.sort((a, b) => b.l.at.localeCompare(a.l.at));
   }
+  /** Calls, e-mails and meetings recorded in deals "กับ" a person (dact with their pid), newest first; a deal
+   *  deleted since takes its records along. */
+  personActs(pid: string): DealAct[] {
+    const S = this.sales;
+    return Object.values(S.acts || {})
+      .filter((a) => a.pid === pid && !!S.deals[a.deal])
+      .sort((a, b) => b.d.localeCompare(a.d) || b.at.localeCompare(a.at));
+  }
   /** Companies on this device only, by name (for people who name one): built once per registry. */
   private localByName: { B: unknown; m: Map<string, Company> } | null = null;
   private localCo(name: string) {
@@ -1576,7 +1599,8 @@ export class GccEngine {
   /** Contact persons named in the Sales Tracker or in customers added by hand, not recorded yet. */
   personSuggestions() {
     const hidden = new Set([...(prefs.get<string[]>(PREF.peopleHide, []) || []), ...(prefs.get<string[]>(PREF.peopleGone, []) || [])]);
-    return personSuggestions(Object.values(this.people), Object.values(this.sales.deals), Object.values(this.custom), (g) => this.personGid(g), hidden, (g) => this.company(g)?.ids || [g]);
+    const ix = this.links();
+    return personSuggestions(Object.values(this.people), Object.values(this.sales.deals), Object.values(this.custom), (g) => this.personGid(g), hidden, (g) => this.company(g)?.ids || [g], (id) => !!ix.byDeal.get(id)?.some((pid) => !!this.people[pid]));
   }
   /** "ไม่ต้อง": don't suggest this one again on this browser (kept apart from deletions, never cut). */
   hideSuggestion(id: string) {
@@ -1592,6 +1616,145 @@ export class GccEngine {
     const have = new Set(g);
     const add = sids.filter((x) => !have.has(x));
     if (add.length) prefs.set(PREF.peopleGone, [...g, ...add].slice(-5000));
+  }
+
+  // ---- a deal's contact (ผู้ติดต่อของดีล): links from a deal to people, person/<pid>/<deal> (people.ts PLink).
+  // The deal holds no copy of the person: everything that shows a deal's contact reads it through these.
+  /** The links that are on, indexed; rebuilt after any change (a link written here, rows pulled, an emit). */
+  private plIx: { v: number; ix: LinkIndex } | null = null;
+  private links(): LinkIndex {
+    if (!this.plIx || this.plIx.v !== this.version) this.plIx = { v: this.version, ix: linkIndex(this.plinks) };
+    return this.plIx.ix;
+  }
+  /** The people who are a deal's contact, the main contact first (a person deleted since is left out). */
+  dealPeople(dealId: string): Person[] {
+    return linkedPeople(this.links(), dealId, this.people);
+  }
+  /** What a deal shows as its contact: the main linked person (name, phone, e-mail), else what was typed in it. */
+  dealContact(d: Deal): DealContact {
+    return dealContact(d, this.dealPeople(d.id));
+  }
+  /** The deals a person is the contact of (a deal deleted since is left out). */
+  personDeals(pid: string): Deal[] {
+    return (this.links().byPerson.get(pid) || []).map((id) => this.sales.deals[id]).filter((d): d is Deal => !!d);
+  }
+  /** The words of a deal's contacts the table's search reads (names, phones, e-mails). */
+  contactHay = (d: Deal) => this.dealPeople(d.id).map((p) => [p.name, p.nick, p.phone, p.email].join(' ')).join(' ');
+  /** A deal's contact phone, for a list that shows one (the Plan page when the company has none). */
+  contactPhone = (d: Deal) => this.dealContact(d).phone;
+  /** The people the deal's company has on record (any of its ids); a client not linked to a company: the
+   *  people who name it. */
+  dealPool(d: Deal): Person[] {
+    if (d.gid != null && this.company(d.gid)) return this.peopleOf(d.gid);
+    const k = norm(d.client);
+    return k ? Object.values(this.people).filter((p) => norm(p.company) === k || (p.gid != null && norm(this.company(p.gid)?.name || '') === k)) : [];
+  }
+  /** May this account set a deal's contact: edit the deal (its own, with an own-work scope) and the contacts. */
+  canLink(d: Pick<Deal, 'resp'> | null | undefined) {
+    return !!d && this.canDeal('edit.deal', d) && this.can('edit.cust');
+  }
+  /** Write one link as a whole record (never deleted: `on` 0 takes it off). The caller persists. */
+  private putLink(pid: string, dealId: string, on: 0 | 1, o: number) {
+    const v: PLink = { on, at: new Date().toISOString(), by: this.me(), o };
+    this.plinks[pid + '/' + dealId] = v;
+    this.plIx = null;
+    this.op(keyOf.plink(pid, dealId), { ...v });
+  }
+  /**
+   * Make person `pid` a contact of a deal: `main` (เปลี่ยนผู้ติดต่อ) in place of its main contact, who is taken
+   * off; else after the ones it has (ใช้คนนี้, เพิ่มอีกคน). Said in the deal's history. False: nothing changed
+   * (gone, or not this account's to change).
+   */
+  linkPerson(dealId: string, pid: string, opt: { main?: boolean } = {}): boolean {
+    const d = this.sales.deals[dealId], p = this.people[pid];
+    if (!d || !p) return false;
+    if (!this.canLink(d)) return this.deny(), false;
+    const cur = this.dealPeople(dealId);
+    if (cur[0]?.id === pid || (!opt.main && cur.some((x) => x.id === pid))) return true;
+    const main = opt.main ? cur[0] : undefined;
+    const rest = cur.filter((x) => x !== main && x.id !== pid).map((x) => this.plinks[x.id + '/' + dealId]);
+    this.batchOps(() => {
+      if (main) this.putLink(main.id, dealId, 0, this.plinks[main.id + '/' + dealId].o);
+      this.putLink(pid, dealId, 1, linkOrder(rest, !!main, Date.now()));
+      this.salesLog(d, main ? 'เปลี่ยนผู้ติดต่อ' : 'เชื่อมผู้ติดต่อ', main ? `${main.name} เป็น ${p.name}` : p.name);
+    });
+    this.persist('plinks', this.plinks);
+    this.saveSales();
+    return true;
+  }
+  /** Take a person off a deal's contacts (the person stays in ผู้ติดต่อ). */
+  unlinkPerson(dealId: string, pid: string): boolean {
+    const d = this.sales.deals[dealId], l = this.plinks[pid + '/' + dealId];
+    if (!d || !l?.on) return false;
+    if (!this.canLink(d)) return this.deny(), false;
+    this.batchOps(() => {
+      this.putLink(pid, dealId, 0, l.o);
+      this.salesLog(d, 'เอาผู้ติดต่อออก', this.people[pid]?.name || '');
+    });
+    this.persist('plinks', this.plinks);
+    this.saveSales();
+    return true;
+  }
+  /** A link made on a deal after `t` (ms): someone's choice, which an undo of the send that made it keeps. */
+  private linkedSince(dealId: string, t: number) {
+    return Object.entries(this.plinks).some(([k, l]) => k.endsWith('/' + dealId) && Date.parse(l.at) > t);
+  }
+  /** The contact a deal made by an explicit action gets (no history of its own: the deal's says it): person
+   *  `pid` when given, else the company's one person still there (several or none: nobody, the deal's card
+   *  offers them). Only with the right to set contacts. */
+  private autoContact(d: Deal, pid?: string): Person | null {
+    if (!this.canLink(d)) return null;
+    let p: Person | null = pid ? this.people[pid] || null : null;
+    if (!pid) {
+      const one = contactChoices(this.dealPool(d));
+      p = one.length === 1 ? one[0] : null;
+    }
+    if (!p) return null;
+    this.putLink(p.id, d.id, 1, Date.now());
+    this.persist('plinks', this.plinks);
+    return p;
+  }
+  /** Carry a deal's contacts to another deal (a joint quotation's new row of the same company). */
+  private carryContacts(from: string, to: Deal) {
+    const ps = this.dealPeople(from);
+    if (!ps.length || !this.canLink(to)) return false;
+    const t = Date.now();
+    ps.forEach((p, i) => this.putLink(p.id, to.id, 1, t + i));
+    this.persist('plinks', this.plinks);
+    return true;
+  }
+  /** "บันทึกเป็นผู้ติดต่อ": the contact typed in a deal becomes a person at the deal's company (under the id the
+   *  People page suggests it with, so two browsers doing it make one; a fresh one when that person was deleted
+   *  before) and the deal's contact. The deal's typed fields stay as they are. Returns the person's id. */
+  saveTypedContact(dealId: string): string {
+    const d = this.sales.deals[dealId];
+    if (!d || !d.contactName.trim()) return '';
+    if (!this.canLink(d)) return this.deny(), '';
+    const c = d.gid != null ? this.company(d.gid) : undefined;
+    let id = suggestionId(this.personGid(d.gid), d.client, d.contactName);
+    const gone = new Set(prefs.get<string[]>(PREF.peopleGone, []) || []);
+    if (!this.people[id] && (gone.has(id) || this.goneKeys.has(keyOf.person(id)))) id = '';
+    let pid = id && this.people[id] ? id : '';
+    // the numbers and e-mails typed for them, not the company's own (copied in when the deal was sent)
+    const ex = typedExtras(d, null, c);
+    this.batchOps(() => {
+      if (!pid) pid = this.addPerson({ name: d.contactName.trim(), gid: d.gid, company: c?.name || d.client, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') }, id ? { id, nx: true } : {});
+      if (pid) this.linkPerson(dealId, pid);
+    });
+    return pid;
+  }
+  /** "เพิ่มให้ <ชื่อ>": the phone numbers and e-mails typed in a deal that its contact (and the company) don't
+   *  have yet go on the person's record. */
+  addTypedToPerson(dealId: string, pid: string) {
+    const d = this.sales.deals[dealId], p = this.people[pid];
+    if (!d || !p) return;
+    if (!this.can('edit.cust')) return this.deny();
+    const ex = typedExtras(d, p, d.gid != null ? this.company(d.gid) : undefined);
+    const more = (cur: string, add: string[]) => [cur.trim(), ...add].filter(Boolean).join(' | ');
+    const patch: Partial<PersonForm> = {};
+    if (ex.phones.length) patch.phone = more(p.phone, ex.phones);
+    if (ex.emails.length) patch.email = more(p.email, ex.emails);
+    if (Object.keys(patch).length) this.updatePerson(pid, patch);
   }
 
   // ------------------------------------------------------------------ Sales Tracker
@@ -1644,8 +1807,10 @@ export class GccEngine {
     return S.includes('อื่นๆ') ? 'อื่นๆ' : S[0] || '';
   }
   /** New deal; `gid` links it to a company whose contact details fill in what is not given. `why`: the
-   *  history entry (a joint quotation's header says what it is). */
-  addDeal(p: Partial<Deal>, why = 'เพิ่มลูกค้า'): Deal {
+   *  history entry (a joint quotation's header says what it is). `contact` (a deal made by an explicit action:
+   *  a send, เพิ่มลูกค้า, a joint quotation's new row): its contact, person `contact`, or '' for the company's
+   *  one person still there, if it has exactly one (autoContact). */
+  addDeal(p: Partial<Deal>, why = 'เพิ่มลูกค้า', opt: { contact?: string } = {}): Deal {
     const c = p.gid != null ? this.company(p.gid) : undefined;
     const gid = c && !isLocalId(c.id) ? c.id : null; // TGO-sync companies exist on this device only
     const cc = c ? this.custom[c.id] : undefined;
@@ -1662,12 +1827,13 @@ export class GccEngine {
     // an account that may edit only its own deals adds deals of its own (else the team would refuse it)
     if (this.myCaps()?.['edit.deal'] === 'own') d.resp = this.me();
     this.putDeal(d);
-    this.salesLog(d, why, d.section);
+    const who = opt.contact != null ? this.autoContact(d, opt.contact || undefined) : null;
+    this.salesLog(d, why, [d.section, who && `ผู้ติดต่อ ${who.name}${opt.contact ? '' : ' (เชื่อมให้อัตโนมัติ)'}`].filter(Boolean).join(' · '));
     this.saveSales();
     return d;
   }
   /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped. */
-  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string } = {}) {
+  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string; pid?: string } = {}) {
     if (!this.can('edit.deal')) {
       this.deny();
       return { added: 0, skipped: 0, ids: [] as string[], k: '' };
@@ -1698,7 +1864,7 @@ export class GccEngine {
       Object.entries(L.sig).forEach(([id, sig]) => {
         const d = this.sales.deals[id];
         if (!d) return; // a teammate deleted it already
-        if (dealSig(d) !== sig || this.dealHasWork(id)) return void kept++;
+        if (dealSig(d) !== sig || this.dealHasWork(id) || this.linkedSince(id, L.at)) return void kept++;
         this.deleteDealNow(d, 'เลิกส่งเข้า Sales Tracker');
         removed++;
       }),
@@ -1733,7 +1899,7 @@ export class GccEngine {
     const add = (d: Deal) => (d.gid != null ? byG.add(this.canonical(d.gid)) : byN.add(norm(d.client)));
     return Object.assign(has, { add });
   }
-  private addDealsFrom(ids: number[], opts: { section?: string; year?: string }) {
+  private addDealsFrom(ids: number[], opts: { section?: string; year?: string; pid?: string }) {
     const year = opts.year || beYear();
     const seen = new Set<number>();
     const has = this.trackedIn(year);
@@ -1747,7 +1913,9 @@ export class GccEngine {
         skipped++;
         return;
       }
-      const d = this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) });
+      // its contact: the person it was sent from (their company's page), else the company's one person
+      const pid = opts.pid && this.people[opts.pid] && this.peopleOf(c.id).some((x) => x.id === opts.pid) ? opts.pid : '';
+      const d = this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) }, undefined, { contact: pid });
       has.add(d);
       made.push(d.id);
       added++;
@@ -2327,7 +2495,9 @@ export class GccEngine {
           year: h.year, section: h.section, service: h.service.slice(),
           ...(gid != null ? { gid } : { client: (x.name || like?.client || '').trim() }),
           ...(like ? { contactName: like.contactName, phone: like.phone, email: like.email, resp: like.resp } : {}),
-        });
+        }, undefined, like && this.dealPeople(like.id).length ? {} : { contact: '' });
+        // the company's own row's contacts (links, not copies), else its one person (addDeal)
+        if (like) this.carryContacts(like.id, d);
       }
       const m = { share: x.share, pct: x.pct, at: new Date(t0 + i).toISOString(), by };
       J[`${h.id}/${d.id}`] = m;
@@ -3423,7 +3593,7 @@ export class GccEngine {
       const k = norm(c.name);
       if (k && !isLocalId(c.id)) (named.get(k) || named.set(k, new Set()).get(k)!).add(this.canonical(c.id));
     });
-    let deals = 0, skipped = 0, linked = 0, ambiguous = 0, inexact = 0;
+    let deals = 0, skipped = 0, linked = 0, ambiguous = 0, inexact = 0, linkedAny = false;
     const listsAdded: Partial<Record<keyof SalesCfg, string[]>> = {};
     data.forEach((t) => {
       // lists: keep ours, add what the file has that we don't (remembered, so an undo can take them out). The
@@ -3472,6 +3642,14 @@ export class GccEngine {
         this.importNew = !S.undone[id];
         try {
           this.putDeal(d);
+          // the typed contact is the one person of the company it names (never a new person): the deal's contact
+          if (gid != null && (c.contactName || c.phone || c.email) && this.canLink(d)) {
+            const m = typedMatches(d, this.peopleOf(gid));
+            if (m.length === 1) {
+              this.putLink(m[0].id, id, 1, Date.now());
+              linkedAny = true;
+            }
+          }
           Object.entries(c.progress).forEach(([p, st]) => {
             S.steps[`${id}/${p}`] = st;
             this.op(keyOf.dstep(id, p), { ...st });
@@ -3495,6 +3673,7 @@ export class GccEngine {
       deals += added;
       this.salesLog({ id: '', client: '' }, 'นำเข้าจาก Sales Tracker เดิม', `ปี ${t.year} · เพิ่ม ${added} ราย` + (t.clients.length > added ? ` · ข้าม ${t.clients.length - added} รายที่มีอยู่แล้ว` : ''));
     });
+    if (linkedAny) this.persist('plinks', this.plinks);
     this.saveSales();
     this.importLists[batch] = listsAdded;
     return { deals, skipped, linked, ambiguous, inexact, years: data.map((x) => x.year), batch };
@@ -3576,6 +3755,8 @@ export class GccEngine {
     const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
     const lines = list.map((x, i) => {
       const d = x.d;
+      // the contact columns: the linked person's, else what was typed in the deal
+      const ct = this.dealContact(d);
       const st = dealStatus(S, d), jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
       // a joint quotation counts once: its header carries the money, a member's cells stay empty (its share said);
       // in the ปิดงาน export the payer's row carries what the view counts (the parts of the companies listed)
@@ -3616,7 +3797,7 @@ export class GccEngine {
       const otherSteps = Object.entries(S.steps)
         .filter(([k]) => k.startsWith(d.id + '/') && !read.has(k.slice(d.id.length + 1)))
         .map(([k, x]) => `${k.slice(d.id.length + 1)}: ${[x.d, x.n].filter(Boolean).join(' ')}`);
-      return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(d.contactName), csvPhone(d.phone), csvCell(d.email), csvCell(d.resp), csvCell(d.referral),
+      return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(ct.name), csvPhone(ct.phone), csvCell(ct.email), csvCell(d.resp), csvCell(d.referral),
         csvCell(d.contactDate), csvCell(lastContact(S, d, today)), csvCell(d.jobStatus === 'closed' ? 'ปิดงาน ' + (d.closedDate || '') : 'เปิด'), csvCell(st.overall)]
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(d.service.includes(x) ? '✓' : '')), [csvCell(d.service.filter((x) => !C.services.includes(x)).join(', '))])
@@ -3955,13 +4136,14 @@ export class GccEngine {
   }
   /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
   private async storedShared(): Promise<SharedState> {
-    const [crm, contacts, dec, sales, custom, people] = await Promise.all([
+    const [crm, contacts, dec, sales, custom, people, plinks] = await Promise.all([
       this.store.get<Partial<Crm>>('crm'),
       this.store.get<Record<string, ContactEdit>>('contacts'),
       this.store.get<Record<string, string>>('dedup'),
       this.store.get<SalesState>('sales'),
       this.store.get<Record<string, CustomCo>>('customCos'),
       this.store.get<Record<string, Person>>('people'),
+      this.store.get<Record<string, PLink>>('plinks'),
     ]);
     // where this tab's own last save failed, the stored copy is older than this tab's: use this tab's
     const ok = (k: string, v: unknown) => !!v && !this.unstored.has(k);
@@ -3972,6 +4154,7 @@ export class GccEngine {
       sales: ok('sales', sales) ? sales! : this.sales,
       custom: ok('customCos', custom) ? custom! : this.custom,
       people: ok('people', people) ? people! : this.people,
+      plinks: ok('plinks', plinks) ? plinks! : this.plinks,
     };
   }
   /** The stored queue of a team session: per sheet, and per account when the team signs in (one
@@ -4154,7 +4337,7 @@ export class GccEngine {
       : type === 'cust' ? this.custom[rest as unknown as number]
       : type === 'contact' ? this.contacts[rest as unknown as number]
       : type === 'task' ? this.crm.tasks.find((t) => t.id === rest)
-      : type === 'person' ? this.people[rest]
+      : type === 'person' ? (rest.includes('/') ? this.plinks[rest] : this.people[rest])
       : type === 'jqt' ? S.jqt?.[rest]
       : type === 'jqm' ? S.jqm?.[rest]
       : type === 'scfg' && rest.startsWith('unit.') ? S.units?.[rest.slice(5)]
@@ -4309,7 +4492,8 @@ export class GccEngine {
     const del = (o: SyncOp) => !!o.del || o.v == null;
     ops.forEach((o) => {
       const m = /^(deal|cust|person)\/(.+)$/.exec(o.k);
-      if (!m || !del(o) || this.canWriteKey(o.k, true)) return;
+      // (person/<pid>/<deal> is a deal's contact, never deleted: not a person)
+      if (!m || !del(o) || this.canWriteKey(o.k, true) || (m[1] === 'person' && !personIdOf(o.k))) return;
       cut.add(o.k);
       if (m[1] === 'deal') deals.add(m[2]);
       if (m[1] === 'person') people.add(m[2]);
@@ -4633,7 +4817,7 @@ export class GccEngine {
     // file yet) and so does this browser's copy of it
     const delDocs = gone.filter((r) => r.k.startsWith('ddoc/')).map((r) => this.sales.docs[r.k.slice(5)]).filter(Boolean);
     rows.forEach((r) => (r.del || r.v == null ? !quiet.has(r.k) && this.goneKeys.add(r.k) : this.goneKeys.delete(r.k)));
-    this.forgetPeople(gone.filter((r) => r.k.startsWith('person/')).map((r) => r.k.slice(7)));
+    this.forgetPeople(gone.map((r) => personIdOf(r.k)).filter(Boolean));
     rows.forEach((r) => applyRow(this, r, fx));
     const unmark = (S: SalesState) => quiet.forEach((k) => k.startsWith('deal/') && S.gone && delete S.gone[k.slice(5)]);
     unmark(this.sales); // not deleted by anyone
@@ -4655,7 +4839,7 @@ export class GccEngine {
       unmark(s.sales);
       return s;
     };
-    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {} };
+    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {}, plinks: {} };
     if (fx.crm) this.store.update<Partial<Crm>>('crm', (cur) => (cur ? merged({ ...none, crm: { ...emptyCrm(), ...cur } }).crm : this.crm)).catch(() => {});
     if (fx.contacts.size || fx.contactDel)
       this.store.update<Record<string, ContactEdit>>('contacts', (cur) => (cur ? merged({ ...none, contacts: cur }).contacts : this.contacts)).catch(() => {});
@@ -4664,6 +4848,10 @@ export class GccEngine {
       this.store.update<SalesState>('sales', (cur) => (cur ? merged({ ...none, sales: { ...emptySales(), ...cur, cfg: { ...emptyCfg(), ...cur.cfg } } }).sales : this.sales)).catch(() => {});
     if (fx.custom) this.store.update<Record<string, CustomCo>>('customCos', (cur) => (cur ? merged({ ...none, custom: cur }).custom : this.custom)).catch(() => {});
     if (fx.people) this.store.update<Record<string, Person>>('people', (cur) => (cur ? merged({ ...none, people: cur }).people! : this.people)).catch(() => {});
+    if (fx.plinks) {
+      this.plIx = null;
+      this.store.update<Record<string, PLink>>('plinks', (cur) => (cur ? merged({ ...none, plinks: cur }).plinks! : this.plinks)).catch(() => {});
+    }
     if (fx.dedup || fx.contactDel || fx.custom) {
       this.rebuild(); // regroups companies / restores original contact data
     } else {
@@ -5276,7 +5464,7 @@ export class GccEngine {
     const keep: Crm = { ...emptyCrm(), stages: pick(C.stages), owners: pick(C.owners), log: pick(C.log), watch: C.watch.filter(loc), tasks: C.tasks.filter((t) => loc(t.gid)) };
     await this.store.set('crm', keep).catch(() => {});
     await this.store.set('contacts', pick(this.contacts)).catch(() => {});
-    for (const k of ['dedup', 'sales', 'customCos', 'people']) await this.store.del(k).catch(() => {});
+    for (const k of ['dedup', 'sales', 'customCos', 'people', 'plinks']) await this.store.del(k).catch(() => {});
     // a file not uploaded yet is an unsent edit too: its only copy, uploaded at the next sign-in (that
     // account's, or this one's unless asked to drop what is unsent)
     const others = (await this.accts(cfg.url)).filter((a) => a.u !== s?.u);
