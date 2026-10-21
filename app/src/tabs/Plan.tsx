@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { STG, TT, stageOf } from '../lib/constants';
 import { TH_M, addDays, daysBetween, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
-import { beYear, fmtMoney, type Deal, type LineView } from '../lib/sales';
+import { beYear, fmtMoney, jobServices, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { ccVars, custKey, dealKey } from '../lib/custColor';
 import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from '../lib/planCal';
@@ -488,7 +488,7 @@ export function Plan() {
                     {/* where it comes from: followed, and/or its tracker job's next step (opens the job) */}
                     <span className="pl-src">
                       {r.watch && <span className="chip">ติดตาม</span>}
-                      {j && <button type="button" className="chip pl-tag hv" onClick={openDeal} title="เปิดงานใน Sales Tracker">{jobTag(r.jobs)}</button>}
+                      {j && <button type="button" className="chip pl-tag hv" onClick={openDeal} title="เปิดงานใน Sales Tracker">{jobTag(r.jobs, (d) => jobServices(e.sales, d))}</button>}
                       {warn && <span className="pl-warn">{warn}</span>}
                       {meta && <span className="pl-meta">{meta}</span>}
                     </span>

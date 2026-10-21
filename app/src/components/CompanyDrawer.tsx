@@ -14,7 +14,8 @@ import { CoAvatar } from './CoAvatar';
 import { CompanyPeople, logType } from '../tabs/People';
 import { useDialog } from './useDialog';
 // joint quotations (package quotes, item 7): the payer's header and a member's line
-import { jointOf, jointRole } from '../lib/sales';
+import { jobServices, jointOf, jointRole } from '../lib/sales';
+import { JobSvc } from './SvcChips';
 import { jointHead, jointLine } from '../lib/joint';
 import { followIdsOf } from '../lib/follow';
 
@@ -466,8 +467,9 @@ function BlockRow({ it }: { it: BlockItem }) {
 /** Newest year first; in a year, open jobs first. */
 const newestFirst = (deals: Deal[]) => deals.sort((a, b) => b.year.localeCompare(a.year) || (a.jobStatus === 'open' ? 0 : 1) - (b.jobStatus === 'open' ? 0 : 1) || b.at.localeCompare(a.at));
 
-/** Where the company stands in the Sales Tracker, and a one-click way to put it there (only while it
- *  has no deal this year). */
+/** Where the company stands in the Sales Tracker (each job with its services: a company may have several in a
+ *  year, one per service), and a one-click way to send it: "ส่งเข้า Sales Tracker", or "เพิ่มงานใน Sales Tracker"
+ *  when it has a job this year already (the dialog says its jobs and whether the new one may repeat one). */
 function SalesBox({ c }: { c: Company }) {
   const { engine: e, ui, set } = useApp();
   const ro = !e.can('edit.deal');
@@ -483,7 +485,7 @@ function SalesBox({ c }: { c: Company }) {
         <H>Sales Tracker</H>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {custom && e.can('edit.cust') && <button onClick={() => set({ addCust: { deal: false, edit: c.id } })} className="lnk">แก้ไขข้อมูลลูกค้า</button>}
-          {!ro && !hasYear && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">ส่งเข้า Sales Tracker</button>}
+          {!ro && <button onClick={() => set({ sendIds: [c.id] })} className="btn sm">{hasYear ? 'เพิ่มงานใน Sales Tracker' : 'ส่งเข้า Sales Tracker'}</button>}
         </span>
       </div>
       {!deals.length && <span className="empty">ยังไม่อยู่ในตารางติดตามการขาย{ro ? '' : ' · ส่งเข้าแล้วข้อมูลติดต่อจะถูกกรอกให้'}</span>}
@@ -504,7 +506,7 @@ function SalesBox({ c }: { c: Company }) {
         ].filter(Boolean);
         return (
           <button key={d.id} onClick={() => set({ sel: null, deal: d.id })} className="hv dr-deal">
-            <span>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>
+            <span>ปี {d.year} · <JobSvc svc={jobServices(e.sales, d)} /> · {d.section || 'ไม่ระบุหมวด'} · <b style={{ fontWeight: 500 }}>{trackerStatus(e.sales, d)}</b></span>
             {more.length > 0 && <span className="t-meta" style={{ fontSize: 13 }}>{more.join(' · ')}</span>}
           </button>
         );

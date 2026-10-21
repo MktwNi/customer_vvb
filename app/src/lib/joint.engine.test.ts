@@ -701,10 +701,12 @@ describe('review 2: new member rows carry the joint quotation\'s Services', () =
     const S = A.sales, g = jointOf(S, { id: hid })!;
     expect(g.members.map((x) => x.deal.service)).toEqual([['CFP'], ['CFP'], ['CFP'], []]);
     expect(S.deals[own.id].service).toEqual(['CFO']);
+    // the reused row keeps its own (none); it is sold under the quotation's CFP, so the chart and the filter
+    // บริการ count it there too (lib/sales.ts jobServices), as the plan page's service types always did
     const st = salesStats(S, Object.values(S.deals), TODAY);
-    expect(st.byService.CFP).toBe(3);
+    expect(st.byService.CFP).toBe(4);
     const cfp = filterDeals(S, normSalesFilter({ year: '2569', service: { v: ['CFP'] } }), TODAY);
-    expect(customersOf(S, cfp)).toHaveLength(3);
+    expect(customersOf(S, cfp)).toHaveLength(4);
     expect(cfp.some((d) => d.id === hid)).toBe(true);
     expect(salesStats(S, cfp, TODAY).forecast).toBe(1284000);
     A.dispose();

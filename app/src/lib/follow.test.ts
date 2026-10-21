@@ -116,6 +116,9 @@ describe('followRows', () => {
     const by = (n: string) => rows.find((r) => r.name === n)!;
     expect(by('ก').deal?.id).toBe('do');
     expect(by('ก').status).toBe('ยังไม่เริ่ม');
+    // its two jobs this year (one closed): the list says the open one and "อีก 1 งาน"
+    expect(by('ก').jobs).toBe(2);
+    expect(by('ข').jobs).toBe(0);
     expect(by('ข').deal).toBeNull();
     expect(by('ข').status).toBe('');
     expect(by('ค').deal).toBeNull();

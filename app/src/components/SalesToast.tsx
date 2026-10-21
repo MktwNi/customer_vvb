@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { fmtN, todayISO } from '../lib/format';
 import { closeReady, dealResult, hasPlan, jointOf, jointRole, planOf, type Deal } from '../lib/sales';
 import { jointCloseOf, jointLine } from '../lib/joint';
-import { closeConfirm, closePrompt, shortName } from '../lib/salesUi';
+import { closeConfirm, closePrompt, jobName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
 import { docById, qtSentView } from '../lib/notify';
 import { undoSentNote } from '../lib/bulk';
@@ -26,7 +26,7 @@ export function useSalesActs() {
   const prompt = (d: Deal, via: 'result' | 'payment') => {
     const g = jointRole(e.sales, d) === 'header' ? jointOf(e.sales, d) : null;
     const open = g ? g.members.filter((x) => x.deal.jobStatus === 'open').length : 0;
-    const name = g ? `${jointLine(e.sales, g, true)}${open ? ` และ ${fmtN(open)} บริษัท` : ''}` : shortName(d.client);
+    const name = g ? `${jointLine(e.sales, g, true)}${open ? ` และ ${fmtN(open)} บริษัท` : ''}` : jobName(d);
     say(closePrompt(e.sales, d, name, via), { ms: 0, acts: [{ label: 'ปิดงาน', act: 'close', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     set({ slPrompt: d.id });
   };
@@ -72,7 +72,7 @@ export function useSalesActs() {
         slOpen: open, slPrompt: null, slConfirm: null,
         deal: s.deal === id ? null : s.deal,
         slEdit: s.slEdit?.id === id ? null : s.slEdit,
-        slToast: { text: `ย้าย ${shortName(d.client)} ไปแท็บปิดงานแล้ว`, ms: 8000, n: (s.slToast?.n || 0) + 1, acts: [{ label: 'ดูแท็บปิดงาน', act: 'closedTab', primary: true }, { label: 'เลิกทำ', act: 'undo', deal: id }] },
+        slToast: { text: `ย้าย ${jobName(d)} ไปแท็บปิดงานแล้ว`, ms: 8000, n: (s.slToast?.n || 0) + 1, acts: [{ label: 'ดูแท็บปิดงาน', act: 'closedTab', primary: true }, { label: 'เลิกทำ', act: 'undo', deal: id }] },
       };
     });
   };
@@ -167,12 +167,12 @@ export function SalesMessages() {
     if (a.act === 'undo' && a.deal) {
       e.updateDeal(a.deal, { jobStatus: 'open' });
       const d = e.sales.deals[a.deal];
-      return acts.say(d ? `เปิดงาน ${shortName(d.client)} อีกครั้งแล้ว` : 'เปิดงานอีกครั้งแล้ว', { ms: 3000 });
+      return acts.say(d ? `เปิดงาน ${jobName(d)} อีกครั้งแล้ว` : 'เปิดงานอีกครั้งแล้ว', { ms: 3000 });
     }
     set({ slToast: null, slPrompt: null });
   };
   const ask = ui.slConfirm ? e.sales.deals[ui.slConfirm] : undefined;
-  const q = ask ? closeConfirm(e.sales, ask, todayISO(), shortName(ask.client)) : '';
+  const q = ask ? closeConfirm(e.sales, ask, todayISO(), jobName(ask)) : '';
   return (
     <>
       {/* (centred in the deal panel while it is open) */}
@@ -191,7 +191,7 @@ export function SalesMessages() {
       </div>
       {ask && (
         <Modal title="ปิดงานตอนนี้?" onClose={() => set({ slConfirm: null })} focus="dialog">
-          <p style={{ margin: 0, lineHeight: 1.6 }}>{q || `ปิดงาน “${shortName(ask.client)}” ตอนนี้? งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`}</p>
+          <p style={{ margin: 0, lineHeight: 1.6 }}>{q || `ปิดงาน “${jobName(ask)}” ตอนนี้? งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`}</p>
           <DialogActions>
             <button type="button" className="quiet" onClick={() => set({ slConfirm: null })}>ยกเลิก</button>
             <button type="button" className="btn pri" onClick={() => acts.closeNow(ask.id)}>ปิดงาน</button>

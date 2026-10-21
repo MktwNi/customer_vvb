@@ -98,6 +98,9 @@ export interface FollowRow extends FollowFacts {
   deal: Deal | null;
   /** That row's status words (trackerStatus), '' when it has none. */
   status: string;
+  /** How many jobs (rows) the company has in the Sales Tracker of the year: a company may have several, one per
+   *  service; `deal` is one of them ("· อีก 1 งาน" beside it). */
+  jobs: number;
   /** ผู้รับผิดชอบ: the company's, else its row's in the year, else its newest row's. */
   owner: string;
 }
@@ -125,12 +128,13 @@ export function followRows(e: FollowSrc, year: string, today: string): FollowRow
     const task = e.tasksOf(c.id).filter((t) => !t.done).sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''))[0] || null;
     const deals = e.dealsOf(c.id).filter((d) => jointRole(e.sales, d) !== 'header');
     // in the year: an open job before a closed one, then the newest
-    const deal = deals.filter((d) => d.year === year).sort((a, b) => (a.jobStatus === 'open' ? 0 : 1) - (b.jobStatus === 'open' ? 0 : 1) || b.at.localeCompare(a.at))[0] || null;
+    const inYear = deals.filter((d) => d.year === year);
+    const deal = inYear.sort((a, b) => (a.jobStatus === 'open' ? 0 : 1) - (b.jobStatus === 'open' ? 0 : 1) || b.at.localeCompare(a.at))[0] || null;
     const newest = deals.slice().sort((a, b) => b.year.localeCompare(a.year) || b.at.localeCompare(a.at))[0];
     rows.push({
       c, name: c.name, next: task ? task.date : '', task,
       cfoSt: c.cfoSt, cfoDays: c.days, giSoon: !!c.fl?.giSoon, giDays: c.giDays,
-      deal, status: deal ? trackerStatus(e.sales, deal, today) : '',
+      deal, status: deal ? trackerStatus(e.sales, deal, today) : '', jobs: inYear.length,
       owner: e.crm.owners[c.id] || deal?.resp || newest?.resp || '',
     });
   }

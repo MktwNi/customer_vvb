@@ -7,7 +7,7 @@ import { norm, readXlsxRows } from './core';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import {
-  dealMoney, dealResult, dealStatus, decodeTrackerText, emptySales, filterDeals, fixPhone, htmlToText, importId, importKey, isoDate, lastContact, looseMoney, matchSource, money, newDeal, overdueDays,
+  dealMoney, dealResult, dealStatus, decodeTrackerText, emptySales, filterDeals, fixPhone, htmlToText, importId, importJobId, importKey, isoDate, lastContact, looseMoney, matchSource, money, newDeal, overdueDays,
   parseContact, parseCsv, parseTrackerJson, parseTrackerSheet, salesStats, DEFAULT_SECTIONS, DEFAULT_SOURCES, type Deal, type SalesState, type TrackerClient,
 } from './sales';
 import { CUSTOM_ID_MIN, isLocalOnly } from './teamSync';
@@ -127,6 +127,12 @@ describe('sales tracker rules (same as the original tracker)', () => {
     // stable across edits in the old tracker: amount, section, contact person
     expect(importId('2569', t.clients[0], 1)).toBe(importId('2569', { ...t.clients[0], forecast: 1, section: 'Partner', contactName: 'คุณซี' }, 1));
     expect(importId('2569', t.clients[0], 1)).not.toBe(importId('2569', t.clients[0], 2));
+    // the id of a row now: by client and services (their order, case and spaces do not count), then the nth such row
+    const c0 = { ...t.clients[0], service: ['CFO', 'T-VER'] };
+    expect(importJobId('2569', c0, 1)).toBe(importJobId('2569', { ...c0, service: [' t-ver', 'cfo'], forecast: 1, section: 'Partner' }, 1));
+    expect(importJobId('2569', c0, 1)).not.toBe(importJobId('2569', { ...c0, service: ['CFO'] }, 1));
+    expect(importJobId('2569', c0, 1)).not.toBe(importJobId('2569', c0, 2));
+    expect(importJobId('2569', { ...c0, service: [] }, 1)).not.toBe(importId('2569', { ...c0, service: [] }, 1));
   });
 
   it('what a sheet download does to dates, phones and amounts is undone; free-text amounts are kept', () => {

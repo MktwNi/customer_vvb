@@ -139,8 +139,14 @@ export const followNote = (added: number, already: number) =>
   added ? `ติดตามเพิ่ม ${fmtN(added)} บริษัท${already ? ` (ติดตามอยู่แล้ว ${fmtN(already)})` : ''}` : `ติดตามอยู่แล้วทั้ง ${fmtN(already)} บริษัท`;
 export const unfollowNote = (removed: number, notOn: number) =>
   removed ? `เลิกติดตาม ${fmtN(removed)} บริษัท${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : 'บริษัทที่เลือกไม่ได้อยู่ใน “บริษัทที่ติดตาม”';
-export const trackerNote = (added: number, skipped: number, year: string) =>
-  added ? `ส่งเข้า Sales Tracker ${fmtN(added)} ราย${skipped ? ` (ข้าม ${fmtN(skipped)} รายที่มีในปี ${year} แล้ว)` : ''}` : `ทุกบริษัทที่เลือกมีในตารางปี ${year} แล้ว`;
+/** After a send: how many went in, and the companies skipped because a job of theirs that year may be the same
+ *  work (`svc`: the services sent that those jobs have, engine.addDealsFromCompanies' clash; none when nothing
+ *  was picked): "ข้าม 1 บริษัทที่มีงาน CFO ปี 2569 อยู่แล้ว". Nothing is skipped without being said. */
+export const trackerNote = (added: number, skipped: number, year: string, svc: string | readonly string[] = '') => {
+  const named = (typeof svc === 'string' ? [svc] : [...svc]).filter(Boolean).join(', ');
+  const job = `มีงาน${named ? ` ${named} ` : ''}ปี ${year} อยู่แล้ว`;
+  return added ? `ส่งเข้า Sales Tracker ${fmtN(added)} ราย${skipped ? ` (ข้าม ${fmtN(skipped)} บริษัทที่${job})` : ''}` : `ไม่ได้ส่ง ทุกบริษัทที่เลือก${job}`;
+};
 export function ownerNote(name: string, r: { changed: number; same: number; kept: number }) {
   const extra = [r.same ? `เป็นอยู่แล้ว ${fmtN(r.same)}` : '', r.kept ? `ไม่เปลี่ยนคนเดิม ${fmtN(r.kept)}` : ''].filter(Boolean).join(' · ');
   const head = !r.changed ? (name ? `${name} เป็นผู้รับผิดชอบอยู่แล้ว` : 'บริษัทที่เลือกยังไม่มีผู้รับผิดชอบอยู่แล้ว') : name ? `ตั้ง ${name} เป็นผู้รับผิดชอบ ${fmtN(r.changed)} บริษัท` : `ล้างผู้รับผิดชอบ ${fmtN(r.changed)} บริษัท`;
@@ -164,7 +170,7 @@ export function confirmWords(act: 'follow' | 'unfollow', n: number, skip: number
     : { title: `เลิกติดตาม ${fmtN(n)} บริษัท?`, body: team ? 'บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมจะไม่เห็นในรายชื่อนี้อีก' : 'บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม”', ok: `เลิกติดตาม ${fmtN(n)} บริษัท` };
 }
 /** The Sales Tracker dialog's warning for many rows: "จะเพิ่ม 250 แถวในตารางปี 2569". */
-export const trackerWarn = (n: number, year: string, team: boolean) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year}${team ? ' ของทั้งทีม' : ''} ตรวจหมวดและปีให้ถูกก่อนส่ง`;
+export const trackerWarn = (n: number, year: string, team: boolean) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year}${team ? ' ของทั้งทีม' : ''} ตรวจหมวด ปี และบริการให้ถูกก่อนส่ง`;
 /** More rows than one send may add (TRACKER_MAX): what to do instead. */
 export const trackerCapWord = (n: number, team: boolean) =>
   `ส่งเข้า Sales Tracker ได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท ตอนนี้จะเพิ่ม ${fmtN(n)} แถว ตารางที่ยาวมากจะเปิดช้า${team ? 'สำหรับทุกคนในทีม' : ''} ` +

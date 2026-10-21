@@ -403,7 +403,8 @@ describe('the Excel file', () => {
     expect(items.rows).toHaveLength(5);
     expect(chkSheets(s, rows, months, false)[0].rows).toHaveLength(2);
     expect(items.rows[0].slice(0, 7)).toEqual(['ต.ค. 2569', 'พฤกษา โฮลดิ้ง', '', 'ไม่มีแผน', 180000, 'พิมพ์เอง', { date: '2026-10-05' }]);
-    expect(items.rows[0].slice(12)).toEqual(['ส่งกลับแก้ไข', 'ฝน', { date: '2026-10-12' }, 'ยอดไม่ตรง']);
+    expect(items.rows[0].slice(12)).toEqual(['ส่งกลับแก้ไข', 'ฝน', { date: '2026-10-12' }, 'ยอดไม่ตรง', '']);
+    expect(items.head.at(-1)).toBe('บริการ');
     expect(sum.rows).toEqual([['ตุลาคม 2569', 305000, 156000, 80250, 541250, 2, 1, 125000, 0, 1, 0, 'ยังไม่ปิด', '', null]]);
     const bytes = await xlsxBytes([items, sum]);
     const z = await JSZip.loadAsync(bytes);
@@ -873,7 +874,7 @@ describe('the Excel file keeps lines cancelled after their check (review 2: it l
     const { s, rows, months } = oct();
     const [items, sum] = chkSheets(s, rows, months, true);
     expect(items.rows).toHaveLength(6);
-    expect(items.rows.at(-1)).toEqual(['ต.ค. 2569', 'ไทยออยล์ เอนเนอร์ยี่', '', 'PAY1 (งวดที่ยกเลิก)', 80250, 'ยอดตอนตรวจ', { date: '2026-10-08' }, null, 'ยกเลิกหลังตรวจ', '', '', '', 'ตรวจแล้ว · ยกเลิกหลังตรวจ ไม่นับในยอด', 'ฝน', { date: '2026-10-12' }, '']);
+    expect(items.rows.at(-1)).toEqual(['ต.ค. 2569', 'ไทยออยล์ เอนเนอร์ยี่', '', 'PAY1 (งวดที่ยกเลิก)', 80250, 'ยอดตอนตรวจ', { date: '2026-10-08' }, null, 'ยกเลิกหลังตรวจ', '', '', '', 'ตรวจแล้ว · ยกเลิกหลังตรวจ ไม่นับในยอด', 'ฝน', { date: '2026-10-12' }, '', '']);
     expect(chkSheets(s, rows, months, false)[0].rows.map((r) => r[8])).toEqual(['รับแล้ว', 'รับแล้ว', 'ยกเลิกหลังตรวจ']);
     expect(sum.head[10]).toBe('ยกเลิกหลังตรวจ (รายการ)');
     expect(sum.rows[0].slice(1, 11)).toEqual([305000, 156000, 80250, 541250, 2, 1, 125000, 0, 1, 1]); // the money as on screen: the orphan is not in it

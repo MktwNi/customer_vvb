@@ -2,7 +2,8 @@ import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useApp } from '../state';
 import type { GccEngine } from '../lib/engine';
 import { daysBetween, dmTh, fmtN, localDay } from '../lib/format';
-import { dealMoney, fmtMoney, type SalesState } from '../lib/sales';
+import { dealMoney, fmtMoney, jobServices, type SalesState } from '../lib/sales';
+import { JobSvc } from './SvcChips';
 import { MONTHS_TH, dayTh } from '../lib/cashUi';
 import { shortName } from '../lib/salesUi';
 import { sameName } from '../lib/caps';
@@ -452,6 +453,7 @@ function XName({ S, r }: { S: SalesState; r: XRow }) {
       <span className="cf-nm">
         <span className="cf-nm-l">
           {d ? <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={`${d.client} เปิดรายละเอียด`}>{name}</button> : <span className="cf-nm-b co-name dense">{name}</span>}
+          {d && <JobSvc svc={jobServices(S, d)} none={false} />}
         </span>
         <SubLine w={[...sub, d?.resp || ''].filter(Boolean)} wrap={!!j} />
       </span>
