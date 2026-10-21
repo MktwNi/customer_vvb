@@ -8,7 +8,7 @@ import {
   type Deal, type DealAct, type DealDoc, type DocKind, type DocTarget, type LineView, type PayHow, type PlanInput, type StageState, type StepView,
 } from '../lib/sales';
 import { OLD_TH } from '../lib/steps';
-import { CLOSE_TITLE, DUP_HINT, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, stepEdit, type FigView } from '../lib/salesUi';
+import { CLOSE_TITLE, DUP_HINT, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, jobName, stepEdit, type FigView } from '../lib/salesUi';
 import { SHOWABLE, openDocFile } from './DocAttach';
 import { useAttach } from './AttachProvider';
 import { docFormNote, overWords, panelEntry, recvPlan, type AttachEntry } from '../lib/attachPlan';
@@ -40,6 +40,8 @@ import { ExpCard, dealGoneCheckWords } from './ExpCard';
 import { expensesOf } from '../lib/expense';
 // the deal's contact: a person in ผู้ติดต่อ linked to it (never a copy)
 import { DealContact, contactSummary, typedFieldsOnly } from './DealContact';
+import { DealSvcRow, OtherJobs } from './DealSvc';
+import { SECTION_LABEL } from '../lib/jobs';
 
 const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
 /** A document card's "นับเป็น" choices. */
@@ -454,7 +456,10 @@ export function DealPanel() {
             </span>
           </div>
           {ro ? <h3 className="dp-name ro co-name title">{d.client}</h3> : <ClientName value={d.client} onSave={(v) => up({ client: v })} />}
+          {/* the job's services (edited here only), then who; the company's other jobs of the year under it */}
+          <DealSvcRow d={d} />
           <span className="dp-meta">{[ct.name, ct.phone, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : 'ยังไม่มอบหมายผู้รับผิดชอบ'].filter(Boolean).join(' · ')}</span>
+          <OtherJobs d={d} />
           {jr === 'member' && <MemberBanner d={d} />}
           <div className="dp-strip">
             <div>
@@ -515,7 +520,7 @@ export function DealPanel() {
           <ContactCard d={d} ro={ro} />
           <HistoryCard d={d} />
           {e.can('del.rec') && (
-            <button type="button" onClick={() => guard.ask({ d, after: previewOf.noDeal(S, d.id), kind: 'delete', title: `ลบ ${shortName(d.client)}`, verb: 'ลบรายการ', plain: `ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ${e.can('view.exp') && expensesOf(S, d.id).length ? ' รวมค่าใช้จ่ายของงานและบิล' : ''} ทุกเครื่องในทีม)${dealGoneCheckWords(e, d.id) ? ' · ' + dealGoneCheckWords(e, d.id) : ''}`, run: () => (e.deleteDeal(d.id), close()) })} className="quiet dp-del">
+            <button type="button" onClick={() => guard.ask({ d, after: previewOf.noDeal(S, d.id), kind: 'delete', title: `ลบ ${jobName(d)}`, verb: 'ลบรายการ', plain: `ลบ "${d.client}" ออกจาก Sales Tracker? (ลบทั้งขั้นตอน โน้ต แผนชำระ และเอกสารที่แนบ${e.can('view.exp') && expensesOf(S, d.id).length ? ' รวมค่าใช้จ่ายของงานและบิล' : ''} ทุกเครื่องในทีม)${dealGoneCheckWords(e, d.id) ? ' · ' + dealGoneCheckWords(e, d.id) : ''}`, run: () => (e.deleteDeal(d.id), close()) })} className="quiet dp-del">
               ลบรายการนี้
             </button>
           )}
@@ -768,7 +773,7 @@ function ResultBig({ d, st, date, onPick }: { d: Deal; st: StageState; date?: st
       const was = closeReady(e.sales, d, today);
       e.setStep(d.id, DEAL_STAGE, v);
       onPick?.();
-      if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
+      if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${jobName(d)} เป็น รอผล แล้ว`);
       else acts.afterResult(d, was);
     } });
   };
@@ -832,7 +837,7 @@ function StepEdit({ d, p, v, won, doc, qt, attach, onHold, onDone }: { d: Deal; 
       if (quiet) return;
       const r = dealResult(e.sales, d);
       if (p === DEAL_STAGE && (r === 'YES' || r === 'NO')) acts.afterResult(d, was);
-      else acts.after(d, was, 'payment', `บันทึก ${code} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
+      else acts.after(d, was, 'payment', `บันทึก ${code} ของ ${jobName(d)} แล้ว · ${dmTh(date)}`);
       onDone();
     } });
   };
@@ -1409,8 +1414,9 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
   );
 }
 
-/** Contact details, the linked company, SOURCE / services, the หมวด and the year: folded by default. */
-function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · SOURCE / บริการ' }: { d: Deal; ro: boolean; title?: string }) {
+/** Contact details, the linked company, the หมวด, SOURCE and the year: folded by default. (The job's services
+ *  are in the panel's header: DealSvcRow.) */
+function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · หมวด / SOURCE' }: { d: Deal; ro: boolean; title?: string }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
   const [open, setOpen] = useState(false);
@@ -1429,14 +1435,14 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · S
       : `ย้ายใบเสนอราคาร่วม${no ? ' ' + no : ''} ไปปี ${y}? ทั้ง ${g.members.length} บริษัทในใบนี้ย้ายไปปี ${y} ด้วย`;
     if (window.confirm(ask)) up({ year: y });
   };
-  const toggle = (k: 'source' | 'service', x: string) => up({ [k]: d[k].includes(x) ? d[k].filter((y) => y !== x) : [...d[k], x] });
+  const toggle = (k: 'source', x: string) => up({ [k]: d[k].includes(x) ? d[k].filter((y) => y !== x) : [...d[k], x] });
   const referrals = [...new Set(Object.values(S.deals).map((x) => x.referral).filter(Boolean))];
   const years = [...new Set([beYear(), String(+beYear() + 1), String(+beYear() - 1), d.year])].sort();
   const lc = lastContactInfo(S, d, todayISO());
-  const sum = [contactSummary(e, d), ...d.source, ...d.service].filter(Boolean).join(' · ') || 'ยังไม่มีข้อมูล';
+  const sum = [contactSummary(e, d), d.section, ...d.source.filter((x) => x !== d.section)].filter(Boolean).join(' · ') || 'ยังไม่มีข้อมูล';
   // (an account that may edit the deal but not the contacts types the contact here, as before)
   const typedOnly = typedFieldsOnly(e, d, ro);
-  const chips = (k: 'source' | 'service', all: string[]) =>
+  const chips = (k: 'source', all: string[]) =>
     opts && !ro ? (
       <div className="sl-opts">
         {all.map((x) => (
@@ -1472,18 +1478,17 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · S
                 {lc.date && lc.from !== 'typed' && <span className="t-meta">ติดต่อล่าสุด {isoTh(lc.date)} {lc.from === 'act' ? 'จากบันทึกการติดต่อ' : 'จากขั้น ' + lc.from}</span>}
               </span>
               {/* หมวด moves the deal: it changes only on a choice in the list, never on a key over the closed button */}
-              <SelField style={labelCol} text="หมวด" value={d.section} onChange={(v) => e.moveDeal(d.id, v, null)} options={[...new Set([...C.sections, d.section])].map((x) => ({ v: x, label: x || 'ไม่ระบุหมวด' }))} />
+              <SelField style={labelCol} text={SECTION_LABEL} value={d.section} onChange={(v) => e.moveDeal(d.id, v, null)} options={[...new Set([...C.sections, d.section])].map((x) => ({ v: x, label: x || 'ไม่ระบุหมวด' }))} />
               <SelField style={labelCol} text="ปี (พ.ศ.)" value={d.year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
             </div>
             <datalist id="sl-team">{e.crm.team.map((x) => <option key={x} value={x} />)}</datalist>
             <datalist id="sl-ref">{referrals.map((x) => <option key={x} value={x} />)}</datalist>
           </ReadOnly>
           <div className="sl-opt-h">
-            <span>SOURCE (ช่องทาง) และบริการ</span>
+            <span>SOURCE (ช่องทาง)</span>
             {!ro && <button type="button" className="lnk" onClick={() => setOpts(!opts)}>{opts ? 'เสร็จ' : 'แก้ไข'}</button>}
           </div>
           {chips('source', C.sources)}
-          {chips('service', C.services)}
         </div>
       )}
     </section>

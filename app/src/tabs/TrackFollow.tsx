@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'r
 import { useApp, useEngineVersion } from '../state';
 import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
-import { beYear } from '../lib/sales';
+import { beYear, jobServices } from '../lib/sales';
+import { JobSvc } from '../components/SvcChips';
 import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followIdsOf, followMatch, followMeta, followRows, type FollowRow } from '../lib/follow';
 import { followedBatch, followedSendTip, followedSendWord } from '../lib/bulk';
 import type { CfoStatus, Task } from '../lib/types';
@@ -180,7 +181,14 @@ export function FollowList() {
                   </Cell>
                   {seeSales && (
                     <Cell label={`Sales Tracker ปี ${year}`}>
-                      {r.deal ? <span>{r.status}</span> : <span className="t-muted">{NOT_IN_TRACKER}</span>}
+                      {/* (the job's services: a company may have several jobs this year, the open one first is said, then
+                          how many more, as the plan page's "Sales Tracker 2 งาน") */}
+                      {r.deal ? (
+                        <span>
+                          <JobSvc svc={jobServices(e.sales, r.deal)} none={r.jobs > 1} /> {r.status}
+                          {r.jobs > 1 && <span className="t-sec">{` · อีก ${fmtN(r.jobs - 1)} งาน`}</span>}
+                        </span>
+                      ) : <span className="t-muted">{NOT_IN_TRACKER}</span>}
                       {!r.deal && canSend && <button onClick={() => set({ sendIds: [r.c.id] })} className="lnk fw-a">ส่งเข้า Sales Tracker</button>}
                     </Cell>
                   )}

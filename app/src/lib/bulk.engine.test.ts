@@ -217,7 +217,7 @@ describe('bulk actions on a browser of its own (no team)', () => {
     expect(inYear).toHaveLength(30);
     expect(new Set(inYear.map((d) => d.gid)).size).toBe(30);
     // again: everything is there now
-    expect(A.e.addDealsFromCompanies(ids, { year: '2569' })).toEqual({ added: 0, skipped: 30, ids: [], k: '' });
+    expect(A.e.addDealsFromCompanies(ids, { year: '2569' })).toEqual({ added: 0, skipped: 30, ids: [], k: '', clash: [] });
   });
 
   it('เลิกทำ after a send takes back exactly its rows, within 10 minutes, leaving rows someone worked on (review: a mistaken send could not be undone)', () => {
@@ -382,7 +382,7 @@ describe('bulk actions in a team (Code.gs in the simulator)', () => {
     expect(V.e.setWatchMany(ids, true)).toEqual({ changed: 0, same: 0, local: 0 });
     expect(V.e.teamNote).toMatch(/ไม่มีสิทธิ์/);
     expect(V.e.setOwners(ids, 'ปลา')).toEqual({ changed: 0, same: 0, kept: 0, local: 0 });
-    expect(V.e.addDealsFromCompanies(ids)).toEqual({ added: 0, skipped: 0, ids: [], k: '' });
+    expect(V.e.addDealsFromCompanies(ids)).toEqual({ added: 0, skipped: 0, ids: [], k: '', clash: [] });
     expect(V.e.addTasks(ids, { type: 'call', date: '2026-10-13', time: '', note: '' }, 5)).toEqual({ n: 0, first: '', last: '', local: 0 });
     expect(V.e.crm.watch).toEqual([]);
     expect(V.e.crm.tasks).toEqual([]);

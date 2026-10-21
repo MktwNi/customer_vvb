@@ -5,8 +5,9 @@
  */
 import { TH_M, dmTh } from './format';
 import { inRange, rangeTh, type Range } from './dateRange';
-import { KIND_TH, beOf, cashKpis, cashTotal, cashYear, csvCell, dealMoney, jointCashLines, payMatch, type CashKpis, type CashLine, type CashSum, type CashYear, type DateBasis, type Deal, type PayF, type SalesState } from './sales';
+import { KIND_TH, beOf, cashKpis, cashTotal, cashYear, csvCell, dealMoney, jobServices, jointCashLines, payMatch, type CashKpis, type CashLine, type CashSum, type CashYear, type DateBasis, type Deal, type PayF, type SalesState } from './sales';
 import { BASIS_TH } from './salesUi';
+import { svcText } from './jobs';
 
 export const MONTHS_TH = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 /** The months of each calendar quarter: "ม.ค.–มี.ค.". */
@@ -216,10 +217,11 @@ export function cashRows(s: SalesState, be: string, Y: CashYear, mode: CashCsvMo
     }
     return { head, rows };
   }
-  const head = ['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'งวด', 'ยอด (บาท)', 'ครบกำหนด', 'วันที่รับ', 'สถานะ', 'เลขใบเสนอราคา', 'ใบเสนอราคาร่วม (จำนวนบริษัท)'];
+  // (บริการ last: a company's CFO job and its CFP job are told apart; the columns before it stay where they were)
+  const head = ['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'งวด', 'ยอด (บาท)', 'ครบกำหนด', 'วันที่รับ', 'สถานะ', 'เลขใบเสนอราคา', 'ใบเสนอราคาร่วม (จำนวนบริษัท)', 'บริการ'];
   const line = (l: CashLine): (string | number)[] => [
     be, l.date ? monthYearTh(l.date) : '', l.joint ? `${l.deal.client} (${jointWords(l.joint)})` : l.deal.client, l.dealYear, l.deal.section, l.deal.resp,
-    l.n > 0 ? `${l.n}/${l.of}` : 'ไม่มีแผน', l.amt, l.due, l.rcv, statusWord(l), dealMoney(s, l.deal).fcDoc?.docNo || '', l.joint ? l.joint.members : '',
+    l.n > 0 ? `${l.n}/${l.of}` : 'ไม่มีแผน', l.amt, l.due, l.rcv, statusWord(l), dealMoney(s, l.deal).fcDoc?.docNo || '', l.joint ? l.joint.members : '', svcText(jobServices(s, l.deal)),
   ];
   return { head, rows: [...Y.lines.map(line), ...(undated ? Y.undated.map(line) : [])] };
 }

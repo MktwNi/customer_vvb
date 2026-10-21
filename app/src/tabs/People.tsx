@@ -3,7 +3,8 @@ import { useApp, useEngineVersion } from '../state';
 import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
-import { ACT_TH, KIND_TH, dealSteps, docsOf, fmtMoney, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { ACT_TH, KIND_TH, beYear, dealSteps, docsOf, fmtMoney, jobServices, jointRole, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { JobSvc } from '../components/SvcChips';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
 import { actCode } from '../components/DealActs';
 import { moneyWords } from '../lib/joint';
@@ -453,7 +454,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
   p: Person; c: Company | undefined; tab: 'log' | 'tasks' | 'deals'; setTab: (t: 'log' | 'tasks' | 'deals') => void; logRef: React.RefObject<HTMLTextAreaElement | null>;
   contacts: { l: LogEntry; key: string }[]; acts: DealAct[]; upcoming: Task[]; doneTasks: Task[]; deals: Deal[]; linked: Deal[]; today: string;
 }) {
-  const { engine: e, set, openSched } = useApp();
+  const { engine: e, ui, set, openSched } = useApp();
   const ro = !e.can('edit.cust');
   const mayDel = (l: LogEntry) => e.can('del.log', l.by || '');
   // a person who deals with several companies: each entry says which one; the tabs cover them all
@@ -539,9 +540,12 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
             <DealMini key={d.id} d={d} p={p} />
           ))}
           {!linked.length && (c || !deals.length) && <span className="empty">{c && !deals.length ? 'บริษัทนี้ยังไม่อยู่ใน Sales Tracker' : c ? 'ยังไม่ได้เป็นผู้ติดต่อของดีลใด' : 'ยังไม่ได้เชื่อมกับบริษัท'}</span>}
-          {c && !deals.length && e.can('edit.deal') && (
-            // a new deal is ดีลและขั้นตอน's, not the person record's (as CompanyDrawer's SalesBox); this person is its contact
-            <button onClick={() => set({ sendIds: [c.id], sendPid: p.id })} className="btn sm" style={{ alignSelf: 'flex-start' }}>ส่งเข้า Sales Tracker</button>
+          {c && e.can('edit.deal') && (
+            // a new deal is ดีลและขั้นตอน's, not the person record's (as CompanyDrawer's SalesBox); this person is its
+            // contact. A company with a job this year may get another (another service): the dialog says its jobs
+            <button onClick={() => set({ sendIds: [c.id], sendPid: p.id })} className="btn sm" style={{ alignSelf: 'flex-start' }}>
+              {deals.some((d) => d.year === (ui.slYear || beYear()) && jointRole(e.sales, d) !== 'header') ? 'เพิ่มงานใน Sales Tracker' : 'ส่งเข้า Sales Tracker'}
+            </button>
           )}
           {rest.length > 0 && (
             <>
@@ -732,7 +736,7 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
   return (
     <button className="pe-deal" onClick={() => set({ deal: d.id })}>
       <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 500 }}>ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}</span>
+        <span style={{ fontWeight: 500 }}>ปี {d.year} · <JobSvc svc={jobServices(S, d)} /> · {d.section || 'ไม่ระบุหมวด'}</span>
         <span className="pe-sub">{trackerStatus(S, d)}</span>
       </span>
       <span className="pe-mini" role="img" aria-label={`ทำแล้ว ${tr.done} จาก ${tr.total} ขั้น`}>

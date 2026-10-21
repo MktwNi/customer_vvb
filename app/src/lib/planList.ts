@@ -12,6 +12,7 @@ import { norm } from './core';
 import { OVERDUE_DAYS, dealResult, jointRole, overdueDays, payDone, type Deal, type SalesState } from './sales';
 import { nextStepView, type NextStepView } from './salesUi';
 import type { StageKey, Task } from './types';
+import { svcText } from './jobs';
 
 /** Where the list comes from: ทั้งหมดที่ต้องติดต่อ (both), ที่ติดตาม, Sales Tracker (งานที่ยังเปิดอยู่). */
 export type PlanSrc = 'all' | 'watch' | 'sales';
@@ -188,10 +189,12 @@ export function unplanned<C extends PlanCo>(rows: readonly PlanRow<C>[]): C[] {
  *  ต.ค." for a planned step, the installment's state at a PAY stage); "Sales Tracker 2 งาน · …" when the
  *  company has more than one (the most urgent one is named). A number stays on the line of the word before
  *  it and of "วัน" after it (no-break spaces), so a narrow tag never ends a line on "ครั้งที่". */
-export function jobTag(jobs: readonly Pick<PlanJob, 'next'>[]): string {
+export function jobTag(jobs: readonly (Pick<PlanJob, 'next'> & { deal?: Pick<Deal, 'service'> })[], svcOf?: (d: Deal) => readonly string[]): string {
   if (!jobs.length) return '';
   const n = jobs[0].next;
-  const what = (n.stage ? `ถัดไป ${n.code || n.stage}${n.hint ? ' ' + n.hint : ''}` : n.hint).replace(/ (?=\d)/g, NBSP).replace(/(\d) (?=วัน)/g, '$1' + NBSP);
-  return `Sales Tracker${jobs.length > 1 ? ` ${jobs.length} งาน` : ''}${what ? ' · ' + what : ''}`;
+  // several jobs (a company's CFO and CFP of the year): the one named says its services ("CFP ถัดไป FOLLOW")
+  const sv = jobs.length > 1 && jobs[0].deal ? svcText(svcOf ? svcOf(jobs[0].deal as Deal) : jobs[0].deal.service) : '';
+  const what = ((sv ? sv + ' ' : '') + (n.stage ? `ถัดไป ${n.code || n.stage}${n.hint ? ' ' + n.hint : ''}` : n.hint)).replace(/ (?=\d)/g, NBSP).replace(/(\d) (?=วัน)/g, '$1' + NBSP);
+  return `Sales Tracker${jobs.length > 1 ? ` ${jobs.length} งาน` : ''}${what.trim() ? ' · ' + what : ''}`;
 }
 const NBSP = '\u00a0';

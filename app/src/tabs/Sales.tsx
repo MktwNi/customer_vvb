@@ -39,7 +39,7 @@ import { askPay } from '../components/PayChk';
 import { previewOf } from '../lib/payCheck';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
-import { customersOf, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
+import { customersOf, jobServices, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
 import { canMergeFrom, closedOrder, jointNo, jointRows, rowDeals, type JRow } from '../lib/joint';
 // the work count (jobs, companies worked for): the ปิดงาน tab's line and counter, its export
 import { closedExportSub, closedLine, closedMeta, closedTabRows } from '../lib/workUi';
@@ -49,6 +49,9 @@ import { UnitsDialog } from '../components/UnitsDialog';
 // เพิ่มลูกค้า → ส่งบริษัทที่ติดตามอยู่: บริษัทที่ติดตาม's list, at most TRACKER_MAX a send
 import { followRows } from '../lib/follow';
 import { followedBatch, followedMenuWords } from '../lib/bulk';
+import { dupRows, dupTitle, named, rowsPerCo } from '../lib/jobs';
+import { JobSvc } from '../components/SvcChips';
+import { jobName } from '../lib/salesUi';
 
 // the shared dialog (components/Dialog.tsx); kept importable from here for older callers
 export { Modal } from '../components/Dialog';
@@ -444,7 +447,7 @@ function MoreMenu({ year, deals, closed }: { year: string; deals: Deal[]; closed
             </button>
           )}
           {e.can('set.data') && <button role="menuitem" className="menu-i" onClick={() => { close(); fileRef.current?.click(); }}>นำเข้าจาก Sales Tracker เดิม<small>ไฟล์สำรอง JSON หรือ CSV / Excel</small></button>}
-          {e.can('set.lists') && <button role="menuitem" className="menu-i" onClick={() => { close(); setLists(true); }}>จัดการหมวด / SOURCE / Services</button>}
+          {e.can('set.lists') && <button role="menuitem" className="menu-i" onClick={() => { close(); setLists(true); }}>จัดการหมวด / SOURCE / บริการ</button>}
           {/* units and commission rates (package dash): for ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น, where commission is private */}
           {e.can('set.units') && e.seesComm() && <button role="menuitem" className="menu-i" onClick={() => { close(); setUnits(true); }}>หน่วยงานและค่าคอมมิชชั่น<small>สัดส่วนรายได้และอัตรา %</small></button>}
         </div>
@@ -514,9 +517,9 @@ function ListsModal({ onClose }: { onClose: () => void }) {
   return (
     // its fields only add to the lists: focus the dialog (a phone would pop its keyboard up for a field)
     <Modal title="จัดการรายการ" onClose={onClose} width={640} focus="dialog">
-      {box('sections', 'หมวด (กลุ่มแถวในตาราง)', 'แต่ละลูกค้าอยู่ในหมวดเดียว เช่น ช่องทางที่ได้ลูกค้ามา · กดที่ชื่อหมวดเพื่อเปลี่ยนชื่อ')}
+      {box('sections', 'หมวด (ช่องทางที่ได้ลูกค้า)', 'กลุ่มแถวในตาราง แต่ละงานอยู่ในหมวดเดียว ตามช่องทางที่ได้ลูกค้ามา · กดที่ชื่อหมวดเพื่อเปลี่ยนชื่อ')}
       {box('sources', 'SOURCE (ช่องทาง)', 'ติ๊กได้หลายช่องต่อหนึ่งลูกค้า ใช้ในกราฟและอัตราได้งานตามช่องทาง')}
-      {box('services', 'Services (บริการ)', 'บริการที่เสนอให้ลูกค้า')}
+      {box('services', 'บริการ (Services)', 'บริการของงาน เช่น CFO CFP T-VER ใช้ในหน้าต่างส่งเข้า Sales Tracker ป้ายใต้ชื่อลูกค้า และตัวกรอง “บริการ”')}
     </Modal>
   );
 }
@@ -721,7 +724,10 @@ interface Tk {
   recv: (deal: Deal, stage: string) => void;
   openPanel: (id: string, plan?: UIState['dpPlan']) => void;
   acts: ReturnType<typeof useSalesActs>;
-  dup: (d: Deal) => boolean;
+  /** the rows this one may repeat (the soft "อาจซ้ำ"), or null */
+  dup: (d: Deal) => Deal[] | null;
+  /** does the row's company have another row in the year (the row then says that it lists no service) */
+  multi: (d: Deal) => boolean;
 }
 const TkCtx = createContext<Tk | null>(null);
 const useTk = () => useContext(TkCtx)!;
@@ -757,11 +763,11 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   const { secs: visible, rows: bySec } = jointRows(S, deals);
   const [jqFold, setJqFold] = useState<Record<string, 1>>({});
   const foldJq = (id: string) => setJqFold((x) => (x[id] ? Object.fromEntries(Object.entries(x).filter(([k]) => k !== id)) : { ...x, [id]: 1 }));
-  // one company twice in the year (two people sent it at the same moment): marked, to delete one (the lens's
-  // jobs of other years are not the year's rows; a joint quotation's header, the payer's row for it, and its
-  // members are rows of their own on purpose)
-  const perCo = new Map<number, number>();
-  facets.forEach((d) => d.gid != null && d.year === ui.slYear && jointRole(S, d) === 'plain' && perCo.set(e.canonical(d.gid), (perCo.get(e.canonical(d.gid)) || 0) + 1));
+  // two rows of one company in the year that may be one job entered twice (the same service, or neither names
+  // one; lib/jobs.ts dupRows): a soft "อาจซ้ำ". A company's jobs of different services are normal. (The lens's jobs
+  // of other years are not the year's rows; a joint quotation's header and members are rows of their own.)
+  const dupOf = dupRows(S, facets.filter((d) => d.year === ui.slYear), (g) => e.canonical(g));
+  const perCo = rowsPerCo(S, facets.filter((d) => d.year === ui.slYear), (g) => e.canonical(g));
   const cur = ui.deal || ui.last.deal;
 
   const toggle = (id: string, focusChev = false) => {
@@ -810,7 +816,8 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       setMenu('');
       set({ deal: id, dpPlan: plan, slToast: null });
     },
-    dup: (d) => d.gid != null && d.year === ui.slYear && jointRole(S, d) === 'plain' && (perCo.get(e.canonical(d.gid)) || 0) > 1,
+    dup: (d) => dupOf.get(d.id) || null,
+    multi: (d) => (perCo.get(d.id) || 1) > 1,
   };
 
   // the section bars stick right under the column headings: their height (fonts, zoom) sets the offset
@@ -1161,6 +1168,7 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
   const nx = nextStepView(S, d, today, t);
   const late = overdueDays(S, d, today, t) != null || nx.tone === 'late';
   const reached = reachedOf(t.steps.filter((v) => v.counted));
+  const dup = tk.dup(d);
   return (
     <tr className={'sl-row' + (cur ? ' cur' : '') + (open ? ' og ogf' : '') + (jm ? ' jq-m' + (jm === 'last' && !open ? ' last' : '') : '')} aria-current={cur ? 'true' : undefined} data-id={d.id} style={open && reached >= 0 ? { '--line-c': 'var(--brand)' } : undefined}>
       <td className="k-chev">
@@ -1174,9 +1182,13 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
           <span className="sl-nm">
             <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => tk.openPanel(d.id)} title={`${d.client} เปิดรายละเอียด`} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
             <span className="sl-nm-s">
-              {cur && <span className="sl-tg">เปิดล่าสุด</span>}
+              {/* the tags first (the line is one clipped line: they must be seen), then the job's services, one
+                  chip and "อีก 2" (two jobs of one company are told apart here); a row without a service says so
+                  only where its company has another row */}
+              {dup && <span className="sl-tg warn" title={dupTitle(d, dup)}>อาจซ้ำ</span>}
               {isNew && <span className="sl-tg">ใหม่</span>}
-              {tk.dup(d) && <span className="sl-tg bad" title={`บริษัทนี้มีในตารางปี ${d.year} มากกว่า 1 แถว เปิดแถวที่ซ้ำแล้วลบออก`}>ซ้ำ</span>}
+              {cur && <span className="sl-tg">เปิดล่าสุด</span>}
+              <RowSvc d={d} />
               {tk.cash && d.year !== tk.year && <span className="sl-tg" title={`งานของปี ${d.year} ที่มีงวดเงินในปี ${tk.year}`}>งานปี {d.year}</span>}
               <span className={'sl-ct' + (ctName ? '' : ' none')}>{ct}</span>
               <span className="sl-sub-last">· {lc ? dmTh(lc) : 'ยังไม่ได้ติดต่อ'}</span>
@@ -1203,6 +1215,14 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
 
 /** ผู้รับผิดชอบ: the name as text, a styled picker under the pointer (one avatar per row: the company's;
  *  the people's initials are in the list). Its list renders only while open, so a long table costs nothing. */
+/** A row's services in its line under the name (lib/jobs.ts): the chips (`max` of them, then "อีก 2"); without a
+ *  service, "ไม่ระบุบริการ" only where the company has another row this year to tell it from. */
+function RowSvc({ d, max = 1 }: { d: Deal; max?: number }) {
+  const tk = useTk();
+  const svc = jobServices(tk.S, d);
+  if (named(svc)) return <JobSvc svc={svc} none={false} max={max} />;
+  return tk.multi(d) ? <span className="sl-tg none" title="งานนี้ยังไม่ได้เลือกบริการ เลือกได้ที่ “แก้บริการ” ในหน้ารายละเอียด">ไม่ระบุบริการ</span> : null;
+}
 function Owner({ d }: { d: Deal }) {
   const { e, ro, team } = useTk();
   const name = d.resp || 'มอบหมาย';
@@ -1216,7 +1236,7 @@ function Owner({ d }: { d: Deal }) {
       value={d.resp}
       shown={name}
       title={`ผู้รับผิดชอบ: ${name} กดเพื่อเปลี่ยน`}
-      label={`ผู้รับผิดชอบ ${shortName(d.client)}`}
+      label={`ผู้รับผิดชอบ ${jobName(d)}`}
       valueText={d.resp || 'ไม่ระบุ'}
       width={220}
       search={false}
@@ -1564,7 +1584,7 @@ function RowMenu({ d }: { d: Deal }) {
         }
       }}
     >
-      <button ref={btn} type="button" className="sl-more hv" aria-label={'เพิ่มเติม ' + shortName(d.client)} aria-haspopup="menu" aria-expanded={open} onClick={() => tk.setMenu(open ? '' : d.id)}>
+      <button ref={btn} type="button" className="sl-more hv" aria-label={'เพิ่มเติม ' + jobName(d)} aria-haspopup="menu" aria-expanded={open} onClick={() => tk.setMenu(open ? '' : d.id)}>
         <Icon name="more" size={18} />
       </button>
       {open && (
@@ -1777,7 +1797,7 @@ function KidRows({ d, t, list: list0 }: { d: Deal; t: DealSteps; list: StepView[
             <span className="qt-kn">
               {note}
               {qcv && <QtCheckLine doc={qv.head.doc} v={qcv} bare />}
-              {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, { at: 'quote', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${shortName(d.client)}`}>แนบฉบับแก้ไข</button>}
+              {!ro && <button type="button" className="lnk" onClick={() => tk.attach(d, { at: 'quote', revise: qv.head!.doc.id })} aria-label={`แนบใบเสนอราคาฉบับแก้ไขของ ${jobName(d)}`}>แนบฉบับแก้ไข</button>}
             </span>
           );
         // (CONTACT / FOLLOW done with a call booked ahead: the last one, then the next one under it)
@@ -1954,7 +1974,7 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
   const save = () => {
     const a = f.save();
     tk.closeEditor();
-    if (a) tk.acts.say(`บันทึกการติดต่อ ${shortName(d.client)} แล้ว · ${ACT_TH[a.type]} ${dmTh(a.d)}${a.stage ? ' ที่ ' + actCode(tk.S, a, tk.today) : ''}`);
+    if (a) tk.acts.say(`บันทึกการติดต่อ ${jobName(d)} แล้ว · ${ACT_TH[a.type]} ${dmTh(a.d)}${a.stage ? ' ที่ ' + actCode(tk.S, a, tk.today) : ''}`);
   };
   // a click outside the row (not in a dialog it opened) leaves it, as the stage editor does
   const cancelRef = useRef(tk.closeEditor);
@@ -2092,11 +2112,11 @@ function ResultSeg({ d, state, big, date }: { d: Deal; state: StageState; big?: 
     askPay(e, { d, after: previewOf.step(e.sales, d.id, DEAL_STAGE, v), kind: 'edit', title: 'ผลการขาย ' + (r === 'WAIT' ? 'รอผล' : r), verb: 'บันทึกผล', run: () => {
       const was = closeReady(e.sales, d, today);
       e.setStep(d.id, DEAL_STAGE, v);
-      if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
+      if (r === 'WAIT') acts.say(`บันทึกผลการขายของ ${jobName(d)} เป็น รอผล แล้ว`);
       else acts.afterResult(d, was);
     } });
   };
-  return <ResultButtons state={state} big={big} label={'ผลการขาย ' + shortName(d.client)} onPick={save} />;
+  return <ResultButtons state={state} big={big} label={'ผลการขาย ' + jobName(d)} onPick={save} />;
 }
 export function ResultButtons({ state, big, label, onPick }: { state: StageState | ''; big?: boolean; label: string; onPick: (r: 'YES' | 'NO' | 'WAIT') => void }) {
   return (
@@ -2250,7 +2270,7 @@ function useStepEditor(d: Deal, stage: string, code = stage) {
       tk.closeEditor();
       const r = dealResult(e.sales, d);
       if (stage === DEAL_STAGE && (r === 'YES' || r === 'NO')) tk.acts.afterResult(d, was);
-      else tk.acts.after(d, was, 'payment', `บันทึก ${code} ของ ${shortName(d.client)} แล้ว · ${dmTh(date)}`);
+      else tk.acts.after(d, was, 'payment', `บันทึก ${code} ของ ${jobName(d)} แล้ว · ${dmTh(date)}`);
     } });
   };
   const cancel = () => {
@@ -2267,7 +2287,7 @@ function useStepEditor(d: Deal, stage: string, code = stage) {
       e.setStep(d.id, DEAL_STAGE, v);
       drafts.delete(key);
       tk.closeEditor();
-      if (r === 'WAIT') tk.acts.say(`บันทึกผลการขายของ ${shortName(d.client)} เป็น รอผล แล้ว`);
+      if (r === 'WAIT') tk.acts.say(`บันทึกผลการขายของ ${jobName(d)} เป็น รอผล แล้ว`);
       else tk.acts.afterResult(d, was);
     } });
   };
@@ -2317,7 +2337,7 @@ function KidEditor({ d, stage, code, kind, line, won }: { d: Deal; stage: string
       <td className="sl-knote" colSpan={3} ref={(el) => void (ed.box.current = el?.closest('tr') || null)}>
         <span className="sl-qaw">
           <span className={'sl-qa-row' + (stage === DEAL_STAGE ? ' yn' : '')}>
-            {stage === DEAL_STAGE && <ResultButtons state="" label={'ผลการขาย ' + shortName(d.client)} onPick={ed.result} />}
+            {stage === DEAL_STAGE && <ResultButtons state="" label={'ผลการขาย ' + jobName(d)} onPick={ed.result} />}
             <input
               ref={input}
               className="fld sl-fld"
@@ -2413,7 +2433,10 @@ function DealCard({ d }: { d: Deal }) {
         <div className="sl-mc-t">
           <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
           <span className="sl-nm-s">
+            {tk.dup(d) && <span className="sl-tg warn" title={dupTitle(d, tk.dup(d)!)}>อาจซ้ำ</span>}
             {cur && <span className="sl-tg">เปิดล่าสุด</span>}
+            {/* (the card's line wraps: every service is shown) */}
+            <RowSvc d={d} max={0} />
             {tk.cash && d.year !== tk.year && <span className="sl-tg">งานปี {d.year}</span>}
             <CardWhen d={d} lc={lc} />
             {od != null && <span className="chip bad">ค้าง {fmtN(od)} วัน</span>}
@@ -2516,7 +2539,7 @@ function CardKids({ d, t }: { d: Deal; t: DealSteps }) {
   const ps = payState(S, d, today, t);
   const money = e.can('view.money');
   return (
-    <div className="sl-mc-kids" id={`mk-${d.id}`} role="list" aria-label={'ขั้นตอนของ ' + shortName(d.client)}>
+    <div className="sl-mc-kids" id={`mk-${d.id}`} role="list" aria-label={'ขั้นตอนของ ' + jobName(d)}>
       {list.map((v, ri) => {
         const p = v.id, s = v.own, pl = v.line, st = v.state;
         const isNow = p === t.next?.id;
@@ -2644,7 +2667,7 @@ function CardKids({ d, t }: { d: Deal; t: DealSteps }) {
           <div className="sl-mk-t">
             <div><b>การติดต่อ</b><span>{t.contacts ? `ติดต่อ ${t.contacts} ครั้ง` : 'ยังไม่มีบันทึก'}</span></div>
             {/* (every contact sits in its step: here only those filed at a step the deal no longer has) */}
-            {t.other.acts.length > 0 && <ActList acts={t.other.acts} max={3} stage short label={'การติดต่ออื่นของ ' + shortName(d.client)} />}
+            {t.other.acts.length > 0 && <ActList acts={t.other.acts} max={3} stage short label={'การติดต่ออื่นของ ' + jobName(d)} />}
             {adding ? (
               <ActForm d={d} stage={tk.edit!.stage || undefined} onDone={actDone} compact />
             ) : (
@@ -2773,7 +2796,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (
                   <tr key={d.id}>
-                    <td><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button></td>
+                    <td><span className="sl-cl-nm"><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button><JobSvc svc={jobServices(S, d)} none={false} max={2} /></span></td>
                     <td className="c-opt t-sec">{d.section || 'ไม่ระบุหมวด'}</td>
                     <td className="c-opt">{d.resp || '—'}</td>
                     <td><Status kind={r === 'YES' ? 'ok' : r === 'NO' ? 'bad' : 'neutral'}>{r === 'YES' ? 'ได้งาน' : r === 'NO' ? 'ไม่ได้งาน' : 'ไม่ระบุผล'}</Status></td>
@@ -2845,7 +2868,7 @@ function LogView({ S, year }: { S: SalesState; year: string }) {
                       {l.client && (
                         <>
                           {' · '}
-                          {l.deal && S.deals[l.deal] ? <button type="button" className="lnk" onClick={() => set({ deal: l.deal })}>{shortName(l.client)}</button> : shortName(l.client)}
+                          {l.deal && S.deals[l.deal] ? <button type="button" className="lnk" onClick={() => set({ deal: l.deal })}>{jobName(S.deals[l.deal], S)}</button> : shortName(l.client)}
                         </>
                       )}
                     </span>
