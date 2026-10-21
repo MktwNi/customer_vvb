@@ -8,7 +8,7 @@
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
-import { toPerson } from './people';
+import { personKey, toPLink, toPerson, type PLink } from './people';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
@@ -296,6 +296,8 @@ export const keyOf = {
   scfg: (name: keyof SalesCfg) => `scfg/${name}`,
   cust: (id: number) => `cust/${id}`,
   person: (id: string) => `person/${id}`,
+  /** a deal's contact: a link from the deal to a person (lib/people.ts PLink), a record of its own */
+  plink: (pid: string, dealId: string) => `person/${pid}/${dealId}`,
   /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
   dundo: (id: string) => `dundo/${id}`,
   /** a joint quotation's mark on its header deal, and one member company of it (lib/sales.ts jointOf) */
@@ -348,7 +350,8 @@ export function uniqueTaskIds(tasks: Task[]) {
   return renamed;
 }
 
-export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person> }
+/** `plinks`: the deals' contacts, keyed `<pid>/<dealId>` (lib/people.ts PLink). */
+export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>; plinks?: Record<string, PLink> }
 
 /** Every shared record currently held locally, keyed like the server. */
 export function localRecords(s: SharedState): Map<string, unknown> {
@@ -392,12 +395,13 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
+  Object.entries(s.plinks || {}).forEach(([k, v]) => m.set('person/' + k, { ...v }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
-export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean }
-export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false });
+export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean; plinks: boolean }
+export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false, plinks: false });
 
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
@@ -664,6 +668,22 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       fx.custom = true;
       break;
     case 'person': {
+      const pk = personKey(rest);
+      if (!pk) return;
+      if (pk.deal) {
+        // a deal's contact (lib/people.ts PLink): builds before it read it as a person without a name and skip it
+        const L = s.plinks || (s.plinks = {});
+        if (del) {
+          if (!(rest in L)) return;
+          delete L[rest];
+        } else {
+          const v = toPLink(row.v);
+          if (!v) return;
+          L[rest] = v;
+        }
+        fx.plinks = true;
+        break;
+      }
       const P = s.people || (s.people = {});
       if (del) {
         if (!(rest in P)) return;

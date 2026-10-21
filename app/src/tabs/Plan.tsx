@@ -118,7 +118,7 @@ export function Plan() {
   // "รายชื่อที่ต้องติดต่อ": the team's real work (lib/planList.ts), never a registry list: the companies followed
   // and the open jobs of the Sales Tracker's year (for an account that sees the tracker), one row per company
   const rowsAll = useMemo(
-    () => planRows<Company>({ company: (id) => e.company(id), watch: C.watch, tasks: C.tasks, owners: C.owners, stages: C.stages, sales: sees ? e.sales : null, year, today }),
+    () => planRows<Company>({ company: (id) => e.company(id), watch: C.watch, tasks: C.tasks, owners: C.owners, stages: C.stages, sales: sees ? e.sales : null, year, today, phoneOf: e.contactPhone }),
     [e, v, sees, year, today],
   );
   const counts = srcCounts(rowsAll);

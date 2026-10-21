@@ -159,9 +159,11 @@ export function CompanyDrawer() {
   const facts = ([['เลขนิติบุคคล', c.jur], ['จังหวัด', D.prov[c.prov]], ['ที่อยู่', c.addr], ['กลุ่มอุตสาหกรรม', D.ind[c.ind]], ['กิจการ', c.biz], ['จำนวนโรงงาน', c.fac ? fmtN(c.fac) + ' แห่ง' : ''], ['SET', c.set ? `${c.set} · ตลาด ${c.mkt}` : '']] as [string, string][]).filter((x) => x[1]);
   const ph = (c.phone || '').split('|').map((x) => x.trim()).filter(Boolean);
   const em = (c.email || '').split('|').map((x) => x.trim()).filter(Boolean);
-  // the contact typed in the Sales Tracker (what is not already listed above)
+  // the contact typed in the Sales Tracker (what is not already listed above); a deal whose contact is a
+  // person shows them in ผู้ติดต่อ below instead
   const split = (s: string) => s.split('|').map((x) => x.trim()).filter(Boolean);
   const dc = deals
+    .filter((x) => !e.dealPeople(x.id).length)
     .map((x) => ({ name: x.contactName.trim(), phones: split(x.phone).filter((t) => !ph.includes(t)), emails: split(x.email).filter((t) => !em.includes(t)) }))
     .find((x) => x.name || x.phones.length || x.emails.length);
   const ce = c.cEdited;
@@ -490,9 +492,12 @@ function SalesBox({ c }: { c: Company }) {
         const lc = lastContact(e.sales, d, todayISO());
         const fv = fcFig(e.sales, d);
         const jr = jointRole(e.sales, d), jg = jr === 'plain' ? null : jointOf(e.sales, d);
+        // the deal's contact, the person linked to it (a typed one is said above, "ผู้ติดต่อใน Sales Tracker")
+        const who = e.dealPeople(d.id)[0];
         const more = [
           // (the title starts with "ใบเสนอราคาร่วม" already)
           jg && (jr === 'header' ? `ผู้จ่าย ${jointTitle(e.sales, jg)} · ${jg.members.length} บริษัท` : `อยู่ใน ${jointTitle(e.sales, jg)}`),
+          who && 'ผู้ติดต่อ ' + who.name,
           d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc),
           money && jr !== 'member' && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : ''),
         ].filter(Boolean);

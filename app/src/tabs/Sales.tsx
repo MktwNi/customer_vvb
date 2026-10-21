@@ -22,6 +22,7 @@ import { QtCheckLine } from '../components/QtCheckSheet';
 import { qtFigWords, qtView } from '../lib/quotes';
 import { followStep, stepMoved, type StepEd, type StepFields } from '../lib/stepEditor';
 import { ActForm, ActItem, ActList, ActStageSel, ActTypeSeg, actCode, delActFocus, oldWord, useActForm } from '../components/DealActs';
+import { contactSummary } from '../components/DealContact';
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, beadOf, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
@@ -96,11 +97,12 @@ export function Sales() {
   // (money by the year it comes in is Cashflow's: without ดู Cashflow the table counts by the deal's year)
   const lens = ui.slLens === 'cash' && e.can('view.cash');
   const fT: SalesFilter = lens ? { ...f, money: 'cash' } : f;
-  const shown = filterDeals(S, fT, today);
+  // (the search reads the deal's contacts too: the people linked to it)
+  const shown = filterDeals(S, fT, today, e.contactHay);
   // the quick views are about open work: their counts come from the other filters, and the closed tab ignores them
-  const noQuick = f.quick || lens ? filterDeals(S, { ...fT, quick: '' }, today) : shown;
+  const noQuick = f.quick || lens ? filterDeals(S, { ...fT, quick: '' }, today, e.contactHay) : shown;
   // the ปิดงาน tab's rows: the table's filters (not the lens nor a quick view), closed jobs only
-  const closedRows = closedTabRows(S, f, today);
+  const closedRows = closedTabRows(S, f, today, e.contactHay);
   // not memoised: the engine changes S.deals in place (an import or a team sync can add a year)
   const all = Object.values(S.deals);
   const v = ui.slView;
@@ -548,7 +550,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   // the counts in the field menu follow the search too, a little behind the typing (six passes over the year)
   const key = useDeferredValue(JSON.stringify(ui.slF));
   // (the lens "เงินเข้าตามปี" counts the other years' jobs with money in this one too)
-  const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key), money: F.money }), { yearDeals, job, me, today }), [ver, key, F.year, F.money, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key), money: F.money }), { yearDeals, job, me, today, hay: e.contactHay }), [ver, key, F.year, F.money, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
   const value: Record<string, FVal | undefined> = { resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section, result: F.result ? { v: [F.result] } : undefined };
   const toF = (k: string, v: FVal | null): Partial<SalesFilter> => (k === 'result' ? { result: (v?.v[0] || '') as ResultF } : { [k]: v || undefined });
   const search = (
@@ -607,10 +609,10 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
             year={F.year}
             today={today}
             unit={unit}
-            count={(draft) => liveCount(S, F, 'date', draft, job, today)}
-            monthCounts={(basis, y) => monthCounts(S, F, basis, y, job, today)}
+            count={(draft) => liveCount(S, F, 'date', draft, job, today, e.contactHay)}
+            monthCounts={(basis, y) => monthCounts(S, F, basis, y, job, today, e.contactHay)}
             // open jobs have no closing date: say where the jobs closed in the range are (the KPIs count them)
-            elsewhere={job === 'open' ? (draft) => (draft.basis === 'closed' ? `อยู่ในแท็บ “ปิดงาน” ${fmtN(liveCount(S, F, 'date', draft, 'closed', today))} งาน` : null) : undefined}
+            elsewhere={job === 'open' ? (draft) => (draft.basis === 'closed' ? `อยู่ในแท็บ “ปิดงาน” ${fmtN(liveCount(S, F, 'date', draft, 'closed', today, e.contactHay))} งาน` : null) : undefined}
           />
           </>
         }
@@ -620,7 +622,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
         onClearAll={() => set({ slF: job === 'open' ? { quick: quick === 'paylate' ? 'payment' : quick } : { quick: F.quick }, slCollapsed: {} })}
         count={on ? { shown, total } : null}
         unit={unit}
-        liveCount={(k, d) => liveCount(S, F, k, k === 'result' ? ((d?.v[0] || '') as ResultF) : d, job, today)}
+        liveCount={(k, d) => liveCount(S, F, k, k === 'result' ? ((d?.v[0] || '') as ResultF) : d, job, today, e.contactHay)}
       />
     </div>
   );
@@ -1152,6 +1154,10 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
   const name = shortName(d.client);
   const isNew = !dealStatus(S, d).started && !!d.at && daysBetween(localDay(d.at), today) <= 7;
   const lc = lastContactInfo(S, d, today).date;
+  // the deal's contact: the person linked to it, else what was typed; none yet, the card's words for it
+  // ("ยังไม่ได้เลือกผู้ติดต่อ" while the company has people to choose from)
+  const ctName = e.dealContact(d).name;
+  const ct = ctName || contactSummary(e, d) || 'ยังไม่มีผู้ติดต่อ';
   const nx = nextStepView(S, d, today, t);
   const late = overdueDays(S, d, today, t) != null || nx.tone === 'late';
   const reached = reachedOf(t.steps.filter((v) => v.counted));
@@ -1172,7 +1178,7 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
               {isNew && <span className="sl-tg">ใหม่</span>}
               {tk.dup(d) && <span className="sl-tg bad" title={`บริษัทนี้มีในตารางปี ${d.year} มากกว่า 1 แถว เปิดแถวที่ซ้ำแล้วลบออก`}>ซ้ำ</span>}
               {tk.cash && d.year !== tk.year && <span className="sl-tg" title={`งานของปี ${d.year} ที่มีงวดเงินในปี ${tk.year}`}>งานปี {d.year}</span>}
-              <span className={'sl-ct' + (d.contactName ? '' : ' none')}>{d.contactName || 'ยังไม่มีผู้ติดต่อ'}</span>
+              <span className={'sl-ct' + (ctName ? '' : ' none')}>{ct}</span>
               <span className="sl-sub-last">· {lc ? dmTh(lc) : 'ยังไม่ได้ติดต่อ'}</span>
             </span>
           </span>
@@ -1989,7 +1995,8 @@ function ActEditRow({ d, stage }: { d: Deal; stage: string }) {
             {/* (the date's own column folds away in a narrow table: it comes here instead) */}
             <span className="sl-qa-date"><DateChip value={f.date} onChange={f.setDate} label="วันที่ติดต่อ" /></span>
           </span>
-          <span className="sl-qa-hint">Enter บันทึก · Esc ยกเลิก</span>
+          {/* (who it was with: the deal's contact, as the panel's "กับ" starts) */}
+          <span className="sl-qa-hint">{tk.e.people[f.pid] ? `กับ ${tk.e.people[f.pid].name} · ` : ''}Enter บันทึก · Esc ยกเลิก</span>
         </span>
       </td>
       <td className="k-last"><DateChip value={f.date} onChange={f.setDate} label="วันที่ติดต่อ" /></td>

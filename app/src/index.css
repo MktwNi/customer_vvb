@@ -1556,6 +1556,36 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .dp-link{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:var(--fs-body)}
 .dp-link>span:first-child{flex:1;min-width:200px}
 .dp-found{cursor:pointer;border:1px solid var(--line);border-radius:10px;text-align:left;padding:8px 12px;font:inherit;font-size:var(--fs-body);display:flex;justify-content:space-between;gap:10px;color:var(--ink)}
+/* the deal's contact (components/DealContact.tsx): a person in ผู้ติดต่อ linked to the deal, from their record;
+   a dashed box is a choice still to make (ใช้คนนี้, เลือก, บันทึกเป็นผู้ติดต่อ) */
+.dc-who{display:flex;flex-direction:column;gap:8px;min-width:0}
+.dc-h{font-size:var(--fs-sec);color:var(--ink-2)}
+.dc-box{border:1px solid var(--line);border-radius:var(--r-inner);padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.dc-box.ask{border-style:dashed}
+.dc-pw{display:flex;flex-direction:column;gap:6px;min-width:0}
+.dc-pw+.dc-pw{border-top:1px solid var(--divider);padding-top:10px}
+.dc-p{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.dc-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:var(--fs-body);color:var(--ink)}
+.dc-n{font-weight:500;display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere}
+.dc-s{font-size:var(--fs-sec);color:var(--ink-2)}
+.dc-c{font-size:var(--fs-sec);display:flex;gap:4px 12px;flex-wrap:wrap;min-width:0}
+.dc-c a,.dc-c span{overflow-wrap:anywhere}.dc-c .dc-tel{white-space:nowrap}
+.dc-a{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:var(--fs-sec)}
+.dc-in{padding-left:52px}
+.dc-note{font-size:var(--fs-sec);color:var(--ink-2);overflow-wrap:anywhere}
+.dc-list{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dc-opt{display:flex;gap:10px;align-items:center;border:0;border-radius:12px;background:transparent;padding:8px;font:inherit;font-size:var(--fs-body);text-align:left;color:var(--ink);cursor:pointer;min-width:0;width:100%}
+.dc-opt>.btn{flex:none}
+.dc-opt .dc-t{gap:0}
+.dc-more{align-self:flex-start}
+.dc-typed{display:flex;flex-direction:column;gap:4px;min-width:0}
+.dc-edit{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px;padding-left:52px}
+.dc-wide{grid-column:1 / -1}
+.dc-end{justify-content:flex-end}
+.dc-open{flex:none}
+/* a Thai phrase with a loan word (ดีล) kept on one line: the line breaker splits it mid-word ("ทุ" / "กดีล") */
+.dc-nw{white-space:nowrap}
+@media (max-width:600px){.dc-p{flex-wrap:wrap}.dc-p>.dc-t{flex-basis:calc(100% - 52px)}.dc-p>.dc-open{margin-left:52px}.dc-in,.dc-edit{padding-left:0}}
 /* the timeline: circles on a rail, the stage being recorded as a tinted card, the closing step last */
 .sl-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .sl-tl-i{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding-bottom:8px}
@@ -1854,6 +1884,9 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 @media (hover:hover){.pe-more summary:hover{background:var(--hv);box-shadow:0 0 0 4px var(--hv)}}
 .pe-deal{cursor:pointer;display:flex;flex-direction:column;gap:8px;text-align:left;border:1px solid var(--line);border-radius:var(--r-inner);background:#fff;padding:12px 14px;font:inherit;font-size:var(--fs-body);color:var(--ink);transition:background-color .12s,border-color .12s}
 @media (hover:hover){.pe-deal:hover{border-color:var(--tint-line);background:var(--hv)}}
+/* a deal of the company this person is not the contact of: one tap makes them its contact */
+.pe-deal-w{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pe-deal-use{align-self:flex-start;font-size:var(--fs-sec);display:flex;gap:6px 14px;flex-wrap:wrap}
 /* the steps of a deal in one bar: done or not (two colours) */
 .pe-mini{display:flex;align-items:center;gap:0}
 .pe-mini i{flex:1;height:6px;border-radius:999px;margin-right:3px;background:var(--rail)}

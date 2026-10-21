@@ -1736,11 +1736,12 @@ export function dateMatch(s: SalesState, d: Deal, r: Range, basis: DateBasis, to
 }
 
 /** Deals of a year that pass the filters, in section order then row order. `today` is a parameter for
- *  tests (the quick views and the date filter depend on it). */
-export function filterDeals(s: SalesState, fIn: SalesFilterIn, today = todayISO()): Deal[] {
-  return withActIndex(s, () => filterPass(s, fIn, today));
+ *  tests (the quick views and the date filter depend on it). `hay`: more words the search reads for a deal
+ *  (its contacts, people linked to it: the engine's contactHay). */
+export function filterDeals(s: SalesState, fIn: SalesFilterIn, today = todayISO(), hay?: (d: Deal) => string): Deal[] {
+  return withActIndex(s, () => filterPass(s, fIn, today, hay));
 }
-function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
+function filterPass(s: SalesState, fIn: SalesFilterIn, today: string, more?: (d: Deal) => string): Deal[] {
   const f = normSalesFilter(fIn);
   const q = (f.q || '').trim().toLowerCase();
   const terms = q ? q.split(/\s+/) : [];
@@ -1777,7 +1778,7 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string): Deal[] {
       if (terms.length) {
         const plan = (planLines(s, d) || []).map((x) => `${x.line.note} ${x.line.howT}`);
         const notes = [...stepKeys(s, d).map((p) => stepOf(s, d.id, p).n), ...plan, ...actsOf(s, d.id).map((a) => a.note)].join(' ');
-        const hay = [d.client, d.contactName, d.phone, d.email, d.resp, d.referral, d.section, notes, jointHay(s, d, nos!)].join(' ').toLowerCase();
+        const hay = [d.client, d.contactName, d.phone, d.email, d.resp, d.referral, d.section, notes, jointHay(s, d, nos!), more ? more(d) : ''].join(' ').toLowerCase();
         if (!terms.every((t) => hay.includes(t))) return false;
       }
       return true;

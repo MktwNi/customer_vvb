@@ -62,6 +62,8 @@ export interface PlanIn<C extends PlanCo = PlanCo> {
   /** the tracker's year (B.E.) */
   year: string;
   today: string;
+  /** a job's contact phone (its linked person's, else typed in it); default: what was typed in the deal */
+  phoneOf?: (d: Deal) => string;
 }
 
 /** A tracker job still to be worked on, of `year`: open, not lost, not won and fully paid (it needs closing,
@@ -124,7 +126,7 @@ export function planRows<C extends PlanCo>(x: PlanIn<C>): PlanRow<C>[] {
   const out = [...rows.values()];
   for (const r of out) {
     r.jobs.sort(byUrgency);
-    if (!r.phone) r.phone = r.jobs.find((y) => y.deal.phone)?.deal.phone || '';
+    if (!r.phone) r.phone = r.jobs.map((y) => (x.phoneOf ? x.phoneOf(y.deal) : y.deal.phone)).find(Boolean) || '';
     if (!r.owner) r.owner = r.jobs.find((y) => y.deal.resp)?.deal.resp || '';
     r.task = r.c ? first.get(r.c.id) || null : null;
     const taskLate = !!r.task && r.task.date < x.today;

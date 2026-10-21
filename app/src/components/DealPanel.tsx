@@ -38,6 +38,8 @@ import { invoiceOnly, planCheckWords, previewOf } from '../lib/payCheck';
 // ค่าใช้จ่ายของงาน (job expenses), after the payment plan: only with ดูค่าใช้จ่ายและกำไรของงาน
 import { ExpCard, dealGoneCheckWords } from './ExpCard';
 import { expensesOf } from '../lib/expense';
+// the deal's contact: a person in ผู้ติดต่อ linked to it (never a copy)
+import { DealContact, contactSummary, typedFieldsOnly } from './DealContact';
 
 const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
 /** A document card's "นับเป็น" choices. */
@@ -384,6 +386,7 @@ export function DealPanel() {
   const od = overdueDays(S, d, today);
   const ready = d.jobStatus === 'open' && closeReady(S, d, today);
   const c = d.gid != null ? e.company(d.gid) : undefined;
+  const ct = e.dealContact(d);
   // (a document for the Actual at a stage accounting checked, or of a closed month: asked first, useAttach)
   const attach: Attach = (entry, file) => (file ? at.drop(d, entry, file) : at.open(d, entry));
   const planFirst = won || ui.dpPlan !== '';
@@ -451,7 +454,7 @@ export function DealPanel() {
             </span>
           </div>
           {ro ? <h3 className="dp-name ro co-name title">{d.client}</h3> : <ClientName value={d.client} onSave={(v) => up({ client: v })} />}
-          <span className="dp-meta">{[d.contactName, d.phone, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : 'ยังไม่มอบหมายผู้รับผิดชอบ'].filter(Boolean).join(' · ')}</span>
+          <span className="dp-meta">{[ct.name, ct.phone, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : 'ยังไม่มอบหมายผู้รับผิดชอบ'].filter(Boolean).join(' · ')}</span>
           {jr === 'member' && <MemberBanner d={d} />}
           <div className="dp-strip">
             <div>
@@ -1430,7 +1433,9 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · S
   const referrals = [...new Set(Object.values(S.deals).map((x) => x.referral).filter(Boolean))];
   const years = [...new Set([beYear(), String(+beYear() + 1), String(+beYear() - 1), d.year])].sort();
   const lc = lastContactInfo(S, d, todayISO());
-  const sum = [d.contactName, ...d.source, ...d.service].filter(Boolean).join(' · ') || 'ยังไม่มีข้อมูล';
+  const sum = [contactSummary(e, d), ...d.source, ...d.service].filter(Boolean).join(' · ') || 'ยังไม่มีข้อมูล';
+  // (an account that may edit the deal but not the contacts types the contact here, as before)
+  const typedOnly = typedFieldsOnly(e, d, ro);
   const chips = (k: 'source' | 'service', all: string[]) =>
     opts && !ro ? (
       <div className="sl-opts">
@@ -1451,11 +1456,14 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · S
       {open && (
         <div id="dp-contact-b" className="sl-acc-b">
           <LinkCompany d={d} ro={ro} />
+          <DealContact d={d} ro={ro} />
           <ReadOnly ro={ro}>
             <div className="sl-fields">
+              {typedOnly && <>
               <Field label="ผู้ติดต่อ" value={d.contactName} onSave={(v) => up({ contactName: v })} />
               <Field label="เบอร์โทร" value={d.phone} onSave={(v) => up({ phone: v })} type="tel" />
               <Field label="อีเมล" value={d.email} onSave={(v) => up({ email: v })} type="email" />
+              </>}
               <Field label="ผู้รับผิดชอบ" value={d.resp} onSave={(v) => up({ resp: v })} list="sl-team" />
               <Field label="แหล่งที่มา (Referral)" value={d.referral} onSave={(v) => up({ referral: v })} list="sl-ref" />
               <span style={labelCol}>
