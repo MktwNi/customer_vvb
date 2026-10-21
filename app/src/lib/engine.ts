@@ -4584,10 +4584,11 @@ export class GccEngine {
       const otherSteps = Object.entries(S.steps)
         .filter(([k]) => k.startsWith(d.id + '/') && !read.has(k.slice(d.id.length + 1)))
         .map(([k, x]) => `${k.slice(d.id.length + 1)}: ${[x.d, x.n].filter(Boolean).join(' ')}`);
+      const svcList = svcClean(d.service); // a name once, however the job came to hold it (lib/jobs.ts svcClean)
       return [csvCell(i + 1), csvCell(d.section), csvCell(d.client), csvCell(d.gid != null ? this.company(d.gid)?.code || '' : ''), csvCell(ct.name), csvPhone(ct.phone), csvCell(ct.email), csvCell(d.resp), csvCell(d.referral),
         csvCell(d.contactDate), csvCell(lastContact(S, d, today)), csvCell(d.jobStatus === 'closed' ? 'ปิดงาน ' + (d.closedDate || '') : 'เปิด'), csvCell(st.overall)]
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
-        .concat(C.services.map((x) => csvCell(d.service.includes(x) ? '✓' : '')), [csvCell(d.service.filter((x) => !C.services.includes(x)).join(', '))])
+        .concat(C.services.map((x) => csvCell(svcList.includes(x) ? '✓' : '')), [csvCell(svcList.filter((x) => !C.services.includes(x)).join(', '))])
         .concat(stepCells.map(csvCell), [csvCell(t.contacts), csvCell(otherSteps.join(' | '))])
         .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
         .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])

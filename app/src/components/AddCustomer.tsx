@@ -11,7 +11,7 @@ import { fmtN, todayISO } from '../lib/format';
 import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { followRows } from '../lib/follow';
 import { useSalesActs } from './SalesToast';
-import { SECTION_LABEL, clashSvc, clashing, jobsShown, named, rowPick, sendLine, sendState, sendTag, svcChoices, svcCommon, svcText, type SendState } from '../lib/jobs';
+import { SECTION_LABEL, SVC_ADD, clashSvc, clashing, jobsShown, named, rowPick, sendLine, sendState, sendTag, svcChoices, svcCommon, svcText, type SendState } from '../lib/jobs';
 import { JobSvc, SvcPick } from './SvcChips';
 import { jobWord } from './DealSvc';
 
@@ -208,7 +208,7 @@ export function AddCustomer() {
           )}
           {a.deal && !edit && (
             <div style={{ ...labelCol, gridColumn: '1 / -1' }}>
-              <SvcPick all={svcChoices(e.sales)} team={e.sales.cfg.services} value={svc} onChange={setSvc} disabled={ro || !e.can('edit.deal')} />
+              <SvcPick all={svcChoices(e.sales)} team={e.sales.cfg.services} value={svc} onChange={setSvc} hint={SVC_ADD.hintSave} disabled={ro || !e.can('edit.deal')} />
               <small className="t-meta">{SVC_HINT_ADD}</small>
             </div>
           )}
@@ -392,7 +392,7 @@ export function SendToTracker() {
         <SelField style={labelCol} text="ปี (พ.ศ.)" value={year} onChange={setYear} options={yearOpts(year)} />
       </div>
       <div style={labelCol}>
-        <SvcPick all={svcChoices(e.sales)} team={e.sales.cfg.services} value={svc} onChange={setSvc} disabled={ro} />
+        <SvcPick all={svcChoices(e.sales)} team={e.sales.cfg.services} value={svc} onChange={setSvc} hint={SVC_ADD.hintSave} disabled={ro} />
         <small className="t-meta">{!svc.length && inYear ? SVC_HINT_NONE : SVC_HINT}</small>
       </div>
       {cos.length > 1 && <span className="t-sec">{meta}</span>}

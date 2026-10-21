@@ -4,7 +4,8 @@
  */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { SvcPick } from './SvcChips';
+import { SvcPick, isAddKey } from './SvcChips';
+import { SVC_ADD } from '../lib/jobs';
 
 const ALL = ['CFO', 'T-VER', 'Net Zero Workshop'];
 const TEAM = ['CFO', 'T-VER'];
@@ -27,5 +28,21 @@ describe('the บริการ picker', () => {
     expect((html.match(/<input[^>]*disabled/g) || []).length).toBe(3);
     expect(html).not.toContain('svc-ck-add');
     expect(html).not.toContain('เพิ่มบริการใหม่');
+  });
+
+  it('the add field says when its name is kept: the deal panel saves it at once, a dialog when the job is saved', () => {
+    const panel = renderToStaticMarkup(<SvcPick all={ALL} team={TEAM} value={[]} onChange={() => {}} />);
+    expect(panel).toContain(SVC_ADD.hint);
+    const dialog = renderToStaticMarkup(<SvcPick all={ALL} team={TEAM} value={[]} onChange={() => {}} hint={SVC_ADD.hintSave} />);
+    expect(dialog).toContain(SVC_ADD.hintSave);
+    expect(dialog).not.toContain(SVC_ADD.hint);
+  });
+
+  it('Enter submits the add field, but not the Enter that only commits a Thai (IME) composition (Chrome: isComposing; Safari: keyCode 229)', () => {
+    expect(isAddKey({ key: 'Enter', keyCode: 13, isComposing: false })).toBe(true);
+    expect(isAddKey({ key: 'Enter', keyCode: 13 })).toBe(true);
+    expect(isAddKey({ key: 'Enter', keyCode: 13, isComposing: true })).toBe(false);
+    expect(isAddKey({ key: 'Enter', keyCode: 229, isComposing: false })).toBe(false);
+    expect(isAddKey({ key: 'a', keyCode: 65, isComposing: false })).toBe(false);
   });
 });

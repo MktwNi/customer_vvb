@@ -73,10 +73,14 @@ export const svcChoices = (s: SalesState) => svcOptions(s.cfg.services, usedServ
 /** The picker's add field (components/SvcChips.tsx SvcPick), in words. */
 export const SVC_ADD = Object.freeze({
   label: 'เพิ่มบริการใหม่',
+  /** the deal panel: the name is saved on this job at once */
   hint: 'ทุกคนในทีมจะเห็นบริการนี้ในรายการ',
+  /** the send and new-customer dialogs: the name is saved when the job is */
+  hintSave: 'จะอยู่ในรายการให้ทุกคนเห็นเมื่อบันทึกงานนี้',
   placeholder: 'ชื่อบริการ',
   button: 'เพิ่ม',
   empty: 'กรอกชื่อบริการก่อนกดเพิ่ม',
+  bare: 'ชื่อบริการต้องมีตัวอักษรหรือตัวเลข',
   long: 'ชื่อบริการต้องไม่เกิน 40 ตัวอักษร',
 });
 /** The longest name a service may have, counted in code points (a Thai letter is one). */
@@ -87,7 +91,7 @@ export const svcCount = (n: number) => (n ? `เลือกแล้ว ${n} �
 /** What the add field did: `name` is the service as it is kept ('' when refused), `value` the picked services
  *  after it, `options` the list after it, `on` whether the name is picked after it (false when refused). */
 export interface SvcAdd {
-  kind: 'empty' | 'long' | 'existing' | 'added';
+  kind: 'empty' | 'bare' | 'long' | 'existing' | 'added';
   name: string;
   msg: string;
   value: string[];
@@ -95,14 +99,17 @@ export interface SvcAdd {
   on: boolean;
 }
 
-/** The add field's rule: a blank or a name over SVC_MAX is refused and said; a name that matches one in the list
- *  (any case, any spacing) selects that one, never a duplicate; any other name is kept as typed (spaces
- *  collapsed) and picked. Pure: the caller stores the result. */
+/** The add field's rule: a blank, a name with no letter or digit, or a name over SVC_MAX is refused and said;
+ *  invisible characters (zero-width spaces, soft hyphens, a BOM) are removed first, so they cannot make a name
+ *  that looks blank or a second spelling of one that exists; a name that matches one in the list (any case, any
+ *  spacing) selects that one, never a duplicate; any other name is kept as typed (spaces collapsed) and picked.
+ *  Pure: the caller stores the result. */
 export function addSvcName(input: string, options: readonly string[], value: readonly string[]): SvcAdd {
-  const name = String(input ?? '').trim().replace(/\s+/g, ' ');
+  const name = String(input ?? '').replace(/\p{Cf}/gu, '').trim().replace(/\s+/g, ' ');
   const picked = svcClean(value);
-  const refuse = (kind: 'empty' | 'long', msg: string): SvcAdd => ({ kind, name: '', msg, value: picked, options: svcOptions(options, picked), on: false });
+  const refuse = (kind: 'empty' | 'bare' | 'long', msg: string): SvcAdd => ({ kind, name: '', msg, value: picked, options: svcOptions(options, picked), on: false });
   if (!name) return refuse('empty', SVC_ADD.empty);
+  if (!/[\p{L}\p{N}]/u.test(name)) return refuse('bare', SVC_ADD.bare);
   if ([...name].length > SVC_MAX) return refuse('long', SVC_ADD.long);
   const k = svcKey(name);
   const hit = svcOptions(options, picked).find((x) => svcKey(x) === k);

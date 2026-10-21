@@ -50,6 +50,18 @@ describe('the add field', () => {
     }
   });
 
+  it('invisible characters are not a name: a zero-width space alone is blank; one beside a name is removed, so it matches the listed one', () => {
+    for (const x of ['​', ' ​‌ ', '﻿', '­']) expect(addSvcName(x, OPT, ['CFO'])).toMatchObject({ kind: 'empty', name: '', on: false });
+    expect(addSvcName('CFO​', OPT, [])).toMatchObject({ kind: 'existing', name: 'CFO', value: ['CFO'], on: true });
+    expect(addSvcName('Lab­Audit', OPT, [])).toMatchObject({ kind: 'added', name: 'LabAudit', value: ['LabAudit'], on: true });
+  });
+
+  it('a name with no letter or digit (a symbol alone) is refused and said; a Thai letter or a digit is a name', () => {
+    for (const x of ['---', '+ / ', '…']) expect(addSvcName(x, OPT, ['CFO'])).toEqual({ kind: 'bare', name: '', msg: 'ชื่อบริการต้องมีตัวอักษรหรือตัวเลข', value: ['CFO'], options: OPT, on: false });
+    expect(addSvcName('ก', OPT, [])).toMatchObject({ kind: 'added', name: 'ก' });
+    expect(addSvcName('5G', OPT, [])).toMatchObject({ kind: 'added', name: '5G' });
+  });
+
   it('a name of 40 characters is added; 41 is refused as too long (a Thai letter counts as one)', () => {
     expect(SVC_MAX).toBe(40);
     expect(addSvcName('ก'.repeat(40), OPT, [])).toMatchObject({ kind: 'added', name: 'ก'.repeat(40), on: true });

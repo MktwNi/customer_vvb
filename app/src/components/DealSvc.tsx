@@ -33,7 +33,8 @@ export function DealSvcRow({ d }: { d: Deal }) {
   const head = jr === 'member' ? payerDeal(S, d) : d;
   const fromHead = head !== d && head.service.length > 0;
   const svc = jobServices(S, d);
-  const ro = !e.canDeal('edit.deal', d) || fromHead;
+  // a viewer (no edit.deal) sees the checklist read-only; a joint member's services belong to its header, so none is offered there
+  const canEdit = !fromHead && e.canDeal('edit.deal', d);
   const others = jr === 'header' ? [] : otherJobs(S, d, coJobs(e, d));
   const othersSvc = svcClean(others.flatMap((o) => jobServices(S, o)));
   const rep = repeats(S, d.service, others);
@@ -42,16 +43,16 @@ export function DealSvcRow({ d }: { d: Deal }) {
       <span className="dp-svc-l">บริการ</span>
       <JobSvc svc={svc} label={false} />
       {fromHead && <span className="t-meta">ตามใบเสนอราคาร่วม</span>}
-      {!ro && (
+      {!fromHead && (
         <button ref={btn} type="button" className="lnk" aria-expanded={open} onClick={() => setOpen(true)}>
-          {svc.length ? 'แก้บริการ' : 'เลือกบริการ'}
+          {!canEdit ? 'ดูบริการ' : svc.length ? 'แก้บริการ' : 'เลือกบริการ'}
         </button>
       )}
       {open && (
         <Pop anchor={btn} onClose={() => setOpen(false)} label="บริการของงานนี้" title="บริการของงานนี้" kind="dialog" width={520} className="val">
           <div className="dp-svc-pop">
-            <span className="t-sec">บริการของงานนี้ เลือกได้หลายบริการ ถ้าอยู่ในใบเสนอราคาเดียวกัน</span>
-            <SvcPick all={svcChoices(S)} team={S.cfg.services} value={d.service} onChange={(v) => e.updateDeal(d.id, { service: v })} label="บริการ" />
+            <span className="t-sec">{canEdit ? 'บริการของงานนี้ เลือกได้หลายบริการ ถ้าอยู่ในใบเสนอราคาเดียวกัน' : 'บริการของงานนี้ ดูได้อย่างเดียว'}</span>
+            <SvcPick all={svcChoices(S)} team={S.cfg.services} value={d.service} onChange={(v) => e.updateDeal(d.id, { service: v })} label="บริการ" disabled={!canEdit} />
             {rep.length > 0 ? (
               <span className="t-warn" role="status">{repeatWords(svcCommon(d.service, rep.flatMap((o) => jobServices(S, o))), rep.length, d.year)}</span>
             ) : othersSvc.length > 0 ? (

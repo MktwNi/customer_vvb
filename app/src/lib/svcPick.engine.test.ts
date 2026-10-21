@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { svcChoices } from './jobs';
+import { svcChoices, svcClean, svcKey } from './jobs';
 import { DEFAULT_SERVICES } from './sales';
 import { CV, type Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
@@ -177,5 +177,24 @@ describe('the names a job holds are listed for every job; the team list is not w
     const offered = svcChoices(O.e.sales);
     expect(offered.slice(0, DEFAULT_SERVICES.length)).toEqual(DEFAULT_SERVICES);
     expect(offered.slice(DEFAULT_SERVICES.length).sort()).toEqual(['Carbon Label Review', 'Lab Audit']);
+  });
+
+  it('two accounts add one name in two spellings to a job before either syncs: the job, the picker and the CSV name it once', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    const O = await member(L, 'orn', 'อร', 'sales');
+    const d = L.e.addDeal({ client: 'บริษัท ทดสอบชื่อซ้ำ จำกัด', year: '2569', resp: 'เอก' });
+    L.e.updateDeal(d.id, { service: ['CFO'] });
+    await settle(L, S, O);
+
+    S.e.updateDeal(d.id, { service: [...S.e.sales.deals[d.id].service, 'Lab Audit'] });
+    O.e.updateDeal(d.id, { service: [...O.e.sales.deals[d.id].service, 'lab audit'] });
+    await settle(L, S, O);
+    for (const t of [L, S, O]) expect(svcClean(t.e.sales.deals[d.id].service).filter((x) => svcKey(x) === 'lab audit')).toEqual(['Lab Audit']);
+    expect(svcChoices(O.e.sales).filter((x) => svcKey(x) === 'lab audit')).toEqual(['Lab Audit']);
+    // the CSV's "Services อื่น" cell names the service once, not once per spelling the sync kept
+    const row = L.e.salesCsv([L.e.sales.deals[d.id]]).split('\n').find((l) => l.includes('ทดสอบชื่อซ้ำ'));
+    expect(row).toBeDefined();
+    expect(row!.match(/lab audit/gi)).toEqual(['Lab Audit']);
   });
 });
