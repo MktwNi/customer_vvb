@@ -19,6 +19,11 @@ import { Select } from './Select';
 import { Kpi, Status } from './ui';
 import { useSalesActs } from './SalesToast';
 import { Band, ExcelDialog, TickBox, useOpenMonth } from './MonthCheck';
+// a joint quotation's money-out line named as its money-in line is: "ใบเสนอราคาร่วม QT-… · 4 บริษัท"
+import { SubLine } from './MonthCheck';
+import { jointLineParts } from '../lib/cashUi';
+import { jointOf } from '../lib/sales';
+import { jointNo } from '../lib/joint';
 
 /**
  * Job expenses in the Cashflow tab, for those who see them (ดูค่าใช้จ่ายและกำไรของงาน; lib/expenseMoney.ts does
@@ -437,7 +442,10 @@ function XName({ S, r }: { S: SalesState; r: XRow }) {
   const d = r.deal;
   const c = d && d.gid != null ? e.company(d.gid) : undefined;
   const j = r.x?.joint;
-  const sub = !d ? 'งานนี้ถูกลบแล้ว' : j ? (j.role === 'header' ? `ใบเสนอราคาร่วม ${j.members} บริษัท${j.part ? ` · ส่วนของ ${j.part} บริษัท` : ''}` : 'บริษัทในใบเสนอราคาร่วม') : [dealMoney(S, d).fcDoc?.docNo, d.section].filter(Boolean).join(' · ');
+  // a joint quotation's, with its number, as the money-in lines of the same card (review): "ใบเสนอราคาร่วม
+  // QT-… · 4 บริษัท[ · ส่วนของ 1 บริษัท]"; one company's "บริษัทในใบเสนอราคาร่วม QT-…" (cashUi jointLineParts)
+  const g = d && j ? jointOf(S, d) : null;
+  const sub = !d ? ['งานนี้ถูกลบแล้ว'] : j ? jointLineParts({ joint: j }, g ? jointNo(S, g) : '') : [dealMoney(S, d).fcDoc?.docNo || '', d.section];
   const name = d ? shortName(d.client) : 'งานที่ถูกลบ';
   return (
     <span className="cf-nmw">
@@ -447,7 +455,7 @@ function XName({ S, r }: { S: SalesState; r: XRow }) {
           {d ? <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={`${d.client} เปิดรายละเอียด`}>{name}</button> : <span className="cf-nm-b co-name dense">{name}</span>}
           {d && <JobSvc svc={jobServices(S, d)} none={false} />}
         </span>
-        <span className="cf-nm-s">{sub}{d?.resp ? ` · ${d.resp}` : ''}</span>
+        <SubLine w={[...sub, d?.resp || ''].filter(Boolean)} wrap={!!j} />
       </span>
     </span>
   );

@@ -297,9 +297,10 @@ describe('one row per company and year; the CSV; money once in Cashflow', () => 
     const cell = (row: string, k: string) => row.split('","')[at(k)]?.replace(/"/g, '');
     expect(at('ใบเสนอราคาร่วม')).toBeGreaterThan(0);
     expect(csv[0].endsWith('"แผนชำระ"')).toBe(true);
-    expect(cell(csv[1], 'ใบเสนอราคาร่วม')).toBe('ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · ผู้จ่าย · 2 บริษัท');
+    // (the payer first, then the quotation: the screens' order)
+    expect(cell(csv[1], 'ใบเสนอราคาร่วม')).toBe(`${PAYER} · ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · ผู้จ่าย · 2 บริษัท`);
     expect(cell(csv[1], 'FORECAST (บาท)')).toBe('1284000');
-    expect(cell(csv[2], 'ใบเสนอราคาร่วม')).toBe('ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · บริษัทร่วม · ส่วนแบ่ง 642,000');
+    expect(cell(csv[2], 'ใบเสนอราคาร่วม')).toBe(`${PAYER} · ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · บริษัทร่วม · ส่วนแบ่ง 642,000`);
     expect(cell(csv[2], 'FORECAST (บาท)')).toBe('');
     // Cashflow: the payer's installment, once, with the member count
     const lines = cashLines(S, Object.values(S.deals), TODAY);

@@ -534,7 +534,8 @@ export function lineLabel(r: Pick<ChkRow, 'line' | 'lineId'>, s?: SalesState): s
 }
 /** The installment column: "งวด 1/2" or "ไม่มีแผน", and under it the stage or where the money came in. */
 export function instOf(r: ChkRow, s?: SalesState): { text: string; sub: string } {
-  if (r.line) return { text: instText(r.line), sub: r.line.joint ? 'ผู้จ่าย ' + r.line.deal.client : r.line.src === 'typed' && r.line.stage ? 'รับที่ ' + (r.line.code || r.line.stage) : instSub(r.line) };
+  // (a joint quotation's payer is the line's name now, its quotation under it: no "ผู้จ่าย …" here)
+  if (r.line) return { text: instText(r.line), sub: r.line.src === 'typed' && r.line.stage ? 'รับที่ ' + (r.line.code || r.line.stage) : instSub(r.line) };
   // an orphan: the stage it was, or the document / typed Actual of a deal without a plan
   const stage = r.lineId !== 'typed' && !r.lineId.startsWith('doc.');
   return { text: stage ? r.lineId : 'ไม่มีแผน', sub: stage ? 'งวดที่ยกเลิก' : lineLabel(r, s) };

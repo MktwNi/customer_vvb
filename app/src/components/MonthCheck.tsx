@@ -22,6 +22,10 @@ import { Status } from './ui';
 import { useSalesActs } from './SalesToast';
 // money out in the same file (job expenses, for those who see them; components/ExpCash.tsx)
 import { X_PREVIEW_HEAD, expSheets, xSheetPreview, type XRow } from '../lib/expenseMoney';
+// a joint quotation's line: its payer is the name (payerName), the quotation goes under it
+import { jointLineParts } from '../lib/cashUi';
+import { jointOf } from '../lib/sales';
+import { jointNo } from '../lib/joint';
 
 /**
  * The month check for accounting under the Cashflow chart ("ตรวจรับเงิน", cash impl-note "Follow-up: month
@@ -116,8 +120,36 @@ function undatedWhy(S: SalesState, l: CashLine) {
   return 'งวดนี้ยังไม่มีวันครบกำหนด';
 }
 
-/** The grey line under a client: its quotation number and หมวด. */
-const subOf = (S: SalesState, d: Deal | null) => (d ? [dealMoney(S, d).fcDoc?.docNo, d.section].filter(Boolean).join(' · ') : 'งานนี้ถูกลบแล้ว');
+/** A joint quotation's line under its payer, in parts: ["ใบเสนอราคาร่วม QT-…", "4 บริษัท"] ([] for any other line). */
+const jointSub = (S: SalesState, l: CashLine | null | undefined) => {
+  const g = l?.joint ? jointOf(S, l.deal) : null;
+  return l ? jointLineParts(l, g ? jointNo(S, g) : dealMoney(S, l.deal).fcDoc?.docNo) : [];
+};
+/** The grey line under a client, in parts: its quotation number (a joint quotation's line: the quotation, jointSub) and หมวด. */
+const subOf = (S: SalesState, d: Deal | null, l?: CashLine | null) => (d ? [...(l?.joint ? jointSub(S, l) : [dealMoney(S, d).fcDoc?.docNo || '']), d.section].filter(Boolean) : ['งานนี้ถูกลบแล้ว']);
+/** The name's tooltip: the client's whole name, a joint quotation's line with its quotation and its part. */
+const tipOf = (S: SalesState, d: Deal, l?: CashLine | null) => [d.client, ...(l?.joint ? jointSub(S, l) : [])].join(' · ');
+/**
+ * The grey line under a name (`w` its parts; `children` before it, the cross-year chip). A joint quotation's line
+ * wraps between its parts, each moved down whole ("11 บริษัท", "ส่วนของ 2 บริษัท"; only one wider than the column
+ * wraps at its space, never inside "QT2026060019"): its number, its count and its part are read whole at 1366
+ * (review: cut on one line, the part a filter counts could not be read at all). Any other line stays one line,
+ * cut short. Also the money-out list's (ExpCash), whose column is narrower.
+ */
+export function SubLine({ w, wrap, children }: { w: string[]; wrap: boolean; children?: ReactNode }) {
+  if (!wrap) return <span className="cf-nm-s">{children}{w.join(' · ')}</span>;
+  return (
+    <span className="cf-nm-s wrap">
+      {children}
+      {w.map((x, i) => (
+        <Fragment key={i}>
+          {i ? ' ' : ''}
+          <span className="cf-nw">{x + (i < w.length - 1 ? ' ·' : '')}</span>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
 const nameOf = (r: ChkRow) => (r.line ? payerName(r.line, shortName) : r.deal ? shortName(r.deal.client) : 'งานที่ถูกลบ');
 
 // ------------------------------------------------------------------ the card
@@ -548,16 +580,16 @@ function NameCell({ S, r, onOpen, tag }: { S: SalesState; r: ChkRow; onOpen: () 
       <span className="cf-nm">
         <span className="cf-nm-l">
           {r.deal ? (
-            <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={onOpen} title={`${nameOf(r)} · ${r.deal.client} เปิดรายละเอียด`}>{nameOf(r)}</button>
+            <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={onOpen} title={`${tipOf(S, r.deal, r.line)} · เปิดรายละเอียด`}>{nameOf(r)}</button>
           ) : (
             <span className="cf-nm-b co-name dense">{nameOf(r)}</span>
           )}
           {/* the job's services: two jobs of one company are told apart */}
           {r.deal && <JobSvc svc={jobServices(S, r.deal)} none={false} />}
         </span>
-        {/* the cross-year chip on the second line: the name (a joint quotation's "มจพ · ใบเสนอราคาร่วม 4 บริษัท")
-            keeps the first line whole at 1366 */}
-        <span className="cf-nm-s">{tag && <span className="chip cf-tag" title={tag}>{tag}</span>}{subOf(S, r.deal)}</span>
+        {/* the cross-year chip on the second line: the name keeps the first line whole at 1366 (a joint
+            quotation's line: its payer, "ใบเสนอราคาร่วม QT-… · 4 บริษัท" here) */}
+        <SubLine w={subOf(S, r.deal, r.line)} wrap={!!r.line?.joint}>{tag && <span className="chip cf-tag" title={tag}>{tag}</span>}</SubLine>
       </span>
     </span>
   );
@@ -586,8 +618,8 @@ function UndatedRow({ S, l }: { S: SalesState; l: CashLine }) {
         <span className="cf-nmw">
           <CoAvatar name={c?.name || l.deal.client} web={c?.web} set={c?.set} size={32} />
           <span className="cf-nm">
-            <span className="cf-nm-l"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={l.deal.client}>{payerName(l, shortName)}</button><JobSvc svc={jobServices(S, l.deal)} none={false} /></span>
-            <span className="cf-nm-s">{subOf(S, l.deal)}</span>
+            <span className="cf-nm-l"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={tipOf(S, l.deal, l)}>{payerName(l, shortName)}</button><JobSvc svc={jobServices(S, l.deal)} none={false} /></span>
+            <SubLine w={subOf(S, l.deal, l)} wrap={!!l.joint} />
           </span>
         </span>
       </td>
@@ -622,6 +654,7 @@ function PhoneList({ S, groups, sumOf, undated, today, ctl }: { S: SalesState; g
                   {r.deal && <JobSvc svc={jobServices(S, r.deal)} none={false} />}
                   <span className="cf-amt">{m0(r.amt)}</span>
                 </div>
+                {r.line?.joint && <div className="cf-mi-2"><span>{jointSub(S, r.line).join(' · ')}</span></div>}
                 <div className="cf-mi-2"><span>{inst.text} · {got ? `รับ ${dmTh(r.date)}` : `ครบกำหนด ${dmTh(r.date)}`}{r.kind === 'got' && r.by.length ? ` · บันทึกโดย ${r.by.join(', ')}` : ''}</span></div>
                 {r.kind === 'got' && <div className="cf-mi-2"><span>หลักฐาน</span><Evidence r={r} short /><span>· {basisWord(r)}</span></div>}
                 {ctl.tag(r.dealId) && <div className="cf-mi-2"><span className="chip">{ctl.tag(r.dealId)}</span></div>}
@@ -641,6 +674,7 @@ function PhoneList({ S, groups, sumOf, undated, today, ctl }: { S: SalesState; g
           {undated.map((l) => (
             <div key={l.id} className="mc-mi">
               <div className="cf-mi-1"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={l.deal.client}>{payerName(l, shortName)}</button><span className="cf-amt">{m0(l.amt)}</span></div>
+              {l.joint && <div className="cf-mi-2"><span>{jointSub(S, l).join(' · ')}</span></div>}
               <div className="cf-mi-2"><span>{instText(l)} · {undatedWhy(S, l)}</span></div>
               <div className="cf-mi-2"><UndatedAct l={l} /></div>
             </div>
