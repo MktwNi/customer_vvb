@@ -56,6 +56,83 @@ export const surelyOther = (a: readonly string[], b: readonly string[]) => named
 
 /** The services in words: "CFO, CFP" ('' for none). */
 export const svcText = (list: readonly string[]) => svcClean(list).join(', ');
+
+/** The names the service picker offers: the team's list, then the given ones (a job's own, the names a job
+ *  holds), each once by svcKey, the first spelling kept ("T-VER" before "t-ver"). */
+export function svcOptions(team: readonly string[], used: readonly string[]): string[] {
+  return svcClean([...team, ...used]);
+}
+/** Every service a job of the tracker holds, each once: any year, a joint quotation's header too (a blank one
+ *  is not a service). Nothing is stored for it: a name is listed for everyone while a job holds it. */
+export function usedServices(s: SalesState): string[] {
+  return svcClean(Object.values(s.deals).flatMap((d) => d.service ?? []));
+}
+/** What the service picker offers for the tracker `s`: the team's list with every service its jobs hold. */
+export const svcChoices = (s: SalesState) => svcOptions(s.cfg.services, usedServices(s));
+
+/** The picker's add field (components/SvcChips.tsx SvcPick), in words. */
+export const SVC_ADD = Object.freeze({
+  label: 'เพิ่มบริการใหม่',
+  /** the deal panel: the name is saved on this job at once */
+  hint: 'ทุกคนในทีมจะเห็นบริการนี้ในรายการ',
+  /** the send and new-customer dialogs: the name is saved when the job is */
+  hintSave: 'จะอยู่ในรายการให้ทุกคนเห็นเมื่อบันทึกงานนี้',
+  placeholder: 'ชื่อบริการ',
+  button: 'เพิ่ม',
+  empty: 'กรอกชื่อบริการก่อนกดเพิ่ม',
+  bare: 'ชื่อบริการต้องมีตัวอักษรหรือตัวเลข',
+  long: 'ชื่อบริการต้องไม่เกิน 40 ตัวอักษร',
+});
+/** The longest name a service may have, counted in code points (a Thai letter is one). */
+export const SVC_MAX = 40;
+/** The picker's count line: "เลือกแล้ว 2 บริการ", "ยังไม่ได้เลือกบริการ". */
+export const svcCount = (n: number) => (n ? `เลือกแล้ว ${n} บริการ` : 'ยังไม่ได้เลือกบริการ');
+
+/** What the add field did: `name` is the service as it is kept ('' when refused), `value` the picked services
+ *  after it, `options` the list after it, `on` whether the name is picked after it (false when refused). */
+export interface SvcAdd {
+  kind: 'empty' | 'bare' | 'long' | 'existing' | 'added';
+  name: string;
+  msg: string;
+  value: string[];
+  options: string[];
+  on: boolean;
+}
+
+/** The add field's rule: a blank, a name with no letter or digit, or a name over SVC_MAX is refused and said;
+ *  invisible characters (zero-width spaces, soft hyphens, a BOM) are removed first, so they cannot make a name
+ *  that looks blank or a second spelling of one that exists; a name that matches one in the list (any case, any
+ *  spacing) selects that one, never a duplicate; any other name is kept as typed (spaces collapsed) and picked.
+ *  Pure: the caller stores the result. */
+export function addSvcName(input: string, options: readonly string[], value: readonly string[]): SvcAdd {
+  const name = String(input ?? '').replace(/\p{Cf}/gu, '').trim().replace(/\s+/g, ' ');
+  const picked = svcClean(value);
+  const refuse = (kind: 'empty' | 'bare' | 'long', msg: string): SvcAdd => ({ kind, name: '', msg, value: picked, options: svcOptions(options, picked), on: false });
+  if (!name) return refuse('empty', SVC_ADD.empty);
+  if (!/[\p{L}\p{N}]/u.test(name)) return refuse('bare', SVC_ADD.bare);
+  if ([...name].length > SVC_MAX) return refuse('long', SVC_ADD.long);
+  const k = svcKey(name);
+  const hit = svcOptions(options, picked).find((x) => svcKey(x) === k);
+  if (hit) {
+    const on = picked.some((x) => svcKey(x) === k);
+    return {
+      kind: 'existing',
+      name: hit,
+      msg: `มีบริการ “${hit}” อยู่แล้ว ` + (on ? 'และเลือกไว้แล้ว' : 'เลือกให้แล้ว'),
+      value: on ? picked : svcClean([...picked, hit]),
+      options: svcOptions(options, [...picked, hit]),
+      on: true,
+    };
+  }
+  return {
+    kind: 'added',
+    name,
+    msg: `เพิ่ม “${name}” แล้ว และเลือกไว้แล้ว`,
+    value: svcClean([...picked, name]),
+    options: svcOptions(options, [...picked, name]),
+    on: true,
+  };
+}
 /** A job's name where two jobs of one company must be told apart (toasts, the bell, aria labels, pickers):
  *  "ทองมงคล · CFP"; the name alone when it lists no service. */
 export const withSvc = (name: string, svc: readonly string[]) => (named(svc) ? `${name} · ${svcText(svc)}` : name);

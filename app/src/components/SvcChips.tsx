@@ -1,7 +1,6 @@
-import type { CSSProperties } from 'react';
-import { SVC_TYPE_LABEL, chipTitle, chipVars, svcType, typeOfService, type CustTypes } from '../lib/svcType';
-import { NO_SVC, SVC_LABEL, svcClean, svcKey, svcText } from '../lib/jobs';
-import { Tick } from './Pop';
+import { useId, useRef, useState } from 'react';
+import { SVC_TYPE_LABEL, chipTitle, chipVars, svcGroups, svcType, typeOfService, type CustTypes } from '../lib/svcType';
+import { NO_SVC, SVC_ADD, SVC_LABEL, addSvcName, svcClean, svcCount, svcKey, svcOptions, svcText } from '../lib/jobs';
 
 /** A company's service types (lib/svcType.ts) as calm chips beside its name: each type's word in its ink on
  *  its tint, in list order ("CFO", "ทวนสอบ"; several when its jobs are of several types). The word is always
@@ -48,32 +47,94 @@ export function JobSvc({ svc, none = true, className = '', label = true, max = 0
   );
 }
 
-/** The บริการ picker (the send dialog, เพิ่มลูกค้า, the deal panel): the team's services as toggle buttons; a
- *  picked one in its type's colours with a check (the word is always there). Several may be picked: one job
- *  quoted together. */
-export function SvcPick({ all, value, onChange, label = SVC_LABEL, disabled }: { all: readonly string[]; value: readonly string[]; onChange: (v: string[]) => void; label?: string; disabled?: boolean }) {
-  const on = new Set(value.map(svcKey));
-  // a service the job holds that the team's list no longer has stays shown, so it can be taken off
-  const opts = svcClean([...all, ...value]);
+/** Does this key press submit the add field? Enter does, except the Enter that only commits a Thai (IME)
+ *  composition: Chrome reports it while composing (isComposing), Safari as keyCode 229. */
+export function isAddKey(k: { key: string; keyCode?: number; isComposing?: boolean }): boolean {
+  return k.key === 'Enter' && !k.isComposing && k.keyCode !== 229;
+}
+
+/**
+ * The บริการ picker (the deal panel, เพิ่มลูกค้า, the send dialog): a formal checklist in a bordered panel. The
+ * legend is `label`; the count line says how many are picked; the names are grouped under their type's plain
+ * heading (lib/svcType.ts svcGroups), each a native checkbox, so Tab, Space and the state are the browser's.
+ * `all`: the names offered (the team's list and every service a job holds, lib/jobs.ts svcChoices); `team`: the
+ * team's list alone (it tells a name with no type, อื่นๆ, from one a salesperson added). The add field stores
+ * a new name in the list at once (it is picked here, and a job's own value takes it on save); `hint` says when
+ * the name is kept (SVC_ADD.hint, or SVC_ADD.hintSave where the job is not saved yet); `disabled` shows the list
+ * read-only with no add field. A name this panel added or ticked stays listed while it is open, so the box a
+ * keyboard user just used is not removed under the cursor.
+ */
+export function SvcPick({ all, team, value, onChange, label = SVC_LABEL, hint = SVC_ADD.hint, disabled }: { all: readonly string[]; team: readonly string[]; value: readonly string[]; onChange: (v: string[]) => void; label?: string; hint?: string; disabled?: boolean }) {
+  const uid = useId();
+  const [kept, setKept] = useState<string[]>([]);
+  const [text, setText] = useState('');
+  const [msg, setMsg] = useState({ text: '', err: false });
+  const input = useRef<HTMLInputElement>(null);
+  const picked = svcClean(value);
+  const on = new Set(picked.map(svcKey));
+  // the job's own services stay listed even when the team's list no longer has them, so they can be taken off
+  const opts = svcOptions(all, [...kept, ...picked]);
+  const groups = svcGroups(opts, team);
+  const pick = (x: string) => {
+    const p = on.has(svcKey(x));
+    setKept((k) => svcClean([...k, x]));
+    onChange(p ? picked.filter((y) => svcKey(y) !== svcKey(x)) : svcClean([...picked, x]));
+  };
+  const add = () => {
+    const r = addSvcName(text, opts, picked);
+    setMsg({ text: r.msg, err: r.kind !== 'existing' && r.kind !== 'added' });
+    if (r.name) setKept((k) => svcClean([...k, r.name]));
+    if (r.kind === 'added' || r.kind === 'existing') setText('');
+    if (r.value.length !== picked.length || r.value.some((x, i) => x !== picked[i])) onChange(r.value);
+    input.current?.focus();
+  };
   return (
-    <div className="svp" role="group" aria-label={label}>
-      {opts.map((x) => {
-        const p = on.has(svcKey(x)), t = typeOfService(x) || 'oth', T = svcType(t);
-        return (
-          <button
-            key={x}
-            type="button"
-            aria-pressed={p}
-            disabled={disabled}
-            className={'svp-o' + (p ? ' on' : ' hv')}
-            style={{ '--k': T.ink, '--kb': T.tint, '--km': T.mark } as CSSProperties}
-            onClick={() => onChange(p ? value.filter((y) => svcKey(y) !== svcKey(x)) : svcClean([...value, x]))}
-          >
-            {p && <Tick size={14} />}
-            <span>{x}</span>
-          </button>
-        );
-      })}
-    </div>
+    <fieldset className="svc-ck" disabled={disabled}>
+      <legend>{label}</legend>
+      <p className="svc-ck-count" aria-live="polite">{svcCount(picked.length)}</p>
+      <div className="svc-ck-list">
+        {groups.map((g) => (
+          <div key={g.id} className="svc-ck-g" role="group" aria-labelledby={`${uid}-${g.id}`}>
+            <div className="svc-ck-h">
+              <b id={`${uid}-${g.id}`}>{g.title}</b>
+              <span>{g.desc}</span>
+            </div>
+            {g.items.map((x) => (
+              <label key={x} className="svc-ck-o">
+                <input type="checkbox" checked={on.has(svcKey(x))} disabled={disabled} onChange={() => pick(x)} />
+                <span>{x}</span>
+              </label>
+            ))}
+          </div>
+        ))}
+      </div>
+      {!disabled && (
+        <div className="svc-ck-add">
+          <div className="svc-ck-addhead">
+            <label htmlFor={`${uid}-new`}>{SVC_ADD.label}</label>
+            <span>{hint}</span>
+          </div>
+          <div className="svc-ck-row">
+            <input
+              id={`${uid}-new`}
+              ref={input}
+              type="text"
+              value={text}
+              placeholder={SVC_ADD.placeholder}
+              autoComplete="off"
+              onChange={(ev) => setText(ev.target.value)}
+              onKeyDown={(ev) => {
+                if (isAddKey({ key: ev.key, keyCode: ev.keyCode, isComposing: ev.nativeEvent.isComposing })) {
+                  ev.preventDefault();
+                  add();
+                }
+              }}
+            />
+            <button type="button" className="btn sm" onClick={add}>{SVC_ADD.button}</button>
+          </div>
+          <p className={'svc-ck-msg' + (msg.err ? ' err' : '')} role="status">{msg.text}</p>
+        </div>
+      )}
+    </fieldset>
   );
 }

@@ -222,3 +222,38 @@ export function typeCounts<R>(rows: readonly R[], typesOfRow: (r: R) => readonly
   for (const r of rows) for (const t of new Set(typesOfRow(r))) n[t]++;
   return n;
 }
+
+// ------------------------------------------------------------------ the service picker's groups
+
+/** The group of the names a job's salesperson added (not a type, not on the team's list). */
+export const SVC_CUSTOM = Object.freeze({ id: 'custom', n: 'บริการที่เพิ่มเอง', d: 'เพิ่มจากงานของทีม ยังไม่อยู่ในรายการตั้งค่า' });
+/** One group of the service picker: a heading (`title`, `desc`) over its names, sorted. */
+export interface SvcGroup { readonly id: string; readonly title: string; readonly desc: string; readonly items: readonly string[] }
+
+/** The service picker's groups for `options` (lib/jobs.ts svcOptions), in list order (the types, then the custom
+ *  group). A name a type lists goes under its type, even one the team's list no longer has (a job's own service
+ *  can always be unticked); a team-list name with no type goes under อื่นๆ; any other under บริการที่เพิ่มเอง.
+ *  Names sorted (th, numeric); an empty group is left out. */
+export function svcGroups(options: readonly string[], team: readonly string[]): SvcGroup[] {
+  const teamK = new Set(team.map(svcKey).filter(Boolean));
+  const by = new Map<string, string[]>();
+  for (const x of options) {
+    const k = svcKey(x);
+    if (!k) continue;
+    const t = typeOfService(x);
+    const g = t && t !== 'oth' ? t : teamK.has(k) ? 'oth' : SVC_CUSTOM.id;
+    const l = by.get(g);
+    const name = x.trim().replace(/\s+/g, ' ');
+    if (l) l.push(name);
+    else by.set(g, [name]);
+  }
+  const cmp = (a: string, b: string) => a.localeCompare(b, 'th', { numeric: true, sensitivity: 'base' });
+  const groups: SvcGroup[] = [];
+  for (const t of SVC_TYPES) {
+    const items = by.get(t.id);
+    if (items && t.id !== 'none') groups.push({ id: t.id, title: t.n, desc: t.d, items: items.sort(cmp) });
+  }
+  const custom = by.get(SVC_CUSTOM.id);
+  if (custom) groups.push({ id: SVC_CUSTOM.id, title: SVC_CUSTOM.n, desc: SVC_CUSTOM.d, items: custom.sort(cmp) });
+  return groups;
+}
