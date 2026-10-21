@@ -4,7 +4,9 @@
  * - a plan set on a deal that counts the receipt twice carries 60,000 to every browser, never 121,730.77;
  * - one tap at a plan line well past the Forecast writes nothing anywhere;
  * - set right with the card's own choice (Actual) and the plan at 60,000: Forecast QT v2 60,000, Actual 60,000
- *   from the receipt, PAY paid, still closed — in every browser.
+ *   from the receipt, PAY paid, still closed — in every browser;
+ * - an invoice an older build counted as the Forecast, its receipt counted at PAY: its card's form saved as it
+ *   opens counts nothing twice, and the quotation card takes the Forecast back from a quotation filed at PAY.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,7 +17,7 @@ import { memoryStore } from './storage';
 import { DEAL_STAGE, dealMoney, docsOf, dupCounted, formTarget, planOf, targetWrong, type Deal, type DealDoc } from './sales';
 import { acFig, fcFig } from './salesUi';
 import { receiveNow, recvPlan } from './attachPlan';
-import { qtView } from './quotes';
+import { qtFcElse, qtView } from './quotes';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -189,5 +191,38 @@ describe('team mode: the receipt counted as the Forecast, and setting it right',
     const F = await fresh();
     for (const t of [O, M, F])
       expect(view(t, id)).toEqual({ fc: 60000, fcFrom: 'quotation', ac: 60000, acWord: 'จากเอกสาร', receipts: 'PAY1:actual:60000,PAY1:none:61730.77', plan: 'PAY 60000 got 60000 paid', job: 'closed' });
+  });
+  it('the card form as it opens never doubles Actual, and the quotation card takes the Forecast back, in every browser', async () => {
+    const { O, M } = await team();
+    at('2026-10-20T01:30:00Z');
+    const id = M.e.addDeal({ client: 'บริษัท ทดสอบใบแจ้งหนี้ จำกัด', section: 'Partner', resp: 'หมิว', year: '2569' } as Partial<Deal>).id;
+    await M.e.attachDoc(id, pdf('QT2026080001.pdf', 7000), { kind: 'quotation', amount: 60000, target: 'forecast', basis: 'total', detected: 60000, docNo: 'QT2026080001', docDate: '2026-08-20', stage: 'QUOTATION' });
+    M.e.setStep(id, DEAL_STAGE, { d: '2026-10-20', n: 'YES' });
+    // an older build's choices: the invoice as the Forecast, a quotation filed at PAY1 as the Forecast too
+    at('2026-10-20T02:00:00Z');
+    await M.e.attachDoc(id, pdf('BL2026080006.pdf', 6000), { kind: 'invoice', amount: 61730.77, target: 'forecast', basis: 'total', detected: 61730.77, docNo: 'BL2026080006', docDate: '2026-08-25', stage: 'PAY1' });
+    await M.e.attachDoc(id, pdf(RN, 319147), { kind: 'receipt', amount: 60000, target: 'actual', basis: 'netPay', detected: 60000, docNo: 'INV2026090004', docDate: '2026-09-28', stage: 'PAY1' });
+    at('2026-10-20T02:10:00Z');
+    await M.e.attachDoc(id, pdf('QT2026080009.pdf', 7100), { kind: 'quotation', amount: 64200, target: 'forecast', basis: 'total', detected: 64200, docNo: 'QT2026080009', docDate: '2026-08-21', stage: 'PAY1' });
+    await settle(M, O);
+    expect(view(O, id)).toMatchObject({ fc: 64200, ac: 60000 });
+    // the owner: the invoice card's form saved as it opens ("ไม่นับยอด": its receipt counts at PAY1)
+    at('2026-10-20T03:00:00Z');
+    const iv = doc(O, id, (z) => z.kind === 'invoice');
+    expect(formTarget(O.e.sales, O.e.sales.deals[id], iv)).toBe('none');
+    O.e.updateDoc(id, iv.id, { target: formTarget(O.e.sales, O.e.sales.deals[id], iv) });
+    // หมิว: the quotation card's "ใช้ฉบับที่ 1 เป็น Forecast" (what QtCard runs)
+    await settle(O, M);
+    const f = qtFcElse(M.e.sales, M.e.sales.deals[id])!, head = qtView(M.e.sales, M.e.sales.deals[id]).head!.doc;
+    expect(f.docNo).toBe('QT2026080009');
+    at('2026-10-20T03:10:00Z');
+    M.e.updateDoc(id, f.id, { target: 'none' });
+    if (dealMoney(M.e.sales, M.e.sales.deals[id]).fcDoc?.id !== head.id) M.e.updateDoc(id, head.id, { target: 'forecast' }, { log: false, confirm: true });
+    await settle(M, O);
+    const F = await fresh();
+    for (const t of [O, M, F]) {
+      const S = t.e.sales, d = S.deals[id];
+      expect({ fc: dealMoney(S, d).forecast, from: dealMoney(S, d).fcDoc?.docNo, ac: dealMoney(S, d).actual, dup: dupCounted(S, d).length, else: qtFcElse(S, d) }).toEqual({ fc: 60000, from: 'QT2026080001', ac: 60000, dup: 0, else: null });
+    }
   });
 });

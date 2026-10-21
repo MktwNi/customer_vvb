@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
 import {
-  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, beYear, closeReady, dealMoney, dealResult, dealSteps, countedCopy, docMismatch, docTargets, docsOf, dueOf, dupCounted, fmtMoney, formTarget, targetWrong,
+  ACT_TH, DEAL_STAGE, HOW_TH, KIND_TH, NOTE_MAX, PLAN_MAX, QUOTE_STAGE, actsOf, beYear, closeReady, dealMoney, dealResult, dealSteps, docMismatch, docsOf, dueOf, dupCounted, fmtMoney, formTarget, formTargets, targetWrong,
   lastContactInfo, mismatchText, overdueDays, owedNoPlan, paidNote, parseAmount, payStageFor, payStages, payState, planLines, planStart, planOf, splitAmounts, stepCode, stepOf, whtRate, wonDate,
   type Deal, type DealAct, type DealDoc, type DocKind, type DocTarget, type LineView, type PayHow, type PlanInput, type StageState, type StepView,
 } from '../lib/sales';
@@ -11,7 +11,7 @@ import { OLD_TH } from '../lib/steps';
 import { CLOSE_TITLE, DUP_HINT, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, shortName, stepEdit, type FigView } from '../lib/salesUi';
 import { SHOWABLE, openDocFile } from './DocAttach';
 import { useAttach } from './AttachProvider';
-import { overWords, panelEntry, recvPlan, type AttachEntry } from '../lib/attachPlan';
+import { docFormNote, overWords, panelEntry, recvPlan, type AttachEntry } from '../lib/attachPlan';
 import { DocThumb } from './DocThumb';
 import { QtCard } from './QtCard';
 import { isQtVersion, qtView } from '../lib/quotes';
@@ -209,22 +209,19 @@ function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boole
   const [busy, setBusy] = useState('');
   const [link, setLink] = useState('');
   const [tick, setTick] = useState(0);
-  // "แก้ยอด / ประเภท": what it counts toward follows its type (lib/sales docTargets) — a receipt is never the
-  // Forecast; one an older build counted so opens on its type's own (Actual, or "ไม่นับยอด" when another copy
-  // of it counts already: lib/sales formTarget) and says what saving does
+  // "แก้ยอด / ประเภท": what it counts toward follows its type (lib/sales formTargets) — a receipt is never the
+  // Forecast. It opens on what the document counts toward now, so saving its number moves no money; one an
+  // older build counted toward what its type never is opens on what is safe (lib/sales formTarget: never a
+  // quotation into the Forecast, never money counted twice), and the form says what saving does to the
+  // Forecast and the Actual whenever what it counts toward or its type changes (lib/attachPlan docFormNote)
   const wrong = targetWrong(doc);
   const [kind, setKind] = useState<DocKind>(doc.kind);
   const [target, setTarget] = useState<DocTarget>(() => formTarget(e.sales, d, doc));
+  const [amt, setAmt] = useState<string | null>(null);
   const pickKind = (k: DocKind) => (setKind(k), setTarget((t) => formTarget(e.sales, d, doc, k, t)));
-  const editNow = () => (setKind(doc.kind), setTarget(formTarget(e.sales, d, doc)), setOpen(true), setEdit(true));
-  // what saving the form says about a document counted toward what its type never is: what it counts as
-  // now, and the Forecast once it stops being it (the quotation's, a typed one, or none)
-  const wrongNote = () => {
-    const copy = target === 'none' ? countedCopy(e.sales, d, doc) : null;
-    const now = target === 'none' ? `จะไม่นับยอด${copy ? ` (ใบนี้รวมใน Actual แล้ว${copy.stage ? ' ที่ขั้น ' + stepCode(e.sales, d, copy.stage, todayISO()) : ''})` : ''}` : `จะนับเป็น ${TARGET_OPT[target]}`;
-    const fc = wrong === 'forecast' ? dealMoney({ ...e.sales, docs: { ...e.sales.docs, [`${d.id}/${doc.id}`]: { ...doc, target: 'none' } } }, d).forecast : null;
-    return `เดิม${wrong === 'forecast' ? 'นับเป็น Forecast' : 'รวมใน Actual'} · บันทึกแล้ว${now}${fc != null ? ` · Forecast จะเป็น ${fmtMoney(fc)} บาท` : ''}`;
-  };
+  const editNow = () => (setKind(doc.kind), setTarget(formTarget(e.sales, d, doc)), setAmt(null), setOpen(true), setEdit(true));
+  const typedAmt = amt == null ? doc.amount : parseAmount(amt);
+  const note = edit ? docFormNote(e.sales, d, doc, { kind, target, amount: typedAmt === undefined ? doc.amount : typedAmt }) : null;
   useEffect(() => () => {
     if (link) URL.revokeObjectURL(link);
   }, [link]);
@@ -257,7 +254,10 @@ function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boole
   const typedOver = !stray && !inUse && doc.target === 'forecast' && m.fcOverride && doc.id === fcFig(e.sales, d).doc?.id && m.forecast != null && doc.amount != null && m.forecast !== doc.amount;
   const warn = mm ? mismatchText(mm.doc, mm.kept, doc.target === 'forecast' ? 'Forecast ที่ใช้' : 'ยอดที่นับ') : typedOver ? mismatchText(doc.amount!, m.forecast!, 'Forecast ที่พิมพ์ไว้') : '';
   // counted toward what its type never is (an older build's choice): said, with the way to set it right
-  const wrongText = stray || !wrong ? '' : wrong === 'forecast' ? `${KIND_TH[doc.kind].split(' / ')[0]}นับเป็น Forecast ไม่ได้ · Forecast มาจากใบเสนอราคา` : `${KIND_TH[doc.kind]}ไม่ใช่เงินที่ได้รับ ไม่ควรรวมใน Actual`;
+  // (an invoice may stay the Forecast of a job without a quotation: formTargets)
+  const wrongText = stray || !wrong ? ''
+    : wrong === 'forecast' ? (doc.kind === 'invoice' ? 'ใบแจ้งหนี้นี้นับเป็น Forecast · ปกติใบแจ้งหนี้รวมใน Actual และ Forecast มาจากใบเสนอราคา' : `${KIND_TH[doc.kind].split(' / ')[0]}นับเป็น Forecast ไม่ได้ · Forecast มาจากใบเสนอราคา`)
+    : `${KIND_TH[doc.kind]}ไม่ใช่เงินที่ได้รับ ไม่ควรรวมใน Actual`;
   const g = stray ? jointOf(e.sales, d) : null;
   const canMove = !!g && e.can('docs.up') && e.canDeal('edit.deal', d) && e.canDeal('edit.deal', g.head);
   const move = () => {
@@ -321,19 +321,19 @@ function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boole
             const fd = new FormData(ev.currentTarget);
             const amount = parseAmount(String(fd.get('amount') ?? ''));
             if (amount === undefined) return void window.alert('อ่านยอดเงินไม่ได้ พิมพ์ตัวเลขเดียว เช่น 107,000');
-            // (what it counts toward is always one its type may: docTargets)
-            const t = amount == null || !docTargets(kind).includes(target) ? 'none' : target;
+            // (what it counts toward is always one the form offers: formTargets)
+            const t = amount == null || !formTargets(doc, kind).includes(target) ? 'none' : target;
             const patch = { amount, target: t, kind, docNo: String(fd.get('docNo') || ''), basis: amount === doc.amount ? doc.basis : 'manual' } as const;
             guard.ask({ d, after: previewOf.doc(e.sales, d.id, doc.id, patch), kind: 'edit', title: `แก้ยอด ${doc.docNo || doc.name}`, verb: 'บันทึก', run: () => (e.updateDoc(d.id, doc.id, patch), setEdit(false)) });
           }}
           className="sl-docc-form"
         >
-          <label style={labelCol}>ยอด (บาท)<input name="amount" defaultValue={doc.amount ?? ''} inputMode="decimal" className="fld" /></label>
-          <SelField style={labelCol} text="นับเป็น" value={target} onChange={setTarget} options={docTargets(kind).map((v) => ({ v, label: TARGET_OPT[v] }))} />
+          <label style={labelCol}>ยอด (บาท)<input name="amount" defaultValue={doc.amount ?? ''} onChange={(ev) => setAmt(ev.target.value)} inputMode="decimal" className="fld" /></label>
+          <SelField style={labelCol} text="นับเป็น" value={target} onChange={setTarget} options={formTargets(doc, kind).map((v) => ({ v, label: TARGET_OPT[v] }))} />
           <SelField style={labelCol} text="ประเภท" value={kind} onChange={pickKind} options={(Object.keys(KIND_TH) as DocKind[]).map((k) => ({ v: k, label: KIND_TH[k] }))} />
           <label style={labelCol}>เลขที่เอกสาร<input name="docNo" defaultValue={doc.docNo} className="fld" /></label>
           <button type="submit" className="btn pri sm">บันทึก</button>
-          {wrong && kind === doc.kind && <span className="t-warn" style={{ gridColumn: '1/-1', fontSize: 12 }}>{wrongNote()}</span>}
+          {note && <span className={note.warn ? 't-warn' : 't-meta'} role="status" style={{ gridColumn: '1/-1', fontSize: 12 }}>{note.text}</span>}
           <span className="t-meta" style={{ gridColumn: '1/-1' }}>ลบเอกสารที่มาแทนใบเดิม ใบเดิมยังไม่นับยอด ตั้งกลับได้ที่ “นับเป็น” ของใบนั้น</span>
         </form>
       )}
@@ -642,9 +642,11 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
           );
           // the step's documents: the quotation's versions as one card, the others each a card of their own —
           // also while the step is being recorded (a PAY not received yet keeps its receipts in view)
+          // (under the QUOTATION edit card its drop zone attaches the revision: the quotation card has no
+          // "แนบฉบับแก้ไข" of its own there)
           const docCards = (
             <>
-              {qts.length > 0 && <QtCard d={d} onRevise={(id) => attach({ at: 'quote', revise: id })} />}
+              {qts.length > 0 && <QtCard d={d} onRevise={(id) => attach({ at: 'quote', revise: id })} revise={!(card && cardStage === v.id && !jm)} />}
               {docs.filter((z) => !qts.includes(z)).map((z) => <DocCard key={z.id} d={d} doc={z} inUse={z.target === 'forecast' ? m.fcDoc?.id === z.id : z.target === 'actual' && z.amount != null} />)}
             </>
           );
@@ -661,6 +663,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
               <>
                 <StepEdit key={cardStage} d={d} p={cardStage} v={v} won={won} doc={!!doc} qt={qts.length && cardStage === v.id ? qtView(S, d).head?.doc : undefined} attach={attach} onHold={() => setPick((x) => x || cardStage)} onDone={() => setPick('')} />
                 {handLine}
+                {jm && <MemberStage d={d} stage={v.id} pay={false} />}
                 {docCards}
                 {entriesOf(v, off)}
               </>

@@ -370,6 +370,11 @@ export const docTargets = (kind: DocKind): DocTarget[] =>
  *  an older build's choice), or null. */
 export const targetWrong = (x: Pick<DealDoc, 'kind' | 'target' | 'amount'>): DocTarget | null =>
   x.amount != null && x.target !== 'none' && !docTargets(x.kind).includes(x.target) ? x.target : null;
+/** What a document card's "นับเป็น" offers for type `kind` (docTargets) — and, for an invoice an older build
+ *  counted as the Forecast, the Forecast as well: a job without a quotation may have taken its Forecast from
+ *  it, and saving the form (for its number, say) must not move that money unasked. */
+export const formTargets = (doc: Pick<DealDoc, 'kind' | 'target'>, kind: DocKind = doc.kind): DocTarget[] =>
+  kind === 'invoice' && doc.kind === 'invoice' && doc.target === 'forecast' ? ['forecast', ...docTargets(kind)] : docTargets(kind);
 /** A stage a document or a contact may be filed at on this deal: a step's (an older stage read into one too),
  *  an installment, a stage of the team's list, or a line of its plan. */
 export const stageOk = (s: SalesState, d: Pick<Deal, 'id'>, p: string) => !!p && (isStepKey(s.cfg, p) || !!payOf(s, d.id, p));
@@ -1411,13 +1416,40 @@ export function dupCounted(s: SalesState, d: Deal): DealDoc[][] {
  *  copy that starts to count would double. */
 export const countedCopy = (s: SalesState, d: Pick<Deal, 'id'>, doc: DealDoc): DealDoc | null =>
   docsOf(s, d.id).find((x) => x.id !== doc.id && countsActual(x) && sameDocument(x, doc)) || null;
-/** What a document card's "นับเป็น" opens on for type `kind`: what it counts toward when its type may,
- *  else that type's own — Actual for a receipt or an invoice, unless another copy of it counts already
- *  (then "ไม่นับยอด": counting it would count it twice). */
-export function formTarget(s: SalesState, d: Pick<Deal, 'id'>, doc: DealDoc, kind: DocKind = doc.kind, t: DocTarget = doc.target): DocTarget {
-  const ts = docTargets(kind);
-  if (ts.includes(t)) return t;
-  return ts[0] === 'actual' && countedCopy(s, d, doc) ? 'none' : ts[0];
+/** The records with `doc` changed as engine.updateDoc saves it: no amount counts toward nothing, and a new
+ *  target (or a new amount on a figure not replaced by a newer one) is a new confirmation — as a Forecast it
+ *  becomes the newest, the one in use. What a form says before saving is worked out on this. */
+export function docEdited(s: SalesState, d: Deal, doc: DealDoc, patch: Partial<Pick<DealDoc, 'amount' | 'target' | 'kind'>>): SalesState {
+  const n: DealDoc = { ...doc, ...patch };
+  if (n.amount == null) n.target = 'none';
+  const superseded = doc.target === 'forecast' && dealMoney(s, d).fcDoc?.id !== doc.id;
+  if (n.target !== doc.target || (n.amount !== doc.amount && !superseded)) n.cAt = '9999-12-31T23:59:59.999Z';
+  return { ...s, docs: { ...s.docs, [`${d.id}/${doc.id}`]: n } };
+}
+/** Whether counting `doc` as money received (as type `kind`) would count money twice: another copy of it
+ *  counts already, another document counts at its stage (attached, a receipt there takes its invoice's place
+ *  — this form changes one document only), or money is in already and it would take Actual more than 5% past
+ *  the Forecast. */
+export function countsTwice(s: SalesState, d: Deal, doc: DealDoc, kind: DocKind = doc.kind): boolean {
+  if (countedCopy(s, d, doc)) return true;
+  if (doc.stage && countedAt(s, d, doc.stage).some((x) => x.id !== doc.id)) return true;
+  const b = dealMoney(s, d), before = b.acDocs || b.hand ? b.actual ?? 0 : 0;
+  if (!(before > 0)) return false;
+  const a = dealMoney(docEdited(s, d, doc, { kind, target: 'actual' }), d), after = a.actual ?? 0;
+  return a.forecast != null && a.forecast > 0 && after > a.forecast * OVER_SHARE && after > before + 0.005;
+}
+/** What a document card's "นับเป็น" opens on for type `kind` (formTargets): what it counts toward when that
+ *  is offered — never moving money as the form opens. Else (an older build's choice its type never is, or
+ *  the type changed in the form):
+ * - an invoice that is the Forecast stays so only while it is the job's only Forecast;
+ * - a quotation opens on "ไม่นับยอด": as the Forecast it would replace the quotation in use;
+ * - a receipt or an invoice on Actual, unless that would count money twice (countsTwice): "ไม่นับยอด".
+ */
+export function formTarget(s: SalesState, d: Deal, doc: DealDoc, kind: DocKind = doc.kind, t: DocTarget = doc.target): DocTarget {
+  const stale = kind === doc.kind && t === doc.target && !!targetWrong(doc);
+  if (formTargets(doc, kind).includes(t) && !(stale && dealMoney(docEdited(s, d, doc, { target: 'none' }), d).forecast != null)) return t;
+  if (!docTargets(kind).includes('actual')) return 'none';
+  return countsTwice(s, d, doc, kind) ? 'none' : 'actual';
 }
 /** What attaching with `mode` sends (DocAttach → attachDoc): the document replaced and the other copies
  *  that stop counting, the hand receipt kept on top of it, what it counts toward, where it goes, and the

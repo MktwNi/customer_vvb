@@ -18,7 +18,7 @@ import type { DocFacts } from './docExtract';
 import { jointNo } from './joint';
 import { attachRevision, qtDay, qtView } from './quotes';
 import {
-  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countsActual, dealMoney, dealResult, dealSteps, docNoKey, docsOf, fmtMoney, isPayAt, jointHeadOf, jointOf, jointRole, owedNoPlan, payState, planOf, stageOk, stepCode, stepLabel, stepOf, whtRate, withDoc,
+  QUOTE_STAGE, attachStage, closeReady, countAs, countGuard, countedAt, countedCopy, countsActual, dealMoney, dealResult, dealSteps, docEdited, docNoKey, docsOf, fmtMoney, isPayAt, jointHeadOf, jointOf, jointRole, owedNoPlan, payState, planOf, stageOk, stepCode, stepLabel, stepOf, targetWrong, whtRate, withDoc,
   type AttachInfo, type CountGuard, type CountMode, type Deal, type DealDoc, type DealStep, type DocKind, type DocTarget, type LineView, type PayHow, type PayLine, type PlanInput, type PlanView, type SalesState,
 } from './sales';
 import { shortName } from './salesUi';
@@ -565,6 +565,37 @@ export function overWords(after: number, cap: number, what: string) {
   const w = what.trim(), sp = /^[A-Za-z]/.test(w) ? ` ${w} ` : w;
   return `Actual จะเป็น ${N(after)} บาท เกิน${sp}อยู่ ${N(after - cap)} บาท (${w} ${N(cap)} บาท)`;
 }
+const WILL: Record<DocTarget, string> = { forecast: 'นับเป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
+/**
+ * What saving a document card's form ("แก้ยอด / ประเภท") does to the job's money, said under the form before
+ * saving: when what it counts toward or its type changes, or it counts toward what its type never is (an
+ * older build's choice). What it counts as, then the Forecast (another figure, from another document, or
+ * none left) and the Actual after it (past the Forecast said as overWords); null when nothing changes.
+ * `warn`: the Forecast moves, Actual goes past it, or the document was counted wrongly.
+ */
+export function docFormNote(s: SalesState, d: Deal, doc: DealDoc, f: { kind: DocKind; target: DocTarget; amount: number | null }): { text: string; warn: boolean } | null {
+  const wrong = !!targetWrong(doc), t: DocTarget = f.amount == null ? 'none' : f.target;
+  if (!wrong && f.kind === doc.kind && t === doc.target) return null;
+  const b = dealMoney(s, d), a = dealMoney(docEdited(s, d, doc, { kind: f.kind, target: t, amount: f.amount }), d);
+  const same = (x: number | null | undefined, y: number | null | undefined) => (x == null ? y == null : near(x, y));
+  const parts: string[] = [];
+  if (t !== doc.target) {
+    const copy = t === 'none' ? countedCopy(s, d, doc) : null;
+    parts.push(`เดิม${WILL[doc.target]}`, `บันทึกแล้วจะ${WILL[t]}${copy ? ` (ใบนี้รวมใน Actual แล้ว${copy.stage ? ' ที่ขั้น ' + code(s, d, copy.stage) : ''})` : ''}`);
+  } else if (wrong) parts.push(`ยัง${WILL[t]}${/[A-Za-z]$/.test(WILL[t]) ? ' ' : ''}ตามเดิม`);
+  const fcMoved = !same(a.forecast, b.forecast) || a.fcDoc?.id !== b.fcDoc?.id;
+  if (fcMoved)
+    parts.push(
+      a.forecast == null ? `จะไม่มี Forecast${b.forecast != null ? ` (เดิม ${N(b.forecast)} บาท)` : ''}`
+      : `Forecast จะเป็น ${N(a.forecast)} บาท${a.fcDoc ? ` จาก${WORD[a.fcDoc.kind]} ${a.fcDoc.docNo || a.fcDoc.name}` : ' ที่พิมพ์ไว้'}${b.forecast != null && !near(a.forecast, b.forecast) ? ` แทน ${N(b.forecast)} บาท` : ''}`,
+    );
+  const fc = a.forecast, over = a.actual != null && fc != null && fc > 0 && a.actual > fc * 1.05 && a.actual > (b.actual ?? 0) + 0.005;
+  if (over) parts.push(overWords(a.actual!, fc!, 'Forecast'));
+  else if (!same(a.actual, b.actual))
+    parts.push(a.actual == null ? `จะไม่มี Actual (เดิม ${N(b.actual)} บาท)` : b.actual == null ? `Actual จะเป็น ${N(a.actual)} บาท` : `Actual จาก ${N(b.actual)} เป็น ${N(a.actual)} บาท`);
+  else if (a.actual != null && (t === 'actual' || doc.target === 'actual' || wrong)) parts.push(`Actual ยังเป็น ${N(a.actual)} บาท`);
+  return parts.length ? { text: parts.join(' · '), warn: wrong || fcMoved || over } : null;
+}
 /** The installments right after `at`, nothing received there yet, that its money pays too: what came in at
  *  `at` makes up its plan and theirs (within 1%, or short of it by withholding tax). */
 function coverOf(P: PlanView, at: LineView): { stages: string[]; amt: number } | null {
@@ -770,9 +801,11 @@ export function recvPlan(s: SalesState, d: Deal, stage: string, today: string): 
     const x = P.lines.find((z) => z.amt > 0 && z.got > z.amt + 0.005);
     const over: RecvPlan['over'] =
       cap > 0 && A >= cap * 0.9 && A + l.amt > cap * 1.05 ? { actual: A, cap, extra: x ? { stage: x.stage, by: r2(x.got - x.amt) } : null, what: 'แผน' }
-      // the plan itself well past the Forecast (a line set while a receipt was counted twice: 121,730.77 of a
-      // 60,000 job): one tap would record that as money in — the form is offered, the message says why
-      : fc != null && fc > 0 && A + l.amt > fc * 1.05 ? { actual: A, cap: fc, extra: null, what: 'Forecast' }
+      // one installment more than the whole job's Forecast, even with VAT added to it (a line set while a
+      // receipt was counted twice: 121,730.77 of a 60,000 job): one tap would record that as money in — the
+      // form is offered, the message says why. A plan past the Forecast by its VAT or extra work, a line at a
+      // time, still takes one tap.
+      : fc != null && fc > 0 && l.amt > fc * 1.07 * 1.05 ? { actual: A, cap: fc, extra: null, what: 'Forecast' }
       : null;
     return { stage, amount: null, shown: l.amt, how, plan: false, ask: false, over };
   }
@@ -864,9 +897,9 @@ export const recvToast = (s: SalesState, d: Deal, stage: string, amount: number,
 export function recvOverText(s: SalesState, d: Deal, r: RecvPlan): string {
   const o = r.over;
   if (!o) return '';
-  // an installment of a plan that is itself past the Forecast: its planned amount is what is doubtful
+  // an installment of a plan more than the whole job's Forecast: its planned amount is what is doubtful
   if (!r.plan && o.what === 'Forecast')
-    return `ยังไม่ได้บันทึก ${code(s, d, r.stage)} · แผนงวดนี้ ${N(r.shown)} บาท${o.actual ? ` รวมกับที่รับแล้ว ${N(o.actual)} บาท` : ''} จะเกิน Forecast ${N(o.cap)} บาท · ถ้ายอดแผนผิด กด “แก้ไขแผน” ถ้ารับเงินเท่านี้จริง กด “แก้ยอด / วันที่”`;
+    return `ยังไม่ได้บันทึก ${code(s, d, r.stage)} · แผนงวดนี้ ${N(r.shown)} บาท มากกว่า Forecast ทั้งงาน ${N(o.cap)} บาท · ถ้ายอดแผนผิด กด “แก้ไขแผน” ถ้ารับเงินเท่านี้จริง กด “แก้ยอด / วันที่”`;
   const what = o.what === 'Forecast' ? ' Forecast ' : 'แผน ';
   const head = o.actual >= o.cap - 0.005
     ? `Actual ${N(o.actual)} บาท ครบตาม${what}${N(o.cap)} บาทแล้ว`

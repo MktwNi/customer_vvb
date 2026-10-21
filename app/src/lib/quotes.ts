@@ -39,6 +39,22 @@ export function qtView(s: SalesState, d: Deal): QtView {
   return { versions, head: cur || versions[versions.length - 1] || null, cur, typed: m.fcOverride };
 }
 
+/** What the quotation card's version counts toward, in words (the panel's card and the phone card's alike):
+ *  "เป็น Forecast" in use, "Forecast พิมพ์เองทีหลัง" under a typed one, "ไม่ได้ใช้ (มียอดที่ใหม่กว่า)" when a
+ *  newer figure replaced it (a revision, or another document: qtFcElse), else what it counts toward. */
+export function qtGoes(v: QtView): string {
+  const h = v.head;
+  if (!h) return '';
+  const t = h.doc.target;
+  return h.state === 'cur' ? 'เป็น Forecast' : v.typed && t === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : t === 'forecast' ? 'ไม่ได้ใช้ (มียอดที่ใหม่กว่า)' : t === 'actual' ? 'รวมใน Actual' : 'ไม่นับยอด';
+}
+/** The document the Forecast comes from when it is not a version of the quotation (a receipt an older build
+ *  counted as the Forecast, a quotation filed at a PAY step), or null. */
+export function qtFcElse(s: SalesState, d: Deal, v: QtView = qtView(s, d)): DealDoc | null {
+  const f = dealMoney(s, d).fcDoc;
+  return v.head && v.head.state !== 'cur' && !v.typed && f && !v.versions.some((x) => x.doc.id === f.id) ? f : null;
+}
+
 /** The version that is the Forecast again when `docId` (the one in use) is deleted: the nearest earlier
  *  one with an amount; null when there is none (the typed Forecast, if any, is used then). */
 export function qtPrev(versions: DealDoc[], docId: string): DealDoc | null {
