@@ -1,0 +1,57 @@
+/* ------------------------------------------------------------------ one person, several companies (tabs/PeopleCos.tsx)
+   The person page's "บริษัทที่ติดต่อด้วย", the add dialog's "คนนี้มีอยู่แล้ว", the merge dialog and the appointment
+   button that asks which company. The app's tokens only; company names carry .co-name (index.css). */
+
+/* the companies they deal with: one row each, its name opens the company page */
+.pc-list{display:flex;flex-direction:column;gap:8px}
+.pc-row{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:var(--r-inner);background:#fff;padding:10px 12px;min-width:0}
+.pc-row.left{background:var(--band)}
+.pc-t{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;line-height:1.45}
+.pc-name{cursor:pointer;border:0;background:transparent;padding:0;font-family:inherit;line-height:1.4;text-align:left;border-radius:6px;overflow-wrap:anywhere;transition:background-color .12s,box-shadow .12s}
+@media (hover:hover){.pc-name:hover{text-decoration:underline;background:var(--hv);box-shadow:0 0 0 4px var(--hv)}}
+.pc-edit{flex:none;font-size:var(--fs-sec)}
+.pc-note{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5}
+.pc-left summary{margin:2px 0 8px}
+
+/* a company row opened, and "เพิ่มบริษัท" */
+.pc-edit-f,.pc-add{display:flex;flex-direction:column;gap:10px;border:1px solid var(--tint-line);border-radius:var(--r-inner);background:#fff;padding:12px}
+.pc-add{border-style:dashed;border-color:var(--line)}
+.pc-edit-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;min-width:0}
+.pc-edit-who{display:flex;gap:10px;align-items:flex-start;min-width:0}
+.pc-edit-a{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+
+/* นัดหมาย at which of their companies */
+/* (the button and its list are items of the row the button sits in: the list takes a row of its own, full width) */
+.pc-sched{display:contents}
+.pc-sched-pop{grid-column:1/-1;flex:1 0 100%;display:flex;flex-direction:column;gap:2px;min-width:0;border:1px solid var(--line);border-radius:var(--r-inner);background:#fff;padding:8px;box-shadow:var(--sh-card);text-align:left}
+
+/* คนนี้มีอยู่แล้ว (the add dialog) */
+.pc-exists{display:flex;flex-direction:column;gap:10px;border:1px solid var(--tint-line);border-radius:var(--r-inner);background:var(--tint);padding:12px 14px}
+.pc-exists-h{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
+.pc-exists-p{display:flex;gap:10px;align-items:flex-start;min-width:0}
+.pc-exists-a{display:flex;gap:10px;align-items:center;flex:none}
+
+/* รวมรายชื่อที่ซ้ำ */
+.pc-dlg{display:flex;flex-direction:column;gap:12px;padding:4px 20px 20px;min-width:0}
+.pc-mcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.pc-mcard{cursor:pointer;display:flex;flex-direction:column;gap:6px;text-align:left;border:1px solid var(--line);border-radius:var(--r-inner);background:#fff;padding:12px 14px;font:inherit;font-size:var(--fs-body);color:var(--ink);min-width:0;transition:border-color .12s,background-color .12s}
+.pc-mcard.keep{border:2px solid var(--brand);padding:11px 13px;cursor:default}
+@media (hover:hover){.pc-mcard:not(.keep):hover{border-color:var(--tint-line);background:var(--hv)}}
+.pc-mcard-n{display:flex;gap:10px;align-items:center}
+.pc-mcard .t-sec{overflow-wrap:anywhere}
+.pc-after{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--divider);padding-top:12px}
+.pc-after dl{margin:0;display:flex;flex-direction:column;gap:6px}
+.pc-after dl>div{display:grid;grid-template-columns:120px minmax(0,1fr);gap:18px;align-items:baseline}
+.pc-after dt{font-size:var(--fs-sec);color:var(--ink-2)}
+.pc-after dd{margin:0;font-size:var(--fs-body);color:var(--ink);overflow-wrap:anywhere}
+/* numbers a teammate saved on a record merged into this person after the merge (the info card) */
+.pe-late{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;border:1px solid var(--tint-line);background:var(--tint);border-radius:var(--r-inner);padding:8px 12px;overflow-wrap:anywhere}
+@media (max-width:560px){
+  .pc-after dl>div{grid-template-columns:minmax(0,1fr);gap:2px}
+  .pc-exists-p{flex-wrap:wrap}
+  /* a suggestion's or a likely pair's buttons go under its words (the words keep the row's width) */
+  .pe-sugg-row{flex-wrap:wrap}
+  .pe-sugg-row>span:first-child{flex:1 1 100%}
+}
+@media (forced-colors:active){.pc-mcard.keep{outline:2px solid Highlight}}
+@media (prefers-reduced-motion:reduce){.pc-name,.pc-mcard{transition:none}}

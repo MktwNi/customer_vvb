@@ -4,7 +4,7 @@
  * storage.ts. React subscribes via `subscribe` / `getVersion` (useSyncExternalStore).
  */
 import type {
-  Built, Cert, Company, ContactEdit, ContactForm, Crm, CustomCo, Person, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
+  Built, Cert, Company, ContactEdit, ContactForm, Crm, CustomCo, Person, PersonRole, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
   SetSnap, StageKey, SyncCfg, Task, TaskForm, TaskType,
 } from './types';
 import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
@@ -12,9 +12,11 @@ import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
-import { NOTE_CAP, PERSON_FIELDS, personSuggestions, toPerson, type PersonForm } from './people';
+import { MAIN_F, NOTE_CAP, PERSON_FIELDS, personSuggestions, reachAll, toPerson, type PersonForm } from './people';
 // a deal's contact: links to people (person/<pid>/<deal>), never a copy of their details
-import { contactChoices, dealContact, linkIndex, linkOrder, linkedPeople, nameKey, personExtras, personIdOf, suggestionId, toPLink, typedAny, typedExtras, typedPerson, type DealContact, type LinkIndex, type PLink } from './people';
+import { contactChoices, dealContact, linkIndex, linkOrder, nameKey, personExtras, personIdOf, suggestionId, toPLink, typedAny, typedExtras, typedPerson, type DealContact, type LinkIndex, type PLink } from './people';
+// one person, several companies (person/<pid>/co/<gid>) and records merged into one (person/<gone>/into/<keep>)
+import { aliasIndex, coKey, coRecOf, coRecsOn, cosOf, dupPairs, findExisting, intoKey, intoValue, mergePlan, pairKey, pcoValue, personKey, phoneKeys, reachPatch, suggestionHeads, toPCo, toPInto, type DupPair, type Found, type PCo, type PInto, type PersonAt, type PersonCo } from './people';
 import {
   CUSTOM_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
@@ -1383,9 +1385,11 @@ export class GccEngine {
         }
       });
       // the deals' contacts: a link this browser does not have yet (never one it has: its own is as new)
+      // (and a person's other companies, and records merged into another: person/<pid>/co/<gid>, <gone>/into/<keep>)
       Object.entries((d.plinks || {}) as Record<string, unknown>).forEach(([k, v]) => {
-        const l = toPLink(v), i = k.indexOf('/');
-        if (l && i > 0 && i < k.length - 1 && !k.includes('/', i + 1) && !this.plinks[k]) {
+        const x = personKey(k);
+        const l = !x || (!x.deal && x.co == null && !x.into) ? null : x.co != null ? toPCo(v) : x.into ? toPInto(v) : toPLink(v);
+        if (l && !this.plinks[k]) {
           this.plinks[k] = l;
           n++;
         }
@@ -1509,16 +1513,27 @@ export class GccEngine {
     this.emit();
     return id;
   }
-  /** Add several contacts found in the Sales Tracker at once (one queue write, one save). */
+  /**
+   * Add several contacts found in the Sales Tracker at once ("เพิ่มทั้งหมด"; one queue write, one save). One human
+   * typed at several companies (the same mobile, e-mail or full name: people.ts suggestionHeads) is one person: the
+   * first of them is recorded, each other one's company (and numbers) is added to them (addToExisting). Returns how
+   * many people were recorded.
+   */
   addPeople(list: (Partial<PersonForm> & { name: string; id: string })[]) {
+    if (!this.can('edit.cust')) return this.deny(), 0;
     let n = 0;
-    this.batchOps(() =>
+    const heads = suggestionHeads(list.map((p) => ({ id: p.id, name: p.name, phone: p.phone || '', email: p.email || '' })));
+    this.bulk(() =>
       list.forEach((p) => {
+        const h = heads.get(p.id);
+        const head = h && h !== p.id ? this.people[this.resolvePid(h)] : undefined;
+        if (head) return void this.addToExisting(head.id, { gid: this.personGid(p.gid), company: this.personGid(p.gid) == null ? p.company || '' : '', phone: p.phone, email: p.email });
         if (this.people[p.id]) return;
         const v = this.newPerson(p, p.id);
         if (!v) return;
         this.people[v.id] = v;
         this.op(keyOf.person(v.id), { ...v }, { nx: true });
+        this.coIx = null;
         n++;
       }),
     );
@@ -1528,11 +1543,21 @@ export class GccEngine {
     }
     return n;
   }
-  /** Save a person's form: only the fields changed in it (over the values it opened with, `init`), so
-   *  a teammate's change to another field meanwhile is kept. */
-  updatePerson(id: string, patch: Partial<PersonForm>, init?: Partial<PersonForm>) {
-    const cur = this.people[id];
-    if (!cur) return;
+  /**
+   * Save a person's form: only the fields changed in it (over the values it opened with, `init`), so a teammate's
+   * change to another field meanwhile is kept. The main company and the person's position, department, role and
+   * status there are one set (MAIN_F): a change of any of them writes all six, so a teammate's change of the main
+   * company at the same time ends as one of the two, never one company with the other's position or status. The main
+   * company changed: the one before stays theirs as another company when it is one of theirs being swapped (`swap`,
+   * or the new main one was another company of theirs), as ไม่อยู่แล้ว when something is recorded with them there
+   * (personCoUsed), else it goes (picked by mistake). `keepCo`: the caller writes the company records (setMainCompany).
+   */
+  updatePerson(id: string, patch: Partial<PersonForm>, init?: Partial<PersonForm>, opt: { keepCo?: boolean } = {}) {
+    const raw = this.people[id];
+    if (!raw) return;
+    // (a record a merge marked ไม่อยู่แล้ว that is not merged after all: as it was, and written so: mergeHeal)
+    const heal = this.mergeHeal(raw);
+    const cur: Person = heal ? { ...raw, status: heal } : raw;
     const n: Person = { ...cur, ...patch };
     // the company only when the form changed it: a save of other fields keeps the team's link as it is
     // (this device may not know the company, or know it under a merged id)
@@ -1549,12 +1574,36 @@ export class GccEngine {
     n.line = (n.line || '').trim();
     n.name = (n.name || '').trim().slice(0, 200) || cur.name;
     n.note = (n.note || '').slice(0, NOTE_CAP);
-    const f = PERSON_FIELDS.filter((k) => n[k] !== cur[k] && (!init || !(k in init) || n[k] !== init[k]));
+    const f: (keyof Person)[] = PERSON_FIELDS.filter((k) => n[k] !== cur[k] && (!init || !(k in init) || n[k] !== init[k]));
+    if (heal && !f.includes('status')) f.push('status');
     if (!f.length) return;
+    if (f.some((k) => MAIN_F.includes(k as (typeof MAIN_F)[number]))) MAIN_F.forEach((k) => !f.includes(k) && f.push(k));
     const out: Person = { ...cur, upAt: new Date().toISOString(), upBy: this.me() };
     f.forEach((k) => Object.assign(out, { [k]: n[k] }));
-    this.people[id] = out;
-    this.op(keyOf.person(id), { ...out }, { f: [...f, 'upAt', 'upBy'] });
+    // (when the status was written: mergeHeal)
+    if (f.includes('status')) {
+      out.stAt = out.upAt;
+      f.push('stAt');
+    }
+    // the main company changed: what becomes of the one before (a team company)
+    const g0 = cur.gid != null ? this.canonical(cur.gid) : null, g1 = out.gid != null ? this.canonical(out.gid) : null;
+    const moved = !opt.keepCo && g0 != null && g0 !== g1;
+    const ids = new Set(this.idsOf(id)), recs = this.coIndex().recs.get(id) || [];
+    const swap = moved && g1 != null && this.personCos(cur).some((x) => !x.main && x.gid === g1 && x.st === 'active');
+    const used = moved && !swap && this.personCoUsed(cur, g0!);
+    this.batchOps(() => {
+      this.people[id] = out;
+      this.coIx = null;
+      this.coPeople = null;
+      this.op(keyOf.person(id), { ...out }, { f: [...f, 'upAt', 'upBy'] });
+      if (!moved) return;
+      if (swap || used) {
+        // kept as another company of theirs: with their position there, ไม่อยู่แล้ว unless being swapped
+        const ex = coRecOf(ids, g0!, recs, (g) => this.canonical(g));
+        this.putCo(ex ? ex[0] : coKey(id, g0!), { on: 1, st: swap ? cur.status : 'left', pos: cur.pos, dept: cur.dept, role: cur.role, at: ex?.[1].at || cur.at || out.upAt, by: ex?.[1].by || cur.by || out.upBy, upAt: out.upAt, upBy: out.upBy, o: 0 });
+      } else coRecsOn(ids, g0!, recs, (g) => this.canonical(g)).forEach(([k, r]) => this.putCo(k, { ...r, on: 0, upAt: out.upAt, upBy: out.upBy }, ['on']));
+    });
+    if (moved) this.persist('plinks', this.plinks);
     this.persist('people', this.people);
     this.emit();
   }
@@ -1563,45 +1612,441 @@ export class GccEngine {
   deletePerson(id: string) {
     if (!this.can('del.rec')) return this.deny();
     if (!this.people[id]) return;
-    delete this.people[id];
-    this.batchOps(() => {
-      this.op(keyOf.person(id));
-      (this.crm.log['p-' + id] || []).slice().forEach((l) => this.delLog('p-' + id, l));
-    });
-    delete this.crm.log['p-' + id];
+    // the records merged into them go with them (deleted here: a deletion made without knowing of a merge leaves the
+    // merged-away record shown again, never both gone: coIndex)
+    const ids = this.idsOf(id).filter((x) => !!this.people[x]);
+    ids.forEach((x) => delete this.people[x]);
+    this.coIx = null;
+    this.coPeople = null;
+    this.batchOps(() =>
+      ids.forEach((x) => {
+        this.op(keyOf.person(x));
+        (this.crm.log['p-' + x] || []).slice().forEach((l) => this.delLog('p-' + x, l));
+      }),
+    );
+    ids.forEach((x) => delete this.crm.log['p-' + x]);
     this.saveCrm();
-    this.forgetPeople([id]); // one found in the Sales Tracker is not suggested again
+    this.forgetPeople(ids); // one found in the Sales Tracker is not suggested again
     this.persist('people', this.people);
     this.emit();
   }
-  /** People at a company (any of its merged ids; by name for a company on this device only). */
-  peopleOf(gid: number) {
+  /** People who deal with a company (any of its merged ids; by name for a company on this device only): those whose
+   *  main company it is and those who have it as another company, each as seen there (personAt: their position,
+   *  role and status at it). Records merged into another are left out. */
+  peopleOf(gid: number): PersonAt[] {
     const c = this.company(gid);
     if (c && isLocalId(c.id)) {
       const k = norm(c.name);
-      return Object.values(this.people).filter((p) => p.gid == null && norm(p.company) === k);
+      return this.livePeople().filter((p) => p.gid == null && norm(p.company) === k).map((p) => this.personView(p, null));
     }
-    const g = this.canonical(gid);
-    return Object.values(this.people).filter((p) => p.gid != null && this.canonical(p.gid) === g);
+    return (this.coPeopleMap().get(this.canonical(gid)) || []).slice();
   }
-  /** The company page a person links to (registry, added by hand, or found by name on this device). */
+  /** The company page a person's main company is (registry, added by hand, or found by name on this device). */
   personCompany(p: Person) {
     if (p.gid != null) return this.company(p.gid);
     return p.company ? this.localCo(p.company) : undefined;
   }
+
+  // ---- one person, several companies (people.ts PCo: person/<pid>/co/<gid>) and records found to be the same
+  // human merged into one (person/<gone>/into/<keep>). Both kept in `plinks` beside the deal links.
+  /**
+   * The company records by person and the merge aliases, built once per change (a record written here drops it). A
+   * record merged into a person deleted since (a merge made while a teammate deleted the kept one) is not merged: it
+   * is shown again, in the deleted person's place (`alias` maps the deleted id to it). The company records of a record
+   * merged into a person are theirs (one a teammate added to it before they had the merge). `into`: each person's
+   * newest alias record (mergeHeal).
+   */
+  private coIx: { v: number; recs: Map<string, [string, PCo][]>; alias: Map<string, string>; aliasesOf: Map<string, string[]>; into: Map<string, PInto> } | null = null;
+  private coIndex() {
+    if (this.coIx && this.coIx.v === this.version) return this.coIx;
+    const own = new Map<string, [string, PCo][]>(), into = new Map<string, PInto>();
+    Object.entries(this.plinks).forEach(([k, l]) => {
+      const x = personKey(k);
+      if (x?.co != null) (own.get(x.pid) || own.set(x.pid, []).get(x.pid)!).push([k, l as PCo]);
+      else if (x?.into) {
+        const cur = into.get(x.pid);
+        if (!cur || l.at > cur.at) into.set(x.pid, l as PInto);
+      }
+    });
+    const alias = aliasIndex(this.plinks);
+    // (the kept person deleted meanwhile: the record merged into them is not merged, and stands in for them where the
+    // merge put them — their deals, calls and companies)
+    const lost = new Map<string, string>();
+    alias.forEach((keep, gone) => {
+      if (this.people[keep]) return;
+      alias.delete(gone);
+      if (this.people[gone] && (!lost.has(keep) || gone < lost.get(keep)!)) lost.set(keep, gone);
+    });
+    lost.forEach((gone, keep) => alias.set(keep, gone));
+    const aliasesOf = new Map<string, string[]>();
+    alias.forEach((keep, gone) => (aliasesOf.get(keep) || aliasesOf.set(keep, []).get(keep)!).push(gone));
+    const recs = new Map<string, [string, PCo][]>();
+    own.forEach((list, pid) => {
+      const k = alias.get(pid) || pid;
+      (recs.get(k) || recs.set(k, []).get(k)!).push(...list);
+    });
+    return (this.coIx = { v: this.version, recs, alias, aliasesOf, into });
+  }
+  /**
+   * A record a merge marked ไม่อยู่แล้ว (mergePeople: so a tab on an older build stops offering it) that is not merged
+   * after all: two merges of one pair made at once the other way round (people.ts aliasIndex keeps one of them), or
+   * the kept person deleted meanwhile. Its status before the merge ('active'; null: nothing to undo), while that is
+   * still the merge's own write (its status written at the alias's time, `stAt`; a status chosen since is kept); the
+   * next save of the person writes it (updatePerson).
+   */
+  private mergeHeal(p: Person): 'active' | null {
+    const ix = this.coIndex();
+    const r = ix.into.get(p.id);
+    return r && r.on && r.st0 === 'active' && !ix.alias.has(p.id) && p.status === 'left' && !!p.stAt && p.stAt === r.at ? 'active' : null;
+  }
+  /** A person as shown: a record a merge marked ไม่อยู่แล้ว that is not merged after all, with its status before. */
+  personNow(p: Person): Person {
+    const h = this.mergeHeal(p);
+    return h ? { ...p, status: h } : p;
+  }
+  /** Who a person id is now: the kept person for a record merged into them, else itself. */
+  resolvePid = (pid: string) => this.coIndex().alias.get(pid) || pid;
+  /** A person's id and those of the records merged into them: their calls, notes, appointments and deals. */
+  idsOf(pid: string): string[] {
+    return [pid, ...(this.coIndex().aliasesOf.get(pid) || [])];
+  }
+  /** A record merged into another (shown nowhere: its history is the kept person's). */
+  isMerged = (pid: string) => this.coIndex().alias.has(pid);
+  /** Everyone in ผู้ติดต่อ but the records merged into another: the lists, pickers, counts and checks. */
+  livePeople(): Person[] {
+    const a = this.coIndex().alias;
+    return Object.values(this.people).filter((p) => !a.has(p.id)).map((p) => this.personNow(p));
+  }
+  /** A person's companies (people.ts cosOf), the main one first, each with their position and status there and the
+   *  company as this device has it (`c`); another company not on this device (deleted) is left out. */
+  personCos(p: Person): (PersonCo & { c?: Company })[] {
+    return cosOf(this.personNow(p), this.coIndex().recs.get(p.id) || [], (g) => this.canonical(g), new Set(this.idsOf(p.id))).flatMap((x) => {
+      if (x.gid == null) return [{ ...x, c: x.company ? this.localCo(x.company) : undefined }];
+      const c = this.company(x.gid);
+      return c || x.main ? [{ ...x, company: c?.name || x.company, c }] : [];
+    });
+  }
+  /** Still deals with some company (one of theirs ยังติดต่อได้); without any company, by their record's status. */
+  personActive(p: Person) {
+    const cos = this.personCos(p);
+    return cos.length ? cos.some((x) => x.st === 'active') : this.personNow(p).status !== 'left';
+  }
+  /**
+   * Phone numbers, e-mails and LINE IDs saved on a record merged into this person after the merge (a teammate who did
+   * not have the merge yet, a tab on an older build) that the person lacks: their page shows them, one tap keeps them
+   * ("เพิ่มให้คนนี้"). null: none. (Companies added to such a record are theirs already: coIndex.)
+   */
+  lateReach(p: Person): { patch: { phone?: string; email?: string; line?: string }; from: Person[] } | null {
+    const ix = this.coIndex();
+    let cur: Pick<Person, 'phone' | 'email' | 'line'> = { phone: p.phone, email: p.email, line: p.line };
+    const from: Person[] = [];
+    (ix.aliasesOf.get(p.id) || []).forEach((g) => {
+      const x = this.people[g], r = ix.into.get(g);
+      if (!x || !r || !(x.upAt > r.at)) return; // (saved since the merge)
+      const add = reachAll(cur, x);
+      if (!Object.keys(add).length) return;
+      cur = { ...cur, ...add };
+      from.push(x);
+    });
+    if (!from.length) return null;
+    const patch: { phone?: string; email?: string; line?: string } = {};
+    (['phone', 'email', 'line'] as const).forEach((k) => cur[k] !== p[k] && (patch[k] = cur[k]));
+    return { patch, from };
+  }
+  /** Person `p` as seen at company `gid` (their position, role and status there), else as on their record; `ncos`:
+   *  how many companies they deal with still. A copy, never stored. */
+  personView(p: Person, gid: number | null | undefined): PersonAt {
+    const cos = this.personCos(p);
+    const n = cos.filter((k) => k.st === 'active').length;
+    const x = gid != null ? cos.find((k) => k.gid === this.canonical(gid)) : undefined;
+    return x ? { ...p, pos: x.pos, dept: x.dept, role: x.role, status: x.st, ncos: n, extra: !x.main } : { ...p, ncos: n, extra: false };
+  }
+  /** Does person `p` deal with company `gid` (main or another, left or not). */
+  dealsWith(p: Person, gid: number) {
+    const g = this.canonical(gid);
+    return this.personCos(p).some((x) => x.gid === g);
+  }
+  /** The people of the team's companies by company (canonical id), as seen there; built once per change (the table
+   *  asks every row: contactSummary). Not inside bulk(), where people may change before the version does. */
+  private coPeople: { v: number; people: Record<string, Person>; m: Map<number, PersonAt[]> } | null = null;
+  private coPeopleMap(): Map<number, PersonAt[]> {
+    if (!this.deferred && this.coPeople && this.coPeople.v === this.version && this.coPeople.people === this.people) return this.coPeople.m;
+    const m = new Map<number, PersonAt[]>();
+    this.livePeople().forEach((p) => {
+      const cos = this.personCos(p);
+      const n = cos.filter((k) => k.st === 'active').length;
+      cos.forEach((x) => x.gid != null && (m.get(x.gid) || m.set(x.gid, []).get(x.gid)!).push({ ...p, pos: x.pos, dept: x.dept, role: x.role, status: x.st, ncos: n, extra: !x.main }));
+    });
+    if (!this.deferred) this.coPeople = { v: this.version, people: this.people, m };
+    return m;
+  }
+  /** Appointments of a person: the ones with them (or a record merged into them), and those of the companies they
+   *  still deal with (their main one always). */
+  personTasks(p: Person): Task[] {
+    const ids = new Set(this.idsOf(p.id));
+    const gs = new Set(this.personCos(p).filter((x) => x.main || x.st === 'active').map((x) => x.c?.id).filter((x): x is number => x != null));
+    return this.crm.tasks.filter((t) => (!!t.pid && ids.has(t.pid)) || gs.has(this.canonical(t.gid)));
+  }
+  /** Write a company record whole, or the fields `f` of it. The caller persists. */
+  private putCo(k: string, v: PCo, f?: (keyof PCo)[]) {
+    this.plinks[k] = v;
+    this.coIx = null;
+    this.coPeople = null;
+    this.op('person/' + k, pcoValue(v), f ? { f: [...new Set([...f, 'upAt', 'upBy'])] } : {});
+  }
+  /** A company's own phone numbers (a switchboard is never one person's). */
+  private coPhones(gid: number | null | undefined) {
+    const c = gid != null ? this.company(gid) : undefined;
+    return c ? phoneKeys(c.phone || '') : [];
+  }
+  /**
+   * "เพิ่มบริษัท": one more company person `pid` deals with — a company the whole team has (registry or added by
+   * hand; one on this device only can't be), with their position there. One they had before (taken off, or left)
+   * comes back; their main company when they have none; their main one when it is (back to ยังติดต่อได้). False:
+   * nothing done (gone, not a team company, not this account's to change).
+   */
+  addCompanyToPerson(pid: string, gid: number, at: { pos?: string; dept?: string; role?: PersonRole } = {}): boolean {
+    const p = this.people[pid];
+    if (!p) return false;
+    if (!this.can('edit.cust')) return this.deny(), false;
+    const g = this.personGid(gid);
+    if (g == null) return false;
+    const c = this.company(g)!;
+    const pos = (at.pos || '').trim().slice(0, 200), dept = (at.dept || '').trim().slice(0, 200), role = at.role || '';
+    const ids = new Set(this.idsOf(pid));
+    if (p.gid == null && !p.company.trim()) {
+      // their main one, and a record of it too: a teammate adding another company to them at the same time makes that
+      // one the main one (the person record is one value), and this one stays theirs as another (cosOf leaves out the
+      // record of the main company)
+      const now = new Date().toISOString(), by = this.me();
+      const cur = coRecOf(ids, g, this.coIndex().recs.get(pid) || [], (x) => this.canonical(x));
+      this.batchOps(() => {
+        this.putCo(cur ? cur[0] : coKey(pid, g), { on: 1, st: 'active', pos: pos || p.pos, dept: dept || p.dept, role: role || p.role, at: cur?.[1].at || now, by: cur?.[1].by || by, upAt: now, upBy: by, o: 0 });
+        this.updatePerson(pid, { gid: g, company: c.name, ...(pos ? { pos } : {}), ...(dept ? { dept } : {}), ...(role ? { role } : {}), status: 'active' });
+      });
+      this.persist('plinks', this.plinks);
+      this.emit();
+      return true;
+    }
+    if (p.gid != null && this.canonical(p.gid) === g) {
+      const patch: Partial<PersonForm> = {};
+      if (p.status === 'left') patch.status = 'active';
+      if (pos && !p.pos.trim()) patch.pos = pos;
+      if (role && !p.role) patch.role = role;
+      if (Object.keys(patch).length) this.updatePerson(pid, patch);
+      return true;
+    }
+    const cur = coRecOf(ids, g, this.coIndex().recs.get(pid) || [], (x) => this.canonical(x));
+    const now = new Date().toISOString(), by = this.me();
+    if (cur) {
+      const [k, r] = cur;
+      const v: PCo = { ...r, on: 1, st: 'active', ...(pos ? { pos } : {}), ...(dept ? { dept } : {}), ...(role ? { role } : {}), upAt: now, upBy: by };
+      const f = (['on', 'st', 'pos', 'dept', 'role'] as const).filter((x) => v[x] !== r[x]);
+      if (!f.length) return true;
+      this.putCo(k, v, [...f]);
+    } else this.putCo(coKey(pid, g), { on: 1, st: 'active', pos, dept, role, at: now, by, upAt: now, upBy: by, o: 0 });
+    this.persist('plinks', this.plinks);
+    this.emit();
+    return true;
+  }
+  /** Save a company row's form (ตำแหน่งที่บริษัทนี้, ฝ่าย, บทบาท, สถานะ): the main one on the person record (with the
+   *  main company, as one set: updatePerson), another on its own record; only what changed in the form (over
+   *  `init`), so a teammate's change meanwhile is kept. `gid`: the company the form was opened for (null: the main
+   *  one, a name typed), so a teammate making another company the main one meanwhile never gets this one's change. */
+  updatePersonCo(pid: string, gid: number | null, patch: Partial<Pick<PCo, 'pos' | 'dept' | 'role' | 'st'>>, init?: Partial<Pick<PCo, 'pos' | 'dept' | 'role' | 'st'>>) {
+    const p = this.people[pid];
+    if (!p) return;
+    if (!this.can('edit.cust')) return this.deny();
+    const x = this.personCos(p).find((k) => (gid == null ? k.main : k.gid === this.canonical(gid)));
+    if (!x) return;
+    const clean = { ...patch, ...(patch.pos != null ? { pos: patch.pos.trim().slice(0, 200) } : {}), ...(patch.dept != null ? { dept: patch.dept.trim().slice(0, 200) } : {}) };
+    if (x.main) {
+      const m = (o?: typeof patch) => o && ({ ...(o.pos != null ? { pos: o.pos } : {}), ...(o.dept != null ? { dept: o.dept } : {}), ...(o.role != null ? { role: o.role } : {}), ...(o.st != null ? { status: o.st } : {}) } as Partial<PersonForm>);
+      return this.updatePerson(pid, m(clean)!, m(init));
+    }
+    const r = this.plinks[x.key] as PCo | undefined;
+    if (!r) return;
+    const f = (['pos', 'dept', 'role', 'st'] as const).filter((k) => clean[k] != null && clean[k] !== r[k] && (!init || init[k] == null || clean[k] !== init[k]));
+    if (!f.length) return;
+    this.putCo(x.key, { ...r, ...Object.fromEntries(f.map((k) => [k, clean[k]])), upAt: new Date().toISOString(), upBy: this.me() }, [...f]);
+    this.persist('plinks', this.plinks);
+    this.emit();
+  }
+  /** "เอาออก": a company added to a person by mistake goes off their list (its record stays, `on: 0`). Not the main
+   *  one (that is changed with "เปลี่ยน"). */
+  removePersonCo(pid: string, gid: number) {
+    const p = this.people[pid];
+    if (!p) return;
+    if (!this.can('edit.cust')) return this.deny();
+    const x = this.personCos(p).find((k) => !k.main && k.gid === this.canonical(gid));
+    if (!x || x.gid == null) return;
+    // (each of its records: two registry records of it merged since, a record of a person merged into them)
+    const on = coRecsOn(new Set(this.idsOf(pid)), x.gid, this.coIndex().recs.get(pid) || [], (g) => this.canonical(g));
+    if (!on.length) return;
+    const now = new Date().toISOString(), by = this.me();
+    this.batchOps(() => on.forEach(([k, r]) => this.putCo(k, { ...r, on: 0, upAt: now, upBy: by }, ['on'])));
+    this.persist('plinks', this.plinks);
+    this.emit();
+  }
+  /** Is anything recorded with a person at a company (a call, a note, a deal of it they are the contact of): then a
+   *  company that is not theirs any more is marked "ไม่อยู่แล้ว" (kept as history), never taken off. */
+  personCoUsed(p: Person, gid: number) {
+    const g = this.canonical(gid);
+    const ids = new Set(this.idsOf(p.id));
+    if (this.personDeals(p.id).some((d) => d.gid != null && this.canonical(d.gid) === g)) return true;
+    return Object.entries(this.crm.log).some(([k, a]) => /^\d+$/.test(k) && this.canonical(+k) === g && (a || []).some((l) => !!l.pid && ids.has(l.pid)));
+  }
+  /**
+   * "ใช้เป็นบริษัทหลัก": another company of a person becomes their main one (one write of the person record with its
+   * position, role and status there, as one set: updatePerson), the main one so far becomes another company (with
+   * theirs). The new main one's record stays as it is (cosOf leaves out the main company's record): a teammate making
+   * a third company the main one at the same time then still has this one as another company. Not while the main
+   * company is a name typed (it can't be kept as another company).
+   */
+  setMainCompany(pid: string, gid: number): boolean {
+    const p = this.people[pid];
+    if (!p) return false;
+    if (!this.can('edit.cust')) return this.deny(), false;
+    const cos = this.personCos(p);
+    const x = cos.find((k) => !k.main && k.gid === this.canonical(gid));
+    const main = cos.find((k) => k.main);
+    const r = x && (this.plinks[x.key] as PCo | undefined);
+    if (!x || !r || !x.c || (main && main.gid == null)) return false;
+    const now = new Date().toISOString(), by = this.me();
+    this.batchOps(() => {
+      if (main && main.gid != null) {
+        const ex = coRecOf(new Set(this.idsOf(pid)), main.gid, this.coIndex().recs.get(pid) || [], (g) => this.canonical(g));
+        this.putCo(ex ? ex[0] : coKey(pid, main.gid), { on: 1, st: main.st, pos: main.pos, dept: main.dept, role: main.role, at: ex?.[1].at || main.at || now, by: ex?.[1].by || main.by || by, upAt: now, upBy: by, o: 0 });
+      }
+      this.updatePerson(pid, { gid: x.gid, company: x.c!.name, pos: x.pos, dept: x.dept, role: x.role, status: x.st }, undefined, { keepCo: true });
+    });
+    this.persist('plinks', this.plinks);
+    this.emit();
+    return true;
+  }
+  /**
+   * "คนนี้มีอยู่แล้ว — เพิ่มบริษัทนี้ให้คนเดิม": a contact being added is person `pid` already: the company typed for
+   * them becomes one more of theirs (with the position typed), the phone numbers and e-mails typed that they lack
+   * are added (their name is never changed), and from a deal they become its contact. False: nothing done.
+   */
+  addToExisting(pid: string, t: { gid: number | null; company?: string; pos?: string; role?: PersonRole; phone?: string; email?: string; line?: string }, deal?: { id: string; main?: boolean }): boolean {
+    const p = this.people[this.resolvePid(pid)];
+    if (!p) return false;
+    if (!this.can('edit.cust')) return this.deny(), false;
+    const typedCo = t.gid == null ? (t.company || '').trim().slice(0, 200) : '';
+    this.batchOps(() => {
+      if (t.gid != null) this.addCompanyToPerson(p.id, t.gid, { pos: t.pos, role: t.role });
+      // a company only typed by name (not in the registry) can't be one more company: their main one when they have
+      // none, else said once in their notes (as a merge says one)
+      else if (typedCo) {
+        if (p.gid == null && !p.company.trim()) this.updatePerson(p.id, { gid: null, company: typedCo, ...(t.pos?.trim() ? { pos: t.pos.trim().slice(0, 200) } : {}) });
+        else if (!this.personCos(p).some((x) => norm(x.c?.name || x.company) === norm(typedCo))) {
+          const line = `ติดต่อในนาม “${typedCo}” ด้วย${t.pos?.trim() ? ` (${t.pos.trim()})` : ''} · บริษัทที่พิมพ์ชื่อเอง ไม่ได้อยู่ในทะเบียน`;
+          if (!this.personLogs(p).some((x) => x.l.text === line)) this.addPersonLog(p.id, 'note', '', line);
+        }
+      }
+      const cur = this.people[p.id];
+      const patch: Partial<PersonForm> = reachPatch(cur, { phone: t.phone || '', email: t.email || '' });
+      if (t.line?.trim() && !cur.line.trim()) patch.line = t.line.trim();
+      if (Object.keys(patch).length) this.updatePerson(p.id, patch);
+      if (deal) this.linkPerson(deal.id, p.id, { main: !!deal.main });
+    });
+    return true;
+  }
+  /** The people a contact being typed already is (people.ts findExisting), `here`: who deals with company `gid`.
+   *  `typedHere`: the phone was typed for the contact in the same form as the company's (เพิ่มลูกค้า: a customer added
+   *  by hand gets its contact's number as its own), so it is not left out as the company's switchboard. */
+  findExisting(t: { name: string; phone: string; email: string }, gid: number | null, company = '', opt: { typedHere?: boolean } = {}): Found[] {
+    const k = norm(company);
+    const here = (p: Person) => (gid != null ? this.dealsWith(p, gid) : !!k && p.gid == null && norm(p.company) === k);
+    return findExisting(t, this.livePeople(), here, opt.typedHere ? [] : this.coPhones(gid));
+  }
+  /** Pairs of people that may be the same human (people.ts dupPairs), less those said "ไม่ใช่คนเดียวกัน" here. A
+   *  company's own number counts against a pair only when both deal with that company. */
+  likelyDups(): DupPair[] {
+    const live = this.livePeople();
+    const own = (p: Person) => this.personCos(p).flatMap((x) => (x.c ? phoneKeys(x.c.phone || '').map((k) => [x.c!.id, k] as [number, string]) : []));
+    return dupPairs(live, own, new Set(prefs.get<string[]>(PREF.peopleNotDup, []) || []));
+  }
+  /** "ไม่ใช่คนเดียวกัน": not offered as a pair again on this browser. */
+  notDup(a: string, b: string) {
+    const h = prefs.get<string[]>(PREF.peopleNotDup, []) || [];
+    const k = pairKey(a, b);
+    if (!h.includes(k)) prefs.set(PREF.peopleNotDup, [...h, k].slice(-2000));
+    this.emit();
+  }
+  /**
+   * "รวมเป็นคนเดียวกัน": person `goneId` is `keepId` (two records of one human). In one batch: the kept record gets
+   * the other's phones, e-mails, LINE, companies (people.ts mergePlan); the deals the other is the contact of get the
+   * kept person in their place (same order: a main contact stays main, also where both records are on a deal), with no
+   * line in the deals' history; an alias record says who they are now (person/<gone>/into/<keep>, with the status the
+   * other record had: mergeHeal) and the other record is marked ไม่อยู่แล้ว, so a tab on an older build stops offering
+   * it; one note on the kept person says it. Their calls, notes, appointments and contact
+   * records are not rewritten (a sales account may not rewrite other people's): they are read through the alias.
+   * Needs ลูกค้าและผู้ติดต่อ only (nothing is deleted).
+   */
+  mergePeople(keepId: string, goneId: string): boolean {
+    const keep = this.people[keepId], gone = this.people[goneId];
+    if (!keep || !gone || keepId === goneId || this.isMerged(keepId) || this.isMerged(goneId)) return false;
+    if (!this.can('edit.cust')) return this.deny(), false;
+    const goneCos = this.personCos(gone);
+    const plan = mergePlan(keep, gone, this.personCos(keep), goneCos);
+    const keepDeals = new Set(this.personDeals(keepId).map((d) => d.id));
+    const moves = Object.entries(this.plinks).filter(([k, l]) => {
+      const x = personKey(k);
+      return !!x?.deal && x.pid === goneId && !!l.on && !!this.sales.deals[x.deal];
+    });
+    const now = new Date().toISOString(), by = this.me();
+    const at = goneCos.find((x) => x.main)?.company || '';
+    this.batchOps(() => {
+      if (Object.keys(plan.patch).length) this.updatePerson(keepId, plan.patch as Partial<PersonForm>);
+      plan.cos.forEach((c) => {
+        const cur = coRecOf(new Set(this.idsOf(keepId)), c.gid, this.coIndex().recs.get(keepId) || [], (g) => this.canonical(g));
+        if (c.fill && cur) this.putCo(cur[0], { ...cur[1], pos: c.pos, upAt: now, upBy: by }, ['pos']);
+        else if (!c.fill) this.putCo(cur ? cur[0] : coKey(keepId, c.gid), { on: 1, st: c.st, pos: c.pos, dept: c.dept, role: c.role, at: cur?.[1].at || now, by: cur?.[1].by || by, upAt: now, upBy: by, o: 0 });
+      });
+      moves.forEach(([k, l]) => {
+        const deal = personKey(k)!.deal!;
+        // the kept person in the other's place: the main contact stays the main one (both on the deal: the earlier
+        // place of the two)
+        if (!keepDeals.has(deal)) this.putLink(keepId, deal, 1, l.o);
+        else if (l.o < Math.min(...this.linksOn(keepId, deal).map(([, x]) => x.o))) this.putLink(keepId, deal, 1, l.o);
+        this.putLink(goneId, deal, 0, l.o);
+      });
+      // the alias says the status the other record had (written ไม่อยู่แล้ว below, at the alias's time: mergeHeal)
+      const st0 = this.personNow(gone).status;
+      const alias: PInto = { on: 1, at: now, by, o: 0, st0 };
+      this.plinks[intoKey(goneId, keepId)] = alias;
+      this.coIx = null;
+      this.coPeople = null;
+      this.op(keyOf.pinto(goneId, keepId), intoValue(alias));
+      if (st0 !== 'left') {
+        const out: Person = { ...this.people[goneId], status: 'left', stAt: now, upAt: now, upBy: by };
+        this.people[goneId] = out;
+        this.op(keyOf.person(goneId), { ...out }, { f: ['status', 'stAt', 'upAt', 'upBy'] });
+      }
+      this.addPersonLog(keepId, 'note', '', `รวมรายชื่อซ้ำ “${gone.name}”${at ? ` (${at})` : ''} เข้ากับคนนี้` + (plan.typedCo ? ` · บริษัทที่พิมพ์ชื่อไว้: ${plan.typedCo}` : ''));
+    });
+    this.persist('plinks', this.plinks);
+    this.emit();
+    return true;
+  }
   /** Calls, e-mails, meetings and notes with a person, newest first. */
   personLogs(p: Person) {
-    // filed under the company id of the time (a company merged or changed since) or under the person
+    // filed under the company id of the time (a company merged or changed since) or under the person; a record
+    // merged into this one: theirs too
+    const ids = new Set(this.idsOf(p.id));
     const out: { l: LogEntry; key: string }[] = [];
-    Object.entries(this.crm.log).forEach(([key, a]) => (a || []).forEach((l) => l.pid === p.id && out.push({ l, key })));
+    Object.entries(this.crm.log).forEach(([key, a]) => (a || []).forEach((l) => !!l.pid && ids.has(l.pid) && out.push({ l, key })));
     return out.sort((a, b) => b.l.at.localeCompare(a.l.at));
   }
   /** Calls, e-mails and meetings recorded in deals "กับ" a person (dact with their pid), newest first; a deal
    *  deleted since takes its records along. */
   personActs(pid: string): DealAct[] {
     const S = this.sales;
+    const ids = new Set(this.idsOf(pid));
     return Object.values(S.acts || {})
-      .filter((a) => a.pid === pid && !!S.deals[a.deal])
+      .filter((a) => !!a.pid && ids.has(a.pid) && !!S.deals[a.deal])
       .sort((a, b) => b.d.localeCompare(a.d) || b.at.localeCompare(a.at));
   }
   /** Companies on this device only, by name (for people who name one): built once per registry. */
@@ -1615,11 +2060,13 @@ export class GccEngine {
     return this.localByName.m.get(norm(name));
   }
   /** A call, e-mail, meeting or note with a person: in the company's contact log (the company page
-   *  shows it too), or kept under the person when they have no company everyone has. */
-  addPersonLog(pid: string, type: string, result: string, text: string) {
+   *  shows it too), or kept under the person when they have no company everyone has. `gid`: at that one of
+   *  their companies (a person who deals with several: "ที่ <บริษัท>"), else their main one. */
+  addPersonLog(pid: string, type: string, result: string, text: string, gid?: number | null) {
     const p = this.people[pid];
     if (!p) return;
-    const c = this.personCompany(p);
+    const at = gid != null ? this.personCos(p).find((x) => x.gid === this.canonical(gid))?.c : undefined;
+    const c = at || this.personCompany(p);
     if (c && !isLocalId(c.id)) return this.addLog(c.id, type, result, text, pid);
     if (!text && !result) return;
     this.logAct('p-' + pid, { type, result, text, pid });
@@ -1630,7 +2077,12 @@ export class GccEngine {
     const hidden = new Set([...(prefs.get<string[]>(PREF.peopleHide, []) || []), ...(prefs.get<string[]>(PREF.peopleGone, []) || [])]);
     // (a deal's typed name that is one of its linked people is recorded already, at whatever company)
     const named = (d: Deal) => this.dealPeople(d.id).some((p) => nameKey(p.name) === nameKey(d.contactName));
-    return personSuggestions(Object.values(this.people), Object.values(this.sales.deals), Object.values(this.custom), (g) => this.personGid(g), hidden, (g) => this.company(g)?.ids || [g], named);
+    return personSuggestions(Object.values(this.people), Object.values(this.sales.deals), Object.values(this.custom), (g) => this.personGid(g), hidden, (g) => this.company(g)?.ids || [g], named, {
+      // (a person's other companies are known too; someone at another company the contact surely is: `same`)
+      cos: (p) => this.personCos(p).filter((x) => !x.main && x.gid != null).map((x) => x.gid!),
+      live: this.livePeople(),
+      coPhones: (g) => this.coPhones(g),
+    });
   }
   /** "ไม่ต้อง": don't suggest this one again on this browser (kept apart from deletions, never cut). */
   hideSuggestion(id: string) {
@@ -1656,9 +2108,23 @@ export class GccEngine {
     if (!this.plIx || this.plIx.v !== this.version) this.plIx = { v: this.version, ix: linkIndex(this.plinks) };
     return this.plIx.ix;
   }
-  /** The people who are a deal's contact, the main contact first (a person deleted since is left out). */
+  /** The people who are a deal's contact, the main contact first (a person deleted since is left out; a record
+   *  merged into another is that person, once). */
   dealPeople(dealId: string): Person[] {
-    return linkedPeople(this.links(), dealId, this.people);
+    const a = this.coIndex().alias, seen = new Set<string>();
+    return (this.links().byDeal.get(dealId) || []).flatMap((x) => {
+      const id = a.get(x) || x;
+      if (seen.has(id) || !this.people[id]) return [];
+      seen.add(id);
+      return [this.people[id]];
+    });
+  }
+  /** The links that are on of a person (and of the records merged into them) on a deal: [pid as written, link]. */
+  private linksOn(pid: string, dealId: string): [string, PLink][] {
+    return this.idsOf(pid).flatMap((id) => {
+      const l = this.plinks[id + '/' + dealId];
+      return l?.on ? [[id, l] as [string, PLink]] : [];
+    });
   }
   /** What a deal shows as its contact: the main linked person (name, phone, e-mail), else what was typed in it. */
   dealContact(d: Deal): DealContact {
@@ -1666,35 +2132,19 @@ export class GccEngine {
   }
   /** The deals a person is the contact of (a deal deleted since is left out). */
   personDeals(pid: string): Deal[] {
-    return (this.links().byPerson.get(pid) || []).map((id) => this.sales.deals[id]).filter((d): d is Deal => !!d);
+    const ids = new Set(this.idsOf(pid).flatMap((x) => this.links().byPerson.get(x) || []));
+    return [...ids].map((id) => this.sales.deals[id]).filter((d): d is Deal => !!d);
   }
   /** The words of a deal's contacts the table's search reads (names, phones, e-mails). */
   contactHay = (d: Deal) => this.dealPeople(d.id).map((p) => [p.name, p.nick, p.phone, p.email].join(' ')).join(' ');
   /** A deal's contact phone, for a list that shows one (the Plan page when the company has none). */
   contactPhone = (d: Deal) => this.dealContact(d).phone;
-  /** The people of the team's companies by company (canonical id), built once per change: the table asks
-   *  every row (contactSummary). Not inside bulk(), where people may change before the version does. */
-  private coPeople: { v: number; people: Record<string, Person>; m: Map<number, Person[]> } | null = null;
-  private peopleAt(gid: number): Person[] {
-    const c = this.company(gid);
-    if (this.deferred || !c || isLocalId(c.id)) return this.peopleOf(gid);
-    if (!this.coPeople || this.coPeople.v !== this.version || this.coPeople.people !== this.people) {
-      const m = new Map<number, Person[]>();
-      Object.values(this.people).forEach((p) => {
-        if (p.gid == null) return;
-        const g = this.canonical(p.gid);
-        (m.get(g) || m.set(g, []).get(g)!).push(p);
-      });
-      this.coPeople = { v: this.version, people: this.people, m };
-    }
-    return (this.coPeople.m.get(this.canonical(gid)) || []).slice();
-  }
-  /** The people the deal's company has on record (any of its ids); a client not linked to a company: the
-   *  people who name it. */
-  dealPool(d: Deal): Person[] {
-    if (d.gid != null && this.company(d.gid)) return this.peopleAt(d.gid);
+  /** The people the deal's company has on record (any of its ids; those who have it as another company too, as
+   *  seen there); a client not linked to a company: the people who name it. */
+  dealPool(d: Deal): PersonAt[] {
+    if (d.gid != null && this.company(d.gid)) return this.peopleOf(d.gid);
     const k = norm(d.client);
-    return k ? Object.values(this.people).filter((p) => norm(p.company) === k || (p.gid != null && norm(this.company(p.gid)?.name || '') === k)) : [];
+    return k ? this.livePeople().filter((p) => norm(p.company) === k || (p.gid != null && norm(this.company(p.gid)?.name || '') === k)).map((p) => this.personView(p, p.gid)) : [];
   }
   /** Is person `p` (one of a deal's contacts) at another company than the deal's: the deal linked to another
    *  company since, or the person moved. Only for a deal linked to a company (one that is not names anyone). */
@@ -1725,9 +2175,11 @@ export class GccEngine {
     const cur = this.dealPeople(dealId);
     if (cur[0]?.id === pid || (!opt.main && cur.some((x) => x.id === pid))) return true;
     const main = opt.main ? cur[0] : undefined;
-    const rest = cur.filter((x) => x !== main && x.id !== pid).map((x) => this.plinks[x.id + '/' + dealId]);
+    const rest = cur.filter((x) => x !== main && x.id !== pid).flatMap((x) => this.linksOn(x.id, dealId).map(([, l]) => l));
     this.batchOps(() => {
-      if (main) this.putLink(main.id, dealId, 0, this.plinks[main.id + '/' + dealId].o);
+      if (main) this.linksOn(main.id, dealId).forEach(([id, l]) => this.putLink(id, dealId, 0, l.o));
+      // (one linked through a record merged into them: that link off, theirs on)
+      this.linksOn(pid, dealId).forEach(([id, l]) => this.putLink(id, dealId, 0, l.o));
       this.putLink(pid, dealId, 1, linkOrder(rest, !!main, Date.now()));
       this.salesLog(d, main ? 'เปลี่ยนผู้ติดต่อ' : 'เชื่อมผู้ติดต่อ', main ? `${main.name} เป็น ${p.name}` : p.name);
     });
@@ -1737,11 +2189,11 @@ export class GccEngine {
   }
   /** Take a person off a deal's contacts (the person stays in ผู้ติดต่อ). */
   unlinkPerson(dealId: string, pid: string): boolean {
-    const d = this.sales.deals[dealId], l = this.plinks[pid + '/' + dealId];
-    if (!d || !l?.on) return false;
+    const d = this.sales.deals[dealId], on = this.linksOn(pid, dealId);
+    if (!d || !on.length) return false;
     if (!this.canLink(d)) return this.deny(), false;
     this.batchOps(() => {
-      this.putLink(pid, dealId, 0, l.o);
+      on.forEach(([id, l]) => this.putLink(id, dealId, 0, l.o));
       this.salesLog(d, 'เอาผู้ติดต่อออก', this.people[pid]?.name || '');
     });
     this.persist('plinks', this.plinks);
@@ -1756,7 +2208,7 @@ export class GccEngine {
     if (!d || !on.length) return false;
     if (!this.canLink(d)) return this.deny(), false;
     this.batchOps(() => {
-      on.forEach((p) => this.putLink(p.id, dealId, 0, this.plinks[p.id + '/' + dealId].o));
+      on.forEach((p) => this.linksOn(p.id, dealId).forEach(([id, l]) => this.putLink(id, dealId, 0, l.o)));
       this.salesLog(d, 'เอาผู้ติดต่อออก', on.map((p) => p.name).join(', '));
     });
     this.persist('plinks', this.plinks);
@@ -1765,7 +2217,7 @@ export class GccEngine {
   }
   /** A link made on a deal after `t` (ms): someone's choice, which an undo of the send that made it keeps. */
   private linkedSince(dealId: string, t: number) {
-    return Object.entries(this.plinks).some(([k, l]) => k.endsWith('/' + dealId) && Date.parse(l.at) > t);
+    return Object.entries(this.plinks).some(([k, l]) => personKey(k)?.deal === dealId && Date.parse(l.at) > t);
   }
   /** The contact a deal made by an explicit action gets (no history of its own: the deal's says it): person
    *  `pid` when given; else, when a contact is typed in the deal (copied from the company's own row or a customer
@@ -1800,9 +2252,10 @@ export class GccEngine {
    * before) and a contact of the deal (its main one when it has none). `t`: a contact typed in a form for the
    * deal (เพิ่มลูกค้า) in place of the deal's, with the phone and e-mail typed beside it. A person of the company
    * with that name already is used, not made again. The deal's typed fields stay as they are. Returns the
-   * person's id.
+   * person's id. `fresh`: "สร้างคนใหม่", chosen beside someone recorded elsewhere the contact may be: a new person,
+   * never them.
    */
-  saveTypedContact(dealId: string, t?: { name: string; phone: string; email: string }): string {
+  saveTypedContact(dealId: string, t?: { name: string; phone: string; email: string }, opt: { pid?: string; fresh?: boolean } = {}): string {
     const d = this.sales.deals[dealId];
     const name = (t ? t.name : d?.contactName || '').trim();
     if (!d || !name) return '';
@@ -1813,12 +2266,24 @@ export class GccEngine {
     let id = suggestionId(this.personGid(d.gid), d.client, name);
     const gone = new Set(prefs.get<string[]>(PREF.peopleGone, []) || []);
     if (!this.people[id] && (gone.has(id) || this.goneKeys.has(keyOf.person(id)))) id = '';
-    let pid = same ? same.id : id && this.people[id] ? id : '';
+    // someone recorded at another company, chosen on the card ("เพิ่มบริษัทนี้ให้ <ชื่อ>")
+    let other = opt.pid && this.people[opt.pid] ? this.resolvePid(opt.pid) : '';
+    let pid = other ? '' : same ? same.id : id && this.people[id] ? this.resolvePid(id) : '';
     // the numbers and e-mails typed for them: a form's as typed, else the deal's that are not the company's
     // own (copied in when the deal was sent)
     const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d, null, c);
+    const typed = { name, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') };
+    // or, without asking (เพิ่มลูกค้า), the one person with this name and a phone or e-mail typed for them (never a
+    // guess by name alone; the number typed in the form is theirs even when the new customer has it as its own)
+    if (!pid && !other && !opt.fresh) {
+      const f = this.findExisting(typed, d.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
+      if (f.length === 1) other = f[0].p.id;
+    }
     this.batchOps(() => {
-      if (!pid) pid = this.addPerson({ name, gid: d.gid, company: c?.name || d.client, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') }, id ? { id, nx: true } : {});
+      if (other) {
+        this.addToExisting(other, { gid: this.personGid(d.gid), phone: typed.phone, email: typed.email });
+        pid = other;
+      } else if (!pid) pid = this.addPerson({ name, gid: d.gid, company: c?.name || d.client, phone: typed.phone, email: typed.email }, id ? { id, nx: true } : {});
       if (pid) this.linkPerson(dealId, pid);
     });
     return pid;
@@ -4657,7 +5122,8 @@ export class GccEngine {
       : type === 'cust' ? this.custom[rest as unknown as number]
       : type === 'contact' ? this.contacts[rest as unknown as number]
       : type === 'task' ? this.crm.tasks.find((t) => t.id === rest)
-      : type === 'person' ? (rest.includes('/') ? this.plinks[rest] : this.people[rest])
+      // (a person's other company is written without the links' order: people.ts pcoValue)
+      : type === 'person' ? (rest.includes('/') ? (personKey(rest)?.co != null && this.plinks[rest] ? pcoValue(this.plinks[rest] as PCo) : this.plinks[rest]) : this.people[rest])
       : type === 'jqt' ? S.jqt?.[rest]
       : type === 'jqm' ? S.jqm?.[rest]
       : type === 'scfg' && rest.startsWith('unit.') ? S.units?.[rest.slice(5)]
@@ -5188,6 +5654,8 @@ export class GccEngine {
     if (fx.people) this.store.update<Record<string, Person>>('people', (cur) => (cur ? merged({ ...none, people: cur }).people! : this.people)).catch(() => {});
     if (fx.plinks) {
       this.plIx = null;
+      this.coIx = null;
+      this.coPeople = null;
       this.store.update<Record<string, PLink>>('plinks', (cur) => (cur ? merged({ ...none, plinks: cur }).plinks! : this.plinks)).catch(() => {});
     }
     if (fx.dedup || fx.contactDel || fx.custom) {

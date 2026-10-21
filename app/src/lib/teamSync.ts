@@ -8,7 +8,7 @@
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
-import { personKey, toPLink, toPerson, type PLink } from './people';
+import { intoValue, pcoValue, personKey, toPCo, toPInto, toPLink, toPerson, type PCo, type PInto, type PLink } from './people';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
@@ -298,6 +298,9 @@ export const keyOf = {
   person: (id: string) => `person/${id}`,
   /** a deal's contact: a link from the deal to a person (lib/people.ts PLink), a record of its own */
   plink: (pid: string, dealId: string) => `person/${pid}/${dealId}`,
+  /** one more company a person deals with (lib/people.ts PCo), and a person merged into another (an alias) */
+  pco: (pid: string, gid: number) => `person/${pid}/co/${gid}`,
+  pinto: (gone: string, keep: string) => `person/${gone}/into/${keep}`,
   /** a deal removed by undoing an import (not deleted by hand): the same file may be imported again */
   dundo: (id: string) => `dundo/${id}`,
   /** a joint quotation's mark on its header deal, and one member company of it (lib/sales.ts jointOf) */
@@ -350,7 +353,8 @@ export function uniqueTaskIds(tasks: Task[]) {
   return renamed;
 }
 
-/** `plinks`: the deals' contacts, keyed `<pid>/<dealId>` (lib/people.ts PLink). */
+/** `plinks`: the deals' contacts, keyed `<pid>/<dealId>` (lib/people.ts PLink), with a person's other companies
+ *  (`<pid>/co/<gid>`, PCo) and merge aliases (`<gone>/into/<keep>`). */
 export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>; plinks?: Record<string, PLink> }
 
 /** Every shared record currently held locally, keyed like the server. */
@@ -395,7 +399,10 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
-  Object.entries(s.plinks || {}).forEach(([k, v]) => m.set('person/' + k, { ...v }));
+  Object.entries(s.plinks || {}).forEach(([k, v]) => {
+    const x = personKey(k);
+    m.set('person/' + k, x?.co != null ? pcoValue(v as PCo) : x?.into ? intoValue(v as PInto) : { ...v });
+  });
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
@@ -670,14 +677,15 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
     case 'person': {
       const pk = personKey(rest);
       if (!pk) return;
-      if (pk.deal) {
-        // a deal's contact (lib/people.ts PLink): builds before it read it as a person without a name and skip it
+      if (pk.deal || pk.co != null || pk.into) {
+        // a deal's contact (lib/people.ts PLink), one more company of a person (PCo) or a merge alias: builds
+        // before deal links read it as a person without a name, ab2bb50 as no key it knows; both skip it
         const L = s.plinks || (s.plinks = {});
         if (del) {
           if (!(rest in L)) return;
           delete L[rest];
         } else {
-          const v = toPLink(row.v);
+          const v = pk.co != null ? toPCo(row.v) : pk.into ? toPInto(row.v) : toPLink(row.v);
           if (!v) return;
           L[rest] = v;
         }

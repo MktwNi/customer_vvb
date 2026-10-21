@@ -96,6 +96,9 @@ export interface Person {
   gid: number | null; company: string;
   phone: string; email: string; line: string; owner: string; status: 'active' | 'left'; note: string;
   at: string; by: string; upAt: string; upBy: string;
+  /** When `status` was last written (kept by older builds as a field they don't know): a merge's own ไม่อยู่แล้ว on a
+   *  record that turns out not merged is told apart from one a person chose (engine mergeHeal). */
+  stAt?: string;
 }
 export interface Crm {
   stages: Record<string, StageKey>;

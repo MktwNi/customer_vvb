@@ -7,6 +7,9 @@ import type { GccEngine } from '../lib/engine';
 import type { Deal } from '../lib/sales';
 import type { Person } from '../lib/types';
 import { PersonAvatar, useOpenPerson } from '../tabs/People';
+// one person, several companies: who someone from outside the deal's company is, in one line
+import { coShort, whoLine } from '../tabs/PeopleCos';
+import { foundWhy, type PersonAt } from '../lib/people';
 import { labelCol } from './ui';
 
 /**
@@ -15,7 +18,8 @@ import { labelCol } from './ui';
  * "แก้เบอร์ / อีเมล" edits that record. A deal without one is offered the people of its company (one: "ใช้คนนี้";
  * several: a short list; none: "เพิ่มผู้ติดต่อ", which records the person for the whole team). What an older deal
  * had typed stays as it was typed, offered as the person it names ("เชื่อมกับ …") or as a new one
- * ("บันทึกเป็นผู้ติดต่อ").
+ * ("บันทึกเป็นผู้ติดต่อ"). A person deals with several companies (a consultant): the people of the deal's company are
+ * those who deal with it, shown with their position there; one picked from outside it gets it added to theirs.
  */
 
 /** An account that may edit the deal but not the contacts (a custom role) types the contact in the deal as before:
@@ -40,7 +44,7 @@ function Reach({ phone, email }: { phone: string; email: string }) {
     </span>
   );
 }
-const roleLine = (p: Person) => [p.pos, p.role ? ROLE_TH[p.role] : ''].filter(Boolean).join(' · ');
+const roleLine = (p: Person) => [p.pos, p.role ? ROLE_TH[p.role] : '', (p as Partial<PersonAt>).ncos! > 1 ? `ผู้ติดต่อของ ${(p as PersonAt).ncos} บริษัท` : ''].filter(Boolean).join(' · ');
 
 export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   const { engine: e, set } = useApp();
@@ -76,6 +80,12 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
     e.linkPerson(d.id, pid, { main });
     focusTo();
   };
+  // someone from outside the deal's company (a consultant who brings it): it becomes one more company of theirs
+  const inPool = new Set(pool.map((p) => p.id));
+  const linkFrom = (pid: string, main = false) => {
+    if (c && !inPool.has(pid)) e.addCompanyToPerson(pid, c.id);
+    link(pid, main);
+  };
   const head = <span className="dc-h" id={hid}>ผู้ติดต่อ</span>;
   const wrap = (body: ReactNode) => (
     <div className="dc-who" role="group" aria-labelledby={hid} ref={box}>
@@ -95,7 +105,7 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
         many={people.length > 1}
         onPick={(pid) => {
           setPick('');
-          link(pid, pick === 'set');
+          linkFrom(pid, pick === 'set');
         }}
         onNew={() => {
           addNew(pick === 'set');
@@ -131,8 +141,10 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
           {people.map((p, i) => {
             const ex = p === owner ? personExtras(d, p, c) : null;
             const more = ex ? [...ex.phones, ...ex.emails] : [];
-            // at another company than the deal's (it was linked to another company since, or they moved)
+            // at another company than the deal's (it was linked to another company since, or they moved); one who
+            // deals with it as another company of theirs is not (their position there is shown)
             const away = e.contactElsewhere(d, p);
+            const v = e.personView(p, d.gid);
             return (
               <div key={p.id} className="dc-pw">
                 <div className="dc-p">
@@ -140,10 +152,11 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
                   <span className="dc-t">
                     <span className="dc-n">
                       {p.name}
-                      {p.status === 'left' && <span className="chip warn">ย้ายงานแล้ว</span>}
+                      {/* (at the deal's company: their status there; from elsewhere: left every company of theirs) */}
+                      {(away ? !e.personActive(p) : v.status === 'left') && <span className="chip warn">{away ? 'ไม่อยู่แล้ว' : 'ไม่อยู่บริษัทนี้แล้ว'}</span>}
                       {people.length > 1 && i === 0 && <span className="t-meta">ผู้ติดต่อหลัก</span>}
                     </span>
-                    {roleLine(p) && <span className="dc-s">{roleLine(p)}</span>}
+                    {roleLine(v) && <span className="dc-s">{roleLine(v)}</span>}
                     {away && <span className="dc-s">อยู่ที่ {e.personCompany(p)?.name || p.company || 'บริษัทอื่น'} ไม่ใช่บริษัทของดีลนี้</span>}
                     <Reach phone={p.phone} email={p.email} />
                     {!p.phone && !p.email && <span className="dc-s">{more.length ? 'ยังไม่มีเบอร์และอีเมลในหน้าผู้ติดต่อ' : 'ยังไม่มีเบอร์และอีเมล'}</span>}
@@ -162,6 +175,8 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
                 ) : (
                   can && (
                     <div className="dc-a dc-in">
+                      {/* an older link to someone this company is not theirs: add it to their companies */}
+                      {away && c && d.gid != null && <button type="button" className="lnk" onClick={() => (e.addCompanyToPerson(p.id, c.id), focusTo())}>เพิ่ม {coShort(c.name)} ให้ {p.name}</button>}
                       {more.length > 0 && (
                         <button type="button" className="lnk" data-fk={'give-' + p.id} onClick={() => (e.addTypedToPerson(d.id, p.id), focusTo('edit-' + p.id))}>เพิ่มให้ {p.name}</button>
                       )}
@@ -212,11 +227,16 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
     // most likely, so it is recorded as a person first, the link offered as a second choice
     const byName = m.by === 'name';
     const reach = m.by === 'phone' ? 'เบอร์โทร' : 'อีเมล';
+    // nobody of the company: someone recorded at another company it surely is (a consultant who brings it)
+    const fe = !m.list.length ? e.findExisting({ name: typed, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') }, d.gid, d.client).filter((x) => !x.here) : [];
+    const elsewhere = fe.length === 1 ? fe[0] : undefined;
     const note = byName
       ? one
         ? `ตรงกับ ${one.name} ในรายชื่อผู้ติดต่อ${one.pos ? ` (${one.pos})` : ''}`
         : `ตรงกับ ${m.list.length} คนในรายชื่อผู้ติดต่อ เลือกคนที่ใช่`
-      : ['ยังไม่อยู่ในรายชื่อผู้ติดต่อ', m.list.length ? `${reach}ตรงกับ ${one ? one.name : m.list.length + ' คน'}` : ''].filter(Boolean).join(' · ');
+      : elsewhere
+        ? `คนนี้มีอยู่แล้ว: ${elsewhere.p.name}${whoLine(e, elsewhere.p) ? ` (${whoLine(e, elsewhere.p)})` : ''} · ${foundWhy(elsewhere.by)}`
+        : ['ยังไม่อยู่ในรายชื่อผู้ติดต่อ', m.list.length ? `${reach}ตรงกับ ${one ? one.name : m.list.length + ' คน'}` : ''].filter(Boolean).join(' · ');
     return wrap(
       <div className="dc-box ask">
         <div className="dc-typed">
@@ -233,6 +253,13 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
           <div className="dc-a">
             {byName ? (
               one && <button type="button" className="btn xs pri" onClick={() => link(one.id)}>เชื่อมกับ {one.name}</button>
+            ) : elsewhere ? (
+              <>
+                <button type="button" className="btn xs pri" onClick={() => (e.saveTypedContact(d.id, undefined, { pid: elsewhere.p.id }), focusTo())}>
+                  {c ? `เพิ่มบริษัทนี้ให้ ${elsewhere.p.name}` : `ใช้ ${elsewhere.p.name}`}
+                </button>
+                <button type="button" className="lnk" onClick={() => (e.saveTypedContact(d.id, undefined, { fresh: true }), focusTo())}>สร้างคนใหม่</button>
+              </>
             ) : (
               <>
                 <button type="button" className="btn xs pri" onClick={() => (e.saveTypedContact(d.id), focusTo())}>บันทึกเป็นผู้ติดต่อ</button>
@@ -294,20 +321,21 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
       <span className="dc-note">{c ? 'ยังไม่มีผู้ติดต่อของบริษัทนี้ในรายชื่อ' : 'ยังไม่มีผู้ติดต่อ'} · เพิ่มครั้งเดียว ใช้ได้ทั้งใน<span className="dc-nw">ดีลนี้</span>และหน้าผู้ติดต่อ</span>
       <div className="dc-a">
         <button type="button" className="btn xs pri" onClick={() => addNew()}>เพิ่มผู้ติดต่อ</button>
-        {Object.keys(e.people).length > 0 && <button type="button" className="lnk" data-fk="search" onClick={() => open('set', 'search')}>ค้นจากรายชื่อผู้ติดต่อทั้งหมด</button>}
+        {e.livePeople().length > 0 && <button type="button" className="lnk" data-fk="search" onClick={() => open('set', 'search')}>ค้นจากรายชื่อผู้ติดต่อทั้งหมด</button>}
       </div>
       {typedLine}
     </div>,
   );
 }
 
-/** One person to choose: name, position · role (or their company, from outside this one), "เลือก". */
-function Opt({ p, sub, onPick }: { p: Person; sub?: string; onPick: () => void }) {
+/** One person to choose: name, position · role (or their company, from outside this one), "เลือก". `left`: the status
+ *  word ("ไม่อยู่บริษัทนี้แล้ว" for one of the company's, "ไม่อยู่แล้ว" for someone from outside who left every company). */
+function Opt({ p, sub, left, onPick }: { p: Person; sub?: string; left?: string; onPick: () => void }) {
   return (
     <button type="button" className="dc-opt hv" onClick={onPick} aria-label={'เลือก ' + p.name}>
       <PersonAvatar p={p} size={32} />
       <span className="dc-t">
-        <span>{p.name}{p.status === 'left' ? ' (ย้ายงานแล้ว)' : ''}</span>
+        <span>{p.name}{left ? ` (${left})` : ''}</span>
         <span className="dc-s">{sub ?? (roleLine(p) || 'ยังไม่ระบุตำแหน่ง')}</span>
       </span>
       <span className="btn xs" aria-hidden="true">เลือก</span>
@@ -315,12 +343,12 @@ function Opt({ p, sub, onPick }: { p: Person; sub?: string; onPick: () => void }
   );
 }
 /** The first five, then "ดูทั้งหมด n คน". */
-function ShortList({ list, onPick, sub }: { list: Person[]; onPick: (pid: string) => void; sub?: (p: Person) => string | undefined }) {
+function ShortList({ list, onPick, sub, left }: { list: Person[]; onPick: (pid: string) => void; sub?: (p: Person) => string | undefined; left?: (p: Person) => string }) {
   const [all, setAll] = useState(false);
   const shown = all ? list : list.slice(0, 5);
   return (
     <div className="dc-list">
-      {shown.map((p) => <Opt key={p.id} p={p} sub={sub?.(p)} onPick={() => onPick(p.id)} />)}
+      {shown.map((p) => <Opt key={p.id} p={p} sub={sub?.(p)} left={left ? left(p) : p.status === 'left' ? 'ไม่อยู่บริษัทนี้แล้ว' : ''} onPick={() => onPick(p.id)} />)}
       {list.length > 5 && (
         <button type="button" className="lnk dc-more" aria-expanded={all} onClick={() => setAll(!all)}>{all ? 'แสดงน้อยลง' : `ดูทั้งหมด ${list.length} คน`}</button>
       )}
@@ -340,11 +368,16 @@ function Picker({ d, mode, pool, skip, hasMain, many, onPick, onNew, onNone, onC
   const inPool = useMemo(() => new Set(pool.map((p) => p.id)), [pool]);
   const found = useMemo(() => {
     if (k.length < 2) return contactChoices(pool, skip);
-    return Object.values(e.people)
-      .filter((p) => !skip.includes(p.id) && norm([p.name, p.nick, p.pos, p.company, e.personCompany(p)?.name || ''].join(' ')).includes(k))
+    // (in the company's: as seen there; from outside: their companies' names and positions searched too)
+    const at = new Map(pool.map((p) => [p.id, p]));
+    return e.livePeople()
+      .filter((p) => !skip.includes(p.id) && norm([p.name, p.nick, p.pos, p.company, ...e.personCos(p).flatMap((x) => [x.c?.name || x.company, x.pos])].join(' ')).includes(k))
+      .map((p) => at.get(p.id) || p)
       .sort((a, b) => +inPool.has(b.id) - +inPool.has(a.id) || a.name.localeCompare(b.name, 'th'))
       .slice(0, 8);
   }, [k, pool, skip, e, inPool]);
+  const c = d.gid != null ? e.company(d.gid) : undefined;
+  const outside = k.length >= 2 && found.some((p) => !inPool.has(p.id));
   const keys = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
     ev.preventDefault();
@@ -356,10 +389,16 @@ function Picker({ d, mode, pool, skip, hasMain, many, onPick, onNew, onNone, onC
       <span className="dc-note">{mode === 'add' ? 'เพิ่มผู้ติดต่ออีกคนในดีลนี้' : hasMain ? 'เลือกผู้ติดต่อคนใหม่ของดีลนี้' : 'เลือกผู้ติดต่อของดีลนี้'}</span>
       <input value={q} onChange={(ev) => setQ(ev.target.value)} autoFocus className="fld" placeholder="พิมพ์ชื่อเพื่อค้นในรายชื่อผู้ติดต่อทั้งหมด" aria-label="ค้นผู้ติดต่อ" />
       {found.length ? (
-        <ShortList list={found} onPick={onPick} sub={(p) => (inPool.has(p.id) ? undefined : [e.personCompany(p)?.name || p.company || 'ไม่ระบุบริษัท', p.pos].filter(Boolean).join(' · '))} />
+        <ShortList
+          list={found}
+          onPick={onPick}
+          sub={(p) => (inPool.has(p.id) ? undefined : whoLine(e, p) || 'ไม่ระบุบริษัท')}
+          left={(p) => (inPool.has(p.id) ? (p.status === 'left' ? 'ไม่อยู่บริษัทนี้แล้ว' : '') : e.personActive(p) ? '' : 'ไม่อยู่แล้ว')}
+        />
       ) : (
         <span className="dc-note">{k.length < 2 ? (d.gid != null ? 'บริษัทนี้ยังไม่มีคนอื่นในรายชื่อผู้ติดต่อ' : 'พิมพ์ชื่อเพื่อค้น') : `ไม่พบ “${q.trim()}” ในรายชื่อผู้ติดต่อ`}</span>
       )}
+      {outside && c && <span className="dc-note">คนจากบริษัทอื่น: เลือกแล้วจะเพิ่ม {c.name} ในบริษัทที่คนนี้ติดต่อด้วย และใช้เป็นผู้ติดต่อของดีลนี้</span>}
       <div className="dc-a">
         <button type="button" className="lnk" onClick={onNew}>เพิ่มผู้ติดต่อใหม่</button>
         {/* (every contact of the deal: with several, the words say so) */}
