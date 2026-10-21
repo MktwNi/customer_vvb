@@ -31,6 +31,9 @@ import { checkedLine, waitShort } from '../lib/notify';
 import { useSalesActs } from './SalesToast';
 import { LensMoney } from '../tabs/SalesCash';
 import type { AttachEntry } from '../lib/attachPlan';
+import { DealSvcRow } from './DealSvc';
+import { svcText } from '../lib/jobs';
+import { jobServices } from '../lib/sales';
 
 /**
  * The joint quotation (ใบเสนอราคาร่วม, package quotes item 7) on screen: making one ("สร้างใบเสนอราคาร่วม",
@@ -340,7 +343,8 @@ function JointEdit({ from, section, hid, onClose }: { from?: string; section?: s
 }
 /** What joining does to a row of the year, in the picker and the dialog's list. */
 function rowSub(S: SalesState, d: Deal, fate: RowFate) {
-  const where = [d.section || 'ไม่ระบุหมวด', d.resp].filter(Boolean).join(' · ');
+  // (the row's services first: a company's CFO job and its CFP job are told apart)
+  const where = [svcText(jobServices(S, d)) || 'ยังไม่ระบุบริการ', d.section || 'ไม่ระบุหมวด', d.resp].filter(Boolean).join(' · ');
   if (fate === 'taken') return 'อยู่ในใบเสนอราคาร่วมอื่นแล้ว';
   if (fate === 'locked') return `งานของ ${d.resp || 'คนอื่น'} · บัญชีของคุณแก้ไขแถวนี้ไม่ได้ ให้ผู้รับผิดชอบหรือหัวหน้าเพิ่ม`;
   const why = ownJob(S, d);
@@ -738,6 +742,8 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
             </span>
           </div>
           {canJ ? <TitleBox value={title} onSave={(v) => e.setJointTitle(hid, v)} /> : <h3 className="dp-name ro">{title}</h3>}
+          {/* the quotation's services: its companies are sold under them */}
+          <DealSvcRow d={d} />
           <span className="dp-meta">{[no, 'ผู้จ่าย ' + payer, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', `${g.members.length} บริษัท`].filter(Boolean).join(' · ')}</span>
           <div className="dp-strip">
             <div>

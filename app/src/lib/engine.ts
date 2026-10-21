@@ -50,6 +50,9 @@ import { expTeamMonth, expWhat, rowWhat, type XRow } from './expenseMoney';
 import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 // บริษัทที่ติดตาม: a follow on any id of a company is the company's
 import { followIdsOf } from './follow';
+// several jobs of one company in a year, told apart by their services
+import { companyCount, sendState, surelyOther, svcClean } from './jobs';
+import { jobServices } from './sales';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1909,8 +1912,14 @@ export class GccEngine {
     this.saveSales();
     return d;
   }
-  /** Send companies (e.g. the starred ones) to the tracker; those already tracked in the year are skipped. */
-  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string; pid?: string } = {}) {
+  /**
+   * Send companies (e.g. the starred ones) to the tracker as a job each, with the services picked (`service`:
+   * one job carrying all of them, as quoted together). A company that already has a job in the year gets
+   * another only when every job it has is surely other work (lib/jobs.ts sendState 'new': both name services
+   * and share none), or when it is in `force` (ticked through "อาจซ้ำ" in the dialog); else it is skipped and
+   * counted (`skipped`): the dialog showed it unticked, or a teammate's send arrived since.
+   */
+  addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string; pid?: string; service?: readonly string[]; force?: readonly number[] } = {}) {
     if (!this.can('edit.deal')) {
       this.deny();
       return { added: 0, skipped: 0, ids: [] as string[], k: '' };
@@ -1960,40 +1969,50 @@ export class GccEngine {
       || Object.values(S.docs).some((x) => x.deal === id);
   }
   /**
-   * Does a company have its own row in the Sales Tracker of `year`? As dealsOf finds a company's deals (by
-   * its id, or by name for a company from the TGO website sync), worked out once for the whole table: the
-   * send dialog asks it of thousands of companies. A joint quotation's header is the payer's row for that
-   * quotation, not the company's own row of the year. `add`: count a row added since.
+   * A company's jobs in the Sales Tracker of `year` (its rows: as dealsOf finds a company's deals, by its id, or
+   * by name for a company from the TGO website sync), worked out once for the whole table: the send dialog asks
+   * it of thousands of companies. A joint quotation's header is the payer's row for that quotation, not a job of
+   * the company's own; its members are (sold under the header's services). `add`: count a row added since.
    */
-  trackedIn(year: string) {
-    const S = this.sales, byG = new Set<number>(), byN = new Set<string>();
-    Object.values(S.deals).forEach((d) => {
-      if (d.year !== year || jointRole(S, d) === 'header') return;
-      if (d.gid != null) byG.add(this.canonical(d.gid));
-      else byN.add(norm(d.client));
-    });
-    const has = (c: Company) => (isLocalId(c.id) ? !!norm(c.name) && byN.has(norm(c.name)) : byG.has(this.canonical(c.id)));
-    const add = (d: Deal) => (d.gid != null ? byG.add(this.canonical(d.gid)) : byN.add(norm(d.client)));
-    return Object.assign(has, { add });
+  jobsIn(year: string) {
+    const S = this.sales, byG = new Map<number, Deal[]>(), byN = new Map<string, Deal[]>();
+    const put = <K>(m: Map<K, Deal[]>, k: K, d: Deal) => {
+      const l = m.get(k);
+      if (l) l.push(d);
+      else m.set(k, [d]);
+    };
+    const add = (d: Deal) => (d.gid != null ? put(byG, this.canonical(d.gid), d) : put(byN, norm(d.client), d));
+    Object.values(S.deals).forEach((d) => d.year === year && jointRole(S, d) !== 'header' && add(d));
+    const NONE: Deal[] = [];
+    const of = (c: Company): Deal[] => (isLocalId(c.id) ? (norm(c.name) && byN.get(norm(c.name))) || NONE : byG.get(this.canonical(c.id)) || NONE);
+    return Object.assign(of, { add });
   }
-  private addDealsFrom(ids: number[], opts: { section?: string; year?: string; pid?: string }) {
+  /** Does a company have a job in the Sales Tracker of `year` (jobsIn)? `add`: count a row added since. */
+  trackedIn(year: string) {
+    const jobs = this.jobsIn(year);
+    return Object.assign((c: Company) => jobs(c).length > 0, { add: jobs.add });
+  }
+  private addDealsFrom(ids: number[], opts: { section?: string; year?: string; pid?: string; service?: readonly string[]; force?: readonly number[] }) {
     const year = opts.year || beYear();
+    const svc = svcClean(opts.service || []);
+    const force = new Set(opts.force || []);
     const seen = new Set<number>();
-    const has = this.trackedIn(year);
+    const jobs = this.jobsIn(year);
     let added = 0, skipped = 0;
     const made: string[] = [];
     ids.forEach((id) => {
       const c = this.company(id);
       if (!c || seen.has(c.id)) return;
       seen.add(c.id);
-      if (has(c)) {
+      // a company with jobs this year: another only when it is surely other work, or ticked through
+      if (sendState(svc, jobs(c).map((d) => jobServices(this.sales, d))) === 'dup' && !force.has(c.id) && !force.has(id)) {
         skipped++;
         return;
       }
       // its contact: the person it was sent from (their company's page), else the company's one person
       const pid = opts.pid && this.people[opts.pid] && this.peopleOf(c.id).some((x) => x.id === opts.pid) ? opts.pid : '';
-      const d = this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}) }, undefined, { contact: pid });
-      has.add(d);
+      const d = this.addDeal({ gid: c.id, year, ...(opts.section != null ? { section: opts.section } : {}), ...(svc.length ? { service: svc.slice() } : {}) }, undefined, { contact: pid });
+      jobs.add(d);
       made.push(d.id);
       added++;
     });
@@ -2025,7 +2044,7 @@ export class GccEngine {
     this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
     const TH: Partial<Record<keyof Deal, string>> = {
       client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
-      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'Services', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
     };
     const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
     if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
@@ -2845,6 +2864,18 @@ export class GccEngine {
     const B = this.B;
     return workTally(o.s || this.sales, deals, {
       ...o,
+      key: (d) => (d.gid != null ? 'g' + (B ? this.canonical(d.gid) : d.gid) : 'n' + norm(d.client)),
+      alias: (d) => {
+        const c = d.gid != null && B ? this.company(d.gid) : undefined;
+        return c ? ['n' + norm(c.name)] : [];
+      },
+    });
+  }
+  /** How many companies `deals` hold, each once however many jobs it has (lib/jobs.ts companyCount), by the same
+   *  company key as workTally: the Dashboard's ลูกค้า card says it beside the rows when they differ. */
+  companyCount(deals: Deal[]): number {
+    const B = this.B;
+    return companyCount(this.sales, deals, {
       key: (d) => (d.gid != null ? 'g' + (B ? this.canonical(d.gid) : d.gid) : 'n' + norm(d.client)),
       alias: (d) => {
         const c = d.gid != null && B ? this.company(d.gid) : undefined;
@@ -3851,13 +3882,24 @@ export class GccEngine {
         this.setSalesList(k, [...S.cfg[k], ...extra]);
         (listsAdded[k] || (listsAdded[k] = [])).push(...extra.filter((x) => S.cfg[k].includes(x)));
       });
-      // clients this year already tracked here, e.g. sent from the registry before importing
-      const have = new Map<string, number>();
+      // clients this year already tracked here, e.g. sent from the registry before importing: each such row stands
+      // for one row of the file, the first of that client it may be (lib/jobs.ts surelyOther: a row of another
+      // service is another job, imported beside it; a row without a service may be any, as before)
+      const have = new Map<string, Deal[]>();
       Object.values(S.deals).forEach((d) => {
         if (d.year !== t.year || d.id.startsWith('imp')) return;
         const k = norm(d.client);
-        if (k) have.set(k, (have.get(k) || 0) + 1);
+        if (k) (have.get(k) || have.set(k, []).get(k)!).push(d);
       });
+      /** A row tracked by hand that this file row may be (taken: it stands for this row only). */
+      const handRow = (c: { client: string; service: string[] }) => {
+        const l = have.get(norm(c.client));
+        if (!l?.length) return false;
+        const i = l.findIndex((d) => !surelyOther(d.service, c.service));
+        if (i < 0) return false;
+        l.splice(i, 1);
+        return true;
+      };
       const nth = new Map<string, number>();
       let added = 0;
       t.clients.forEach((c, i) => {
@@ -3867,7 +3909,7 @@ export class GccEngine {
         const id = importId(t.year, c, n);
         // already imported, deleted by the team since (never brought back — unless the deletion was
         // an undone import), or tracked by hand
-        if (S.deals[id] || (S.gone[id] && !S.undone[id]) || n <= (have.get(norm(c.client)) || 0)) {
+        if (S.deals[id] || (S.gone[id] && !S.undone[id]) || handRow(c)) {
           skipped++;
           return;
         }

@@ -22,6 +22,8 @@ import {
   type CashLine, type CashSum, type Deal, type DealDoc, type DealLog, type DocKind, type PayLine, type PlanInput, type SalesFilter, type SalesState,
 } from './sales';
 import { sameName } from './caps';
+import { svcText } from './jobs';
+import { jobServices } from './sales';
 import { TH_M, dmTh, isoTh, localDay } from './format';
 import { MONTHS_TH, instSub, instText, jointWords } from './cashUi';
 import { QT_CHIP, QT_WORD, checkedLine, type BellRow } from './notify';
@@ -799,13 +801,15 @@ const closeWord = (m: Pick<MonthRow, 'state' | 'drift'>) => (m.state === 'closed
  */
 export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owed: boolean, filter = ''): XSheet[] {
   const ls = sheetLines(rows, owed);
-  const head = ['เดือน', 'ลูกค้า', 'เลขใบเสนอราคา', 'งวด', 'ยอด (บาท)', 'ฐานยอด', 'วันที่รับ', 'ครบกำหนด', 'สถานะเงิน', 'วิธีชำระ', 'หลักฐาน', 'บันทึกโดย', 'บัญชีตรวจ', 'ผู้ตรวจ', 'วันที่ตรวจ', 'ข้อความส่งกลับแก้ไข'];
+  // (บริการ last: two jobs of one company are told apart; the columns before it stay where they were)
+  const head = ['เดือน', 'ลูกค้า', 'เลขใบเสนอราคา', 'งวด', 'ยอด (บาท)', 'ฐานยอด', 'วันที่รับ', 'ครบกำหนด', 'สถานะเงิน', 'วิธีชำระ', 'หลักฐาน', 'บันทึกโดย', 'บัญชีตรวจ', 'ผู้ตรวจ', 'วันที่ตรวจ', 'ข้อความส่งกลับแก้ไข', 'บริการ'];
+  const svc = (d: Deal | null | undefined) => (d ? svcText(jobServices(s, d)) : '');
   const orphan = (r: ChkRow): XCell[] => {
     const rec = r.rec!, inst = instOf(r, s);
     return [
       ymTh(r.ym, true), r.deal ? r.deal.client : 'งานที่ถูกลบ', r.deal ? dealMoney(s, r.deal).fcDoc?.docNo || '' : '', `${inst.text} (${inst.sub})`,
       r.amt, 'ยอดตอนตรวจ', dateCell(rec.d), null, moneyWord(r), '', '', '',
-      checkWord(r) + (r.to ? ' · ' + movedWords(r.to, rec) : ''), rec.by, dateCell(localDay(rec.at)), rec.s === 'back' ? rec.note || '' : '',
+      checkWord(r) + (r.to ? ' · ' + movedWords(r.to, rec) : ''), rec.by, dateCell(localDay(rec.at)), rec.s === 'back' ? rec.note || '' : '', svc(r.deal),
     ];
   };
   const line = (r: ChkRow): XCell[] => {
@@ -817,7 +821,7 @@ export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owe
       ymTh(r.ym, true), l.joint ? `${d.client} (${jointWords(l.joint)})` : d.client, dealMoney(s, d).fcDoc?.docNo || '', instText(l) + (l.src === 'plan' ? ` (${l.code || l.stage})` : ''),
       r.amt, basisWord(r), dateCell(l.rcv), dateCell(l.due), moneyWord(r), pl?.how ? HOW_TH[pl.how] : '',
       r.kind === 'got' ? (r.docs.length ? r.docs.map(docWord).join(', ') : 'ไม่มีไฟล์') : '', r.by.join(', '),
-      checkWord(r), held ? r.rec!.by : '', held ? dateCell(localDay(r.rec!.at)) : null, r.state === 'back' ? r.rec!.note || '' : '',
+      checkWord(r), held ? r.rec!.by : '', held ? dateCell(localDay(r.rec!.at)) : null, r.state === 'back' ? r.rec!.note || '' : '', svc(d),
     ];
   };
   const sumHead = ['เดือน', 'เข้าแล้ว (บาท)', 'รอรับ (บาท)', 'เลยกำหนด (บาท)', 'รวม (บาท)', 'รายการเข้าแล้ว', 'บัญชีตรวจแล้ว (รายการ)', 'บัญชีตรวจแล้ว (บาท)', 'รอตรวจ (รายการ)', 'ส่งกลับแก้ไข (รายการ)', 'ยกเลิกหลังตรวจ (รายการ)', 'ปิดเดือน', 'ปิดโดย', 'วันที่ปิด'];
@@ -833,7 +837,7 @@ export function chkSheets(s: SalesState, rows: ChkRow[], months: MonthRow[], owe
   // the close columns are the whole month's; the figures are the filter's
   if (filter) sums.push([], ['ตัวกรอง', `เฉพาะ ${filter} · คอลัมน์ปิดเดือนเป็นของทั้งเดือน`]);
   return [
-    { name: 'รายการ', head, rows: ls.map(line), widths: [11, 34, 16, 14, 14, 16, 12, 12, 14, 10, 24, 14, 30, 10, 12, 40] },
+    { name: 'รายการ', head, rows: ls.map(line), widths: [11, 34, 16, 14, 14, 16, 12, 12, 14, 10, 24, 14, 30, 10, 12, 40, 16] },
     { name: 'สรุป', head: sumHead, rows: sums, widths: [16, 14, 14, 14, 14, 12, 18, 18, 14, 16, 18, 26, 10, 12] },
   ];
 }

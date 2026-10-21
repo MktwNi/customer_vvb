@@ -19,7 +19,8 @@ import { beOf, cashYear, payBasis, quarterOf, type PayF } from '../lib/sales';
 import { thisQuarter } from '../lib/dateRange';
 import { payIn, payMonthCounts } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): customers per member, the money once (a member shows its part)
-import { customersOf, jointAttr, jointCashLines, jointRole } from '../lib/sales';
+import { customersOf, jobServices, jointAttr, jointCashLines, jointRole } from '../lib/sales';
+import { JobSvc } from '../components/SvcChips';
 import { workCardRows, workCardSub } from '../lib/workUi';
 import { shareOf } from '../lib/joint';
 // units, % contribution and commission (package dash, items 8 and 9b)
@@ -141,6 +142,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
   // a ผู้รับผิดชอบ / SOURCE / REFERRAL filter counts a joint quotation by the parts of its companies listed
   const attr = jointAttr(F);
   const st = salesStats(S, list, today, attr);
+  // the companies the rows are of, each once (a company may have a CFO job and a CFP job)
+  const cos = e.companyCount(list);
   const me = e.me();
   const ver = useEngineVersion();
   const key = JSON.stringify(f);
@@ -256,7 +259,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         <div className="sd-heroes">
           {([
             // rows in ราย (each company of a joint quotation one): not to be read against the ปิดงาน tab's jobs
-            ['user', st.total, 'ลูกค้า', 'ราย', `เปิด ${fmtN(st.open)} · ปิดแล้ว ${fmtN(st.closed)} ราย`, ''],
+            // (a company with two jobs is two rows: the companies are said beside them when they differ)
+            ['user', st.total, 'ลูกค้า', 'ราย', `เปิด ${fmtN(st.open)} · ปิดแล้ว ${fmtN(st.closed)} ราย${cos !== st.total ? ` · ${fmtN(cos)} บริษัท` : ''}`, ''],
             ['sales', st.yes, 'ปิดการขายได้', 'ราย', st.decided ? `Win rate ${st.winRate}%` : 'ยังไม่มีลูกค้าที่รู้ผล', 'pri'],
             ['plan', st.overdue, 'ค้างติดตาม', 'ราย', 'ไม่ได้ติดต่อเกิน 14 วัน', st.overdue ? 'warn' : ''],
           ] as const).map(([ic, n, l, unit, sub2, tone]) => (
@@ -410,7 +414,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                   <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={32} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
-                    <small>{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
+                    <small><JobSvc svc={jobServices(S, d)} none={false} />{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
                   </span>
                   {amt > 0 && <span className={'sd-win-amt' + (fc ? ' fc' : '')} title={fc ? 'ยังไม่มี Actual · แสดง Forecast' : 'Actual'}>{fc ? 'Forecast ' : ''}{baht(amt)} บาท</span>}
                 </button>
@@ -537,7 +541,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                   <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={34} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
-                    <small>{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
+                    <small><JobSvc svc={jobServices(S, d)} none={false} />{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
                   </span>
                   {od != null && <span className="sd-od">{fmtN(od)} วัน</span>}
                 </button>

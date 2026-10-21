@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useApp, type UIState } from '../state';
 import { daysBetween, dmTh, downloadBlob, fmtN, localDay } from '../lib/format';
-import { dealMoney, fmtMoney, type CashLine, type Deal, type SalesState } from '../lib/sales';
+import { dealMoney, fmtMoney, jobServices, type CashLine, type Deal, type SalesState } from '../lib/sales';
+import { JobSvc } from './SvcChips';
 import { MONTHS_TH, dayTh, instSub, instText, payerName } from '../lib/cashUi';
 import { shortName } from '../lib/salesUi';
 import { sameName } from '../lib/caps';
@@ -551,6 +552,8 @@ function NameCell({ S, r, onOpen, tag }: { S: SalesState; r: ChkRow; onOpen: () 
           ) : (
             <span className="cf-nm-b co-name dense">{nameOf(r)}</span>
           )}
+          {/* the job's services: two jobs of one company are told apart */}
+          {r.deal && <JobSvc svc={jobServices(S, r.deal)} none={false} />}
         </span>
         {/* the cross-year chip on the second line: the name (a joint quotation's "มจพ · ใบเสนอราคาร่วม 4 บริษัท")
             keeps the first line whole at 1366 */}
@@ -583,7 +586,7 @@ function UndatedRow({ S, l }: { S: SalesState; l: CashLine }) {
         <span className="cf-nmw">
           <CoAvatar name={c?.name || l.deal.client} web={c?.web} set={c?.set} size={32} />
           <span className="cf-nm">
-            <span className="cf-nm-l"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={l.deal.client}>{payerName(l, shortName)}</button></span>
+            <span className="cf-nm-l"><button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: l.deal.id })} title={l.deal.client}>{payerName(l, shortName)}</button><JobSvc svc={jobServices(S, l.deal)} none={false} /></span>
             <span className="cf-nm-s">{subOf(S, l.deal)}</span>
           </span>
         </span>
@@ -616,6 +619,7 @@ function PhoneList({ S, groups, sumOf, undated, today, ctl }: { S: SalesState; g
               <div key={r.key} className="mc-mi">
                 <div className="cf-mi-1">
                   {r.deal ? <button type="button" className="cf-nm-b hv-tx co-name dense" onClick={() => set({ deal: r.deal!.id })} title={r.deal.client}>{nameOf(r)}</button> : <span className="cf-nm-b co-name dense">{nameOf(r)}</span>}
+                  {r.deal && <JobSvc svc={jobServices(S, r.deal)} none={false} />}
                   <span className="cf-amt">{m0(r.amt)}</span>
                 </div>
                 <div className="cf-mi-2"><span>{inst.text} · {got ? `รับ ${dmTh(r.date)}` : `ครบกำหนด ${dmTh(r.date)}`}{r.kind === 'got' && r.by.length ? ` · บันทึกโดย ${r.by.join(', ')}` : ''}</span></div>

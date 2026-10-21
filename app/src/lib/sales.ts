@@ -1656,11 +1656,17 @@ export function normSalesFilter(f: SalesFilterIn): SalesFilter {
   return out;
 }
 
-/** A deal's values of a list field: ผู้รับผิดชอบ / แหล่งที่มา / หมวด one each, SOURCE / Services a list;
- *  empty is NONE. หน่วยงาน (`s` needed): the ids of the units its money goes to, NONE for ยังไม่ระบุหน่วยงาน. */
+/** A deal's values of a list field: ผู้รับผิดชอบ / แหล่งที่มา / หมวด one each, SOURCE / บริการ a list;
+ *  empty is NONE. หน่วยงาน (`s` needed): the ids of the units its money goes to, NONE for ยังไม่ระบุหน่วยงาน.
+ *  บริการ (`s` given): the services the job is sold under (jobServices: a joint quotation's member, its
+ *  header's). */
 export function listValues(d: Deal, k: ListKey, s?: SalesState): string[] {
   if (k === 'unit') return s ? dealUnits(unitCtx(s), d).map((u) => u || NONE) : [NONE];
-  if (k === 'source' || k === 'service') return d[k].length ? d[k] : [NONE];
+  if (k === 'service') {
+    const v = s ? jobServices(s, d) : d.service;
+    return v.length ? v : [NONE];
+  }
+  if (k === 'source') return d[k].length ? d[k] : [NONE];
   return [d[k] || NONE];
 }
 export function listMatch(d: Deal, k: ListKey, f: ListF, s?: SalesState): boolean {
@@ -1950,6 +1956,13 @@ setPartsHook(jointPartsOf);
 /** The deal whose money and หมวด a row follows: a joint quotation's member is paid through its header and
  *  drawn under its band (in the header's หมวด); any other deal is its own. */
 export const payerDeal = (s: SalesState, d: Deal): Deal => (jointRole(s, d) === 'member' && s.deals[jointHeadOf(s, d.id)]) || d;
+/** The Services a job is sold under: a joint quotation's member through its header's quotation, so the
+ *  header's (its own while the header lists none); any other job its own. The filter "บริการ", the plan's
+ *  service types (lib/svcType.ts) and the rule for two jobs of one company (lib/jobs.ts) all read it. */
+export function jobServices(s: SalesState, d: Deal): string[] {
+  const h = payerDeal(s, d);
+  return h !== d && h.service.length ? h.service : d.service;
+}
 /** The deals that count as customers (a joint quotation's header is not one: its members are). */
 export const customersOf = (s: SalesState, deals: Deal[]) => deals.filter((d) => jointRole(s, d) !== 'header');
 
@@ -2406,7 +2419,8 @@ function statsPass(s: SalesState, deals: Deal[], today: string, attr: boolean): 
       if (r === 'YES' || r === 'NO') b.decided++;
       if (r === 'YES') b.yes++;
     });
-    d.service.forEach((x) => (st.byService[x] = (st.byService[x] || 0) + 1));
+    // (the job's services: a joint quotation's company is sold under its quotation's, as the filter บริการ reads it)
+    jobServices(s, d).forEach((x) => (st.byService[x] = (st.byService[x] || 0) + 1));
     const t = dealSteps(s, d, today).steps;
     st.stages.forEach((g) => {
       const hit = g.name === PAY_SLOT.id ? t.some((v) => v.kind === 'pay' && v.counted && v.state === 'done') : t.some((v) => v.id === g.name && v.filled);

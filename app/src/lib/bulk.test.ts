@@ -137,9 +137,10 @@ describe('words', () => {
     expect(followNote(0, 4)).toBe('ติดตามอยู่แล้วทั้ง 4 บริษัท');
     expect(unfollowNote(2, 1)).toBe('เลิกติดตาม 2 บริษัท (ไม่ได้ติดตามอยู่ 1)');
     expect(unfollowNote(0, 3)).toBe('บริษัทที่เลือกไม่ได้อยู่ใน “บริษัทที่ติดตาม”');
-    expect(trackerNote(15, 2, '2569')).toBe('ส่งเข้า Sales Tracker 15 ราย (ข้าม 2 รายที่มีในปี 2569 แล้ว)');
+    expect(trackerNote(15, 2, '2569')).toBe('ส่งเข้า Sales Tracker 15 ราย (ข้าม 2 บริษัทที่มีงานปี 2569 อยู่แล้ว)');
+    expect(trackerNote(15, 1, '2569', 'CFO')).toBe('ส่งเข้า Sales Tracker 15 ราย (ข้าม 1 บริษัทที่มีงาน CFO ปี 2569 อยู่แล้ว)');
     expect(trackerNote(1200, 0, '2569')).toBe('ส่งเข้า Sales Tracker 1,200 ราย');
-    expect(trackerNote(0, 3, '2569')).toBe('ทุกบริษัทที่เลือกมีในตารางปี 2569 แล้ว');
+    expect(trackerNote(0, 3, '2569')).toBe('ไม่ได้ส่ง ทุกบริษัทที่เลือกมีงานปี 2569 อยู่แล้ว');
     expect(ownerNote('หมิว', { changed: 10, same: 2, kept: 3 })).toBe('ตั้ง หมิว เป็นผู้รับผิดชอบ 10 บริษัท (เป็นอยู่แล้ว 2 · ไม่เปลี่ยนคนเดิม 3)');
     expect(ownerNote('หมิว', { changed: 0, same: 4, kept: 0 })).toBe('หมิว เป็นผู้รับผิดชอบอยู่แล้ว');
     expect(ownerNote('', { changed: 5, same: 1, kept: 0 })).toBe('ล้างผู้รับผิดชอบ 5 บริษัท (เป็นอยู่แล้ว 1)');
@@ -150,7 +151,7 @@ describe('words', () => {
     expect(BIG).toBe(200);
     expect(confirmWords('follow', 2225, 3, true)).toEqual({ title: 'ติดตาม 2,225 บริษัท?', body: expect.stringContaining('ติดตามอยู่แล้ว 3 บริษัท จะข้ามไป'), ok: 'ติดตาม 2,225 บริษัท' });
     expect(confirmWords('unfollow', 300, 0, true).ok).toBe('เลิกติดตาม 300 บริษัท');
-    expect(trackerWarn(250, '2569', true)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ของทั้งทีม ตรวจหมวดและปีให้ถูกก่อนส่ง');
+    expect(trackerWarn(250, '2569', true)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ของทั้งทีม ตรวจหมวด ปี และบริการให้ถูกก่อนส่ง');
   });
   it('speaks of the team only when one is connected (review: the words said so with no team at all)', () => {
     // (the list is named as the ติดตาม page names it: บริษัทที่ติดตาม, tabs/TrackFollow.tsx)
@@ -158,7 +159,7 @@ describe('words', () => {
     expect(confirmWords('follow', 2228, 0, false).body).toBe('บริษัทที่เลือกจะขึ้นใน “บริษัทที่ติดตาม”');
     expect(confirmWords('unfollow', 300, 0, true).body).toBe('บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมจะไม่เห็นในรายชื่อนี้อีก');
     expect(confirmWords('unfollow', 300, 0, false).body).toBe('บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม”');
-    expect(trackerWarn(250, '2569', false)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ตรวจหมวดและปีให้ถูกก่อนส่ง');
+    expect(trackerWarn(250, '2569', false)).toBe('จะเพิ่ม 250 แถวในตารางปี 2569 ตรวจหมวด ปี และบริการให้ถูกก่อนส่ง');
     expect(ownerSub(12, true)).toBe('ให้ 12 บริษัทที่เลือก · ทั้งทีมเห็นชื่อนี้ในหน้าบริษัท และใช้กรองได้');
     expect(ownerSub(12, false)).toBe('ให้ 12 บริษัทที่เลือก · ชื่อนี้ขึ้นในหน้าบริษัท และใช้กรองได้');
     expect(planWarn(2228, true)).toBe('จะสร้าง 2,228 นัดในแผนติดต่อของทีม ทุกคนในทีมเห็นนัดเหล่านี้');

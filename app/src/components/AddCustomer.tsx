@@ -6,11 +6,21 @@ import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
-import { customersOf, jointRole, payerDeal } from '../lib/sales';
+import { customersOf, jobServices, jointRole, payerDeal } from '../lib/sales';
 import { fmtN, todayISO } from '../lib/format';
 import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { followRows } from '../lib/follow';
 import { useSalesActs } from './SalesToast';
+import { SECTION_LABEL, clashing, rowPick, sendState, svcText, type SendState } from '../lib/jobs';
+import { JobSvc, SvcPick } from './SvcChips';
+import { jobWord } from './DealSvc';
+
+/** The บริการ picker's line under it: one job carries what one quotation offers. */
+const SVC_HINT = 'เลือกได้หลายบริการ ถ้าเสนอในใบเสนอราคาเดียวกัน ถ้าแยกใบ ส่งทีละบริการ';
+const SVC_HINT_ADD = 'เลือกได้หลายบริการ ถ้าเสนอในใบเสนอราคาเดียวกัน';
+const SVC_HINT_NONE = 'ยังไม่ได้เลือก บริษัทที่มีงานปีนี้แล้วจะไม่ถูกติ๊กไว้ เพราะยังแยกไม่ได้ว่าเป็นงานใหม่หรือไม่ · เลือกบริการภายหลังได้ที่หน้ารายละเอียดของงาน';
+/** The years the dialogs offer: this one, next year, and the one shown. */
+const yearOpts = (year: string) => [...new Set([beYear(), String(+beYear() + 1), year])].sort().map((y) => ({ v: y, label: y }));
 
 /** The หมวด choices with how many of the year's customers each has ("4 ราย"): a joint quotation's header is
  *  not one, its members count in the header's หมวด (where the table draws them), as the table counts them. */
@@ -41,6 +51,9 @@ export function AddCustomer() {
   // teammate's change to another field while it was open is kept
   const [init] = useState(f);
   const [section, setSection] = useState(a.section ?? e.sales.cfg.sections[0] ?? '');
+  // the job's year and services (เพิ่มลูกค้า into the Sales Tracker)
+  const [year, setYear] = useState(ui.slYear || beYear());
+  const [svc, setSvc] = useState<string[]>([]);
   const [err, setErr] = useState('');
   // the four fields needed on day one first; the rest fold (open when editing, or one already has a value)
   const [moreOpen, setMoreOpen] = useState(() => !!edit && (['jur', 'prov', 'ind', 'biz', 'web', 'addr', 'note'] as const).some((k) => !!f[k]));
@@ -76,19 +89,22 @@ export function AddCustomer() {
       takeContact(a.link);
     }
     if (a.deal) {
-      // (a joint quotation's header is the payer's row for that quotation, not the company's own row)
-      const old = e.dealsOf(c.id).find((x) => x.year === ui.slYear && jointRole(e.sales, x) !== 'header');
+      // the company's job of the year that this may be (lib/jobs.ts: of a service picked here, or any job when
+      // none is picked or it lists none) is opened; a job of other services gets this one beside it (a joint
+      // quotation's header is the payer's row for that quotation, not the company's own row)
+      const jobs = e.dealsOf(c.id).filter((x) => x.year === year && jointRole(e.sales, x) !== 'header');
+      const old = clashing(e.sales, svc, jobs)[0];
       // a new row carries what was typed (a tab on an older build reads it there); a contact typed is its contact,
       // else the company's one person on record, if it has one (addDeal: never someone else than what was typed)
       const d =
         old ||
         e.addDeal(
-          { gid: c.id, section, year: ui.slYear, ...(typed.name ? { contactName: typed.name } : {}), ...(typed.phone ? { phone: typed.phone } : {}), ...(typed.email ? { email: typed.email } : {}) },
+          { gid: c.id, section, year, ...(svc.length ? { service: svc.slice() } : {}), ...(typed.name ? { contactName: typed.name } : {}), ...(typed.phone ? { phone: typed.phone } : {}), ...(typed.email ? { email: typed.email } : {}) },
           undefined,
           typed.name ? {} : { contact: '' },
         );
       takeContact(d.id);
-      set({ addCust: null, deal: d.id });
+      set({ addCust: null, deal: d.id, slYear: year });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: c.id, dTab: 'info' });
   };
@@ -110,11 +126,11 @@ export function AddCustomer() {
       takeContact(a.link);
     }
     if (a.deal) {
-      const d = e.addDeal({ gid: id, section, year: ui.slYear || beYear() });
+      const d = e.addDeal({ gid: id, section, year, ...(svc.length ? { service: svc.slice() } : {}) });
       // the contact typed here is a person (ผู้ติดต่อ), with the phone and e-mail typed beside it, and the deal's
       // contact: typed once, linked everywhere
       takeContact(d.id);
-      set({ addCust: null, deal: d.id });
+      set({ addCust: null, deal: d.id, slYear: year });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: id, dTab: 'info' });
   };
@@ -143,8 +159,19 @@ export function AddCustomer() {
               ))}
             </div>
           )}
+          {/* the job in the Sales Tracker: หมวด and ปี on one row, then บริการ (as the send dialog) */}
           {a.deal && !edit && (
-            <SelField style={labelCol} text="หมวดใน Sales Tracker" value={section} onChange={setSection} options={sectionOpts(e, ui.slYear || beYear())} />
+            <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 120px', gap: 10 }}>
+              <SelField style={{ ...labelCol, minWidth: 0 }} text={SECTION_LABEL} value={section} onChange={setSection} options={sectionOpts(e, year)} width={320} />
+              <SelField style={labelCol} text="ปี (พ.ศ.)" value={year} onChange={setYear} options={yearOpts(year)} />
+            </div>
+          )}
+          {a.deal && !edit && (
+            <div style={{ ...labelCol, gridColumn: '1 / -1' }}>
+              <span id="ac-svc">บริการ</span>
+              <SvcPick all={e.sales.cfg.services} value={svc} onChange={setSvc} />
+              <small className="t-meta">{SVC_HINT_ADD}</small>
+            </div>
           )}
           <label style={labelCol}>ผู้ติดต่อ<input value={f.contact} onChange={up('contact')} className="fld" /></label>
           <label style={labelCol}>เบอร์โทร<input value={f.phone} onChange={up('phone')} type="tel" className="fld" /></label>
@@ -183,59 +210,120 @@ export function AddCustomer() {
  *  on request, so the dialog opens at once. */
 const LIST_FIRST = 150;
 
-/** Send companies (one from its page, the starred ones, or the search page's selection) to the Sales Tracker. */
+/**
+ * Send companies (one from its page, the starred ones, or the search page's selection) to the Sales Tracker: one
+ * job each, under the หมวด (the channel the customer came from) and the year, with the services picked (one job
+ * quoted together). A company that already has jobs that year is never locked: its jobs are said on its row, and
+ * whether this is a new job (its services and the picked ones are named and share none: ticked) or may repeat one
+ * (not ticked, "อาจซ้ำ": tick it if it is other work) is the row's own (lib/jobs.ts sendState, rowPick).
+ */
 export function SendToTracker() {
   const { engine: e, ui, set } = useApp();
   const ver = useEngineVersion();
   const { say } = useSalesActs();
-  // teammates' latest first: a company one of them sent a moment ago shows as already in the table
+  // teammates' latest first: a company one of them sent a moment ago shows its job
   useEffect(() => void e.teamSyncNow(), [e]);
   const ro = !e.can('edit.deal');
+  const S = e.sales;
   const cos = useMemo(() => (ui.sendIds || []).map((id) => e.company(id)).filter(Boolean) as Company[], [ui.sendIds, e, ver]);
   // opened from a person's page: that person is the deal's contact
   const from = ui.sendPid && e.can('edit.cust') ? e.people[ui.sendPid] : undefined;
-  const [pick, setPick] = useState<Record<number, boolean>>(() => Object.fromEntries(cos.map((c) => [c.id, true])));
+  // the person's own ticks, with the row's state when they made them: kept when the services change
+  const [mine, setMine] = useState<Record<number, { on: boolean; st: SendState }>>({});
   // several companies: by default each goes to the section of where it was found (TGO, SET/mai…)
   const AUTO = '\u0000auto';
   const [section, setSection] = useState(() => (cos.length > 1 ? AUTO : e.suggestSection(cos[0]) || e.sales.cfg.sections[0] || ''));
   const [year, setYear] = useState(ui.slYear || beYear());
+  const [svc, setSvc] = useState<string[]>([]);
   const [all, setAll] = useState(false);
   const close = () => set({ sendIds: null });
-  const chosen = cos.filter((c) => pick[c.id]);
-  // the year's table once, not once per company
-  const has = useMemo(() => e.trackedIn(year), [e, year, ver]);
-  const inYear = useMemo(() => cos.filter((c) => has(c)).length, [cos, has]);
-  const toAdd = chosen.filter((c) => !has(c)).length;
+  // the year's jobs once, not once per company
+  const jobsOf = useMemo(() => e.jobsIn(year), [e, year, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = useMemo(
+    () =>
+      cos.map((c) => {
+        const jobs = jobsOf(c);
+        const st = sendState(svc, jobs.map((d) => jobServices(S, d)));
+        return { c, jobs, st, ...rowPick(st, mine[c.id]) };
+      }),
+    [cos, jobsOf, svc, mine, S],
+  );
+  const chosen = rows.filter((r) => r.on);
+  const toAdd = chosen.length;
+  const inYear = rows.filter((r) => r.jobs.length).length;
+  const dupOff = rows.filter((r) => r.st === 'dup' && !r.on).length;
   // one send adds at most TRACKER_MAX rows (the table draws its whole year for every teammate)
   const over = toAdd > TRACKER_MAX;
   const team = !!e.teamCfg;
-  const shown = all ? cos : cos.slice(0, LIST_FIRST);
+  const shown = all ? rows : rows.slice(0, LIST_FIRST);
+  const one = rows.length === 1 ? rows[0] : null;
+  // one company that may repeat a job, not ticked: the button opens that job instead
+  const clash = one && one.st === 'dup' ? clashing(S, svc, one.jobs) : [];
+  const openJob = (id: string) => set({ sendIds: null, sel: null, deal: id, slYear: year });
   const send = () => {
     if (over) return;
-    const r = e.addDealsFromCompanies(chosen.map((c) => c.id), { ...(section === AUTO ? {} : { section }), year, pid: ui.sendPid });
-    const note = `ส่งเข้า Sales Tracker แล้ว ${r.added} ราย${r.skipped ? ` (ข้าม ${r.skipped} รายที่มีในตารางปี ${year} แล้ว)` : ''}`;
+    const r = e.addDealsFromCompanies(chosen.map((x) => x.c.id), {
+      ...(section === AUTO ? {} : { section }), year, pid: ui.sendPid, service: svc, force: chosen.filter((x) => x.force).map((x) => x.c.id),
+    });
+    const note = trackerNote(r.added, r.skipped, year, svcText(svc));
     if (ui.sendStay) {
       // from the search page's selection: stay there, say what was sent, link to the table; an account
       // that may delete deals can take the rows back (เลิกทำ, 10 minutes: engine.undoSent)
       set({ sendIds: null });
       const acts: ToastAct[] = r.added ? [{ label: `ดูตารางปี ${year}`, act: 'goSales', year, primary: true }] : [];
       if (r.added && e.can('del.rec')) acts.push({ label: 'เลิกทำ', act: 'sendUndo', k: r.k });
-      say(trackerNote(r.added, r.skipped, year), { ms: acts.length > 1 ? 12000 : 8000, acts: acts.length ? acts : undefined });
+      say(note, { ms: acts.length > 1 ? 12000 : 8000, acts: acts.length ? acts : undefined });
       return;
     }
     if (cos.length === 1) {
-      const d = e.dealsOf(cos[0].id).find((x) => x.year === year && jointRole(e.sales, x) !== 'header');
-      set({ sendIds: null, sel: null, deal: d ? d.id : null, slYear: year });
+      // the new job; skipped (a teammate's job of this service arrived meanwhile): that job, and why
+      const id = r.ids[0] || clashing(S, svc, jobsOf(cos[0]))[0]?.id || null;
+      if (!r.added) say(note, { ms: 8000 });
+      set({ sendIds: null, sel: null, deal: id, slYear: year });
     } else {
       // a batch of the followed companies (ui.sendMore: opened with more left over): say how many still wait
       const left = ui.sendMore > 0 ? followRows(e, year, todayISO()).filter((x) => !x.deal).length : 0;
       set({ sendIds: null, sel: null, tab: 'sales', slView: 'table', slYear: year, slNote: note + followedLeftWord(left, year) });
     }
   };
-  const years = [...new Set([beYear(), String(+beYear() + 1), year])].sort();
+  const tick = (id: number, st: SendState, on: boolean) => setMine((m) => ({ ...m, [id]: { on, st } }));
+  /** The line about a company's jobs this year: "มีงานปี 2569: CFO · กำลังดำเนินการ", two jobs, then "อีก N งาน". */
+  const jobsLine = (r: (typeof rows)[number]) => {
+    if (one && r.st === 'dup' && clash.length) {
+      const d = clash[0];
+      return (
+        <>
+          <span className="sv-sub">
+            มีงาน <JobSvc svc={jobServices(S, d)} /> ปี {year} อยู่แล้ว · {jobWord(S, d)} ·{' '}
+            <button type="button" className="lnk" onClick={() => openJob(d.id)}>เปิดงานเดิม</button>
+          </span>
+          {!r.on && <span className="sv-sub t-muted">ถ้าเป็นคนละงาน ติ๊กเพื่อเพิ่มอีกงาน</span>}
+        </>
+      );
+    }
+    return (
+      <span className="sv-sub">
+        มีงานปี {year}:{' '}
+        {r.jobs.slice(0, 2).map((d, i) => (
+          <span key={d.id} className="sv-job">
+            {i > 0 && ' · '}
+            <JobSvc svc={jobServices(S, d)} /> {jobWord(S, d)}
+          </span>
+        ))}
+        {r.jobs.length > 2 && ` · อีก ${fmtN(r.jobs.length - 2)} งาน`}
+      </span>
+    );
+  };
+  const meta = [
+    `${fmtN(cos.length)} บริษัท`,
+    inYear ? `มีงานปี ${year} แล้ว ${fmtN(inYear)} บริษัท` : '',
+    dupOff ? (svc.length ? `อาจซ้ำ ${fmtN(dupOff)} บริษัท ไม่ได้ติ๊กไว้ ติ๊กได้ถ้าเป็นคนละงาน` : `${fmtN(dupOff)} บริษัทไม่ได้ติ๊กไว้ เลือกบริการด้านบนเพื่อแยกงาน`) : '',
+    // the first TRACKER_MAX of the followed companies (บริษัทที่ติดตาม's ส่งเข้า Sales Tracker ทั้งหมด)
+    ui.sendMore > 0 ? followedMoreWord(ui.sendMore) : '',
+  ].filter(Boolean).join(' · ');
   return (
     <Modal title="ส่งเข้า Sales Tracker" onClose={close} width={560}>
-      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ · {from ? `ผู้ติดต่อของดีลคือ ${from.name}` : 'บริษัทที่มีผู้ติดต่อในรายชื่อคนเดียว จะใช้คนนั้นเป็นผู้ติดต่อของดีล'}</span>}
+      {ro ? <Notice kind="info">{RO_NOTE}</Notice> : <span className="t-sec">ชื่อบริษัท เบอร์ อีเมล และผู้รับผิดชอบจะถูกกรอกให้อัตโนมัติ · {from ? `ผู้ติดต่อของดีลคือ ${from.name}` : <>บริษัทที่มีผู้ติดต่อในรายชื่อคนเดียว จะใช้คนนั้นเป็นผู้ติดต่อ<span className="dc-nw">ของดีล</span></>}</span>}
       {/* many at once: how many rows the team's table gets, before sending */}
       {!ro && (over ? <Notice kind="warn">{trackerCapWord(toAdd, team)}</Notice> : toAdd > BIG && <Notice kind="warn">{trackerWarn(toAdd, year, team)}</Notice>)}
       <ReadOnly ro={ro} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -243,42 +331,46 @@ export function SendToTracker() {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 120px', gap: 10 }}>
         <SelField
           style={{ ...labelCol, minWidth: 0 }}
-          text="หมวด"
+          text={SECTION_LABEL}
           value={section}
           onChange={setSection}
           options={[...(cos.length > 1 ? [{ v: AUTO, label: 'อัตโนมัติ', sub: 'ตามแหล่งที่พบ (TGO / SET/mai)' }] : []), ...sectionOpts(e, year)]}
           width={320}
         />
-        <SelField style={labelCol} text="ปี (พ.ศ.)" value={year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
+        <SelField style={labelCol} text="ปี (พ.ศ.)" value={year} onChange={setYear} options={yearOpts(year)} />
       </div>
-      {cos.length > 1 && (
-        <span className="t-meta">
-          {`${fmtN(cos.length)} บริษัท`}
-          {inYear ? ` · มีในตารางปี ${year} แล้ว ${fmtN(inYear)} บริษัท จะข้ามไป` : ''}
-          {/* the first TRACKER_MAX of the followed companies (บริษัทที่ติดตาม's ส่งเข้า Sales Tracker ทั้งหมด) */}
-          {ui.sendMore > 0 ? ` · ${followedMoreWord(ui.sendMore)}` : ''}
-        </span>
-      )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
-        {shown.map((c) => (
-          <label key={c.id} className={has(c) ? undefined : 'hv'} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, padding: '6px 4px', borderTop: '1px solid var(--divider)', cursor: has(c) ? 'default' : 'pointer', color: has(c) ? 'var(--muted)' : undefined }}>
-            <input type="checkbox" checked={!!pick[c.id] && !has(c)} disabled={has(c)} onChange={(ev) => setPick({ ...pick, [c.id]: ev.target.checked })} style={{ accentColor: 'var(--brand)' }} />
-            <span style={{ flex: 1 }}>{c.name}</span>
-            <span className="t-meta">{has(c) ? `มีในตารางปี ${year} แล้ว` : c.phone || 'ยังไม่มีเบอร์'}</span>
+      <div style={labelCol}>
+        <span>บริการ</span>
+        <SvcPick all={e.sales.cfg.services} value={svc} onChange={setSvc} />
+        <small className="t-meta">{!svc.length && inYear ? SVC_HINT_NONE : SVC_HINT}</small>
+      </div>
+      {cos.length > 1 && <span className="t-sec">{meta}</span>}
+      <div className="sv-rows">
+        {shown.map((r) => (
+          <label key={r.c.id} className="sv-row hv">
+            <input type="checkbox" checked={r.on} onChange={(ev) => tick(r.c.id, r.st, ev.target.checked)} style={{ accentColor: 'var(--brand)' }} />
+            <span className="sv-n">
+              <span>{r.c.name}</span>
+              {r.jobs.length > 0 && jobsLine(r)}
+            </span>
+            <span className="sv-tag">
+              {r.st === 'new' ? <span className="chip info">เพิ่มเป็นงานใหม่</span> : r.st === 'dup' ? <span className="chip warn">อาจซ้ำ</span> : <span className="t-meta">{r.c.phone || 'ยังไม่มีเบอร์'}</span>}
+            </span>
           </label>
         ))}
-        {shown.length < cos.length && (
+        {shown.length < rows.length && (
           <button type="button" className="lnk" style={{ alignSelf: 'flex-start', fontSize: 13, padding: '8px 4px', borderTop: '1px solid var(--divider)' }} onClick={() => setAll(true)}>
-            {`แสดงอีก ${fmtN(cos.length - shown.length)} บริษัท`}
+            {`แสดงอีก ${fmtN(rows.length - shown.length)} บริษัท`}
           </button>
         )}
       </div>
       </ReadOnly>
       <div className="dlg-act">
         <button onClick={close} className="quiet">ยกเลิก</button>
-        {!ro && toAdd > 0 && !over && <button onClick={send} className="btn pri">
-          ส่ง {fmtN(toAdd)} รายการ
-        </button>}
+        {!ro && toAdd > 0 && !over && <button onClick={send} className="btn pri">ส่ง {fmtN(toAdd)} รายการ</button>}
+        {!ro && !toAdd && clash.length > 0 && (
+          <button onClick={() => openJob(clash[0].id)} className="btn pri">{`เปิดงาน${svcText(jobServices(S, clash[0])) ? ' ' + svcText(jobServices(S, clash[0])) + ' ' : ''}เดิม`}</button>
+        )}
       </div>
     </Modal>
   );

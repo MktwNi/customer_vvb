@@ -50,3 +50,18 @@
 @media (forced-colors:active){.sxr.on,.sx-mcard.on{outline:2px solid Highlight;outline-offset:-2px}}
 /* phones: เลือกทั้งหมด on the left, near the cards' boxes */
 @media (max-width:760px){.sx-foot-r{flex:1 1 100%;justify-content:space-between}}
+
+/* the send dialog's companies (ส่งเข้า Sales Tracker): the name, the jobs it has this year under it, and on the
+   right "เพิ่มเป็นงานใหม่", "อาจซ้ำ" or the phone */
+.sv-rows{display:flex;flex-direction:column;max-height:300px;overflow-y:auto}
+.sv-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:start;padding:10px 4px;border-top:1px solid var(--divider);font-size:14px;cursor:pointer}
+.sv-row input{margin-top:3px}
+.sv-n{min-width:0;display:flex;flex-direction:column;gap:2px}
+.sv-sub{font-size:13px;line-height:1.75;color:var(--ink-2)}
+.sv-sub .svts{margin:0 2px}
+.sv-sub .lnk{font-size:13px}
+.sv-tag{justify-self:end}
+@media (max-width:520px){
+  .sv-row{grid-template-columns:auto minmax(0,1fr)}
+  .sv-tag{grid-column:2;justify-self:start}
+}

@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import type { GccEngine } from '../lib/engine';
 import { dtTh, isoTh, todayISO } from '../lib/format';
 import { fmtMoney, jointOf, jointRole, type Deal } from '../lib/sales';
-import { shortName } from '../lib/salesUi';
+import { jobName, shortName } from '../lib/salesUi';
 import { unitCtx, unitsOf } from '../lib/contrib';
 import { EXP_CAT_MAX, EXP_NOTE_MAX, expensesOf, type DealExp } from '../lib/expense';
 import {
@@ -107,7 +107,7 @@ export function BillsStuckNote() {
       {list.slice(0, 3).map((x, i) => (
         <Fragment key={x.id}>
           {i ? ' · ' : ': '}
-          <button type="button" className="lnk" onClick={() => set({ deal: x.deal })}>{shortName(e.sales.deals[x.deal]?.client || '')} · {x.c}</button>
+          <button type="button" className="lnk" onClick={() => set({ deal: x.deal })}>{e.sales.deals[x.deal] ? jobName(e.sales.deals[x.deal], e.sales) : ''} · {x.c}</button>
         </Fragment>
       ))}
       {list.length > 3 && ` และอีก ${list.length - 3} รายการ`}
