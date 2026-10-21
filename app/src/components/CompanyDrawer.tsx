@@ -492,9 +492,12 @@ function SalesBox({ c }: { c: Company }) {
         const lc = lastContact(e.sales, d, todayISO());
         const fv = fcFig(e.sales, d);
         const jr = jointRole(e.sales, d), jg = jr === 'plain' ? null : jointOf(e.sales, d);
+        // the deal's contact, the person linked to it (a typed one is said above, "ผู้ติดต่อใน Sales Tracker")
+        const who = e.dealPeople(d.id)[0];
         const more = [
           // (the title starts with "ใบเสนอราคาร่วม" already)
           jg && (jr === 'header' ? `ผู้จ่าย ${jointTitle(e.sales, jg)} · ${jg.members.length} บริษัท` : `อยู่ใน ${jointTitle(e.sales, jg)}`),
+          who && 'ผู้ติดต่อ ' + who.name,
           d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc),
           money && jr !== 'member' && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : ''),
         ].filter(Boolean);

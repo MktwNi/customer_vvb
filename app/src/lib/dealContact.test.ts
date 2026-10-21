@@ -5,10 +5,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   actPeople, contactChoices, dealContact, linkIndex, linkOrder, linkedPeople, personIdOf, personKey, personSuggestions, sameContact, suggestionId, toPLink, toPerson,
-  typedExtras, typedMatches, type PLink,
+  personExtras, typedAny, typedExtras, typedMatch, typedPerson, type PLink,
 } from './people';
 import { applyRow, keyOf, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 import { filterDeals, newDeal, emptySales, type Deal } from './sales';
+import { liveCount, monthCounts, trackerFields } from './salesUi';
 import { planRows } from './planList';
 import type { Person } from './types';
 
@@ -98,13 +99,42 @@ describe('a deal\'s contacts', () => {
     expect(dealContact(deal({ contactName: 'คุณสมศรี', phone: '02-555-0000' }), [bare]).phone).toBe('');
   });
 
-  it('matches a typed contact by name first, then by phone or e-mail', () => {
+  it('matches a typed contact by name first, then by a phone or e-mail that is not the company\'s', () => {
     const pool = [P('a', { name: 'คุณธนพล ใจกว้าง', phone: '02-555-1234' }), P('b', { name: 'คุณวิภา', phone: '081-111-1111', email: 'wipa@example.com' }), P('c', { name: 'คุณธนพล ใจกว้าง' })];
-    expect(typedMatches(deal({ contactName: 'ธนพล ใจกว้าง', phone: '081-111-1111' }), pool).map((p) => p.id)).toEqual(['a', 'c']);
-    expect(typedMatches(deal({ contactName: 'คุณใครไม่รู้', phone: '0811111111' }), pool).map((p) => p.id)).toEqual(['b']);
-    expect(typedMatches(deal({ contactName: '', phone: '', email: 'WIPA@example.com' }), pool).map((p) => p.id)).toEqual(['b']);
-    expect(typedMatches(deal({ contactName: 'คุณใหม่' }), pool)).toEqual([]);
+    const ids = (m: { list: Person[] }) => m.list.map((p) => p.id);
+    expect(typedMatch(deal({ contactName: 'ธนพล ใจกว้าง', phone: '081-111-1111' }), pool)).toMatchObject({ by: 'name' });
+    expect(ids(typedMatch(deal({ contactName: 'ธนพล ใจกว้าง', phone: '081-111-1111' }), pool))).toEqual(['a', 'c']);
+    expect(typedMatch(deal({ contactName: 'คุณใครไม่รู้', phone: '0811111111' }), pool)).toMatchObject({ by: 'phone' });
+    expect(ids(typedMatch(deal({ contactName: 'คุณใครไม่รู้', phone: '0811111111' }), pool))).toEqual(['b']);
+    expect(typedMatch(deal({ contactName: '', phone: '', email: 'WIPA@example.com' }), pool)).toMatchObject({ by: 'email' });
+    expect(typedMatch(deal({ contactName: 'คุณใหม่' }), pool)).toEqual({ by: '', list: [] });
+    // the company's own number (a switchboard copied in when sent) is nobody's in particular
+    expect(typedMatch(deal({ contactName: 'คุณใครไม่รู้', phone: '02-555-1234' }), pool, { phone: '025551234' })).toEqual({ by: '', list: [] });
     expect(sameContact({ name: 'Dr. Anna', phone: '', email: '' }, { name: 'anna', phone: '', email: '' })).toBe(true);
+  });
+
+  it('a link made without asking is never a guess: the typed name, or with no name typed a number of its own', () => {
+    // (review R1: the company's one person shares the number typed for someone else)
+    const one = [P('s', { name: 'คุณสมหญิง ทดลอง', phone: '02-555-1234' })];
+    expect(typedPerson(deal({ contactName: 'คุณสมชาย ตัวอย่าง', phone: '02-555-1234' }), one)).toBeNull();
+    expect(typedPerson(deal({ contactName: 'สมหญิง ทดลอง', phone: '' }), one)!.id).toBe('s');
+    expect(typedPerson(deal({ contactName: '', phone: '02 555 1234' }), one)!.id).toBe('s');
+    expect(typedPerson(deal({ contactName: '', phone: '02-555-1234' }), one, { phone: '02-555-1234' })).toBeNull();
+    const two = [...one, P('t', { name: 'คุณสมหญิง ทดลอง' })];
+    expect(typedPerson(deal({ contactName: 'คุณสมหญิง ทดลอง' }), two)).toBeNull();
+    // anything typed: a name, or a number that is not the company's
+    expect(typedAny(deal({ contactName: '', phone: '02-000-0001' }), { phone: '02-000-0001' })).toBe(false);
+    expect(typedAny(deal({ contactName: '', phone: '081-000-0001' }), { phone: '02-000-0001' })).toBe(true);
+    expect(typedAny(deal({ contactName: 'คุณเอ' }))).toBe(true);
+  });
+
+  it('what the deal holds for its contact that their record lacks: all of it while they have none (as the deal shows it)', () => {
+    const co = { phone: '02-000-0001', email: '' };
+    const d = deal({ contactName: '', phone: '02-000-0001 | 081-222-3333', email: 'x@example.com' });
+    expect(personExtras(d, { phone: '', email: '' }, co)).toEqual({ phones: ['02-000-0001', '081-222-3333'], emails: ['x@example.com'] });
+    expect(personExtras(d, { phone: '089-999-9999', email: 'x@example.com' }, co)).toEqual({ phones: ['081-222-3333'], emails: [] });
+    // the deal panel's header shows the same number for them (dealContact)
+    expect(dealContact(d, [P('a', { phone: '', email: '' })]).phone).toBe(d.phone);
   });
 
   it('typed numbers and e-mails the person and the company don\'t have yet', () => {
@@ -121,13 +151,16 @@ describe('a deal\'s contacts', () => {
     expect(w.pid).toBe('d');
     expect(w.list.map((p) => p.id)).toEqual(['d', 'b', 'a']);
     expect(actPeople([], pool).pid).toBe('');
+    // a contact at another company now (the deal linked to another company since) is listed, not the default
+    expect(actPeople([pool[3], pool[0]], pool, (p) => p.id === 'd').pid).toBe('a');
+    expect(actPeople([pool[3]], pool, () => true)).toMatchObject({ pid: '' });
   });
 
-  it('a deal linked to a person is no longer a People suggestion; the id a typed contact is saved under is the suggestion\'s', () => {
+  it('a deal whose typed name is a person linked to it is no longer a People suggestion; the id a typed contact is saved under is the suggestion\'s', () => {
     const d = deal({ contactName: 'คุณสมชาย ใจดี' });
     const s = personSuggestions([], [d], [], (g) => g, new Set());
     expect(s.map((x) => x.id)).toEqual([suggestionId(7, d.client, d.contactName)]);
-    expect(personSuggestions([], [d], [], (g) => g, new Set(), undefined, (id) => id === 'd1')).toEqual([]);
+    expect(personSuggestions([], [d], [], (g) => g, new Set(), undefined, (x) => x.id === 'd1')).toEqual([]);
   });
 
   it('the table\'s search and the plan list read the linked person', () => {
@@ -138,5 +171,21 @@ describe('a deal\'s contacts', () => {
     expect(filterDeals(S, { year: '2569', q: 'วรรณา' }, '2026-10-21', hay).map((x) => x.id)).toEqual(['d1']);
     const rows = planRows({ company: () => undefined, watch: [], tasks: [], owners: {}, stages: {}, sales: S, year: '2569', today: '2026-10-21', phoneOf: () => '080-000-0101' });
     expect(rows[0].phone).toBe('080-000-0101');
+  });
+
+  it('the filter menu\'s counts follow the search through the linked person, as the rows do (review R9)', () => {
+    const S = emptySales();
+    S.deals.d1 = { ...deal({ year: '2569', contactName: '', resp: 'หมิว' }), at: '2026-10-05T03:00:00.000Z' };
+    const hay = (x: Deal) => (x.id === 'd1' ? 'ดร.พรทดลอง ตัวอย่าง' : '');
+    const F = { year: '2569', q: 'พรทดลอง' };
+    const today = '2026-10-21';
+    expect(filterDeals(S, F, today, hay).length).toBe(1);
+    const resp = (h?: typeof hay) => trackerFields(S, F, { yearDeals: [S.deals.d1], job: 'open', me: '', today, hay: h }).find((f) => f.key === 'resp')!.options.map((o) => [o.v, o.n]);
+    expect(resp()).toEqual([['หมิว', 0]]);
+    expect(resp(hay)).toEqual([['หมิว', 1]]);
+    expect(liveCount(S, F, 'resp', { v: ['หมิว'] }, 'open', today, hay)).toBe(1);
+    expect(liveCount(S, F, 'resp', { v: ['หมิว'] }, 'open', today)).toBe(0);
+    const added = (h?: typeof hay) => monthCounts(S, F, 'added', 2026, 'open', today, h)[9];
+    expect([added(hay), added()]).toEqual([1, 0]);
   });
 });

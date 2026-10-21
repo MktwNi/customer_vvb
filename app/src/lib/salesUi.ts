@@ -75,20 +75,22 @@ export function viewCount(S: SalesState, rows: Deal[], job: ViewJob, f: SalesFil
 }
 
 /** The view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date' takes a date
- *  draft), counted as the view counts (viewCount). */
-export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string): number {
+ *  draft), counted as the view counts (viewCount). `hay`: what else the search reads for a deal (the table's: the
+ *  people linked to it, engine contactHay), so the count says what the rows will. */
+export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string, hay?: (d: Deal) => string): number {
   const f = { ...viewOf(F, job), [key]: draft ?? undefined };
-  return viewCount(S, filterDeals(S, f, today), job, f);
+  return viewCount(S, filterDeals(S, f, today, hay), job, f);
 }
 
 /** How many of the view (date filter off) have a date of `basis` in each month of `ceYear`, counted as the view
- *  counts (viewCount: what the view says once that month is picked). */
-export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceYear: number, job: ViewJob, today: string): number[] {
+ *  counts (viewCount: what the view says once that month is picked). `hay` (as liveCount's): what else the
+ *  search reads for a deal, as the table's rows (filterDeals). */
+export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceYear: number, job: ViewJob, today: string, hay?: (d: Deal) => string): number[] {
   const y = String(ceYear), f = { ...viewOf(F, job), date: null };
   const by: Deal[][] = Array.from({ length: 12 }, () => []);
   withActIndex(S, () =>
     // (the ปิดงาน tab's jobs include a joint quotation's header: the payer's row is that job)
-    (job === 'closed' ? filterDeals(S, f, today) : customersOf(S, filterDeals(S, f, today))).forEach((d) => {
+    (job === 'closed' ? filterDeals(S, f, today, hay) : customersOf(S, filterDeals(S, f, today, hay))).forEach((d) => {
       const ms = new Set(basisDates(S, d, basis, today).filter((x) => x.d.startsWith(y)).map((x) => +x.d.slice(5, 7) - 1));
       ms.forEach((m) => by[m].push(d));
     }),
@@ -98,8 +100,9 @@ export function monthCounts(S: SalesState, F: SalesFilter, basis: DateBasis, ceY
 
 const thCmp = (a: string, b: string) => a.localeCompare(b, 'th');
 /** What trackerFields reads besides the filters; `units`: the หน่วยงาน field's units (id, name, retired) when the
- *  account sees the revenue split (package dash), else no such field. */
-export interface FieldsCtx { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean; units?: { id: string; n: string; off?: boolean }[] }
+ *  account sees the revenue split (package dash), else no such field; `hay`: what else the search reads for a deal
+ *  (the table's: the people linked to it), so the counts follow the search as the rows do. */
+export interface FieldsCtx { yearDeals: Deal[]; job: ViewJob; me: string; today: string; dash?: boolean; units?: { id: string; n: string; off?: boolean }[]; hay?: (d: Deal) => string }
 /**
  * The tracker's filter fields with their choices and counts (filters spec §6.3). A count is how many rows
  * of the view pass every other filter and have that value (a deal counts once under each of its SOURCE
@@ -114,7 +117,7 @@ export function trackerFields(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FF
   return withActIndex(S, () => fieldsOf(S, F, ctx));
 }
 function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
-  const { yearDeals, job, me, today } = ctx;
+  const { yearDeals, job, me, today, hay } = ctx;
   /** each value's rows, counted as the view counts them (viewCount, under the filters with that value picked) */
   const tally = (rows: Deal[], valuesOf: (d: Deal) => string[], f: (v: string) => SalesFilter) => {
     const by = new Map<string, Deal[]>(), m = new Map<string, number>();
@@ -123,7 +126,7 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
     return m;
   };
   const counts = (k: ListKey) => {
-    const f = { ...viewOf(F, job), [k]: undefined }, rows = filterDeals(S, f, today);
+    const f = { ...viewOf(F, job), [k]: undefined }, rows = filterDeals(S, f, today, hay);
     // (a joint quotation's member counts in its header's หมวด, where its row is drawn and filtered)
     return tally(job === 'closed' ? rows : customersOf(S, rows), (d) => listValues(k === 'section' ? payerDeal(S, d) : d, k, S), (v) => ({ ...f, [k]: { v: [v] } }));
   };
@@ -169,7 +172,7 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
     });
   }
   if (!ctx.dash) {
-    const f = { ...viewOf(F, job), result: '' as const }, rows = filterDeals(S, f, today);
+    const f = { ...viewOf(F, job), result: '' as const }, rows = filterDeals(S, f, today, hay);
     const n = tally(job === 'closed' ? rows : customersOf(S, rows), (d) => [dealResult(S, d) || 'EMPTY'], (v) => ({ ...f, result: v as ResultF }));
     fields.push({ key: 'result', label: 'ผลการขาย', hint: 'ได้งาน / ไม่ได้งาน / รอผล', kind: 'single', all: 'ทั้งหมด', options: RESULT_OPTS.map((o) => ({ ...o, n: n.get(o.v) || 0 })) });
   }

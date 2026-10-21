@@ -499,14 +499,27 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
           {rest.length > 0 && (
             <>
               <span className="pe-k">ดีลอื่นของบริษัทนี้</span>
-              {rest.map((d) => (
-                <div key={d.id} className="pe-deal-w">
-                  <DealMini d={d} p={p} />
-                  {p.status !== 'left' && e.canLink(d) && (
-                    <button type="button" className="lnk pe-deal-use" onClick={() => e.linkPerson(d.id, p.id)}>ใช้ {p.name} เป็นผู้ติดต่อของดีลนี้</button>
-                  )}
-                </div>
-              ))}
+              {rest.map((d) => {
+                // the deal has a contact already: in their place, or one more (both said, the card shows who it is now)
+                const cur = e.dealPeople(d.id)[0];
+                return (
+                  <div key={d.id} className="pe-deal-w">
+                    <DealMini d={d} p={p} />
+                    {p.status !== 'left' && e.canLink(d) && (
+                      <span className="pe-deal-use">
+                        {cur ? (
+                          <>
+                            <button type="button" className="lnk" onClick={() => e.linkPerson(d.id, p.id, { main: true })}>ใช้ {p.name} แทน {cur.name}</button>
+                            <button type="button" className="lnk" onClick={() => e.linkPerson(d.id, p.id)}>เพิ่มเป็นผู้ติดต่ออีกคน</button>
+                          </>
+                        ) : (
+                          <button type="button" className="lnk" onClick={() => e.linkPerson(d.id, p.id)}>ใช้ {p.name} เป็นผู้ติดต่อของ<span className="dc-nw">ดีลนี้</span></button>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </>
           )}
         </div>
@@ -688,6 +701,8 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
   const S = e.sales;
   const tr = dealSteps(S, d, todayISO());
   const mine = e.dealPeople(d.id).some((x) => x.id === p.id);
+  // another deal of the company: who its contact is now (so a tap below says what it changes)
+  const now = mine ? '' : e.dealContact(d).name;
   return (
     <button className="pe-deal" onClick={() => set({ deal: d.id })}>
       <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
@@ -699,7 +714,7 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
       </span>
       <span className="pe-sub">
         {/* (a joint quotation's member: its part, never its own typed figures, which count nowhere) */}
-        {[...moneyWords(S, d, e.can('view.money')), d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : ''].filter(Boolean).join(' · ')}
+        {[...moneyWords(S, d, e.can('view.money')), d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', mine ? 'ผู้ติดต่อในดีลนี้' : now ? 'ผู้ติดต่อตอนนี้ ' + now : ''].filter(Boolean).join(' · ')}
       </span>
     </button>
   );

@@ -21,8 +21,9 @@ export function actStages(S: SalesState, d: Deal, today: string): { v: string; l
 }
 
 /** Who a contact record of `d` may be with ("กับ"): the deal's contacts first, then the company's other people
- *  still there; `pid` the default, the deal's main contact (lib/people.ts actPeople). */
-export const actWith = (e: GccEngine, d: Deal) => actPeople(e.dealPeople(d.id), e.dealPool(d));
+ *  still there; `pid` the default, the deal's main contact (lib/people.ts actPeople), unless they are at another
+ *  company now (engine contactElsewhere: chosen each time, the card says so). */
+export const actWith = (e: GccEngine, d: Deal) => actPeople(e.dealPeople(d.id), e.dealPool(d), (p) => e.contactElsewhere(d, p));
 
 /** The quick-add's state: type (โทร), date (today), note, stage (where the deal is) and person (the deal's
  *  contact). Enter saves; `save` returns the record (null when nothing was saved). */
@@ -105,7 +106,7 @@ export function ActForm({ d, stage, onDone, compact }: { d: Deal; stage?: string
         {people.length > 0 && (
           <div className="sl-af-l">
             <span id={withId}>กับ</span>
-            <Select className="sm" labelledBy={withId} label="ผู้ติดต่อ" value={f.pid} onChange={f.setPid} width={240} options={[{ v: '', label: 'ไม่ระบุ' }, ...people.map((p) => ({ v: p.id, label: p.name }))]} />
+            <Select className="sm" labelledBy={withId} label="ผู้ติดต่อ" value={f.pid} onChange={f.setPid} width={240} options={[{ v: '', label: 'ไม่ระบุ' }, ...people.map((p) => ({ v: p.id, label: p.name, sub: e.contactElsewhere(d, p) ? 'อยู่ที่ ' + (e.personCompany(p)?.name || p.company || 'บริษัทอื่น') : undefined }))]} />
           </div>
         )}
         <span className="sl-af-a">

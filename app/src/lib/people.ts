@@ -110,7 +110,7 @@ export function personSuggestions(
   canon: (gid: number) => number | null,
   hidden: Set<string>,
   aliases: (gid: number) => number[] = (g) => [g],
-  linked: (dealId: string) => boolean = () => false,
+  linked: (d: Deal) => boolean = () => false,
 ): Suggestion[] {
   const coKeys = (gid: number | null, company: string) => {
     const keys = new Set<string>();
@@ -142,8 +142,9 @@ export function personSuggestions(
     if (known.some((k) => [...keys].some((x) => k.co.has(x)) && (k.name === nk || (ph.length > 0 && ph.some((x) => k.phones.includes(x))) || (!!em && k.email === em)))) return;
     out.set(id, { id, name, gid: shared ?? gid, company, phone, email, from });
   };
-  // (a deal whose contact is a person already is not a suggestion: its typed name is an older note)
-  deals.forEach((d) => d.contactName && !linked(d.id) && add(d.contactName, d.gid, d.client, d.phone, d.email, 'Sales Tracker ปี ' + d.year));
+  // (`linked`: the deal's typed name is a person linked to it already, whatever their company; a typed name the
+  // deal's linked people are not is still someone to record)
+  deals.forEach((d) => d.contactName && !linked(d) && add(d.contactName, d.gid, d.client, d.phone, d.email, 'Sales Tracker ปี ' + d.year));
   custom.forEach((c) => c.contact && add(c.contact, c.id, c.name, '', '', 'ลูกค้าที่เพิ่มเอง'));
   return [...out.values()].sort((a, b) => a.company.localeCompare(b.company, 'th') || a.name.localeCompare(b.name, 'th'));
 }
@@ -227,16 +228,6 @@ export function sameContact(t: { name: string; phone: string; email: string }, p
   const pe = splitList(p.email).map(emailKey);
   return (nk.length > 1 && nameKey(p.name) === nk) || ph.some((x) => phoneKeys(p.phone).includes(x)) || em.some((x) => pe.includes(x));
 }
-/** The people of `pool` a deal's typed contact names: by name first; by phone or e-mail only when the name
- *  matches nobody (a switchboard number typed for anyone at the company would match everyone). */
-export function typedMatches(d: Pick<Deal, 'contactName' | 'phone' | 'email'>, pool: Person[]): Person[] {
-  const nk = nameKey(d.contactName);
-  if (nk.length > 1) {
-    const byName = pool.filter((p) => nameKey(p.name) === nk);
-    if (byName.length) return byName;
-  }
-  return pool.filter((p) => sameContact({ name: '', phone: d.phone, email: d.email }, p));
-}
 /** The phone numbers and e-mails typed in a deal that the person (if any) and the company don't have yet. */
 export function typedExtras(d: Pick<Deal, 'phone' | 'email'>, p: Pick<Person, 'phone' | 'email'> | null, co?: { phone?: string; email?: string }) {
   const hasPh = new Set([...phoneKeys(p?.phone || ''), ...phoneKeys(co?.phone || '')]);
@@ -248,6 +239,45 @@ export function typedExtras(d: Pick<Deal, 'phone' | 'email'>, p: Pick<Person, 'p
   const emails = splitList(d.email).filter((x) => !hasEm.has(emailKey(x)));
   return { phones: [...new Set(phones)], emails: [...new Set(emails)] };
 }
+/** What a deal holds for its contact `p` that their record lacks (what "เพิ่มให้ <ชื่อ>" carries over): the
+ *  numbers typed in it that neither they nor the company have; while they have no phone (no e-mail) at all,
+ *  every one the deal has, the company's too, since that is what the deal shows as theirs (dealContact). */
+export function personExtras(d: Pick<Deal, 'phone' | 'email'>, p: Pick<Person, 'phone' | 'email'>, co?: { phone?: string; email?: string }) {
+  const own = typedExtras(d, p, co), all = typedExtras(d, p);
+  return { phones: p.phone.trim() ? own.phones : all.phones, emails: p.email.trim() ? own.emails : all.emails };
+}
+
+/** Who of `pool` a deal's typed contact names, and how: by its name (without titles); with no name typed or
+ *  none matching, by a phone number or e-mail typed in it that is not the company's own (`co`: a switchboard
+ *  copied in when the deal was sent is everyone's). A match by phone or e-mail while a name is typed is only a
+ *  hint: the names differ (someone else at the same number). */
+export function typedMatch(d: Pick<Deal, 'contactName' | 'phone' | 'email'>, pool: Person[], co?: { phone?: string; email?: string }): { by: 'name' | 'phone' | 'email' | ''; list: Person[] } {
+  const nk = nameKey(d.contactName);
+  if (nk.length > 1) {
+    const list = pool.filter((p) => nameKey(p.name) === nk);
+    if (list.length) return { by: 'name', list };
+  }
+  const ex = typedExtras(d, null, co);
+  const ph = ex.phones.flatMap(phoneKeys), em = ex.emails.map(emailKey);
+  const byPh = ph.length ? pool.filter((p) => phoneKeys(p.phone).some((x) => ph.includes(x))) : [];
+  if (byPh.length) return { by: 'phone', list: byPh };
+  const byEm = em.length ? pool.filter((p) => splitList(p.email).some((x) => em.includes(emailKey(x)))) : [];
+  return byEm.length ? { by: 'email', list: byEm } : { by: '', list: [] };
+}
+/** The one person of `pool` a deal's typed contact surely is, for a link made without asking (an import, a
+ *  send): the only one with the typed name; with no name typed, the only one with a phone or e-mail typed in
+ *  it (not the company's). null: nobody, several, or a name typed that is nobody's (never a guess by number). */
+export function typedPerson(d: Pick<Deal, 'contactName' | 'phone' | 'email'>, pool: Person[], co?: { phone?: string; email?: string }): Person | null {
+  const m = typedMatch(d, pool, co);
+  if (m.list.length !== 1) return null;
+  return m.by === 'name' || !d.contactName.trim() ? m.list[0] : null;
+}
+/** Has the deal a contact typed in it: a name, or a phone or e-mail that is not the company's own. */
+export function typedAny(d: Pick<Deal, 'contactName' | 'phone' | 'email'>, co?: { phone?: string; email?: string }) {
+  if (d.contactName.trim()) return true;
+  const ex = typedExtras(d, null, co);
+  return ex.phones.length + ex.emails.length > 0;
+}
 
 const ROLE_RANK: Record<PersonRole, number> = { decision: 0, influencer: 1, coordinator: 2, user: 3, '': 4 };
 /** Who a deal is offered as its contact: the people still at the company (not ย้ายงานแล้ว), not `skip`,
@@ -257,8 +287,9 @@ export function contactChoices(pool: Person[], skip: Iterable<string> = []): Per
   return pool.filter((p) => p.status !== 'left' && !no.has(p.id)).sort((a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || a.name.localeCompare(b.name, 'th'));
 }
 /** The "กับ" choices of a contact record: the deal's contacts first, then the company's other people still
- *  there; the default is the deal's main contact. */
-export function actPeople(linked: Person[], pool: Person[]): { list: Person[]; pid: string } {
+ *  there; the default is the deal's main contact, the first one not at another company (`elsewhere`: the deal
+ *  was linked to another company since, or the person moved). */
+export function actPeople(linked: Person[], pool: Person[], elsewhere: (p: Person) => boolean = () => false): { list: Person[]; pid: string } {
   const ids = new Set(linked.map((p) => p.id));
-  return { list: [...linked, ...contactChoices(pool, ids)], pid: linked[0]?.id || '' };
+  return { list: [...linked, ...contactChoices(pool, ids)], pid: linked.find((p) => !elsewhere(p))?.id || '' };
 }

@@ -1,8 +1,8 @@
-import { useId, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useApp } from '../state';
 import { norm } from '../lib/core';
 import { telHref } from '../lib/format';
-import { ROLE_TH, contactChoices, nameKey, splitList, typedExtras, typedMatches } from '../lib/people';
+import { ROLE_TH, contactChoices, nameKey, personExtras, splitList, typedExtras, typedMatch } from '../lib/people';
 import type { GccEngine } from '../lib/engine';
 import type { Deal } from '../lib/sales';
 import type { Person } from '../lib/types';
@@ -48,6 +48,21 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   const hid = useId();
   const [pick, setPick] = useState<'' | 'set' | 'add'>('');
   const [editing, setEditing] = useState('');
+  // the keyboard keeps its place: after a choice, the block's first control; after a form or the list closes,
+  // the button that opened it (data-fk), as the rest of the panel does
+  const box = useRef<HTMLDivElement>(null);
+  const opener = useRef('');
+  const focusTo = (k = '') =>
+    requestAnimationFrame(() => {
+      const el = box.current;
+      if (!el) return;
+      // (no key: the main contact's "เปิดหน้าผู้ติดต่อ", else the block's first button)
+      (el.querySelector<HTMLElement>(k ? `[data-fk="${CSS.escape(k)}"]` : '[data-fk^="open-"]') || el.querySelector<HTMLElement>('button, input'))?.focus();
+    });
+  const open = (mode: 'set' | 'add', from: string) => {
+    opener.current = from;
+    setPick(mode);
+  };
   if (typedFieldsOnly(e, d, ro)) return null;
   const people = e.dealPeople(d.id);
   // linking needs both: this deal's ดีลและขั้นตอน (ro) and ลูกค้าและผู้ติดต่อ
@@ -57,9 +72,13 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   const typed = d.contactName.trim();
   // a new person from this deal: at its company (or named after the client), then the deal's contact
   const addNew = (main = false) => set({ addPerson: c ? { gid: c.id, deal: d.id, main } : { company: d.client, deal: d.id, main } });
+  const link = (pid: string, main = false) => {
+    e.linkPerson(d.id, pid, { main });
+    focusTo();
+  };
   const head = <span className="dc-h" id={hid}>ผู้ติดต่อ</span>;
   const wrap = (body: ReactNode) => (
-    <div className="dc-who" role="group" aria-labelledby={hid}>
+    <div className="dc-who" role="group" aria-labelledby={hid} ref={box}>
       {head}
       {body}
     </div>
@@ -73,80 +92,113 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
         pool={pool}
         skip={people.map((p) => p.id)}
         hasMain={people.length > 0}
+        many={people.length > 1}
         onPick={(pid) => {
-          e.linkPerson(d.id, pid, { main: pick === 'set' });
           setPick('');
+          link(pid, pick === 'set');
         }}
         onNew={() => {
           addNew(pick === 'set');
           setPick('');
         }}
         onNone={() => {
-          if (people[0]) e.unlinkPerson(d.id, people[0].id);
+          // every contact off, as the words say (the people stay in ผู้ติดต่อ)
+          e.clearContacts(d.id);
           setPick('');
+          focusTo();
         }}
-        onCancel={() => setPick('')}
+        onCancel={() => {
+          setPick('');
+          focusTo(opener.current);
+        }}
       />,
     );
 
   // ---- linked: the people, from their own record
   if (people.length) {
     const main = people[0];
-    // what was typed in the deal and is not on their record (nor the company's): kept, said once
-    const theirs = !typed || nameKey(typed) === nameKey(main.name);
-    const ex = typedExtras(d, theirs ? main : null, c);
-    const extra = [...(theirs ? [] : [typed]), ...ex.phones, ...ex.emails];
+    // whose the typed contact is: the linked person with its name (none typed: the main one); what the deal holds
+    // for them that their record lacks is said under them, one tap to carry it over (personExtras)
+    const owner = typed ? people.find((p) => nameKey(p.name) === nameKey(typed)) : main;
+    // a typed name none of them has: an older contact of the deal, kept and said once
+    const old = typed && !owner ? typedExtras(d, null, c) : null;
+    const ids = new Set(people.map((p) => p.id));
+    const oldOne = old ? typedMatch(d, pool.filter((p) => !ids.has(p.id)), c) : null;
+    const oldMatch = oldOne && oldOne.by === 'name' && oldOne.list.length === 1 ? oldOne.list[0] : undefined;
     return wrap(
       <>
         <div className="dc-box">
-          {people.map((p, i) => (
-            <div key={p.id} className="dc-pw">
-              <div className="dc-p">
-                <PersonAvatar p={p} size={40} />
-                <span className="dc-t">
-                  <span className="dc-n">
-                    {p.name}
-                    {p.status === 'left' && <span className="chip warn">ย้ายงานแล้ว</span>}
-                    {people.length > 1 && i === 0 && <span className="t-meta">ผู้ติดต่อหลัก</span>}
+          {people.map((p, i) => {
+            const ex = p === owner ? personExtras(d, p, c) : null;
+            const more = ex ? [...ex.phones, ...ex.emails] : [];
+            // at another company than the deal's (it was linked to another company since, or they moved)
+            const away = e.contactElsewhere(d, p);
+            return (
+              <div key={p.id} className="dc-pw">
+                <div className="dc-p">
+                  <PersonAvatar p={p} size={40} />
+                  <span className="dc-t">
+                    <span className="dc-n">
+                      {p.name}
+                      {p.status === 'left' && <span className="chip warn">ย้ายงานแล้ว</span>}
+                      {people.length > 1 && i === 0 && <span className="t-meta">ผู้ติดต่อหลัก</span>}
+                    </span>
+                    {roleLine(p) && <span className="dc-s">{roleLine(p)}</span>}
+                    {away && <span className="dc-s">อยู่ที่ {e.personCompany(p)?.name || p.company || 'บริษัทอื่น'} ไม่ใช่บริษัทของดีลนี้</span>}
+                    <Reach phone={p.phone} email={p.email} />
+                    {!p.phone && !p.email && <span className="dc-s">{more.length ? 'ยังไม่มีเบอร์และอีเมลในหน้าผู้ติดต่อ' : 'ยังไม่มีเบอร์และอีเมล'}</span>}
+                    {more.length > 0 && <span className="dc-s">พิมพ์ไว้ใน<span className="dc-nw">ดีลนี้</span> {more.join(' · ')}</span>}
                   </span>
-                  {roleLine(p) && <span className="dc-s">{roleLine(p)}</span>}
-                  <Reach phone={p.phone} email={p.email} />
-                  {!p.phone && !p.email && <span className="dc-s">ยังไม่มีเบอร์และอีเมล</span>}
-                </span>
-                <button type="button" className="btn xs dc-open" onClick={() => openPerson(p.id)}>เปิดหน้าผู้ติดต่อ</button>
+                  <button type="button" className="btn xs dc-open" data-fk={'open-' + p.id} onClick={() => openPerson(p.id)} aria-label={'เปิดหน้าผู้ติดต่อ ' + p.name}>เปิดหน้าผู้ติดต่อ</button>
+                </div>
+                {editing === p.id ? (
+                  <QuickEdit
+                    p={p}
+                    onDone={() => {
+                      setEditing('');
+                      focusTo('edit-' + p.id);
+                    }}
+                  />
+                ) : (
+                  can && (
+                    <div className="dc-a dc-in">
+                      {more.length > 0 && (
+                        <button type="button" className="lnk" data-fk={'give-' + p.id} onClick={() => (e.addTypedToPerson(d.id, p.id), focusTo('edit-' + p.id))}>เพิ่มให้ {p.name}</button>
+                      )}
+                      <button type="button" className="lnk" data-fk={'edit-' + p.id} onClick={() => setEditing(p.id)} aria-label={'แก้เบอร์และอีเมลของ ' + p.name}>แก้เบอร์ / อีเมล</button>
+                      {i === 0 ? (
+                        <>
+                          <button type="button" className="lnk" data-fk="set" onClick={() => open('set', 'set')}>เปลี่ยนผู้ติดต่อ</button>
+                          <button type="button" className="lnk" data-fk="add" onClick={() => open('add', 'add')}>เพิ่มอีกคน</button>
+                        </>
+                      ) : (
+                        <button type="button" className="lnk" onClick={() => (e.unlinkPerson(d.id, p.id), focusTo())} aria-label={`เอา ${p.name} ออกจากดีลนี้`}>เอาออกจากดีลนี้</button>
+                      )}
+                    </div>
+                  )
+                )}
               </div>
-              {editing === p.id ? (
-                <QuickEdit p={p} onDone={() => setEditing('')} />
-              ) : (
-                can && (
-                  <div className="dc-a dc-in">
-                    <button type="button" className="lnk" onClick={() => setEditing(p.id)}>แก้เบอร์ / อีเมล</button>
-                    {i === 0 ? (
-                      <>
-                        <button type="button" className="lnk" onClick={() => setPick('set')}>เปลี่ยนผู้ติดต่อ</button>
-                        <button type="button" className="lnk" onClick={() => setPick('add')}>เพิ่มอีกคน</button>
-                      </>
-                    ) : (
-                      <button type="button" className="lnk" onClick={() => e.unlinkPerson(d.id, p.id)}>เอาออกจากดีลนี้</button>
-                    )}
-                  </div>
-                )
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
-        {extra.length > 0 && (
+        {old && (
           <span className="dc-note">
-            {theirs ? 'พิมพ์ไว้ในดีลนี้' : 'ผู้ติดต่อที่พิมพ์ไว้ในดีลนี้เดิม'}: {extra.join(' · ')}
-            {can && theirs && (ex.phones.length > 0 || ex.emails.length > 0) && (
+            ผู้ติดต่อที่พิมพ์ไว้ใน<span className="dc-nw">ดีลนี้</span>เดิม: {[typed, ...old.phones, ...old.emails].join(' · ')}
+            {can && (
               <>
                 {' '}
-                <button type="button" className="lnk" onClick={() => e.addTypedToPerson(d.id, main.id)}>เพิ่มให้ {main.name}</button>
+                {oldMatch ? (
+                  <button type="button" className="lnk" onClick={() => link(oldMatch.id)}>เพิ่ม {oldMatch.name} เป็นผู้ติดต่ออีกคน</button>
+                ) : (
+                  <button type="button" className="lnk" onClick={() => (e.saveTypedContact(d.id), focusTo())}>บันทึกเป็นผู้ติดต่ออีกคน</button>
+                )}
               </>
             )}
           </span>
         )}
-        {can && !editing && <span className="t-meta">ข้อมูลชุดเดียวกับหน้าผู้ติดต่อ แก้ที่นี่หรือที่หน้าผู้ติดต่อ ก็เห็นตรงกันทุกดีล</span>}
+        {can && !editing && (
+          <span className="t-meta">ข้อมูลชุดเดียวกับหน้าผู้ติดต่อ แก้ที่ไหนก็เห็นตรงกัน<span className="dc-nw">ทุกดีล</span></span>
+        )}
       </>,
     );
   }
@@ -154,30 +206,40 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   // ---- an older deal's typed contact: kept as typed, offered as the person it names or a new one
   if (typed) {
     const ex = typedExtras(d, null, c);
-    const m = typedMatches(d, pool);
-    const one = m.length === 1 ? m[0] : undefined;
+    const m = typedMatch(d, pool, c);
+    const one = m.list.length === 1 ? m.list[0] : undefined;
+    // the same name: link it; only the phone or e-mail is the same (the names differ): someone else at that number
+    // most likely, so it is recorded as a person first, the link offered as a second choice
+    const byName = m.by === 'name';
+    const reach = m.by === 'phone' ? 'เบอร์โทร' : 'อีเมล';
+    const note = byName
+      ? one
+        ? `ตรงกับ ${one.name} ในรายชื่อผู้ติดต่อ${one.pos ? ` (${one.pos})` : ''}`
+        : `ตรงกับ ${m.list.length} คนในรายชื่อผู้ติดต่อ เลือกคนที่ใช่`
+      : ['ยังไม่อยู่ในรายชื่อผู้ติดต่อ', m.list.length ? `${reach}ตรงกับ ${one ? one.name : m.list.length + ' คน'}` : ''].filter(Boolean).join(' · ');
     return wrap(
       <div className="dc-box ask">
         <div className="dc-typed">
           <span className="dc-n">{typed}</span>
           <Reach phone={ex.phones.join(' | ')} email={ex.emails.join(' | ')} />
-          <span className="dc-note">
-            {one ? `พิมพ์ไว้ในดีลนี้ · ตรงกับ ${one.name} ในรายชื่อผู้ติดต่อ${one.pos ? ` (${one.pos})` : ''}` : m.length > 1 ? `พิมพ์ไว้ในดีลนี้ · ตรงกับ ${m.length} คนในรายชื่อผู้ติดต่อ เลือกคนที่ใช่` : 'พิมพ์ไว้ในดีลนี้ · ยังไม่อยู่ในรายชื่อผู้ติดต่อ'}
-          </span>
+          <span className="dc-note">พิมพ์ไว้ใน<span className="dc-nw">ดีลนี้</span> · {note}</span>
         </div>
-        {can && m.length > 1 && (
+        {can && byName && m.list.length > 1 && (
           <div className="dc-list">
-            {m.map((p) => <Opt key={p.id} p={p} onPick={() => e.linkPerson(d.id, p.id)} />)}
+            {m.list.map((p) => <Opt key={p.id} p={p} onPick={() => link(p.id)} />)}
           </div>
         )}
         {can && (
           <div className="dc-a">
-            {one ? (
-              <button type="button" className="btn xs pri" onClick={() => e.linkPerson(d.id, one.id)}>เชื่อมกับ {one.name}</button>
+            {byName ? (
+              one && <button type="button" className="btn xs pri" onClick={() => link(one.id)}>เชื่อมกับ {one.name}</button>
             ) : (
-              !m.length && <button type="button" className="btn xs pri" onClick={() => e.saveTypedContact(d.id)}>บันทึกเป็นผู้ติดต่อ</button>
+              <>
+                <button type="button" className="btn xs pri" onClick={() => (e.saveTypedContact(d.id), focusTo())}>บันทึกเป็นผู้ติดต่อ</button>
+                {one && <button type="button" className="lnk" onClick={() => link(one.id)}>{`ใช้ ${one.name} แทน`}</button>}
+              </>
             )}
-            <button type="button" className="lnk" onClick={() => setPick('set')}>เลือกคนอื่น</button>
+            <button type="button" className="lnk" data-fk="other" onClick={() => open('set', 'other')}>เลือกคนอื่น</button>
           </div>
         )}
       </div>,
@@ -186,7 +248,7 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
 
   // ---- no contact yet: the company's people, one tap
   const ex = typedExtras(d, null, c);
-  const typedLine = ex.phones.length + ex.emails.length > 0 && <span className="dc-note">พิมพ์ไว้ในดีลนี้: {[...ex.phones, ...ex.emails].join(' · ')}</span>;
+  const typedLine = ex.phones.length + ex.emails.length > 0 && <span className="dc-note">พิมพ์ไว้ใน<span className="dc-nw">ดีลนี้</span>: {[...ex.phones, ...ex.emails].join(' · ')}</span>;
   const list = contactChoices(pool);
   if (!can)
     return wrap(
@@ -199,7 +261,7 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
     const p = list[0];
     return wrap(
       <div className="dc-box ask">
-        <span className="dc-note">ยังไม่ได้เลือกผู้ติดต่อของดีลนี้ · บริษัทนี้มี 1 คนในรายชื่อผู้ติดต่อ</span>
+        <span className="dc-note">ยังไม่ได้เลือกผู้ติดต่อของ<span className="dc-nw">ดีลนี้</span> · บริษัทนี้มี 1 คนในรายชื่อผู้ติดต่อ</span>
         <div className="dc-p">
           <PersonAvatar p={p} size={40} />
           <span className="dc-t">
@@ -207,7 +269,7 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
             {roleLine(p) && <span className="dc-s">{roleLine(p)}</span>}
             <Reach phone={p.phone} email={p.email} />
           </span>
-          <button type="button" className="btn xs pri dc-open" onClick={() => e.linkPerson(d.id, p.id)}>ใช้คนนี้</button>
+          <button type="button" className="btn xs pri dc-open" onClick={() => link(p.id)} aria-label={'ใช้ ' + p.name + ' เป็นผู้ติดต่อของดีลนี้'}>ใช้คนนี้</button>
         </div>
         <div className="dc-a dc-in">
           <button type="button" className="lnk" onClick={() => addNew()}>เพิ่มผู้ติดต่อคนอื่น</button>
@@ -219,8 +281,8 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   if (list.length > 1)
     return wrap(
       <div className="dc-box ask">
-        <span className="dc-note">ยังไม่ได้เลือกผู้ติดต่อของดีลนี้ · เลือกจากรายชื่อของบริษัทนี้ ({list.length} คน)</span>
-        <ShortList list={list} onPick={(pid) => e.linkPerson(d.id, pid)} />
+        <span className="dc-note">ยังไม่ได้เลือกผู้ติดต่อของ<span className="dc-nw">ดีลนี้</span> · เลือกจากรายชื่อของบริษัทนี้ ({list.length} คน)</span>
+        <ShortList list={list} onPick={(pid) => link(pid)} />
         <div className="dc-a">
           <button type="button" className="lnk" onClick={() => addNew()}>เพิ่มผู้ติดต่อใหม่</button>
         </div>
@@ -229,10 +291,10 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
     );
   return wrap(
     <div className="dc-box ask">
-      <span className="dc-note">{c ? 'ยังไม่มีผู้ติดต่อของบริษัทนี้ในรายชื่อ' : 'ยังไม่มีผู้ติดต่อ'} · เพิ่มครั้งเดียว ใช้ได้ทั้งในดีลนี้และหน้าผู้ติดต่อ</span>
+      <span className="dc-note">{c ? 'ยังไม่มีผู้ติดต่อของบริษัทนี้ในรายชื่อ' : 'ยังไม่มีผู้ติดต่อ'} · เพิ่มครั้งเดียว ใช้ได้ทั้งใน<span className="dc-nw">ดีลนี้</span>และหน้าผู้ติดต่อ</span>
       <div className="dc-a">
         <button type="button" className="btn xs pri" onClick={() => addNew()}>เพิ่มผู้ติดต่อ</button>
-        {Object.keys(e.people).length > 0 && <button type="button" className="lnk" onClick={() => setPick('set')}>ค้นจากรายชื่อผู้ติดต่อทั้งหมด</button>}
+        {Object.keys(e.people).length > 0 && <button type="button" className="lnk" data-fk="search" onClick={() => open('set', 'search')}>ค้นจากรายชื่อผู้ติดต่อทั้งหมด</button>}
       </div>
       {typedLine}
     </div>,
@@ -268,8 +330,8 @@ function ShortList({ list, onPick, sub }: { list: Person[]; onPick: (pid: string
 
 /** Choose a person: the company's people still there first; typing searches everyone in ผู้ติดต่อ. `set`: the deal's
  *  (main) contact; `add`: one more. */
-function Picker({ d, mode, pool, skip, hasMain, onPick, onNew, onNone, onCancel }: {
-  d: Deal; mode: 'set' | 'add'; pool: Person[]; skip: string[]; hasMain: boolean;
+function Picker({ d, mode, pool, skip, hasMain, many, onPick, onNew, onNone, onCancel }: {
+  d: Deal; mode: 'set' | 'add'; pool: Person[]; skip: string[]; hasMain: boolean; many: boolean;
   onPick: (pid: string) => void; onNew: () => void; onNone: () => void; onCancel: () => void;
 }) {
   const { engine: e } = useApp();
@@ -300,7 +362,8 @@ function Picker({ d, mode, pool, skip, hasMain, onPick, onNew, onNone, onCancel 
       )}
       <div className="dc-a">
         <button type="button" className="lnk" onClick={onNew}>เพิ่มผู้ติดต่อใหม่</button>
-        {mode === 'set' && hasMain && <button type="button" className="quiet" onClick={onNone}>ไม่ระบุผู้ติดต่อ</button>}
+        {/* (every contact of the deal: with several, the words say so) */}
+        {mode === 'set' && hasMain && <button type="button" className="quiet" onClick={onNone}>{many ? 'ไม่ระบุผู้ติดต่อทุกคน' : 'ไม่ระบุผู้ติดต่อ'}</button>}
         <button type="button" className="quiet" onClick={onCancel}>ยกเลิก</button>
       </div>
     </div>

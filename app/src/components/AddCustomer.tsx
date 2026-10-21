@@ -61,13 +61,33 @@ export function AddCustomer() {
   }, [f.name, f.jur, e, edit, ver]);
   const up = (k: keyof typeof EMPTY) => (ev: { target: { value: string } }) => setF({ ...f, [k]: ev.target.value });
 
+  /** The contact typed here (name, phone, e-mail as typed; '' each when nothing was). */
+  const typed = { name: f.contact.trim(), phone: f.phone.trim(), email: f.email.trim() };
+  /** The deal's contact from what was typed: the person of its company with that name, else a new one in
+   *  ผู้ติดต่อ with the phone and e-mail typed beside it (typed once, linked everywhere). */
+  const takeContact = (dealId: string) => {
+    const d = e.sales.deals[dealId];
+    if (typed.name && d && e.canLink(d)) e.saveTypedContact(dealId, typed);
+  };
   /** Use an existing company instead of adding a new one. */
   const useExisting = (c: Company) => {
-    if (a.link) e.updateDeal(a.link, { gid: c.id });
+    if (a.link) {
+      e.updateDeal(a.link, { gid: c.id });
+      takeContact(a.link);
+    }
     if (a.deal) {
       // (a joint quotation's header is the payer's row for that quotation, not the company's own row)
-      // (a new row: the company's one person on record, if it has one, is its contact)
-      const d = e.dealsOf(c.id).find((x) => x.year === ui.slYear && jointRole(e.sales, x) !== 'header') || e.addDeal({ gid: c.id, section, year: ui.slYear }, undefined, { contact: '' });
+      const old = e.dealsOf(c.id).find((x) => x.year === ui.slYear && jointRole(e.sales, x) !== 'header');
+      // a new row carries what was typed (a tab on an older build reads it there); a contact typed is its contact,
+      // else the company's one person on record, if it has one (addDeal: never someone else than what was typed)
+      const d =
+        old ||
+        e.addDeal(
+          { gid: c.id, section, year: ui.slYear, ...(typed.name ? { contactName: typed.name } : {}), ...(typed.phone ? { phone: typed.phone } : {}), ...(typed.email ? { email: typed.email } : {}) },
+          undefined,
+          typed.name ? {} : { contact: '' },
+        );
+      takeContact(d.id);
       set({ addCust: null, deal: d.id });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: c.id, dTab: 'info' });
@@ -85,11 +105,15 @@ export function AddCustomer() {
       return;
     }
     const id = e.addCustomer(f);
-    if (a.link) e.updateDeal(a.link, { gid: id });
+    if (a.link) {
+      e.updateDeal(a.link, { gid: id });
+      takeContact(a.link);
+    }
     if (a.deal) {
       const d = e.addDeal({ gid: id, section, year: ui.slYear || beYear() });
-      // the contact typed here is a person (ผู้ติดต่อ) and the deal's contact: typed once, linked everywhere
-      if (f.contact.trim() && e.canLink(d)) e.saveTypedContact(d.id);
+      // the contact typed here is a person (ผู้ติดต่อ), with the phone and e-mail typed beside it, and the deal's
+      // contact: typed once, linked everywhere
+      takeContact(d.id);
       set({ addCust: null, deal: d.id });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: id, dTab: 'info' });

@@ -11,7 +11,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { BUILTIN } from './caps';
-import { contactChoices, suggestionId, toPerson } from './people';
+import { actPeople, contactChoices, personExtras, suggestionId, toPerson } from './people';
 import { CV, type Role, type SyncOp } from './teamSync';
 import type { Company, Dataset, RoundRaw } from './types';
 
@@ -390,6 +390,166 @@ describe('two browsers, an older build', () => {
     expect(Object.keys(E.e.plinks)).toEqual([`${pid}/${d.id}`]);
     expect(E.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
     expect(CV).toBe(5); // no new client version: the team script needs no update
+  });
+});
+
+describe('the review\'s cases: never someone else than what was typed', () => {
+  it('an import with a typed name that is nobody\'s links nobody, whoever shares the number; with no name typed, a number of their own links them', async () => {
+    const [A] = await team();
+    const [c1, c2, c3] = companies(A);
+    // (R1 / R10: the company's one person on record shares the number typed for someone else)
+    A.e.addPerson({ name: 'คุณสมหญิง ทดลอง', gid: c1.id, phone: '02-555-1234' });
+    const p2 = A.e.addPerson({ name: 'คุณเบอร์ ตรง', gid: c2.id, phone: '081-000-0707' });
+    A.e.addPerson({ name: 'คุณอีเมล ตรง', gid: c3.id, email: 'only@example.com' });
+    const f = Object.assign(new Blob([JSON.stringify({ rows: [
+      { type: 'section', name: 'TGO' },
+      { type: 'client', client: c1.name, contactName: 'คุณสมชาย ตัวอย่าง', phone: '02-555-1234' },
+      { type: 'client', client: c2.name, contactName: '', phone: '081 000 0707' },
+      { type: 'client', client: c3.name, contactName: 'คุณคนอื่น', email: 'only@example.com' },
+    ] })]), { name: 'old.json' }) as File;
+    expect((await A.e.importTracker(f, '2565')).deals).toBe(3);
+    const of = (c: Company) => A.e.dealsOf(c.id).find((x) => x.year === '2565')!;
+    const d1 = of(c1);
+    expect(A.e.dealPeople(d1.id)).toEqual([]);
+    expect(A.e.dealContact(d1)).toMatchObject({ name: 'คุณสมชาย ตัวอย่าง', person: null });
+    expect(A.e.salesCsv([d1]).split('\r\n')[1]).toContain('คุณสมชาย ตัวอย่าง');
+    expect(A.e.dealPeople(of(c2).id).map((p) => p.id)).toEqual([p2]);
+    expect(A.e.dealPeople(of(c3).id)).toEqual([]);
+  });
+
+  it('a typed name the deal\'s linked people are not is still someone to record on the People page', async () => {
+    const [A] = await team();
+    const co = companies(A)[0];
+    const other = A.e.addPerson({ name: 'คุณสมหญิง ทดลอง', gid: co.id });
+    const d = A.e.addDeal({ gid: co.id, year: '2569', contactName: 'คุณสมชาย ตัวอย่าง' });
+    expect(A.e.personSuggestions().map((x) => x.name)).toEqual(['คุณสมชาย ตัวอย่าง']);
+    A.e.linkPerson(d.id, other); // chosen by hand in their place
+    expect(A.e.personSuggestions().map((x) => x.name)).toEqual(['คุณสมชาย ตัวอย่าง']);
+    // recorded from the card ("บันทึกเป็นผู้ติดต่ออีกคน"): one more contact, no longer a suggestion
+    const pid = A.e.saveTypedContact(d.id);
+    expect(A.e.dealPeople(d.id).map((p) => p.id)).toEqual([other, pid]);
+    expect(A.e.personSuggestions()).toEqual([]);
+  });
+
+  it('a joint quotation\'s new row and a send of a customer added by hand keep the typed contact: the one person is linked only when it is them', async () => {
+    const [A] = await team();
+    const [c1, c2] = companies(A);
+    // (R8) the company's own row has a typed contact and no link; its only person is someone else
+    A.e.addPerson({ name: 'คุณอื่น ไม่ใช่คนเดิม', gid: c1.id });
+    const own = A.e.addDeal({ gid: c1.id, year: '2569', section: 'Partner', resp: 'เอ', contactName: 'คุณพิมพ์ ไว้เดิม', phone: '081-000-0001' });
+    A.e.updateDeal(own.id, { jobStatus: 'closed' });
+    // …and one whose typed contact is its one person
+    const same = A.e.addPerson({ name: 'คุณตรง ชื่อ', gid: c2.id });
+    const own2 = A.e.addDeal({ gid: c2.id, year: '2569', section: 'Partner', resp: 'เอ', contactName: 'ตรง ชื่อ' });
+    A.e.updateDeal(own2.id, { jobStatus: 'closed' });
+    later();
+    const { hid } = await A.e.createJoint({
+      title: 'CFP ร่วม', payer: 'ผู้จ่ายทดลอง', payerGid: null, year: '2569', section: 'Partner', resp: 'เอ', service: ['CFP'], total: 100000, docNo: 'QT-J8', docDate: '2026-10-21', basis: 'total', detected: 100000,
+      members: [{ deal: own.id, share: null, pct: null }, { deal: own2.id, share: null, pct: null }],
+    });
+    const mem = Object.keys(A.e.sales.jqm || {}).filter((k) => k.startsWith(hid + '/')).map((k) => A.e.sales.deals[k.slice(hid.length + 1)]);
+    const m1 = mem.find((x) => x.gid === c1.id)!, m2 = mem.find((x) => x.gid === c2.id)!;
+    expect(m1).toMatchObject({ contactName: 'คุณพิมพ์ ไว้เดิม', phone: '081-000-0001' });
+    expect(A.e.dealPeople(m1.id)).toEqual([]);
+    expect(A.e.dealContact(m1).name).toBe(A.e.dealContact(own).name);
+    expect(A.e.dealPeople(m2.id).map((p) => p.id)).toEqual([same]);
+
+    // (R6) a customer added by hand with a contact, sent: its one person on record is someone else
+    const cid = A.e.addCustomer({ name: 'บริษัท ส่งทดลอง จำกัด', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '02-000-0002', email: '', web: '', contact: 'คุณสมชาย ตัวอย่าง', note: '' });
+    A.e.addPerson({ name: 'คุณสมหญิง อีกคน', gid: cid });
+    A.e.addDealsFromCompanies([cid], { year: '2569' });
+    const sent = A.e.dealsOf(cid)[0];
+    expect(sent.contactName).toBe('คุณสมชาย ตัวอย่าง');
+    expect(A.e.dealPeople(sent.id)).toEqual([]);
+    expect(A.e.dealContact(sent).name).toBe('คุณสมชาย ตัวอย่าง');
+    // the company's switchboard alone typed is nobody's: the one person still links
+    const c3 = companies(A)[0];
+    const one = A.e.addPerson({ name: 'คุณคนเดียว', gid: c3.id });
+    const d3 = A.e.addDeal({ gid: c3.id, year: '2569' }, undefined, { contact: '' });
+    expect(A.e.dealPeople(d3.id).map((p) => p.id)).toEqual([one]);
+  });
+
+  it('เพิ่มลูกค้า: a contact typed for a registry company is the deal\'s contact, with its phone and e-mail, not the company\'s one person', async () => {
+    const [A, B] = await team();
+    const [co] = companies(A);
+    const only = A.e.addPerson({ name: 'คุณคนเดียว ในรายชื่อ', gid: co.id });
+    // what AddCustomer's "ใช้บริษัทนี้" does with ผู้ติดต่อ / เบอร์โทร / อีเมล typed
+    const t = { name: 'คุณอีกคน ที่พิมพ์ไว้', phone: '080-000-0555', email: 'typed@example.com' };
+    const d = A.e.addDeal({ gid: co.id, year: '2569', contactName: t.name, phone: t.phone, email: t.email });
+    const pid = A.e.saveTypedContact(d.id, t);
+    expect(pid).not.toBe(only);
+    expect(A.e.people[pid]).toMatchObject({ name: t.name, gid: co.id, phone: t.phone, email: t.email });
+    expect(A.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+    // the card and the header agree: the person's own number, nothing left over in the deal
+    expect(A.e.dealContact(A.e.sales.deals[d.id])).toMatchObject({ name: t.name, phone: t.phone, email: t.email });
+    expect(personExtras(A.e.sales.deals[d.id], A.e.people[pid], co)).toEqual({ phones: [], emails: [] });
+    // the same name typed again (another deal): that person, not a second one
+    const d2 = A.e.addDeal({ gid: co.id, year: '2570' });
+    expect(A.e.saveTypedContact(d2.id, { name: 'อีกคน ที่พิมพ์ไว้', phone: '', email: '' })).toBe(pid);
+    expect(A.e.peopleOf(co.id).length).toBe(2);
+    await settle(A, B);
+    expect(B.e.dealContact(B.e.sales.deals[d.id]).phone).toBe(t.phone);
+
+    // a new customer (ไม่มีในทะเบียน): the phone and e-mail typed beside the contact go on the person too
+    const cid = A.e.addCustomer({ name: 'บริษัท ทดลองรีวิว ตัวอย่าง จำกัด', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '080-000-0777', email: 'review@example.com', web: '', contact: 'คุณรีวิว ตัวอย่าง', note: '' });
+    const nd = A.e.addDeal({ gid: cid, year: '2569' });
+    const np = A.e.saveTypedContact(nd.id, { name: 'คุณรีวิว ตัวอย่าง', phone: '080-000-0777', email: 'review@example.com' });
+    expect(A.e.people[np]).toMatchObject({ name: 'คุณรีวิว ตัวอย่าง', phone: '080-000-0777', email: 'review@example.com' });
+  });
+
+  it('a person with no phone of their own: the deal\'s number is said under them and "เพิ่มให้" carries it over, as the header shows it', async () => {
+    const [A] = await team();
+    const [co] = companies(A);
+    const pid = A.e.addPerson({ name: 'ดร.วรรณา ตัวอย่าง', gid: co.id });
+    const d = A.e.addDeal({ gid: co.id, year: '2569', phone: '02-000-0001' });
+    A.e.linkPerson(d.id, pid);
+    const dd = A.e.sales.deals[d.id];
+    expect(A.e.dealContact(dd).phone).toBe('02-000-0001');
+    expect(personExtras(dd, A.e.people[pid], { phone: '02-000-0001' }).phones).toEqual(['02-000-0001']);
+    A.e.addTypedToPerson(d.id, pid);
+    expect(A.e.people[pid].phone).toBe('02-000-0001');
+    expect(A.e.sales.deals[d.id].phone).toBe('02-000-0001');
+  });
+
+  it('a contact at another company after the deal is linked elsewhere is said, and not the "กับ" default', async () => {
+    const [A] = await team();
+    const [c1, c2] = companies(A);
+    const a = A.e.addPerson({ name: 'คุณเอ บริษัทหนึ่ง', gid: c1.id });
+    const b = A.e.addPerson({ name: 'คุณบี บริษัทสอง', gid: c2.id });
+    const d = A.e.addDeal({ gid: c1.id, year: '2569' });
+    A.e.linkPerson(d.id, a);
+    const w = (x = A.e.sales.deals[d.id]) => actPeople(A.e.dealPeople(x.id), A.e.dealPool(x), (p) => A.e.contactElsewhere(x, p));
+    expect(w().pid).toBe(a);
+    A.e.updateDeal(d.id, { gid: c2.id });
+    const dd = A.e.sales.deals[d.id];
+    expect(A.e.contactElsewhere(dd, A.e.people[a])).toBe(true);
+    expect(w().pid).toBe('');
+    expect(w().list.map((p) => p.id)).toEqual([a, b]);
+    // a deal not linked to a company: whoever was chosen is its contact
+    const loose = A.e.addDeal({ client: 'ลูกค้าไม่มีในทะเบียน', year: '2569' });
+    A.e.linkPerson(loose.id, b);
+    expect(A.e.contactElsewhere(A.e.sales.deals[loose.id], A.e.people[b])).toBe(false);
+    expect(w(A.e.sales.deals[loose.id]).pid).toBe(b);
+  });
+
+  it('"ไม่ระบุผู้ติดต่อ" takes every contact off, in one history line', async () => {
+    const [A, B] = await team();
+    const co = companies(A)[0];
+    const p1 = A.e.addPerson({ name: 'คุณหลัก', gid: co.id });
+    const p2 = A.e.addPerson({ name: 'คุณรอง', gid: co.id });
+    const d = A.e.addDeal({ gid: co.id, year: '2569' });
+    A.e.linkPerson(d.id, p1);
+    later();
+    A.e.linkPerson(d.id, p2);
+    expect(A.e.clearContacts(d.id)).toBe(true);
+    expect(A.e.dealPeople(d.id)).toEqual([]);
+    expect(hist(A, d.id).at(-1)).toMatchObject({ action: 'เอาผู้ติดต่อออก', detail: 'คุณหลัก, คุณรอง' });
+    expect(A.e.clearContacts(d.id)).toBe(false);
+    await settle(A, B);
+    expect(B.e.dealPeople(d.id)).toEqual([]);
+    expect([last(`person/${p1}/${d.id}`)!.v, last(`person/${p2}/${d.id}`)!.v]).toMatchObject([{ on: 0 }, { on: 0 }]);
+    // the people stay
+    expect(Object.keys(B.e.people)).toEqual(expect.arrayContaining([p1, p2]));
   });
 });
 

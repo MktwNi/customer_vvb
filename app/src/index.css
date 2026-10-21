@@ -1576,6 +1576,8 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .dc-wide{grid-column:1 / -1}
 .dc-end{justify-content:flex-end}
 .dc-open{flex:none}
+/* a Thai phrase with a loan word (ดีล) kept on one line: the line breaker splits it mid-word ("ทุ" / "กดีล") */
+.dc-nw{white-space:nowrap}
 @media (max-width:600px){.dc-p{flex-wrap:wrap}.dc-p>.dc-t{flex-basis:calc(100% - 52px)}.dc-p>.dc-open{margin-left:52px}.dc-in,.dc-edit{padding-left:0}}
 /* the timeline: circles on a rail, the stage being recorded as a tinted card, the closing step last */
 .sl-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
@@ -1877,7 +1879,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 @media (hover:hover){.pe-deal:hover{border-color:var(--tint-line);background:var(--hv)}}
 /* a deal of the company this person is not the contact of: one tap makes them its contact */
 .pe-deal-w{display:flex;flex-direction:column;gap:6px;min-width:0}
-.pe-deal-use{align-self:flex-start;font-size:var(--fs-sec)}
+.pe-deal-use{align-self:flex-start;font-size:var(--fs-sec);display:flex;gap:6px 14px;flex-wrap:wrap}
 /* the steps of a deal in one bar: done or not (two colours) */
 .pe-mini{display:flex;align-items:center;gap:0}
 .pe-mini i{flex:1;height:6px;border-radius:999px;margin-right:3px;background:var(--rail)}
