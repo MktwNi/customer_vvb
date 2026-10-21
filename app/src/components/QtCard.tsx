@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useApp } from '../state';
-import { downloadBlob, isoTh } from '../lib/format';
-import { KIND_TH, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, type Deal, type DealDoc, type DocKind } from '../lib/sales';
+import { downloadBlob, isoTh, todayISO } from '../lib/format';
+import { KIND_TH, dealMoney, docMismatch, fmtMoney, mismatchText, parseAmount, stepCode, targetWrong, type Deal, type DealDoc, type DocKind } from '../lib/sales';
 import { fcFig } from '../lib/salesUi';
-import { qtDelText, qtFacts, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, type QtVersion, type QtView } from '../lib/quotes';
+import { qtDelText, qtFacts, qtFcElse, qtGoes, qtInActual, qtRoText, qtVerLabel, qtVerShort, qtVerText, qtView, swapCheck, type QtVersion, type QtView } from '../lib/quotes';
 import type { DocFacts } from '../lib/docExtract';
 import type { GccEngine } from '../lib/engine';
 import { DOC_ACCEPT, DOC_MAX_BYTES, docMime } from '../lib/teamFiles';
@@ -17,8 +17,12 @@ import { Icon } from './icons';
 import { useSalesActs } from './SalesToast';
 import { QtBack, QtCheckLine } from './QtCheckSheet';
 import { canMergeFrom } from '../lib/joint';
+import { usePayGuard } from './PayChk';
+import { previewOf } from '../lib/payCheck';
 
-const TARGET_TH = { forecast: 'เป็น Forecast', actual: 'รวมใน Actual', none: 'ไม่นับยอด' };
+/** "Forecast ตอนนี้มาจากใบเสร็จ INV2026090004 ที่ขั้น PAY ไม่ใช่ใบเสนอราคานี้" (lib/quotes qtFcElse). */
+const fcElseText = (e: GccEngine, d: Deal, f: DealDoc) =>
+  `Forecast ตอนนี้มาจาก${KIND_TH[f.kind].split(' / ')[0]} ${f.docNo || f.name}${f.stage ? ` ที่ขั้น ${stepCode(e.sales, d, f.stage, todayISO())}` : ''} ไม่ใช่ใบเสนอราคานี้`;
 const BASIS_WORD: Record<DealDoc['basis'], string> = { total: 'รวม VAT', subtotal: 'ก่อน VAT', netPay: 'หลังหัก ณ ที่จ่าย', manual: 'ยอดที่พิมพ์' };
 
 /** Delete the version the quotation's card is about, after saying what that does to the Forecast;
@@ -40,9 +44,10 @@ export function deleteQt(e: GccEngine, d: Deal, v: QtView, say: (t: string) => v
  * "ฉบับเดิม"), "แก้ไขข้อมูล" (amount, number, date, type, the figure with or before VAT) and "เปลี่ยนไฟล์"
  * (the same quotation, another file); download and delete in a quiet menu; every version listed under it.
  * An account that can only read opens the files and changes nothing. `onRevise` opens the attach dialog
- * for a revision of that version.
+ * for a revision of that version; `revise` false: no "แนบฉบับแก้ไข" of its own (under the QUOTATION step's
+ * edit card, whose drop zone attaches the revision).
  */
-export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => void }) {
+export function QtCard({ d, onRevise, revise = true }: { d: Deal; onRevise: (docId: string) => void; revise?: boolean }) {
   const { engine: e, set } = useApp();
   const acts = useSalesActs();
   const ro = !e.canQuote(d);
@@ -52,6 +57,8 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
   const [swap, setSwap] = useState<File | null>(null);
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState('');
+  // (a change to what a version counts: asked first when accounting checked the money, PayChk)
+  const guard = usePayGuard();
   const v = qtView(e.sales, d), h = v.head;
   if (!h) return null;
   const doc = h.doc;
@@ -71,14 +78,29 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
   const typedOver = h.state !== 'cur' && v.typed && doc.target === 'forecast' && fcFig(e.sales, d).doc?.id === doc.id && m.forecast != null && doc.amount != null && m.forecast !== doc.amount;
   const warn = mm ? mismatchText(mm.doc, mm.kept, h.state === 'cur' ? 'Forecast ที่ใช้' : 'ยอดที่นับ') : typedOver ? mismatchText(doc.amount!, m.forecast!, 'Forecast ที่พิมพ์ไว้') : '';
   const useDoc = () => (mm ? e.updateDoc(d.id, doc.id, { amount: mm.doc, basis: 'manual' }) : e.updateDeal(d.id, { forecast: null }));
-  const goes = h.state === 'cur' ? TARGET_TH.forecast : v.typed && doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : doc.target === 'forecast' ? 'ไม่ได้ใช้ (มียอดที่ใหม่กว่า)' : TARGET_TH[doc.target];
+  const goes = qtGoes(v);
+  // the Forecast held by a document that is not a version of this quotation (a receipt an older build
+  // counted as the Forecast, a quotation filed at a PAY step): named. One its type never counts so is set
+  // right on its own card (it says so there); another one stops counting from here, this version the
+  // Forecast again
+  const fcElse = qtFcElse(e.sales, d, v);
+  const useThis = (f: DealDoc) =>
+    guard.ask({ d, after: previewOf.doc(e.sales, d.id, f.id, { target: 'none' }), kind: 'edit', title: `ใช้ฉบับที่ ${h.n} เป็น Forecast`, verb: 'ใช้ฉบับนี้', run: () => {
+      e.updateDoc(d.id, f.id, { target: 'none' });
+      // (an older Forecast document may be newer than this version: this one is confirmed again)
+      if (dealMoney(e.sales, e.sales.deals[d.id]).fcDoc?.id !== doc.id) e.updateDoc(d.id, doc.id, { target: 'forecast' }, { log: false, confirm: true });
+      acts.say(`Forecast ${fmtMoney(dealMoney(e.sales, e.sales.deals[d.id]).forecast) || '—'} บาท จากใบเสนอราคาฉบับที่ ${h.n} · ${KIND_TH[f.kind].split(' / ')[0]} ${f.docNo || f.name} ไม่นับยอดแล้ว`);
+    } });
+  const vName = (x: QtVersion) => qtVerLabel(x).split(' · ')[0];
+  const notActual = (x: QtVersion) =>
+    guard.ask({ d, after: previewOf.doc(e.sales, d.id, x.doc.id, { target: 'none' }), kind: 'edit', title: `ไม่นับ${vName(x)} ใน Actual`, verb: 'ไม่นับยอด', run: () => (e.updateDoc(d.id, x.doc.id, { target: 'none' }), acts.say(`${vName(x)} ไม่นับใน Actual แล้ว · Actual ${fmtMoney(dealMoney(e.sales, e.sales.deals[d.id]).actual) || '—'}`)) });
   const meta = [doc.docDate ? 'ลงวันที่ ' + isoTh(doc.docDate) : '', 'แนบโดย ' + (doc.by || 'ไม่ระบุ'), doc.name, doc.fileId ? 'Drive ของทีม' : 'อยู่ในเครื่องที่แนบ รออัปโหลด'].filter(Boolean).join(' · ');
   const olds = v.versions.length > 1 ? [...v.versions].reverse() : [];
   // the check (package notify): its status, and "ตรวจใบนี้" for a checker while it waits
   const cv = e.qtCheckFor(doc);
   const check = cv?.status === 'wait' && !e.checkBlock(doc) ? () => set({ qtCheck: doc.id, qtSig: '' }) : undefined;
   return (
-    <div className={'sl-docc qt' + (warn ? ' warn' : '')}>
+    <div className={'sl-docc qt' + (warn || (money && fcElse) ? ' warn' : '')}>
       <div className="sl-docc-r">
         <DocThumb doc={doc} tick={tick} onOpen={() => open(doc)} />
         <div className="qt-h">
@@ -105,6 +127,12 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
           {!ro && <> · <button type="button" className="lnk" onClick={useDoc}>ใช้ยอดจากเอกสาร {fmtMoney(mm ? mm.doc : doc.amount)}</button></>}
         </p>
       )}
+      {money && fcElse && (
+        <p className="sl-docc-w">
+          {fcElseText(e, d, fcElse)}
+          {targetWrong(fcElse) ? ' · แก้ที่การ์ดของใบนั้น' : !ro && doc.amount != null && <> · <button type="button" className="lnk" onClick={() => useThis(fcElse)}>ใช้ฉบับที่ {h.n} เป็น Forecast</button></>}
+        </p>
+      )}
       {ro ? (
         <div className="qt-acts">
           {opens && <button type="button" className="btn xs" onClick={() => open(doc)}>{SHOWABLE.test(doc.mime) ? 'เปิดไฟล์' : 'ดาวน์โหลดไฟล์'}</button>}
@@ -114,7 +142,7 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
         <QtForm d={d} doc={doc} n={h.n} onDone={(said) => (setForm(false), said && acts.say(said))} />
       ) : (
         <div className="qt-acts">
-          <button type="button" className="btn xs" onClick={() => onRevise(doc.id)}>แนบฉบับแก้ไข</button>
+          {revise && <button type="button" className="btn xs" onClick={() => onRevise(doc.id)}>แนบฉบับแก้ไข</button>}
           <button type="button" className="lnk" onClick={() => setForm(true)}>แก้ไขข้อมูล</button>
           <SwapPick onFile={setSwap} />
           {busy && <span className="qt-busy" role="status">{busy}</span>}
@@ -138,8 +166,12 @@ export function QtCard({ d, onRevise }: { d: Deal; onRevise: (docId: string) => 
           {olds.map((x) => (
             <div key={x.doc.id} className={'qt-ver' + (x === h ? ' cur' : '')} role="listitem">
               <span className="qt-vn">{qtVerLabel(x)}</span>
-              <span className={x === h ? '' : 'qt-vw'}>{qtVerText(x, v.typed)}</span>
-              <span className="r">{x !== h && <button type="button" className="lnk" onClick={() => open(x.doc)} aria-label={`เปิดไฟล์ ${qtVerLabel(x)} ${x.doc.name}`}>เปิดไฟล์</button>}</span>
+              <span className={x === h || qtInActual(x) ? '' : 'qt-vw'}>{qtVerText(x, v.typed)}</span>
+              <span className="r">
+                {/* a version an older build counted as money received: it stops counting here, in one step */}
+                {x !== h && qtInActual(x) && !ro && money && <button type="button" className="lnk" onClick={() => notActual(x)} aria-label={`ไม่นับ ${qtVerLabel(x)} ใน Actual`}>ไม่นับใน Actual</button>}
+                {x !== h && <button type="button" className="lnk" onClick={() => open(x.doc)} aria-label={`เปิดไฟล์ ${qtVerLabel(x)} ${x.doc.name}`}>เปิดไฟล์</button>}
+              </span>
             </div>
           ))}
         </div>
@@ -412,7 +444,9 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
   const doc = h.doc;
   const open = (x: DealDoc) => void openDocFile(e, x).then(() => setTick((k) => k + 1));
   const olds: QtVersion[] = v.versions.filter((x) => x !== h).reverse();
-  const goes = h.state === 'cur' ? TARGET_TH.forecast : v.typed && doc.target === 'forecast' ? 'Forecast พิมพ์เองทีหลัง' : TARGET_TH[doc.target];
+  // (as the panel's card: a version a newer figure replaced is "ไม่ได้ใช้", and the document that holds the
+  // Forecast instead is named)
+  const goes = qtGoes(v), fcElse = e.can('view.money') ? qtFcElse(e.sales, d, v) : null;
   const cv = e.qtCheckFor(doc);
   const ro = !e.canQuote(d);
   return (
@@ -428,6 +462,7 @@ export function QtPhone({ d, v, onRevise, onChange }: { d: Deal; v: QtView; onRe
           </span>
         </span>
       </div>
+      {fcElse && <p className="qt-mc-w">{fcElseText(e, d, fcElse)}</p>}
       <QtBack v={cv} />
       {cv?.status === 'wait' && !e.checkBlock(doc) && (
         <button type="button" className="lnk qt-go" onClick={() => set({ qtCheck: doc.id, qtSig: '' })}>ตรวจใบนี้</button>

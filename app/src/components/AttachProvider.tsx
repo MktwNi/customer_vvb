@@ -95,8 +95,10 @@ export function useAttach() {
     if (r.over) {
       // the money of this job is in already (an earlier receipt counted more than its installment, say):
       // one tap would count it again — the form is there for money that really came in on top
-      // (without a plan there is no installment form to correct: the message says to attach the receipt)
-      acts.say(recvOverText(S, d, r), { ms: 12000, acts: r.plan ? [] : [{ label: 'แก้ยอด / วันที่', act: 'recvEdit', deal: d.id, k: stage }] });
+      // (without a plan there is no installment form to correct: the message says to attach the receipt;
+      // an installment of a plan past the Forecast: the plan may be what is wrong, its editor is offered too)
+      const fix: ToastAct[] = !r.plan && r.over.what === 'Forecast' ? [{ label: 'แก้ไขแผน', act: 'plan', deal: d.id }] : [];
+      acts.say(recvOverText(S, d, r), { ms: 12000, acts: r.plan ? [] : [...fix, { label: 'แก้ยอด / วันที่', act: 'recvEdit', deal: d.id, k: stage }] });
       return 'over';
     }
     if (r.ask && !(typed != null && typed > 0)) {
