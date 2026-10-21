@@ -1155,6 +1155,14 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-nm-s>.sl-sub-last{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .sl-tg{color:var(--link)}
 .sl-tg.bad{color:var(--bad)}
+/* "อาจซ้ำ": a soft amber word (two rows of one company and one service in the year), never red */
+.sl-tg.warn{color:var(--warn)}
+/* a row without a service, where its company has another row this year: a muted word, not a chip */
+.sl-tg.none{color:var(--muted)}
+/* a closed job's name, its services on a line under it (the ปิดงาน tab): two chips, then "อีก 2" */
+.sl-cl-nm{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.sl-cl-nm>.sl-nm-b{max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sl-cl-nm>.svts.js{flex-wrap:nowrap;max-width:100%}
 .sl-tg::after{content:' ·';color:var(--muted)}
 @media (pointer:coarse){.sl-nm-b{min-height:24px}.sl-kedit,.sl-closeb,.sl-mlist :is(.lnk,.quiet),.sl-tools :is(.lnk,.quiet){display:inline-flex;align-items:center;min-height:28px}}
 /* ผู้รับผิดชอบ: the name; read-only as text */
@@ -2427,3 +2435,11 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
   li.cur-step .sl-drop-b .btn{width:100%;height:40px}
   li.cur-step .sl-drop-b .sl-drop-pick{order:-1;border-color:var(--brand);color:var(--link)}
 }
+
+/* the deal panel's services (under the name) and the company's other jobs of the year (under the meta line) */
+.dp-svc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:var(--fs-sec);color:var(--ink-2)}
+.dp-svc .lnk{font-size:var(--fs-sec)}
+.dp-svc-pop{display:flex;flex-direction:column;gap:12px;padding:4px 2px}
+.dp-oth{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:var(--fs-sec);color:var(--ink-2)}
+.dp-oth-j{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
+.dp-oth .lnk{font-size:var(--fs-sec)}

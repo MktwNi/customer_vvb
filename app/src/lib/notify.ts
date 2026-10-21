@@ -15,7 +15,8 @@
  *   update): quotations waiting for this checker, this person's own quotations sent back (or checked in the
  *   last 7 days), instalments late or due soon, and appointments due today or late.
  */
-import { DUE_SOON, QUOTE_STAGE, fmtMoney, payDue, type Deal, type DealDoc, type SalesState } from './sales';
+import { DUE_SOON, QUOTE_STAGE, fmtMoney, jobServices, payDue, type Deal, type DealDoc, type SalesState } from './sales';
+import { withSvc } from './jobs';
 import { TT } from './constants';
 import { addDays, daysBetween, dmTh, localDay, pad } from './format';
 import { BUILTIN, can, resolveCaps, sameName, type CapId, type CapSet, type Grants } from './caps';
@@ -608,6 +609,9 @@ export function bellEmpty(may: (c: CapId) => boolean, qtLive: boolean) {
   return (w.length === 1 ? w[0] : w.slice(0, -1).join(' ') + ' และ' + w[w.length - 1]) + 'จะขึ้นที่นี่';
 }
 
+/** A job as the bell names it: the client with its services ("บริษัท ทองมงคล จำกัด · CFP"), so two jobs of one
+ *  company are told apart; '' when the deal is gone. */
+const bellName = (S: SalesState, d: Deal | undefined) => (d ? withSvc(d.client, jobServices(S, d)) : '');
 export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
   const { S, me, caps, live, cfg, today } = x;
   const all = caps == null;
@@ -623,7 +627,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
     add('chk', waitingChecks(S, x.checks, me, cfg, since).map((doc) => ({
       key: 'q:' + doc.id,
       kind: 'chk',
-      title: S.deals[doc.deal]?.client || '',
+      title: bellName(S, S.deals[doc.deal]),
       sub: [doc.docNo || 'ใบเสนอราคา', doc.amount != null ? fmtMoney(doc.amount) + ' บาท' : '', doc.by ? doc.by + ' แนบ' : ''].filter(Boolean).join(' · '),
       right: { text: whenTh(doc.cAt || doc.at, today) },
       count: true,
@@ -638,7 +642,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
     return {
       key: 'w:' + doc.id,
       kind: 'mine',
-      title: S.deals[doc.deal]?.client || '',
+      title: bellName(S, S.deals[doc.deal]),
       sub: `${doc.docNo || 'ใบเสนอราคา'} · ${w.state === 'wait' && stale ? 'แก้แล้ว รอตรวจอีกครั้ง' : w.text}`,
       // no check here yet (the script has no notifications, or they are not set up): nothing waits for a checker
       right: { text: o?.why === 'script' || o?.why === 'off' ? 'ยังไม่ได้แจ้ง' : QT_WORD.wait, chip: '' },
@@ -661,7 +665,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
           row: {
             key: 'm:' + doc.id,
             kind: 'mine',
-            title: S.deals[doc.deal]?.client || '',
+            title: bellName(S, S.deals[doc.deal]),
             sub: v.status === 'back' ? `${no} · ${r.by} ส่งกลับให้แก้${r.note ? ': ' + short(r.note) : ''}` : `${no} · ${r.by} ตรวจแล้ว ${dmTh(localDay(r.at))}`,
             right: { text: QT_WORD[v.status], chip: v.status === 'ok' ? 'info' : '' },
             count: v.status === 'back',
@@ -705,7 +709,7 @@ export function bellItems(x: BellIn): { groups: BellGroup[]; count: number } {
       return {
         key: `p:${d.id}/${l.stage}`,
         kind: 'pay',
-        title: d.client,
+        title: bellName(S, d),
         sub: [l.code, amt ? fmtMoney(amt) + ' บาท' : '', 'ครบกำหนด ' + dmTh(l.due), team && d.resp ? d.resp : ''].filter(Boolean).join(' · '),
         right: late ? { text: `เลยกำหนด ${l.lateDays} วัน`, chip: 'bad' } : { text: l.due === today ? 'ถึงกำหนดวันนี้' : `ถึงกำหนด ${daysBetween(today, l.due)} วัน`, chip: 'warn' },
         count: true,

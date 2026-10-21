@@ -84,7 +84,10 @@ describe('the rows: followed companies and open tracker jobs, one row per compan
     expect(r.jobs.map((j) => j.deal.id)).toEqual(['idle', 'calm']);
     expect(r.jobs[0]).toMatchObject({ late: true, idle: 41, when: '2026-09-15' });
     expect(r.late).toBe(true);
-    expect(jobTag(r.jobs)).toBe('Sales Tracker 2 งาน · ถัดไป CONTACT ติดต่อประสานงาน');
+    // (two jobs: the one named says its services, so the tag says which job it is)
+    expect(jobTag(r.jobs)).toBe('Sales Tracker 2 งาน · CFP ถัดไป CONTACT ติดต่อประสานงาน');
+    expect(jobTag(r.jobs.map((j) => ({ ...j, deal: { ...j.deal, service: [] } })))).toBe('Sales Tracker 2 งาน · ถัดไป CONTACT ติดต่อประสานงาน');
+    expect(jobTag(r.jobs.slice(0, 1))).toBe('Sales Tracker · ถัดไป CONTACT ติดต่อประสานงาน');
   });
 
   it('lists only open jobs of the year: not closed, not lost, not won and fully paid, not another year', () => {

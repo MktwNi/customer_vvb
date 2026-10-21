@@ -1,11 +1,12 @@
 /** Small pure helpers behind the Sales Tracker screens (no DOM, so they are unit-tested). */
 import { addDays, daysBetween, dmTh, dow, localDay, todayISO } from './format';
-import { basisDates, customersOf, filterDeals, jointAttr, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, stepContactDay, withActIndex, workTally, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
+import { basisDates, customersOf, filterDeals, jobServices, jointAttr, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, stepContactDay, withActIndex, workTally, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
   DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, stepCode, countedAt, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, dupCounted, fmtMoney, lastStage, mismatchText, overdueDays, payState, stepOf,
   type Deal, type DealAct, type DealDoc, type DealSteps, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats, type StepView,
 } from './sales';
 import type { FField, FOpt } from '../components/FilterBar';
+import { withSvc } from './jobs';
 
 /**
  * A Buddhist-era year typed by a person ("2569", "พ.ศ. 2569", Thai digits too) → `{ year }`.
@@ -149,10 +150,10 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
   const fields: FField[] = [
     { key: 'resp', label: 'ผู้รับผิดชอบ', kind: 'multi', ops: true, people: true, pinned: true, rest: 'ทุกคน', options: busiest('resp', me || undefined) },
     { key: 'source', label: 'SOURCE', hint: 'ช่องทางที่ได้ลูกค้า', kind: 'multi', ops: true, options: ordered('source', S.cfg.sources) },
-    { key: 'service', label: 'Services', hint: 'บริการที่เสนอ', kind: 'multi', ops: true, options: ordered('service', S.cfg.services) },
+    { key: 'service', label: 'บริการ', hint: 'บริการของงาน เช่น CFO CFP T-VER', kind: 'multi', ops: true, options: ordered('service', S.cfg.services) },
     { key: 'referral', label: 'แหล่งที่มา', hint: 'ใครแนะนำ / มาจากไหน', kind: 'multi', ops: true, find: 'ค้นหาชื่อ', options: busiest('referral') },
     {
-      key: 'section', label: 'หมวด', hint: 'กลุ่มแถวในตาราง', kind: 'multi', ops: true, find: 'ค้นหาหมวด',
+      key: 'section', label: 'หมวด', hint: 'กลุ่มแถวในตาราง ตามช่องทางที่ได้ลูกค้า', kind: 'multi', ops: true, find: 'ค้นหาหมวด',
       options: (() => {
         const n = counts('section');
         const vs = [...new Set([...sectionsFor(S, yearDeals).map((x) => x || NONE), ...chosen('section')])];
@@ -217,6 +218,10 @@ export function shortName(client: string) {
   const s = client.replace(/^(บริษัท|บจก\.|บมจ\.|หจก\.|ห้างหุ้นส่วน(จำกัด|สามัญ)?)\s*/, '').replace(/\s*(จำกัด\s*\(มหาชน\)|\(มหาชน\)|จำกัด)\s*$/, '').trim();
   return s || client;
 }
+/** A job's short name with its services, where two jobs of one company must be told apart (toasts, the bell,
+ *  aria labels, the joint quotation's picker): "ทองมงคล · CFP"; the name alone without a service. `s` given:
+ *  a joint quotation's member is named with its header's services (jobServices). */
+export const jobName = (d: Pick<Deal, 'client' | 'service' | 'id'>, s?: SalesState) => withSvc(shortName(d.client), s ? jobServices(s, d as Deal) : d.service);
 
 /** Status colours of the design system: a dot + word, or a tinted chip for what needs action now. */
 export type StatusKind = 'ok' | 'warn' | 'bad' | 'info' | 'neutral';

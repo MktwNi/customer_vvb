@@ -18,7 +18,7 @@
  * Pure functions only (no engine, no DOM).
  */
 import type { CSSProperties } from 'react';
-import { jointRole, payerDeal, type Deal, type SalesState } from './sales';
+import { jobServices, jointRole, type Deal, type SalesState } from './sales';
 
 export const SVC_TYPE_LABEL = 'ประเภทบริการ';
 export type SvcTypeId = 'cfo' | 'cfp' | 'con' | 'vvb' | 'plt' | 'tvr' | 'oth' | 'none';
@@ -76,12 +76,9 @@ export function typesOfServices(svc: readonly string[]): SvcTypeId[] {
   return [...out].sort(byTypeOrder);
 }
 
-/** The Services a job's type is read from: a joint quotation's member is sold through its header's
- *  quotation, so the header's (its own while the header lists none); any other job its own. */
-export function jobServices(s: SalesState, d: Deal): string[] {
-  const h = payerDeal(s, d);
-  return h !== d && h.service.length ? h.service : d.service;
-}
+/** The Services a job's type is read from (lib/sales.ts jobServices): a joint quotation's member is sold
+ *  through its header's quotation, so the header's (its own while the header lists none); any other job its own. */
+export { jobServices };
 /** A customer's types and where they were read: the open jobs of the tracker's year (`open`), any job of
  *  that year (`year`), the jobs of another year (`other`, `year` says which), one deal's own Services
  *  (`deal`: an installment), or nothing (`''`: ยังไม่ระบุประเภท). `why`: each type's services, as written in

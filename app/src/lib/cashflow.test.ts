@@ -96,15 +96,20 @@ describe('the demo world against the mockups', () => {
   });
   it('the CSV: a row per amount, the undated last with an empty month, ISO dates, empty cells empty', () => {
     const r = cashRows(s, '2569', Y, 'lines', true);
-    expect(r.head).toEqual(['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'งวด', 'ยอด (บาท)', 'ครบกำหนด', 'วันที่รับ', 'สถานะ', 'เลขใบเสนอราคา', 'ใบเสนอราคาร่วม (จำนวนบริษัท)']);
+    expect(r.head).toEqual(['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'งวด', 'ยอด (บาท)', 'ครบกำหนด', 'วันที่รับ', 'สถานะ', 'เลขใบเสนอราคา', 'ใบเสนอราคาร่วม (จำนวนบริษัท)', 'บริการ']);
     expect(r.rows).toHaveLength(13 + 1);
-    expect(r.rows[0]).toEqual(['2569', 'เม.ย. 2569', 'ดับบลิวเอชเอ', '2569', '', '', 'ไม่มีแผน', 95000, '', '2026-04-20', 'รับแล้ว', '', '']);
-    expect(r.rows[1]).toEqual(['2569', 'มิ.ย. 2569', 'อมตะ คอร์ปอเรชัน', '2569', 'TGO', 'ปลา', '1/2', 120000, '2026-06-30', '2026-06-30', 'รับแล้ว', '', '']);
-    expect(r.rows[13]).toEqual(['2569', '', 'คงธนา เซอร์วิส', '2569', '', '', 'ไม่มีแผน', 125000, '', '', 'ยังไม่กำหนดวันรับ', '', '']);
+    expect(r.rows[0]).toEqual(['2569', 'เม.ย. 2569', 'ดับบลิวเอชเอ', '2569', '', '', 'ไม่มีแผน', 95000, '', '2026-04-20', 'รับแล้ว', '', '', '']);
+    expect(r.rows[1]).toEqual(['2569', 'มิ.ย. 2569', 'อมตะ คอร์ปอเรชัน', '2569', 'TGO', 'ปลา', '1/2', 120000, '2026-06-30', '2026-06-30', 'รับแล้ว', '', '', '']);
+    expect(r.rows[13]).toEqual(['2569', '', 'คงธนา เซอร์วิส', '2569', '', '', 'ไม่มีแผน', 125000, '', '', 'ยังไม่กำหนดวันรับ', '', '', '']);
     expect(cashRows(s, '2569', Y, 'lines', false).rows).toHaveLength(13);
+    // the job's services in the last column (two jobs of one company told apart); the columns before it unmoved
+    const d1 = Y.lines[1].deal, was = d1.service;
+    d1.service = ['CFO', 'LESS'];
+    expect(cashRows(s, '2569', Y, 'lines', false).rows[1].at(-1)).toBe('CFO, LESS');
+    d1.service = was;
     const csv = cashCsv(r).split('\r\n');
     expect(csv).toHaveLength(15);
-    expect(csv[2]).toBe('"2569","มิ.ย. 2569","อมตะ คอร์ปอเรชัน","2569","TGO","ปลา","1/2","120000","2026-06-30","2026-06-30","รับแล้ว","",""');
+    expect(csv[2]).toBe('"2569","มิ.ย. 2569","อมตะ คอร์ปอเรชัน","2569","TGO","ปลา","1/2","120000","2026-06-30","2026-06-30","รับแล้ว","","",""');
     const m = cashRows(s, '2569', Y, 'month', true);
     expect(m.rows).toHaveLength(13);
     expect(m.rows[9]).toEqual(['2569', 'ต.ค. 2569', 305000, 80250, 156000, 541250, 5]);
