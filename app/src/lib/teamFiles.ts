@@ -22,11 +22,17 @@ export function docMime(f: { name: string; type: string }): string {
   return EXT_MIME[/\.([^.]+)$/.exec(f.name)?.[1].toLowerCase() ?? ''] || '';
 }
 
+/** A transport for file requests; `signal` cuts the request (the engine's upload giving way, GccEngine.yieldFiles). */
+export type FileTransport = (url: string, body: Record<string, unknown>, signal?: AbortSignal) => Promise<Record<string, unknown>>;
+
 /** fetchTransport (teamSync.ts) with a 180 s instead of a 45 s timeout: a 10 MB file is ~13.4 MB of
  *  base64 each way, which takes minutes on a slow mobile connection. */
-export const fileFetchTransport: Transport = async (url, body) => {
+export const fileFetchTransport: FileTransport = async (url, body, signal) => {
   const ctl = new AbortController();
   const to = setTimeout(() => ctl.abort(new DOMException('timeout', 'TimeoutError')), 180000);
+  const cut = () => ctl.abort(signal?.reason ?? new DOMException('cut', 'AbortError'));
+  if (signal?.aborted) cut();
+  else signal?.addEventListener('abort', cut, { once: true });
   let t: string;
   try {
     const r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl.signal });
@@ -35,6 +41,7 @@ export const fileFetchTransport: Transport = async (url, body) => {
     t = await r.text(); // the timeout also covers a body download that stalls
   } finally {
     clearTimeout(to);
+    signal?.removeEventListener('abort', cut);
   }
   try {
     return JSON.parse(t);
@@ -143,11 +150,18 @@ export function fileNetFail(e: unknown): boolean {
   return e.code === 'http' && (st >= 500 || st === 429);
 }
 
+/** A file request ended by its 180 s limit (fileFetchTransport) or cut by the browser. Not sent again quietly
+ *  (it already waited long enough), unless the page was put away meanwhile: a phone that slept longer than the
+ *  limit fires the overdue timer the moment it wakes, and that says nothing about the connection. */
+export function fileTimedOut(e: unknown): boolean {
+  const name = (e as Error)?.name;
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
 /** Why the files still wait, for the notice that says so (engine docsWaitNote): plain words for a failure of
  *  the connection; the script's own message for anything else (fileErrText). */
 export function fileWaitWhy(e: unknown): string {
-  const name = (e as Error)?.name;
-  if (name === 'TimeoutError' || name === 'AbortError') return 'ส่งไม่ทันเวลา (ไฟล์ใหญ่หรืออินเทอร์เน็ตช้า)';
+  if (fileTimedOut(e)) return 'ส่งไม่ทันเวลา (ไฟล์ใหญ่หรืออินเทอร์เน็ตช้า)';
   if (e instanceof TypeError) return typeof navigator !== 'undefined' && navigator.onLine === false ? 'เครื่องออฟไลน์อยู่' : 'การเชื่อมต่อกับ Google ขาดช่วงระหว่างส่ง';
   if (fileNetFail(e)) return 'Google หรือสคริปต์ของทีมไม่ว่างชั่วคราว';
   return fileErrText(e);

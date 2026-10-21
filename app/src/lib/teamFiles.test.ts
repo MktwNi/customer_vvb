@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
-import { base64ToBlob, blobToBase64, deleteDocFile, DOC_ACCEPT, DOC_MAX_BYTES, docMime, downloadDocFile, fileErrText, fileFetchTransport, fileNetFail, fileWaitWhy, NOT_SCRIPT, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { base64ToBlob, blobToBase64, deleteDocFile, DOC_ACCEPT, DOC_MAX_BYTES, docMime, downloadDocFile, fileErrText, fileFetchTransport, fileNetFail, fileTimedOut, fileWaitWhy, NOT_SCRIPT, scriptSupportsFiles, uploadDocFile } from './teamFiles';
 import { call, errText, TeamSyncError, type Transport } from './teamSync';
 
 // the 10 MB cases push ~14 MB of base64 through JSON and the simulator
@@ -342,6 +342,24 @@ describe('fileFetchTransport', () => {
     expect(errText(err, 'connect')).toContain('ลองกดอีกครั้ง');
     expect(seen!.headers).toEqual({ 'Content-Type': 'text/plain;charset=utf-8' });
     expect(JSON.parse(String(seen!.body))).toEqual({ action: 'file', key: KEY, fileId: 'x' });
+  });
+
+  it('is cut by the caller\'s signal (an upload giving way, engine yieldFiles), already cut or on its way', async () => {
+    let n = 0;
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      n++;
+      return new Promise((_, reject) => {
+        if (init.signal!.aborted) return reject(init.signal!.reason);
+        init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    });
+    const ac = new AbortController();
+    const p = fileFetchTransport(URL, { action: 'upload' }, ac.signal);
+    ac.abort(new DOMException('cut', 'AbortError'));
+    const err = await p.catch((e) => e);
+    expect([err.name, fileTimedOut(err), fileNetFail(err)]).toEqual(['AbortError', true, false]);
+    expect((await fileFetchTransport(URL, {}, ac.signal).catch((e) => e)).name).toBe('AbortError');
+    expect(n).toBe(2);
   });
 
   it('turns HTTP errors and non-JSON pages (Google sign-in) into readable errors', async () => {

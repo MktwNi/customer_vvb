@@ -32,7 +32,7 @@ import { expDocId, purgeExpenses, toExpense, type DealExp, type JobExp } from '.
 import { expChanged, type ExpInput, type ExpKey } from './expenseJob';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
 import { cashCsv, cashRows, type CashCsvMode } from './cashUi';
-import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, fileNetFail, fileWaitWhy, scriptSupportsFiles, uploadDocFile } from './teamFiles';
+import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fileFetchTransport, fileNetFail, fileTimedOut, fileWaitWhy, scriptSupportsFiles, uploadDocFile, type FileTransport } from './teamFiles';
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
 import { DEAL_STAGE, QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, workTally, type JointGroup, type WorkOpts, type WorkTally } from './sales';
@@ -87,9 +87,22 @@ const OLD_SCRIPT = 'สคริปต์ของทีมยังไม่ร
 const OLD_NOTIFY = 'สคริปต์ของทีมยังไม่รองรับการแจ้งเตือนและการตรวจใบเสนอราคา — ให้ผู้ดูแลระบบอัปเดต Code.gs ตามขั้นตอนในหน้า ผู้ใช้และสิทธิ์ › การแจ้งเตือน';
 /** How long a script found unable to store files is taken at its word before the upload round asks again. */
 export const FILES_RECHECK_MS = 60000;
-/** An upload that failed while the page was put away (a phone's screen locked, another app opened): the
- *  round ends without a notice and goes again when the page is back (sendQuiet). */
-class DocAway extends Error {}
+/**
+ * An upload round that ends without a failure to tell (sendQuiet): 'away', a try failed while the page was put
+ * away (a phone's screen locked, another app opened), and the round goes again when the page is back; 'yield',
+ * the try was cut so that something which cannot wait goes first (yieldFiles), and the file goes at the next
+ * round; 'ended', the session ended while the try waited for its turn.
+ */
+class DocAway extends Error {
+  constructor(readonly why: 'away' | 'yield' | 'ended') {
+    super(why);
+  }
+}
+/** The file's record no longer wants it sent (deleted, taken off, replaced, or sent from another tab) by the
+ *  time its quiet try came: the round goes on with the next file (sendQuiet's `still`). */
+class DocGone extends Error {}
+/** localStorage key another tab of this browser writes to have an upload of this tab give way (yieldFiles). */
+const FILE_YIELD = 'gcc-file-yield';
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -242,6 +255,8 @@ export class GccEngine {
     this.teamSync();
   };
   private teamPrefsChanged = (e: StorageEvent) => {
+    // another tab of this browser is signing out (or about to): this tab's upload gives way to its sync
+    if (e.key === FILE_YIELD) return void this.upTry?.abort();
     if (e.key === PREF.wipe) {
       if (typeof location !== 'undefined') location.reload(); // another tab signed out and wiped the team data
       return;
@@ -2627,7 +2642,7 @@ export class GccEngine {
   // ---- attached documents (quotation / invoice); files go to the team's Drive, a copy stays in this browser
   /** Script supports attachments (null = not checked yet for this connection). */
   teamFiles: boolean | null = null;
-  fileTransport: Transport = fileFetchTransport;
+  fileTransport: FileTransport = fileFetchTransport;
   docMsg = '';
   private docUploading = false;
   private docBlobKey = (docId: string) => 'docblob:' + docId;
@@ -2864,8 +2879,9 @@ export class GccEngine {
     try {
       await this.store.set(this.docBlobKey(id), { name, mime, data: await file.arrayBuffer() });
     } catch {
-      if (!this.teamCfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
-      fileId = (await uploadDocFile(this.fileTransport, this.teamCfg.url, this.cred(this.teamCfg), { docId: id, name, mime, blob: file })).fileId;
+      const cfg = this.teamCfg;
+      if (!cfg) throw new Error('บันทึกไฟล์ในเบราว์เซอร์ไม่สำเร็จ (พื้นที่เต็ม?) และยังไม่ได้เชื่อมต่อทีม');
+      fileId = (await this.netTurn(() => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: id, name, mime, blob: file }))).fileId;
     }
     // as it is now (a teammate may have corrected or deleted it while the file was stored)
     const old = S.docs[ok], d = S.deals[dealId];
@@ -3013,14 +3029,23 @@ export class GccEngine {
   }
   /** The upload run in flight: a caller that needs it done (signing out) waits for it. */
   private docRun: Promise<void> | null = null;
+  /** docRun was asked for with `wait` (it does not give way to another tab's round). */
+  private docRunWaits = false;
   /** `fresh`: a new file was just attached (or this is the last try at signing out): a script last found
    *  unable to store files is asked again now. `wait`: the person asked for this round (retryDocsNow): it
    *  waits for another tab's round instead of skipping it. */
-  async uploadDocs(fresh = false, wait = false) {
+  async uploadDocs(fresh = false, wait = false): Promise<void> {
     const cfg = this.teamCfg;
     if (fresh) this.filesRecheck();
     if (!cfg || !this.filesUp()) return;
-    if (this.docRun) return this.docRun;
+    if (this.docRun) {
+      if (!wait || this.docRunWaits) return this.docRun;
+      // the run in flight was started by a sync and may be skipping (another tab of the browser holds the
+      // files: browsers grant a lock in a later task, so that is not known yet): once it is over, this one
+      // waits its turn and goes
+      await this.docRun;
+      return this.uploadDocs(false, true);
+    }
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
     const run = (locks ? locks.request('gcc-doc-upload', { ifAvailable: !wait }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)) : this.uploadDocsNow(cfg)).then(
@@ -3028,6 +3053,7 @@ export class GccEngine {
       () => {},
     );
     this.docRun = run;
+    this.docRunWaits = wait;
     await run;
     if (this.docRun === run) this.docRun = null;
   }
@@ -3063,22 +3089,47 @@ export class GccEngine {
     const bills = this.billsWaiting(cfg).filter((x) => !this.docRefused.has(expDocId(x.id)) && this.canExp(S.deals[x.deal])).length;
     return docs + bills ? { n: docs + bills, at: w.at, why: w.why, busy: this.docSending || this.docAsked } : null;
   }
+  /** The upload request of this tab on its way now (sendQuiet): cut by yieldFiles and endTeam. */
+  private upTry: AbortController | null = null;
+  /**
+   * Something that cannot wait needs the line now (signing out, the sign-out dialog sending what is queued): an
+   * upload on its way in this tab, and in the other tabs of this browser (FILE_YIELD), is cut and its turn
+   * let go, so the sync round goes at once instead of after the file. Nothing is lost: the file stays here,
+   * the round ends without a notice, and the file goes at the next round (signing out tries it once more).
+   */
+  private yieldFiles() {
+    this.upTry?.abort();
+    prefs.set(FILE_YIELD, `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`);
+  }
   /**
    * One request of an upload round, in its turn with the sync (netTurn), sent again quietly after a failure
    * with no readable answer (docQuiet: 3 s, then 10 s; the turn is let go while it waits). A try that failed
    * while the page was put away ends the round as DocAway: on a phone the browser cuts a request when the screen
-   * locks or another app opens, and the round goes again, quietly, as soon as the page is back.
+   * locks or another app opens (or a timer overdue from the sleep ends it as it wakes), and the round goes
+   * again, quietly, as soon as the page is back. A try cut by yieldFiles ends the round the same way. `still`:
+   * whether the record still wants this file, asked before each try (DocGone when not).
    */
-  private async sendQuiet<T>(cfg: TeamCfg, send: () => Promise<T>): Promise<T> {
+  private async sendQuiet<T>(cfg: TeamCfg, send: (t: Transport) => Promise<T>, still?: () => boolean): Promise<T> {
     for (let i = 0; ; i++) {
       const h = this.hideN;
       try {
-        // (signed out while it waited for its turn: nothing is sent for the session that ended)
-        return await this.netTurn(() => (this.teamCfg === cfg ? send() : Promise.reject(new DocAway('ended'))));
+        return await this.netTurn(() => {
+          // (signed out while it waited for its turn: nothing is sent for the session that ended)
+          if (this.teamCfg !== cfg) return Promise.reject(new DocAway('ended'));
+          if (still && !still()) return Promise.reject(new DocGone());
+          const ac = new AbortController();
+          this.upTry = ac;
+          const cut = new Promise<never>((_, no) => ac.signal.addEventListener('abort', () => no(new DocAway('yield')), { once: true }));
+          cut.catch(() => {});
+          return Promise.race([send((u, b) => this.fileTransport(u, b, ac.signal)), cut]).finally(() => {
+            if (this.upTry === ac) this.upTry = null;
+          });
+        });
       } catch (e) {
-        if (!fileNetFail(e) || this.teamCfg !== cfg) throw e;
-        if (h !== this.hideN || (typeof document !== 'undefined' && document.hidden)) throw new DocAway('away');
-        if (i >= this.docQuiet.length) throw e;
+        if (e instanceof DocAway || e instanceof DocGone || this.teamCfg !== cfg) throw e;
+        const away = h !== this.hideN || (typeof document !== 'undefined' && document.hidden);
+        if (away && (fileNetFail(e) || fileTimedOut(e))) throw new DocAway('away');
+        if (!fileNetFail(e) || i >= this.docQuiet.length) throw e;
         await new Promise((r) => setTimeout(r, this.docQuiet[i]));
         if (this.teamCfg !== cfg) throw e;
       }
@@ -3119,7 +3170,7 @@ export class GccEngine {
       // again or a file is attached (filesRecheck): the lead may deploy the new version meanwhile
       if (this.teamFiles === false && Date.now() - this.teamFilesAt >= FILES_RECHECK_MS) this.teamFiles = null;
       if (this.teamFiles == null) {
-        this.teamFiles = await this.sendQuiet(cfg, () => scriptSupportsFiles(this.fileTransport, cfg.url, this.cred(cfg)));
+        this.teamFiles = await this.sendQuiet(cfg, (t) => scriptSupportsFiles(t, cfg.url, this.cred(cfg)));
         this.teamFilesAt = Date.now();
       }
       if (!this.teamFiles) {
@@ -3136,9 +3187,13 @@ export class GccEngine {
           continue;
         }
         let r: { fileId: string };
+        const k = `${doc.deal}/${doc.id}`;
+        // (deleted meanwhile, or sent from another tab whose sync brought its Drive file: not sent again)
+        const still = () => !!this.sales.docs[k] && !this.sales.docs[k].fileId && !!this.sales.deals[doc.deal];
         try {
-          r = await this.sendQuiet(cfg, () => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) }));
+          r = await this.sendQuiet(cfg, (t) => uploadDocFile(t, cfg.url, this.cred(cfg), { docId: doc.id, name: doc.name, mime: doc.mime, blob: new Blob([b.data], { type: doc.mime }) }), still);
         } catch (e) {
+          if (e instanceof DocGone) continue;
           // a file the script refuses for good must not hold back every other upload
           if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data'].includes(e.code ?? '')) {
             failed.push(`${doc.name}: ${fileErrText(e)}`);
@@ -3147,7 +3202,7 @@ export class GccEngine {
           }
           throw e;
         }
-        const k = `${doc.deal}/${doc.id}`, cur = this.sales.docs[k];
+        const cur = this.sales.docs[k];
         if (!cur) {
           this.dropDriveFile(r.fileId); // deleted meanwhile
           continue;
@@ -3167,10 +3222,11 @@ export class GccEngine {
       if (this.teamCfg !== cfg) return;
       // a file refused for good before this failure is still named (the red message)
       this.docMsg = this.refusedText(cfg, failed);
-      // failed while the page was put away: no notice, tried again as soon as the page is back (teamWake)
+      // failed while the page was put away: no notice, tried again as soon as the page is back (teamWake); cut
+      // to let a sign-out's sync go first (yieldFiles): no notice, tried again at the next round
       if (e instanceof DocAway) {
         this.docRetryAt = 0;
-        this.docAway = true;
+        if (e.why === 'away') this.docAway = true;
         return;
       }
       this.docFails++;
@@ -3473,8 +3529,15 @@ export class GccEngine {
       let fileId = b.fid || '';
       if (!fileId) {
         try {
-          fileId = (await this.sendQuiet(cfg, () => uploadDocFile(this.fileTransport, cfg.url, this.cred(cfg), { docId: expDocId(x.id), name: b.name, mime: b.mime, blob: new Blob([b.data], { type: b.mime }) }))).fileId;
+          // (deleted, taken off or replaced meanwhile, or linked from another tab: not sent; the next round
+          // tidies this copy up as above)
+          const still = () => {
+            const c = this.sales.exp?.[k];
+            return !!c?.file && !c.file.id && c.file.name === b.name && c.file.size === b.data.byteLength && this.canExp(this.sales.deals[x.deal]);
+          };
+          fileId = (await this.sendQuiet(cfg, (t) => uploadDocFile(t, cfg.url, this.cred(cfg), { docId: expDocId(x.id), name: b.name, mime: b.mime, blob: new Blob([b.data], { type: b.mime }) }), still)).fileId;
         } catch (e) {
+          if (e instanceof DocGone) continue;
           if (e instanceof TeamSyncError && ['file_too_large', 'bad_file_type', 'empty_file', 'bad_doc_id', 'bad_data', 'forbidden'].includes(e.code ?? '')) {
             failed.push(`บิล ${x.c}: ${fileErrText(e)}`);
             this.docRefused.add(expDocId(x.id));
@@ -4270,8 +4333,10 @@ export class GccEngine {
     return r && { ...(r as Record<string, unknown>) };
   }
 
-  /** Wait for a round in flight, then run a full one (e.g. to send what is queued before leaving). */
-  async teamSyncNow() {
+  /** Wait for a round in flight, then run a full one (e.g. to send what is queued before leaving). `urgent`:
+   *  signing out, or the sign-out dialog sending what is queued: an upload on its way gives way (yieldFiles). */
+  async teamSyncNow(o: { urgent?: boolean } = {}) {
+    if (o.urgent) this.yieldFiles();
     for (let i = 0; i < 3 && this.teamBusy; i++) await this.teamRunning;
     await this.teamSync();
   }
@@ -4281,7 +4346,8 @@ export class GccEngine {
    * Run `fn` when no other sync round or file upload of this browser is talking to the team's script: a sync
    * round (its pull and push) and each upload take turns, across this browser's tabs (Web Locks) and within this
    * tab. A push never shares a slow line with a file of several MB, and two uploads never run side by side;
-   * between two files of a round a waiting sync goes first (the locks are granted in order).
+   * between two files of a round a waiting sync goes first (the locks are granted in order). What cannot wait
+   * for a file (signing out, the sign-out dialog, a session ending) cuts the upload on its way (yieldFiles).
    */
   private netTurn<T>(fn: () => Promise<T>): Promise<T> {
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
@@ -5367,8 +5433,9 @@ export class GccEngine {
     const cfg = this.teamCfg, s = this.session;
     if (cfg && !this.auth && (this.pending.size || this.docsUnsent) && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
       this.docRetryAt = 0; // a last try for files waiting after a failed upload, too
+      // the edits first (an upload on its way gives way, and goes again right after), then the files
       const flush = async () => {
-        await this.teamSyncNow().catch(() => {});
+        await this.teamSyncNow({ urgent: true }).catch(() => {});
         await this.uploadDocs(true);
       };
       await Promise.race([flush(), new Promise((r) => setTimeout(r, 10000))]);
@@ -6148,6 +6215,8 @@ export class GccEngine {
   /** End this tab's session; a sync still in flight sees the new generation and stops. */
   private endTeam() {
     this.stopTeam();
+    // an upload on its way is for the session that ends: cut, so the next session's sync does not wait for it
+    this.upTry?.abort();
     this.teamGen++;
     this.teamBusy = this.teamAgain = false;
     // kept for the next session of this sheet; an account's are not (never sent under someone else's)
