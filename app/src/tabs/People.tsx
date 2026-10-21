@@ -13,6 +13,8 @@ import { Modal } from '../components/Dialog';
 import { DoneBox, taskInfo } from './Plan';
 import { Notice, PageHead, Pager, labelCol } from '../components/ui';
 import { SelField, Select } from '../components/Select';
+// one person, several companies: their companies card, the "คนนี้มีอยู่แล้ว" prompt, merging two records, the CSV
+import { CompaniesCard, DupLine, ExistsPrompt, MergePick, SchedBtn, coShort, downloadPeopleCsv, whoLine } from './PeopleCos';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 const PER_PAGE = 30;
@@ -65,7 +67,11 @@ function usePeopleIndex(e: Engine, ver: number) {
   return useMemo(() => {
     const today = todayISO();
     const idx = new Map<string, { last: string; n: number; next?: Task }>();
-    const get = (id: string) => idx.get(id) || (idx.set(id, { last: '', n: 0 }), idx.get(id)!);
+    // (a record merged into another: the kept person's)
+    const get = (pid: string) => {
+      const id = e.resolvePid(pid);
+      return idx.get(id) || (idx.set(id, { last: '', n: 0 }), idx.get(id)!);
+    };
     Object.values(e.crm.log).forEach((a) =>
       (a || []).forEach((l) => {
         if (!l.pid || !CONTACT.includes(l.type)) return;
@@ -92,9 +98,11 @@ function usePeopleIndex(e: Engine, ver: number) {
 }
 
 export function People() {
-  const { ui } = useApp();
+  const { engine: e, ui } = useApp();
   useEngineVersion();
-  return ui.person ? <PersonPage key={ui.person} id={ui.person} /> : <PeopleList />;
+  // a record merged into another (an older link, a teammate merged it meanwhile): the kept person's page
+  const id = ui.person && e.isMerged(ui.person) && e.people[e.resolvePid(ui.person)] ? e.resolvePid(ui.person) : ui.person;
+  return id ? <PersonPage key={id} id={id} /> : <PeopleList />;
 }
 
 // ------------------------------------------------------------------ list
@@ -105,17 +113,28 @@ function PeopleList() {
   const today = todayISO();
   const me = e.me();
   const idx = usePeopleIndex(e, ver);
-  const all = Object.values(e.people);
-  const active = all.filter((p) => p.status !== 'left');
+  // everyone but the records merged into another; a person still deals with some company of theirs, or left them all
+  // (ไม่อยู่แล้ว); their companies, positions there and names all searched
+  const { all, active, cosOf } = useMemo(() => {
+    const all = e.livePeople();
+    const cosOf = new Map(all.map((p) => [p.id, e.personCos(p)]));
+    const on = (p: Person) => {
+      const c = cosOf.get(p.id)!;
+      return c.length ? c.some((x) => x.st === 'active') : p.status !== 'left';
+    };
+    return { all, active: all.filter(on), cosOf };
+  }, [e, ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts = { all: active.length, mine: active.filter((p) => me && p.owner === me).length, left: all.length - active.length };
   const q = norm(ui.pQ);
-  const list = (ui.pView === 'left' ? all.filter((p) => p.status === 'left') : ui.pView === 'mine' ? active.filter((p) => me && p.owner === me) : active)
-    .filter((p) => !q || norm([p.name, p.nick, p.pos, p.dept, p.company, e.personCompany(p)?.name || '', p.phone, p.email, p.line].join(' ')).includes(q))
+  const isOn = new Set(active.map((p) => p.id));
+  const list = (ui.pView === 'left' ? all.filter((p) => !isOn.has(p.id)) : ui.pView === 'mine' ? active.filter((p) => me && p.owner === me) : active)
+    .filter((p) => !q || norm([p.name, p.nick, p.pos, p.dept, p.company, ...cosOf.get(p.id)!.flatMap((x) => [x.c?.name || x.company, x.pos, x.dept]), p.phone, p.email, p.line].join(' ')).includes(q))
     .sort((a, b) => (idx.get(b.id)?.last || b.upAt || '').localeCompare(idx.get(a.id)?.last || a.upAt || '') || a.name.localeCompare(b.name, 'th'));
   const pages = Math.max(1, Math.ceil(list.length / PER_PAGE));
   const page = Math.min(ui.pPage, pages - 1);
   const shown = list.slice(page * PER_PAGE, (page + 1) * PER_PAGE);
-  const cos = new Set(active.map((p) => (p.gid != null ? 'g' + e.canonical(p.gid) : 'n' + norm(p.company)))).size;
+  // the companies the people still deal with
+  const cos = new Set(active.flatMap((p) => cosOf.get(p.id)!.filter((x) => x.st === 'active').map((x) => (x.gid != null ? 'g' + x.gid : 'n' + norm(x.company))))).size;
   const sugg = useMemo(() => e.personSuggestions(), [e, ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showSugg, setShowSugg] = useState(false);
   const openPerson = useOpenPerson();
@@ -127,22 +146,32 @@ function PeopleList() {
     row?.scrollIntoView({ block: 'nearest' });
     row?.querySelector<HTMLElement>('.pe-open')?.focus({ preventScroll: true });
   }, [cur]);
-  const views: [typeof ui.pView, string, number][] = [['all', 'ทั้งหมด', counts.all], ['mine', 'ที่ฉันดูแล', counts.mine], ['left', 'ย้ายงานแล้ว', counts.left]];
+  const views: [typeof ui.pView, string, number][] = [['all', 'ทั้งหมด', counts.all], ['mine', 'ที่ฉันดูแล', counts.mine], ['left', 'ไม่อยู่แล้ว', counts.left]];
 
   return (
     <>
       <PageHead
         title="ผู้ติดต่อ"
         sub={all.length ? `${fmtN(active.length)} คน · จาก ${fmtN(cos)} บริษัท · ทั้งทีมเห็นข้อมูลเดียวกัน` : 'บันทึกคนที่คุยด้วยในแต่ละบริษัท พร้อมประวัติการติดต่อ นัด และโน้ต'}
-        right={e.can('edit.cust') ? <button onClick={() => set({ addPerson: {} })} className="btn pri">เพิ่มผู้ติดต่อ</button> : undefined}
+        right={
+          all.length || e.can('edit.cust') ? (
+            <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {/* (the people shown: this view and search, one row per person) */}
+              {all.length > 0 && <button onClick={() => downloadPeopleCsv(e, list, idx)} className="btn" disabled={!list.length}>ดาวน์โหลด CSV</button>}
+              {e.can('edit.cust') && <button onClick={() => set({ addPerson: {} })} className="btn pri">เพิ่มผู้ติดต่อ</button>}
+            </span>
+          ) : undefined
+        }
       />
+      <DupLine />
       {sugg.length > 0 && e.can('edit.cust') && (
         <div className="pe-sugg">
           <div className="note">
             <span>พบชื่อผู้ติดต่อใน Sales Tracker ที่ยังไม่ได้บันทึก {fmtN(sugg.length)} คน</span>
             <button onClick={() => setShowSugg(!showSugg)} aria-expanded={showSugg} className="lnk" style={{ fontSize: 13 }}>{showSugg ? 'ซ่อนรายการ' : 'ดูและเพิ่ม'}</button>
             {showSugg && (
-              <button onClick={() => e.addPeople(sugg.map((s) => ({ id: s.id, name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email })))} className="lnk" style={{ fontSize: 13 }}>
+              // (one who is someone recorded at another company already is left for its own button)
+              <button onClick={() => e.addPeople(sugg.filter((s) => !s.same).map((s) => ({ id: s.id, name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email })))} className="lnk" style={{ fontSize: 13 }}>
                 เพิ่มทั้งหมด
               </button>
             )}
@@ -154,9 +183,14 @@ function PeopleList() {
                   <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <b style={{ fontWeight: 500 }}>{s.name}</b>
                     <span className="t-sec">{[s.company, s.phone, s.email].filter(Boolean).join(' · ')} · จาก {s.from}</span>
+                    {s.same && <span className="t-sec">คนนี้มีอยู่แล้ว: {s.same.name}{whoLine(e, s.same) ? ' · ' + whoLine(e, s.same) : ''}</span>}
                   </span>
                   <span style={{ display: 'flex', gap: 6, flex: 'none', alignItems: 'center' }}>
-                    <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} className="btn xs" aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
+                    {s.same && s.gid != null ? (
+                      <button onClick={() => e.addToExisting(s.same!.id, { gid: s.gid, phone: s.phone, email: s.email })} className="btn xs">เพิ่ม {coShort(s.company)} ให้ {s.same.name}</button>
+                    ) : (
+                      <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} className="btn xs" aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
+                    )}
                     <button onClick={() => e.hideSuggestion(s.id)} className="quiet" aria-label={'ไม่ต้องเพิ่ม ' + s.name}>ไม่ต้อง</button>
                   </span>
                 </div>
@@ -200,6 +234,9 @@ function PeopleList() {
               {shown.map((p) => {
                 const x = idx.get(p.id);
                 const c = e.personCompany(p);
+                const pc = cosOf.get(p.id)!;
+                const more = pc.filter((k) => !k.main && k.st === 'active').length;
+                const left = !isOn.has(p.id);
                 const ph = phones(p.phone)[0] || '';
                 const nt = x?.next;
                 const ty = nt ? TT.find((t) => t[0] === nt.type) || TT[0] : null;
@@ -210,13 +247,16 @@ function PeopleList() {
                       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                         <button className="pe-open" onClick={() => openPerson(p.id)}>{p.name}</button>
                         <span className="pe-sub">
-                          {p.status === 'left' && <span className="pe-chip warn sm">ย้ายงานแล้ว</span>}
+                          {left && <span className="chip warn" style={{ height: 20, marginRight: 6 }}>ไม่อยู่แล้ว</span>}
                           {[p.pos, p.dept].filter(Boolean).join(' · ') || (p.role ? ROLE_TH[p.role] : '—')}
                         </span>
                       </span>
                     </span>
                     <span className="pe-co">
-                      <span className="pe-clamp">{c?.name || p.company || '—'}</span>
+                      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <span className="pe-clamp">{c?.name || p.company || pc.find((k) => !k.main)?.c?.name || '—'}</span>
+                        {more > 0 && (c || p.company) && <span className="pe-sub">และอีก {fmtN(more)} บริษัท</span>}
+                      </span>
                     </span>
                     <span className="pe-cell">{ph ? <a href={telHref(p.phone)} className="pe-link">{ph}</a> : <span className="pe-sub">—</span>}</span>
                     <span className="pe-cell">{p.owner || <span className="pe-sub">—</span>}</span>
@@ -243,7 +283,7 @@ function PeopleList() {
 // ------------------------------------------------------------------ person page
 
 function PersonPage({ id }: { id: string }) {
-  const { engine: e, set, open, openSched } = useApp();
+  const { engine: e, set, open } = useApp();
   const ver = useEngineVersion();
   const p = e.people[id];
   const idx = usePeopleIndex(e, ver);
@@ -263,40 +303,44 @@ function PersonPage({ id }: { id: string }) {
         <button onClick={back} className="lnk">กลับไปที่รายชื่อ</button>
       </div>
     );
+  // their main company (the deals tab's send); the companies they deal with (one person, several companies)
   const c = e.personCompany(p);
+  const cos = e.personCos(p);
+  const nCos = cos.filter((x) => x.st === 'active').length;
+  const ids = e.idsOf(p.id);
   const logs = e.personLogs(p);
   const contacts = logs.filter((x) => CONTACT.includes(x.l.type));
   // and the contact records of the deals, "กับ" this person
   const acts = e.personActs(p.id);
   const notes = logs.filter((x) => x.l.type === 'note');
-  const tasks = c ? e.tasksOf(c.id) : e.crm.tasks.filter((t) => t.pid === p.id);
+  // the appointments of the companies they deal with, and theirs
+  const tasks = e.personTasks(p);
   const upcoming = tasks.filter((t) => !t.done).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  // the profile counts this person's own appointments still ahead (the tab lists the company's)
-  const mineAhead = tasks.filter((t) => t.pid === p.id && !t.done && t.date >= today).length;
+  // the profile counts this person's own appointments still ahead (the tab lists the companies')
+  const mineAhead = tasks.filter((t) => !!t.pid && ids.includes(t.pid) && !t.done && t.date >= today).length;
   const doneTasks = tasks.filter((t) => t.done).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
-  // the company's deals (their documents), and the deals this person is the contact of (the link)
+  // the deals of their companies (their documents), and the deals this person is the contact of (the link)
   const byYear = (a: Deal, b: Deal) => b.year.localeCompare(a.year);
-  const deals = c ? e.dealsOf(c.id).sort(byYear) : [];
+  const coIds = [...new Set(cos.filter((x) => x.st === 'active' || x.main).map((x) => x.c?.id).filter((x): x is number => x != null))];
+  const deals = coIds.flatMap((g) => e.dealsOf(g)).sort(byYear);
   const linked = e.personDeals(p.id).sort(byYear);
-  const others = c ? e.peopleOf(c.id).filter((x) => x.id !== p.id) : [];
+  const away = !e.personActive(p);
   const lineUrl = lineHref(p.line);
   const openDeals = linked.filter((d) => d.jobStatus === 'open').length;
   const startLog = () => {
     setTab('log');
     requestAnimationFrame(() => logRef.current?.focus());
   };
+  // (their position, department and role are each company's: the companies card)
   const info: [string, ReactNode][] = [
     ['ชื่อเล่น', p.nick],
-    ['ตำแหน่ง', p.pos],
-    ['ฝ่าย / แผนก', p.dept],
-    ['บทบาทในการซื้อ', p.role ? ROLE_TH[p.role] : ''],
     ['โทรศัพท์', phones(p.phone).map((x) => (telHref(x) ? <a key={x} href={telHref(x)} className="pe-link" style={{ display: 'block' }}>{x}</a> : <span key={x} style={{ display: 'block' }}>{x}</span>))],
     ['อีเมล', p.email ? <a href={'mailto:' + p.email} className="pe-link" style={{ wordBreak: 'break-all' }}>{p.email}</a> : ''],
     ['LINE ID', p.line && lineUrl ? <a href={lineUrl} target="_blank" rel="noopener noreferrer" className="pe-link">{p.line}</a> : p.line],
     ['ผู้ดูแล', p.owner],
   ];
   // said once, as a grey footer line under the facts
-  const foot = [p.status === 'left' ? 'ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว' : 'ยังติดต่อได้', `บันทึกโดย ${p.by || '—'}${p.at ? ' · ' + isoTh(localDay(p.at)) : ''}`].join(' · ');
+  const foot = [`บันทึกโดย ${p.by || '—'}${p.at ? ' · ' + isoTh(localDay(p.at)) : ''}`, p.upAt && p.upAt !== p.at ? `แก้ล่าสุด ${p.upBy || '—'} ${isoTh(localDay(p.upAt))}` : ''].filter(Boolean).join(' · ');
 
   return (
     <>
@@ -323,7 +367,8 @@ function PersonPage({ id }: { id: string }) {
                 </>
               )}
             </span>
-            {p.status === 'left' && <span className="chip warn">ย้ายงานแล้ว</span>}
+            {nCos > 1 && <span className="t-meta">ผู้ติดต่อของ {fmtN(nCos)} บริษัท</span>}
+            {away && <span className="chip warn">ไม่อยู่แล้ว</span>}
             <div className="pe-stats">
               <span><b>{fmtN(contacts.length + acts.length)}</b>ติดต่อแล้ว</span>
               <span><b>{fmtN(mineAhead)}</b>นัดกับคนนี้</span>
@@ -332,14 +377,14 @@ function PersonPage({ id }: { id: string }) {
             {!ro && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
                 <button onClick={startLog} className="btn" style={{ padding: 0 }}>บันทึกการโทร</button>
-                {c && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn" style={{ padding: 0 }}>นัดหมาย</button>}
+                <SchedBtn p={p} style={{ padding: 0, width: '100%' }} />
               </div>
             )}
           </div>
         </section>
 
-        {/* company + documents */}
-        <SideCard p={p} c={c} deals={deals} others={others} last={idx.get(p.id)?.last || ''} today={today} />
+        {/* their companies + documents */}
+        <SideCard p={p} deals={deals} last={idx.get(p.id)?.last || ''} today={today} />
         </div>
         <div className="pe-col pe-col-c">
         {/* info */}
@@ -411,6 +456,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
   const { engine: e, set, openSched } = useApp();
   const ro = !e.can('edit.cust');
   const mayDel = (l: LogEntry) => e.can('del.log', l.by || '');
+  // a person who deals with several companies: each entry says which one; the tabs cover them all
+  const many = e.personCos(p).filter((x) => x.st === 'active').length > 1;
   // newest first: a deal's record by its day (its time of writing when written that day)
   const hist: Hist[] = [
     ...contacts.map(({ l, key }) => ({ at: l.at, l, key })),
@@ -436,7 +483,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
           ) : (
             <ol className="pe-tl">
               {hist.map((h) => {
-                if (h.a) return <ActEntry key={'a' + h.a.deal + h.a.id} a={h.a} />;
+                if (h.a) return <ActEntry key={'a' + h.a.deal + h.a.id} a={h.a} many={many} />;
                 const { l, key } = h;
                 // the node's colour is the type's only cue besides its word in the grey line
                 const [tag, ink] = logType(l.type);
@@ -450,7 +497,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
                     <div className="pe-tl-card">
                       {l.text && <span style={{ whiteSpace: 'pre-line' }}>{l.text}</span>}
                       <span style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                        <span className="pe-sub"><span style={{ color: ink }}>{tag}</span>{[l.result, dtTh(l.at).split(' ').slice(-2).join(' '), l.by || 'ไม่ระบุชื่อ'].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
+                        <span className="pe-sub"><span style={{ color: ink }}>{tag}</span>{[l.result, dtTh(l.at).split(' ').slice(-2).join(' '), l.by || 'ไม่ระบุชื่อ', many && /^\d+$/.test(key) ? coShort(e.company(+key)?.name || '') : ''].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
                         {mayDel(l) && <span className="dr-acts"><button className="quiet" onClick={() => window.confirm('ลบรายการนี้?') && e.delLog(key, l)} aria-label="ลบรายการนี้">ลบ</button></span>}
                       </span>
                     </div>
@@ -464,8 +511,8 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
       {tab === 'tasks' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="pe-sub">{c ? 'นัดของบริษัทนี้ · ที่ทำกับ ' + p.name + ' มีป้ายกำกับ' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'}</span>
-            {c && !ro && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn sm">นัดหมาย</button>}
+            <span className="pe-sub">{many ? 'นัดของบริษัทที่คนนี้ติดต่อด้วย · ที่ทำกับ ' + p.name + ' มีป้ายกำกับ' : c ? 'นัดของบริษัทนี้ · ที่ทำกับ ' + p.name + ' มีป้ายกำกับ' : 'เชื่อมกับบริษัทก่อนจึงนัดได้'}</span>
+            {!ro && (many ? <SchedBtn p={p} className="btn sm" /> : c && <button onClick={() => openSched({ ids: [c.id], pid: p.id })} className="btn sm">นัดหมาย</button>)}
           </div>
           {!upcoming.length && <span className="empty">ยังไม่มีนัดที่จะถึง</span>}
           <ol className="pe-tl">
@@ -498,7 +545,7 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
           )}
           {rest.length > 0 && (
             <>
-              <span className="pe-k">ดีลอื่นของบริษัทนี้</span>
+              <span className="pe-k">{many ? 'ดีลอื่นของบริษัทเหล่านี้' : 'ดีลอื่นของบริษัทนี้'}</span>
               {rest.map((d) => {
                 // the deal has a contact already: in their place, or one more (both said, the card shows who it is now)
                 const cur = e.dealPeople(d.id)[0];
@@ -528,40 +575,13 @@ function TabsCard({ p, c, tab, setTab, logRef, contacts, acts, upcoming, doneTas
   );
 }
 
-function SideCard({ p, c, deals, others, last, today }: { p: Person; c: Company | undefined; deals: Deal[]; others: Person[]; last: string; today: string }) {
-  const { engine: e, set, open } = useApp();
-  const openPerson = useOpenPerson();
+function SideCard({ p, deals, last, today }: { p: Person; deals: Deal[]; last: string; today: string }) {
+  const { engine: e, set } = useApp();
   const docs = deals.flatMap((d) => docsOf(e.sales, d.id).map((doc) => ({ doc, d })));
   return (
-    <section className="pe-card pe-side" aria-label="บริษัทและเอกสาร">
-      <div className="pe-card-h">
-        <h3>บริษัท</h3>
-      </div>
-      {c ? (
-        <button className="pe-cobox" onClick={() => open(c.id)}>
-          <CoAvatar name={c.name} web={c.web} set={c.set} size={40} />
-          <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
-            <b className="co-name">{c.name}</b>
-            <span className="pe-sub">{c.code} · เปิดหน้าบริษัท</span>
-          </span>
-        </button>
-      ) : (
-        <span className="pe-sub">{p.company || 'ยังไม่ได้ระบุบริษัท'}</span>
-      )}
-      {others.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span className="pe-k">คนอื่นในบริษัทนี้</span>
-          {others.slice(0, 6).map((o) => (
-            <button key={o.id} className="pe-other" onClick={() => openPerson(o.id)}>
-              <PersonAvatar p={o} size={28} />
-              <span style={{ minWidth: 0, textAlign: 'left' }}>
-                <span style={{ display: 'block' }}>{o.name}</span>
-                <span className="pe-sub">{o.pos || '—'}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+    <section className="pe-card pe-side" aria-label="บริษัทที่ติดต่อด้วยและเอกสาร">
+      {/* the companies they deal with (one person, several companies), the other people there */}
+      <CompaniesCard p={p} />
       <div className="pe-card-h" style={{ marginTop: 6 }}>
         <h3>เอกสาร</h3>
         <span className="pe-sub">{fmtN(docs.length)} ไฟล์</span>
@@ -616,15 +636,21 @@ function LogForm({ pid, taRef }: { pid: string; taRef: React.RefObject<HTMLTextA
   const [type, setType] = useState('call');
   const [result, setResult] = useState('');
   const [text, setText] = useState('');
+  // a person who deals with several companies: at which one (its contact log, the company page shows it too)
+  const p = e.people[pid];
+  const at = p ? e.personCos(p).filter((x) => x.st === 'active' && x.gid != null && !!x.c) : [];
+  const [gid, setGid] = useState<number | null>(null);
+  const cur = at.find((x) => x.gid === gid) || at[0];
   const save = (ev: FormEvent) => {
     ev.preventDefault();
     if (!text.trim() && !result) return;
-    e.addPersonLog(pid, type, result, text.trim());
+    e.addPersonLog(pid, type, result, text.trim(), cur?.gid ?? null);
     setText('');
     setResult('');
   };
   return (
     <form onSubmit={save} className="pe-logform">
+      {at.length > 1 && <Select label="ที่บริษัท" value={String(cur!.gid)} onChange={(v) => setGid(+v)} options={at.map((x) => ({ v: String(x.gid), label: 'ที่ ' + coShort(x.c!.name) }))} />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
         <Select label="ประเภท" value={type} onChange={setType} options={CONTACT.map((k) => ({ v: k, label: LOG_TYPES[k][0] }))} />
         <Select label="ผลการติดต่อ" value={result} onChange={setResult} options={[{ v: '', label: 'ผลการติดต่อ' }, ...LOG_RESULTS.map((r) => ({ v: r, label: r }))]} />
@@ -642,8 +668,8 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
   const ti = taskInfo(e, t);
   const ty = TT.find((x) => x[0] === t.type) || TT[0];
   const over = !t.done && t.date < today;
-  const withP = t.pid === p.id;
-  const other = t.pid && t.pid !== p.id ? e.people[t.pid] : undefined;
+  const withP = !!t.pid && e.idsOf(p.id).includes(t.pid);
+  const other = t.pid && !withP ? e.people[e.resolvePid(t.pid)] : undefined;
   return (
     <li className={'dr-row' + (t.done ? ' done' : '')}>
       <span className="pe-tl-node" style={{ borderColor: logType(t.type)[1], background: t.done ? logType(t.type)[1] : '#fff' }} />
@@ -674,7 +700,7 @@ function TaskItem({ t, p, today }: { t: Task; p: Person; today: string }) {
 }
 
 /** A deal's contact record "กับ" the person, in their history: where it was recorded, and the deal to open. */
-function ActEntry({ a }: { a: DealAct }) {
+function ActEntry({ a, many }: { a: DealAct; many?: boolean }) {
   const { engine: e, set } = useApp();
   const d = e.sales.deals[a.deal];
   const [, ink] = logType(a.type);
@@ -688,7 +714,7 @@ function ActEntry({ a }: { a: DealAct }) {
       <div className="pe-tl-card">
         {a.note && <span style={{ whiteSpace: 'pre-line' }}>{a.note}</span>}
         <span style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-          <span className="pe-sub"><span style={{ color: ink }}>{ACT_TH[a.type]}</span>{[d ? `ในดีล Sales Tracker ปี ${d.year}` : '', actCode(e.sales, a), a.by || 'ไม่ระบุชื่อ'].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
+          <span className="pe-sub"><span style={{ color: ink }}>{ACT_TH[a.type]}</span>{[d ? `ในดีล Sales Tracker ปี ${d.year}` : '', actCode(e.sales, a), a.by || 'ไม่ระบุชื่อ', many && d ? coShort(d.client) : ''].filter(Boolean).map((x) => ' · ' + x).join('')}</span>
           {d && <span className="dr-acts"><button className="lnk" style={{ fontSize: 13 }} onClick={() => set({ deal: d.id })}>เปิดดีล</button></span>}
         </span>
       </div>
@@ -725,6 +751,7 @@ function DealMini({ d, p }: { d: Deal; p: Person }) {
 function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: () => void }) {
   const { engine: e, set } = useApp();
   const [f, setF] = useState<PersonForm>(init);
+  const [merge, setMerge] = useState(false);
   const up = <K extends keyof PersonForm>(k: K) => (ev: { target: { value: string } }) => setF({ ...f, [k]: ev.target.value as PersonForm[K] });
   const team = [...new Set([...e.crm.team, p.owner].filter(Boolean))];
   const save = (ev: FormEvent) => {
@@ -752,32 +779,30 @@ function PersonEdit({ p, init, onDone }: { p: Person; init: PersonForm; onDone: 
     <form onSubmit={save} className="pe-form">
       <label style={labelCol}>ชื่อ *<input value={f.name} onChange={up('name')} required maxLength={200} className="fld" /></label>
       <label style={labelCol}>ชื่อเล่น<input value={f.nick} onChange={up('nick')} maxLength={100} className="fld" /></label>
-      <label style={labelCol}>ตำแหน่ง<input value={f.pos} onChange={up('pos')} maxLength={200} className="fld" /></label>
-      <label style={labelCol}>ฝ่าย / แผนก<input value={f.dept} onChange={up('dept')} maxLength={200} className="fld" /></label>
-      <SelField style={labelCol} text="บทบาทในการซื้อ" value={f.role} onChange={(v) => up('role')({ target: { value: v } })} options={ROLES.map((r) => ({ v: r, label: ROLE_TH[r] }))} />
+      {/* (position, department, role, status and the company are each company's: บริษัทที่ติดต่อด้วย) */}
       <label style={labelCol}>โทรศัพท์ (หลายเบอร์คั่นด้วย |)<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} className="fld" /></label>
       <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
       <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
       <SelField style={labelCol} text="ผู้ดูแล" value={f.owner} onChange={(v) => up('owner')({ target: { value: v } })} options={[{ v: '', label: 'ไม่ระบุ' }, ...team.map((x) => ({ v: x, label: x }))]} />
-      <SelField style={labelCol} text="สถานะ" value={f.status} onChange={(v) => up('status')({ target: { value: v } })} options={[{ v: 'active', label: 'ยังติดต่อได้' }, { v: 'left', label: 'ย้ายงาน / ไม่อยู่บริษัทนี้แล้ว' }]} />
-      <div style={{ gridColumn: '1 / -1' }}>
-        <CompanyPicker gid={f.gid} company={f.company} onChange={(gid, company) => setF({ ...f, gid, company })} />
-      </div>
+      <span className="t-meta" style={{ gridColumn: '1 / -1' }}>ตำแหน่ง บทบาท และสถานะของแต่ละบริษัท แก้ที่ “บริษัทที่ติดต่อด้วย”</span>
       <label style={{ ...labelCol, gridColumn: '1 / -1' }}>
         ข้อมูลเพิ่มเติม
         <textarea value={f.note} onChange={up('note')} rows={3} maxLength={NOTE_CAP} placeholder="เช่น ช่วงเวลาที่สะดวก ความสนใจ" className="pe-ta" />
       </label>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        {e.can('del.rec') ? <button type="button" onClick={del} className="quiet" style={{ marginRight: 'auto' }}>ลบผู้ติดต่อ</button> : <span style={{ marginRight: 'auto' }} />}
+        {e.can('del.rec') && <button type="button" onClick={del} className="quiet">ลบผู้ติดต่อ</button>}
+        {/* two records of one human: one (needs ลูกค้าและผู้ติดต่อ only: nothing is deleted) */}
+        <button type="button" onClick={() => setMerge(true)} className="quiet" style={{ marginRight: 'auto' }}>รวมกับคนที่ซ้ำ</button>
         <button type="button" onClick={onDone} className="quiet">ยกเลิก</button>
         <button type="submit" className="btn pri">บันทึก</button>
       </div>
+      {merge && <MergePick p={p} onClose={() => setMerge(false)} />}
     </form>
   );
 }
 
 /** Pick the company a person works at: one in the registry or added by hand, or just type its name. */
-function CompanyPicker({ gid, company, onChange }: { gid: number | null; company: string; onChange: (gid: number | null, company: string) => void }) {
+export function CompanyPicker({ gid, company, onChange }: { gid: number | null; company: string; onChange: (gid: number | null, company: string) => void }) {
   const { engine: e } = useApp();
   const cur = gid != null ? e.company(gid) : undefined;
   const [q, setQ] = useState('');
@@ -863,11 +888,17 @@ export function AddPerson() {
   const dup = useMemo(() => {
     const nk = nameKey(f.name), ph = phoneKeys(f.phone), em = f.email.trim().toLowerCase();
     if (!nk && !ph.length && !em) return undefined;
-    const pool = f.gid != null ? e.peopleOf(f.gid) : Object.values(e.people).filter((p) => p.gid == null && norm(p.company) === norm(f.company));
+    const pool = f.gid != null ? e.peopleOf(f.gid) : e.livePeople().filter((p) => p.gid == null && norm(p.company) === norm(f.company));
     return pool.find((p) => (nk.length > 1 && nameKey(p.name) === nk) || phoneKeys(p.phone).some((x) => ph.includes(x)) || (!!em && p.email.trim().toLowerCase() === em));
   }, [f, e]);
-  const submit = (ev: FormEvent) => {
-    ev.preventDefault();
+  // someone recorded already at another company (the same mobile, e-mail or full name): this company is added to
+  // them instead of a second record of them ("เพิ่มบริษัทนี้ให้คนเดิม", the primary; "สร้างคนใหม่" beside it)
+  const found = useMemo(() => (dup ? [] : e.findExisting({ name: f.name, phone: f.phone, email: f.email }, f.gid, f.company).filter((x) => !x.here)), [f, e, dup]);
+  const one = found.length === 1 ? found[0].p : undefined;
+  // several: one of them to choose ("ใช้คนนี้"), or a new person on purpose; Enter makes nobody
+  const several = found.length > 1;
+  const co = f.gid != null ? e.company(f.gid) : undefined;
+  const create = () => {
     if (!f.name.trim()) return;
     const id = e.addPerson({ ...f, name: f.name.trim() });
     if (!id) return;
@@ -876,6 +907,18 @@ export function AddPerson() {
     set({ addPerson: null });
     if (deal) return;
     if (ui.tab === 'people' && ui.sel == null) openPerson(id);
+  };
+  const useOld = (pid: string) => {
+    e.addToExisting(pid, { gid: co ? co.id : null, pos: f.pos, role: f.role, phone: f.phone, email: f.email, line: f.line }, deal ? { id: deal.id, main: !!a.main } : undefined);
+    set({ addPerson: null });
+    if (!deal && ui.tab === 'people' && ui.sel == null) openPerson(pid);
+  };
+  const submit = (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!f.name.trim()) return;
+    // (Enter: the dialog's primary)
+    if (one) useOld(one.id);
+    else if (!several) create();
   };
   return (
     <Modal title="เพิ่มผู้ติดต่อ" onClose={close} width={620}>
@@ -889,6 +932,11 @@ export function AddPerson() {
         <SelField style={labelCol} text="บทบาทในการซื้อ" value={f.role} onChange={(v) => up('role')({ target: { value: v } })} options={ROLES.map((r) => ({ v: r, label: ROLE_TH[r] }))} />
         <label style={labelCol}>โทรศัพท์<input value={f.phone} onChange={up('phone')} type="tel" maxLength={200} className="fld" /></label>
         <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
+        {found.length > 0 && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <ExistsPrompt found={found} coName={co?.name || ''} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
+          </div>
+        )}
         <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
         {dup && (
           <div style={{ gridColumn: '1 / -1' }}>
@@ -902,21 +950,41 @@ export function AddPerson() {
             </Notice>
           </div>
         )}
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" onClick={close} className="quiet">ยกเลิก</button>
-          <button type="submit" className="btn pri">{deal ? 'เพิ่มและใช้ในดีลนี้' : 'เพิ่มผู้ติดต่อ'}</button>
+          {one ? (
+            <>
+              <button type="button" onClick={create} className="btn">สร้างคนใหม่</button>
+              <button type="submit" className="btn pri">{co ? 'เพิ่มบริษัทนี้ให้คนเดิม' : deal ? 'ใช้คนเดิมในดีลนี้' : 'ใช้คนเดิม'}</button>
+            </>
+          ) : several ? (
+            <button type="button" onClick={create} className="btn">สร้างคนใหม่</button>
+          ) : (
+            <button type="submit" className="btn pri">{deal ? 'เพิ่มและใช้ในดีลนี้' : 'เพิ่มผู้ติดต่อ'}</button>
+          )}
         </div>
       </form>
     </Modal>
   );
 }
 
-/** A company's people, on its page (CompanyDrawer). */
+/** A company's people, on its page (CompanyDrawer, also from the Search drawer): everyone who deals with it, whose main
+ *  company it is or not, with their position there; those no longer there folded under them. */
 export function CompanyPeople({ c }: { c: Company }) {
   const { engine: e, set } = useApp();
   const openPerson = useOpenPerson();
-  const list = e.peopleOf(c.id).sort((a, b) => (a.status === 'left' ? 1 : 0) - (b.status === 'left' ? 1 : 0) || a.name.localeCompare(b.name, 'th'));
+  const all = e.peopleOf(c.id).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  const list = all.filter((p) => p.status !== 'left'), gone = all.filter((p) => p.status === 'left');
   const box: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 8 };
+  const row = (p: (typeof all)[number]) => (
+    <button key={p.id} className="pe-other" onClick={() => openPerson(p.id)}>
+      <PersonAvatar p={p} size={32} />
+      <span style={{ minWidth: 0, textAlign: 'left', flex: 1 }}>
+        <span style={{ display: 'block' }}>{p.name}</span>
+        <span className="pe-sub">{[p.pos, phones(p.phone)[0], p.ncos > 1 ? `ผู้ติดต่อของ ${fmtN(p.ncos)} บริษัท` : ''].filter(Boolean).join(' · ') || '—'}</span>
+      </span>
+    </button>
+  );
   return (
     <div style={box}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
@@ -924,15 +992,13 @@ export function CompanyPeople({ c }: { c: Company }) {
         {e.can('edit.cust') && <button onClick={() => set({ addPerson: { gid: c.id } })} className="lnk">เพิ่มผู้ติดต่อ</button>}
       </div>
       {!list.length && <span className="empty">{e.can('edit.cust') ? 'ยังไม่มี · บันทึกคนที่คุยด้วย เพื่อเก็บเบอร์ ตำแหน่ง และประวัติ' : 'ยังไม่มีผู้ติดต่อ'}</span>}
-      {list.map((p) => (
-        <button key={p.id} className="pe-other" onClick={() => openPerson(p.id)}>
-          <PersonAvatar p={p} size={32} />
-          <span style={{ minWidth: 0, textAlign: 'left', flex: 1 }}>
-            <span style={{ display: 'block' }}>{p.name}{p.status === 'left' ? ' (ย้ายงานแล้ว)' : ''}</span>
-            <span className="pe-sub">{[p.pos, phones(p.phone)[0]].filter(Boolean).join(' · ') || '—'}</span>
-          </span>
-        </button>
-      ))}
+      {list.map(row)}
+      {gone.length > 0 && (
+        <details className="pe-more">
+          <summary>ไม่อยู่บริษัทนี้แล้ว {fmtN(gone.length)} คน</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{gone.map(row)}</div>
+        </details>
+      )}
     </div>
   );
 }
