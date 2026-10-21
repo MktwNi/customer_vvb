@@ -15,7 +15,7 @@ import { CompanyPeople, logType } from '../tabs/People';
 import { useDialog } from './useDialog';
 // joint quotations (package quotes, item 7): the payer's header and a member's line
 import { jointOf, jointRole } from '../lib/sales';
-import { jointTitle } from '../lib/joint';
+import { jointHead, jointLine } from '../lib/joint';
 import { followIdsOf } from '../lib/follow';
 
 const box: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10 };
@@ -491,12 +491,13 @@ function SalesBox({ c }: { c: Company }) {
         const m = dealMoney(e.sales, d);
         const lc = lastContact(e.sales, d, todayISO());
         const fv = fcFig(e.sales, d);
-        const jr = jointRole(e.sales, d), jg = jr === 'plain' ? null : jointOf(e.sales, d);
+        const jr = jointRole(e.sales, d), jg = jr === 'plain' ? null : jointOf(e.sales, d), jh = jg && jointHead(e.sales, jg);
         // the deal's contact, the person linked to it (a typed one is said above, "ผู้ติดต่อใน Sales Tracker")
         const who = e.dealPeople(d.id)[0];
         const more = [
-          // (the title starts with "ใบเสนอราคาร่วม" already)
-          jg && (jr === 'header' ? `ผู้จ่าย ${jointTitle(e.sales, jg)} · ${jg.members.length} บริษัท` : `อยู่ใน ${jointTitle(e.sales, jg)}`),
+          // a joint quotation this company pays (it is the drawer's company: the quotation said, not "ผู้จ่าย"), or the
+          // payer's quotation a member is in
+          jg && jh && (jr === 'header' ? [jh.qt, jh.label, `${jg.members.length} บริษัท`].filter(Boolean).join(' · ') : `อยู่ใน ${jointLine(e.sales, jg, true)}`),
           who && 'ผู้ติดต่อ ' + who.name,
           d.resp && 'ผู้รับผิดชอบ ' + d.resp, lc && 'ติดต่อล่าสุด ' + isoTh(lc),
           money && jr !== 'member' && m.forecast != null && 'Forecast ' + fmtMoney(m.forecast) + (fv.kind === 'ok' ? ' (จากเอกสาร)' : fv.kind === 'warn' ? ' (ไม่ตรงเอกสาร)' : ''),

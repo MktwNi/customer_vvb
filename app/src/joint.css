@@ -15,8 +15,10 @@
 .jq-band .sl-caret{margin-left:0}
 .jq-band.folded .sl-caret svg{transform:rotate(-90deg)}
 .jq-in{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
-.jq-nm{cursor:pointer;border:0;padding:0;background:none;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.jq-sub{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* the payer on top: .co-name dense gives it a company's type (no font shorthand here), cut short as a row's
+   name is; the quotation under it as a row's second line (13px dark grey) */
+.jq-nm{cursor:pointer;border:0;padding:0;background:none;line-height:1.45;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.jq-sub{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .jq-band .sl-mn small{color:var(--muted)}
 .jq-band .sl-mn small.bad{color:var(--bad)}.jq-band .sl-mn small.ok{color:var(--ok)}
 .jq-st{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
@@ -40,6 +42,8 @@
 .sl-ltable tr.jq-cm.last>:first-child{border-radius:0 0 0 var(--r-band)}
 .sl-ltable tr.jq-cm .sl-mn b.share{font-weight:400;color:var(--muted)}
 .jq-res{font-size:var(--fs-sec);color:var(--ink-2)}
+/* (the payer's name wraps here as the list's company names do) */
+.sl-ltable tr.jq-cband .jq-nm{white-space:normal}
 /* on a phone (mockups m6 / m6b; index.css lays the rows out in two lines): the band is a head of two lines
    (its name across, then its results and the Forecast), its tint and edge on the row; its companies keep the
    edge down the left. The desktop's per-cell tint, edge and corners are undone. In a list below 860px, as
@@ -134,7 +138,10 @@
 .jp-f{display:flex;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;font-size:var(--fs-meta);color:var(--muted);border-top:1px solid var(--divider);padding-top:10px}
 .jp-f b{color:var(--ink);font-weight:500}
 .jp-res .sl-yn{align-self:flex-start}
-.dp.jp input.dp-name:not(:focus){text-overflow:ellipsis}
+/* the quotation's own name in the panel's second line, edited in place */
+.jp-tt{cursor:pointer;border:0;border-bottom:1px dashed transparent;padding:0;background:none;color:inherit;text-align:left}
+@media (hover:hover){.jp-tt:hover{border-bottom-color:var(--field)}}
+.jp-tti{display:inline-block;width:min(100%,440px);height:30px;font-size:var(--fs-sec);vertical-align:middle}
 .jp-cf{margin:-4px 4px 0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
 @media (max-width:760px){
   .jp-r{grid-template-columns:minmax(0,1fr) 96px;row-gap:4px}
@@ -166,8 +173,8 @@
 /* ---------- a phone: one card per joint quotation ---------- */
 .jm{background:#fff;border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-card), inset 3px 0 0 var(--tint-line);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .jm-h{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
-.jm-l{font-size:var(--fs-meta);color:var(--muted)}
-.jm-nm{cursor:pointer;border:0;padding:0;background:none;font:inherit;font-size:var(--fs-body);font-weight:500;color:var(--ink);text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the payer (.co-name dense: a company's type), whole as a phone card's name is; the quotation under it */
+.jm-nm{cursor:pointer;border:0;padding:0;background:none;line-height:1.4;text-align:left;max-width:100%;overflow-wrap:anywhere}
 .jm-s{font-size:var(--fs-sec);color:var(--ink-2)}
 .jm-money{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .jm-money .jq-st{padding-top:2px}

@@ -38,7 +38,7 @@ import { DOC_MAX_BYTES, deleteDocFile, docMime, downloadDocFile, fileErrText, fi
 import { isQtVersion, qtFacts, qtPrev, qtVersions } from './quotes';
 // joint quotations (package quotes, item 7)
 import { DEAL_STAGE, QUOTE_STAGE, jointHeadOf, jointOf, jointRole, toJqm, toJqt, workTally, type JointGroup, type WorkOpts, type WorkTally } from './sales';
-import { canMergeFrom, closedCsvRows, isJointNote, jointFill, jointNo, jointNote, jointTitle, rowFate, shareOf, type ClosedCsvRow, type JointNew, type JointPick } from './joint';
+import { canMergeFrom, closedCsvRows, isJointNote, jointFill, jointLabel, jointLine, jointNo, jointNote, rowFate, shareOf, type ClosedCsvRow, type JointNew, type JointPick } from './joint';
 import {
   QT_NOTE_MAX, dirPeople, fpOf, myNotify0, needsCheck, parseMyNotify, parseNotifyCfg, parseNotifyFlag, parseNotifyStatus, parseQtOut, qtCheckOf, qtFpKey, qtLocalOutcome, qtSentNews, toQtCheck,
   type MailPerson, type MyNotify, type NotifyCfg, type NotifyLive, type NotifyStatus, type QtCheck, type QtCheckView, type QtSent, type QtSentCtx, type Scope,
@@ -4008,7 +4008,9 @@ export class GccEngine {
       const m0 = jr === 'member' ? { forecast: null, actual: null, fcConfirmed: false, acConfirmed: false } : dealMoney(S, d);
       const m = x.fc !== undefined ? { ...m0, forecast: x.fc, actual: x.ac ?? null } : m0;
       const sh = jr === 'member' ? shareOf(S, d) : null;
-      const joint = !g ? '' : jr === 'header' ? `${jointTitle(S, g)} · ผู้จ่าย · ${g.members.length} บริษัท${x.part != null ? ` · นับส่วนของ ${x.part} บริษัทตามตัวกรอง` : ''}` : `${jointTitle(S, g)} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
+      // (the payer first, then the quotation: "มหาวิทยาลัย… · ใบเสนอราคาร่วม QT-… · CFP มจพ", lib/joint jointLine)
+      const jt = g ? [jointLine(S, g), jointLabel(g)].filter(Boolean).join(' · ') : '';
+      const joint = !g ? '' : jr === 'header' ? `${jt} · ผู้จ่าย · ${g.members.length} บริษัท${x.part != null ? ` · นับส่วนของ ${x.part} บริษัทตามตัวกรอง` : ''}` : `${jt} · บริษัทร่วม${sh?.amt != null ? ' · ส่วนแบ่ง ' + fmtMoney(sh.amt) : ''}`;
       const docs = Object.values(S.docs).filter((x) => x.deal === d.id);
       // the steps' cells, and every stored stage they read
       const t = dealSteps(S, d, today), read = new Set<string>();

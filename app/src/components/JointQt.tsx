@@ -9,7 +9,7 @@ import {
 import { JOINT_PAID, nextStepView, shortName, statusView } from '../lib/salesUi';
 import { jointCloseCount } from '../lib/workUi';
 import {
-  OWN_TH, bandPart, closeSummary, closedJoint, closedWord, jointNo, jointShort, jointSub, jointTitle, memberLine, memberShares, outWord, ownJob, parseShare, payerShort, pickLine, pickParts, resultsWord, sentDay, shareOf, sharesCheck,
+  OWN_TH, bandPart, closeSummary, closedJoint, closedWord, jointHead, jointLine, jointNo, jointShort, memberLine, memberShares, outWord, ownJob, parseShare, payerShort, pickLine, pickParts, resultsWord, sentDay, shareOf, sharesCheck,
   sharesWord,
   type JRow, type JointPick, type RowFate,
 } from '../lib/joint';
@@ -325,7 +325,7 @@ function JointEdit({ from, section, hid, onClose }: { from?: string; section?: s
   );
   return (
     <Modal title={g ? 'แก้ไขรายชื่อบริษัท' : 'สร้างใบเสนอราคาร่วม'} onClose={onClose} width={g ? 640 : 1040}>
-      <span className="sl-dlg-sub">{g ? `${jointTitle(S, g)} · ยอดนับครั้งเดียวที่ใบเสนอราคาร่วม แต่ละบริษัทยังมีแถวติดตามของตัวเอง` : 'ใบเสนอราคาใบเดียวที่ครอบคลุมหลายบริษัท ยอดนับครั้งเดียว แต่ละบริษัทยังมีแถวติดตามของตัวเอง'}</span>
+      <span className="sl-dlg-sub">{g ? `${jointLine(S, g, true)} · ยอดนับครั้งเดียวที่ใบเสนอราคาร่วม แต่ละบริษัทยังมีแถวติดตามของตัวเอง` : 'ใบเสนอราคาใบเดียวที่ครอบคลุมหลายบริษัท ยอดนับครั้งเดียว แต่ละบริษัทยังมีแถวติดตามของตัวเอง'}</span>
       <div className={g ? 'jc-one' : 'jc-cols'}>
         {head}
         {list}
@@ -375,14 +375,15 @@ function JointClose({ hid, onClose }: { hid: string; onClose: () => void }) {
     onClose();
     set((s) => ({
       deal: s.deal && (s.deal === hid || g.members.some((x) => x.deal.id === s.deal)) ? null : s.deal,
-      slToast: n ? { text: `ย้ายใบเสนอราคาร่วม ${jointShort(g)} และ ${fmtN(sum.open)} บริษัทไปแท็บปิดงานแล้ว`, ms: 8000, n: (s.slToast?.n || 0) + 1, acts: [{ label: 'ดูแท็บปิดงาน', act: 'closedTab', primary: true }, { label: 'เลิกทำ', act: 'jqUndo', deal: hid }] } : s.slToast,
+      slToast: n ? { text: `ย้าย ${jointLine(S, g, true)} และ ${fmtN(sum.open)} บริษัทไปแท็บปิดงานแล้ว`, ms: 8000, n: (s.slToast?.n || 0) + 1, acts: [{ label: 'ดูแท็บปิดงาน', act: 'closedTab', primary: true }, { label: 'เลิกทำ', act: 'jqUndo', deal: hid }] } : s.slToast,
     }));
   };
   return (
     <Modal title="ปิดงานใบเสนอราคาร่วม?" onClose={onClose} width={560} focus="dialog">
+      {/* the organisation that hires and pays on top, the quotation under it (lib/joint jointHead) */}
       <p className="jx-p">
-        {[jointNo(S, g), jointShort(g)].filter(Boolean).join(' · ')}
-        <small>ผู้จ่าย {g.head.client}{v ? ` · ฉบับที่ ${v.n}` : ''}</small>
+        <span className="co-name">{g.head.client}</span>
+        <small>{[jointHead(S, g).sub, v ? `ฉบับที่ ${v.n}` : ''].filter(Boolean).join(' · ')}</small>
       </p>
       <div className="jx-list" role="table" aria-label="บริษัทในใบเสนอราคานี้">
         <div className="jx-r ph" role="row"><span role="columnheader">บริษัท</span><span role="columnheader">ผล</span><span role="columnheader" className="r">{money ? 'ส่วนแบ่ง (บาท)' : ''}</span></div>
@@ -512,9 +513,10 @@ function BandFig({ v, bp, note, children }: { v: number | null; bp: BandPart; no
 }
 
 /**
- * A joint quotation in the table: the band ("ใบเสนอราคาร่วม QT-… · CFP มจพ", "4 บริษัท · ผู้จ่าย … · หมิว", the
- * day it was sent, the Forecast counted once, the Actual, the check, ⋯), then its members' rows (`children`,
- * drawn by the table with their left edge), then a small gap. Its caret folds the members away. `onRevise`:
+ * A joint quotation in the table: the band (the payer on top as a company's name is, "ใบเสนอราคาร่วม QT-… · CFP
+ * มจพ · 4 บริษัท · หมิว" under it: lib/joint jointHead; the day it was sent, the Forecast counted once, the
+ * Actual, the check, ⋯), then its members' rows (`children`, drawn by the table with their left edge), then a
+ * small gap. Its caret folds the members away. `onRevise`:
  * "แนบใบเสนอราคาฉบับแก้ไข" opens the attach dialog for that version (the table hosts it).
  */
 export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise, children }: { b: Extract<JRow, { k: 'band' }>; folded: boolean; onFold: () => void; ro: boolean; cash: CashLens | null; attr?: boolean; onOpen: (id: string, plan?: '' | 'edit') => void; onRevise?: (docId: string) => void; children: ReactNode }) {
@@ -526,7 +528,7 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise,
   // what of its money the view counts, as the section's sum does: the whole, the parts of the companies shown
   // (a ผู้รับผิดชอบ / SOURCE / REFERRAL filter), or none (its header filtered out)
   const bp = bandPart(S, b, !!attr), pt = bp.part;
-  const sent = sentDay(S, g), title = jointTitle(S, g), part = closedWord(g);
+  const sent = sentDay(S, g), jh = jointHead(S, g), title = jointLine(S, g, true), part = closedWord(g);
   const qv = qtView(S, h).head;
   const canEdit = !ro && e.canJoint();
   const items = [
@@ -542,12 +544,12 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise,
       <tr className="jq-gap" aria-hidden="true"><td colSpan={10} /></tr>
       <tr className={'jq-band' + (folded ? ' folded' : '')} data-jqt={h.id}>
         <td className="k-chev">
-          <button type="button" className="sl-caret hv2" aria-expanded={!folded} aria-label={`${folded ? 'แสดง' : 'ย่อ'}บริษัทใน${title}`} onClick={onFold}><Chevron /></button>
+          <button type="button" className="sl-caret hv2" aria-expanded={!folded} aria-label={`${folded ? 'แสดง' : 'ย่อ'}บริษัทใน ${title}`} onClick={onFold}><Chevron /></button>
         </td>
         <th scope="rowgroup" colSpan={4} className="k-name">
           <span className="jq-in">
-            <button type="button" className="jq-nm hv-tx" onClick={() => onOpen(h.id)} title={`${g.qt.title || title} เปิดรายละเอียด`}>{title}</button>
-            <span className="jq-sub" title={jointSub(g)}>{jointSub(g)}{part ? ' · ' + part : ''}</span>
+            <button type="button" className="jq-nm hv-tx co-name dense" onClick={() => onOpen(h.id)} title={`${h.client} เปิดรายละเอียด`}>{shortName(h.client)}</button>
+            <span className="jq-sub" title={jh.sub}>{jh.sub}{part ? ' · ' + part : ''}</span>
           </span>
         </th>
         <td className="k-last"><span className="jq-kdate">{sent ? isoTh(sent) : '—'}<small>{sent ? 'ส่งใบเสนอราคา' : 'ยังไม่ได้ส่ง'}</small></span></td>
@@ -586,17 +588,16 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise,
 export function JointCard({ b, attr, onOpen }: { b: Extract<JRow, { k: 'band' }>; attr?: boolean; onOpen: (id: string) => void }) {
   const { engine: e } = useApp();
   const S = e.sales, g = b.g, h = g.head, today = todayISO(), money = e.can('view.money');
-  const m = dealMoney(S, h), sent = sentDay(S, g), no = jointNo(S, g);
+  const m = dealMoney(S, h), sent = sentDay(S, g), jh = jointHead(S, g);
   const shares = memberShares(S, g);
   const bp = bandPart(S, b, !!attr);
   const checked = !!useHeadCheck(S, g);
   const list = b.shown.length ? b.shown : [];
   return (
-    <article className="jm" aria-label={jointTitle(S, g)} data-jqt={h.id}>
+    <article className="jm" aria-label={jointLine(S, g)} data-jqt={h.id}>
       <div className="jm-h">
-        <span className="jm-l">ใบเสนอราคาร่วม · {fmtN(g.members.length)} บริษัท{closedWord(g) ? ' · ' + closedWord(g) : ''}</span>
-        <button type="button" className="jm-nm hv-tx" onClick={() => onOpen(h.id)}>{[no, jointShort(g)].filter(Boolean).join(' · ')}</button>
-        <span className="jm-s">{['ผู้จ่าย ' + payerShort(g), h.resp, sent ? 'ส่ง ' + dmTh(sent) : 'ยังไม่ได้ส่ง'].filter(Boolean).join(' · ')}</span>
+        <button type="button" className="jm-nm hv-tx co-name dense" onClick={() => onOpen(h.id)} title={h.client}>{shortName(h.client)}</button>
+        <span className="jm-s">{[jh.sub, sent ? 'ส่ง ' + dmTh(sent) : 'ยังไม่ได้ส่ง', closedWord(g)].filter(Boolean).join(' · ')}</span>
       </div>
       <div className="jm-money">
         {money && <div className="sl-mc-m"><span>Forecast</span><BandFig v={m.forecast} bp={bp} note={<small>นับครั้งเดียว</small>} /></div>}
@@ -638,8 +639,8 @@ export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: '
         {/* the name spans ลูกค้า, หมวด and ผู้รับผิดชอบ, so the job's name and its line are read whole */}
         <td colSpan={3}>
           <span className="jq-in">
-            <button type="button" className="jq-nm hv-tx" onClick={() => set({ deal: h.id })} title={g.qt.title}>{jointTitle(S, g)}</button>
-            <span className="jq-sub">{[`${g.members.length} บริษัท`, 'ผู้จ่าย ' + h.client, v.cur ? `ฉบับที่ ${v.cur.n}` : '', part].filter(Boolean).join(' · ')}</span>
+            <button type="button" className="jq-nm hv-tx co-name dense" onClick={() => set({ deal: h.id })} title={h.client}>{shortName(h.client)}</button>
+            <span className="jq-sub">{[jointHead(S, g).sub, v.cur ? `ฉบับที่ ${v.cur.n}` : '', part].filter(Boolean).join(' · ')}</span>
           </span>
         </td>
         <td><span className="jq-res">{resultsWord(S, g) || 'ยังไม่มีผล'}</span></td>
@@ -669,19 +670,29 @@ export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: '
 
 // ------------------------------------------------------------------ the panels (screens 12, 12b)
 
-/** The joint quotation's name in the panel's head, edited in place (saved on leaving it, or Enter). */
-function TitleBox({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+/** The joint quotation's own name in the panel's second line (lib/joint jointLabel, `shown`), edited in place:
+ *  the words turn into a field holding the whole name, saved on leaving it or Enter (empty keeps the old one;
+ *  Escape too). */
+function TitleBox({ value, shown, onSave }: { value: string; shown: string; onSave: (v: string) => void }) {
+  const [ed, setEd] = useState(false);
+  if (!ed) return <button type="button" className="jp-tt hv-tx" onClick={() => setEd(true)} title={`${value} · แก้ไขชื่องาน`}>{shown || 'แก้ไขชื่องาน'}</button>;
   return (
     <input
-      key={value}
+      autoFocus
       defaultValue={value}
       aria-label="ชื่องาน"
-      className="dp-name hv"
-      onKeyDown={(ev) => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()}
+      className="fld jp-tti"
+      onKeyDown={(ev) => {
+        if (ev.key === 'Escape') {
+          ev.stopPropagation();
+          ev.currentTarget.value = value;
+        }
+        if (ev.key === 'Enter' || ev.key === 'Escape') ev.currentTarget.blur();
+      }}
       onBlur={(ev) => {
         const v = ev.currentTarget.value.trim();
-        if (!v) ev.currentTarget.value = value;
-        else if (v !== value) onSave(v);
+        if (v && v !== value) onSave(v);
+        setEd(false);
       }}
     />
   );
@@ -703,7 +714,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
   if (!g) return null;
   const hid = d.id, ro = !e.canDeal('edit.deal', d), canJ = !ro && e.canJoint(), money = e.can('view.money');
   const m = dealMoney(S, d), r = dealResult(S, d), ps = payState(S, d, today), P = ps.plan, won = r === 'YES';
-  const no = jointNo(S, g), payer = payerShort(g), title = g.qt.title || jointShort(g);
+  const no = jointNo(S, g), payer = payerShort(g), title = g.qt.title || jointShort(g), jh = jointHead(S, g);
   const res = resultsWord(S, g);
   const stWord = won ? (P ? (ps.left.length ? `ได้งาน · รับ ${P.paidN}/${P.n} งวด` : 'ได้งาน · รับครบทุกงวด') : 'ได้งาน') : r === 'NO' ? 'ไม่ได้งาน' : r === 'WAIT' ? 'รอผล' : 'กำลังติดตาม';
   const stKind = won ? 'ok' : r === 'NO' ? 'bad' : r === 'WAIT' ? 'warn' : 'info';
@@ -724,7 +735,7 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
   return (
     <>
       <div onClick={close} className="dp-back" />
-      <aside ref={panelRef} className="panel dp jp" tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}>
+      <aside ref={panelRef} className="panel dp jp" tabIndex={-1} role="dialog" aria-modal="true" aria-label={jointLine(S, g)}>
         <div className="dp-head">
           <div className="dp-top">
             <span className="dp-crumb">Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'} · ใบเสนอราคาร่วม</span>
@@ -737,8 +748,14 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
               <button type="button" onClick={close} aria-label="ปิด" className="dlg-x"><Icon name="close" size={18} /></button>
             </span>
           </div>
-          {canJ ? <TitleBox value={title} onSave={(v) => e.setJointTitle(hid, v)} /> : <h3 className="dp-name ro">{title}</h3>}
-          <span className="dp-meta">{[no, 'ผู้จ่าย ' + payer, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : '', `${g.members.length} บริษัท`].filter(Boolean).join(' · ')}</span>
+          {/* the organisation that hires and pays on top, as a company's panel is headed; the quotation under it:
+              its number, its own name (edited here), its companies, its owner (lib/joint jointHead) */}
+          <h3 className="dp-name ro co-name title">{d.client}</h3>
+          <span className="dp-meta">
+            {jh.qt}
+            {canJ ? <> · <TitleBox value={title} shown={jh.label} onSave={(v) => e.setJointTitle(hid, v)} /></> : jh.label ? ' · ' + jh.label : ''}
+            {[` · ${g.members.length} บริษัท`, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : ''].filter(Boolean).join(' · ')}
+          </span>
           <div className="dp-strip">
             <div>
               <span>สถานะ</span>

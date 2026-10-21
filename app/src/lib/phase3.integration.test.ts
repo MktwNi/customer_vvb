@@ -27,7 +27,7 @@ import {
 import { bandPart, jointRows, memberShares, viewCashLines } from './joint';
 import { apportioned, commRows, contribIn, dealGot, dealUnits, periodRange, unitCtx, unitQuarters } from './contrib';
 import { barOf, cashCheckRows, chkRows, closeDrift, pageKeep, sumRows, teamMonth, yearCheck, ymOf } from './payCheck';
-import { payerName } from './cashUi';
+import { jointLineWords, payerName } from './cashUi';
 import { qtCheckOf, QT_WORD } from './notify';
 import { BUILTIN, can as capCan } from './caps';
 import type { Dataset, RoundRaw } from './types';
@@ -171,7 +171,9 @@ describe('Cashflow and the Dashboard (phase 1) count the joint quotation once', 
     const K = cashKpis(Y, '2569', TODAY);
     expect([K.got, K.owed, K.late]).toEqual([820000, 280000, 100000]);
     expect(cashRecon(lines, '2569')).toMatchObject({ open: 280000, inYear: 280000, undated: 0 });
-    expect(payerName(lines.find((l) => l.deal.id === hid)!)).toBe('มจพ · ใบเสนอราคาร่วม 3 บริษัท');
+    // (the payer is the line's name; its quotation goes under it)
+    expect(payerName(lines.find((l) => l.deal.id === hid)!)).toBe(PAYER);
+    expect(jointLineWords(lines.find((l) => l.deal.id === hid)!)).toBe('ใบเสนอราคาร่วม · 3 บริษัท');
   });
   it('การรับเงิน (Dashboard) in Q3: the joint quotation and the plain job; customers per company', () => {
     const { S, hid, p1 } = fx;
@@ -272,7 +274,8 @@ describe('the month check (item 6 follow-up) and Cashflow agree on the joint quo
     const F = normSalesFilter({ year: '2569', resp: 'มกร', money: 'cash' });
     const jun = cashCheckRows(all(), 2026, pageKeep(S, F, TODAY)).rows.find((r) => r.key === hid + '/PAY1')!;
     expect([jun.amt, jun.state, jun.fp?.amt]).toEqual([108000, 'ok', 360000]);
-    expect(payerName(jun.line!)).toBe('มจพ · ใบเสนอราคาร่วม 3 บริษัท · ส่วนของ 1 บริษัท');
+    expect(payerName(jun.line!)).toBe(PAYER);
+    expect(jointLineWords(jun.line!, 'QT-1')).toBe('ใบเสนอราคาร่วม QT-1 · 3 บริษัท · ส่วนของ 1 บริษัท');
   });
   it('a check never changes a money figure: the KPI, Cashflow and commission are the same without the checks', () => {
     const { S } = fx;

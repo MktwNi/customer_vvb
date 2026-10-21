@@ -53,15 +53,38 @@ export function jointShort(g: Pick<JointGroup, 'head' | 'qt'>) {
   const kept = m[1].split(/\s+/).filter((w) => w && (/^[A-Za-z0-9][\w.+-]*$/.test(w) || !payer.includes(w)));
   return [...kept, m[2].trim()].join(' ');
 }
-/** The payer as the band and the panel name it: the title's abbreviation ("มจพ"), else its short name. */
+/** The payer in a sentence ("ผลจาก มจพ", "รับจาก มจพ 1 จาก 2 งวด"): the title's abbreviation, else its short name. */
 export function payerShort(g: Pick<JointGroup, 'head' | 'qt'>) {
   const m = /\(([^()]{1,24})\)\s*$/.exec(g.qt.title.trim());
   return m ? m[1].trim() : shortName(g.head.client);
 }
-/** "ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ" (the band, the closed list, the phone card). */
-export const jointTitle = (s: SalesState, g: JointGroup) => ['ใบเสนอราคาร่วม' + (jointNo(s, g) ? ' ' + jointNo(s, g) : ''), jointShort(g)].join(' · ');
-/** "4 บริษัท · ผู้จ่าย มหาวิทยาลัย… · หมิว". */
-export const jointSub = (g: JointGroup) => [`${g.members.length} บริษัท`, 'ผู้จ่าย ' + g.head.client, g.head.resp].filter(Boolean).join(' · ');
+/** "ใบเสนอราคาร่วม QT-2569-052" (before it has a number: "ใบเสนอราคาร่วม"). */
+export const jointQtWord = (s: SalesState, g: JointGroup) => {
+  const no = jointNo(s, g);
+  return 'ใบเสนอราคาร่วม' + (no ? ' ' + no : '');
+};
+/** The quotation's own name as it goes under the payer: its title shortened (jointShort, "CFP มจพ"); '' without
+ *  a title, or when the title only repeats the payer's name (the payer is the line above). */
+export function jointLabel(g: Pick<JointGroup, 'head' | 'qt'>) {
+  const k = (x: string) => x.replace(/\s+/g, ''), payer = [k(g.head.client), k(shortName(g.head.client))];
+  if (!g.qt.title.trim() || payer.includes(k(g.qt.title))) return '';
+  const t = jointShort(g);
+  return payer.includes(k(t)) ? '' : t;
+}
+/**
+ * A joint quotation named as an item (owner, Oct 2569: "ควรเขียนชื่อองค์กรที่จ้างไว้ด้านบน แล้วเอาชื่อใบเสนอราคา
+ * หรือเลขไว้ข้างล่าง"): `name` the organisation that hires and pays, on top, as a company's name is (its full
+ * name: a row shortens it as it does any company's, salesUi shortName); `sub` the quotation under it:
+ * "ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · 4 บริษัท · หมิว" (its number, its own name, its companies, its owner).
+ * The table's band, the phone card, the ปิดงาน band, the panel's head and the closing dialog.
+ */
+export function jointHead(s: SalesState, g: JointGroup) {
+  const qt = jointQtWord(s, g), label = jointLabel(g);
+  return { name: g.head.client, qt, label, sub: [qt, label, `${g.members.length} บริษัท`, g.head.resp].filter(Boolean).join(' · ') };
+}
+/** The same on one line (a message, a control's label, the CSV): "มหาวิทยาลัย… · ใบเสนอราคาร่วม QT-2569-052";
+ *  `short`: the payer as a row names it (salesUi shortName). */
+export const jointLine = (s: SalesState, g: JointGroup, short = false) => `${short ? shortName(g.head.client) : g.head.client} · ${jointQtWord(s, g)}`;
 
 /** A member's part as its row shows it: the amount of the quotation (null without a total), its % of the
  *  whole, and `auto` when nobody typed it (an equal split). A member that withdrew (NO) has none. */

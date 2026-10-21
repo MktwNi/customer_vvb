@@ -62,14 +62,15 @@ export function statusWord(l: CashLine) {
 }
 /** "ใบเสนอราคาร่วม 4 บริษัท", and under a ผู้รับผิดชอบ / SOURCE / REFERRAL filter "· ส่วนของ 1 บริษัท" (the amount is that part). */
 export const jointWords = (j: NonNullable<CashLine['joint']>) => `ใบเสนอราคาร่วม ${j.members} บริษัท${j.part ? ` · ส่วนของ ${j.part} บริษัท` : ''}`;
-/** The client as the money views name it: a joint quotation's header says how many companies it pays for,
- *  the payer by the abbreviation its title ends with ("มจพ · ใบเสนอราคาร่วม 4 บริษัท", as the band names it,
- *  lib/joint payerShort), so the count is not cut off after a long payer name; else by its short name. */
-export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => {
-  if (!l.joint) return short(l.deal.client);
-  const abbr = /\(([^()]{1,24})\)\s*$/.exec(l.joint.title.trim())?.[1]?.trim();
-  return `${abbr || short(l.deal.client)} · ${jointWords(l.joint)}`;
-};
+/** The client as the money views name a line, on its first line: the company; a joint quotation's line its payer,
+ *  the organisation that hires and pays, as the table's band names it (owner, Oct 2569: the organisation on top,
+ *  the quotation under it: jointLineWords). */
+export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => short(l.deal.client);
+/** A joint quotation's line under its payer: "ใบเสนอราคาร่วม QT-2569-052 · 4 บริษัท", and under a ผู้รับผิดชอบ /
+ *  SOURCE / REFERRAL filter "· ส่วนของ 1 บริษัท" (the amount is that part); '' for any other line. `no` the
+ *  quotation's number (lib/joint jointNo). */
+export const jointLineWords = (l: CashLine, no = '') =>
+  !l.joint ? '' : [`ใบเสนอราคาร่วม${no ? ' ' + no : ''}`, `${l.joint.members} บริษัท`, l.joint.part ? `ส่วนของ ${l.joint.part} บริษัท` : ''].filter(Boolean).join(' · ');
 
 /** The year picker's line on the money views: "เงินเข้า 15 งวด" / "ไม่มีเงินเข้า". */
 export const yearMoneyLabel = (Y: Pick<CashYear, 'totals'>) => (Y.totals.n ? `เงินเข้า ${Y.totals.n} งวด` : 'ไม่มีเงินเข้า');

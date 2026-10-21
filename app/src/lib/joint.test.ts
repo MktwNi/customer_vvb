@@ -12,13 +12,13 @@ import {
   type Deal, type DealDoc, type JointMember, type PayLine, type SalesFilterIn, type SalesState,
 } from './sales';
 import {
-  canMergeFrom, closeSummary, closedWord, isJointNote, jointNote, jointRows, jointShort, jointSub, jointTitle, memberLine, memberShares, ownJob, parseShare, payerShort, pickParts, resultsWord, rowDeals, rowFate, rowMoneyDeals, shareOf,
+  canMergeFrom, closeSummary, closedWord, isJointNote, jointHead, jointLabel, jointLine, jointNote, jointRows, jointShort, memberLine, memberShares, ownJob, parseShare, payerShort, pickParts, resultsWord, rowDeals, rowFate, rowMoneyDeals, shareOf,
   sharesCheck, sharesWord, strayDocs,
 } from './joint';
 // the second review's fixes
 import { bandPart, jointNo, moneyWords, noteNo, pickLine, viewCashLines } from './joint';
 import { dealSteps } from './sales';
-import { cashRows, payerName } from './cashUi';
+import { cashRows, jointLineWords, payerName } from './cashUi';
 import { closingView, liveCount, monthCounts, nextStepView, statusView, trackerFields } from './salesUi';
 import { applyRow, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
@@ -458,8 +458,9 @@ describe('the search, the picker, the words', () => {
     const s = world(), g = jointOf(s, { id: 'h' })!;
     expect(jointShort(g)).toBe('CFP มจพ');
     expect(payerShort(g)).toBe('มจพ');
-    expect(jointTitle(s, g)).toBe('ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ');
-    expect(jointSub(g)).toBe(`4 บริษัท · ผู้จ่าย ${PAYER} · หมิว`);
+    // the band: the payer on top, the quotation under it (no "ผู้จ่าย": the payer is the line above)
+    expect(jointHead(s, g)).toEqual({ name: PAYER, qt: 'ใบเสนอราคาร่วม QT-2569-052', label: 'CFP มจพ', sub: 'ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · 4 บริษัท · หมิว' });
+    expect(jointLine(s, g)).toBe(`${PAYER} · ใบเสนอราคาร่วม QT-2569-052`);
     expect(memberLine(s, s.deals.b2, true)).toBe('อยู่ในใบเสนอราคาร่วม QT-2569-052 (มจพ) · ร่วมกับอีก 3 บริษัท · ส่วนแบ่ง 321,000 (25%)');
     expect(memberLine(s, s.deals.b2, false)).toBe('อยู่ในใบเสนอราคาร่วม QT-2569-052 (มจพ) · ร่วมกับอีก 3 บริษัท');
     expect(shareOf(s, s.deals.b2)).toMatchObject({ amt: 321000, pct: 25 });
@@ -574,12 +575,15 @@ describe('review 2: the Cashflow tab counts a joint quotation as the Dashboard d
     const one = viewCashLines(s, tab(s, { resp: { v: ['คุณบี'] } }), T);
     // (and which: the units' split of the part goes to that company alone, lib/contrib lineParts)
     expect(one.map((l) => l.joint)).toEqual([{ members: 4, title: s.jqt!.h.title, part: 1, keep: ['b2'] }, { members: 4, title: s.jqt!.h.title, part: 1, keep: ['b2'] }]);
-    // (the payer by its title's abbreviation, as the band names it: the count is never cut off)
-    expect(payerName(one[0], (x) => x)).toBe('มจพ · ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท');
+    // (the payer is the line's name, as the band's; the quotation, its companies and the part under it)
+    expect(payerName(one[0], (x) => x)).toBe(PAYER);
+    expect(jointLineWords(one[0], 'QT-2569-052')).toBe('ใบเสนอราคาร่วม QT-2569-052 · 4 บริษัท · ส่วนของ 1 บริษัท');
     const csv = cashRows(s, '2569', cashYear(one, '2569'), 'lines', true);
     expect(csv.rows[0][2]).toBe(`${PAYER} (ใบเสนอราคาร่วม 4 บริษัท · ส่วนของ 1 บริษัท)`);
     const whole = viewCashLines(s, tab(s, {}), T).find((l) => l.deal.id === 'h')!;
-    expect(payerName(whole, (x) => x)).toBe('มจพ · ใบเสนอราคาร่วม 4 บริษัท');
+    expect(payerName(whole, (x) => x)).toBe(PAYER);
+    expect(jointLineWords(whole)).toBe('ใบเสนอราคาร่วม · 4 บริษัท');
+    expect(jointLineWords(cashLines(s, [s.deals.p1], T)[0] || { ...whole, joint: undefined })).toBe('');
   });
 });
 
@@ -620,6 +624,63 @@ describe('review 2: the band says what of its money the view counts', () => {
   });
 });
 
+describe('the payer on top, the quotation under it (owner, Oct 2569)', () => {
+  // "ใบเสนอราคารวม … ควรเขียนชื่อองค์กรที่จ้างไว้ด้านบน แล้วเอาชื่อใบเสนอราคาหรือเลขไว้ข้างล่าง"
+  const KMUTNB = 'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าพระนครเหนือ (สำนักงานใหญ่)';
+  /** the owner's screenshot: QT2026060019, made as "CFP <payer>" for 11 companies, หมิว's */
+  function eleven(o: { title?: string; no?: string; resp?: string } = {}) {
+    const s = emptySales();
+    s.deals.h = newDeal({ id: 'h', year: '2569', client: KMUTNB, resp: o.resp ?? 'หมิว' }, 'หมิว', '2026-06-01T03:00:00.000Z');
+    s.jqt = { h: { title: o.title ?? 'CFP ' + KMUTNB, at: '2026-06-01T03:00:00.000Z', by: 'หมิว' } };
+    s.jqm = {};
+    for (let i = 1; i <= 11; i++) {
+      s.deals['m' + i] = newDeal({ id: 'm' + i, year: '2569', client: 'บริษัท สมาชิก ' + i + ' จำกัด' }, 'หมิว', '2026-06-01T03:00:00.000Z');
+      s.jqm['h/m' + i] = M({}, `2026-06-01T03:00:${String(i).padStart(2, '0')}.000Z`);
+    }
+    if (o.no !== '') s.docs['h/qt-h'] = qt('h', 1100000, { docNo: o.no ?? 'QT2026060019' });
+    return { s, g: jointOf(s, { id: 'h' })! };
+  }
+  it('the band\'s two lines: the organisation that hires, then the number, its own name, the companies, the owner', () => {
+    const { s, g } = eleven();
+    const h = jointHead(s, g);
+    expect(h.name).toBe(KMUTNB);
+    expect(h.sub).toBe('ใบเสนอราคาร่วม QT2026060019 · CFP สำนักงานใหญ่ · 11 บริษัท · หมิว');
+    // no "ผู้จ่าย …" under it: the payer is the line above
+    expect(h.sub).not.toContain('ผู้จ่าย');
+    expect(h.sub).not.toContain('มหาวิทยาลัย');
+    // one line (a message, a control's label, the CSV): the payer first
+    expect(jointLine(s, g)).toBe(`${KMUTNB} · ใบเสนอราคาร่วม QT2026060019`);
+    expect(jointLine(s, g, true)).toBe(`${KMUTNB} · ใบเสนอราคาร่วม QT2026060019`);
+  });
+  it('the quotation\'s own name only when it says more than the payer; no number yet, no owner: left out', () => {
+    // no title: the payer's name is not said twice
+    const none = eleven({ title: '' });
+    expect(jointHead(none.s, none.g).sub).toBe('ใบเสนอราคาร่วม QT2026060019 · 11 บริษัท · หมิว');
+    // a title that is only the payer's name (its short name too)
+    const same = eleven({ title: KMUTNB });
+    expect(jointLabel(same.g)).toBe('');
+    const co = eleven({ title: 'สยามฟู้ดส์ แปรรูป' });
+    co.s.deals.h.client = 'บริษัท สยามฟู้ดส์ แปรรูป จำกัด';
+    expect(jointLabel(jointOf(co.s, { id: 'h' })!)).toBe('');
+    expect(jointLine(co.s, jointOf(co.s, { id: 'h' })!, true)).toBe('สยามฟู้ดส์ แปรรูป · ใบเสนอราคาร่วม QT2026060019');
+    // the team's own words stay
+    expect(jointLabel(eleven({ title: 'CFP รอบ 2' }).g)).toBe('CFP รอบ 2');
+    // made without its file and no number typed: "ใบเสนอราคาร่วม" alone; no owner: none said
+    const bare = eleven({ no: '', resp: '' });
+    expect(jointHead(bare.s, bare.g)).toMatchObject({ qt: 'ใบเสนอราคาร่วม', sub: 'ใบเสนอราคาร่วม · CFP สำนักงานใหญ่ · 11 บริษัท' });
+    expect(jointLine(bare.s, bare.g)).toBe(`${KMUTNB} · ใบเสนอราคาร่วม`);
+  });
+  it('found as before: by the payer and by the quotation\'s number, the band with all its companies', () => {
+    const { s } = eleven();
+    const ids = (q: string) => filterDeals(s, normSalesFilter({ year: '2569', q }), T).map((d) => d.id).sort();
+    const every = ['h', ...Array.from({ length: 11 }, (_, i) => 'm' + (i + 1))].sort();
+    expect(ids('QT2026060019')).toEqual(every);
+    expect(ids('พระนครเหนือ')).toContain('h');
+    const bands = [...jointRows(s, filterDeals(s, normSalesFilter({ year: '2569', q: 'พระนครเหนือ' }), T)).rows.values()].flat().filter((r) => r.k === 'band');
+    expect(bands).toHaveLength(1);
+  });
+});
+
 describe('review 2: the words', () => {
   it('the number of a joint quotation made without its file is the one typed (its header\'s QUOTATION note)', () => {
     const s = world();
@@ -629,7 +690,7 @@ describe('review 2: the words', () => {
     s.steps['b1/QUOTATION'] = { d: '2026-10-06', n: 'ส่งทางอีเมลถึงคุณสมชาย' };
     const g = jointOf(s, { id: 'h' })!;
     expect(jointNo(s, g)).toBe('QT-2569-099');
-    expect(jointTitle(s, g)).toBe('ใบเสนอราคาร่วม QT-2569-099 · CFP มจพ');
+    expect(jointHead(s, g).sub).toBe('ใบเสนอราคาร่วม QT-2569-099 · CFP มจพ · 4 บริษัท · หมิว');
     expect(memberLine(s, s.deals.b2, false)).toBe('อยู่ในใบเสนอราคาร่วม QT-2569-099 (มจพ) · ร่วมกับอีก 3 บริษัท');
     expect([noteNo('ใบเสนอราคาร่วม QT-2569-099'), noteNo('ใบเสนอราคาร่วม'), noteNo('ใบเสนอราคา QT-1 · 100 บาท')]).toEqual(['QT-2569-099', '', '']);
     // found by its number: the header and its companies, the money once

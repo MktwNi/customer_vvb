@@ -903,14 +903,14 @@ describe('the Excel file keeps lines cancelled after their check (review 2: it l
 });
 
 describe('a joint quotation (spec §F test 7)', () => {
-  it('the header\'s lines are checkable and say who pays; the file names the joint quotation', () => {
+  it('the header\'s lines are checkable; the payer is their name (no "ผู้จ่าย" under it); the file names the joint quotation', () => {
     const s = demo();
     // the header's lines as cashLines gives them once package quotes is in (lib/sales.ts CashLine.joint)
     const ls = lines(s).map((l): CashLine => (l.deal.id === 'w1' ? { ...l, joint: { members: 3, title: 'QT ร่วม' } } : l));
     const rows = chkRows(s, ls, {}, PAYCHK_CFG0.since);
     const h = byKey(rows, 'w1/PAY1');
     expect([h.kind, h.state]).toEqual(['got', 'wait']);
-    expect(instOf(h, s).sub).toBe('ผู้จ่าย แสนสิริ กรีน พร็อพเพอร์ตี้');
+    expect(instOf(h, s)).toEqual({ text: 'งวด 1/2', sub: 'PAY1' });
     const months = yearCheck(rows, 2026, {}, T).months.filter((m) => m.ym === '2026-09');
     expect(chkSheets(s, month(rows, '2026-09'), months, false)[0].rows[0][1]).toBe('แสนสิริ กรีน พร็อพเพอร์ตี้ (ใบเสนอราคาร่วม 3 บริษัท)');
   });
