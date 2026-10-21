@@ -112,6 +112,16 @@ async function round(t: Tab) {
   await t.e.uploadDocs();
 }
 const later = (ms: number) => vi.setSystemTime(Date.now() + ms);
+/** An upload round whose tries fail: fake time goes on through its quiet waits (3 s, 10 s) until it ends. */
+async function quietTries(p: Promise<unknown>) {
+  let done = false;
+  p.then(() => (done = true));
+  for (let i = 0; i < 200 && !done; i++) {
+    await vi.advanceTimersByTimeAsync(250);
+    await tick();
+  }
+  await p;
+}
 const pdf = (name: string) => Object.assign(new Blob(['%PDF-1.4 ' + name], { type: 'application/pdf' }), { name });
 const quote = { kind: 'quotation', amount: 1000, target: 'forecast', basis: 'total', detected: 1000, docNo: 'Q-1', docDate: '' } as const;
 const fileOf = (t: Tab, deal: string, id: string) => t.e.sales.docs[`${deal}/${id}`]?.fileId ?? null;
@@ -236,18 +246,19 @@ describe('files a sales account attached while the link answers as a script that
     expect(fileOf(T1, d.id, a.id)).toBeTruthy();
     expect([fileOf(T2, d.id, a.id), T2.e.docsHeld, T2.e.docMsg]).toEqual([fileOf(T1, d.id, a.id), 0, '']);
 
-    // a failed upload's message in T2, then T1 uploads that file: T2's next round drops the message
+    // T2's tries fail (also the quiet ones): its waiting notice, never the red message; then T1 uploads that
+    // file: T2's notice goes once it hears of it
     T2.net.files = 'fail';
     const b = await T2.e.attachDoc(d.id, pdf('b.pdf'), quote);
-    await T2.e.uploadDocs();
-    expect(T2.e.docMsg).toMatch(/อัปโหลดเอกสารขึ้น Drive ไม่สำเร็จ.*จะลองใหม่ในอีก 1 นาที/);
+    await quietTries(T2.e.uploadDocs());
+    expect([T2.e.docsWaitNote?.n, T2.e.docMsg]).toEqual([1, '']);
     await settle(T2, T1);
     await T1.e.uploadDocs();
     await settle(T1);
     T2.net.files = 'ok';
     await round(T2);
-    expect([!!fileOf(T2, d.id, b.id), T2.e.docMsg]).toEqual([true, '']);
-    // cleared by T2's own round finding nothing to send: T2 uploaded nothing, T1 both files
+    expect([!!fileOf(T2, d.id, b.id), T2.e.docsWaitNote, T2.e.docMsg]).toEqual([true, null, '']);
+    // T2 uploaded nothing, T1 both files
     expect([T2.net.sent.filter((x) => x === 'upload').length, T1.net.sent.filter((x) => x === 'upload').length]).toEqual([0, 2]);
   });
 
@@ -275,12 +286,14 @@ describe('files a sales account attached while the link answers as a script that
     await M.e.uploadDocs();
     expect(M.e.teamFiles).toBe(null);
     expect(M.e.docsHeld).toBe(0);
-    expect(M.e.docMsg).toBe('อัปโหลดเอกสารขึ้น Drive ไม่สำเร็จ: ' + NOT_SCRIPT + ' (เก็บไว้ในเครื่องนี้ จะลองใหม่ในอีก 1 นาที)');
+    // the waiting notice says what the lead checks; the file is fine, so never the red message
+    expect(M.e.docsWaitNote).toEqual({ n: 1, at: Date.now() + 60000, why: NOT_SCRIPT, busy: false });
+    expect(M.e.docMsg).toBe('');
     expect(fileOf(M, d.id, doc.id)).toBe('');
     M.net.files = 'ok';
     later(61000);
     await round(M);
-    expect([!!fileOf(M, d.id, doc.id), M.e.docMsg]).toEqual([true, '']);
+    expect([!!fileOf(M, d.id, doc.id), M.e.docsWaitNote, M.e.docMsg]).toEqual([true, null, '']);
   });
 
   it('signing out ends the notice and keeps the file; it goes up after signing in again', async () => {

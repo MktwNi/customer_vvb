@@ -1007,7 +1007,8 @@ export function LogoutDialog({ onClose }: { onClose: () => void }) {
     started.current = true;
     if (!(e.teamPendingN + e.docsUnsent) || e.auth || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     setSending(true);
-    e.teamSyncNow()
+    // (urgent: an upload on its way gives way, so the edits go now rather than after the file)
+    e.teamSyncNow({ urgent: true })
       .catch(() => {})
       .finally(() => setSending(false));
   }, [e]);

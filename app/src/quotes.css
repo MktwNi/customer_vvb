@@ -25,7 +25,7 @@
 .qt-ver .qt-vn{color:var(--ink)}
 .qt-ver .qt-vw{color:var(--muted)}
 .qt-ver .lnk{font-size:var(--fs-sec)}
-.qt-ver .r{text-align:right}
+.qt-ver .r{text-align:right;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px 12px}
 
 /* "แก้ไขข้อมูล": the form in the card */
 .qt-form{border-top:1px solid var(--divider);padding:12px 14px 14px;display:flex;flex-direction:column;gap:12px;background:#FBFCFF;border-radius:0 0 var(--r-inner) var(--r-inner)}
@@ -70,6 +70,7 @@
 .qt-mc-m b{color:var(--ink);font-weight:500}
 .qt-mc-g{font-size:var(--fs-meta);color:var(--muted)}
 .qt-mc-g.ok{color:var(--ok)}
+.qt-mc-w{margin:6px 0 0;font-size:var(--fs-sec);color:var(--warn);line-height:1.5}
 .qt-m2{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
 .qt-mv{display:flex;flex-direction:column;width:100%;font-size:var(--fs-sec);color:var(--ink-2);padding:2px;line-height:1.5}
 .qt-mv-n{color:var(--ink)}

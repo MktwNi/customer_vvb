@@ -172,6 +172,13 @@ button.kpi{cursor:pointer}
 .doc-held p{margin:0}
 .doc-held p+p{margin-top:4px}
 .doc-held-h{color:var(--warn)}
+/* files waiting after failed upload tries (Sales tab): calm amber, the words say it, a button to send now */
+.doc-wait{margin:0 0 12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;background:var(--warn-bg);border-radius:var(--r-field);padding:10px 14px;font-size:var(--fs-sec);line-height:1.6;color:var(--ink-2);overflow-wrap:anywhere}
+.doc-wait-t{flex:1 1 300px;min-width:0}
+.doc-wait p{margin:0}
+.doc-wait-h{color:var(--warn);font-weight:500}
+.doc-wait-why{color:var(--muted);font-size:var(--fs-meta)}
+.doc-wait .btn{flex:none}
 /* menus (§7.11): 14/400 items, an optional short grey line, the tint under the pointer */
 .menu{background:#fff;border:1px solid var(--line);border-radius:var(--r-inner);box-shadow:var(--sh-pop);padding:6px;display:flex;flex-direction:column;min-width:220px}
 .menu-i{cursor:pointer;border:0;border-radius:10px;background-color:transparent;text-align:left;padding:10px 14px;font:inherit;font-size:var(--fs-body);color:var(--ink);display:flex;flex-direction:column;gap:2px;transition:background-color .12s}
