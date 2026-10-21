@@ -15,7 +15,7 @@ import { DoneBox, taskInfo } from './Plan';
 import { Notice, PageHead, Pager, labelCol } from '../components/ui';
 import { SelField, Select } from '../components/Select';
 // one person, several companies: their companies card, the "คนนี้มีอยู่แล้ว" prompt, merging two records, the CSV
-import { CompaniesCard, DupLine, ExistsPrompt, MergePick, SchedBtn, coShort, downloadPeopleCsv, whoLine } from './PeopleCos';
+import { CompaniesCard, DupLine, ExistsPrompt, MergePick, SchedBtn, coShort, downloadPeopleCsv, nowAt, whoLine } from './PeopleCos';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 const PER_PAGE = 30;
@@ -171,7 +171,8 @@ function PeopleList() {
             <span>พบชื่อผู้ติดต่อใน Sales Tracker ที่ยังไม่ได้บันทึก {fmtN(sugg.length)} คน</span>
             <button onClick={() => setShowSugg(!showSugg)} aria-expanded={showSugg} className="lnk" style={{ fontSize: 13 }}>{showSugg ? 'ซ่อนรายการ' : 'ดูและเพิ่ม'}</button>
             {showSugg && (
-              // (one who is someone recorded at another company already is left for its own button)
+              // (one who is someone recorded already is left for its own button; one human at several companies is one
+              // person with each company: engine addPeople)
               <button onClick={() => e.addPeople(sugg.filter((s) => !s.same).map((s) => ({ id: s.id, name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email })))} className="lnk" style={{ fontSize: 13 }}>
                 เพิ่มทั้งหมด
               </button>
@@ -185,10 +186,14 @@ function PeopleList() {
                     <b style={{ fontWeight: 500 }}>{s.name}</b>
                     <span className="t-sec">{[s.company, s.phone, s.email].filter(Boolean).join(' · ')} · จาก {s.from}</span>
                     {s.same && <span className="t-sec">คนนี้มีอยู่แล้ว: {s.same.name}{whoLine(e, s.same) ? ' · ' + whoLine(e, s.same) : ''}</span>}
+                    {s.dupOf && <span className="t-sec">คนเดียวกับ {s.dupOf.name} · {coShort(s.dupOf.company)} ด้านบน · “เพิ่มทั้งหมด” บันทึกเป็นคนเดียวที่ติดต่อหลายบริษัท</span>}
                   </span>
                   <span style={{ display: 'flex', gap: 6, flex: 'none', alignItems: 'center' }}>
                     {s.same && s.gid != null ? (
                       <button onClick={() => e.addToExisting(s.same!.id, { gid: s.gid, phone: s.phone, email: s.email })} className="btn xs">เพิ่ม {coShort(s.company)} ให้ {s.same.name}</button>
+                    ) : s.same ? (
+                      // (a company only named, not in the registry: the person is used, the name said in their notes)
+                      <button onClick={() => (e.addToExisting(s.same!.id, { gid: null, company: s.company, phone: s.phone, email: s.email }), e.hideSuggestion(s.id))} className="btn xs">ใช้ {s.same.name}</button>
                     ) : (
                       <button onClick={() => e.addPerson({ name: s.name, gid: s.gid, company: s.company, phone: s.phone, email: s.email }, { id: s.id, nx: true })} className="btn xs" aria-label={'เพิ่ม ' + s.name}>เพิ่ม</button>
                     )}
@@ -234,9 +239,9 @@ function PeopleList() {
             <ul className="pe-rows">
               {shown.map((p) => {
                 const x = idx.get(p.id);
-                const c = e.personCompany(p);
-                const pc = cosOf.get(p.id)!;
-                const more = pc.filter((k) => !k.main && k.st === 'active').length;
+                // (the company they are at now: their main one, else, having left it, the first they still deal with)
+                const at = nowAt(e, p);
+                const more = at?.more || 0;
                 const left = !isOn.has(p.id);
                 const ph = phones(p.phone)[0] || '';
                 const nt = x?.next;
@@ -249,14 +254,14 @@ function PeopleList() {
                         <button className="pe-open" onClick={() => openPerson(p.id)}>{p.name}</button>
                         <span className="pe-sub">
                           {left && <span className="chip warn" style={{ height: 20, marginRight: 6 }}>ไม่อยู่แล้ว</span>}
-                          {[p.pos, p.dept].filter(Boolean).join(' · ') || (p.role ? ROLE_TH[p.role] : '—')}
+                          {[at?.pos ?? p.pos, at?.dept ?? p.dept].filter(Boolean).join(' · ') || ((at?.role ?? p.role) ? ROLE_TH[at?.role ?? p.role] : '—')}
                         </span>
                       </span>
                     </span>
                     <span className="pe-co">
                       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                        <span className="pe-clamp">{c?.name || p.company || pc.find((k) => !k.main)?.c?.name || '—'}</span>
-                        {more > 0 && (c || p.company) && <span className="pe-sub">และอีก {fmtN(more)} บริษัท</span>}
+                        <span className="pe-clamp">{at ? (at.c?.name || at.company) + (at.st === 'left' && !left ? ' (ไม่อยู่แล้ว)' : '') : '—'}</span>
+                        {more > 0 && <span className="pe-sub">และอีก {fmtN(more)} บริษัท</span>}
                       </span>
                     </span>
                     <span className="pe-cell">{ph ? <a href={telHref(p.phone)} className="pe-link">{ph}</a> : <span className="pe-sub">—</span>}</span>
@@ -326,6 +331,10 @@ function PersonPage({ id }: { id: string }) {
   const deals = coIds.flatMap((g) => e.dealsOf(g)).sort(byYear);
   const linked = e.personDeals(p.id).sort(byYear);
   const away = !e.personActive(p);
+  // the company they are at now (their main one; having left it, the first they still deal with)
+  const at = nowAt(e, p);
+  // numbers saved on a record merged into them after the merge (a teammate who did not have it yet)
+  const late = e.lateReach(p);
   const lineUrl = lineHref(p.line);
   const openDeals = linked.filter((d) => d.jobStatus === 'open').length;
   const startLog = () => {
@@ -360,11 +369,12 @@ function PersonPage({ id }: { id: string }) {
             </span>
             <h2 className="pe-name">{p.name}{p.nick ? <span className="pe-nick"> ({p.nick})</span> : null}</h2>
             <span className="pe-pos">
-              {[p.pos, p.dept].filter(Boolean).join(' · ') || 'ยังไม่ระบุตำแหน่ง'}
-              {(c || p.company) && (
+              {[at?.pos, at?.dept].filter(Boolean).join(' · ') || 'ยังไม่ระบุตำแหน่ง'}
+              {at && (
                 <>
                   {' @ '}
-                  {c ? <button className="pe-colink" onClick={() => open(c.id)}>{c.name}</button> : p.company}
+                  {at.c ? <button className="pe-colink" onClick={() => open(at.c!.id)}>{at.c.name}</button> : at.company}
+                  {at.st === 'left' && !away ? ' (ไม่อยู่แล้ว)' : ''}
                 </>
               )}
             </span>
@@ -408,6 +418,15 @@ function PersonPage({ id }: { id: string }) {
                   </div>
                 ))}
               </dl>
+              {late && (
+                <div className="pc-note pe-late" role="status">
+                  <span>
+                    บันทึกไว้ในรายชื่อเดิม “{late.from.map((x) => x.name).join(', ')}” หลังรวมแล้ว:{' '}
+                    {[late.patch.phone, late.patch.email, late.patch.line ? 'LINE ' + late.patch.line : ''].filter(Boolean).join(' · ')}
+                  </span>
+                  {!ro && <button type="button" className="pe-act" onClick={() => e.updatePerson(p.id, late.patch, { phone: p.phone, email: p.email, line: p.line })}>เพิ่มให้คนนี้</button>}
+                </div>
+              )}
               {p.note && (
                 <div className="pe-about">
                   <span className="pe-k">ข้อมูลเพิ่มเติม</span>
@@ -913,7 +932,7 @@ export function AddPerson() {
     if (ui.tab === 'people' && ui.sel == null) openPerson(id);
   };
   const useOld = (pid: string) => {
-    e.addToExisting(pid, { gid: co ? co.id : null, pos: f.pos, role: f.role, phone: f.phone, email: f.email, line: f.line }, deal ? { id: deal.id, main: !!a.main } : undefined);
+    e.addToExisting(pid, { gid: co ? co.id : null, company: co ? '' : f.company, pos: f.pos, role: f.role, phone: f.phone, email: f.email, line: f.line }, deal ? { id: deal.id, main: !!a.main } : undefined);
     set({ addPerson: null });
     if (!deal && ui.tab === 'people' && ui.sel == null) openPerson(pid);
   };
@@ -938,7 +957,7 @@ export function AddPerson() {
         <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
         {found.length > 0 && (
           <div style={{ gridColumn: '1 / -1' }}>
-            <ExistsPrompt found={found} coName={co?.name || ''} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
+            <ExistsPrompt found={found} coName={co?.name || ''} typedCo={co ? '' : f.company.trim()} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
           </div>
         )}
         <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>

@@ -58,6 +58,11 @@ export function CompaniesCard({ p }: { p: Person }) {
   const act = cos.filter((x) => x.st === 'active'), left = cos.filter((x) => x.st === 'left');
   const main = cos.find((x) => x.main);
   const keyOf = (x: Co) => (x.main ? 'main' : 'g' + x.gid);
+  // the keyboard keeps its place: after a row's form closes, that row's "แก้ไข" (the company's row, wherever it is
+  // now: made the main one, or ไม่อยู่แล้ว), else "เพิ่มบริษัท"
+  const focusTo = (k: string) =>
+    requestAnimationFrame(() => (document.querySelector<HTMLElement>(`[data-fk="${CSS.escape('co-' + k)}"]`) || document.querySelector<HTMLElement>('[data-fk="co-add"]'))?.focus());
+  const rowKey = (x: Co) => (x.gid != null ? 'g' + x.gid : 'main');
   // their main company left while another is still theirs: one tap makes that one the main one
   const promote = !ro && main && main.st === 'left' && main.gid != null ? act.find((x) => !x.main && x.c) : undefined;
   const ids = new Set(e.idsOf(p.id));
@@ -68,9 +73,9 @@ export function CompaniesCard({ p }: { p: Person }) {
   }, [e, ver, p]);
   const row = (x: Co) =>
     edit === keyOf(x) ? (
-      <CoEdit key={keyOf(x)} p={p} x={x} mainTyped={!!main && main.gid == null} onDone={() => setEdit('')} />
+      <CoEdit key={keyOf(x)} p={p} x={x} mainTyped={!!main && main.gid == null} onDone={(g) => (setEdit(''), focusTo(g !== undefined ? (g != null ? 'g' + g : 'main') : rowKey(x)))} />
     ) : (
-      <CoRow key={keyOf(x)} p={p} x={x} onEdit={ro ? undefined : () => setEdit(keyOf(x))} />
+      <CoRow key={keyOf(x)} p={p} x={x} fk={'co-' + rowKey(x)} onEdit={ro ? undefined : () => setEdit(keyOf(x))} />
     );
   return (
     <>
@@ -92,8 +97,8 @@ export function CompaniesCard({ p }: { p: Person }) {
           <div className="pc-list">{left.map(row)}</div>
         </details>
       )}
-      {!ro && (adding ? <AddCo p={p} cos={cos} onDone={() => setAdding(false)} /> : (
-        <button type="button" className="pe-act" style={{ alignSelf: 'flex-start' }} onClick={() => setAdding(true)}>เพิ่มบริษัท</button>
+      {!ro && (adding ? <AddCo p={p} cos={cos} onDone={(g) => (setAdding(false), focusTo(g != null ? 'g' + g : 'add'))} /> : (
+        <button type="button" className="pe-act" data-fk="co-add" style={{ alignSelf: 'flex-start' }} onClick={() => setAdding(true)}>เพิ่มบริษัท</button>
       ))}
       {others.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -118,7 +123,7 @@ export function CompaniesCard({ p }: { p: Person }) {
   );
 }
 
-function CoRow({ p, x, onEdit }: { p: Person; x: Co; onEdit?: () => void }) {
+function CoRow({ p, x, fk, onEdit }: { p: Person; x: Co; fk: string; onEdit?: () => void }) {
   const { engine: e, open } = useApp();
   const name = coName(x);
   const n = coCounts(e, p, x.gid);
@@ -137,14 +142,15 @@ function CoRow({ p, x, onEdit }: { p: Person; x: Co; onEdit?: () => void }) {
         {!x.c && <span className="t-meta">พิมพ์ชื่อเอง ไม่ได้เชื่อมกับทะเบียน</span>}
         {x.c && <span className="t-meta">{countLine(n)}{x.st === 'left' && x.upAt ? ` · ไม่อยู่แล้วตั้งแต่ ${isoTh(localDay(x.upAt))}` : ''}</span>}
       </span>
-      {onEdit && <button type="button" className="lnk pc-edit" onClick={onEdit} aria-label={'แก้ไขบริษัท ' + name}>แก้ไข</button>}
+      {onEdit && <button type="button" className="lnk pc-edit" data-fk={fk} onClick={onEdit} aria-label={'แก้ไขบริษัท ' + name}>แก้ไข</button>}
     </div>
   );
 }
 
 /** One company's row opened: their position, department, role and status there; the main one is changed with
- *  "เปลี่ยน"; another one becomes the main one, or goes (added by mistake, nothing recorded there). */
-function CoEdit({ p, x, mainTyped, onDone }: { p: Person; x: Co; mainTyped: boolean; onDone: () => void }) {
+ *  "เปลี่ยน"; another one becomes the main one, or goes (added by mistake, nothing recorded there). `onDone(g)`: the
+ *  company whose row the keyboard goes back to (another one picked with เปลี่ยน; undefined: this one). */
+function CoEdit({ p, x, mainTyped, onDone }: { p: Person; x: Co; mainTyped: boolean; onDone: (g?: number | null) => void }) {
   const { engine: e } = useApp();
   const [init] = useState({ pos: x.pos, dept: x.dept, role: x.role, st: x.st });
   const [f, setF] = useState(init);
@@ -153,7 +159,8 @@ function CoEdit({ p, x, mainTyped, onDone }: { p: Person; x: Co; mainTyped: bool
   const used = x.gid != null && e.personCoUsed(p, x.gid);
   const save = (ev: FormEvent) => {
     ev.preventDefault();
-    e.updatePersonCo(p.id, x.main ? null : x.gid, f, init);
+    // (the company the form was opened for: a teammate making another one the main one meanwhile never gets this)
+    e.updatePersonCo(p.id, x.gid, f, init);
     onDone();
   };
   return (
@@ -179,14 +186,26 @@ function CoEdit({ p, x, mainTyped, onDone }: { p: Person; x: Co; mainTyped: bool
         {x.main && !changing && <button type="button" className="pe-act" onClick={() => setChanging(true)}>เปลี่ยน</button>}
       </span>
       {changing && (
+        <>
+        {x.gid != null && (
+          <span className="t-meta">
+            เลือกบริษัทอื่นของคนนี้: สองบริษัทสลับกัน · เลือกบริษัทใหม่: {coShort(coName(x))}{' '}
+            {used ? 'ยังอยู่ในรายการแบบ “ไม่อยู่แล้ว” เพราะมีดีลหรือประวัติกับคนนี้ที่นั่น' : 'ออกจากรายการ เพราะยังไม่มีดีลหรือประวัติที่นั่น'}
+          </span>
+        )}
         <CompanyPicker
           gid={p.gid}
           company={p.company}
           onChange={(gid, company) => {
-            e.updatePerson(p.id, { gid, company }, { gid: p.gid, company: p.company });
-            onDone();
+            // one of their other companies: the two swap (the one so far stays theirs); another company: the one so
+            // far is kept as ไม่อยู่แล้ว when something is recorded with them there, else it goes
+            const theirs = gid != null ? e.personCos(p).find((k) => !k.main && k.gid === e.canonical(gid) && k.c) : undefined;
+            if (theirs) e.setMainCompany(p.id, theirs.gid!);
+            else e.updatePerson(p.id, { gid, company }, { gid: p.gid, company: p.company });
+            onDone(gid);
           }}
         />
+        </>
       )}
       <label style={labelCol}>ตำแหน่งที่บริษัทนี้<input value={f.pos} onChange={(ev) => setF({ ...f, pos: ev.target.value })} maxLength={200} autoFocus className="fld" /></label>
       <label style={labelCol}>ฝ่าย / แผนก<input value={f.dept} onChange={(ev) => setF({ ...f, dept: ev.target.value })} maxLength={200} className="fld" /></label>
@@ -203,10 +222,10 @@ function CoEdit({ p, x, mainTyped, onDone }: { p: Person; x: Co; mainTyped: bool
           <button type="button" className="pe-act" onClick={() => (e.setMainCompany(p.id, x.gid!), onDone())}>ใช้เป็นบริษัทหลัก</button>
         )}
         {!x.main && !used && (
-          <button type="button" className="quiet" onClick={() => (e.removePersonCo(p.id, x.gid!), onDone())} title="เพิ่มผิดบริษัท: เอาออกจากรายการ">เอาออก</button>
+          <button type="button" className="quiet" onClick={() => (e.removePersonCo(p.id, x.gid!), onDone(null))} title="เพิ่มผิดบริษัท: เอาออกจากรายการ">เอาออก</button>
         )}
         <span style={{ flex: 1 }} />
-        <button type="button" className="quiet" onClick={onDone}>ยกเลิก</button>
+        <button type="button" className="quiet" onClick={() => onDone()}>ยกเลิก</button>
         <button type="submit" className="btn sm pri">บันทึก</button>
       </span>
     </form>
@@ -214,7 +233,7 @@ function CoEdit({ p, x, mainTyped, onDone }: { p: Person; x: Co; mainTyped: bool
 }
 
 /** "เพิ่มบริษัท": search the companies the team has (registry and added by hand), pick one, an optional position. */
-function AddCo({ p, cos, onDone }: { p: Person; cos: Co[]; onDone: () => void }) {
+function AddCo({ p, cos, onDone }: { p: Person; cos: Co[]; onDone: (g?: number | null) => void }) {
   const { engine: e } = useApp();
   const [q, setQ] = useState('');
   const [pick, setPick] = useState<Company | null>(null);
@@ -239,7 +258,7 @@ function AddCo({ p, cos, onDone }: { p: Person; cos: Co[]; onDone: () => void })
       return;
     }
     e.addCompanyToPerson(p.id, pick.id, { pos });
-    onDone();
+    onDone(e.canonical(pick.id));
   };
   const was = (c: Company) => have.get(e.canonical(c.id));
   return (
@@ -266,7 +285,7 @@ function AddCo({ p, cos, onDone }: { p: Person; cos: Co[]; onDone: () => void })
           {norm(q).length >= 2 && !found.length && !noMain && <span className="pe-sub">ไม่พบบริษัทนี้ในทะเบียน · เพิ่มลูกค้าใหม่ก่อน แล้วค่อยเพิ่มที่นี่</span>}
           {/* (no company at all yet: their main one may be a name typed, as on the add dialog) */}
           {noMain && q.trim().length >= 2 && (
-            <button type="button" className="pe-act" style={{ alignSelf: 'flex-start' }} onClick={() => (e.updatePerson(p.id, { gid: null, company: q.trim().slice(0, 200) }, { gid: p.gid, company: p.company }), onDone())}>
+            <button type="button" className="pe-act" style={{ alignSelf: 'flex-start' }} onClick={() => (e.updatePerson(p.id, { gid: null, company: q.trim().slice(0, 200) }, { gid: p.gid, company: p.company }), onDone(null))}>
               ใช้ชื่อ “{q.trim()}” โดยไม่เชื่อมกับทะเบียน
             </button>
           )}
@@ -275,7 +294,7 @@ function AddCo({ p, cos, onDone }: { p: Person; cos: Co[]; onDone: () => void })
       <label style={labelCol}>ตำแหน่งที่บริษัทนี้ (ไม่ใส่ก็ได้)<input ref={posRef} value={pos} onChange={(ev) => setPos(ev.target.value)} maxLength={200} placeholder="เช่น ที่ปรึกษาโครงการ" className="fld" /></label>
       <span className="pc-edit-a">
         <span style={{ flex: 1 }} />
-        <button type="button" className="quiet" onClick={onDone}>ยกเลิก</button>
+        <button type="button" className="quiet" onClick={() => onDone()}>ยกเลิก</button>
         {pick && <button type="submit" className="btn sm pri">เพิ่มบริษัท</button>}
       </span>
     </form>
@@ -334,6 +353,15 @@ export function SchedBtn({ p, className = 'btn', style }: { p: Person; className
 }
 
 // ------------------------------------------------------------------ คนนี้มีอยู่แล้ว (the add dialog)
+/** The company a person is described by now (the list's company, the profile's "ตำแหน่ง @ บริษัท"): their main one
+ *  while they are still there (or are at none), else the first one they still deal with; `left`: they left it. */
+export function nowAt(e: Engine, p: Person): (Co & { more: number }) | undefined {
+  const cos = e.personCos(p);
+  const act = cos.filter((x) => x.st === 'active');
+  const main = cos.find((x) => x.main);
+  const at = main && (main.st === 'active' || !act.length) ? main : act[0] || cos[0];
+  return at && { ...at, more: act.filter((x) => x !== at).length };
+}
 /** Who a found person is, in one line: their position, main company and how many more. */
 export function whoLine(e: Engine, p: Person) {
   const cos = e.personCos(p).filter((x) => x.st === 'active');
@@ -344,7 +372,7 @@ export function whoLine(e: Engine, p: Person) {
  * The add dialog's check, under โทรศัพท์ / อีเมล: someone recorded already at another company is this contact
  * ("เพิ่มบริษัทนี้ให้คนเดิม" is the dialog's primary then, Enter chooses it); several: one to choose.
  */
-export function ExistsPrompt({ found, coName: co, onUse, onOpen }: { found: Found[]; coName: string; onUse: (pid: string) => void; onOpen: (pid: string) => void }) {
+export function ExistsPrompt({ found, coName: co, typedCo = '', onUse, onOpen }: { found: Found[]; coName: string; typedCo?: string; onUse: (pid: string) => void; onOpen: (pid: string) => void }) {
   const { engine: e } = useApp();
   const ref = useRef<HTMLDivElement>(null);
   const key = found.map((x) => x.p.id).join(',');
@@ -374,6 +402,8 @@ export function ExistsPrompt({ found, coName: co, onUse, onOpen }: { found: Foun
       {one && (
         <span className="t-sec">
           {co ? `เพิ่ม ${co} ให้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · ตำแหน่งที่พิมพ์ไว้เป็นตำแหน่งที่บริษัทนี้ · ` : 'ใช้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · '}
+          {/* (a company typed by name can't be one more company of theirs: where it goes, said) */}
+          {!co && typedCo ? `“${typedCo}” ไม่ได้อยู่ในทะเบียน จะบันทึกไว้ในโน้ตของคนเดิม (เป็นบริษัทหลักถ้ายังไม่มี) · ` : ''}
           เบอร์และอีเมลใหม่ (ถ้ามี) เพิ่มให้คนเดิม
         </span>
       )}
@@ -390,11 +420,15 @@ export function DupLine() {
   const [show, setShow] = useState(false);
   const [merge, setMerge] = useState<DupPair | null>(null);
   if (!pairs.length || !e.can('edit.cust')) return null;
-  const why = [...new Set(pairs.flatMap((x) => x.by))].filter((x) => x !== 'name').map((x) => (x === 'phone' ? 'เบอร์โทร' : 'อีเมล'));
+  // (the reasons the pairs have: the same for every pair, said as they are, "เบอร์โทรและชื่อ"; else each one that some
+  // pair has, "เบอร์โทรหรือชื่อ"; each row says its own)
+  const sig = (by: Found['by']) => (['phone', 'email', 'name'] as const).filter((k) => by.includes(k));
+  const all = new Set(pairs.map((x) => sig(x.by).join()));
+  const why = all.size === 1 ? foundWhy(sig(pairs[0].by)) : (['phone', 'email', 'name'] as const).filter((k) => pairs.some((x) => x.by.includes(k))).map((x) => (x === 'phone' ? 'เบอร์โทร' : x === 'email' ? 'อีเมล' : 'ชื่อ')).join('หรือ') + 'ตรงกัน';
   return (
     <div className="pe-sugg">
       <div className="note">
-        <span>พบรายชื่อที่อาจเป็นคนเดียวกัน {fmtN(pairs.length)} คู่{why.length ? ` (${why.join('หรือ')}ตรงกัน)` : ' (ชื่อตรงกัน)'}</span>
+        <span>พบรายชื่อที่อาจเป็นคนเดียวกัน {fmtN(pairs.length)} คู่ ({why})</span>
         <button onClick={() => setShow(!show)} aria-expanded={show} className="lnk" style={{ fontSize: 13 }}>{show ? 'ซ่อนรายการ' : 'ดูและรวม'}</button>
       </div>
       {show && (
@@ -448,13 +482,14 @@ export function MergePick({ p, onClose }: { p: Person; onClose: () => void }) {
   );
 }
 
-/** One record's card in the merge dialog: what it holds, and what it is chosen as. */
-function MergeCard({ e, p, keep, onPick }: { e: Engine; p: Person; keep: boolean; onPick: () => void }) {
+/** One record's card in the merge dialog: what it holds, and what it is chosen as (one radio of "เก็บรายชื่อไหน":
+ *  the chosen one is the Tab stop, the arrow keys move the choice). */
+function MergeCard({ e, p, keep, onPick, onKey }: { e: Engine; p: Person; keep: boolean; onPick: () => void; onKey: (ev: React.KeyboardEvent<HTMLButtonElement>) => void }) {
   const cos = e.personCos(p);
   const nTasks = e.personTasks(p).filter((t) => t.pid && e.idsOf(p.id).includes(t.pid)).length;
   const nContacts = e.personLogs(p).filter((x) => CONTACT.includes(x.l.type)).length + e.personActs(p.id).length;
   return (
-    <button type="button" className={'pc-mcard' + (keep ? ' keep' : '')} aria-pressed={keep} onClick={onPick}>
+    <button type="button" role="radio" className={'pc-mcard' + (keep ? ' keep' : '')} aria-checked={keep} tabIndex={keep ? 0 : -1} onClick={onPick} onKeyDown={onKey} data-pid={p.id}>
       <span className="t-meta">{keep ? 'เก็บรายชื่อนี้' : 'รวมเข้ามา แล้วไม่แสดงแยกอีก'}</span>
       <span className="pc-mcard-n">
         <PersonAvatar p={p} size={32} />
@@ -474,6 +509,15 @@ export function MergeDialog({ a, b, why, onClose }: { a: Person; b: Person; why:
   // the record with more on it stays by default (more companies, deals, older)
   const [swap, setSwap] = useState(() => e.personDeals(b.id).length + e.personCos(b).length > e.personDeals(a.id).length + e.personCos(a).length);
   const keep = swap ? b : a, gone = swap ? a : b;
+  const cards = useRef<HTMLDivElement>(null);
+  // the arrow keys move the choice, and the keyboard with it (a radio group)
+  const onKey = (ev: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) return;
+    ev.preventDefault();
+    const next = keep.id === a.id ? b : a;
+    setSwap(next.id === b.id);
+    requestAnimationFrame(() => cards.current?.querySelector<HTMLElement>(`[data-pid="${CSS.escape(next.id)}"]`)?.focus());
+  };
   const plan = mergePlan(keep, gone, e.personCos(keep), e.personCos(gone));
   const after = { ...keep, ...plan.patch } as Person;
   const kc = e.personCos(keep);
@@ -505,11 +549,12 @@ export function MergeDialog({ a, b, why, onClose }: { a: Person; b: Person; why:
         <span className="t-sec">
           สองรายชื่อนี้น่าจะเป็นคนเดียวกัน{why.length ? ` (${foundWhy(why)})` : ''} รวมแล้วเหลือรายชื่อเดียว ดีล ประวัติการติดต่อ นัด และโน้ตของทั้งสองรายชื่ออยู่ที่คนเดียวกัน
         </span>
-        <div className="pc-mcards">
-          <MergeCard e={e} p={keep} keep onPick={() => {}} />
-          <MergeCard e={e} p={gone} keep={false} onPick={() => setSwap(!swap)} />
+        <span className="pe-k" id="pc-keep-h">เก็บรายชื่อไหน (แตะอีกรายชื่อเพื่อเก็บรายชื่อนั้นแทน)</span>
+        <div className="pc-mcards" role="radiogroup" aria-labelledby="pc-keep-h" ref={cards}>
+          {/* (the two in the same places whichever is kept) */}
+          <MergeCard e={e} p={a} keep={keep.id === a.id} onPick={() => setSwap(false)} onKey={onKey} />
+          <MergeCard e={e} p={b} keep={keep.id === b.id} onPick={() => setSwap(true)} onKey={onKey} />
         </div>
-        <button type="button" className="pe-act" style={{ alignSelf: 'flex-start' }} onClick={() => setSwap(!swap)}>สลับ เก็บอีกรายชื่อแทน</button>
         <div className="pc-after">
           <span className="t-meta">หลังรวม</span>
           <dl>

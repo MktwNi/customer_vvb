@@ -23,6 +23,9 @@ export const ROLES = Object.keys(ROLE_TH) as PersonRole[];
 /** Person fields a person edits (the rest is bookkeeping). */
 export const PERSON_FIELDS = ['name', 'nick', 'pos', 'dept', 'role', 'gid', 'company', 'phone', 'email', 'line', 'owner', 'status', 'note'] as const;
 export type PersonForm = Pick<Person, (typeof PERSON_FIELDS)[number]>;
+/** A person's main company and their position, department, role and status there: written together (engine
+ *  updatePerson), so two changes made at once never leave one company with the other's position or status. */
+export const MAIN_F = ['gid', 'company', 'pos', 'dept', 'role', 'status'] as const;
 export const NOTE_CAP = 5000;
 
 const str = (v: unknown, max = 300) => (v == null ? '' : String(v)).slice(0, max);
@@ -100,7 +103,12 @@ export const suggestionId = (shared: number | null, company: string, name: strin
 
 /** `same`: an existing person (at another company) this contact surely is (findExisting): "เพิ่ม <บริษัท> ให้ <ชื่อ>"
  *  instead of a second record of them ("เพิ่มทั้งหมด" leaves it). */
-export interface Suggestion { id: string; name: string; gid: number | null; company: string; phone: string; email: string; from: string; same?: Person }
+export interface Suggestion {
+  id: string; name: string; gid: number | null; company: string; phone: string; email: string; from: string; same?: Person;
+  /** another suggestion above it that is the same human (the same mobile, e-mail or full name typed at several
+   *  companies, e.g. a consultant): "เพิ่มทั้งหมด" makes them one person with each company (suggestionHeads) */
+  dupOf?: { id: string; name: string; company: string };
+}
 
 /**
  * Contact persons named in the Sales Tracker (a deal's ผู้ติดต่อ) and in customers added by hand that
@@ -154,15 +162,56 @@ export function personSuggestions(
     if ([...keys].some((k) => { const x = stableId('s', k, nk); return hidden.has(x) || ids.has(x); })) return;
     const ph = phoneKeys(phone), em = email.trim().toLowerCase();
     if (known.some((k) => [...keys].some((x) => k.co.has(x)) && (k.name === nk || (ph.length > 0 && ph.some((x) => k.phones.includes(x))) || (!!em && k.email === em)))) return;
-    // someone already recorded at another company (same mobile, e-mail or full name): add this company to them
-    const f = shared != null && find ? find({ name, phone, email }, () => false, more.coPhones?.(shared) || []) : [];
+    // someone already recorded at another company (same mobile, e-mail or full name): add this company to them; a
+    // company only named (a deal not linked to the registry): the person is used, their numbers kept
+    const f = find ? find({ name, phone, email }, () => false, shared != null ? more.coPhones?.(shared) || [] : []) : [];
     out.set(id, { id, name, gid: shared ?? gid, company, phone, email, from, ...(f.length === 1 ? { same: f[0].p } : {}) });
   };
   // (`linked`: the deal's typed name is a person linked to it already, whatever their company; a typed name the
   // deal's linked people are not is still someone to record)
   deals.forEach((d) => d.contactName && !linked(d) && add(d.contactName, d.gid, d.client, d.phone, d.email, 'Sales Tracker ปี ' + d.year));
   custom.forEach((c) => c.contact && add(c.contact, c.id, c.name, '', '', 'ลูกค้าที่เพิ่มเอง'));
-  return [...out.values()].sort((a, b) => a.company.localeCompare(b.company, 'th') || a.name.localeCompare(b.name, 'th'));
+  const list = [...out.values()].sort((a, b) => a.company.localeCompare(b.company, 'th') || a.name.localeCompare(b.name, 'th'));
+  const heads = suggestionHeads(list);
+  const byId = new Map(list.map((s) => [s.id, s]));
+  return list.map((s) => {
+    const h = heads.get(s.id);
+    const x = h && h !== s.id ? byId.get(h) : undefined;
+    return x ? { ...s, dupOf: { id: x.id, name: x.name, company: x.company } } : s;
+  });
+}
+/**
+ * Suggestions that are one human (not recorded yet: none has `same`): the same mobile number, the same e-mail (never
+ * an office's) or the same full name (two words or more) typed at several companies. Each one's head: the first of
+ * its group in `list`'s order (who "เพิ่มทั้งหมด" records; the others become their companies).
+ */
+export function suggestionHeads(list: Pick<Suggestion, 'id' | 'name' | 'phone' | 'email' | 'same'>[]): Map<string, string> {
+  const up = new Map<string, string>();
+  const root = (x: string): string => {
+    const u = up.get(x);
+    return !u || u === x ? x : root(u);
+  };
+  const first = new Map<string, string>();
+  const at = new Map(list.map((s, i) => [s.id, i]));
+  list.forEach((s) => {
+    up.set(s.id, s.id);
+    if (s.same) return;
+    const keys = [
+      ...phoneKeys(s.phone).filter(isMobile).map((k) => 't' + k),
+      ...splitList(s.email).map(emailKey).filter((k) => !isRoleMail(k)).map((k) => 'm' + k),
+      ...(nameWords(s.name) >= 2 && nameKey(s.name).length > 1 ? ['n' + nameKey(s.name)] : []),
+    ];
+    keys.forEach((k) => {
+      const f = first.get(k);
+      if (!f) return void first.set(k, s.id);
+      const a = root(f), b = root(s.id);
+      // (the one earlier in the list heads the group)
+      if (a !== b) (at.get(a)! < at.get(b)! ? up.set(b, a) : up.set(a, b));
+    });
+  });
+  const out = new Map<string, string>();
+  list.forEach((s) => out.set(s.id, root(s.id)));
+  return out;
 }
 
 // ------------------------------------------------------------------ a deal's contact (ผู้ติดต่อของดีล)
@@ -353,11 +402,14 @@ export interface PersonCo {
   at: string; by: string; upAt: string; key: string;
 }
 /**
- * A person's companies, the main one first, then the others in the order they were added. `recs`: their company
- * records (key, value), on or off; `canon`: the company an id is now (merged ids collapse, the newest record of a
- * company wins). A record of the main company is left out (the person record says it), so is one taken off.
+ * A person's companies, the main one first, then the others in the order added. `recs`: their company records (key,
+ * value), on or off; `canon`: the company an id is now (merged ids collapse); `ids`: whose records they are (the
+ * person and the records merged into them; default the person). Several records of one company (two registry
+ * records merged since, a record of a merged-away person): the newest one that is on wins, the newest off one only
+ * when none is on (taken off as a duplicate company before the merge, it never hides the one still theirs). A record
+ * of the main company is left out (the person record says it), so is one taken off.
  */
-export function cosOf(p: Person, recs: [string, PCo][], canon: (gid: number) => number = (g) => g): PersonCo[] {
+export function cosOf(p: Person, recs: [string, PCo][], canon: (gid: number) => number = (g) => g, ids: ReadonlySet<string> = new Set([p.id])): PersonCo[] {
   const mainG = p.gid != null ? canon(p.gid) : null;
   const out: PersonCo[] = [];
   if (p.gid != null || p.company.trim())
@@ -365,10 +417,10 @@ export function cosOf(p: Person, recs: [string, PCo][], canon: (gid: number) => 
   const by = new Map<number, { k: string; r: PCo }>();
   recs.forEach(([k, r]) => {
     const x = personKey(k);
-    if (!x || x.co == null || x.pid !== p.id) return;
+    if (!x || x.co == null || !ids.has(x.pid)) return;
     const g = canon(x.co);
     const cur = by.get(g);
-    if (!cur || (r.upAt || r.at) > (cur.r.upAt || cur.r.at)) by.set(g, { k, r });
+    if (!cur || newer(r, cur.r)) by.set(g, { k, r });
   });
   const extra: PersonCo[] = [];
   by.forEach(({ k, r }, g) => {
@@ -378,17 +430,45 @@ export function cosOf(p: Person, recs: [string, PCo][], canon: (gid: number) => 
   extra.sort((a, b) => a.at.localeCompare(b.at) || a.gid! - b.gid!);
   return out.concat(extra);
 }
-/** The newest record (on or off) a person has for a company (any of its ids): the key a change of it goes to. */
-export function coRecOf(pid: string, gid: number, recs: [string, PCo][], canon: (gid: number) => number = (g) => g): [string, PCo] | null {
+/** Of two records of one company: the one that is on, else the newer (cosOf). */
+const newer = (r: PCo, cur: PCo) => (r.on !== cur.on ? !!r.on : (r.upAt || r.at) > (cur.upAt || cur.at));
+/** The record a change of a person's company goes to (any of its ids; the person's or a record merged into them):
+ *  the one cosOf shows (the newest that is on, else the newest), null when they have none. */
+export function coRecOf(pid: string | ReadonlySet<string>, gid: number, recs: [string, PCo][], canon: (gid: number) => number = (g) => g): [string, PCo] | null {
+  const ids = typeof pid === 'string' ? new Set([pid]) : pid;
   const g = canon(gid);
   let best: [string, PCo] | null = null;
   recs.forEach(([k, r]) => {
     const x = personKey(k);
-    if (!x || x.co == null || x.pid !== pid || canon(x.co) !== g) return;
-    if (!best || (r.upAt || r.at) > (best[1].upAt || best[1].at)) best = [k, r];
+    if (!x || x.co == null || !ids.has(x.pid) || canon(x.co) !== g) return;
+    if (!best || newer(r, best[1])) best = [k, r];
   });
   return best;
 }
+/** Every record of a person's company that is on (any of its ids): "เอาออก" takes each off. */
+export function coRecsOn(ids: ReadonlySet<string>, gid: number, recs: [string, PCo][], canon: (gid: number) => number = (g) => g): [string, PCo][] {
+  const g = canon(gid);
+  return recs.filter(([k, r]) => {
+    const x = personKey(k);
+    return !!x && x.co != null && ids.has(x.pid) && canon(x.co) === g && !!r.on;
+  });
+}
+
+/**
+ * A merge alias, `person/<gone>/into/<keep>` (a PLink's fields), with the status the merged-away record had before
+ * the merge (`st0`): the merge marks that record ไม่อยู่แล้ว (so a tab on an older build stops offering it), and a
+ * record that turns out not merged after all (two merges of one pair made at once the other way round, or the kept
+ * person deleted meanwhile) is shown with the status it had.
+ */
+export interface PInto extends PLink { st0?: 'active' | 'left' }
+export function toPInto(v: unknown): PInto | null {
+  const l = toPLink(v);
+  if (!l) return null;
+  const s = (v as Record<string, unknown>).st0;
+  return s === 'active' || s === 'left' ? { ...l, st0: s } : l;
+}
+/** What an alias is written as. */
+export const intoValue = (l: PInto) => ({ on: l.on, at: l.at, by: l.by, ...(l.st0 ? { st0: l.st0 } : {}) });
 
 /**
  * Who each merged-away person is now (gone → kept), from the alias records `<gone>/into/<keep>` (the newest per
@@ -474,11 +554,19 @@ export interface DupPair { key: string; a: Person; b: Person; by: Found['by'] }
 export const pairKey = (a: string, b: string) => (a < b ? a + '|' + b : b + '|' + a);
 /**
  * Pairs of people (alive, not merged away) that may be one human: the same mobile number held by just the two
- * (never a company's own number, `coPhones`), the same e-mail held by just the two, or the same full name (two
- * words or more). `dismissed`: pairs said "ไม่ใช่คนเดียวกัน" on this browser.
+ * (never a company's own number: `coPhones`, every company's numbers, or per person their companies and each one's
+ * numbers ([company, number]) — then a number counts unless it is the own number of a company both deal with: a
+ * customer added by hand often has its contact's mobile as its number, and that never hides a second record of them
+ * at another company), the same e-mail held by just the two, or the same full name (two words or more).
+ * `dismissed`: pairs said "ไม่ใช่คนเดียวกัน" on this browser.
  */
-export function dupPairs(people: Person[], coPhones: Iterable<string> = [], dismissed: Set<string> = new Set()): DupPair[] {
-  const co = new Set(coPhones);
+export function dupPairs(people: Person[], coPhones: Iterable<string> | ((p: Person) => Iterable<[number | string, string]>) = [], dismissed: Set<string> = new Set()): DupPair[] {
+  const per = typeof coPhones === 'function' ? coPhones : null;
+  const co = new Set(per ? [] : (coPhones as Iterable<string>));
+  const own = new Map<string, Set<string>>();
+  const ownOf = (p: Person) => own.get(p.id) || (own.set(p.id, new Set([...(per ? per(p) : [])].map(([c, k]) => c + '|' + k))), own.get(p.id)!);
+  /** Is `k` the own number of a company both deal with. */
+  const shared = (a: Person, b: Person, k: string) => [...ownOf(a)].some((x) => x.endsWith('|' + k) && ownOf(b).has(x));
   const groups = new Map<string, Person[]>();
   const put = (k: string, p: Person) => (groups.get(k) || groups.set(k, []).get(k)!).push(p);
   people.forEach((p) => {
@@ -495,6 +583,7 @@ export function dupPairs(people: Person[], coPhones: Iterable<string> = [], dism
       for (let j = i + 1; j < list.length; j++) {
         const k = pairKey(list[i].id, list[j].id);
         if (dismissed.has(k)) continue;
+        if (why === 'phone' && per && shared(list[i], list[j], g.slice(1))) continue;
         const cur = pairs.get(k);
         if (cur) !cur.by.includes(why) && cur.by.push(why);
         else pairs.set(k, { key: k, a: list[i], b: list[j], by: [why] });
@@ -520,6 +609,15 @@ export function reachPatch(p: Pick<Person, 'phone' | 'email'>, t: { phone: strin
   const ph = union(p.phone, t.phone, phoneKeys), em = union(p.email, t.email, (x) => [emailKey(x)]);
   if (ph !== p.phone.trim() && ph.length <= 200) out.phone = ph;
   if (em !== p.email.trim() && em.length <= 200) out.email = em;
+  return out;
+}
+
+/** The phone numbers, e-mails and LINE IDs a person's record gets from another record of them (the ones it lacks;
+ *  {} when none): what a teammate saved on a record merged into them after the merge (engine lateReach). */
+export function reachAll(p: Pick<Person, 'phone' | 'email' | 'line'>, t: Pick<Person, 'phone' | 'email' | 'line'>): { phone?: string; email?: string; line?: string } {
+  const out: { phone?: string; email?: string; line?: string } = reachPatch(p, t);
+  const ln = union(p.line, t.line, (x) => [x.trim().toLowerCase()]);
+  if (ln !== p.line.trim() && ln.length <= 100) out.line = ln;
   return out;
 }
 

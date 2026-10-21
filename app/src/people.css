@@ -44,9 +44,14 @@
 .pc-after dl>div{display:grid;grid-template-columns:120px minmax(0,1fr);gap:18px;align-items:baseline}
 .pc-after dt{font-size:var(--fs-sec);color:var(--ink-2)}
 .pc-after dd{margin:0;font-size:var(--fs-body);color:var(--ink);overflow-wrap:anywhere}
+/* numbers a teammate saved on a record merged into this person after the merge (the info card) */
+.pe-late{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;border:1px solid var(--tint-line);background:var(--tint);border-radius:var(--r-inner);padding:8px 12px;overflow-wrap:anywhere}
 @media (max-width:560px){
   .pc-after dl>div{grid-template-columns:minmax(0,1fr);gap:2px}
   .pc-exists-p{flex-wrap:wrap}
+  /* a suggestion's or a likely pair's buttons go under its words (the words keep the row's width) */
+  .pe-sugg-row{flex-wrap:wrap}
+  .pe-sugg-row>span:first-child{flex:1 1 100%}
 }
 @media (forced-colors:active){.pc-mcard.keep{outline:2px solid Highlight}}
 @media (prefers-reduced-motion:reduce){.pc-name,.pc-mcard{transition:none}}

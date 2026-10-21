@@ -5,8 +5,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  aliasIndex, coKey, coRecOf, cosOf, dupPairs, findExisting, foundWhy, intoKey, isMobile, linkIndex, mergePlan, nameWords, pairKey, pcoValue,
+  aliasIndex, coKey, coRecOf, coRecsOn, cosOf, dupPairs, findExisting, foundWhy, intoKey, isMobile, linkIndex, mergePlan, nameWords, pairKey, pcoValue,
   peopleCsv, personIdOf, personKey, personSuggestions, reachPatch, toPCo, toPerson, type PCo, type PLink,
+  intoValue, reachAll, suggestionHeads, toPInto,
 } from './people';
 import { applyRow, keyOf, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 import { emptySales, newDeal } from './sales';
@@ -109,10 +110,18 @@ describe('a person\'s companies', () => {
       [60, false, '', 'left'],
     ]);
     expect(cos[1].key).toBe('p1/co/31');
-    // a record taken off after it was on: off (the newest)
-    expect(cosOf(p, [['p1/co/30', C(1)], ['p1/co/31', C(2, { on: 0 })]], canon).length).toBe(1);
-    expect(coRecOf('p1', 30, [['p1/co/30', C(1)], ['p1/co/31', C(2, { on: 0 })]], canon)![0]).toBe('p1/co/31');
+    // two registry records of one company merged since, the person added to both and one taken off (the wrong
+    // duplicate): the one still on is theirs, whichever is newer; the change of it goes there
+    expect(cosOf(p, [['p1/co/30', C(1, { pos: 'ที่ปรึกษา' })], ['p1/co/31', C(2, { on: 0 })]], canon).map((x) => [x.gid, x.pos, x.key])).toEqual([[7, 'ที่ปรึกษาโครงการ', ''], [30, 'ที่ปรึกษา', 'p1/co/30']]);
+    expect(coRecOf('p1', 31, [['p1/co/30', C(1)], ['p1/co/31', C(2, { on: 0 })]], canon)![0]).toBe('p1/co/30');
+    // every record off: off, the newest is where a change goes
+    expect(cosOf(p, [['p1/co/30', C(1, { on: 0 })], ['p1/co/31', C(2, { on: 0 })]], canon).length).toBe(1);
+    expect(coRecOf('p1', 30, [['p1/co/30', C(1, { on: 0 })], ['p1/co/31', C(2, { on: 0 })]], canon)![0]).toBe('p1/co/31');
+    expect(coRecsOn(new Set(['p1']), 30, [['p1/co/30', C(1)], ['p1/co/31', C(2)], ['p1/co/32', C(3)]], canon).map((x) => x[0])).toEqual(['p1/co/30', 'p1/co/31']);
     expect(coRecOf('p1', 99, [['p1/co/30', C(1)]], canon)).toBeNull();
+    // a record merged into them (`ids`) is theirs
+    expect(cosOf(p, [['g1/co/40', C(1, { pos: 'กรรมการ' })]], canon, new Set(['p1', 'g1'])).map((x) => [x.gid, x.pos])).toEqual([[7, 'ที่ปรึกษาโครงการ'], [40, 'กรรมการ']]);
+    expect(cosOf(p, [['g1/co/40', C(1)]], canon).length).toBe(1);
   });
   it('a person with a name typed as their company: that is their main one; with none at all, only the others', () => {
     expect(cosOf(P('p2', { gid: null, company: 'ร้านพิมพ์เอง' }), []).map((x) => [x.gid, x.company, x.main])).toEqual([[null, 'ร้านพิมพ์เอง', true]]);
@@ -212,5 +221,71 @@ describe('suggestions and the CSV', () => {
     expect(head.split(',')[4]).toBe('"บริษัทอื่นที่ติดต่อด้วย"');
     expect(row).toContain('"หลัก","ที่ปรึกษาโครงการ","ซากิ (ที่ปรึกษาด้าน CFO) | ฝาจีบ (ไม่อยู่แล้ว)","=""080-000-0303""","p@example.com"');
     expect(row).toContain('"ยังติดต่อได้"');
+  });
+});
+
+describe('the review fixes (pure)', () => {
+  it('suggestions that are one human (a mobile, an e-mail or a full name at several companies) are one group, headed by the first', () => {
+    const S = (id: string, name: string, phone = '', email = '') => ({ id, name, phone, email });
+    const list = [
+      S('a', 'ดร.พรวิมล ตัวอย่าง', '080-000-0303'),
+      S('b', 'คุณวิภา ศรีสุข', '02-111-0000'),
+      S('c', 'คุณวิม', '0800000303'), // the same mobile
+      S('d', 'พรวิมล ตัวอย่าง', '', 'pw@example.com'), // the same full name
+      S('e', 'คุณวิภา', '02-111-0000'), // a landline: never
+      S('f', 'คุณนก', '', 'pw@example.com'), // the e-mail of d: so of a
+      S('g', 'คุณแนน', '', 'info@example.com'),
+      S('h', 'คุณนิด', '', 'info@example.com'), // an office's address: never
+    ];
+    const h = suggestionHeads(list);
+    expect(list.map((x) => h.get(x.id))).toEqual(['a', 'b', 'a', 'a', 'e', 'a', 'g', 'h']);
+    // the earlier one heads even when a later key joins two groups
+    const h2 = suggestionHeads([S('x', 'คุณหนึ่ง', '0810000001'), S('y', 'คุณสอง', '0810000002'), S('z', 'คุณสาม', '0810000002 | 0810000001')]);
+    expect([...h2.values()]).toEqual(['x', 'x', 'x']);
+    // one already recorded (`same`) is not grouped
+    expect(suggestionHeads([{ ...S('s', 'คุณหนึ่ง', '0810000001'), same: P('p') }, S('t', 'คุณหนึ่ง', '0810000001')]).get('t')).toBe('t');
+  });
+
+  it('"เพิ่มทั้งหมด"\'s list says which suggestion is the same human as one above; a deal not linked to the registry gets `same` too', () => {
+    const pw = P('pw', { name: 'ดร.พรวิมล ตัวอย่าง', gid: 7, phone: '080-000-0303' });
+    const d1 = newDeal({ id: 'd1', client: 'ก', gid: 26, contactName: 'ดร.พรวิมล ตัวอย่าง', phone: '080-000-0404' }, 'เอ');
+    const d2 = newDeal({ id: 'd2', client: 'ข', gid: 27, contactName: 'ดร.พรวิมล ตัวอย่าง', phone: '080-000-0404' }, 'เอ');
+    const s = personSuggestions([], [d1, d2], [], (x) => x, new Set(), (x) => [x], () => false, { live: [] });
+    expect(s.map((x) => [x.gid, x.dupOf?.id])).toEqual([[26, undefined], [27, s[0].id]]);
+    // a client typed without a registry company, the person's mobile: them
+    const d3 = newDeal({ id: 'd3', client: 'แสนสิริ กรีน', gid: null, contactName: 'คุณวิภา', phone: '080-000-0303' }, 'เอ');
+    const s3 = personSuggestions([pw], [d3], [], () => null, new Set(), (x) => [x], () => false, { live: [pw] });
+    expect(s3.map((x) => [x.gid, x.same?.id])).toEqual([[null, 'pw']]);
+  });
+
+  it('likely pairs: a customer\'s own number that is a contact\'s mobile hides no second record of them elsewhere; a switchboard of a company of both still does', () => {
+    const a = P('a', { name: 'คุณกมล รักษ์โลก', gid: 7, phone: '081-234-0000' });
+    const b = P('b', { name: 'คุณกมล', gid: 9, phone: '0812340000' });
+    const phones: Record<string, [number, string][]> = { a: [[7, '021110000']], b: [[9, '0812340000']] };
+    expect(dupPairs([a, b], (p) => phones[p.id]).map((x) => [x.key, x.by])).toEqual([[pairKey('a', 'b'), ['phone']]]);
+    // (every company's numbers at once, as before: hidden)
+    expect(dupPairs([a, b], ['0812340000'])).toEqual([]);
+    // two customers added by hand, each with the mobile as its number: still a pair
+    expect(dupPairs([a, b], (p) => (p.id === 'a' ? [[8, '0812340000']] : [[9, '0812340000']])).length).toBe(1);
+    // both deal with a company whose own number it is: the office's
+    expect(dupPairs([a, b], () => [[9, '0812340000']])).toEqual([]);
+  });
+
+  it('an alias carries the status the merged record had; read defensively; written without an order', () => {
+    expect(toPInto({ on: 1, at: T(1), by: 'เอ', st0: 'active' })).toMatchObject({ on: 1, st0: 'active' });
+    expect(toPInto({ on: 1, at: T(1), by: 'เอ', st0: 'x' })).not.toHaveProperty('st0');
+    expect(toPInto(null)).toBeNull();
+    expect(intoValue({ on: 1, at: T(1), by: 'เอ', o: 5, st0: 'left' })).toEqual({ on: 1, at: T(1), by: 'เอ', st0: 'left' });
+    // the sync keeps it
+    const s = state();
+    applyRow(s, { seq: 1, k: 'person/g/into/k', v: { on: 1, at: T(1), by: 'เอ', st0: 'active' }, del: false, by: 'เอ', at: T(1) }, noEffects());
+    expect(s.plinks!['g/into/k']).toMatchObject({ st0: 'active' });
+    expect(localRecords(s).get('person/g/into/k')).toEqual({ on: 1, at: T(1), by: 'เอ', st0: 'active' });
+  });
+
+  it('what another record of a person adds to theirs: numbers, e-mails and LINE IDs they lack', () => {
+    const k = P('k', { phone: '080-000-0303', email: 'a@example.com', line: 'pw.demo' });
+    expect(reachAll(k, { phone: '0800000303 | 089-999-0000', email: 'A@example.com', line: 'PW.demo | pw.two' })).toEqual({ phone: '080-000-0303 | 089-999-0000', line: 'pw.demo | pw.two' });
+    expect(reachAll(k, { phone: '', email: '', line: '' })).toEqual({});
   });
 });

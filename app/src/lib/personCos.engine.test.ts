@@ -216,9 +216,9 @@ describe('one person, several companies', () => {
     }
     const old = sim.post({ action: 'pull', key: KEY, since: 0, cv: 5 }).rows!.filter((r) => r.k === 'person/' + pid).at(-1)!;
     expect(toPerson(old.v, pid)).toMatchObject({ gid: c2.id, pos: 'ที่ปรึกษา' });
-    // "เปลี่ยน" the main company to one of theirs: that one's record goes off (said once, as the main one)
+    // "เปลี่ยน" the main company to one of theirs: the two swap (said once each; the one so far stays theirs)
     A.e.updatePerson(pid, { gid: c1.id, company: c1.name });
-    expect(cosOf(A, pid).map((x) => x[0])).toEqual([c1.id]);
+    expect(cosOf(A, pid).map((x) => [x[0], x[1], x[3]])).toEqual([[c1.id, true, 'active'], [c2.id, false, 'active']]);
   });
 
   it('a tab on the older build (cv 5): no phantom person from the records; its whole-record writes of the people keep the companies and the merge', async () => {
@@ -490,5 +490,286 @@ describe('who may change a person\'s companies and merge', () => {
       expect(t.e.livePeople().map((p) => p.id)).toEqual([pid]);
       expect(t.e.dealPeople(mine.id).map((p) => p.id)).toEqual([pid]);
     }
+  });
+});
+
+// ---------------------------------------------------------------- the review's findings (round 1), each as it was found
+describe('review fixes: changes made at the same time, merges, the main company', () => {
+  it('"เพิ่มทั้งหมด" for one contact typed at three companies: one person with the three companies (two browsers at once: still one)', async () => {
+    const [A, B] = await team();
+    const [c1, c2, c3] = companies(A);
+    for (const c of [c1, c2, c3]) A.e.addDeal({ gid: c.id, year: '2569', contactName: 'ดร.พรวิมล ตัวอย่าง', phone: '080-000-0303' });
+    await settle(A, B);
+    const s = A.e.personSuggestions();
+    // the list says it: one row, then "the same as above" twice
+    expect(s.map((x) => [x.gid, !!x.same, x.dupOf?.id || ''])).toEqual(expect.arrayContaining([[s[0].gid, false, '']]));
+    expect(s.filter((x) => x.dupOf?.id === s[0].id).length).toBe(2);
+    const all = (t: Tab) => t.e.personSuggestions().filter((x) => !x.same).map((x) => ({ id: x.id, name: x.name, gid: x.gid, company: x.company, phone: x.phone, email: x.email }));
+    expect(A.e.addPeople(all(A))).toBe(1);
+    expect(B.e.addPeople(all(B))).toBe(1);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.livePeople().length).toBe(1);
+      const p = t.e.livePeople()[0];
+      expect(cosOf(t, p.id).map((x) => x[0]).sort()).toEqual([c1.id, c2.id, c3.id].sort());
+      expect(t.e.likelyDups()).toEqual([]);
+      expect(t.e.personSuggestions()).toEqual([]);
+    }
+  });
+
+  it('a teammate who has not had the merge yet adds a company and an e-mail to the merged-away record: the company is the kept person\'s; the e-mail is shown on their page, one tap keeps it', async () => {
+    const [A, B] = await team();
+    const [c1, c2, c3] = companies(A);
+    const keep = A.e.addPerson({ name: 'ดร.พรวิมล ตัวอย่าง', gid: c1.id, phone: '080-000-0303' });
+    const gone = A.e.addPerson({ name: 'พรวิมล ตัวอย่าง', gid: c2.id, phone: '0800000303' });
+    await settle(A, B);
+    later();
+    A.e.mergePeople(keep, gone);
+    later(1000);
+    B.e.addCompanyToPerson(gone, c3.id, { pos: 'ที่ปรึกษา' });
+    B.e.updatePerson(gone, { email: 'pw.new@example.com' }, { email: '' });
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(cosOf(t, keep)).toEqual([[c1.id, true, '', 'active'], [c2.id, false, '', 'active'], [c3.id, false, 'ที่ปรึกษา', 'active']]);
+      expect(t.e.peopleOf(c3.id).map((p) => [p.id, p.pos])).toEqual([[keep, 'ที่ปรึกษา']]);
+      expect(t.e.livePeople().map((p) => p.id)).toEqual([keep]);
+      expect(t.e.lateReach(t.e.people[keep])).toMatchObject({ patch: { email: 'pw.new@example.com' }, from: [{ id: gone }] });
+    }
+    // "เพิ่มให้คนนี้"
+    const late = A.e.lateReach(A.e.people[keep])!;
+    A.e.updatePerson(keep, late.patch, { email: '' });
+    await settle(A, B);
+    expect(B.e.people[keep].email).toBe('pw.new@example.com');
+    expect(B.e.lateReach(B.e.people[keep])).toBeNull();
+    // the merge's own write of the other record is not "saved since"
+    expect(A.e.lateReach(A.e.people[keep])).toBeNull();
+  });
+
+  it('a merge while a teammate deletes the kept person: the other record is shown again, as it was, in their place (deals included); a deletion made knowing the merge takes both', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = companies(A);
+    const keep = A.e.addPerson({ name: 'ดร.พรวิมล ตัวอย่าง', gid: c1.id, phone: '080-000-0303' });
+    const gone = A.e.addPerson({ name: 'พรวิมล ตัวอย่าง', gid: c2.id, phone: '0800000303' });
+    const d = A.e.addDeal({ gid: c2.id, year: '2569' });
+    A.e.linkPerson(d.id, gone);
+    await settle(A, B);
+    later();
+    A.e.mergePeople(keep, gone);
+    B.e.deletePerson(keep);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.livePeople().map((p) => [p.id, p.status])).toEqual([[gone, 'active']]);
+      expect(t.e.personActive(t.e.people[gone])).toBe(true);
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([gone]);
+      expect(t.e.personDeals(gone).map((x) => x.id)).toEqual([d.id]);
+      expect(t.e.peopleOf(c2.id).map((p) => [p.id, p.status])).toEqual([[gone, 'active']]);
+    }
+    // its next save writes the status it shows
+    A.e.updatePerson(gone, { nick: 'วิม' }, { nick: '' });
+    await settle(A, B);
+    expect(last('person/' + gone)!.v).toMatchObject({ status: 'active', nick: 'วิม' });
+    // the deliberate way (knowing the merge): both go
+    const k2 = A.e.addPerson({ name: 'คุณเอกชัย มั่นคง', gid: c1.id, phone: '081-111-2222' });
+    const g2 = A.e.addPerson({ name: 'เอกชัย มั่นคง', gid: c2.id, phone: '0811112222' });
+    A.e.mergePeople(k2, g2);
+    A.e.deletePerson(k2);
+    await settle(A, B);
+    for (const t of [A, B]) expect(t.e.livePeople().map((p) => p.id)).toEqual([gone]);
+  });
+
+  it('two people make two different companies the main one at the same time: neither company is lost', async () => {
+    const [A, B] = await team();
+    const [c1, c2, c3] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณวรรณา ตัวอย่าง', gid: c1.id, pos: 'ผู้จัดการ' });
+    A.e.addCompanyToPerson(pid, c2.id, { pos: 'ที่ปรึกษา' });
+    A.e.addCompanyToPerson(pid, c3.id, { pos: 'กรรมการ' });
+    await settle(A, B);
+    later();
+    A.e.setMainCompany(pid, c2.id);
+    B.e.setMainCompany(pid, c3.id);
+    await settle(A, B);
+    for (const t of [A, B]) expect(cosOf(t, pid)).toEqual([[c3.id, true, 'กรรมการ', 'active'], [c1.id, false, 'ผู้จัดการ', 'active'], [c2.id, false, 'ที่ปรึกษา', 'active']]);
+  });
+
+  it('a swap of the main company and ไม่อยู่แล้ว at the main company at the same time: either one wins whole, never ไม่อยู่แล้ว on the other company', async () => {
+    for (const order of ['swap-last', 'left-last'] as const) {
+      const [A, B] = await team();
+      const [c1, c2] = companies(A);
+      const pid = A.e.addPerson({ name: 'คุณวรรณา ตัวอย่าง', gid: c1.id, pos: 'ผู้จัดการ' });
+      A.e.addCompanyToPerson(pid, c2.id, { pos: 'ที่ปรึกษา' });
+      await settle(A, B);
+      later();
+      A.e.setMainCompany(pid, c2.id);
+      B.e.updatePersonCo(pid, c1.id, { st: 'left' }, { st: 'active' });
+      if (order === 'left-last') await settle(A, B);
+      else await settle(B, A);
+      const want = order === 'left-last'
+        ? [[c1.id, true, 'ผู้จัดการ', 'left'], [c2.id, false, 'ที่ปรึกษา', 'active']]
+        : [[c2.id, true, 'ที่ปรึกษา', 'active'], [c1.id, false, 'ผู้จัดการ', 'active']];
+      for (const t of [A, B]) expect(cosOf(t, pid)).toEqual(want);
+      tabs.splice(0).forEach((t) => t.e.dispose());
+    }
+  });
+
+  it('a form opened for the main company, saved after a teammate made another one the main one: the change goes to the company it was opened for', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณวรรณา ตัวอย่าง', gid: c1.id, pos: 'ผู้จัดการ' });
+    A.e.addCompanyToPerson(pid, c2.id, { pos: 'ที่ปรึกษา' });
+    await settle(A, B);
+    later();
+    A.e.setMainCompany(pid, c2.id);
+    await settle(A, B);
+    // B's form was opened on c1 as the main company
+    B.e.updatePersonCo(pid, c1.id, { pos: 'ผู้จัดการทั่วไป' }, { pos: 'ผู้จัดการ' });
+    await settle(A, B);
+    for (const t of [A, B]) expect(cosOf(t, pid)).toEqual([[c2.id, true, 'ที่ปรึกษา', 'active'], [c1.id, false, 'ผู้จัดการทั่วไป', 'active']]);
+  });
+
+  it('two merges of one pair the other way round at the same time: one person, still ยังติดต่อได้ at their main company; one marked ไม่อยู่แล้ว since stays so', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = companies(A);
+    const x = A.e.addPerson({ name: 'ดร.พรวิมล ตัวอย่าง', gid: c1.id, phone: '080-000-0303' });
+    const y = A.e.addPerson({ name: 'พรวิมล ตัวอย่าง', gid: c2.id, phone: '0800000303' });
+    await settle(A, B);
+    later();
+    A.e.mergePeople(x, y);
+    B.e.mergePeople(y, x);
+    await settle(A, B);
+    const s = x < y ? x : y;
+    for (const t of [A, B]) {
+      expect(t.e.livePeople().map((p) => [p.id, p.status])).toEqual([[s, 'active']]);
+      expect(cosOf(t, s).map((r) => [r[0], r[3]])).toEqual([[s === x ? c1.id : c2.id, 'active'], [s === x ? c2.id : c1.id, 'active']]);
+    }
+    later();
+    A.e.updatePersonCo(s, null, { st: 'left' }, { st: 'active' });
+    await settle(A, B);
+    for (const t of [A, B]) expect(t.e.personNow(t.e.people[s]).status).toBe('left');
+  });
+
+  it('"เปลี่ยน" the main company: kept as ไม่อยู่แล้ว where a deal or a call was with them, gone where nothing was', async () => {
+    const [A, B] = await team();
+    const [c1, c2, c3] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณวรรณา ตัวอย่าง', gid: c1.id, pos: 'ผู้จัดการ' });
+    const d = A.e.addDeal({ gid: c1.id, year: '2569' });
+    A.e.linkPerson(d.id, pid);
+    A.e.updatePerson(pid, { gid: c2.id, company: c2.name }, { gid: c1.id, company: c1.name });
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(cosOf(t, pid)).toEqual([[c2.id, true, 'ผู้จัดการ', 'active'], [c1.id, false, 'ผู้จัดการ', 'left']]);
+      expect(t.e.peopleOf(c1.id).map((p) => [p.id, p.status])).toEqual([[pid, 'left']]);
+      expect(t.e.contactElsewhere(t.e.sales.deals[d.id], t.e.people[pid])).toBe(false);
+    }
+    // nothing recorded at c2: changed again, it goes
+    A.e.updatePerson(pid, { gid: c3.id, company: c3.name }, { gid: c2.id, company: c2.name });
+    expect(cosOf(A, pid).map((x) => [x[0], x[3]])).toEqual([[c3.id, 'active'], [c1.id, 'left']]);
+  });
+
+  it('a merge where both records are on one deal with someone between them: the main contact stays the main one', async () => {
+    const [A] = await team();
+    const [c1, c2] = companies(A);
+    const keep = A.e.addPerson({ name: 'ดร.พรวิมล ตัวอย่าง', gid: c1.id, phone: '080-000-0303' });
+    const gone = A.e.addPerson({ name: 'พรวิมล ตัวอย่าง', gid: c2.id, phone: '0800000303' });
+    const other = A.e.addPerson({ name: 'คุณเอกชัย มั่นคง', gid: c2.id });
+    const d = A.e.addDeal({ gid: c2.id, year: '2569' });
+    A.e.linkPerson(d.id, gone);
+    later();
+    A.e.linkPerson(d.id, other);
+    later();
+    A.e.linkPerson(d.id, keep);
+    A.e.mergePeople(keep, gone);
+    expect(A.e.dealPeople(d.id).map((p) => p.id)).toEqual([keep, other]);
+  });
+
+  it('two registry records of one company merged after the person was added to both and one taken off: they still deal with it', async () => {
+    const [A] = await team();
+    const g0 = A.e.B.groups[0];
+    A.e.decide(g0.key, 'split');
+    const g = A.e.B.groups.find((x) => x.key === g0.key)!;
+    const [x, y] = g.ids;
+    const [c1] = companies(A).filter((c) => !g.ids.includes(c.id));
+    const pid = A.e.addPerson({ name: 'ดร.พรวิมล ตัวอย่าง', gid: c1.id });
+    A.e.addCompanyToPerson(pid, x, { pos: 'ที่ปรึกษา' });
+    later();
+    A.e.addCompanyToPerson(pid, y);
+    later();
+    A.e.removePersonCo(pid, y);
+    A.e.decide(g.key, 'merge');
+    const m = A.e.canonical(x);
+    expect(cosOf(A, pid).map((r) => [r[0], r[2], r[3]])).toEqual([[c1.id, '', 'active'], [m, 'ที่ปรึกษา', 'active']]);
+    expect(A.e.peopleOf(m).map((p) => p.id)).toEqual([pid]);
+    // taken off now (the merged company): every record of it goes off
+    A.e.removePersonCo(pid, m);
+    expect(A.e.peopleOf(m)).toEqual([]);
+  });
+
+  it('two browsers add a company to a person who has none, at the same time: both companies stay', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณสมชาย ตัวอย่าง', company: '' });
+    await settle(A, B);
+    later();
+    A.e.addCompanyToPerson(pid, c1.id, { pos: 'ผู้จัดการ' });
+    B.e.addCompanyToPerson(pid, c2.id, { pos: 'ที่ปรึกษา' });
+    await settle(A, B);
+    for (const t of [A, B]) expect(cosOf(t, pid)).toEqual([[c2.id, true, 'ที่ปรึกษา', 'active'], [c1.id, false, 'ผู้จัดการ', 'active']]);
+  });
+});
+
+describe('review fixes: no duplicates from the deal card, เพิ่มลูกค้า and the suggestions', () => {
+  it('"สร้างคนใหม่" beside someone recorded elsewhere makes a new person; "ใช้ <ชื่อ>" uses them', async () => {
+    const [A] = await team();
+    const [c1] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณวิภา ศรีสุข', gid: c1.id, phone: '081-234-5678' });
+    // a deal not linked to the registry, the same name and mobile typed
+    const d = A.e.addDeal({ client: 'บริษัท แสนสิริ กรีน (ตัวอย่าง) จำกัด', year: '2569', contactName: 'คุณวิภา ศรีสุข', phone: '0812345678' });
+    expect(A.e.findExisting({ name: 'คุณวิภา ศรีสุข', phone: '0812345678', email: '' }, null, d.client).map((x) => x.p.id)).toEqual([pid]);
+    const fresh = A.e.saveTypedContact(d.id, undefined, { fresh: true });
+    expect(fresh).not.toBe(pid);
+    expect(A.e.dealPeople(d.id).map((p) => p.id)).toEqual([fresh]);
+    expect(A.e.livePeople().length).toBe(2);
+    // the other choice, on another such deal: them
+    const d2 = A.e.addDeal({ client: 'บริษัท แสนสิริ กรีน (ตัวอย่าง) จำกัด', year: '2570', contactName: 'คุณวิภา ศรีสุข', phone: '0812345678' });
+    expect(A.e.saveTypedContact(d2.id, undefined, { pid })).toBe(pid);
+  });
+
+  it('เพิ่มลูกค้า with a contact typed: the same name and mobile is the person already recorded, though the new customer has the mobile as its number; a short name with it is caught as a likely pair', async () => {
+    const [A] = await team();
+    const [c1] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณกมล รักษ์โลก', gid: c1.id, phone: '089-555-0101' });
+    // what AddCustomer does: the customer, its job, then the contact typed
+    const typed = { name: 'คุณกมล รักษ์โลก', phone: '089-555-0101', email: '' };
+    const id = A.e.addCustomer({ name: 'บริษัท ทดสอบรีวิว ไม่ซ้ำ จำกัด', jur: '', prov: '', ind: '', biz: '', addr: '', phone: typed.phone, email: '', web: '', contact: typed.name, note: '' });
+    const d = A.e.addDeal({ gid: id, year: '2569' });
+    expect(A.e.saveTypedContact(d.id, typed)).toBe(pid);
+    expect(A.e.livePeople().length).toBe(1);
+    expect(A.e.dealsWith(A.e.people[pid], id)).toBe(true);
+    // "คุณกมล" alone (one word) and the same mobile: someone new, and the pair is offered to merge
+    const id2 = A.e.addCustomer({ name: 'บริษัท ทดสอบรีวิว สอง จำกัด', jur: '', prov: '', ind: '', biz: '', addr: '', phone: '0895550101', email: '', web: '', contact: 'คุณกมล', note: '' });
+    const d2 = A.e.addDeal({ gid: id2, year: '2569' });
+    const other = A.e.saveTypedContact(d2.id, { name: 'คุณกมล', phone: '0895550101', email: '' });
+    expect(other).not.toBe(pid);
+    expect(A.e.likelyDups().map((x) => [x.key, x.by])).toEqual([[[pid, other].sort().join('|'), ['phone']]]);
+  });
+
+  it('a suggestion from a deal not linked to the registry that is someone recorded: "ใช้ <ชื่อ>" (no second record; the company named in their notes, once)', async () => {
+    const [A] = await team();
+    const [c1] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณวิภา ศรีสุข', gid: c1.id, phone: '081-234-5678' });
+    A.e.addDeal({ client: 'บริษัท แสนสิริ กรีน (ตัวอย่าง) จำกัด', year: '2569', contactName: 'คุณวิภา', phone: '0812345678 | 02-000-1111' });
+    const s = A.e.personSuggestions();
+    expect(s.map((x) => [x.gid, x.same?.id])).toEqual([[null, pid]]);
+    // "เพิ่มทั้งหมด" leaves it; its own button
+    expect(A.e.addPeople(s.filter((x) => !x.same).map((x) => ({ id: x.id, name: x.name, gid: x.gid, company: x.company, phone: x.phone, email: x.email })))).toBe(0);
+    for (let i = 0; i < 2; i++) A.e.addToExisting(pid, { gid: null, company: s[0].company, phone: s[0].phone, email: s[0].email });
+    A.e.hideSuggestion(s[0].id);
+    expect(A.e.livePeople().length).toBe(1);
+    expect(A.e.people[pid].phone).toBe('081-234-5678 | 02-000-1111');
+    expect(A.e.personLogs(A.e.people[pid]).filter((x) => (x.l.text || '').includes('แสนสิริ')).length).toBe(1);
+    expect(A.e.personSuggestions()).toEqual([]);
+    // someone with no company at all: it becomes their main one (a name typed)
+    const q = A.e.addPerson({ name: 'คุณใหม่ ไร้สังกัด', company: '' });
+    A.e.addToExisting(q, { gid: null, company: 'ร้านตัวอย่างพิมพ์เอง', pos: 'เจ้าของ' });
+    expect(A.e.people[q]).toMatchObject({ gid: null, company: 'ร้านตัวอย่างพิมพ์เอง', pos: 'เจ้าของ' });
   });
 });

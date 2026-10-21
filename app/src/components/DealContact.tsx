@@ -152,7 +152,8 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
                   <span className="dc-t">
                     <span className="dc-n">
                       {p.name}
-                      {v.status === 'left' && <span className="chip warn">{away ? 'ย้ายงานแล้ว' : 'ไม่อยู่บริษัทนี้แล้ว'}</span>}
+                      {/* (at the deal's company: their status there; from elsewhere: left every company of theirs) */}
+                      {(away ? !e.personActive(p) : v.status === 'left') && <span className="chip warn">{away ? 'ไม่อยู่แล้ว' : 'ไม่อยู่บริษัทนี้แล้ว'}</span>}
                       {people.length > 1 && i === 0 && <span className="t-meta">ผู้ติดต่อหลัก</span>}
                     </span>
                     {roleLine(v) && <span className="dc-s">{roleLine(v)}</span>}
@@ -257,7 +258,7 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
                 <button type="button" className="btn xs pri" onClick={() => (e.saveTypedContact(d.id, undefined, { pid: elsewhere.p.id }), focusTo())}>
                   {c ? `เพิ่มบริษัทนี้ให้ ${elsewhere.p.name}` : `ใช้ ${elsewhere.p.name}`}
                 </button>
-                <button type="button" className="lnk" onClick={() => (e.saveTypedContact(d.id), focusTo())}>สร้างคนใหม่</button>
+                <button type="button" className="lnk" onClick={() => (e.saveTypedContact(d.id, undefined, { fresh: true }), focusTo())}>สร้างคนใหม่</button>
               </>
             ) : (
               <>
@@ -327,13 +328,14 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   );
 }
 
-/** One person to choose: name, position · role (or their company, from outside this one), "เลือก". */
-function Opt({ p, sub, onPick }: { p: Person; sub?: string; onPick: () => void }) {
+/** One person to choose: name, position · role (or their company, from outside this one), "เลือก". `left`: the status
+ *  word ("ไม่อยู่บริษัทนี้แล้ว" for one of the company's, "ไม่อยู่แล้ว" for someone from outside who left every company). */
+function Opt({ p, sub, left, onPick }: { p: Person; sub?: string; left?: string; onPick: () => void }) {
   return (
     <button type="button" className="dc-opt hv" onClick={onPick} aria-label={'เลือก ' + p.name}>
       <PersonAvatar p={p} size={32} />
       <span className="dc-t">
-        <span>{p.name}{p.status === 'left' ? ' (ย้ายงานแล้ว)' : ''}</span>
+        <span>{p.name}{left ? ` (${left})` : ''}</span>
         <span className="dc-s">{sub ?? (roleLine(p) || 'ยังไม่ระบุตำแหน่ง')}</span>
       </span>
       <span className="btn xs" aria-hidden="true">เลือก</span>
@@ -341,12 +343,12 @@ function Opt({ p, sub, onPick }: { p: Person; sub?: string; onPick: () => void }
   );
 }
 /** The first five, then "ดูทั้งหมด n คน". */
-function ShortList({ list, onPick, sub }: { list: Person[]; onPick: (pid: string) => void; sub?: (p: Person) => string | undefined }) {
+function ShortList({ list, onPick, sub, left }: { list: Person[]; onPick: (pid: string) => void; sub?: (p: Person) => string | undefined; left?: (p: Person) => string }) {
   const [all, setAll] = useState(false);
   const shown = all ? list : list.slice(0, 5);
   return (
     <div className="dc-list">
-      {shown.map((p) => <Opt key={p.id} p={p} sub={sub?.(p)} onPick={() => onPick(p.id)} />)}
+      {shown.map((p) => <Opt key={p.id} p={p} sub={sub?.(p)} left={left ? left(p) : p.status === 'left' ? 'ไม่อยู่บริษัทนี้แล้ว' : ''} onPick={() => onPick(p.id)} />)}
       {list.length > 5 && (
         <button type="button" className="lnk dc-more" aria-expanded={all} onClick={() => setAll(!all)}>{all ? 'แสดงน้อยลง' : `ดูทั้งหมด ${list.length} คน`}</button>
       )}
@@ -387,7 +389,12 @@ function Picker({ d, mode, pool, skip, hasMain, many, onPick, onNew, onNone, onC
       <span className="dc-note">{mode === 'add' ? 'เพิ่มผู้ติดต่ออีกคนในดีลนี้' : hasMain ? 'เลือกผู้ติดต่อคนใหม่ของดีลนี้' : 'เลือกผู้ติดต่อของดีลนี้'}</span>
       <input value={q} onChange={(ev) => setQ(ev.target.value)} autoFocus className="fld" placeholder="พิมพ์ชื่อเพื่อค้นในรายชื่อผู้ติดต่อทั้งหมด" aria-label="ค้นผู้ติดต่อ" />
       {found.length ? (
-        <ShortList list={found} onPick={onPick} sub={(p) => (inPool.has(p.id) ? undefined : whoLine(e, p) || 'ไม่ระบุบริษัท')} />
+        <ShortList
+          list={found}
+          onPick={onPick}
+          sub={(p) => (inPool.has(p.id) ? undefined : whoLine(e, p) || 'ไม่ระบุบริษัท')}
+          left={(p) => (inPool.has(p.id) ? (p.status === 'left' ? 'ไม่อยู่บริษัทนี้แล้ว' : '') : e.personActive(p) ? '' : 'ไม่อยู่แล้ว')}
+        />
       ) : (
         <span className="dc-note">{k.length < 2 ? (d.gid != null ? 'บริษัทนี้ยังไม่มีคนอื่นในรายชื่อผู้ติดต่อ' : 'พิมพ์ชื่อเพื่อค้น') : `ไม่พบ “${q.trim()}” ในรายชื่อผู้ติดต่อ`}</span>
       )}

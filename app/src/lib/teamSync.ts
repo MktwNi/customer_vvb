@@ -8,7 +8,7 @@
  * that reaches the server for a key wins. Clients pull rows with seq > cursor and push queued ops.
  */
 import type { ContactEdit, Crm, CustomCo, LogEntry, Person, StageKey, Task } from './types';
-import { pcoValue, personKey, toPCo, toPLink, toPerson, type PCo, type PLink } from './people';
+import { intoValue, pcoValue, personKey, toPCo, toPInto, toPLink, toPerson, type PCo, type PInto, type PLink } from './people';
 import { PLAN_FIELDS, toAct, toCust, toDeal, toDoc, toJqm, toJqt, toLog, toPay, toStep, type SalesCfg, type SalesState } from './sales';
 import { parseCaps, parseGrants, parseMyReq, type CapSet, type Grants, type MyReq } from './caps';
 import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotify, type NotifyLive } from './notify';
@@ -399,7 +399,10 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   }
   Object.values(s.custom || {}).forEach((c) => m.set(keyOf.cust(c.id), { ...c }));
   Object.values(s.people || {}).forEach((p) => m.set(keyOf.person(p.id), { ...p }));
-  Object.entries(s.plinks || {}).forEach(([k, v]) => m.set('person/' + k, personKey(k)?.co != null ? pcoValue(v as PCo) : { ...v }));
+  Object.entries(s.plinks || {}).forEach(([k, v]) => {
+    const x = personKey(k);
+    m.set('person/' + k, x?.co != null ? pcoValue(v as PCo) : x?.into ? intoValue(v as PInto) : { ...v });
+  });
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
@@ -682,7 +685,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
           if (!(rest in L)) return;
           delete L[rest];
         } else {
-          const v = pk.co != null ? toPCo(row.v) : toPLink(row.v);
+          const v = pk.co != null ? toPCo(row.v) : pk.into ? toPInto(row.v) : toPLink(row.v);
           if (!v) return;
           L[rest] = v;
         }
