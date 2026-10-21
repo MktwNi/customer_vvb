@@ -1943,6 +1943,14 @@ export class GccEngine {
     if (cur && !f.length) return false;
     this.sales.pays[k] = n;
     this.op(keyOf.dpay(d.id, stage), { ...n }, { f: [...(cur ? f : PLAN_FIELDS), 'at', 'by'] });
+    // the note "รับเงินแล้ว" filled in at its stage follows the line it describes: a received line whose
+    // planned amount (or how) changed would else still read the old figure ("รับชำระแล้ว 121,730.77 บาท"
+    // under a plan of 60,000), and "ยกเลิกการรับ" would no longer know the note as its own (a note typed
+    // by hand, or one changed since, stays as it is)
+    if (cur && cur.rcv) {
+      const st = stepOf(this.sales, d.id, stage), was0 = paidNote(cur), now = paidNote(n);
+      if (now !== was0 && st.n === was0) this.setStep(d.id, stage, { d: st.d, n: now }, true, true);
+    }
     return true;
   }
   /** What an installment would have come to with this line: its documents and its hand receipt. */
@@ -2789,6 +2797,18 @@ export class GccEngine {
       n.auto = { ...doc.auto, n: note };
       f.push('auto');
       this.setStep(dealId, doc.auto.stage, { d: st.d, n: note }, true, true);
+    } else if (!doc.auto && !countsActual(doc) && countsActual(n) && n.stage && isPayAt(this.sales, dealId, n.stage)) {
+      // money received again at its installment (an older build's choice set right): it fills in the stage
+      // as when it was attached — when the stage is empty, or holds only the note "รับเงินแล้ว" wrote for the
+      // money this document now stands for (not kept on top, PayLine.add), so PAY reads the day on the
+      // receipt, not the day of the tap
+      const st = stepOf(this.sales, dealId, n.stage), line = this.sales.pays[`${dealId}/${n.stage}`];
+      if (!st.n.trim() || (line && !line.add && st.n === paidNote(line))) {
+        const today = todayISO(), ad = n.docDate && n.docDate <= today ? n.docDate : today;
+        n.auto = { stage: n.stage, n: note, d: ad };
+        f.push('auto');
+        this.setStep(dealId, n.stage, { d: ad, n: note }, true, true);
+      }
     }
     this.sales.docs[k] = n;
     this.op(keyOf.ddoc(dealId, docId), { ...n }, { f });

@@ -576,7 +576,8 @@ const WILL: Record<DocTarget, string> = { forecast: 'นับเป็น Forec
 export function docFormNote(s: SalesState, d: Deal, doc: DealDoc, f: { kind: DocKind; target: DocTarget; amount: number | null }): { text: string; warn: boolean } | null {
   const wrong = !!targetWrong(doc), t: DocTarget = f.amount == null ? 'none' : f.target;
   if (!wrong && f.kind === doc.kind && t === doc.target) return null;
-  const b = dealMoney(s, d), a = dealMoney(docEdited(s, d, doc, { kind: f.kind, target: t, amount: f.amount }), d);
+  const sa = docEdited(s, d, doc, { kind: f.kind, target: t, amount: f.amount });
+  const b = dealMoney(s, d), a = dealMoney(sa, d);
   const same = (x: number | null | undefined, y: number | null | undefined) => (x == null ? y == null : near(x, y));
   const parts: string[] = [];
   if (t !== doc.target) {
@@ -594,7 +595,13 @@ export function docFormNote(s: SalesState, d: Deal, doc: DealDoc, f: { kind: Doc
   else if (!same(a.actual, b.actual))
     parts.push(a.actual == null ? `จะไม่มี Actual (เดิม ${N(b.actual)} บาท)` : b.actual == null ? `Actual จะเป็น ${N(a.actual)} บาท` : `Actual จาก ${N(b.actual)} เป็น ${N(a.actual)} บาท`);
   else if (a.actual != null && (t === 'actual' || doc.target === 'actual' || wrong)) parts.push(`Actual ยังเป็น ${N(a.actual)} บาท`);
-  return parts.length ? { text: parts.join(' · '), warn: wrong || fcMoved || over } : null;
+  // an installment received that saving leaves part-paid (its plan line set while a receipt counted twice):
+  // said, with where to set the plan right, so "ค้างรับ" after saving is no surprise
+  const today = todayISO(), lb = doc.stage ? planOf(s, d, today)?.lines.find((l) => l.stage === doc.stage) : undefined;
+  const la = lb && planOf(sa, d, today)?.lines.find((l) => l.stage === doc.stage);
+  const owes = !!lb && !!la && lb.status === 'paid' && la.status !== 'paid' && la.left > 0.005;
+  if (owes) parts.push(`${code(s, d, doc.stage!)} จะค้างรับ ${N(la!.left)} บาท (แผน ${N(la!.amt)} บาท) · ถ้ายอดแผนผิด แก้ที่ “แก้ไขแผน”`);
+  return parts.length ? { text: parts.join(' · '), warn: wrong || fcMoved || over || owes } : null;
 }
 /** The installments right after `at`, nothing received there yet, that its money pays too: what came in at
  *  `at` makes up its plan and theirs (within 1%, or short of it by withholding tax). */

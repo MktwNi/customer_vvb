@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { analyzeDocText, type DocFacts } from './docExtract';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { DEAL_STAGE, closeReady, countedCopy, dealMoney, docTargets, docsOf, dupCounted, formTarget, formTargets, planOf, planStart, targetWrong, type Deal, type DealDoc } from './sales';
+import { DEAL_STAGE, closeReady, countedCopy, dealMoney, docTargets, docsOf, dupCounted, formTarget, formTargets, paidNote, planOf, planStart, stepOf, targetWrong, type Deal, type DealDoc } from './sales';
 import { acFig, fcFig } from './salesUi';
 import { attachPlan, docFormNote, panelEntry, receiveNow, recvOverText, recvPlan } from './attachPlan';
 import { qtFcElse, qtGoes, qtVerShort, qtVerText, qtView } from './quotes';
@@ -280,16 +280,81 @@ describe('the owner\'s deal today, set right on this build', () => {
     e.updateDoc(id, rcpt(e, id, 60000).id, { target: 'forecast' });
     e.markPaid(id, 'PAY1', { date: TODAY, amount: null, how: 'transfer' });
     expect(money(e, id)).toEqual({ forecast: 60000, fcDoc: 'receipt', actual: 121730.77, word: 'บันทึกเอง' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('รับชำระแล้ว 121,730.77 บาท · โอน');
+    // the receipt's form, picked first: it says PAY would be part-paid by the plan of 121,730.77
+    const r0 = docsOf(e.sales, id).find((z) => targetWrong(z))!;
+    expect(docFormNote(e.sales, deal(e, id), r0, { kind: 'receipt', target: 'actual', amount: 60000 })).toEqual({
+      text: 'เดิมนับเป็น Forecast · บันทึกแล้วจะรวมใน Actual · Forecast จะเป็น 60,000 บาท จากใบเสนอราคา QT2026070022 · Actual จาก 121,730.77 เป็น 60,000 บาท · PAY จะค้างรับ 61,730.77 บาท (แผน 121,730.77 บาท) · ถ้ายอดแผนผิด แก้ที่ “แก้ไขแผน”',
+      warn: true,
+    });
     // the fix: 1 แก้ไขแผน PAY 60,000; 2 the receipt card → its form's choice (Actual)
     at('2026-10-21T03:00:00Z');
     e.setPlan(id, [{ stage: 'PAY1', amt: 60000, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '' }]);
+    // with the plan set right first, nothing is left owed: the form does not say so
+    expect(docFormNote(e.sales, deal(e, id), r0, { kind: 'receipt', target: 'actual', amount: 60000 })!.text).toBe('เดิมนับเป็น Forecast · บันทึกแล้วจะรวมใน Actual · Forecast จะเป็น 60,000 บาท จากใบเสนอราคา QT2026070022 · Actual ยังเป็น 60,000 บาท');
+    // the note the tap filled in follows the plan: PAY no longer reads 121,730.77 (and is hidden as the tap's own)
+    expect(stepOf(e.sales, id, 'PAY1')).toEqual({ d: TODAY, n: 'รับชำระแล้ว 60,000 บาท · โอน' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe(paidNote(e.sales.pays[`${id}/PAY1`]));
     const r = docsOf(e.sales, id).find((z) => targetWrong(z))!;
     e.updateDoc(id, r.id, { target: formTarget(e.sales, deal(e, id), r) });
     expect(money(e, id)).toEqual({ forecast: 60000, fcDoc: 'quotation', actual: 60000, word: 'จากเอกสาร' });
     expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ amt: 60000, got: 60000, status: 'paid', hand: false });
+    // the receipt fills in PAY as when it was attached: received on the day on the receipt, not the day of the tap
+    expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0].rcvDate).toBe('2026-09-28');
+    expect(stepOf(e.sales, id, 'PAY1')).toEqual({ d: '2026-09-28', n: 'ใบเสร็จ / ใบกำกับภาษี INV2026090004 · 60,000 บาท' });
     expect(closeReady(e.sales, deal(e, id), TODAY)).toBe(true);
     expect(deal(e, id).jobStatus).toBe('closed');
     expect(docsOf(e.sales, id).filter((z: DealDoc) => targetWrong(z))).toEqual([]);
+  });
+  it('the other order (the receipt first, as its amber link leads, then แก้ไขแผน): the same figures, PAY received 28 ก.ย.', async () => {
+    const e = mk();
+    const id = await wonDeal(e);
+    await receipt(e, id, 'PAY1', 61730.77);
+    await receipt(e, id, 'PAY1', 60000);
+    e.setPlan(id, [{ stage: 'PAY1', amt: 121730.77, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '' }]);
+    e.updateDeal(id, { jobStatus: 'closed' });
+    at('2026-10-21T02:10:00Z');
+    e.updateDoc(id, rcpt(e, id, 61730.77).id, { target: 'none' });
+    e.updateDoc(id, rcpt(e, id, 60000).id, { target: 'forecast' });
+    e.deleteDoc(id, docsOf(e.sales, id).find((z) => z.amount === 61730.77 && z.kind === 'receipt')!.id);
+    e.markPaid(id, 'PAY1', { date: TODAY, amount: null, how: 'transfer' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('รับชำระแล้ว 121,730.77 บาท · โอน');
+    at('2026-10-21T03:00:00Z');
+    const r = docsOf(e.sales, id).find((z) => targetWrong(z))!;
+    e.updateDoc(id, r.id, { target: formTarget(e.sales, deal(e, id), r) });
+    expect(money(e, id)).toEqual({ forecast: 60000, fcDoc: 'quotation', actual: 60000, word: 'จากเอกสาร' });
+    expect(stepOf(e.sales, id, 'PAY1')).toEqual({ d: '2026-09-28', n: 'ใบเสร็จ / ใบกำกับภาษี INV2026090004 · 60,000 บาท' });
+    expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ amt: 121730.77, got: 60000 });
+    expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0].left).toBeCloseTo(61730.77, 2);
+    e.setPlan(id, [{ stage: 'PAY1', amt: 60000, pct: null, due: '', rel: null, how: 'transfer', howT: '', note: '' }]);
+    expect(planOf(e.sales, deal(e, id), TODAY)!.lines[0]).toMatchObject({ amt: 60000, got: 60000, left: 0, status: 'paid', hand: false, rcvDate: '2026-09-28' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('ใบเสร็จ / ใบกำกับภาษี INV2026090004 · 60,000 บาท');
+    expect(deal(e, id).jobStatus).toBe('closed');
+  });
+  it('the note "รับเงินแล้ว" filled in follows the plan; a note typed by hand stays; "ยกเลิกการรับ" still clears its own', async () => {
+    const e = mk();
+    const id = await wonDeal(e);
+    const line = (amt: number) => ({ stage: 'PAY1', amt, pct: null, due: '', rel: null, how: 'transfer' as const, howT: '', note: '' });
+    e.setPlan(id, [line(121730.77)]);
+    at('2026-10-21T02:10:00Z');
+    e.markPaid(id, 'PAY1', { date: TODAY, amount: null, how: 'transfer' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('รับชำระแล้ว 121,730.77 บาท · โอน');
+    e.setPlan(id, [line(60000)]);
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('รับชำระแล้ว 60,000 บาท · โอน');
+    e.updatePayLine(id, 'PAY1', { how: 'cheque' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe(paidNote(e.sales.pays[`${id}/PAY1`]));
+    e.unmarkPaid(id, 'PAY1');
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('');
+    // an amount typed when received (got) is what the note says: a plan change leaves it; a note by hand stays
+    e.markPaid(id, 'PAY1', { date: TODAY, amount: 58000, how: 'transfer' });
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('รับชำระแล้ว 58,000 บาท · โอน');
+    e.setPlan(id, [line(64200)]);
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('รับชำระแล้ว 58,000 บาท · โอน');
+    e.setStep(id, 'PAY1', { d: TODAY, n: 'ลูกค้าโอนแล้ว หัก ณ ที่จ่าย' });
+    e.setPlan(id, [line(60000)]);
+    e.markPaid(id, 'PAY1', { date: TODAY, amount: null, how: 'transfer' });
+    e.setPlan(id, [line(61000)]);
+    expect(stepOf(e.sales, id, 'PAY1').n).toBe('ลูกค้าโอนแล้ว หัก ณ ที่จ่าย');
   });
 });
 
