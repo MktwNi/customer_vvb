@@ -26,7 +26,7 @@ import {
 } from './caps';
 import {
   ACT_TH, HOW_TH, KIND_TH, NOTE_MAX, PLAN_FIELDS, PLAN_MAX, actStage, attachStage, beYear, closeReady, countedAt, countsActual, coveredStage, dealSteps, isPayAt, planOf, planStart, csvCell, csvPhone, dealMoney, decodeTrackerText, docsOf, lastContact, paidNote, payDue, payState, payStageFor, planCsv, planLines, splitAmounts, stepLabel, teamSteps,
-  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf, withActIndex,
+  toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importJobId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf, withActIndex,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
 import { cashYear, setMoneyHidden, type CashLine } from './sales';
@@ -51,8 +51,8 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 // บริษัทที่ติดตาม: a follow on any id of a company is the company's
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
-import { companyCount, sendState, surelyOther, svcClean } from './jobs';
-import { jobServices } from './sales';
+import { clashSvc, companyCount, sendState, surelyOther, svcClean } from './jobs';
+import { jobServices, svcSig } from './sales';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1915,14 +1915,14 @@ export class GccEngine {
   /**
    * Send companies (e.g. the starred ones) to the tracker as a job each, with the services picked (`service`:
    * one job carrying all of them, as quoted together). A company that already has a job in the year gets
-   * another only when every job it has is surely other work (lib/jobs.ts sendState 'new': both name services
-   * and share none), or when it is in `force` (ticked through "อาจซ้ำ" in the dialog); else it is skipped and
-   * counted (`skipped`): the dialog showed it unticked, or a teammate's send arrived since.
+   * another only when no job of it has a service picked (lib/jobs.ts sendState 'new'; with none picked, never),
+   * or when it is in `force` (ticked through "อาจซ้ำ" in the dialog); else it is skipped and counted (`skipped`,
+   * `clash` the picked services its jobs have): the dialog showed it unticked, or a teammate's send arrived since.
    */
   addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string; pid?: string; service?: readonly string[]; force?: readonly number[] } = {}) {
     if (!this.can('edit.deal')) {
       this.deny();
-      return { added: 0, skipped: 0, ids: [] as string[], k: '' };
+      return { added: 0, skipped: 0, ids: [] as string[], k: '', clash: [] as string[] };
     }
     const r = this.bulk(() => this.addDealsFrom(ids, opts));
     // what เลิกทำ may take back: these rows as they were made
@@ -1999,14 +1999,16 @@ export class GccEngine {
     const seen = new Set<number>();
     const jobs = this.jobsIn(year);
     let added = 0, skipped = 0;
-    const made: string[] = [];
+    const made: string[] = [], clash: string[] = [];
     ids.forEach((id) => {
       const c = this.company(id);
       if (!c || seen.has(c.id)) return;
       seen.add(c.id);
-      // a company with jobs this year: another only when it is surely other work, or ticked through
+      // a company with jobs this year: another only when no job of it has a service picked (none picked: when
+      // it has no job), or ticked through; else skipped, and the services it has already are said (clash)
       if (sendState(svc, jobs(c).map((d) => jobServices(this.sales, d))) === 'dup' && !force.has(c.id) && !force.has(id)) {
         skipped++;
+        clash.push(...clashSvc(this.sales, svc, jobs(c)));
         return;
       }
       // its contact: the person it was sent from (their company's page), else the company's one person
@@ -2016,7 +2018,7 @@ export class GccEngine {
       made.push(d.id);
       added++;
     });
-    return { added, skipped, ids: made };
+    return { added, skipped, ids: made, clash: svcClean(clash) };
   }
   updateDeal(id: string, patch: Partial<Deal>, opt: { keepJoint?: boolean } = {}) {
     const d = this.sales.deals[id];
@@ -3900,16 +3902,47 @@ export class GccEngine {
         l.splice(i, 1);
         return true;
       };
-      const nth = new Map<string, number>();
-      let added = 0;
-      t.clients.forEach((c, i) => {
-        const key = importKey(c);
-        const n = (nth.get(key) || 0) + 1;
+      // each row's id: the nth row of that client with those services (importJobId), so a row added above
+      // another in a newer download, or a row of another service, is never taken for one imported before. Rows
+      // imported before a company's rows were told apart by their services have the id of the nth row of that
+      // client (importId): one of them stands for the row of the file with the same services (wherever it now
+      // is), else for the row at its place unless the two name services and share none; one deleted since
+      // stays deleted, as before
+      const gone = (x: string) => !!S.gone[x] && !S.undone[x];
+      const nth = new Map<string, number>(), nthS = new Map<string, number>(), per = new Map<string, number>();
+      t.clients.forEach((c) => per.set(importKey(c), (per.get(importKey(c)) || 0) + 1));
+      const rows = t.clients.map((c) => {
+        const key = importKey(c), ks = key + '|' + svcSig(c.service);
+        const n = (nth.get(key) || 0) + 1, m = (nthS.get(ks) || 0) + 1;
         nth.set(key, n);
-        const id = importId(t.year, c, n);
-        // already imported, deleted by the team since (never brought back — unless the deletion was
-        // an undone import), or tracked by hand
-        if (S.deals[id] || (S.gone[id] && !S.undone[id]) || handRow(c)) {
+        nthS.set(ks, m);
+        return { c, n, id: importJobId(t.year, c, m), done: false };
+      });
+      const taken = new Set<string>();
+      for (const r of rows) r.done = !!S.deals[r.id] || gone(r.id);
+      for (const r of rows) {
+        if (r.done) continue;
+        for (let k = 1; k <= (per.get(importKey(r.c)) || 0) + 20 && !r.done; k++) {
+          const x = importId(t.year, r.c, k), d = S.deals[x];
+          if (d && !taken.has(x) && svcSig(d.service) === svcSig(r.c.service)) {
+            taken.add(x);
+            r.done = true;
+          }
+        }
+      }
+      for (const r of rows) {
+        if (r.done) continue;
+        const x = importId(t.year, r.c, r.n), d = S.deals[x];
+        if (!taken.has(x) && ((d && !surelyOther(d.service, r.c.service)) || gone(x))) {
+          taken.add(x);
+          r.done = true;
+        }
+      }
+      let added = 0;
+      rows.forEach(({ c, id, done }, i) => {
+        // already imported (now or before), deleted by the team since (never brought back — unless the
+        // deletion was an undone import), or tracked by hand
+        if (done || handRow(c)) {
           skipped++;
           return;
         }

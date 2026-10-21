@@ -16,7 +16,7 @@ import { CashChart, CashKey } from '../components/CashChart';
 import { MonthCheck, YearCheck, useOpenMonth } from '../components/MonthCheck';
 import { cashCheckRows, chkRows, pageKeep, sumRows, ymOf } from '../lib/payCheck';
 // joint quotations (package quotes, item 7): the same money as the Dashboard under a person filter; customers per company
-import { customersOf, dealMoney } from '../lib/sales';
+import { customersOf, dealMoney, jobServices } from '../lib/sales';
 import { viewCashLines } from '../lib/joint';
 import { Check, Pop, Radio } from '../components/Pop';
 import { Chevron } from '../components/StageTrack';
@@ -289,7 +289,9 @@ function CashExport({ S, year, lines, Y, X, filterWords, onClose }: { S: SalesSt
   const rowsOf = (m: CashCsvMode) => {
     const inRows = cashRows(S, year, Y, m, und && has);
     if (fl === 'in' || !X) return inRows;
-    return fl === 'out' ? expCsvRows(year, X, m, und && has, qtNo) : bothCsvRows(year, inRows, Y, X, m, und && has, qtNo);
+    // (บริการ: a joint quotation's company under its quotation's services, as the in rows and the screens say)
+    const svcOf = (d: Deal) => jobServices(S, d);
+    return fl === 'out' ? expCsvRows(year, X, m, und && has, qtNo, svcOf) : bothCsvRows(year, inRows, Y, X, m, und && has, qtNo, svcOf);
   };
   const rows = rowsOf(mode);
   const n = (m: CashCsvMode) => rowsOf(m).rows.length;

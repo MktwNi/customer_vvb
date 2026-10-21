@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { customersOf, jobServices, salesStats, type Deal } from './sales';
+import { customersOf, importId, jobServices, newDeal, salesStats, type Deal, type TrackerClient } from './sales';
 import { dupRows, sendState } from './jobs';
 import { trackerNote } from './bulk';
 import { CV, type SyncOp } from './teamSync';
@@ -238,6 +238,75 @@ describe('import from the old tracker: a company\'s rows of different services a
     expect(of(c3)).toEqual(['']);
     expect((await A.e.importTracker(f, '2565')).deals).toBe(0);
     expect(of(c1)).toEqual(['CFO', 'CFP']);
+  });
+});
+
+describe('import: a row added above another in a newer download (review P1c)', () => {
+  const file = (rows: Record<string, unknown>[]) => Object.assign(new Blob([JSON.stringify({ rows: [{ type: 'section', name: 'Retention' }, ...rows] })]), { name: 'old.json' }) as File;
+  const jobsIn = (t: Tab, c: Company, y: string) =>
+    t.e.dealsOf(c.id).filter((d) => d.year === y).map((d) => `${d.service.join('+')}:${d.forecast}`).sort();
+  it('v1 CFO, CFP then v2 with a T-VER row on top: T-VER comes in, nothing twice; the Forecast is the three jobs', async () => {
+    const [A, B] = await team();
+    const c = companies(A)[12];
+    const v1 = [{ type: 'client', client: c.name, service: ['CFO'], forecast: 100000 }, { type: 'client', client: c.name, service: ['CFP'], forecast: 200000 }];
+    expect((await A.e.importTracker(file(v1), '2564')).deals).toBe(2);
+    const v2 = [{ type: 'client', client: c.name, service: ['T-VER'], forecast: 300000 }, ...v1];
+    const r = await A.e.importTracker(file(v2), '2564');
+    expect([r.deals, r.skipped]).toEqual([1, 2]);
+    await settle(A, B);
+    for (const t of [A, B]) expect(jobsIn(t, c, '2564')).toEqual(['CFO:100000', 'CFP:200000', 'T-VER:300000']);
+    // again: nothing
+    expect((await A.e.importTracker(file(v2), '2564')).deals).toBe(0);
+    // a row's place among the client's rows of the same service still tells two CFO rows apart
+    const v3 = [...v2, { type: 'client', client: c.name, service: ['CFO'], forecast: 50000 }];
+    expect((await A.e.importTracker(file(v3), '2564')).deals).toBe(1);
+    expect(jobsIn(A, c, '2564')).toEqual(['CFO:100000', 'CFO:50000', 'CFP:200000', 'T-VER:300000']);
+  });
+  it('rows imported before services told jobs apart (the nth row of the client) are found by their services, wherever they now are', async () => {
+    const [A] = await team();
+    const c = companies(A)[13], c2 = companies(A)[14];
+    // as an import of the live build made them: ids by the client's nth row
+    const put = (d: Deal) => (A.e as unknown as { putDeal: (d: Deal) => void }).putDeal(d);
+    const tc = (svc: string[], client = c.name) => ({ section: 'Retention', client, contactName: '', service: svc }) as unknown as TrackerClient;
+    put({ ...newDeal({ id: importId('2563', tc(['CFO']), 1), client: c.name, year: '2563', section: 'Retention', gid: c.id, service: ['CFO'] }, 'เอ'), forecast: 100000 });
+    put({ ...newDeal({ id: importId('2563', tc(['CFP']), 2), client: c.name, year: '2563', section: 'Retention', gid: c.id, service: ['CFP'] }, 'เอ'), forecast: 200000 });
+    // c2: one row without a service, its service picked in the app since (CFO)
+    put({ ...newDeal({ id: importId('2563', tc([], c2.name), 1), client: c2.name, year: '2563', section: 'Retention', gid: c2.id, service: ['CFO'] }, 'เอ'), forecast: 70000 });
+    const v2 = [
+      { type: 'client', client: c.name, service: ['T-VER'], forecast: 300000 },
+      { type: 'client', client: c.name, service: ['CFO'], forecast: 100000 },
+      { type: 'client', client: c.name, service: ['CFP'], forecast: 200000 },
+      { type: 'client', client: c2.name, service: [], forecast: 70000 },
+    ];
+    const r = await A.e.importTracker(file(v2), '2563');
+    expect([r.deals, r.skipped]).toEqual([1, 3]);
+    expect(jobsIn(A, c, '2563')).toEqual(['CFO:100000', 'CFP:200000', 'T-VER:300000']);
+    expect(jobsIn(A, c2, '2563')).toEqual(['CFO:70000']);
+    expect((await A.e.importTracker(file(v2), '2563')).deals).toBe(0);
+  });
+});
+
+describe('the owner\'s case with a job that lists no service (review N1)', () => {
+  it('ทองมงคล has a Retention job without a service; a send with CFP adds the CFP job beside it, and no tag; a send with nothing picked adds nothing and says it has a job', async () => {
+    const [A, B] = await team();
+    const co = companies(A)[15];
+    A.e.addDealsFromCompanies([co.id], { year: Y, section: 'Retention' });
+    await settle(A, B);
+    expect(sendState(['CFP'], B.e.jobsIn(Y)(co).map((d) => jobServices(B.e.sales, d)))).toBe('new');
+    const r0 = B.e.addDealsFromCompanies([co.id], { year: Y });
+    expect(r0).toMatchObject({ added: 0, skipped: 1, clash: [] });
+    expect(trackerNote(r0.added, r0.skipped, Y, r0.clash)).toBe('ไม่ได้ส่ง ทุกบริษัทที่เลือกมีงานปี 2569 อยู่แล้ว');
+    later();
+    expect(B.e.addDealsFromCompanies([co.id], { year: Y, section: 'Retention', service: ['CFP'] })).toMatchObject({ added: 1, skipped: 0 });
+    await settle(B, A);
+    for (const t of [A, B]) {
+      expect(svcs(t, co)).toEqual(['', 'CFP']);
+      expect(dupRows(t.e.sales, Object.values(t.e.sales.deals)).size).toBe(0);
+    }
+    // CFP again (with LESS): the skip names CFP, the service its job has, not LESS
+    const r = A.e.addDealsFromCompanies([co.id], { year: Y, service: ['CFP', 'LESS'] });
+    expect(r).toMatchObject({ added: 0, skipped: 1, clash: ['CFP'] });
+    expect(trackerNote(r.added, r.skipped, Y, r.clash)).toBe('ไม่ได้ส่ง ทุกบริษัทที่เลือกมีงาน CFP ปี 2569 อยู่แล้ว');
   });
 });
 

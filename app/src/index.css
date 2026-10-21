@@ -1157,9 +1157,12 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-tg.bad{color:var(--bad)}
 /* "อาจซ้ำ": a soft amber word (two rows of one company and one service in the year), never red */
 .sl-tg.warn{color:var(--warn)}
-/* a closed job's name with its services (the ปิดงาน tab) */
-.sl-cl-nm{display:flex;align-items:center;gap:6px;min-width:0}
-.sl-cl-nm>.sl-nm-b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a row without a service, where its company has another row this year: a muted word, not a chip */
+.sl-tg.none{color:var(--muted)}
+/* a closed job's name, its services on a line under it (the ปิดงาน tab): two chips, then "อีก 2" */
+.sl-cl-nm{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.sl-cl-nm>.sl-nm-b{max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sl-cl-nm>.svts.js{flex-wrap:nowrap;max-width:100%}
 .sl-tg::after{content:' ·';color:var(--muted)}
 @media (pointer:coarse){.sl-nm-b{min-height:24px}.sl-kedit,.sl-closeb,.sl-mlist :is(.lnk,.quiet),.sl-tools :is(.lnk,.quiet){display:inline-flex;align-items:center;min-height:28px}}
 /* ผู้รับผิดชอบ: the name; read-only as text */

@@ -6,12 +6,12 @@ import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
 import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
-import { customersOf, jobServices, jointRole, payerDeal } from '../lib/sales';
+import { customersOf, jobServices, jointRole, payerDeal, type Deal } from '../lib/sales';
 import { fmtN, todayISO } from '../lib/format';
 import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { followRows } from '../lib/follow';
 import { useSalesActs } from './SalesToast';
-import { SECTION_LABEL, clashing, rowPick, sendState, svcText, type SendState } from '../lib/jobs';
+import { SECTION_LABEL, clashSvc, clashing, jobsShown, named, rowPick, sendLine, sendState, sendTag, svcCommon, svcText, type SendState } from '../lib/jobs';
 import { JobSvc, SvcPick } from './SvcChips';
 import { jobWord } from './DealSvc';
 
@@ -59,6 +59,7 @@ export function AddCustomer() {
   const [moreOpen, setMoreOpen] = useState(() => !!edit && (['jur', 'prov', 'ind', 'biz', 'web', 'addr', 'note'] as const).some((k) => !!f[k]));
   const [similar, setSimilar] = useState<Company[]>([]);
   const D = e.B.D;
+  const { say } = useSalesActs();
   // an account that may not add customers has no way here; should it get here anyway, nothing can be saved
   const ro = !e.can('edit.cust');
   const provs = useMemo(() => D.prov.filter(Boolean).slice().sort((x, y) => x.localeCompare(y, 'th')), [D]);
@@ -82,18 +83,20 @@ export function AddCustomer() {
     const d = e.sales.deals[dealId];
     if (typed.name && d && e.canLink(d)) e.saveTypedContact(dealId, typed);
   };
-  /** Use an existing company instead of adding a new one. */
-  const useExisting = (c: Company) => {
+  /** A suggested company's jobs of the year (a joint quotation's header is the payer's row for that quotation,
+   *  not the company's own row) and what the services picked here make of a new one (lib/jobs.ts sendState). */
+  const jobsOfCo = (c: Company) => e.dealsOf(c.id).filter((x) => x.year === year && jointRole(e.sales, x) !== 'header');
+  /**
+   * Use an existing company instead of adding a new one. From the Sales Tracker (`a.deal`): a new job of it, or
+   * (`old`, "เปิดงาน … เดิม": the services picked are on that job) its job of the year, said in a message with the
+   * picked services that job does not have; never one opened in place of a new one without saying so.
+   */
+  const useExisting = (c: Company, old?: Deal) => {
     if (a.link) {
       e.updateDeal(a.link, { gid: c.id });
       takeContact(a.link);
     }
     if (a.deal) {
-      // the company's job of the year that this may be (lib/jobs.ts: of a service picked here, or any job when
-      // none is picked or it lists none) is opened; a job of other services gets this one beside it (a joint
-      // quotation's header is the payer's row for that quotation, not the company's own row)
-      const jobs = e.dealsOf(c.id).filter((x) => x.year === year && jointRole(e.sales, x) !== 'header');
-      const old = clashing(e.sales, svc, jobs)[0];
       // a new row carries what was typed (a tab on an older build reads it there); a contact typed is its contact,
       // else the company's one person on record, if it has one (addDeal: never someone else than what was typed)
       const d =
@@ -104,6 +107,10 @@ export function AddCustomer() {
           typed.name ? {} : { contact: '' },
         );
       takeContact(d.id);
+      if (old) {
+        const has = jobServices(e.sales, old), miss = svc.filter((x) => !svcCommon([x], has).length);
+        say(`เปิดงาน${has.length ? ' ' + svcText(has) + ' ' : ''}เดิมของบริษัทนี้ปี ${year} ไม่ได้เพิ่มงานใหม่${miss.length ? ` · ${svcText(miss)} ยังไม่อยู่ในงานนี้ เพิ่มได้ที่ “แก้บริการ”` : ''}`, { ms: 8000 });
+      }
       set({ addCust: null, deal: d.id, slYear: year });
     } else if (a.link) set({ addCust: null });
     else set({ addCust: null, sel: c.id, dTab: 'info' });
@@ -149,14 +156,47 @@ export function AddCustomer() {
           {similar.length > 0 && (
             <div style={{ gridColumn: '1 / -1', border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="t-warn" style={{ fontSize: 13 }}>พบบริษัทที่คล้ายกันในทะเบียน ใช้บริษัทเดิมเพื่อไม่ให้ข้อมูลซ้ำ</span>
-              {similar.map((c) => (
-                <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', fontSize: 14 }}>
-                  <span>
-                    {c.name} <span className="t-meta">· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
-                  </span>
-                  <button type="button" onClick={() => useExisting(c)} className="btn xs">ใช้บริษัทนี้</button>
-                </div>
-              ))}
+              {similar.map((c) => {
+                // from the Sales Tracker: the company's jobs this year, and whether the services picked here may
+                // repeat one ("เปิดงาน CFO เดิม" or "เพิ่มเป็นงานใหม่", the person decides) or make a new job
+                const jobs = a.deal ? jobsOfCo(c) : [];
+                const st = sendState(svc, jobs.map((d) => jobServices(e.sales, d)));
+                const list = jobsShown(e.sales, svc, jobs);
+                // the job to open instead: one with a service picked (or any, nothing picked); beside a new job, one
+                // that lists no service (it may be this one: its service is then picked there)
+                const old = st === 'dup' ? clashing(e.sales, svc, jobs)[0] : jobs.find((d) => !named(jobServices(e.sales, d)));
+                const oldSvc = old ? svcText(jobServices(e.sales, old)) : '';
+                const line =
+                  st === 'dup' ? (named(svc) ? `${svcText(clashSvc(e.sales, svc, jobs))} มีอยู่ในงานเดิม เปิดงานเดิม หรือเพิ่มเป็นงานใหม่ถ้าเป็นคนละงาน` : 'ยังไม่ได้เลือกบริการด้านล่าง เปิดงานเดิม หรือเลือกบริการแล้วเพิ่มเป็นงานใหม่')
+                  : old ? 'งานเดิมยังไม่ระบุบริการ ถ้าเป็นงานเดียวกัน เปิดงานเดิมแล้วเลือกบริการที่นั่น'
+                  : '';
+                return (
+                  <div key={c.id} className="ac-sim">
+                    <span className="ac-sim-n">
+                      <span>
+                        {c.name} <span className="t-meta">· {c.code}{c.jur ? ' · ' + c.jur : ''} · {D.prov[c.prov] || 'ไม่ระบุจังหวัด'}</span>
+                      </span>
+                      {jobs.length > 0 && (
+                        <span className="sv-sub">
+                          มีงานปี {year}:{' '}
+                          {list.slice(0, 2).map((d, i) => (
+                            <span key={d.id} className="sv-job">
+                              {i > 0 && ' · '}
+                              <JobSvc svc={jobServices(e.sales, d)} /> {jobWord(e.sales, d)}
+                            </span>
+                          ))}
+                          {list.length > 2 && ` · อีก ${fmtN(list.length - 2)} งาน`}
+                        </span>
+                      )}
+                      {line && <span className="sv-sub t-sec">{line}</span>}
+                    </span>
+                    <span className="ac-sim-b">
+                      {old && <button type="button" onClick={() => useExisting(c, old)} className="btn xs">{`เปิดงาน${oldSvc ? ' ' + oldSvc + ' ' : ''}เดิม`}</button>}
+                      <button type="button" onClick={() => useExisting(c)} className="btn xs">{jobs.length ? 'เพิ่มเป็นงานใหม่' : 'ใช้บริษัทนี้'}</button>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
           {/* the job in the Sales Tracker: หมวด and ปี on one row, then บริการ (as the send dialog) */}
@@ -214,8 +254,9 @@ const LIST_FIRST = 150;
  * Send companies (one from its page, the starred ones, or the search page's selection) to the Sales Tracker: one
  * job each, under the หมวด (the channel the customer came from) and the year, with the services picked (one job
  * quoted together). A company that already has jobs that year is never locked: its jobs are said on its row, and
- * whether this is a new job (its services and the picked ones are named and share none: ticked) or may repeat one
- * (not ticked, "อาจซ้ำ": tick it if it is other work) is the row's own (lib/jobs.ts sendState, rowPick).
+ * whether this is a new job (no job of it has a service picked: ticked, "เพิ่มเป็นงานใหม่") or may repeat one (not
+ * ticked, "อาจซ้ำ"; nothing picked: "มีงานแล้ว"; tick it if it is other work) is the row's own (lib/jobs.ts
+ * sendState, sendTag, rowPick). A tick holds while the row reads as when it was made, so what is ticked is sent.
  */
 export function SendToTracker() {
   const { engine: e, ui, set } = useApp();
@@ -228,7 +269,7 @@ export function SendToTracker() {
   const cos = useMemo(() => (ui.sendIds || []).map((id) => e.company(id)).filter(Boolean) as Company[], [ui.sendIds, e, ver]);
   // opened from a person's page: that person is the deal's contact
   const from = ui.sendPid && e.can('edit.cust') ? e.people[ui.sendPid] : undefined;
-  // the person's own ticks, with the row's state when they made them: kept when the services change
+  // the person's own ticks, with the row's state when they made them: kept while the row still reads so
   const [mine, setMine] = useState<Record<number, { on: boolean; st: SendState }>>({});
   // several companies: by default each goes to the section of where it was found (TGO, SET/mai…)
   const AUTO = '\u0000auto';
@@ -251,7 +292,10 @@ export function SendToTracker() {
   const chosen = rows.filter((r) => r.on);
   const toAdd = chosen.length;
   const inYear = rows.filter((r) => r.jobs.length).length;
+  // not ticked: may repeat a job (a service picked is on one), or nothing picked and it has a job; ticked as a
+  // new job beside a job that lists no service (that job may be this one: the row says so)
   const dupOff = rows.filter((r) => r.st === 'dup' && !r.on).length;
+  const bare = rows.filter((r) => r.st === 'new' && r.on && r.jobs.some((d) => !named(jobServices(S, d)))).length;
   // one send adds at most TRACKER_MAX rows (the table draws its whole year for every teammate)
   const over = toAdd > TRACKER_MAX;
   const team = !!e.teamCfg;
@@ -265,7 +309,8 @@ export function SendToTracker() {
     const r = e.addDealsFromCompanies(chosen.map((x) => x.c.id), {
       ...(section === AUTO ? {} : { section }), year, pid: ui.sendPid, service: svc, force: chosen.filter((x) => x.force).map((x) => x.c.id),
     });
-    const note = trackerNote(r.added, r.skipped, year, svcText(svc));
+    // (a company skipped: its jobs have a service picked, said by name; nothing picked: that it has a job)
+    const note = trackerNote(r.added, r.skipped, year, r.clash);
     if (ui.sendStay) {
       // from the search page's selection: stay there, say what was sent, link to the table; an account
       // that may delete deals can take the rows back (เลิกทำ, 10 minutes: engine.undoSent)
@@ -287,37 +332,45 @@ export function SendToTracker() {
     }
   };
   const tick = (id: number, st: SendState, on: boolean) => setMine((m) => ({ ...m, [id]: { on, st } }));
-  /** The line about a company's jobs this year: "มีงานปี 2569: CFO · กำลังดำเนินการ", two jobs, then "อีก N งาน". */
+  /** A company's jobs this year under its name, the ones it may repeat first: one company's dialog lists each on
+   *  a line of its own with a way to open it, then what its tick does; many companies, two on one line, then
+   *  "อีก N งาน". */
   const jobsLine = (r: (typeof rows)[number]) => {
-    if (one && r.st === 'dup' && clash.length) {
-      const d = clash[0];
+    const list = jobsShown(S, svc, r.jobs);
+    if (one) {
+      const line = sendLine(S, r.st, svc, r.jobs, r.on);
       return (
         <>
-          <span className="sv-sub">
-            มีงาน <JobSvc svc={jobServices(S, d)} /> ปี {year} อยู่แล้ว · {jobWord(S, d)} ·{' '}
-            <button type="button" className="lnk" onClick={() => openJob(d.id)}>เปิดงานเดิม</button>
-          </span>
-          {!r.on && <span className="sv-sub t-muted">ถ้าเป็นคนละงาน ติ๊กเพื่อเพิ่มอีกงาน</span>}
+          <span className="sv-sub">{`มีงานปี ${year} แล้ว ${fmtN(r.jobs.length)} งาน`}</span>
+          {list.slice(0, 3).map((d) => (
+            <span key={d.id} className="sv-sub sv-job1">
+              <JobSvc svc={jobServices(S, d)} /> {jobWord(S, d)} ·{' '}
+              <button type="button" className="lnk" onClick={() => openJob(d.id)}>เปิดงานนี้</button>
+            </span>
+          ))}
+          {list.length > 3 && <span className="sv-sub">{`อีก ${fmtN(list.length - 3)} งาน`}</span>}
+          {line && <span className={'sv-sub ' + (r.st === 'dup' && !r.on ? 't-muted' : 't-sec')}>{line}</span>}
         </>
       );
     }
     return (
       <span className="sv-sub">
         มีงานปี {year}:{' '}
-        {r.jobs.slice(0, 2).map((d, i) => (
+        {list.slice(0, 2).map((d, i) => (
           <span key={d.id} className="sv-job">
             {i > 0 && ' · '}
             <JobSvc svc={jobServices(S, d)} /> {jobWord(S, d)}
           </span>
         ))}
-        {r.jobs.length > 2 && ` · อีก ${fmtN(r.jobs.length - 2)} งาน`}
+        {list.length > 2 && ` · อีก ${fmtN(list.length - 2)} งาน`}
       </span>
     );
   };
   const meta = [
     `${fmtN(cos.length)} บริษัท`,
     inYear ? `มีงานปี ${year} แล้ว ${fmtN(inYear)} บริษัท` : '',
-    dupOff ? (svc.length ? `อาจซ้ำ ${fmtN(dupOff)} บริษัท ไม่ได้ติ๊กไว้ ติ๊กได้ถ้าเป็นคนละงาน` : `${fmtN(dupOff)} บริษัทไม่ได้ติ๊กไว้ เลือกบริการด้านบนเพื่อแยกงาน`) : '',
+    dupOff ? (named(svc) ? `อาจซ้ำ ${fmtN(dupOff)} บริษัท ไม่ได้ติ๊กไว้ ติ๊กได้ถ้าเป็นคนละงาน` : `${fmtN(dupOff)} บริษัทที่มีงานแล้วไม่ได้ติ๊กไว้ เลือกบริการด้านบนเพื่อเพิ่มเป็นงานใหม่`) : '',
+    bare ? `งานเดิมของ ${fmtN(bare)} บริษัทยังไม่ระบุบริการ ติ๊กไว้เป็นงานใหม่ ตรวจก่อนส่ง` : '',
     // the first TRACKER_MAX of the followed companies (บริษัทที่ติดตาม's ส่งเข้า Sales Tracker ทั้งหมด)
     ui.sendMore > 0 ? followedMoreWord(ui.sendMore) : '',
   ].filter(Boolean).join(' · ');
@@ -354,7 +407,10 @@ export function SendToTracker() {
               {r.jobs.length > 0 && jobsLine(r)}
             </span>
             <span className="sv-tag">
-              {r.st === 'new' ? <span className="chip info">เพิ่มเป็นงานใหม่</span> : r.st === 'dup' ? <span className="chip warn">อาจซ้ำ</span> : <span className="t-meta">{r.c.phone || 'ยังไม่มีเบอร์'}</span>}
+              {(() => {
+                const tg = sendTag(r.st, svc);
+                return tg ? <span className={'chip ' + tg.tone}>{tg.text}</span> : <span className="t-meta">{r.c.phone || 'ยังไม่มีเบอร์'}</span>;
+              })()}
             </span>
           </label>
         ))}

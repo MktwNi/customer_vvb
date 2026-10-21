@@ -80,7 +80,7 @@ function GroupTable({ rows }: { rows: [string, SalesStats['byResp'][string]][] }
             <tr key={k}>
               <td>
                 {k}
-                <small>{fmtN(v.n)} ราย</small>
+                <small>{fmtN(v.n)} งาน</small>
               </td>
               <td>{fmtMoney(v.forecast) || '0'}</td>
               <td>
@@ -258,11 +258,11 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         </div>
         <div className="sd-heroes">
           {([
-            // rows in ราย (each company of a joint quotation one): not to be read against the ปิดงาน tab's jobs
-            // (a company with two jobs is two rows: the companies are said beside them when they differ)
-            ['user', st.total, 'ลูกค้า', 'ราย', `เปิด ${fmtN(st.open)} · ปิดแล้ว ${fmtN(st.closed)} ราย${cos !== st.total ? ` · ${fmtN(cos)} บริษัท` : ''}`, ''],
-            ['sales', st.yes, 'ปิดการขายได้', 'ราย', st.decided ? `Win rate ${st.winRate}%` : 'ยังไม่มีลูกค้าที่รู้ผล', 'pri'],
-            ['plan', st.overdue, 'ค้างติดตาม', 'ราย', 'ไม่ได้ติดต่อเกิน 14 วัน', st.overdue ? 'warn' : ''],
+            // ลูกค้า: the companies, each once (a company with a CFO job and a CFP job is one customer, two jobs); the
+            // rest count jobs (งาน: the rows, each company of a joint quotation one), as the win rate does
+            ['user', cos, 'ลูกค้า', 'ราย', `งาน ${fmtN(st.total)} · เปิด ${fmtN(st.open)} · ปิดแล้ว ${fmtN(st.closed)}`, ''],
+            ['sales', st.yes, 'ปิดการขายได้', 'งาน', st.decided ? `Win rate ${st.winRate}%` : 'ยังไม่มีงานที่รู้ผล', 'pri'],
+            ['plan', st.overdue, 'ค้างติดตาม', 'งาน', 'ไม่ได้ติดต่อเกิน 14 วัน', st.overdue ? 'warn' : ''],
           ] as const).map(([ic, n, l, unit, sub2, tone]) => (
             <div key={l} className={'sd-stat' + (tone ? ' ' + tone : '')}>
               <span className="sd-stat-l"><Icon name={ic} />{l}</span>
@@ -295,7 +295,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               count={(draft) => liveCount(S, F, 'date', draft, '', today)}
               // with การรับเงิน the months count deals by their money's own dates, as the filter and its footer do
               monthCounts={(basis, y) => (F.pay ? payMonthCounts(lines, F.pay, y) : monthCounts(S, F, basis, y, '', today))}
-              unit="ราย"
+              unit="งาน"
               lock={F.pay ? { basis: payBasis(F.pay), hint: F.pay === 'got' ? 'นับงวดที่รับเงินแล้วตามวันที่รับ การ์ดเงินจะนับเฉพาะเงินที่รับในช่วงนี้' : 'นับงวดที่ยังไม่ได้รับตามวันครบกำหนด การ์ดเงินจะนับเฉพาะงวดที่ครบกำหนดในช่วงนี้' } : undefined}
               // on the money's own dates the footer adds the money of the draft range (the stat will show it)
               money={(draft) => {
@@ -308,8 +308,8 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
           onClearAll={() => setF({})}
           count={filtered ? { shown: list.length, total: deals.length } : null}
           liveCount={(k, d) => (k === 'pay' ? payCount((d?.v[0] || '') as PayF) : liveCount(S, F, k, d, '', today))}
-          // the cards count customers in ราย ("ลูกค้า 25 ราย"): the row says it the same way
-          unit="ราย"
+          // the rows are jobs (งาน), as the cards count them (ลูกค้า alone counts companies)
+          unit="งาน"
         />
       </div>
 
@@ -317,9 +317,9 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
         {st.stages.map((x) => {
           const share = st.total ? Math.round((x.n / st.total) * 100) : 0;
           return (
-            <div key={x.name} role="listitem" className="sd-stage" title={`${x.code}${x.th ? ' · ' + x.th : ''}: ${fmtN(x.n)} ราย (${share}%)`}>
+            <div key={x.name} role="listitem" className="sd-stage" title={`${x.code}${x.th ? ' · ' + x.th : ''}: ${fmtN(x.n)} งาน (${share}%)`}>
               <span className="sd-stage-l">{x.th || x.code}</span>
-              <span className={'sd-stage-p' + (x.n ? '' : ' zero')}>{fmtN(x.n)} ราย · {share}%</span>
+              <span className={'sd-stage-p' + (x.n ? '' : ' zero')}>{fmtN(x.n)} งาน · {share}%</span>
             </div>
           );
         })}
@@ -333,7 +333,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
               <CoAvatar colored name={top[0]} size={92} ring="rgba(255,255,255,.9)" style={{ alignSelf: 'center', marginTop: 6 }} />
               <div className="sd-top-name">
                 <b>{top[0]}</b>
-                <span>{`ลูกค้า ${fmtN(top[1].n)} ราย · ปิดได้ ${fmtN(yesBy[top[0]] || 0)}`}</span>
+                <span>{`งาน ${fmtN(top[1].n)} · ปิดได้ ${fmtN(yesBy[top[0]] || 0)}`}</span>
               </div>
               {money && <span className="sd-top-money" title={`Actual ${fmtMoney(top[1].actual) || 0} บาท · Forecast ${fmtMoney(top[1].forecast) || 0} บาท`}>{top[1].actual ? `Actual ${baht(top[1].actual)} บาท` : `Forecast ${baht(top[1].forecast)} บาท`}</span>}
               {sellers.length > 1 && (
@@ -403,7 +403,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
             <span className="sd-card-t">ผลการขาย</span>
             <b className="sd-big">{st.decided ? `${st.winRate}%` : '—'}</b>
           </div>
-          <span className="sd-muted">{`Win rate · ปิดได้ ÷ รู้ผลแล้ว (${fmtN(st.decided)} ราย)`}</span>
+          <span className="sd-muted">{`Win rate · ปิดได้ ÷ รู้ผลแล้ว (${fmtN(st.decided)} งาน)`}</span>
           <div className="sd-wins">
             <span className="sd-wins-h">ปิดการขายล่าสุด</span>
             {!wins.length && <span className="sd-muted">ยังไม่มี · ใส่ YES ในขั้น CLOSE ของตาราง</span>}
@@ -414,7 +414,7 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                   <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={32} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
-                    <small><JobSvc svc={jobServices(S, d)} none={false} />{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
+                    <small><JobSvc svc={jobServices(S, d)} none={false} max={1} />{[d.resp, at ? short(at) : ''].filter(Boolean).join(' · ')}</small>
                   </span>
                   {amt > 0 && <span className={'sd-win-amt' + (fc ? ' fc' : '')} title={fc ? 'ยังไม่มี Actual · แสดง Forecast' : 'Actual'}>{fc ? 'Forecast ' : ''}{baht(amt)} บาท</span>}
                 </button>
@@ -428,17 +428,17 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                   <span key={l}><i className={bg ? '' : 'wait'} style={bg ? { background: bg } : undefined} />{l} <b>{fmtN(n)}</b></span>
                 ))}
               </div>
-              <div className="sd-seg" role="img" aria-label={`ปิดได้ ${st.yes} · ไม่สำเร็จ ${st.no} · รอผล ${undecided} จากลูกค้าทั้งหมด ${st.total} ราย`}>
+              <div className="sd-seg" role="img" aria-label={`ปิดได้ ${st.yes} · ไม่สำเร็จ ${st.no} · รอผล ${undecided} จากงานทั้งหมด ${st.total} งาน`}>
                 {segs.map(([l, n, bg, fg]) => {
                   const p = Math.round((n / st.total) * 100);
                   return n ? (
-                    <span key={l} className={'sd-seg-b' + (bg ? '' : ' wait')} style={{ flex: `${n} 1 0`, background: bg || undefined, color: fg || undefined }} title={`${l}: ${fmtN(n)} ราย (${p}%)`}>
+                    <span key={l} className={'sd-seg-b' + (bg ? '' : ' wait')} style={{ flex: `${n} 1 0`, background: bg || undefined, color: fg || undefined }} title={`${l}: ${fmtN(n)} งาน (${p}%)`}>
                       {n / st.total >= 0.15 ? `${p}%` : ''}
                     </span>
                   ) : null;
                 })}
               </div>
-              <span className="sd-muted">{`% ของลูกค้าทั้งหมด ${fmtN(st.total)} ราย`}</span>
+              <span className="sd-muted">{`% ของงานทั้งหมด ${fmtN(st.total)} งาน`}</span>
             </>
           )}
           {!st.total && <span className="sd-muted">ยังไม่มีลูกค้าในปีนี้</span>}
@@ -541,14 +541,14 @@ export function SalesDash({ S, deals, today, year }: { S: SalesState; deals: Dea
                   <CoAvatar colored ckey={dealKey(e, d)} name={d.client} web={c?.web} set={c?.set} size={34} />
                   <span className="sd-fi-t">
                     <b>{coreName(d.client) || d.client}</b>
-                    <small><JobSvc svc={jobServices(S, d)} none={false} />{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
+                    <small><JobSvc svc={jobServices(S, d)} none={false} max={1} />{[d.section, d.resp, when].filter(Boolean).join(' · ')}</small>
                   </span>
                   {od != null && <span className="sd-od">{fmtN(od)} วัน</span>}
                 </button>
               );
             })}
           </div>
-          {follow.length > 8 && <button className="sd-more" onClick={() => setShowAll(!showAll)}>{showAll ? 'ย่อรายการ' : `ดูทั้งหมด ${fmtN(follow.length)} ราย`}</button>}
+          {follow.length > 8 && <button className="sd-more" onClick={() => setShowAll(!showAll)}>{showAll ? 'ย่อรายการ' : `ดูทั้งหมด ${fmtN(follow.length)} งาน`}</button>}
         </section>
 
         <section className="sd-card sd-acc-card" aria-label="รายละเอียด">

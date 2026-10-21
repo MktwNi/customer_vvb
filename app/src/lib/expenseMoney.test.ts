@@ -449,6 +449,16 @@ describe('the files', () => {
     expect(lines.head[6]).toBe('หมวดค่าใช้จ่าย');
     expect(lines.rows[0]).toEqual(['2569', 'ส.ค. 2569', 'ผู้จ่าย ร่วม (ใบเสนอราคาร่วม 2 บริษัท)', '2569', 'Partner', 'หมิว', 'ค่าแล็บ', '', 10000, '2026-08-14', '2026-08-15', 'จ่ายแล้ว', '', 'หมิว', '']);
     expect(lines.head.at(-1)).toBe('บริการ');
+    // the บริการ column reads the services the caller gives (the screen: jobServices, a joint quotation's company
+    // under its quotation's), as the Cashflow and month-check exports do; by default the job's own
+    const svcOf = (d: Deal) => (d ? ['CFP'] : []);
+    expect(expCsvRows('2569', X0, 'lines', false, qt, svcOf).rows.every((r) => r.at(-1) === 'CFP')).toBe(true);
+    expect(bothCsvRows('2569', cashRows(s, '2569', C, 'lines', false), C, X0, 'lines', false, qt, svcOf).rows.filter((r) => r[2] === 'เงินออก').every((r) => r.at(-1) === 'CFP')).toBe(true);
+    const xr = expChkRows(s, expLines(s), {}, SINCE).filter((r) => r.deal);
+    expect(xr.length).toBeGreaterThan(0);
+    const sh = expSheets(xr, [], true, qt, undefined, '', svcOf)[0].rows;
+    expect(sh.length).toBeGreaterThan(0);
+    expect(sh.every((r) => r.at(-1) === 'CFP')).toBe(true);
     expect(lines.rows.map((r) => r[11])).toEqual(['จ่ายแล้ว', 'จ่ายแล้ว', 'จ่ายแล้ว', 'จ่ายแล้ว', 'ค้างจ่าย']);
     const m = expCsvRows('2569', X0, 'month', false, qt);
     expect(m.head).toEqual(['ปี (พ.ศ.)', 'เดือน', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'จำนวนรายการ']);

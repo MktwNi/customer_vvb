@@ -1978,7 +1978,8 @@ export const customersOf = (s: SalesState, deals: Deal[]) => deals.filter((d) =>
  *   closed (`closedOnly` false: any job), each once (`key`: the registry company, else the name; a row without
  *   a link merges with a linked row of the same name, `alias` giving a linked row's other names). A joint
  *   quotation's companies count each; its payer never (it pays, the work is for its companies).
- * - `lost`: companies closed with NO (and not worked); `noResult`: closed company rows without YES or NO.
+ * - `lost`: companies closed with NO (and not worked); `noResult`: companies whose closed rows have no YES or NO
+ *   (and are neither worked nor lost: a company with a CFO job lost and a CFP job without a result is lost).
  * - `jobRow` / `workRow`: the rows that carry each count, for the CSV's "นับเป็นงาน" and "นับเป็นบริษัทที่ทำงาน
  *   ให้" (1 on these rows, so a SUM equals the screen): a joint quotation's job on its payer's row (which the
  *   export lists with it, also when filtered out), a company on its first counted row in list order.
@@ -1986,6 +1987,13 @@ export const customersOf = (s: SalesState, deals: Deal[]) => deals.filter((d) =>
  */
 export interface WorkTally { jobs: number; joint: number; worked: number; lost: number; noResult: number; jobRow: Set<string>; workRow: Set<string> }
 export interface WorkOpts { key?: (d: Deal) => string; alias?: (d: Deal) => string[]; closedOnly?: boolean; attr?: boolean }
+/** Names a row gets before anyone types one (เพิ่มในหมวดนี้, an import without a name; or none): never one company,
+ *  so two such rows are two companies (workTally, lib/jobs.ts). */
+const PLACEHOLDER = new Set(['ลูกค้าใหม่', 'ลูกค้า', '(ไม่มีชื่อ)'].map(norm));
+export const placeholderName = (client: string) => {
+  const k = norm(client);
+  return !k || PLACEHOLDER.has(k);
+};
 /** A company's key for workTally without the registry at hand: its link, else its name. */
 export const workKey = (d: Pick<Deal, 'gid' | 'client'>) => (d.gid != null ? 'g' + d.gid : 'n' + norm(d.client));
 export function workTally(s: SalesState, deals: Deal[], o: WorkOpts = {}): WorkTally {
@@ -2000,11 +2008,13 @@ export function workTally(s: SalesState, deals: Deal[], o: WorkOpts = {}): WorkT
     ['n' + norm(d.client), ...(o.alias ? o.alias(d) : [])].forEach((a) => a.length > 1 && !alias.has(a) && alias.set(a, k));
   }
   const kOf = (d: Deal) => {
+    // (a row without a link and without a name of its own is a company of its own)
+    if (d.gid == null && placeholderName(d.client)) return 'd' + d.id;
     const k = key(d);
     return alias.get(k) || k;
   };
-  const jobRow = new Set<string>(), workRow = new Set<string>(), seen = new Set<string>(), worked = new Set<string>(), lost = new Set<string>();
-  let joint = 0, noResult = 0;
+  const jobRow = new Set<string>(), workRow = new Set<string>(), seen = new Set<string>(), worked = new Set<string>(), lost = new Set<string>(), noRes = new Set<string>();
+  let joint = 0;
   for (const d of deals) {
     const r = role.get(d.id)!;
     if (r === 'plain') jobRow.add(d.id);
@@ -2031,9 +2041,12 @@ export function workTally(s: SalesState, deals: Deal[], o: WorkOpts = {}): WorkT
         workRow.add(d.id);
       }
     } else if (res === 'NO') lost.add(kOf(d));
-    else noResult++;
+    else noRes.add(kOf(d));
   }
-  return { jobs: jobRow.size, joint, worked: worked.size, lost: [...lost].filter((k) => !worked.has(k)).length, noResult, jobRow, workRow };
+  return {
+    jobs: jobRow.size, joint, worked: worked.size, lost: [...lost].filter((k) => !worked.has(k)).length,
+    noResult: [...noRes].filter((k) => !worked.has(k) && !lost.has(k)).length, jobRow, workRow,
+  };
 }
 
 /**
@@ -2623,11 +2636,11 @@ export function parseTrackerSheet(rows: Record<string, unknown>[]): TrackerData[
 
 /** The name an imported row is matched by: the client, or the contact person for a row without one. */
 export const importKey = (c: TrackerClient) => norm(c.client) || '@' + c.contactName.trim().toLowerCase();
-/** Stable id for an imported row (the nth row of that client in that year), so importing the same
- *  file again — or a newer download where a section or contact was edited — finds the rows already
- *  imported instead of duplicating them. */
-export function importId(year: string, c: TrackerClient, nth: number) {
-  const s = `${year}|${importKey(c)}|${nth}`;
+/** A service as it is compared (lib/jobs.ts): case, outer and doubled spaces do not count ("t-ver", " CFO "). */
+export const svcKey = (s: string) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+/** A row's services as one key: each once (svcKey), sorted; '' for none. */
+export const svcSig = (svc: readonly string[]) => [...new Set(svc.map(svcKey).filter(Boolean))].sort().join(',');
+function impHash(year: string, s: string) {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -2635,6 +2648,14 @@ export function importId(year: string, c: TrackerClient, nth: number) {
   }
   return 'imp' + year + (h >>> 0).toString(36);
 }
+/** The id an imported row got before a company's rows were told apart by their services (the nth row of that
+ *  client in that year): the import still finds the rows imported then by it (engine.importTrackerData). */
+export const importId = (year: string, c: TrackerClient, nth: number) => impHash(year, `${year}|${importKey(c)}|${nth}`);
+/** Stable id for an imported row: the nth row of that client with those services in that year (a company's rows
+ *  of different services are different jobs), so importing the same file again, or a newer download where a
+ *  row was added above another, or a section, contact or amount was edited, finds the rows already imported
+ *  instead of duplicating them or leaving a new one out. */
+export const importJobId = (year: string, c: TrackerClient, nth: number) => impHash(year, `${year}|${importKey(c)}|s:${svcSig(c.service)}|${nth}`);
 
 /** Text of a CSV file in whatever encoding Excel saved it: UTF-8 (with or without BOM), UTF-16 with a
  *  BOM, else Thai Windows "ANSI" (windows-874 / TIS-620) — which reading it as UTF-8 would turn into "����". */

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { SVC_TYPE_LABEL, chipTitle, chipVars, svcType, typeOfService, type CustTypes } from '../lib/svcType';
-import { NO_SVC, SVC_LABEL, svcClean, svcKey } from '../lib/jobs';
+import { NO_SVC, SVC_LABEL, svcClean, svcKey, svcText } from '../lib/jobs';
 import { Tick } from './Pop';
 
 /** A company's service types (lib/svcType.ts) as calm chips beside its name: each type's word in its ink on
@@ -21,8 +21,10 @@ export function SvcChips({ ct }: { ct: CustTypes }) {
 
 /** A job's services as chips: each service's own word ("CFP", "Course Training") in its type's ink on its tint
  *  (the plan page's colours, lib/svcType.ts), in the order the job lists them; "ยังไม่ระบุบริการ" in grey for a
- *  job without one (`none` false: nothing then). The word is always written: colour is never the only cue. */
-export function JobSvc({ svc, none = true, className = '', label = true }: { svc: readonly string[]; none?: boolean; className?: string; label?: boolean }) {
+ *  job without one (`none` false: nothing then). The word is always written: colour is never the only cue. `max`
+ *  (a line of one row: the table, a list): the first `max` chips, then "อีก 2" in words, the whole list in the
+ *  tooltip and for a screen reader, so a chip is never cut. */
+export function JobSvc({ svc, none = true, className = '', label = true, max = 0 }: { svc: readonly string[]; none?: boolean; className?: string; label?: boolean; max?: number }) {
   const list = svcClean(svc);
   if (!list.length)
     return none ? (
@@ -30,14 +32,18 @@ export function JobSvc({ svc, none = true, className = '', label = true }: { svc
         <span className="svt none" style={chipVars('none')} title="งานนี้ยังไม่ได้เลือกบริการ">{NO_SVC}</span>
       </span>
     ) : null;
+  const shown = max > 0 && list.length > max ? list.slice(0, max) : list;
+  const more = list.length - shown.length;
   return (
-    <span className={'svts js ' + className}>
+    <span className={'svts js ' + className} title={more ? `${SVC_LABEL} ${svcText(list)}` : undefined}>
       {/* (a screen reader hears "บริการ CFO" where no visible word says it already) */}
       {label && <span className="sr-only">{SVC_LABEL} </span>}
-      {list.map((x) => {
+      {more > 0 && <span className="sr-only">{svcText(list)}</span>}
+      {shown.map((x) => {
         const t = typeOfService(x) || 'oth';
-        return <span key={x} className="svt" style={chipVars(t)} title={`${SVC_LABEL} ${x} · ${SVC_TYPE_LABEL} ${svcType(t).n}`}>{x}</span>;
+        return <span key={x} className="svt" style={chipVars(t)} aria-hidden={more ? true : undefined} title={more ? undefined : `${SVC_LABEL} ${x} · ${SVC_TYPE_LABEL} ${svcType(t).n}`}>{x}</span>;
       })}
+      {more > 0 && <span className="svt-more" aria-hidden="true">{`อีก ${more}`}</span>}
     </span>
   );
 }

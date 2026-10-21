@@ -181,8 +181,14 @@ export function FollowList() {
                   </Cell>
                   {seeSales && (
                     <Cell label={`Sales Tracker ปี ${year}`}>
-                      {/* (the job's services: a company may have several jobs this year, the open one first is said) */}
-                      {r.deal ? <span><JobSvc svc={jobServices(e.sales, r.deal)} none={false} /> {r.status}</span> : <span className="t-muted">{NOT_IN_TRACKER}</span>}
+                      {/* (the job's services: a company may have several jobs this year, the open one first is said, then
+                          how many more, as the plan page's "Sales Tracker 2 งาน") */}
+                      {r.deal ? (
+                        <span>
+                          <JobSvc svc={jobServices(e.sales, r.deal)} none={r.jobs > 1} /> {r.status}
+                          {r.jobs > 1 && <span className="t-sec">{` · อีก ${fmtN(r.jobs - 1)} งาน`}</span>}
+                        </span>
+                      ) : <span className="t-muted">{NOT_IN_TRACKER}</span>}
                       {!r.deal && canSend && <button onClick={() => set({ sendIds: [r.c.id] })} className="lnk fw-a">ส่งเข้า Sales Tracker</button>}
                     </Cell>
                   )}

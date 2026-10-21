@@ -65,3 +65,9 @@
   .sv-row{grid-template-columns:auto minmax(0,1fr)}
   .sv-tag{grid-column:2;justify-self:start}
 }
+
+/* เพิ่มลูกค้า's similar companies: the name, its jobs this year from the Sales Tracker, and the buttons */
+.ac-sim{display:flex;gap:6px 10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:14px}
+.ac-sim-n{min-width:0;flex:1 1 260px;display:flex;flex-direction:column;gap:2px}
+.ac-sim-b{display:flex;gap:8px;flex-wrap:wrap}
+.sv-job1{display:flex;flex-wrap:wrap;align-items:center;gap:4px}

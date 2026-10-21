@@ -49,7 +49,7 @@ import { UnitsDialog } from '../components/UnitsDialog';
 // เพิ่มลูกค้า → ส่งบริษัทที่ติดตามอยู่: บริษัทที่ติดตาม's list, at most TRACKER_MAX a send
 import { followRows } from '../lib/follow';
 import { followedBatch, followedMenuWords } from '../lib/bulk';
-import { dupRows, dupTitle } from '../lib/jobs';
+import { dupRows, dupTitle, named, rowsPerCo } from '../lib/jobs';
 import { JobSvc } from '../components/SvcChips';
 import { jobName } from '../lib/salesUi';
 
@@ -726,6 +726,8 @@ interface Tk {
   acts: ReturnType<typeof useSalesActs>;
   /** the rows this one may repeat (the soft "อาจซ้ำ"), or null */
   dup: (d: Deal) => Deal[] | null;
+  /** does the row's company have another row in the year (the row then says that it lists no service) */
+  multi: (d: Deal) => boolean;
 }
 const TkCtx = createContext<Tk | null>(null);
 const useTk = () => useContext(TkCtx)!;
@@ -765,6 +767,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
   // one; lib/jobs.ts dupRows): a soft "อาจซ้ำ". A company's jobs of different services are normal. (The lens's jobs
   // of other years are not the year's rows; a joint quotation's header and members are rows of their own.)
   const dupOf = dupRows(S, facets.filter((d) => d.year === ui.slYear), (g) => e.canonical(g));
+  const perCo = rowsPerCo(S, facets.filter((d) => d.year === ui.slYear), (g) => e.canonical(g));
   const cur = ui.deal || ui.last.deal;
 
   const toggle = (id: string, focusChev = false) => {
@@ -814,6 +817,7 @@ function TableView({ e, S, F, deals, base, all, facets, today, openN }: { e: Eng
       set({ deal: id, dpPlan: plan, slToast: null });
     },
     dup: (d) => dupOf.get(d.id) || null,
+    multi: (d) => (perCo.get(d.id) || 1) > 1,
   };
 
   // the section bars stick right under the column headings: their height (fonts, zoom) sets the offset
@@ -1178,11 +1182,13 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
           <span className="sl-nm">
             <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => tk.openPanel(d.id)} title={`${d.client} เปิดรายละเอียด`} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
             <span className="sl-nm-s">
-              {/* the job's services first: two jobs of one company are told apart here */}
-              <JobSvc svc={jobServices(S, d)} />
-              {cur && <span className="sl-tg">เปิดล่าสุด</span>}
-              {isNew && <span className="sl-tg">ใหม่</span>}
+              {/* the tags first (the line is one clipped line: they must be seen), then the job's services, one
+                  chip and "อีก 2" (two jobs of one company are told apart here); a row without a service says so
+                  only where its company has another row */}
               {dup && <span className="sl-tg warn" title={dupTitle(d, dup)}>อาจซ้ำ</span>}
+              {isNew && <span className="sl-tg">ใหม่</span>}
+              {cur && <span className="sl-tg">เปิดล่าสุด</span>}
+              <RowSvc d={d} />
               {tk.cash && d.year !== tk.year && <span className="sl-tg" title={`งานของปี ${d.year} ที่มีงวดเงินในปี ${tk.year}`}>งานปี {d.year}</span>}
               <span className={'sl-ct' + (ctName ? '' : ' none')}>{ct}</span>
               <span className="sl-sub-last">· {lc ? dmTh(lc) : 'ยังไม่ได้ติดต่อ'}</span>
@@ -1209,6 +1215,14 @@ function DealRow({ d, open, t, kidIds, jm }: { d: Deal; open: boolean; t: DealSt
 
 /** ผู้รับผิดชอบ: the name as text, a styled picker under the pointer (one avatar per row: the company's;
  *  the people's initials are in the list). Its list renders only while open, so a long table costs nothing. */
+/** A row's services in its line under the name (lib/jobs.ts): the chips (`max` of them, then "อีก 2"); without a
+ *  service, "ไม่ระบุบริการ" only where the company has another row this year to tell it from. */
+function RowSvc({ d, max = 1 }: { d: Deal; max?: number }) {
+  const tk = useTk();
+  const svc = jobServices(tk.S, d);
+  if (named(svc)) return <JobSvc svc={svc} none={false} max={max} />;
+  return tk.multi(d) ? <span className="sl-tg none" title="งานนี้ยังไม่ได้เลือกบริการ เลือกได้ที่ “แก้บริการ” ในหน้ารายละเอียด">ไม่ระบุบริการ</span> : null;
+}
 function Owner({ d }: { d: Deal }) {
   const { e, ro, team } = useTk();
   const name = d.resp || 'มอบหมาย';
@@ -2419,9 +2433,10 @@ function DealCard({ d }: { d: Deal }) {
         <div className="sl-mc-t">
           <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => tk.openPanel(d.id)} aria-label={`${d.client} เปิดรายละเอียด`}>{name}</button>
           <span className="sl-nm-s">
-            <JobSvc svc={jobServices(S, d)} />
-            {cur && <span className="sl-tg">เปิดล่าสุด</span>}
             {tk.dup(d) && <span className="sl-tg warn" title={dupTitle(d, tk.dup(d)!)}>อาจซ้ำ</span>}
+            {cur && <span className="sl-tg">เปิดล่าสุด</span>}
+            {/* (the card's line wraps: every service is shown) */}
+            <RowSvc d={d} max={0} />
             {tk.cash && d.year !== tk.year && <span className="sl-tg">งานปี {d.year}</span>}
             <CardWhen d={d} lc={lc} />
             {od != null && <span className="chip bad">ค้าง {fmtN(od)} วัน</span>}
@@ -2781,7 +2796,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (
                   <tr key={d.id}>
-                    <td><span className="sl-cl-nm"><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button><JobSvc svc={jobServices(S, d)} none={false} /></span></td>
+                    <td><span className="sl-cl-nm"><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button><JobSvc svc={jobServices(S, d)} none={false} max={2} /></span></td>
                     <td className="c-opt t-sec">{d.section || 'ไม่ระบุหมวด'}</td>
                     <td className="c-opt">{d.resp || '—'}</td>
                     <td><Status kind={r === 'YES' ? 'ok' : r === 'NO' ? 'bad' : 'neutral'}>{r === 'YES' ? 'ได้งาน' : r === 'NO' ? 'ไม่ได้งาน' : 'ไม่ระบุผล'}</Status></td>

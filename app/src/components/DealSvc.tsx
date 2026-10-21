@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useApp } from '../state';
 import { jobServices, jointRole, payerDeal, trackerStatus, type Deal, type SalesState } from '../lib/sales';
-import { jobCoKey, otherJobs, repeats, svcClean, svcCommon, svcText } from '../lib/jobs';
+import { jobCoKey, otherJobs, otherWords, repeatWords, repeats, svcClean, svcCommon, svcText } from '../lib/jobs';
 import type { GccEngine } from '../lib/engine';
 import { fmtN } from '../lib/format';
 import { Pop } from './Pop';
@@ -53,11 +53,9 @@ export function DealSvcRow({ d }: { d: Deal }) {
             <span className="t-sec">บริการของงานนี้ เลือกได้หลายบริการ ถ้าอยู่ในใบเสนอราคาเดียวกัน</span>
             <SvcPick all={S.cfg.services} value={d.service} onChange={(v) => e.updateDeal(d.id, { service: v })} label="บริการของงานนี้" />
             {rep.length > 0 ? (
-              <span className="t-warn" role="status">
-                {`งาน ${svcCommon(d.service, rep.flatMap((o) => jobServices(S, o))).join(', ')} อีกแถวของบริษัทนี้ปี ${d.year} อาจเป็นงานเดียวกัน ทั้งสองแถวจะขึ้นว่า “อาจซ้ำ” จนกว่าแต่ละแถวจะแนบใบเสนอราคาของตัวเอง`}
-              </span>
+              <span className="t-warn" role="status">{repeatWords(svcCommon(d.service, rep.flatMap((o) => jobServices(S, o))), rep.length, d.year)}</span>
             ) : othersSvc.length > 0 ? (
-              <span className="t-meta">{`บริษัทนี้มีงาน ${othersSvc.join(', ')} ปี ${d.year} อีกงาน ถ้าเลือกบริการเดียวกันที่นี่ ทั้งสองแถวจะขึ้นว่า “อาจซ้ำ”`}</span>
+              <span className="t-meta">{otherWords(othersSvc, others.length, d.year)}</span>
             ) : null}
             <button type="button" className="btn sm" style={{ alignSelf: 'flex-end' }} onClick={() => setOpen(false)}>เสร็จ</button>
           </div>

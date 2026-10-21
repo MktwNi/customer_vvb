@@ -698,7 +698,7 @@ export type OutXl = (ym: string | null) => { rows: XRow[]; months: MonthRow[] } 
 export function ExcelDialog({ S, rows, months, ym, ce, year, filter, out, outFirst, onClose }: { S: SalesState; rows: ChkRow[]; months: MonthRow[]; ym: string | null; ce: number; year: string; /** the page's filter in words ('' none) */ filter: string; out?: { rows: XRow[]; months: MonthRow[] } | null; /** opened from the out side: its sheet previewed */ outFirst?: boolean; onClose: () => void }) {
   const [owed, setOwed] = useState(true);
   const [busy, setBusy] = useState('');
-  const sheets = [...chkSheets(S, rows, months, owed, filter), ...(out ? expSheets(out.rows, out.months, owed, (d) => dealMoney(S, d).fcDoc?.docNo || '', months, filter) : [])];
+  const sheets = [...chkSheets(S, rows, months, owed, filter), ...(out ? expSheets(out.rows, out.months, owed, (d) => dealMoney(S, d).fcDoc?.docNo || '', months, filter, (d) => jobServices(S, d)) : [])];
   const ls = sheets[0];
   const got = rows.filter((r) => r.kind === 'got');
   const toCome = rows.filter((r) => r.kind === 'late' || r.kind === 'owed');

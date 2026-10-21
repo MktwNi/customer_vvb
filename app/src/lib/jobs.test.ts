@@ -5,8 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  clashing, companyCount, dupRows, dupTitle, jobCoKey, maySame, named, otherJobs, repeats, rowPick, sendState, surelyOther, svcClean, svcCommon, svcShare, svcText, withSvc,
+  clashSvc, clashing, companyCount, dupRows, dupTitle, jobCoKey, jobsShown, maySame, named, otherJobs, otherWords, repeatWords, repeats, rowPick, rowsPerCo, sendLine, sendState, sendTag, surelyOther, svcClean,
+  svcCommon, svcShare, svcText, withSvc,
 } from './jobs';
+import { closedMeta } from './workUi';
 import { customersOf, emptySales, filterDeals, jobServices, listValues, newDeal, salesStats, workTally, type Deal, type DealDoc, type SalesState } from './sales';
 import { jobName } from './salesUi';
 import { liveCount, trackerFields } from './salesUi';
@@ -86,14 +88,46 @@ describe('a row of the send dialog', () => {
   it('nothing picked (a prospecting send): every company with a job stays unticked', () => {
     expect(sendState([], [['CFO']])).toBe('dup');
   });
-  it('a job without a service: nothing tells, not ticked', () => {
-    expect(sendState(['CFP'], [[]])).toBe('dup');
+  it('a job without a service beside a service picked: no service is shared, so a new job, ticked (the table does not tag the pair either); the row says the old job lists none', () => {
+    expect(sendState(['CFP'], [[]])).toBe('new');
+    expect(sendState(['CFP'], [[], ['CFO']])).toBe('new');
+    expect(maySame(['CFP'], [])).toBe(false);
+    const s = emptySales();
+    const old = deal(s, 'old');
+    expect(sendLine(s, 'new', ['CFP'], [old], true)).toBe('งานเดิมยังไม่ระบุบริการ ถ้าเป็นงานเดียวกัน เอาติ๊กออก แล้วเปิดงานเดิมเพื่อเลือกบริการ');
+    expect(sendLine(s, 'new', ['CFP'], [deal(s, 'cfo', { service: ['CFO'] })], true)).toBe('');
   });
-  it('the person\'s own tick wins; it is forced only when made while the row read อาจซ้ำ', () => {
+  it('the tag beside the tick: เพิ่มเป็นงานใหม่, อาจซ้ำ (a service picked is on a job), มีงานแล้ว (nothing picked)', () => {
+    expect(sendTag('new', ['CFP'])).toEqual({ text: 'เพิ่มเป็นงานใหม่', tone: 'info' });
+    expect(sendTag('dup', ['CFO'])).toEqual({ text: 'อาจซ้ำ', tone: 'warn' });
+    expect(sendTag('dup', [])).toEqual({ text: 'มีงานแล้ว', tone: '' });
+    expect(sendTag('', ['CFO'])).toBeNull();
+    const s = emptySales();
+    const jobs = [deal(s, 'a', { service: ['CFO', 'LESS'] }), deal(s, 'b', { service: ['CFP'] })];
+    expect(sendLine(s, 'dup', ['CFO', 'T-VER'], jobs, false)).toBe('CFO มีอยู่ในงานเดิม ถ้าเป็นคนละงาน ติ๊กเพื่อเพิ่มอีกงาน');
+    expect(sendLine(s, 'dup', [], jobs, false)).toBe('เลือกบริการด้านบนเพื่อเพิ่มเป็นงานใหม่ หรือติ๊กเพื่อเพิ่มอีกงาน');
+    // the jobs listed: the one it may repeat first
+    expect(jobsShown(s, ['CFP'], jobs).map((d) => d.id)).toEqual(['b', 'a']);
+    expect(jobsShown(s, [], jobs).map((d) => d.id)).toEqual(['a', 'b']);
+  });
+  it('the note after a send names the services the skipped jobs have, not every one picked', () => {
+    const s = emptySales();
+    const jobs = [deal(s, 'a', { service: ['CFO'] }), deal(s, 'b', { service: [] })];
+    expect(clashSvc(s, ['CFO', 'CFP'], jobs)).toEqual(['CFO']);
+    expect(clashSvc(s, ['CFP'], jobs)).toEqual([]);
+    expect(clashSvc(s, [], jobs)).toEqual([]);
+  });
+  it('a tick counts while the row still reads as when it was made: what is shown ticked is what is sent', () => {
+    // ticked through "อาจซ้ำ": sent through it
     expect(rowPick('dup', { on: true, st: 'dup' })).toEqual({ on: true, force: true });
     expect(rowPick('new', { on: false, st: 'new' })).toEqual({ on: false, force: false });
-    // ticked while new, a teammate's send made it a repeat since: kept ticked, not forced (the engine re-checks)
-    expect(rowPick('dup', { on: true, st: 'new' })).toEqual({ on: true, force: false });
+    // ticked while new, then a service picked here (or a teammate's send) made it a possible repeat: the row goes
+    // back to not ticked, as the engine would skip it (review: it stayed ticked and counted, then was skipped)
+    expect(sendState(['CFP'], [['CFO']])).toBe('new');
+    expect(sendState(['CFP', 'CFO'], [['CFO']])).toBe('dup');
+    expect(rowPick('dup', { on: true, st: 'new' })).toEqual({ on: false, force: false });
+    // unticked while a repeat, then it became a new job: ticked again, as any new job
+    expect(rowPick('new', { on: false, st: 'dup' })).toEqual({ on: true, force: false });
   });
   it('lists the jobs a send would repeat (a joint member by its header\'s services)', () => {
     const s = emptySales();
@@ -105,6 +139,9 @@ describe('a row of the send dialog', () => {
     expect(clashing(s, ['CFP'], [cfo, m]).map((d) => d.id)).toEqual(['m']);
     expect(clashing(s, [], [cfo, m]).map((d) => d.id)).toEqual(['cfo', 'm']);
     expect(h.id).toBe('h');
+    // a job without a service is not one a send of CFP may repeat
+    const bare = deal(s, 'bare', { service: [] });
+    expect(clashing(s, ['CFP'], [cfo, bare]).map((d) => d.id)).toEqual([]);
   });
 });
 
@@ -170,7 +207,27 @@ describe('the table\'s soft "อาจซ้ำ"', () => {
   });
 });
 
+describe('a row says it lists no service only where its company has another row', () => {
+  it('rowsPerCo: rows of one company in the year (plain rows), a placeholder name never one company', () => {
+    const s = emptySales();
+    deal(s, 'a', { service: ['CFO'] });
+    deal(s, 'b');
+    deal(s, 'lone', { gid: 26, client: 'ซากิโนมิยะ' });
+    deal(s, 'old', { year: '2568' });
+    deal(s, 'p1', { gid: null, client: 'ลูกค้าใหม่' });
+    deal(s, 'p2', { gid: null, client: 'ลูกค้าใหม่' });
+    const n = rowsPerCo(s, Object.values(s.deals));
+    expect([n.get('a'), n.get('b'), n.get('lone'), n.get('old'), n.get('p1')]).toEqual([2, 2, 1, 1, undefined]);
+  });
+});
+
 describe('the company\'s other jobs (the deal panel)', () => {
+  it('the บริการ popover counts the other jobs (review: "อีกงาน" for two)', () => {
+    expect(otherWords(['CFO'], 1, Y)).toBe('บริษัทนี้มีงาน CFO ปี 2569 อีกงาน ถ้าเลือกบริการเดียวกันที่นี่ ทั้งสองแถวจะขึ้นว่า “อาจซ้ำ”');
+    expect(otherWords(['CFO', 'T-VER'], 2, Y)).toBe('บริษัทนี้มีงานอื่นปี 2569 อีก 2 งาน (CFO, T-VER) ถ้าเลือกบริการเดียวกับงานใด แถวนั้นและแถวนี้จะขึ้นว่า “อาจซ้ำ”');
+    expect(repeatWords(['CFO'], 1, Y)).toMatch(/^งาน CFO อีกแถวของบริษัทนี้ปี 2569 อาจเป็นงานเดียวกัน ทั้งสองแถว/);
+    expect(repeatWords(['CFO'], 2, Y)).toMatch(/^งาน CFO อีก 2 แถวของบริษัทนี้ปี 2569 อาจเป็นงานเดียวกัน แถวเหล่านั้นและแถวนี้/);
+  });
   it('lists the year\'s other rows, open first, never a joint header; warns when a pick repeats one', () => {
     const s = emptySales();
     const a = deal(s, 'a', { service: ['CFP'] });
@@ -213,6 +270,36 @@ describe('counting with several jobs of one company', () => {
     expect(st.yes).toBe(2);
     expect(st.no).toBe(1);
     expect(st.winRate).toBe(67);
+  });
+  it('rows with a placeholder name and no link are companies of their own (review: 4 rows read as 2 companies)', () => {
+    const s = emptySales();
+    deal(s, 'n1', { gid: null, client: 'ลูกค้าใหม่' });
+    deal(s, 'n2', { gid: null, client: 'ลูกค้าใหม่' });
+    deal(s, 'u1', { gid: null, client: '(ไม่มีชื่อ)' });
+    deal(s, 'u2', { gid: null, client: '(ไม่มีชื่อ)' });
+    deal(s, 'r1', { gid: null, client: 'ร้าน ก' });
+    deal(s, 'r2', { gid: null, client: 'ร้าน  ก' });
+    expect(companyCount(s, Object.values(s.deals))).toBe(5);
+    // the work tally keys them the same way: two closed placeholder rows without a result are two companies
+    for (const id of ['n1', 'n2']) s.deals[id] = { ...s.deals[id], jobStatus: 'closed' };
+    expect(workTally(s, [s.deals.n1, s.deals.n2]).noResult).toBe(2);
+  });
+  it('ยังไม่มีผล counts companies, not rows: a company worked for or lost is neither (review: 2 rows of one company read "2 บริษัท")', () => {
+    const s = emptySales();
+    deal(s, 'cfo', { service: ['CFO'], jobStatus: 'closed' });
+    deal(s, 'cfp', { service: ['CFP'], jobStatus: 'closed' });
+    deal(s, 'tv', { service: ['T-VER'], jobStatus: 'closed' });
+    won(s, 'cfo');
+    expect(workTally(s, Object.values(s.deals))).toMatchObject({ jobs: 3, worked: 1, lost: 0, noResult: 0 });
+    // another company: lost once, no result once: lost
+    deal(s, 'x1', { gid: 26, client: 'ซากิโนมิยะ', jobStatus: 'closed' });
+    deal(s, 'x2', { gid: 26, client: 'ซากิโนมิยะ', jobStatus: 'closed' });
+    lost(s, 'x1');
+    // and one with two jobs without a result: one company
+    deal(s, 'y1', { gid: 27, client: 'บริษัท ข', jobStatus: 'closed' });
+    deal(s, 'y2', { gid: 27, client: 'บริษัท ข', jobStatus: 'closed' });
+    expect(workTally(s, Object.values(s.deals))).toMatchObject({ jobs: 7, worked: 1, lost: 1, noResult: 1 });
+    expect(closedMeta(workTally(s, Object.values(s.deals)), '')).toBe('นับบริษัทที่ได้งาน บริษัทซ้ำนับครั้งเดียว · ไม่ได้งาน 1 บริษัท · ยังไม่มีผล 1 บริษัท · เปิดกลับได้');
   });
   it('a joint quotation\'s header is not a company of its own', () => {
     const s = emptySales();

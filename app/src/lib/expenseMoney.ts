@@ -30,6 +30,10 @@ import { TH_M, dmTh, isoTh, localDay } from './format';
 import { Q_TH } from './cashUi';
 import { sameName } from './caps';
 import { svcText } from './jobs';
+/** The services a job's line is sold under, for the บริการ column: the caller passes lib/sales.ts jobServices (a
+ *  joint quotation's company under its quotation's, as the screens and the Cashflow export say); else its own. */
+type SvcOf = (d: Deal) => readonly string[];
+const ownSvc: SvcOf = (d) => d.service;
 import {
   fpDiff, sameFp, splitKey, sumRows, ymTh,
   type ChkRow, type ChkState, type ChkSum, type FpDiff, type MonthClose, type MonthRow, type PayCheck, type PayFp, type PaySt,
@@ -577,7 +581,7 @@ export const xSheetLines = (rows: XRow[], owed: boolean) => [...rows.filter((r) 
  * side's months of the same file, for เงินเข้าแล้ว and คงเหลือสุทธิ) and the out side's check and close.
  * `qtNo`: a deal's quotation number. Amounts are numbers, dates real dates.
  */
-export function expSheets(rows: XRow[], months: MonthRow[], owed: boolean, qtNo: (d: Deal) => string, inMonths?: MonthRow[], filter = ''): XSheet[] {
+export function expSheets(rows: XRow[], months: MonthRow[], owed: boolean, qtNo: (d: Deal) => string, inMonths?: MonthRow[], filter = '', svcOf: SvcOf = ownSvc): XSheet[] {
   const ls = xSheetLines(rows, owed);
   // (บริการ last: two jobs of one company are told apart; the columns before it stay where they were)
   const head = ['เดือน', 'ลูกค้า', 'เลขใบเสนอราคา', 'หมวดค่าใช้จ่าย', 'รายละเอียด', 'ยอด (บาท)', 'วันที่บิล', 'วันที่จ่าย', 'สถานะเงิน', 'บิล / ใบเสร็จ', 'บันทึกโดย', 'บัญชีตรวจ', 'ผู้ตรวจ', 'วันที่ตรวจ', 'ข้อความส่งกลับแก้ไข', 'บริการ'];
@@ -587,7 +591,7 @@ export function expSheets(rows: XRow[], months: MonthRow[], owed: boolean, qtNo:
     return [
       ymTh(r.ym, true), client, r.deal ? qtNo(r.deal) : '', x ? x.c || NO_CAT : '', x?.n || '',
       r.amt, dateCell(x?.bill || ''), r.kind === 'orphan' ? dateCell(r.rec!.d) : dateCell(x?.paid || ''), xMoneyWord(r), r.kind === 'orphan' ? '' : billWord(x), r.by.join(', '),
-      xCheckWord(r), held && r.rec ? r.rec.by : '', held && r.rec ? dateCell(localDay(r.rec.at)) : null, r.rec?.s === 'back' ? r.rec.note || '' : '', r.deal ? svcText(r.deal.service) : '',
+      xCheckWord(r), held && r.rec ? r.rec.by : '', held && r.rec ? dateCell(localDay(r.rec.at)) : null, r.rec?.s === 'back' ? r.rec.note || '' : '', r.deal ? svcText(svcOf(r.deal)) : '',
     ];
   };
   const inOf = (ym: string) => inMonths?.find((m) => m.ym === ym)?.sum.got;
@@ -639,7 +643,7 @@ const expClient = (x: ExpLine) =>
  * the paid date, unpaid on the bill date, the bills with no date last (`undated`). `month` / `quarter`: the
  * sums, the bills with no date in one last row (`undated`).
  */
-export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string) {
+export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string, svcOf: SvcOf = ownSvc) {
   if (mode !== 'lines') {
     const head = ['ปี (พ.ศ.)', mode === 'month' ? 'เดือน' : 'ไตรมาส', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'จำนวนรายการ'];
     const row = (label: string, c: ExpSum): (string | number)[] => [be, label, c.paid, c.unpaid, c.paidN + c.unpaidN];
@@ -649,7 +653,7 @@ export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'qu
   }
   const head = ['ปี (พ.ศ.)', 'เดือน', 'ลูกค้า', 'ปีของงาน', 'หมวด', 'ผู้รับผิดชอบ', 'หมวดค่าใช้จ่าย', 'รายละเอียด', 'ยอด (บาท)', 'วันที่บิล', 'วันที่จ่าย', 'สถานะ', 'เลขใบเสนอราคา', 'บันทึกโดย', 'บริการ'];
   const line = (x: ExpLine): (string | number)[] => [
-    be, x.date ? `${TH_M[+x.date.slice(5, 7) - 1]} ${beOf(x.date)}` : '', expClient(x), x.dealYear, x.deal.section, x.deal.resp, x.c || NO_CAT, x.n, x.amt, x.bill, x.paid, expStatusWord(x), qtNo(x.deal), x.by, svcText(x.deal.service),
+    be, x.date ? `${TH_M[+x.date.slice(5, 7) - 1]} ${beOf(x.date)}` : '', expClient(x), x.dealYear, x.deal.section, x.deal.resp, x.c || NO_CAT, x.n, x.amt, x.bill, x.paid, expStatusWord(x), qtNo(x.deal), x.by, svcText(svcOf(x.deal)),
   ];
   return { head, rows: [...X.lines.map(line), ...(undated ? X.undated.map(line) : [])] };
 }
@@ -661,7 +665,7 @@ export function expCsvRows(be: string, X: ExpYear, mode: 'lines' | 'month' | 'qu
  * there is any. `inRows`: sales cashRows of the same year and mode (its own columns: the in lines are
  * re-laid in the shared columns).
  */
-export function bothCsvRows(be: string, inRows: { head: string[]; rows: (string | number)[][] }, Y: Pick<CashYear, 'months' | 'quarters' | 'lines' | 'undated'>, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string) {
+export function bothCsvRows(be: string, inRows: { head: string[]; rows: (string | number)[][] }, Y: Pick<CashYear, 'months' | 'quarters' | 'lines' | 'undated'>, X: ExpYear, mode: 'lines' | 'month' | 'quarter', undated: boolean, qtNo: (d: Deal) => string, svcOf: SvcOf = ownSvc) {
   if (mode !== 'lines') {
     const head = ['ปี (พ.ศ.)', mode === 'month' ? 'เดือน' : 'ไตรมาส', 'รับแล้ว (บาท)', 'เลยกำหนด (บาท)', 'รอรับ (บาท)', 'จ่ายแล้ว (บาท)', 'ค้างจ่าย (บาท)', 'คงเหลือสุทธิ (บาท)', 'จำนวนงวด', 'จำนวนรายการค่าใช้จ่าย'];
     const row = (label: string, c: CashSum, x: ExpSum): (string | number)[] => [be, label, r2(c.got), r2(c.late), r2(c.wait), x.paid, x.unpaid, r2(c.got - x.paid), c.n, x.paidN + x.unpaidN];
@@ -680,7 +684,7 @@ export function bothCsvRows(be: string, inRows: { head: string[]; rows: (string 
   const ins = inRows.rows.map((r) => ({ d: String(r[9] || r[8] || ''), row: [r[0], r[1], 'เงินเข้า', r[2], r[3], r[4], r[5], r[6], '', r[7], r[8], r[9], r[10], r[11], r[13] ?? ''] as (string | number)[] }));
   const outs = [...X.lines, ...(undated ? X.undated : [])].map((x) => ({
     d: x.date,
-    row: [be, x.date ? `${TH_M[+x.date.slice(5, 7) - 1]} ${beOf(x.date)}` : '', 'เงินออก', expClient(x), x.dealYear, x.deal.section, x.deal.resp, x.c || NO_CAT, x.n, x.amt, x.bill, x.paid, expStatusWord(x), qtNo(x.deal), svcText(x.deal.service)] as (string | number)[],
+    row: [be, x.date ? `${TH_M[+x.date.slice(5, 7) - 1]} ${beOf(x.date)}` : '', 'เงินออก', expClient(x), x.dealYear, x.deal.section, x.deal.resp, x.c || NO_CAT, x.n, x.amt, x.bill, x.paid, expStatusWord(x), qtNo(x.deal), svcText(svcOf(x.deal))] as (string | number)[],
   }));
   // dated first, soonest first (in before out on a day), the undated last in their own order
   const all = [...ins, ...outs].map((r, i) => ({ ...r, i }));
