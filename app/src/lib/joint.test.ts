@@ -18,7 +18,8 @@ import {
 // the second review's fixes
 import { bandPart, jointNo, moneyWords, noteNo, pickLine, viewCashLines } from './joint';
 import { dealSteps } from './sales';
-import { cashRows, jointLineWords, payerName } from './cashUi';
+import { cashRows, jointLineParts, jointLineWords, payerName } from './cashUi';
+import { expLines } from './expenseMoney';
 import { closingView, liveCount, monthCounts, nextStepView, statusView, trackerFields } from './salesUi';
 import { applyRow, localRecords, noEffects, rebaseOp, type SharedState } from './teamSync';
 
@@ -678,6 +679,47 @@ describe('the payer on top, the quotation under it (owner, Oct 2569)', () => {
     expect(ids('พระนครเหนือ')).toContain('h');
     const bands = [...jointRows(s, filterDeals(s, normSalesFilter({ year: '2569', q: 'พระนครเหนือ' }), T)).rows.values()].flat().filter((r) => r.k === 'band');
     expect(bands).toHaveLength(1);
+  });
+  // review of the payer-first change, minor 5: the title's "(สำนักงานใหญ่)" is the payer's branch, not its abbreviation
+  it('a sentence names the payer, not its branch: "ยังไม่มีแผนชำระของ มหาวิทยาลัย…" (not "… ของ สำนักงานใหญ่")', () => {
+    const { s, g } = eleven();
+    expect(payerShort(g)).toBe(PAYER);
+    expect(closeSummary(s, g, T).pay).toBe(`ยังไม่มีผลจาก ${PAYER}`);
+    expect(memberLine(s, s.deals.m1, false)).toBe(`อยู่ในใบเสนอราคาร่วม QT2026060019 (${PAYER}) · ร่วมกับอีก 10 บริษัท`);
+    // the band's label keeps the team's words as the owner's screenshot reads them
+    expect(jointHead(s, g).label).toBe('CFP สำนักงานใหญ่');
+    // an abbreviation in brackets is still the one a sentence uses; a branch number is not one
+    expect(payerShort(eleven({ title: 'CFP ' + KMUTNB.replace(' (สำนักงานใหญ่)', '') + ' (มจพ)' }).g)).toBe('มจพ');
+    expect(payerShort(eleven({ title: 'CFP (สาขาที่ 00001)' }).g)).toBe(PAYER);
+    // no bracket in the title: the payer's name, without the branch it ends in
+    expect(payerShort(eleven({ title: 'CFP รอบ 2' }).g)).toBe(PAYER);
+    const co = eleven({ title: '' });
+    co.s.deals.h.client = 'บริษัท สยามฟู้ดส์ แปรรูป จำกัด (สำนักงานใหญ่)';
+    expect(payerShort(jointOf(co.s, { id: 'h' })!)).toBe('สยามฟู้ดส์ แปรรูป');
+  });
+  // review major 1 and minor 3: the month check's second line, money in and money out alike
+  it('the money lines under the payer: the quotation\'s number and its companies, in parts that wrap whole', () => {
+    const { s, g } = eleven();
+    s.steps['h/CLOSED DEAL'] = { d: '2026-07-01', n: 'YES' };
+    s.pays['h/PAY1'] = L({ amt: 550000, due: '2026-10-05' });
+    s.exp = { 'h/x1': { c: 'ค่าแล็บ', amt: 10000, d: '2026-10-01', by: 'หมิว', at: '2026-10-02T03:00:00.000Z' }, 'm1/x2': { c: 'ค่าเดินทาง', amt: 2000, d: '2026-10-01', by: 'หมิว', at: '2026-10-02T03:00:00.000Z' } };
+    const no = jointNo(s, g);
+    // money in: the header's line
+    const inn = cashLines(s, [s.deals.h], T).find((l) => l.deal.id === 'h')!;
+    expect(payerName(inn)).toBe(KMUTNB);
+    expect(jointLineParts(inn, no)).toEqual(['ใบเสนอราคาร่วม QT2026060019', '11 บริษัท']);
+    // under a ผู้รับผิดชอบ filter, the part is its own piece (never cut away from the rest)
+    expect(jointLineParts({ joint: { ...inn.joint!, part: 2 } }, no)).toEqual(['ใบเสนอราคาร่วม QT2026060019', '11 บริษัท', 'ส่วนของ 2 บริษัท']);
+    expect(jointLineWords({ joint: { ...inn.joint!, part: 2 } }, no)).toBe('ใบเสนอราคาร่วม QT2026060019 · 11 บริษัท · ส่วนของ 2 บริษัท');
+    // money out: the quotation's expense reads as its money in does, a company's says which quotation
+    const out = expLines(s);
+    const hx = out.find((x) => x.id === 'h/x1')!, mx = out.find((x) => x.id === 'm1/x2')!;
+    expect(jointLineParts(hx, jointNo(s, jointOf(s, hx.deal)!))).toEqual(['ใบเสนอราคาร่วม QT2026060019', '11 บริษัท']);
+    expect(jointLineParts({ joint: { ...hx.joint!, part: 1 } }, no)).toEqual(['ใบเสนอราคาร่วม QT2026060019', '11 บริษัท', 'ส่วนของ 1 บริษัท']);
+    expect(jointLineParts(mx, jointNo(s, jointOf(s, mx.deal)!))).toEqual(['บริษัทในใบเสนอราคาร่วม QT2026060019']);
+    // before it has a number; any other line has none
+    expect(jointLineParts(mx)).toEqual(['บริษัทในใบเสนอราคาร่วม']);
+    expect(jointLineParts({ joint: undefined }, no)).toEqual([]);
   });
 });
 

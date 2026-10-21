@@ -141,6 +141,10 @@
 /* the quotation's own name in the panel's second line, edited in place */
 .jp-tt{cursor:pointer;border:0;border-bottom:1px dashed transparent;padding:0;background:none;color:inherit;text-align:left}
 @media (hover:hover){.jp-tt:hover{border-bottom-color:var(--field)}}
+/* (a phone has no hover: the dashed line stays, so the name reads as one to tap) */
+@media (hover:none){.jp-tt{border-bottom-color:var(--field)}}
+/* no name of its own yet: a link after the line's data, underlined (not its colour alone) */
+.jp-tt-add{font-size:var(--fs-sec);text-decoration:underline;text-underline-offset:3px}
 .jp-tti{display:inline-block;width:min(100%,440px);height:30px;font-size:var(--fs-sec);vertical-align:middle}
 .jp-cf{margin:-4px 4px 0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
 @media (max-width:760px){

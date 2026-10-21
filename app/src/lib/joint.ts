@@ -53,10 +53,16 @@ export function jointShort(g: Pick<JointGroup, 'head' | 'qt'>) {
   const kept = m[1].split(/\s+/).filter((w) => w && (/^[A-Za-z0-9][\w.+-]*$/.test(w) || !payer.includes(w)));
   return [...kept, m[2].trim()].join(' ');
 }
-/** The payer in a sentence ("ผลจาก มจพ", "รับจาก มจพ 1 จาก 2 งวด"): the title's abbreviation, else its short name. */
+/** A bracket that names a branch of the payer, not an abbreviation of it: "(สำนักงานใหญ่)", "(สาขาที่ 00001)". */
+const BRANCH = /^(สำนักงานใหญ่|สนญ\.?|สาขา.*|head\s*office|hq|branch.*)$/i;
+/** The payer in a sentence ("ผลจาก มจพ", "รับจาก มจพ 1 จาก 2 งวด"): the title's abbreviation, else its short name.
+ *  A title ending in the payer's branch ("CFP มหาวิทยาลัย… (สำนักงานใหญ่)") has none: the sentence names the
+ *  payer, without its branch ("ผลจาก มหาวิทยาลัย…พระนครเหนือ", not "ผลจาก สำนักงานใหญ่"). */
 export function payerShort(g: Pick<JointGroup, 'head' | 'qt'>) {
   const m = /\(([^()]{1,24})\)\s*$/.exec(g.qt.title.trim());
-  return m ? m[1].trim() : shortName(g.head.client);
+  if (m && !BRANCH.test(m[1].trim())) return m[1].trim();
+  const b = /^(.*\S)\s*\(([^()]{1,24})\)\s*$/.exec(g.head.client.trim());
+  return shortName(b && BRANCH.test(b[2].trim()) ? b[1] : g.head.client);
 }
 /** "ใบเสนอราคาร่วม QT-2569-052" (before it has a number: "ใบเสนอราคาร่วม"). */
 export const jointQtWord = (s: SalesState, g: JointGroup) => {

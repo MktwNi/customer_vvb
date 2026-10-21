@@ -66,11 +66,21 @@ export const jointWords = (j: NonNullable<CashLine['joint']>) => `ใบเส�
  *  the organisation that hires and pays, as the table's band names it (owner, Oct 2569: the organisation on top,
  *  the quotation under it: jointLineWords). */
 export const payerName = (l: CashLine, short: (s: string) => string = (s) => s) => short(l.deal.client);
-/** A joint quotation's line under its payer: "ใบเสนอราคาร่วม QT-2569-052 · 4 บริษัท", and under a ผู้รับผิดชอบ /
- *  SOURCE / REFERRAL filter "· ส่วนของ 1 บริษัท" (the amount is that part); '' for any other line. `no` the
- *  quotation's number (lib/joint jointNo). */
-export const jointLineWords = (l: CashLine, no = '') =>
-  !l.joint ? '' : [`ใบเสนอราคาร่วม${no ? ' ' + no : ''}`, `${l.joint.members} บริษัท`, l.joint.part ? `ส่วนของ ${l.joint.part} บริษัท` : ''].filter(Boolean).join(' · ');
+/** What a money line knows of its joint quotation: a CashLine's joint, or a money-out line's (expenseMoney,
+ *  `role` 'member' for an expense on one company of it). */
+type JointBit = { joint?: { members: number; part?: number; role?: 'header' | 'member' } | null };
+/** A joint quotation's line under its payer, in parts: ["ใบเสนอราคาร่วม QT-2569-052", "4 บริษัท"], and under a
+ *  ผู้รับผิดชอบ / SOURCE / REFERRAL filter "ส่วนของ 1 บริษัท" (the amount is that part); [] for any other line.
+ *  A money-out line of one company in it: ["บริษัทในใบเสนอราคาร่วม QT-2569-052"]. `no` the quotation's number
+ *  (lib/joint jointNo). On screen the parts wrap between them, each moved down whole (MonthCheck SubLine). */
+export const jointLineParts = (l: JointBit, no = ''): string[] => {
+  const j = l.joint, qt = `ใบเสนอราคาร่วม${no ? ' ' + no : ''}`;
+  if (!j) return [];
+  if (j.role === 'member') return ['บริษัทใน' + qt];
+  return [qt, `${j.members} บริษัท`, j.part ? `ส่วนของ ${j.part} บริษัท` : ''].filter(Boolean);
+};
+/** The same on one line: "ใบเสนอราคาร่วม QT-2569-052 · 4 บริษัท · ส่วนของ 1 บริษัท" ('' for any other line). */
+export const jointLineWords = (l: JointBit, no = '') => jointLineParts(l, no).join(' · ');
 
 /** The year picker's line on the money views: "เงินเข้า 15 งวด" / "ไม่มีเงินเข้า". */
 export const yearMoneyLabel = (Y: Pick<CashYear, 'totals'>) => (Y.totals.n ? `เงินเข้า ${Y.totals.n} งวด` : 'ไม่มีเงินเข้า');

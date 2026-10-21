@@ -672,10 +672,12 @@ export function JointClosedRows({ b, attr, onReopen }: { b: Extract<JRow, { k: '
 
 /** The joint quotation's own name in the panel's second line (lib/joint jointLabel, `shown`), edited in place:
  *  the words turn into a field holding the whole name, saved on leaving it or Enter (empty keeps the old one;
- *  Escape too). */
+ *  Escape too). Without a name of its own (`shown` ''), a link "ตั้งชื่องาน" after the line's data, never words
+ *  among them that read as the job's name (review). */
 function TitleBox({ value, shown, onSave }: { value: string; shown: string; onSave: (v: string) => void }) {
   const [ed, setEd] = useState(false);
-  if (!ed) return <button type="button" className="jp-tt hv-tx" onClick={() => setEd(true)} title={`${value} · แก้ไขชื่องาน`}>{shown || 'แก้ไขชื่องาน'}</button>;
+  if (!ed && !shown) return <button type="button" className="lnk jp-tt-add" onClick={() => setEd(true)} title="ตั้งชื่อของใบเสนอราคาร่วมนี้ ขึ้นใต้ชื่อผู้จ่าย">ตั้งชื่องาน</button>;
+  if (!ed) return <button type="button" className="jp-tt hv-tx" onClick={() => setEd(true)} title={`${value} · แก้ไขชื่องาน`}>{shown}</button>;
   return (
     <input
       autoFocus
@@ -753,8 +755,10 @@ export function JointPanel({ d, panelRef, close, attach, plan, info, history }: 
           <h3 className="dp-name ro co-name title">{d.client}</h3>
           <span className="dp-meta">
             {jh.qt}
-            {canJ ? <> · <TitleBox value={title} shown={jh.label} onSave={(v) => e.setJointTitle(hid, v)} /></> : jh.label ? ' · ' + jh.label : ''}
+            {jh.label ? <> · {canJ ? <TitleBox value={title} shown={jh.label} onSave={(v) => e.setJointTitle(hid, v)} /> : jh.label}</> : ''}
             {[` · ${g.members.length} บริษัท`, d.resp ? 'ผู้รับผิดชอบ ' + d.resp : ''].filter(Boolean).join(' · ')}
+            {/* no name of its own yet: a link to give it one, after the data */}
+            {canJ && !jh.label && <> <TitleBox value={title} shown="" onSave={(v) => e.setJointTitle(hid, v)} /></>}
           </span>
           <div className="dp-strip">
             <div>

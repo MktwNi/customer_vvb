@@ -105,6 +105,10 @@
    its layout */
 .cf-nm-b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;border:0;background:none;padding:0;line-height:inherit;text-align:left;cursor:pointer}
 .cf-nm-s{font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+/* a joint quotation's second line (MonthCheck SubLine): wraps between its parts, each moved down whole; only a
+   part wider than the column itself (the money-out list's narrow one) wraps inside, at its space */
+.cf-nm-s.wrap{white-space:normal}
+.cf-nm-s .cf-nw{display:inline-block;max-width:100%;vertical-align:top}
 .cf-cell{display:flex;flex-direction:column;align-items:flex-start;line-height:1.45;min-width:0}
 .cf-cell small{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .cf-amt{font-weight:500;font-variant-numeric:tabular-nums}
