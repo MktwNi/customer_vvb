@@ -271,14 +271,23 @@ describe('Sales Tracker: concurrent edits between browsers', () => {
     };
     const d = C.addDeal({ client: 'ลูกค้าอัปโหลดไม่ผ่าน', year: '2569' });
     await C.attachDoc(d.id, pdf('x.pdf'), { kind: 'other', amount: null, target: 'none', basis: 'manual', detected: null, docNo: '', docDate: '' });
+    // the round's own quiet tries (3 s, then 10 s later), then it ends with the waiting notice
     await vi.waitFor(() => expect(calls).toBe(1), WAIT);
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(calls).toBe(2), WAIT);
+    await vi.advanceTimersByTimeAsync(10000);
+    await vi.waitFor(() => expect(calls).toBe(3), WAIT);
     await vi.waitFor(() => expect((C as unknown as Priv).docUploading).toBe(false), WAIT);
     for (let i = 0; i < 3; i++) await C.teamSync();
-    expect(calls).toBe(1);
-    expect(C.docMsg).toMatch(/จะลองใหม่ในอีก 1 นาที/);
+    expect(calls).toBe(3);
+    expect(C.docsWaitNote?.n).toBe(1);
+    // (vi.waitFor moves fake time a little after the last try)
+    expect(C.docsWaitNote!.at - Date.now()).toBeGreaterThan(59000);
+    expect(C.docsWaitNote!.at - Date.now()).toBeLessThanOrEqual(60000);
+    expect(C.docMsg).toBe('');
     vi.setSystemTime(Date.now() + 61000);
     await C.teamSync();
-    await vi.waitFor(() => expect(calls).toBe(2), WAIT);
+    await vi.waitFor(() => expect(calls).toBe(4), WAIT);
     C.dispose();
   });
 

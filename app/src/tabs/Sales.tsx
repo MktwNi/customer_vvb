@@ -170,6 +170,8 @@ export function Sales() {
       />
       <span className="sr-only" role="status">{said}</span>
       <DocsHeldNote />
+      <DocsWaitNote />
+      {/* only a file the script refused for good (too large, not a PDF or picture…): it will not go up as it is */}
       {e.docMsg && <Notice kind="error">{e.docMsg}</Notice>}
       <BillsStuckNote />
       {ui.slNote && (
@@ -234,6 +236,35 @@ function DocsHeldNote() {
           ดูคู่มือ
         </a>
       </p>
+    </div>
+  );
+}
+
+/**
+ * Files attached in this browser that did not go up after an upload round's tries (engine.docsWaitNote): a
+ * calm note, not an error (owner, 21 Oct 2569: "ทำไมถึงขึ้นแบบนี้บ่อยจังครับ" about a pink "เชื่อมต่อสคริปต์ของทีม
+ * ไม่ได้"). It says the files are safe here, how many wait and when the next try is, with a button to send them
+ * now, and goes as soon as they are up (also when another tab or device sent them). A failure that a quiet
+ * second try fixed never shows it; a file the script refused for good is the red message (docMsg).
+ */
+function DocsWaitNote() {
+  const { engine: e } = useApp();
+  useEngineVersion();
+  const w = e.docsWaitNote;
+  if (!w) return null;
+  const t = new Date(w.at);
+  const hm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  const next = w.busy ? 'กำลังส่งอีกครั้ง' : w.at > Date.now() ? `ระบบจะลองส่งให้เองอีกครั้งเวลา ${hm} น.` : 'ระบบจะลองส่งให้เองอีกครั้งในไม่ช้า';
+  return (
+    <div className="doc-wait" role="status">
+      <div className="doc-wait-t">
+        <p className="doc-wait-h">ไฟล์ที่แนบ {fmtN(w.n)} ไฟล์ยังรอขึ้น Drive ของทีม</p>
+        <p>ไฟล์ไม่หาย ยังเก็บอยู่ในเบราว์เซอร์นี้ · {next}</p>
+        <p className="doc-wait-why">ครั้งล่าสุดส่งไม่ผ่าน: {w.why}</p>
+      </div>
+      <button type="button" className="btn xs" disabled={w.busy} onClick={() => void e.retryDocsNow()}>
+        {w.busy ? 'กำลังส่ง…' : 'ลองอีกครั้งตอนนี้'}
+      </button>
     </div>
   );
 }

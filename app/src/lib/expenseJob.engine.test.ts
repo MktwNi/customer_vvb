@@ -338,6 +338,7 @@ const lastV = (k: string) => rows(k).at(-1)!.v as JobExp;
 const blockUploads = (t: Tab) => {
   const orig = t.e.fileTransport;
   let on = true;
+  t.e.docQuiet = []; // (no quiet second tries here: uploadRetry.engine.test.ts has them)
   (t.e as unknown as { fileTransport: unknown }).fileTransport = async (u: string, body: Record<string, unknown>) => {
     if (on && body.action === 'upload') throw new TypeError('fetch failed');
     return (orig as (u: string, b: Record<string, unknown>) => Promise<unknown>)(u, body);

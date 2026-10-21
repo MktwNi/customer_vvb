@@ -560,6 +560,7 @@ describe('signing out', () => {
     await settle(L);
     const A = await member(L, 'aem', 'เอ', 'sales', 'X', undefined, false); // a shared computer: not remembered
     A.net.files = 'fail'; // the upload fails (or is still running); the record reaches the team
+    A.e.docQuiet = []; // (no quiet second tries here: uploadRetry.engine.test.ts has them)
     const doc = await A.e.attachDoc(d.id, pdf('q.pdf'), quote);
     await settle(A);
     const k = d.id + '/' + doc.id;
@@ -644,6 +645,7 @@ describe('what a team-code browser queued, sent by an account', () => {
     const d = A.e.addDeal({ client: 'บริษัท ทดสอบ จำกัด' });
     await settle(A);
     A.net.offline = true;
+    A.e.docQuiet = []; // (no quiet second tries here: uploadRetry.engine.test.ts has them)
     const doc = await A.e.attachDoc(d.id, pdf('qt.pdf'), quote);
     await stored(A);
     expect(doc.by).toBe('');
