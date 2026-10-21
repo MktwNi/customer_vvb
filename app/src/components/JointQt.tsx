@@ -32,6 +32,7 @@ import { useSalesActs } from './SalesToast';
 import { LensMoney } from '../tabs/SalesCash';
 import type { AttachEntry } from '../lib/attachPlan';
 import { DealSvcRow } from './DealSvc';
+import { JobSvc } from './SvcChips';
 import { svcText } from '../lib/jobs';
 import { jobServices } from '../lib/sales';
 
@@ -552,7 +553,11 @@ export function JointBand({ b, folded, onFold, ro, cash, attr, onOpen, onRevise,
         </td>
         <th scope="rowgroup" colSpan={4} className="k-name">
           <span className="jq-in">
-            <button type="button" className="jq-nm hv-tx co-name dense" onClick={() => onOpen(h.id)} title={`${h.client} เปิดรายละเอียด`}>{shortName(h.client)}</button>
+            {/* the payer, then the quotation's services (its companies are sold under them: lib/sales jobServices) */}
+            <span className="jq-l1">
+              <button type="button" className="jq-nm hv-tx co-name dense" onClick={() => onOpen(h.id)} title={`${h.client} เปิดรายละเอียด`}>{shortName(h.client)}</button>
+              <JobSvc svc={jobServices(S, h)} none={false} max={2} />
+            </span>
             <span className="jq-sub" title={jh.sub}>{jh.sub}{part ? ' · ' + part : ''}</span>
           </span>
         </th>
@@ -600,7 +605,10 @@ export function JointCard({ b, attr, onOpen }: { b: Extract<JRow, { k: 'band' }>
   return (
     <article className="jm" aria-label={jointLine(S, g)} data-jqt={h.id}>
       <div className="jm-h">
-        <button type="button" className="jm-nm hv-tx co-name dense" onClick={() => onOpen(h.id)} title={h.client}>{shortName(h.client)}</button>
+        <span className="jm-l1">
+          <button type="button" className="jm-nm hv-tx co-name dense" onClick={() => onOpen(h.id)} title={h.client}>{shortName(h.client)}</button>
+          <JobSvc svc={jobServices(S, h)} none={false} />
+        </span>
         <span className="jm-s">{[jh.sub, sent ? 'ส่ง ' + dmTh(sent) : 'ยังไม่ได้ส่ง', closedWord(g)].filter(Boolean).join(' · ')}</span>
       </div>
       <div className="jm-money">

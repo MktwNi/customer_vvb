@@ -18,6 +18,9 @@
 /* the payer on top: .co-name dense gives it a company's type (no font shorthand here), cut short as a row's
    name is; the quotation under it as a row's second line (13px dark grey) */
 .jq-nm{cursor:pointer;border:0;padding:0;background:none;line-height:1.45;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* the payer's line: the name gives way (cut short) before the services' chips */
+.jq-l1{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}
+.jq-l1 .jq-nm{min-width:0}
 .jq-sub{font-size:var(--fs-sec);color:var(--ink-2);line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .jq-band .sl-mn small{color:var(--muted)}
 .jq-band .sl-mn small.bad{color:var(--bad)}.jq-band .sl-mn small.ok{color:var(--ok)}
@@ -179,6 +182,8 @@
 .jm-h{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
 /* the payer (.co-name dense: a company's type), whole as a phone card's name is; the quotation under it */
 .jm-nm{cursor:pointer;border:0;padding:0;background:none;line-height:1.4;text-align:left;max-width:100%;overflow-wrap:anywhere}
+.jm-l1{display:flex;align-items:baseline;gap:8px;min-width:0;max-width:100%}
+.jm-l1 .jm-nm{min-width:0}
 .jm-s{font-size:var(--fs-sec);color:var(--ink-2)}
 .jm-money{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .jm-money .jq-st{padding-top:2px}

@@ -105,8 +105,8 @@
 /* a job's services (lib/jobs.ts): the same chips, each service's own word; in a row's line under the name
    they are 18px tall so the line keeps its height */
 .svts.js .svt{gap:0}
-.sl-nm-s .svts.js,.sl-mc .svts.js,.cf-nm-l .svts.js,.dr-deal .svts.js,.pe-deal .svts.js,.sd-fi-t .svts.js{flex:none;gap:3px}
-.sl-nm-s .svts.js .svt,.cf-nm-l .svts.js .svt,.sd-fi-t .svts.js .svt,.dr-deal .svts.js .svt,.pe-deal .svts.js .svt,.sv-row .svts.js .svt,.dp-oth .svts.js .svt{height:18px;padding:0 6px}
+.sl-nm-s .svts.js,.sl-mc .svts.js,.cf-nm-l .svts.js,.jq-l1 .svts.js,.jm-l1 .svts.js,.dr-deal .svts.js,.pe-deal .svts.js,.sd-fi-t .svts.js{flex:none;gap:3px}
+.sl-nm-s .svts.js .svt,.cf-nm-l .svts.js .svt,.jq-l1 .svts.js .svt,.jm-l1 .svts.js .svt,.sd-fi-t .svts.js .svt,.dr-deal .svts.js .svt,.pe-deal .svts.js .svt,.sv-row .svts.js .svt,.dp-oth .svts.js .svt{height:18px;padding:0 6px}
 /* the บริการ picker: the team's services as pills; a picked one in its type's colours with a check */
 .svp{display:flex;flex-wrap:wrap;gap:6px}
 .svp-o{display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 12px;border-radius:var(--r-pill);border:1px solid var(--field);background:var(--card);color:var(--ink-2);font:inherit;font-size:13px;font-weight:400;cursor:pointer;white-space:nowrap}
