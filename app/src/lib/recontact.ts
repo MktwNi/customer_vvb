@@ -133,3 +133,9 @@ function hashId(text: string): string {
 export const cycleIdOf = (from: string, year: string) => `cy-${hashId(JSON.stringify([from, year]))}`;
 /** The id of one history line of a cycle: 'old' on the old job, 'next' on the new one. The same on every browser. */
 export const cycleLogIdOf = (from: string, year: string, side: 'old' | 'next') => `cl-${hashId(JSON.stringify([from, year, side]))}`;
+/** A new cycle's job keeps the year it started in: its id is the cycle of its old job for that year (cycleIdOf), so a job
+ *  moved to another year would hold the id of the year it left, and a new cycle of that year would be refused for a job
+ *  that is no longer there. */
+export const isCycleJob = (d: { id: string; year: string; from?: string }) => !!d.from && d.id === cycleIdOf(d.from, d.year);
+/** Why a new cycle's job cannot change its year (engine updateDeal and jointYearBlock, DealPanel). */
+export const CYCLE_YEAR_BLOCK = 'งานรอบใหม่ย้ายปีไม่ได้ · ถ้าเปิดผิดปี ให้ผู้ดูแลระบบลบงานนี้แล้วเปิดรอบใหม่ในปีที่ถูกต้อง';

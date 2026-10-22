@@ -54,7 +54,7 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
 import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcClean } from './jobs';
-import { cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, recontactErr, recontactOf } from './recontact';
+import { CYCLE_YEAR_BLOCK, cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, isCycleJob, recontactErr, recontactOf } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
 
@@ -2632,6 +2632,12 @@ export class GccEngine {
     if (!d) return;
     // a follow-up date is a real date, today or later, and only on a closed job ('' clears it): anything else is not written
     if ('recontact' in patch && patch.recontact && (recontactErr(patch.recontact, todayISO()) || (patch.jobStatus ?? d.jobStatus) !== 'closed')) return;
+    // a new cycle's job keeps its year (lib/recontact isCycleJob): its id is the cycle of its old job for that year
+    if (patch.year != null && patch.year !== d.year && isCycleJob(d)) {
+      this.teamNote = CYCLE_YEAR_BLOCK;
+      this.emit();
+      return;
+    }
     // a joint quotation and its companies share a year (package quotes): moveJointYear
     if (!opt.keepJoint && patch.year != null && patch.year !== d.year && jointRole(this.sales, d) !== 'plain') return this.moveJointYear(d, patch);
     const n: Deal = { ...d, ...patch, id };
@@ -3151,11 +3157,15 @@ export class GccEngine {
    *  must be a row this account may edit). */
   jointYearBlock(d: Deal): string {
     const S = this.sales, r = jointRole(S, d);
+    if (r === 'member' && isCycleJob(d)) return CYCLE_YEAR_BLOCK;
     if (r === 'member') return this.can('edit.jqt') ? '' : 'บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี';
     if (r !== 'header') return '';
     if (!this.canJoint()) return 'บัญชีของคุณแก้ไขใบเสนอราคาร่วมไม่ได้';
     const x = jointOf(S, d)?.members.find((m) => !this.canDeal('edit.deal', m.deal));
-    return x ? `ย้ายปีไม่ได้: ${x.deal.client} เป็นงานของ ${x.deal.resp || 'คนอื่น'} บัญชีของคุณแก้ไขแถวนั้นไม่ได้` : '';
+    if (x) return `ย้ายปีไม่ได้: ${x.deal.client} เป็นงานของ ${x.deal.resp || 'คนอื่น'} บัญชีของคุณแก้ไขแถวนั้นไม่ได้`;
+    // a new cycle's job in the quotation keeps its year, so the header cannot take it along
+    const c = jointOf(S, d)?.members.find((m) => isCycleJob(m.deal));
+    return c ? `ย้ายปีไม่ได้: ${c.deal.client} เป็นงานรอบใหม่ของปี ${c.deal.year}` : '';
   }
   /** A joint quotation's header or member moves to another year: a member leaves the joint quotation (its
    *  row and its own records stay); the header takes every company with it, in one push. */

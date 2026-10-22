@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  CYCLE_LABEL, KEEP_LABEL, cycleBlock, cycleDefault, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, cycleYears, dueWords, isoDay, keptLine, nextYear, recontactDue, recontactErr, recontactList, recontactOf, yearLater,
+  CYCLE_LABEL, CYCLE_YEAR_BLOCK, KEEP_LABEL, cycleBlock, cycleDefault, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, cycleYears, dueWords, isCycleJob, isoDay, keptLine, nextYear, recontactDue, recontactErr, recontactList, recontactOf, yearLater,
 } from './recontact';
 import { emptySales, newDeal, toDeal, type Deal, type SalesState } from './sales';
 
@@ -152,6 +152,15 @@ describe('the new job\'s id: one per old job and year, the same on every browser
     expect(cycleLogIdOf('job-1', '2570', 'old')).not.toBe(cycleLogIdOf('job-1', '2570', 'next'));
     expect(cycleLogIdOf('job-1', '2570', 'old')).not.toBe(cycleLogIdOf('job-1', '2571', 'old'));
     expect(cycleLogIdOf('job-1', '2570', 'old')).toMatch(/^cl-[0-9a-z]+$/);
+  });
+
+  it('a new cycle\'s job is one whose id is the cycle of its old job for its own year; a plain job, or one moved to another year, is not', () => {
+    const cy = cycleIdOf('job-1', '2570');
+    expect(isCycleJob({ id: cy, year: '2570', from: 'job-1' })).toBe(true);
+    expect(isCycleJob({ id: cy, year: '2571', from: 'job-1' })).toBe(false);
+    expect(isCycleJob({ id: 'job-1', year: '2570' })).toBe(false);
+    expect(isCycleJob({ id: 'job-2', year: '2570', from: 'job-1' })).toBe(false);
+    expect(CYCLE_YEAR_BLOCK).toMatch(/ย้ายปีไม่ได้/);
   });
 });
 

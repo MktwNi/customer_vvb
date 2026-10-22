@@ -28,7 +28,7 @@ import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
 // joint quotations (package quotes, item 7): the header's own panel, a member's line and stages
 import { jointHeadOf, jointOf, jointRole } from '../lib/sales';
-import { CYCLE_LABEL, RECONTACT_LABEL, keptLine, recontactErr, recontactOf } from '../lib/recontact';
+import { CYCLE_LABEL, CYCLE_YEAR_BLOCK, RECONTACT_LABEL, isCycleJob, keptLine, recontactErr, recontactOf } from '../lib/recontact';
 import { isJointNote, jointNo, strayDocs } from '../lib/joint';
 import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 // สัดส่วนรายได้ (package dash, items 8 and 9b)
@@ -1463,6 +1463,8 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · �
   const up = (p: Partial<Deal>) => e.updateDeal(d.id, p);
   /** Another year: a joint quotation's company leaves it, its header takes every company along (asked first). */
   const setYear = (y: string) => {
+    // a new cycle's job keeps its year (lib/recontact isCycleJob); the engine refuses the same move
+    if (y !== d.year && isCycleJob(d)) return acts.say(CYCLE_YEAR_BLOCK);
     const jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
     if (y === d.year || !g) return up({ year: y });
     const why = e.jointYearBlock(d);

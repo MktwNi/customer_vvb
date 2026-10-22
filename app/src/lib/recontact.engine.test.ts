@@ -425,3 +425,52 @@ describe('a date on a job that a teammate reopens', () => {
     expect(hist(A, d.id).at(-1)!.detail).not.toMatch(/เก็บไว้ติดตาม/);
   });
 });
+
+describe('a new cycle job keeps the year it started in', () => {
+  it('a year change on it is refused on every browser, so the year stays and a second cycle of that year says so; a plain job still moves', async () => {
+    const L = await lead();
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    const B = await member(L, 'bee', 'บี', 'sales');
+    const [c1, c2] = companies(L);
+    const old = A.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO', service: ['CFO'], resp: 'เอ' });
+    A.e.updateDeal(old.id, { jobStatus: 'closed' });
+    await settle(L, A, B);
+    const n = A.e.newCycle(old.id, '2570');
+    expect(n).not.toBeNull();
+    await settle(A, B, L);
+    // the owner and the lead each ask for 2571: neither change is written
+    A.e.updateDeal(n!.id, { year: '2571' });
+    await settle(A, B, L);
+    L.e.updateDeal(n!.id, { year: '2571' });
+    await settle(A, B, L);
+    for (const t of [A, B, L]) expect(t.e.sales.deals[n!.id].year).toBe('2570');
+    // the 2570 cycle is still that job: a second one is refused for the true reason
+    expect(L.e.newCycle(old.id, '2570')).toBeNull();
+    expect(L.e.teamNote).toMatch(/มีงานปี 2570 แล้ว/);
+    // a job that is not a new cycle still moves its year
+    const plain = L.e.addDeal({ gid: c2.id, year: '2569', section: 'TGO' });
+    L.e.updateDeal(plain.id, { year: '2570' });
+    expect(L.e.sales.deals[plain.id].year).toBe('2570');
+  });
+
+  it('in a joint quotation the header does not move a year that a new cycle company would leave behind; the companies stay in one year', async () => {
+    const L = await lead();
+    const [c1] = companies(L);
+    const old = L.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO', service: ['CFO'], resp: 'เอ' });
+    L.e.updateDeal(old.id, { jobStatus: 'closed' });
+    const n = L.e.newCycle(old.id, '2570');
+    expect(n).not.toBeNull();
+    const { hid } = await L.e.createJoint({
+      title: 'ใบเสนอราคาร่วมรอบใหม่', payer: 'ผู้จ่ายทดสอบ', payerGid: null, year: '2570', section: 'TGO', resp: 'เอ', service: ['CFO'],
+      total: 1000, docNo: 'QT-2570-901', docDate: '2026-10-06', basis: 'total', detected: 1000, members: [{ deal: n!.id, share: null, pct: null }],
+    });
+    L.e.updateDeal(hid, { year: '2571' });
+    expect(L.e.sales.deals[hid].year).toBe('2570');
+    expect(L.e.sales.deals[n!.id].year).toBe('2570');
+    expect(L.e.teamNote).toMatch(/ย้ายปีไม่ได้/);
+    // the member's own move is refused too: it stays in the joint quotation's year
+    L.e.updateDeal(n!.id, { year: '2571' });
+    expect(L.e.sales.deals[n!.id].year).toBe('2570');
+    expect(L.e.sales.deals[n!.id].year).toBe(L.e.sales.deals[hid].year);
+  });
+});
