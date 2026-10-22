@@ -3,7 +3,7 @@ import { useApp, useEngineVersion } from '../state';
 import { LOG_RESULTS, LOG_TYPES, TT } from '../lib/constants';
 import { dtTh, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
-import { ACT_TH, KIND_TH, beYear, dealSteps, docsOf, fmtMoney, jobServices, jointRole, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { ACT_TH, KIND_TH, beYear, dealSteps, docsOf, fmtMoney, jobServices, jointRole, placeholderName, trackerStatus, type Deal, type DealAct } from '../lib/sales';
 import { JobSvc } from '../components/SvcChips';
 import { NOTE_CAP, PERSON_FIELDS, ROLES, ROLE_TH, nameKey, personInitial, phoneKeys, type PersonForm } from '../lib/people';
 import { actCode } from '../components/DealActs';
@@ -921,6 +921,8 @@ export function AddPerson() {
   // several: one of them to choose ("ใช้คนนี้"), or a new person on purpose; Enter makes nobody
   const several = found.length > 1;
   const co = f.gid != null ? e.company(f.gid) : undefined;
+  // a deal typed by name, the company typed here is its client: that company is added to them and the deal (linkPerson)
+  const dealCo = deal && !co && !placeholderName(deal.client) && (!f.company.trim() || norm(f.company) === norm(deal.client)) ? deal.client.trim() : '';
   const create = () => {
     if (!f.name.trim()) return;
     const id = e.addPerson({ ...f, name: f.name.trim() });
@@ -957,7 +959,7 @@ export function AddPerson() {
         <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
         {found.length > 0 && (
           <div style={{ gridColumn: '1 / -1' }}>
-            <ExistsPrompt found={found} coName={co?.name || ''} typedCo={co ? '' : f.company.trim()} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
+            <ExistsPrompt found={found} coName={co?.name || ''} typedCo={co || dealCo ? '' : f.company.trim()} dealCo={dealCo} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
           </div>
         )}
         <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
@@ -978,7 +980,7 @@ export function AddPerson() {
           {one ? (
             <>
               <button type="button" onClick={create} className="btn">สร้างคนใหม่</button>
-              <button type="submit" className="btn pri">{co ? 'เพิ่มบริษัทนี้ให้คนเดิม' : deal ? 'ใช้คนเดิมในดีลนี้' : 'ใช้คนเดิม'}</button>
+              <button type="submit" className="btn pri">{co || dealCo ? 'เพิ่มบริษัทนี้ให้คนเดิม' : deal ? 'ใช้คนเดิมในดีลนี้' : 'ใช้คนเดิม'}</button>
             </>
           ) : several ? (
             <button type="button" onClick={create} className="btn">สร้างคนใหม่</button>

@@ -54,7 +54,8 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
 import { clashSvc, companyCount, sendState, surelyOther, svcClean } from './jobs';
-import { jobServices, svcSig } from './sales';
+import { jobServices, placeholderName, svcSig } from './sales';
+import { customIdOf, findCompanyByName } from './dealCompany';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1448,11 +1449,11 @@ export class GccEngine {
       .filter((c) => (j.length >= 10 && c.jur.replace(/\D/g, '') === j) || (k.length >= 3 && (norm(c.name) === k || (k.length >= 6 && norm(c.name).includes(k)))))
       .slice(0, 8);
   }
-  /** Add a customer that is not in the registry; returns its company id. */
-  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>): number {
-    let id: number;
-    do id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
-    while (this.custom[id] || this.B.byId.has(id));
+  /** Add a customer that is not in the registry; returns its company id. `opt.id`: the id to take when it is free
+   *  (a company made for a deal's typed name: customIdOf), else a random one. */
+  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>, opt: { id?: number } = {}): number {
+    let id = opt.id && !this.custom[opt.id] && !this.B.byId.has(opt.id) ? opt.id : 0;
+    while (!id || this.custom[id] || this.B.byId.has(id)) id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
     const c: CustomCo = { ...p, name: p.name.trim().slice(0, 200), note: cap(p.note || ''), id, at: new Date().toISOString(), by: this.me() };
     this.custom[id] = c;
     this.op(keyOf.cust(id), { ...c });
@@ -1814,7 +1815,9 @@ export class GccEngine {
     const c = this.company(g)!;
     const pos = (at.pos || '').trim().slice(0, 200), dept = (at.dept || '').trim().slice(0, 200), role = at.role || '';
     const ids = new Set(this.idsOf(pid));
-    if (p.gid == null && !p.company.trim()) {
+    // (their main one when they have none; or the company typed for them is this one, by name: it becomes the registry
+    // one, not a second company of theirs)
+    if (p.gid == null && (!p.company.trim() || norm(p.company) === norm(c.name))) {
       // their main one, and a record of it too: a teammate adding another company to them at the same time makes that
       // one the main one (the person record is one value), and this one stays theirs as another (cosOf leaves out the
       // record of the main company)
@@ -1933,7 +1936,12 @@ export class GccEngine {
     const p = this.people[this.resolvePid(pid)];
     if (!p) return false;
     if (!this.can('edit.cust')) return this.deny(), false;
-    const typedCo = t.gid == null ? (t.company || '').trim().slice(0, 200) : '';
+    // a deal with no company yet and the client's name typed (or none): the deal's company is the one this contact gets,
+    // with the position typed (linkPerson, linkDealCompany) — not a note
+    const dl = deal ? this.sales.deals[deal.id] : undefined;
+    const typed = t.gid == null ? (t.company || '').trim().slice(0, 200) : '';
+    const viaDeal = t.gid == null && !!dl && dl.gid == null && !placeholderName(dl.client) && (!typed || norm(typed) === norm(dl.client));
+    const typedCo = viaDeal ? '' : typed;
     this.batchOps(() => {
       if (t.gid != null) this.addCompanyToPerson(p.id, t.gid, { pos: t.pos, role: t.role });
       // a company only typed by name (not in the registry) can't be one more company: their main one when they have
@@ -1949,7 +1957,9 @@ export class GccEngine {
       const patch: Partial<PersonForm> = reachPatch(cur, { phone: t.phone || '', email: t.email || '' });
       if (t.line?.trim() && !cur.line.trim()) patch.line = t.line.trim();
       if (Object.keys(patch).length) this.updatePerson(p.id, patch);
-      if (deal) this.linkPerson(deal.id, p.id, { main: !!deal.main });
+      // (the position typed goes to the deal's company when that is the one made here: viaDeal; a registry company
+      // picked above got it already)
+      if (deal) this.linkPerson(deal.id, p.id, { main: !!deal.main, ...(viaDeal ? { pos: t.pos, role: t.role } : {}) });
     });
     return true;
   }
@@ -2152,6 +2162,14 @@ export class GccEngine {
     if (d.gid == null || !this.company(d.gid)) return false;
     return !this.dealPool(d).some((x) => x.id === p.id);
   }
+  /** Is the deal's contact `p` not at the deal's company: a deal with one, and they are not one of its people
+   *  (contactElsewhere); a deal typed by name with none yet, and they have no company of that name (the card's hint:
+   *  "เชื่อมให้ได้เลย", linkDealCompany). */
+  contactNotHere(d: Deal, p: Person): boolean {
+    if (d.gid != null) return this.contactElsewhere(d, p);
+    if (placeholderName(d.client)) return false;
+    return !this.personCos(p).some((x) => norm(x.c?.name || x.company) === norm(d.client));
+  }
   /** May this account set a deal's contact: edit the deal (its own, with an own-work scope) and the contacts. */
   canLink(d: Pick<Deal, 'resp'> | null | undefined) {
     return !!d && this.canDeal('edit.deal', d) && this.can('edit.cust');
@@ -2164,16 +2182,56 @@ export class GccEngine {
     this.op(keyOf.plink(pid, dealId), { ...v });
   }
   /**
-   * Make person `pid` a contact of a deal: `main` (เปลี่ยนผู้ติดต่อ) in place of its main contact, who is taken
-   * off; else after the ones it has (ใช้คนนี้, เพิ่มอีกคน). Said in the deal's history. False: nothing changed
-   * (gone, or not this account's to change).
+   * The company a deal typed by its client name gets (lib/dealCompany.ts): the team's company of that name, else a new
+   * customer of it (addCustomer, with the id the name gets everywhere). The deal is linked to it (updateDeal). A deal
+   * that has its company: that one. Null: the client is a placeholder ("ลูกค้าใหม่"), or nothing may be added. The
+   * caller checks canLink.
    */
-  linkPerson(dealId: string, pid: string, opt: { main?: boolean } = {}): boolean {
+  private dealCompanyOf(d: Deal): number | null {
+    if (d.gid != null) return this.canonical(d.gid);
+    if (placeholderName(d.client) || !this.can('edit.cust')) return null;
+    const name = d.client.trim();
+    const hit = findCompanyByName(name, this.B.companies);
+    const gid = hit ? this.canonical(hit.id) : this.addCustomer({ name, jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, { id: customIdOf(name) });
+    this.updateDeal(d.id, { gid });
+    return gid;
+  }
+  /**
+   * The one link a contact to a deal makes for the company as well (the owner's rule: linking a contact to a deal
+   * links the deal's company and the contact's company, in one action): the deal's company (dealCompanyOf) and the
+   * contact as one of its people (addCompanyToPerson, with the position typed; their main company when they have
+   * none; the typed main company of the same name becomes this one). linkPerson runs it for a deal typed by name,
+   * and the deal card's button for a contact who is not at the deal's company runs it for any deal. Again: nothing
+   * written. Null: no company to link (a placeholder name, or nothing may be added).
+   */
+  linkDealCompany(dealId: string, pid: string, at: { pos?: string; role?: PersonRole } = {}): number | null {
+    const d = this.sales.deals[dealId], p = this.people[this.resolvePid(pid)];
+    if (!d || !p) return null;
+    if (!this.canLink(d)) return this.deny(), null;
+    return this.batchOps(() => {
+      const gid = this.dealCompanyOf(d);
+      if (gid == null) return null;
+      this.addCompanyToPerson(p.id, gid, at);
+      return gid;
+    });
+  }
+  /**
+   * Make person `pid` a contact of a deal: `main` (เปลี่ยนผู้ติดต่อ) in place of its main contact, who is taken
+   * off; else after the ones it has (ใช้คนนี้, เพิ่มอีกคน). Said in the deal's history. A deal typed by name, with no
+   * company yet, gets its company and the contact's too (linkDealCompany), `pos`/`role`: the contact's position
+   * there; a link made before that lacks the company gets it now. False: nothing changed (gone, or not this
+   * account's to change).
+   */
+  linkPerson(dealId: string, pid: string, opt: { main?: boolean; pos?: string; role?: PersonRole } = {}): boolean {
     const d = this.sales.deals[dealId], p = this.people[pid];
     if (!d || !p) return false;
     if (!this.canLink(d)) return this.deny(), false;
     const cur = this.dealPeople(dealId);
-    if (cur[0]?.id === pid || (!opt.main && cur.some((x) => x.id === pid))) return true;
+    const at = { pos: opt.pos, role: opt.role };
+    if (cur[0]?.id === pid || (!opt.main && cur.some((x) => x.id === pid))) {
+      if (d.gid == null) this.linkDealCompany(dealId, pid, at);
+      return true;
+    }
     const main = opt.main ? cur[0] : undefined;
     const rest = cur.filter((x) => x !== main && x.id !== pid).flatMap((x) => this.linksOn(x.id, dealId).map(([, l]) => l));
     this.batchOps(() => {
@@ -2182,6 +2240,7 @@ export class GccEngine {
       this.linksOn(pid, dealId).forEach(([id, l]) => this.putLink(id, dealId, 0, l.o));
       this.putLink(pid, dealId, 1, linkOrder(rest, !!main, Date.now()));
       this.salesLog(d, main ? 'เปลี่ยนผู้ติดต่อ' : 'เชื่อมผู้ติดต่อ', main ? `${main.name} เป็น ${p.name}` : p.name);
+      if (d.gid == null) this.linkDealCompany(dealId, pid, at);
     });
     this.persist('plinks', this.plinks);
     this.saveSales();
@@ -2256,10 +2315,13 @@ export class GccEngine {
    * never them.
    */
   saveTypedContact(dealId: string, t?: { name: string; phone: string; email: string }, opt: { pid?: string; fresh?: boolean } = {}): string {
+    const d0 = this.sales.deals[dealId];
+    const name = (t ? t.name : d0?.contactName || '').trim();
+    if (!d0 || !name) return '';
+    if (!this.canLink(d0)) return this.deny(), '';
+    // a deal typed by name gets its company first: the person is made at it, and its id is the one for that company
+    this.dealCompanyOf(d0);
     const d = this.sales.deals[dealId];
-    const name = (t ? t.name : d?.contactName || '').trim();
-    if (!d || !name) return '';
-    if (!this.canLink(d)) return this.deny(), '';
     const c = d.gid != null ? this.company(d.gid) : undefined;
     // the company's person with this name (one still there first)
     const same = contactChoices(this.dealPool(d)).concat(this.dealPool(d)).find((p) => nameKey(p.name) === nameKey(name));

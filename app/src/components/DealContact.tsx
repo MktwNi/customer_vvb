@@ -4,7 +4,7 @@ import { norm } from '../lib/core';
 import { telHref } from '../lib/format';
 import { ROLE_TH, contactChoices, nameKey, personExtras, splitList, typedExtras, typedMatch } from '../lib/people';
 import type { GccEngine } from '../lib/engine';
-import type { Deal } from '../lib/sales';
+import { placeholderName, type Deal } from '../lib/sales';
 import type { Person } from '../lib/types';
 import { PersonAvatar, useOpenPerson } from '../tabs/People';
 // one person, several companies: who someone from outside the deal's company is, in one line
@@ -72,6 +72,8 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
   // linking needs both: this deal's ดีลและขั้นตอน (ro) and ลูกค้าและผู้ติดต่อ
   const can = !ro && e.can('edit.cust');
   const c = d.gid != null ? e.company(d.gid) : undefined;
+  // the deal's company: its registry one, else the name typed for the client (made into one when a contact is linked)
+  const coName = c ? c.name : placeholderName(d.client) ? '' : d.client.trim();
   const pool = e.dealPool(d);
   const typed = d.contactName.trim();
   // a new person from this deal: at its company (or named after the client), then the deal's contact
@@ -144,6 +146,8 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
             // at another company than the deal's (it was linked to another company since, or they moved); one who
             // deals with it as another company of theirs is not (their position there is shown)
             const away = e.contactElsewhere(d, p);
+            // not at the deal's company: one hint and one button (the same link as linking the contact)
+            const notHere = e.contactNotHere(d, p);
             const v = e.personView(p, d.gid);
             return (
               <div key={p.id} className="dc-pw">
@@ -157,7 +161,11 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
                       {people.length > 1 && i === 0 && <span className="t-meta">ผู้ติดต่อหลัก</span>}
                     </span>
                     {roleLine(v) && <span className="dc-s">{roleLine(v)}</span>}
-                    {away && <span className="dc-s">อยู่ที่ {e.personCompany(p)?.name || p.company || 'บริษัทอื่น'} ไม่ใช่บริษัทของดีลนี้</span>}
+                    {notHere && (
+                      <span className="dc-s">
+                        {can ? 'ผู้ติดต่อคนนี้ยังไม่อยู่ในบริษัทนี้ · เชื่อมให้ได้เลย' : away ? `อยู่ที่ ${e.personCompany(p)?.name || p.company || 'บริษัทอื่น'} ไม่ใช่บริษัทของดีลนี้` : 'ผู้ติดต่อคนนี้ยังไม่อยู่ในบริษัทนี้'}
+                      </span>
+                    )}
                     <Reach phone={p.phone} email={p.email} />
                     {!p.phone && !p.email && <span className="dc-s">{more.length ? 'ยังไม่มีเบอร์และอีเมลในหน้าผู้ติดต่อ' : 'ยังไม่มีเบอร์และอีเมล'}</span>}
                     {more.length > 0 && <span className="dc-s">พิมพ์ไว้ใน<span className="dc-nw">ดีลนี้</span> {more.join(' · ')}</span>}
@@ -175,8 +183,8 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
                 ) : (
                   can && (
                     <div className="dc-a dc-in">
-                      {/* an older link to someone this company is not theirs: add it to their companies */}
-                      {away && c && d.gid != null && <button type="button" className="lnk" onClick={() => (e.addCompanyToPerson(p.id, c.id), focusTo())}>เพิ่ม {coShort(c.name)} ให้ {p.name}</button>}
+                      {/* not at the deal's company: the same helper as linking the contact (the deal's company and theirs) */}
+                      {notHere && coName && <button type="button" className="lnk" onClick={() => (e.linkDealCompany(d.id, p.id), focusTo())}>เพิ่ม {coShort(coName)} ให้ {p.name}</button>}
                       {more.length > 0 && (
                         <button type="button" className="lnk" data-fk={'give-' + p.id} onClick={() => (e.addTypedToPerson(d.id, p.id), focusTo('edit-' + p.id))}>เพิ่มให้ {p.name}</button>
                       )}
@@ -256,7 +264,7 @@ export function DealContact({ d, ro }: { d: Deal; ro: boolean }) {
             ) : elsewhere ? (
               <>
                 <button type="button" className="btn xs pri" onClick={() => (e.saveTypedContact(d.id, undefined, { pid: elsewhere.p.id }), focusTo())}>
-                  {c ? `เพิ่มบริษัทนี้ให้ ${elsewhere.p.name}` : `ใช้ ${elsewhere.p.name}`}
+                  {coName ? `เพิ่มบริษัทนี้ให้ ${elsewhere.p.name}` : `ใช้ ${elsewhere.p.name}`}
                 </button>
                 <button type="button" className="lnk" onClick={() => (e.saveTypedContact(d.id, undefined, { fresh: true }), focusTo())}>สร้างคนใหม่</button>
               </>
@@ -377,6 +385,7 @@ function Picker({ d, mode, pool, skip, hasMain, many, onPick, onNew, onNone, onC
       .slice(0, 8);
   }, [k, pool, skip, e, inPool]);
   const c = d.gid != null ? e.company(d.gid) : undefined;
+  const coName = c ? c.name : placeholderName(d.client) ? '' : d.client.trim();
   const outside = k.length >= 2 && found.some((p) => !inPool.has(p.id));
   const keys = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
@@ -398,7 +407,7 @@ function Picker({ d, mode, pool, skip, hasMain, many, onPick, onNew, onNone, onC
       ) : (
         <span className="dc-note">{k.length < 2 ? (d.gid != null ? 'บริษัทนี้ยังไม่มีคนอื่นในรายชื่อผู้ติดต่อ' : 'พิมพ์ชื่อเพื่อค้น') : `ไม่พบ “${q.trim()}” ในรายชื่อผู้ติดต่อ`}</span>
       )}
-      {outside && c && <span className="dc-note">คนจากบริษัทอื่น: เลือกแล้วจะเพิ่ม {c.name} ในบริษัทที่คนนี้ติดต่อด้วย และใช้เป็นผู้ติดต่อของดีลนี้</span>}
+      {outside && coName && <span className="dc-note">คนจากบริษัทอื่น: เลือกแล้วจะเพิ่ม {coName} ในบริษัทที่คนนี้ติดต่อด้วย และใช้เป็นผู้ติดต่อของดีลนี้</span>}
       <div className="dc-a">
         <button type="button" className="lnk" onClick={onNew}>เพิ่มผู้ติดต่อใหม่</button>
         {/* (every contact of the deal: with several, the words say so) */}
