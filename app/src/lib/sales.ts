@@ -72,6 +72,10 @@ export interface Deal {
   order: number;
   /** The import (from the old tracker) that added it, so that import can be undone. */
   imp?: string;
+  /** A closed single job kept for a follow-up: the date to contact again (ISO, lib/recontact.ts). '' or absent: plain ปิดงาน. */
+  recontact?: string;
+  /** The job this one continues as a new cycle (เปิดรอบใหม่): the old job's id. Absent for a job made any other way. */
+  from?: string;
   at: string; by: string;
 }
 export interface DealStep { d: string; n: string }
@@ -237,6 +241,9 @@ export function toDeal(v: unknown, id: string): Deal | null {
   };
   if (iso(o.fcAt)) d.fcAt = iso(o.fcAt);
   if (typeof o.imp === 'string') d.imp = o.imp.slice(0, 40);
+  // a follow-up date is read on a closed job only: a job reopened (or a stale write on an open one) shows none (lib/recontact.ts)
+  if (iso(o.recontact) && d.jobStatus === 'closed') d.recontact = iso(o.recontact).slice(0, 10);
+  if (typeof o.from === 'string' && o.from) d.from = o.from.slice(0, 60);
   return d;
 }
 const KINDS = ['quotation', 'invoice', 'receipt', 'other'];

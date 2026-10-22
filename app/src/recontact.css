@@ -1,0 +1,34 @@
+/* Keeping a closed job for a follow-up (lib/recontact.ts): the รอติดต่อใหม่ list at the top of the ปิดงาน tab, the
+ * kept line under a job's company, the new-cycle button, and the closing dialog's choice. Sizes stay on the scale
+ * (12, 13, 14, 16, 18, 24, 28, 40), weights 400 and 500 (design.guard.test.ts). */
+
+.sl-wait{margin:0 0 16px;padding:0 0 4px;overflow:hidden}
+.sl-wait-hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:14px 16px 6px}
+.sl-wait-hd h3{margin:0;font-size:var(--fs-card);font-weight:500;color:var(--ink)}
+.sl-wait-l{list-style:none;margin:0;padding:0}
+.sl-wait-l li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px;padding:12px 16px;border-top:1px solid var(--line)}
+.sl-wait-when{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:150px}
+.sl-wait-d{color:var(--ink);font-variant-numeric:tabular-nums}
+.sl-wait-who{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;flex:1 1 220px}
+.sl-wait-who small{font-size:var(--fs-sec);overflow-wrap:anywhere}
+.sl-kept{display:block;margin-top:2px}
+.sl-cycle{margin-left:12px;font-size:var(--fs-sec)}
+
+/* the choice in the closing dialog and the new-cycle dialog: plain labelled options, the choice in words */
+.cl-how{margin:12px 0 0;padding:0;border:0;min-width:0;display:grid;gap:8px}
+.cl-how legend{padding:0;margin:0 0 6px;font-size:var(--fs-sec);color:var(--ink-2)}
+.cl-opt{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-field);cursor:pointer}
+.cl-opt input{margin:3px 0 0;flex:none}
+.cl-opt:has(input:checked){border-color:var(--brand)}
+.cl-opt:has(input:disabled){cursor:default;color:var(--muted)}
+.cl-opt span{display:grid;gap:2px;min-width:0}
+.cl-opt b{font-weight:500;font-size:var(--fs-body);color:var(--ink)}
+.cl-opt small{font-size:var(--fs-meta);color:var(--ink-2);line-height:1.5}
+.cl-date{display:grid;gap:6px;margin-top:14px}
+.cl-date > span{font-size:var(--fs-sec);color:var(--ink-2)}
+.cl-date small{font-size:var(--fs-meta)}
+
+/* a closed job's date to contact again, in its panel */
+.kept-date{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:12px}
+.kept-date > span{font-size:var(--fs-sec);color:var(--ink-2)}
+.kept-date small{flex-basis:100%;font-size:var(--fs-meta)}
