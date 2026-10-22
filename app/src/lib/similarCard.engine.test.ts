@@ -3,7 +3,9 @@
  * is left off the card for the year being added (similarFor), and the exact name submitted with the card left off still
  * reuses that company: the hand-added row merges into it (core.ts build: one juristic id, the name normalised), so a job
  * of the year goes to the registry company and no second company of that name shows. A company without a juristic id is
- * not merged that way, so its card stays.
+ * not merged that way, so its card stays. So does a match the submit would not merge: a juristic id typed under another
+ * name, a partial name, or the juristic id typed with dashes (core.ts compares the id as typed); the card is the way to
+ * reuse it there.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -95,5 +97,44 @@ describe('the exact name submitted with the card left off still reuses the compa
     const id = e.addCustomer({ ...blank, name: r.name });
     expect(e.canonical(id)).not.toBe(r.id);
     expect(e.similarFor(r.name, '', '2569').map((c) => c.id)).toContain(r.id);
+  });
+
+  it('the exact name with its juristic id: the card is left off, and the submit merges into the company', () => {
+    const [r] = unique(true);
+    e.addDeal({ gid: r.id, year: '2568' });
+    expect(e.similarFor(r.name, r.jur, '2569').map((c) => c.id)).not.toContain(r.id);
+    const id = e.addCustomer({ ...blank, name: r.name, jur: r.jur });
+    expect(e.canonical(id)).toBe(r.id);
+    expect(e.B.companies.filter((c) => norm(c.name) === norm(r.name)).length).toBe(1);
+  });
+});
+
+/** The same digits as a juristic id typed with dashes ("0-1055-00000-01-1"). */
+const dashed = (d: string) => `${d.slice(0, 1)}-${d.slice(1, 5)}-${d.slice(5, 10)}-${d.slice(10, 12)}-${d.slice(12)}`;
+
+describe('the card stays where the submit would not merge the company', () => {
+  it('a juristic id typed under another name: the card stays, and the submit with that name makes a company of its own', () => {
+    const [r] = unique(true);
+    e.addDeal({ gid: r.id, year: '2568' });
+    const other = 'ชื่อคนละคำกับทะเบียน ทดสอบเอ';
+    expect(e.similarFor(other, r.jur, '2569').map((c) => c.id)).toContain(r.id);
+    expect(e.canonical(e.addCustomer({ ...blank, name: other, jur: r.jur }))).not.toBe(r.id);
+  });
+
+  it('a partial name of the company: the card stays, and the submit with it does not merge', () => {
+    const [r] = unique(true).filter((c) => norm(c.name).length >= 12);
+    e.addDeal({ gid: r.id, year: '2568' });
+    const part = norm(r.name).slice(0, 8);
+    expect(e.similarFor(part, '', '2569').map((c) => c.id)).toContain(r.id);
+    expect(e.canonical(e.addCustomer({ ...blank, name: part }))).not.toBe(r.id);
+  });
+
+  it('the exact name with the juristic id typed with dashes: the card stays, and the submit does not merge (the ids differ as typed)', () => {
+    const [r] = unique(true);
+    e.addDeal({ gid: r.id, year: '2568' });
+    const dj = dashed(jurOf(r));
+    expect(dj).not.toBe(r.jur);
+    expect(e.similarFor(r.name, dj, '2569').map((c) => c.id)).toContain(r.id);
+    expect(e.canonical(e.addCustomer({ ...blank, name: r.name, jur: dj }))).not.toBe(r.id);
   });
 });

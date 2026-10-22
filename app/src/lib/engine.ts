@@ -57,7 +57,7 @@ import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcC
 import { CYCLE_YEAR_BLOCK, cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, isCycleJob, recontactErr, recontactOf } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
-import { cardHides } from './similarCard';
+import { cardHides, reusedOnSubmit } from './similarCard';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1452,13 +1452,15 @@ export class GccEngine {
       .slice(0, 8);
   }
   /** The companies the registry-match card offers for a new customer typed `name` and `jur` (AddCustomer): similarCompanies,
-   *  less those cardHides leaves off for `year`, the job being added in a Sales Tracker (no `year`: all of them). */
+   *  less those cardHides leaves off for `year` (the job being added in a Sales Tracker, or the deal a company is linked to;
+   *  no `year`: all of them). */
   similarFor(name: string, jur: string, year?: string): Company[] {
     const cos = this.similarCompanies(name, jur);
     if (year === undefined) return cos;
     return cos.filter((c) => {
       const sameName = this.B.companies.filter((x) => norm(x.name) === norm(c.name)).length;
-      return !cardHides({ jobYears: this.jobYearsOf(c.id), sameName, hasJur: !!c.jur }, year);
+      const reused = reusedOnSubmit({ name, jur }, { name: c.name, jur: c.jur, sameName });
+      return !cardHides({ jobYears: this.jobYearsOf(c.id), reused }, year);
     });
   }
   /** The years of a company's jobs, as the card counts them (a joint quotation's header is not one of its jobs). */
