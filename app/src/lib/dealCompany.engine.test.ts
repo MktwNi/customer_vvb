@@ -501,6 +501,22 @@ describe('the same name, two companies: the exact name first, the contact\'s own
     }
   });
 
+  it('a card\'s pick of someone at the second of two same-name companies: the deal\'s phone that is that company\'s switchboard is not copied to them; the mobile typed for them is', async () => {
+    const [A, B] = await team();
+    A.e.addCustomer({ name: 'สองเบอร์ ทดสอบ', ...blank, phone: '02-111-1111' }, { id: CUSTOM_ID_MIN + 71 });
+    const hi = A.e.addCustomer({ name: 'สองเบอร์ ทดสอบ', ...blank, phone: '02-222-2222' }, { id: CUSTOM_ID_MIN + 72 });
+    const pid = A.e.addPerson({ name: 'คุณเบอร์ ทดสอบ', gid: hi });
+    const d = A.e.addDeal({ client: 'สองเบอร์ ทดสอบ', year: '2569', contactName: 'คุณเบอร์ ทดสอบ', phone: '02-222-2222 | 081-333-4444' });
+    // the card's "เพิ่มบริษัทนี้ให้ <ชื่อ>": the contact is at hi, so the deal's company for them is hi (not the lower id)
+    expect(A.e.saveTypedContact(d.id, undefined, { pid })).toBe(pid);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(hi);
+      expect(cosOf(t, pid).map((x) => x[0])).toEqual([hi]);
+      expect(t.e.people[pid].phone).toBe('081-333-4444');
+    }
+  });
+
   it('two browsers pick the same company for the same typed name and contact, each from its own copy', async () => {
     const [A, B] = await team();
     A.e.addCustomer({ name: 'สองเบราว์เซอร์ ทดสอบ', ...blank }, { id: CUSTOM_ID_MIN + 31 });

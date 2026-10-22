@@ -2389,20 +2389,29 @@ export class GccEngine {
     // someone recorded at another company, chosen on the card ("เพิ่มบริษัทนี้ให้ <ชื่อ>")
     let other = opt.pid && this.people[opt.pid] ? this.resolvePid(opt.pid) : '';
     let pid = other ? '' : same ? same.id : id && this.people[id] ? this.resolvePid(id) : '';
-    // the company the deal gets (teamCompanyOf, nothing written yet; the contact's own among same-name companies once a
-    // contact is known): the typed numbers leave out its own
-    const co = this.teamCompanyOf(d0, pid ? this.people[pid] : undefined);
-    const c0 = co != null ? this.company(co) : undefined;
-    // the numbers and e-mails typed for them: a form's as typed, else the deal's that are not the company's
-    // own (copied in when the deal was sent)
-    const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d0, null, c0);
-    const typed = { name, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') };
+    // the company the deal gets (teamCompanyOf, nothing written yet: the contact's own among same-name companies) and the
+    // numbers and e-mails typed for them, which leave out that company's own. Worked out once the contact is known: the
+    // one the card picked (`other`), or the one person found below; before that, for no one. A switchboard of another
+    // company of the same name is not theirs to leave out.
+    const forContact = (who: string) => {
+      const co = this.teamCompanyOf(d0, who ? this.people[who] : undefined);
+      const c0 = co != null ? this.company(co) : undefined;
+      // the numbers and e-mails typed for them: a form's as typed, else the deal's that are not the company's
+      // own (copied in when the deal was sent)
+      const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d0, null, c0);
+      return { co, c0, typed: { name, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') } };
+    };
+    let who = forContact(pid || other);
     // or, without asking (เพิ่มลูกค้า), the one person with this name and a phone or e-mail typed for them (never a
     // guess by name alone; the number typed in the form is theirs even when the new customer has it as its own)
     if (!pid && !other && !opt.fresh) {
-      const f = this.findExisting(typed, d0.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
-      if (f.length === 1) other = f[0].p.id;
+      const f = this.findExisting(who.typed, d0.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
+      if (f.length === 1) {
+        other = f[0].p.id;
+        who = forContact(other);
+      }
     }
+    const { co, c0, typed } = who;
     return this.batchOps(() => {
       if (other) {
         // (the numbers and e-mails here; the company is added below)
