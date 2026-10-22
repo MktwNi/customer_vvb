@@ -54,7 +54,8 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
 import { clashSvc, companyCount, sendState, surelyOther, svcClean } from './jobs';
-import { jobServices, svcSig } from './sales';
+import { jobServices, placeholderName, svcSig } from './sales';
+import { customIdOf, findCompanyByName } from './dealCompany';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1448,14 +1449,16 @@ export class GccEngine {
       .filter((c) => (j.length >= 10 && c.jur.replace(/\D/g, '') === j) || (k.length >= 3 && (norm(c.name) === k || (k.length >= 6 && norm(c.name).includes(k)))))
       .slice(0, 8);
   }
-  /** Add a customer that is not in the registry; returns its company id. */
-  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>): number {
-    let id: number;
-    do id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
-    while (this.custom[id] || this.B.byId.has(id));
+  /** Add a customer that is not in the registry; returns its company id. `opt.id`: the id to take when it is free
+   *  (a company made for a deal's typed name: customIdOf), else a random one. That id is create-only (SyncOp.nx): a
+   *  live row another browser made for the same name first stands, so its fields are not blanked by this browser's
+   *  copy; a deletion the team made of it does not stop this one (SyncOp.revive). */
+  addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>, opt: { id?: number } = {}): number {
+    let id = opt.id && !this.custom[opt.id] && !this.B.byId.has(opt.id) ? opt.id : 0;
+    while (!id || this.custom[id] || this.B.byId.has(id)) id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
     const c: CustomCo = { ...p, name: p.name.trim().slice(0, 200), note: cap(p.note || ''), id, at: new Date().toISOString(), by: this.me() };
     this.custom[id] = c;
-    this.op(keyOf.cust(id), { ...c });
+    this.op(keyOf.cust(id), { ...c }, opt.id ? { nx: true, revive: true } : {});
     this.persist('customCos', this.custom);
     this.rebuild();
     this.emit();
@@ -1814,7 +1817,9 @@ export class GccEngine {
     const c = this.company(g)!;
     const pos = (at.pos || '').trim().slice(0, 200), dept = (at.dept || '').trim().slice(0, 200), role = at.role || '';
     const ids = new Set(this.idsOf(pid));
-    if (p.gid == null && !p.company.trim()) {
+    // (their main one when they have none; or the company typed for them is this one, by name: it becomes the registry
+    // one, not a second company of theirs)
+    if (p.gid == null && (!p.company.trim() || norm(p.company) === norm(c.name))) {
       // their main one, and a record of it too: a teammate adding another company to them at the same time makes that
       // one the main one (the person record is one value), and this one stays theirs as another (cosOf leaves out the
       // record of the main company)
@@ -1933,7 +1938,16 @@ export class GccEngine {
     const p = this.people[this.resolvePid(pid)];
     if (!p) return false;
     if (!this.can('edit.cust')) return this.deny(), false;
-    const typedCo = t.gid == null ? (t.company || '').trim().slice(0, 200) : '';
+    // a deal with no company yet and the client's name typed (or none): the deal's company is the one this contact gets,
+    // with the position typed (linkPerson, linkDealCompany) — not a note
+    const dl = deal ? this.sales.deals[deal.id] : undefined;
+    const typed = t.gid == null ? (t.company || '').trim().slice(0, 200) : '';
+    const viaDeal = t.gid == null && !!dl && dl.gid == null && !placeholderName(dl.client) && (!typed || norm(typed) === norm(dl.client));
+    // a deal linked to its company, none picked here (or the deal's own name typed): that company is the one this
+    // contact gets too, through linkDealCompany as the card's button does — the company the duplicate prompt names
+    const own = dl && dl.gid != null ? this.company(dl.gid) : undefined;
+    const viaLinked = t.gid == null && !!dl && !!own && (!typed || norm(typed) === norm(dl.client) || norm(typed) === norm(own.name));
+    const typedCo = viaDeal || viaLinked ? '' : typed;
     this.batchOps(() => {
       if (t.gid != null) this.addCompanyToPerson(p.id, t.gid, { pos: t.pos, role: t.role });
       // a company only typed by name (not in the registry) can't be one more company: their main one when they have
@@ -1949,7 +1963,10 @@ export class GccEngine {
       const patch: Partial<PersonForm> = reachPatch(cur, { phone: t.phone || '', email: t.email || '' });
       if (t.line?.trim() && !cur.line.trim()) patch.line = t.line.trim();
       if (Object.keys(patch).length) this.updatePerson(p.id, patch);
-      if (deal) this.linkPerson(deal.id, p.id, { main: !!deal.main });
+      // (the position typed goes to the deal's company when that is the one made here: viaDeal; a registry company
+      // picked above got it already)
+      if (deal) this.linkPerson(deal.id, p.id, { main: !!deal.main, ...(viaDeal ? { pos: t.pos, role: t.role } : {}) });
+      if (viaLinked && deal) this.linkDealCompany(deal.id, p.id, { pos: t.pos, role: t.role });
     });
     return true;
   }
@@ -2152,6 +2169,14 @@ export class GccEngine {
     if (d.gid == null || !this.company(d.gid)) return false;
     return !this.dealPool(d).some((x) => x.id === p.id);
   }
+  /** Is the deal's contact `p` not at the deal's company: a deal with one, and they are not one of its people
+   *  (contactElsewhere); a deal typed by name with none yet (and a client's name): every contact of it, as the company
+   *  is not linked yet and the card's button links it ("เชื่อมให้ได้เลย", linkDealCompany). */
+  contactNotHere(d: Deal, p: Person): boolean {
+    if (d.gid != null) return this.contactElsewhere(d, p);
+    // (a deal with no company yet: whoever they are, the deal's company is not linked, so the card's button links it)
+    return !placeholderName(d.client);
+  }
   /** May this account set a deal's contact: edit the deal (its own, with an own-work scope) and the contacts. */
   canLink(d: Pick<Deal, 'resp'> | null | undefined) {
     return !!d && this.canDeal('edit.deal', d) && this.can('edit.cust');
@@ -2164,16 +2189,71 @@ export class GccEngine {
     this.op(keyOf.plink(pid, dealId), { ...v });
   }
   /**
-   * Make person `pid` a contact of a deal: `main` (เปลี่ยนผู้ติดต่อ) in place of its main contact, who is taken
-   * off; else after the ones it has (ใช้คนนี้, เพิ่มอีกคน). Said in the deal's history. False: nothing changed
-   * (gone, or not this account's to change).
+   * The team's company a deal gets for its client name, nothing written (lib/dealCompany.ts): the registry or hand-added
+   * company of that name (merged rows too); a deal that has its company: that one. Undefined: none of that name yet (a
+   * new customer is made by dealCompanyOf), or the client is a placeholder ("ลูกค้าใหม่") or nothing may be added.
    */
-  linkPerson(dealId: string, pid: string, opt: { main?: boolean } = {}): boolean {
+  private teamCompanyOf(d: Deal): number | undefined {
+    if (d.gid != null) return this.canonical(d.gid);
+    if (placeholderName(d.client) || !this.can('edit.cust')) return undefined;
+    const hit = findCompanyByName(d.client.trim(), this.namedRows());
+    return hit ? this.canonical(hit.id) : undefined;
+  }
+  /**
+   * The company a deal typed by its client name gets (lib/dealCompany.ts): the team's company of that name (teamCompanyOf),
+   * else a new customer of it (addCustomer, with the id the name gets everywhere). The deal is linked to it (updateDeal).
+   * A deal that has its company: that one. Null: the client is a placeholder ("ลูกค้าใหม่") or nothing may be added.
+   * The caller checks canLink.
+   */
+  private dealCompanyOf(d: Deal): number | null {
+    if (d.gid != null) return this.canonical(d.gid);
+    if (placeholderName(d.client) || !this.can('edit.cust')) return null;
+    const name = d.client.trim();
+    const gid = this.teamCompanyOf(d) ?? this.addCustomer({ name, jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, { id: customIdOf(name) });
+    this.updateDeal(d.id, { gid });
+    return gid;
+  }
+  /** Every company row the team has, registry and hand-added (merged rows too), each by its own name, as the company it is
+   *  now (a merged row maps to its company). */
+  private namedRows(): { id: number; name: string; jur?: string }[] {
+    return [...this.B.rawById.values()].map((r) => ({ id: this.canonical(r.id), name: r.name, jur: r.jur }));
+  }
+  /**
+   * The one link a contact to a deal makes for the company as well (the owner's rule: linking a contact to a deal
+   * links the deal's company and the contact's company, in one action): the deal's company (dealCompanyOf) and the
+   * contact as one of its people (addCompanyToPerson, with the position typed; their main company when they have
+   * none; the typed main company of the same name becomes this one). linkPerson runs it for a deal typed by name,
+   * and the deal card's button for a contact who is not at the deal's company runs it for any deal. Again: nothing
+   * written. Null: no company to link (a placeholder name, or nothing may be added).
+   */
+  linkDealCompany(dealId: string, pid: string, at: { pos?: string; role?: PersonRole } = {}): number | null {
+    const d = this.sales.deals[dealId], p = this.people[this.resolvePid(pid)];
+    if (!d || !p) return null;
+    if (!this.canLink(d)) return this.deny(), null;
+    return this.batchOps(() => {
+      const gid = this.dealCompanyOf(d);
+      if (gid == null) return null;
+      this.addCompanyToPerson(p.id, gid, at);
+      return gid;
+    });
+  }
+  /**
+   * Make person `pid` a contact of a deal: `main` (เปลี่ยนผู้ติดต่อ) in place of its main contact, who is taken
+   * off; else after the ones it has (ใช้คนนี้, เพิ่มอีกคน). Said in the deal's history. A deal typed by name, with no
+   * company yet, gets its company and the contact's too (linkDealCompany), `pos`/`role`: the contact's position
+   * there; a link made before that lacks the company gets it now. False: nothing changed (gone, or not this
+   * account's to change).
+   */
+  linkPerson(dealId: string, pid: string, opt: { main?: boolean; pos?: string; role?: PersonRole } = {}): boolean {
     const d = this.sales.deals[dealId], p = this.people[pid];
     if (!d || !p) return false;
     if (!this.canLink(d)) return this.deny(), false;
     const cur = this.dealPeople(dealId);
-    if (cur[0]?.id === pid || (!opt.main && cur.some((x) => x.id === pid))) return true;
+    const at = { pos: opt.pos, role: opt.role };
+    if (cur[0]?.id === pid || (!opt.main && cur.some((x) => x.id === pid))) {
+      if (d.gid == null) this.linkDealCompany(dealId, pid, at);
+      return true;
+    }
     const main = opt.main ? cur[0] : undefined;
     const rest = cur.filter((x) => x !== main && x.id !== pid).flatMap((x) => this.linksOn(x.id, dealId).map(([, l]) => l));
     this.batchOps(() => {
@@ -2182,6 +2262,7 @@ export class GccEngine {
       this.linksOn(pid, dealId).forEach(([id, l]) => this.putLink(id, dealId, 0, l.o));
       this.putLink(pid, dealId, 1, linkOrder(rest, !!main, Date.now()));
       this.salesLog(d, main ? 'เปลี่ยนผู้ติดต่อ' : 'เชื่อมผู้ติดต่อ', main ? `${main.name} เป็น ${p.name}` : p.name);
+      if (d.gid == null) this.linkDealCompany(dealId, pid, at);
     });
     this.persist('plinks', this.plinks);
     this.saveSales();
@@ -2256,14 +2337,19 @@ export class GccEngine {
    * never them.
    */
   saveTypedContact(dealId: string, t?: { name: string; phone: string; email: string }, opt: { pid?: string; fresh?: boolean } = {}): string {
-    const d = this.sales.deals[dealId];
-    const name = (t ? t.name : d?.contactName || '').trim();
-    if (!d || !name) return '';
-    if (!this.canLink(d)) return this.deny(), '';
-    const c = d.gid != null ? this.company(d.gid) : undefined;
+    const d0 = this.sales.deals[dealId];
+    const name = (t ? t.name : d0?.contactName || '').trim();
+    if (!d0 || !name) return '';
+    if (!this.canLink(d0)) return this.deny(), '';
+    // the company the deal gets (teamCompanyOf, nothing written yet): the typed numbers leave out its own
+    const co = this.teamCompanyOf(d0);
+    const c0 = co != null ? this.company(co) : undefined;
+    // the people and the id are looked for in the deal as it is now, before its company is linked: the id is the one the
+    // People page suggests for it, and a typed-only person of the client's name is the same person, not a second one
+    const pool = this.dealPool(d0);
     // the company's person with this name (one still there first)
-    const same = contactChoices(this.dealPool(d)).concat(this.dealPool(d)).find((p) => nameKey(p.name) === nameKey(name));
-    let id = suggestionId(this.personGid(d.gid), d.client, name);
+    const same = contactChoices(pool).concat(pool).find((p) => nameKey(p.name) === nameKey(name));
+    let id = suggestionId(this.personGid(d0.gid), d0.client, name);
     const gone = new Set(prefs.get<string[]>(PREF.peopleGone, []) || []);
     if (!this.people[id] && (gone.has(id) || this.goneKeys.has(keyOf.person(id)))) id = '';
     // someone recorded at another company, chosen on the card ("เพิ่มบริษัทนี้ให้ <ชื่อ>")
@@ -2271,22 +2357,28 @@ export class GccEngine {
     let pid = other ? '' : same ? same.id : id && this.people[id] ? this.resolvePid(id) : '';
     // the numbers and e-mails typed for them: a form's as typed, else the deal's that are not the company's
     // own (copied in when the deal was sent)
-    const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d, null, c);
+    const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d0, null, c0);
     const typed = { name, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') };
     // or, without asking (เพิ่มลูกค้า), the one person with this name and a phone or e-mail typed for them (never a
     // guess by name alone; the number typed in the form is theirs even when the new customer has it as its own)
     if (!pid && !other && !opt.fresh) {
-      const f = this.findExisting(typed, d.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
+      const f = this.findExisting(typed, d0.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
       if (f.length === 1) other = f[0].p.id;
     }
-    this.batchOps(() => {
+    return this.batchOps(() => {
       if (other) {
-        this.addToExisting(other, { gid: this.personGid(d.gid), phone: typed.phone, email: typed.email });
+        // (the numbers and e-mails here; the company is added below)
+        this.addToExisting(other, { gid: null, phone: typed.phone, email: typed.email });
         pid = other;
-      } else if (!pid) pid = this.addPerson({ name, gid: d.gid, company: c?.name || d.client, phone: typed.phone, email: typed.email }, id ? { id, nx: true } : {});
-      if (pid) this.linkPerson(dealId, pid);
+      } else if (!pid) pid = this.addPerson({ name, gid: d0.gid ?? co ?? null, company: c0?.name || d0.client, phone: typed.phone, email: typed.email }, id ? { id, nx: true } : {});
+      if (pid) {
+        // the deal's company and the contact's, in one action (linkPerson takes linkDealCompany for a deal typed by name);
+        // the duplicate prompt's "เพิ่มบริษัทนี้ให้คนเดิม" adds the deal's company to someone recorded elsewhere, the same way
+        this.linkPerson(dealId, pid);
+        if (other) this.linkDealCompany(dealId, pid);
+      }
+      return pid;
     });
-    return pid;
   }
   /** "เพิ่มให้ <ชื่อ>": the phone numbers and e-mails a deal holds for its contact that their record lacks
    *  (people.ts personExtras) go on the person's record. */
@@ -4716,7 +4808,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; revive?: boolean } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     if (!this.canWriteKey(k, v === undefined, v)) {
@@ -4735,7 +4827,8 @@ export class GccEngine {
     if (v !== undefined) {
       const nxPrev = !!prev?.nx && !prev.sent;
       // created by an import, or a stage set automatically by a logged call: only fills a gap
-      if (this.importNew || opt.nx) o.nx = true;
+      if (opt.revive) o.revive = true;
+      if (this.importNew || opt.nx || opt.revive) o.nx = true;
       else if (nxPrev && opt.f) {
         // a person's edit of an import row not shared yet: if the team has that row, their record wins
         // except for the fields edited here (rebaseOp), so the edit isn't lost
@@ -5731,7 +5824,7 @@ export class GccEngine {
             if (p.fl) o.fl = p.fl;
           }
           if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
-          if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
+          if (o.v !== undefined && p.nx && !p.del) { o.nx = true; if (p.revive) o.revive = true; } // still only filling a gap
           if (p.base !== undefined) o.base = p.base; // still only over what was seen there
           return o;
         })

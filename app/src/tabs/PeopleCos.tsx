@@ -372,7 +372,7 @@ export function whoLine(e: Engine, p: Person) {
  * The add dialog's check, under โทรศัพท์ / อีเมล: someone recorded already at another company is this contact
  * ("เพิ่มบริษัทนี้ให้คนเดิม" is the dialog's primary then, Enter chooses it); several: one to choose.
  */
-export function ExistsPrompt({ found, coName: co, typedCo = '', onUse, onOpen }: { found: Found[]; coName: string; typedCo?: string; onUse: (pid: string) => void; onOpen: (pid: string) => void }) {
+export function ExistsPrompt({ found, coName: co, typedCo = '', dealCo = '', onUse, onOpen }: { found: Found[]; coName: string; typedCo?: string; dealCo?: string; onUse: (pid: string) => void; onOpen: (pid: string) => void }) {
   const { engine: e } = useApp();
   const ref = useRef<HTMLDivElement>(null);
   const key = found.map((x) => x.p.id).join(',');
@@ -402,8 +402,10 @@ export function ExistsPrompt({ found, coName: co, typedCo = '', onUse, onOpen }:
       {one && (
         <span className="t-sec">
           {co ? `เพิ่ม ${co} ให้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · ตำแหน่งที่พิมพ์ไว้เป็นตำแหน่งที่บริษัทนี้ · ` : 'ใช้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · '}
-          {/* (a company typed by name can't be one more company of theirs: where it goes, said) */}
-          {!co && typedCo ? `“${typedCo}” ไม่ได้อยู่ในทะเบียน จะบันทึกไว้ในโน้ตของคนเดิม (เป็นบริษัทหลักถ้ายังไม่มี) · ` : ''}
+          {/* (the deal's company, typed by name: added to them and the deal, made into one in the registry when it is not) */}
+          {!co && dealCo ? `เพิ่ม “${dealCo}” ให้คนเดิม และเป็นบริษัทของดีลนี้ (ถ้ายังไม่อยู่ในทะเบียนจะเพิ่มให้ก่อน) · ` : ''}
+          {/* (a company typed by name on the dialog alone can't be one more company of theirs: where it goes, said) */}
+          {!co && !dealCo && typedCo ? `“${typedCo}” ไม่ได้อยู่ในทะเบียน จะบันทึกไว้ในโน้ตของคนเดิม (เป็นบริษัทหลักถ้ายังไม่มี) · ` : ''}
           เบอร์และอีเมลใหม่ (ถ้ามี) เพิ่มให้คนเดิม
         </span>
       )}

@@ -28,6 +28,9 @@ export interface SyncOp {
   base?: { d: string; n: string } | null;
   /** Create only (an import): dropped if the team already has any row for the record. */
   nx?: boolean;
+  /** With nx: a deletion the team made of the record does not stop this create (a company made again for a name the
+   *  team had deleted); a live row still does. */
+  revive?: boolean;
   /** Items added and removed in list fields named in `f` (a deal's SOURCE / Services): applied to the
    *  teammate's list, so two people ticking different items both keep theirs. */
   fl?: Record<string, ListEdit>;
@@ -721,6 +724,7 @@ export function rebaseOp(row: SyncRow, o: SyncOp): { drop: true } | { v: unknown
   // an import only fills gaps: whatever the team has for the record (a value or a deletion) wins —
   // except fields a person edited here before it was shared (o.f), put on top of the team's record
   if (o.nx) {
+    if (o.revive && row.del) return null; // a record the team deleted: this browser's create stands (SyncOp.revive)
     if (!o.f || row.del || !row.v || typeof row.v !== 'object' || !o.v || typeof o.v !== 'object') return { drop: true };
     return { v: withFields(row.v as Record<string, unknown>, o) };
   }
