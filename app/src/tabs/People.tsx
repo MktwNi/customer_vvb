@@ -931,9 +931,9 @@ export function AddPerson() {
   const dealCo = deal && deal.gid == null && !co && !placeholderName(deal.client) && (!f.company.trim() || norm(f.company) === norm(deal.client)) ? deal.client.trim() : '';
   const create = () => {
     if (!f.name.trim()) return;
-    const id = e.addPerson({ ...f, name: f.name.trim() });
+    // (addNewPerson: a deal typed by name gets only the company picked here, when it is not the one the name gives)
+    const id = e.addNewPerson({ ...f, name: f.name.trim() }, deal ? { id: deal.id, main: !!a.main } : undefined);
     if (!id) return;
-    useIn(id);
     // from the People page, the new person's page opens; from a company page or a deal, it stays there
     set({ addPerson: null });
     if (deal) return;

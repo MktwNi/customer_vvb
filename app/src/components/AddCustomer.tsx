@@ -10,6 +10,7 @@ import { customersOf, jobServices, jointRole, payerDeal, type Deal } from '../li
 import { fmtN, todayISO } from '../lib/format';
 import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { followRows } from '../lib/follow';
+import { cardYear } from '../lib/similarCard';
 import { useSalesActs } from './SalesToast';
 import { SECTION_LABEL, SVC_ADD, clashSvc, clashing, jobsShown, named, rowPick, sendLine, sendState, sendTag, svcChoices, svcCommon, svcText, type SendState } from '../lib/jobs';
 import { JobSvc, SvcPick } from './SvcChips';
@@ -68,11 +69,14 @@ export function AddCustomer() {
   useEffect(() => {
     if (!edit) void e.teamSyncNow();
   }, [e, edit]);
+  // the year the card is for (cardYear): the job's year in the Sales Tracker, the linked deal's year from its card; a company
+  // whose jobs are all in other years is not offered for it (similarFor)
+  const cardY = cardYear(a, year, a.link ? e.sales.deals[a.link]?.year : undefined);
   useEffect(() => {
     if (edit) return;
-    const t = setTimeout(() => setSimilar(e.similarCompanies(f.name, f.jur)), 300);
+    const t = setTimeout(() => setSimilar(e.similarFor(f.name, f.jur, cardY)), 300);
     return () => clearTimeout(t);
-  }, [f.name, f.jur, e, edit, ver]);
+  }, [f.name, f.jur, e, edit, ver, cardY]);
   const up = (k: keyof typeof EMPTY) => (ev: { target: { value: string } }) => setF({ ...f, [k]: ev.target.value });
 
   /** The contact typed here (name, phone, e-mail as typed; '' each when nothing was). */
