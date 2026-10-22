@@ -1,5 +1,6 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { SRCC, tagsOf } from '../lib/constants';
+import { keyedDateStep } from '../lib/dateInput';
 import { isoTh } from '../lib/format';
 
 /** One white card (design §7.2): radius 20, hairline border, the card shadow. The class `.card` is the same. */
@@ -124,14 +125,26 @@ export function Dot({ color, size = 8 }: { color: string; size?: number }) {
 /**
  * A date field that reads as Thai text ("8 ต.ค. 2569", design §7.10): the browser's own date input does
  * the picking (a click opens its calendar), but its mm/dd/yyyy never shows.
+ * `keyed`: a date typed key by key (the deal's contact date). A year still being typed is the field's draft
+ * (lib/dateInput): not saved, and the text shows the saved date, not the draft. Only a complete day reaches
+ * onChange; the draft is dropped when the field loses focus. Without `keyed` every browser value reaches
+ * onChange, '' (a cleared field) included.
  */
-export function DateField({ value, onChange, label, placeholder = 'เลือกวันที่', id, name, min, max, style }: { value: string; onChange: (iso: string) => void; label?: string; placeholder?: string; id?: string; name?: string; min?: string; max?: string; style?: CSSProperties }) {
+export function DateField({ value, onChange, label, placeholder = 'เลือกวันที่', id, name, min, max, style, keyed = false }: { value: string; onChange: (iso: string) => void; label?: string; placeholder?: string; id?: string; name?: string; min?: string; max?: string; style?: CSSProperties; keyed?: boolean }) {
+  // the field's draft while a keyed year is typed (null: the field shows `value`)
+  const [draft, setDraft] = useState<string | null>(null);
   const open = (el: HTMLInputElement) => {
     try {
       el.showPicker();
     } catch {
       /* an older browser: its own field still works */
     }
+  };
+  const change = (raw: string) => {
+    if (!keyed) return onChange(raw);
+    const r = keyedDateStep(raw);
+    setDraft(r.draft);
+    if (r.commit) onChange(r.commit);
   };
   return (
     <span className="dfld" style={style}>
@@ -140,11 +153,12 @@ export function DateField({ value, onChange, label, placeholder = 'เลือ�
         id={id}
         name={name}
         className="fld"
-        value={value}
+        value={draft ?? value}
         min={min}
         max={max}
         aria-label={label}
-        onChange={(ev) => onChange(ev.target.value)}
+        onChange={(ev) => change(ev.target.value)}
+        onBlur={() => setDraft(null)}
         onClick={(ev) => open(ev.currentTarget)}
         onKeyDown={(ev) => {
           if (ev.key === 'Enter' || ev.key === ' ') {

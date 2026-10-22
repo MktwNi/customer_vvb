@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { addDays, isoTh, todayISO } from '../lib/format';
-import { dateInputChange } from '../lib/dateInput';
+import { keyedDateStep } from '../lib/dateInput';
 
 /**
  * A date as Thai text on a button ("8 ต.ค. 2569", design §7.10): one tab stop with its own focus ring.
@@ -31,8 +31,8 @@ export function DateChip({ value, onChange, label, text, className = '', id, emp
     onChange(addDays(value || todayISO(), ev.key === 'ArrowUp' ? 1 : -1));
   };
   const change = (raw: string) => {
-    const r = dateInputChange(raw);
-    setDraft(r.commit ? null : r.draft);
+    const r = keyedDateStep(raw);
+    setDraft(r.draft);
     if (r.commit) onChange(r.commit);
   };
   const shown = text ?? (value ? isoTh(value) : empty);

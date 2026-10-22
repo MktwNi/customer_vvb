@@ -1481,7 +1481,7 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · �
               <Field label="แหล่งที่มา (Referral)" value={d.referral} onSave={(v) => up({ referral: v })} list="sl-ref" />
               <span style={labelCol}>
                 วันที่ติดต่อ
-                <DateField value={d.contactDate} onChange={(v) => up({ contactDate: v })} label="วันที่ติดต่อ" placeholder="ยังไม่ระบุ" />
+                <DateField keyed value={d.contactDate} onChange={(v) => up({ contactDate: v })} label="วันที่ติดต่อ" placeholder="ยังไม่ระบุ" />
                 {lc.date && lc.from !== 'typed' && <span className="t-meta">ติดต่อล่าสุด {isoTh(lc.date)} {lc.from === 'act' ? 'จากบันทึกการติดต่อ' : 'จากขั้น ' + lc.from}</span>}
               </span>
               {/* หมวด moves the deal: it changes only on a choice in the list, never on a key over the closed button */}

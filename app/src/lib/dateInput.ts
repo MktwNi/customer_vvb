@@ -17,3 +17,10 @@ export interface DateInputChange {
 export function dateInputChange(raw: string): DateInputChange {
   return /^[1-9]\d{3}-\d\d-\d\d$/.test(raw) && isDay(raw) ? { commit: raw, draft: '' } : { commit: null, draft: raw };
 }
+
+/** What a keyed date field (DateChip, DateField keyed) does with a value the browser reports: the draft it shows
+ *  (null: the saved date) and the complete day to save (null: none). */
+export function keyedDateStep(raw: string): { draft: string | null; commit: string | null } {
+  const r = dateInputChange(raw);
+  return r.commit ? { draft: null, commit: r.commit } : { draft: r.draft, commit: null };
+}

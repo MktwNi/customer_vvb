@@ -4,7 +4,7 @@
  * a deal's contact date 0202-10-22 that showed "22 ต.ค." with no year and counted 666,202 days overdue).
  */
 import { describe, expect, it } from 'vitest';
-import { dateInputChange } from './dateInput';
+import { dateInputChange, keyedDateStep } from './dateInput';
 
 describe('dateInputChange (the date chip\'s native input)', () => {
   it('commits a complete day: four digits in the year, a real calendar day', () => {
@@ -32,5 +32,14 @@ describe('dateInputChange (the date chip\'s native input)', () => {
     const typed = ['0002-10-22', '0020-10-22', '0202-10-22', '2027-10-22'];
     const saved = typed.map((raw) => dateInputChange(raw).commit).filter((x): x is string => x != null);
     expect(saved).toEqual(['2027-10-22']);
+  });
+
+  it('keyedDateStep: a partial year is the draft and saves nothing; the complete day saves and clears the draft', () => {
+    expect(keyedDateStep('0202-10-22')).toEqual({ draft: '0202-10-22', commit: null });
+    expect(keyedDateStep('')).toEqual({ draft: '', commit: null });
+    expect(keyedDateStep('2027-10-22')).toEqual({ draft: null, commit: '2027-10-22' });
+    const typed = ['0002-10-22', '0020-10-22', '0202-10-22', '2027-10-22'].map(keyedDateStep);
+    expect(typed.map((x) => x.commit).filter((x): x is string => x != null)).toEqual(['2027-10-22']);
+    expect(typed.at(-1)).toEqual({ draft: null, commit: '2027-10-22' });
   });
 });
