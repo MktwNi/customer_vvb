@@ -3,7 +3,9 @@
  * company and the contact's company too (engine linkDealCompany, lib/dealCompany.ts), end to end with the real team
  * script (team-sync/Code.gs in the simulator). The owner's case (the typed company from "คนนี้มีอยู่แล้ว"), the other
  * ways a contact gets linked (made from the deal, typed on it), a deal that already has its company, the links made
- * before this, who may link, and a tab on the older build (cv 5).
+ * before this, who may link, and a tab on the older build (cv 5). The same name, two companies: the exact name first, the
+ * contact's own company among ties, two browsers picking alike, and the duplicate prompt's pick of another company (the
+ * person gets that company only; the deal waits for its card's button).
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +14,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { norm } from './core';
-import { CV, type Role } from './teamSync';
+import { CUSTOM_ID_MIN, CV, type Role } from './teamSync';
 import type { Company, Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -457,6 +459,137 @@ describe('review fixes: one company per typed name, its fields kept, the duplica
     expect(A.e.addToExisting(pid, { gid: null, company: '', pos: 'ผู้จัดการฝ่ายขาย' }, { id: d.id, main: true })).toBe(true);
     await settle(A, B);
     expect(sheetText()).toBe(before);
+  });
+});
+
+describe('the same name, two companies: the exact name first, the contact\'s own company, the duplicate prompt\'s pick', () => {
+  // (companies added by hand, with ids fixed so the order of the ties is known)
+  const blank = { jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' };
+
+  it('name first: the company whose name is the typed name beats one that only matches after normalising, the lower id notwithstanding', async () => {
+    const [A, B] = await team();
+    const loose = A.e.addCustomer({ name: 'บริษัท สามทดสอบ จำกัด', ...blank }, { id: CUSTOM_ID_MIN + 11 });
+    const exact = A.e.addCustomer({ name: 'สามทดสอบ', ...blank }, { id: CUSTOM_ID_MIN + 12 });
+    const pid = A.e.addPerson({ name: 'คุณสาม ทดสอบ' });
+    const d = A.e.addDeal({ client: 'สามทดสอบ', year: '2569' });
+    expect(A.e.linkPerson(d.id, pid)).toBe(true);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(exact);
+      expect(cosOf(t, pid).map((x) => x[0])).toEqual([exact]);
+    }
+    expect(loose).not.toBe(exact);
+    expect(madeNamed('สามทดสอบ').length).toBe(2); // the two companies are kept: nothing merged, nothing made again
+  });
+
+  it('the contact\'s own company beats a tie: of two companies of one exact name, the one the contact is at, whatever the id; a contact at neither gets the lowest id', async () => {
+    const [A, B] = await team();
+    const lo = A.e.addCustomer({ name: 'สองที่ ทดสอบ', ...blank }, { id: CUSTOM_ID_MIN + 21 });
+    const hi = A.e.addCustomer({ name: 'สองที่ ทดสอบ', ...blank }, { id: CUSTOM_ID_MIN + 22 });
+    const pid = A.e.addPerson({ name: 'คุณที่ สองที่', gid: hi });
+    const d = A.e.addDeal({ client: 'สองที่ ทดสอบ', year: '2569' });
+    expect(A.e.linkPerson(d.id, pid)).toBe(true);
+    const pid2 = A.e.addPerson({ name: 'คุณเปล่า สองที่' });
+    const d2 = A.e.addDeal({ client: 'สองที่ ทดสอบ', year: '2570' });
+    expect(A.e.linkPerson(d2.id, pid2)).toBe(true);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(hi);
+      expect(t.e.sales.deals[d2.id].gid).toBe(lo);
+      expect(cosOf(t, pid).map((x) => x[0])).toEqual([hi]);
+      expect(cosOf(t, pid2).map((x) => x[0])).toEqual([lo]);
+    }
+  });
+
+  it('two browsers pick the same company for the same typed name and contact, each from its own copy', async () => {
+    const [A, B] = await team();
+    A.e.addCustomer({ name: 'สองเบราว์เซอร์ ทดสอบ', ...blank }, { id: CUSTOM_ID_MIN + 31 });
+    const hi = A.e.addCustomer({ name: 'สองเบราว์เซอร์ ทดสอบ', ...blank }, { id: CUSTOM_ID_MIN + 32 });
+    await settle(A, B);
+    const pa = A.e.addPerson({ name: 'คุณเอ ตัวอย่าง', gid: hi });
+    const d = A.e.addDeal({ client: 'สองเบราว์เซอร์ ทดสอบ', year: '2569' });
+    await settle(A, B);
+    expect(B.e.linkPerson(d.id, pa)).toBe(true);
+    expect(A.e.linkPerson(d.id, pa)).toBe(true);
+    await settle(A, B);
+    expect(A.e.sales.deals[d.id].gid).toBe(hi);
+    expect(B.e.sales.deals[d.id].gid).toBe(hi);
+    // a contact with no company, on B: the lowest id, the same on A
+    const pb = B.e.addPerson({ name: 'คุณบี ตัวอย่าง' });
+    const d2 = B.e.addDeal({ client: 'สองเบราว์เซอร์ ทดสอบ', year: '2570' });
+    expect(B.e.linkPerson(d2.id, pb)).toBe(true);
+    await settle(A, B);
+    for (const t of [A, B]) expect(t.e.sales.deals[d2.id].gid).toBe(CUSTOM_ID_MIN + 31);
+  });
+
+  it('the duplicate prompt picks a different team company: the person gets that company only, the deal stays unlinked, no company made for the typed client, the card offers the deal\'s company', async () => {
+    const [A, B] = await team();
+    const [, c2] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณคนเดิม ตัวอย่าง' });
+    const d = A.e.addDeal({ client: 'ทดสอบห้าง จำกัด', year: '2569' });
+    expect(A.e.addToExisting(pid, { gid: c2.id, pos: 'ที่ปรึกษา', phone: '', email: '' }, { id: d.id, main: true })).toBe(true);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(cosOf(t, pid)).toEqual([[c2.id, true, 'ที่ปรึกษา', 'active']]);
+      expect(t.e.sales.deals[d.id].gid).toBeNull();
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+      expect(t.e.pickedIsDealCompany(d.id, pid, c2.id)).toBe(false);
+      expect(t.e.contactNotHere(t.e.sales.deals[d.id], t.e.people[pid])).toBe(true); // the card's one button
+    }
+    expect(namedIn(A, 'ทดสอบห้าง จำกัด')).toBe(0);
+    expect(madeNamed('ทดสอบห้าง จำกัด').length).toBe(0);
+    // the card's button: the deal's company made once, and the contact has it too
+    const before = sheetText();
+    const gid = A.e.linkDealCompany(d.id, pid);
+    expect(gid).not.toBeNull();
+    await settle(A, B);
+    expect(sheetText()).not.toBe(before);
+    expect(madeNamed('ทดสอบห้าง จำกัด').length).toBe(1);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(gid);
+      expect(cosOf(t, pid).map((x) => x[0])).toEqual([c2.id, gid]);
+      expect(t.e.contactNotHere(t.e.sales.deals[d.id], t.e.people[pid])).toBe(false);
+    }
+  });
+
+  it('the duplicate prompt picks the company the deal gets: as before, the deal linked to it and the person has it once', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณตรงกัน ตัวอย่าง', gid: c1.id });
+    const d = A.e.addDeal({ client: c2.name, year: '2569' });
+    expect(A.e.pickedIsDealCompany(d.id, pid, c2.id)).toBe(true);
+    expect(A.e.addToExisting(pid, { gid: c2.id, pos: 'ที่ปรึกษา' }, { id: d.id, main: true })).toBe(true);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(c2.id);
+      expect(cosOf(t, pid)).toEqual([[c1.id, true, '', 'active'], [c2.id, false, 'ที่ปรึกษา', 'active']]);
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+    }
+    // the same company at the deal already: the card has no button for the contact there
+    const at = A.e.addPerson({ name: 'คุณอยู่แล้ว ตัวอย่าง', gid: c2.id });
+    const d2 = A.e.addDeal({ client: c2.name, year: '2570' });
+    expect(A.e.contactNotHere(A.e.sales.deals[d2.id], A.e.people[at])).toBe(false);
+    expect(A.e.contactNotHere(A.e.sales.deals[d2.id], A.e.people[pid])).toBe(false);
+  });
+
+  it('the duplicate prompt\'s pick is refused for a viewer and for an account that may not link: nothing written, the deal stays as it was', async () => {
+    const L = await lead();
+    const V = await member(L, 'pla2', 'ปลา', 'viewer');
+    const { id: dealOnly } = await L.e.roleSave({ n: 'ดีลอย่างเดียว สอง', d: '', c: { 'view.sales': 'all', 'view.money': 'all', 'edit.deal': 'all' } });
+    const D = await member(L, 'dao2', 'ดาว', dealOnly);
+    const [c1, c2] = companies(L);
+    const pid = L.e.addPerson({ name: 'คุณถูกห้าม สิทธิ์', gid: c1.id });
+    const d = L.e.addDeal({ client: 'ห้ามเชื่อม สอง', year: '2569', resp: 'หมิว' });
+    await settle(L, V, D);
+    const before = sheetText();
+    expect(V.e.addToExisting(pid, { gid: c2.id, pos: 'ที่ปรึกษา' }, { id: d.id, main: true })).toBe(false);
+    expect(D.e.addToExisting(pid, { gid: c2.id, pos: 'ที่ปรึกษา' }, { id: d.id, main: true })).toBe(false);
+    await settle(L, V, D);
+    expect(sheetText()).toBe(before);
+    expect(L.e.sales.deals[d.id].gid).toBeNull();
+    expect(L.e.dealPeople(d.id)).toEqual([]);
+    expect(cosOf(L, pid)).toEqual([[c1.id, true, '', 'active']]);
+    expect(namedIn(L, 'ห้ามเชื่อม สอง')).toBe(0);
   });
 });
 
