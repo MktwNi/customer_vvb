@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FocusEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type FocusEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
@@ -8,7 +8,7 @@ import {
   type Deal, type DealAct, type DealDoc, type DocKind, type DocTarget, type LineView, type PayHow, type PlanInput, type StageState, type StepView,
 } from '../lib/sales';
 import { OLD_TH } from '../lib/steps';
-import { CLOSE_TITLE, DUP_HINT, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, jobName, stepEdit, type FigView } from '../lib/salesUi';
+import { CLOSE_TITLE, DUP_HINT, JOINT_PAID, acFig, actualSource, closingView, diffText, dupText, fcFig, lineFig, lineMeta, lineStatusView, overPlan, relText, jobName, stepEdit, yearOptions, type FigView } from '../lib/salesUi';
 import { SHOWABLE, openDocFile } from './DocAttach';
 import { useAttach } from './AttachProvider';
 import { docFormNote, overWords, panelEntry, recvPlan, type AttachEntry } from '../lib/attachPlan';
@@ -1454,30 +1454,40 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
 
 /** Contact details, the linked company, the หมวด, SOURCE and the year: folded by default. (The job's services
  *  are in the panel's header: DealSvcRow.) */
-function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · หมวด / SOURCE' }: { d: Deal; ro: boolean; title?: string }) {
+export function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · หมวด / SOURCE', startOpen = false }: { d: Deal; ro: boolean; title?: string; startOpen?: boolean }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
-  const [open, setOpen] = useState(false);
+  // (startOpen: the card's body is open at first, as a test of its controls needs it)
+  const [open, setOpen] = useState(startOpen);
   const [opts, setOpts] = useState(false);
+  // the reason ปีของงาน cannot change is read with the control (its aria-describedby)
+  const yearWhyId = useId();
   const S = e.sales, C = S.cfg;
   const up = (p: Partial<Deal>) => e.updateDeal(d.id, p);
-  /** Another year: a joint quotation's company leaves it, its header takes every company along (asked first). */
+  /** ปีของงาน: a joint quotation's company leaves it, its header takes every company along (asked first). */
   const setYear = (y: string) => {
+    if (y === d.year) return;
     // a new cycle's job keeps its year (lib/recontact isCycleJob); the engine refuses the same move
-    if (y !== d.year && isCycleJob(d)) return acts.say(CYCLE_YEAR_BLOCK);
+    if (isCycleJob(d)) return acts.say(CYCLE_YEAR_BLOCK);
+    // the send's duplicate check first: a company that already has this service in y does not take the job
+    const clash = e.jobYearClash(d, y);
+    if (clash) return acts.say(clash);
     const jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
-    if (y === d.year || !g) return up({ year: y });
+    if (!g) return e.setJobYear(d.id, y);
     const why = e.jointYearBlock(d);
     if (why) return acts.say(why);
     const no = jointNo(S, g);
     const ask = jr === 'member'
       ? `ย้าย ${d.client} ไปปี ${y}? บริษัทนี้จะออกจากใบเสนอราคาร่วม${no ? ' ' + no : ''} (บริษัทในใบเสนอราคาร่วมอยู่ปีเดียวกัน) แถวและข้อมูลของบริษัทยังอยู่ ยอดของใบเสนอราคาร่วมไม่เปลี่ยน`
       : `ย้ายใบเสนอราคาร่วม${no ? ' ' + no : ''} ไปปี ${y}? ทั้ง ${g.members.length} บริษัทในใบนี้ย้ายไปปี ${y} ด้วย`;
-    if (window.confirm(ask)) up({ year: y });
+    if (window.confirm(ask)) e.setJobYear(d.id, y);
   };
   const toggle = (k: 'source', x: string) => up({ [k]: d[k].includes(x) ? d[k].filter((y) => y !== x) : [...d[k], x] });
   const referrals = [...new Set(Object.values(S.deals).map((x) => x.referral).filter(Boolean))];
-  const years = [...new Set([beYear(), String(+beYear() + 1), String(+beYear() - 1), d.year])].sort();
+  // the tracker's years (the year picker's list: every year with deals, this year ±1) and the job's own
+  const years = yearOptions(Object.values(S.deals), d.year, beYear());
+  // why ปีของงาน cannot be changed here (a viewer, or an account whose edits cover its own work only)
+  const yearWhy = e.can('edit.deal') ? `งานนี้ของ ${d.resp || 'ไม่มีผู้รับผิดชอบ'} · บัญชีของคุณแก้ได้เฉพาะงานของตัวเอง` : 'บัญชีนี้ดูข้อมูลได้ แต่แก้ไขไม่ได้';
   const lc = lastContactInfo(S, d, todayISO());
   const sum = [contactSummary(e, d), d.section, ...d.source.filter((x) => x !== d.section)].filter(Boolean).join(' · ') || 'ยังไม่มีข้อมูล';
   // (an account that may edit the deal but not the contacts types the contact here, as before)
@@ -1514,12 +1524,15 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · �
               <Field label="แหล่งที่มา (Referral)" value={d.referral} onSave={(v) => up({ referral: v })} list="sl-ref" />
               <span style={labelCol}>
                 วันที่ติดต่อ
-                <DateField value={d.contactDate} onChange={(v) => up({ contactDate: v })} label="วันที่ติดต่อ" placeholder="ยังไม่ระบุ" />
+                <DateField keyed value={d.contactDate} onChange={(v) => up({ contactDate: v })} label="วันที่ติดต่อ" placeholder="ยังไม่ระบุ" />
                 {lc.date && lc.from !== 'typed' && <span className="t-meta">ติดต่อล่าสุด {isoTh(lc.date)} {lc.from === 'act' ? 'จากบันทึกการติดต่อ' : 'จากขั้น ' + lc.from}</span>}
               </span>
               {/* หมวด moves the deal: it changes only on a choice in the list, never on a key over the closed button */}
               <SelField style={labelCol} text={SECTION_LABEL} value={d.section} onChange={(v) => e.moveDeal(d.id, v, null)} options={[...new Set([...C.sections, d.section])].map((x) => ({ v: x, label: x || 'ไม่ระบุหมวด' }))} />
-              <SelField style={labelCol} text="ปี (พ.ศ.)" value={d.year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
+              <span style={labelCol}>
+                <SelField style={labelCol} text="ปีของงาน" value={d.year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} describedBy={ro ? yearWhyId : undefined} />
+                {ro && <span id={yearWhyId} className="t-meta">{yearWhy}</span>}
+              </span>
             </div>
             <datalist id="sl-team">{e.crm.team.map((x) => <option key={x} value={x} />)}</datalist>
             <datalist id="sl-ref">{referrals.map((x) => <option key={x} value={x} />)}</datalist>

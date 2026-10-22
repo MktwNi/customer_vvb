@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  actsOf, basisDates, dateMatch, emptySales, filterDeals, listMatch, newDeal, normSalesFilter, owedIn, receivedIn, withActIndex,
+  actsOf, basisDates, dateMatch, emptySales, filterDeals, listMatch, newDeal, normSalesFilter, owedIn, quoteSent, receivedIn, withActIndex,
   type Deal, type DealAct, type DealDoc, type PayLine, type SalesState,
 } from './sales';
 import { liveCount, monthCounts, trackerFields, withoutDate } from './salesUi';
@@ -218,5 +218,70 @@ describe('another year of the tracker', () => {
     const none: { quick: string; date?: unknown } = { quick: 'active' };
     expect(withoutDate(none)).toBe(none);
     expect(withoutDate({ date: null, q: 'x' })).toEqual({ date: null, q: 'x' });
+  });
+});
+
+describe('ใบเสนอราคา: ส่งแล้ว or ยังไม่ส่ง', () => {
+  // the rule: the QUOTATION step done (recorded, not planned ahead of today), or a quotation document attached
+  it('a QUOTATION step recorded (a date, or a note alone) is sent; a planned one is not; a quotation attached is; an invoice or a receipt is not', () => {
+    const ds = [deal({ id: 'a' }), deal({ id: 'b' }), deal({ id: 'c' }), deal({ id: 'e' }), deal({ id: 'f' }), deal({ id: 'g' })];
+    const S = state(ds, { 'a/QUOTATION': '2026-10-05', 'b/QUOTATION': '2026-10-20' });
+    S.steps['e/QUOTATION'] = { d: '', n: 'ส่งทางอีเมลแล้ว' };
+    S.docs = {
+      q: doc({ id: 'q', deal: 'c', kind: 'quotation', stage: 'QUOTATION', target: 'forecast' }),
+      i: doc({ id: 'i', deal: 'f', kind: 'invoice', stage: 'PAY1', target: 'actual' }),
+      r: doc({ id: 'r', deal: 'g', kind: 'receipt', stage: 'PAY1', target: 'actual' }),
+    };
+    const sent = (id: string) => quoteSent(S, { id }, T);
+    expect(['a', 'b', 'c', 'e', 'f', 'g'].map(sent)).toEqual([true, false, true, true, false, false]);
+    // the same rule through the filter: each value is its own set, and together they are every deal
+    const sentIds = ids(filterDeals(S, normSalesFilter({ year: '2569', quote: 'sent' }), T));
+    const unsentIds = ids(filterDeals(S, normSalesFilter({ year: '2569', quote: 'unsent' }), T));
+    expect(sentIds.sort()).toEqual(['a', 'c', 'e']);
+    expect(unsentIds.sort()).toEqual(['b', 'f', 'g']);
+    expect(ids(filterDeals(S, normSalesFilter({ year: '2569' }), T)).length).toBe(6);
+  });
+
+  it('the filter keeps a known value and drops any other', () => {
+    expect(normSalesFilter({ year: '2569', quote: 'sent' }).quote).toBe('sent');
+    expect(normSalesFilter({ year: '2569', quote: 'unsent' }).quote).toBe('unsent');
+    expect(normSalesFilter({ year: '2569', quote: 'x' as never }).quote).toBeUndefined();
+    expect(normSalesFilter({ year: '2569', quote: '' }).quote).toBeUndefined();
+  });
+
+  it('combined with the year, a person and a result: the rows are the ones every filter lets through', () => {
+    const ds = [
+      deal({ id: 'a', resp: 'หมิว' }), // sent (QUOTATION done), won
+      deal({ id: 'c', resp: 'หมิว' }), // sent (a quotation attached), not won yet
+      deal({ id: 'b', resp: 'ปลา' }), // sent, won, another person
+      deal({ id: 'd', resp: 'หมิว' }), // not sent, won
+      deal({ id: 'x', resp: 'หมิว', year: '2570' }), // another year
+    ];
+    const S = state(ds, { 'a/QUOTATION': '2026-10-05', 'b/QUOTATION': '2026-10-05', 'x/QUOTATION': '2026-10-05', 'a/CLOSED DEAL': ['2026-10-06', 'YES'], 'b/CLOSED DEAL': ['2026-10-06', 'YES'], 'd/CLOSED DEAL': ['2026-10-06', 'YES'] });
+    S.docs = { q: doc({ id: 'q', deal: 'c', kind: 'quotation', stage: 'QUOTATION', target: 'forecast' }) };
+    const F = normSalesFilter({ year: '2569', quote: 'sent', resp: 'หมิว', result: 'YES' });
+    expect(ids(filterDeals(S, F, T))).toEqual(['a']);
+    // without the result: the sent ones of หมิว (a, c); the other year never counts
+    expect(ids(filterDeals(S, normSalesFilter({ year: '2569', quote: 'sent', resp: 'หมิว' }), T)).sort()).toEqual(['a', 'c']);
+    expect(ids(filterDeals(S, normSalesFilter({ year: '2569', quote: 'unsent', resp: 'หมิว' }), T))).toEqual(['d']);
+  });
+
+  it('the filter row shows the count of each choice: ทั้งหมด, ส่งแล้ว, ยังไม่ส่ง; the counts ignore the field itself and keep the other filters', () => {
+    const ds = [deal({ id: 'a', resp: 'หมิว' }), deal({ id: 'b', resp: 'หมิว' }), deal({ id: 'c', resp: 'ปลา' })];
+    const S = state(ds, { 'a/QUOTATION': '2026-10-05' });
+    const F = normSalesFilter({ year: '2569', resp: 'หมิว' });
+    const field = trackerFields(S, F, { yearDeals: ds, job: 'open', me: 'หมิว', today: T }).find((f) => f.key === 'quote')!;
+    expect(field.kind).toBe('single');
+    expect(field.all).toBe('ทั้งหมด');
+    expect(field.options.map((o) => [o.v, o.label, o.n])).toEqual([['sent', 'ส่งแล้ว', 1], ['unsent', 'ยังไม่ส่ง', 1]]);
+    expect(liveCount(S, F, 'quote', 'unsent', 'open', T)).toBe(1);
+    // its own field is left out of its count: with ส่งแล้ว picked, the choices still count every deal of the year
+    expect(liveCount(S, normSalesFilter({ year: '2569', quote: 'sent' }), 'quote', null, 'open', T)).toBe(3);
+  });
+
+  it('the Dashboard\'s row has no ใบเสนอราคา field (it reports the same deals as the table without this filter)', () => {
+    const ds = [deal({ id: 'a' })];
+    const fields = trackerFields(state(ds), normSalesFilter({ year: '2569' }), { yearDeals: ds, job: '', me: 'me', today: T, dash: true });
+    expect(fields.some((f) => f.key === 'quote')).toBe(false);
   });
 });

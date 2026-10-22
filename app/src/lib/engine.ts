@@ -31,7 +31,7 @@ import {
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importJobId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf, withActIndex,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
-import { cashYear, setMoneyHidden, type CashLine } from './sales';
+import { cashYear, setMoneyHidden, yearChangeWords, type CashLine } from './sales';
 import { expDocId, purgeExpenses, toExpense, type DealExp, type JobExp } from './expense';
 import { expChanged, type ExpInput, type ExpKey } from './expenseJob';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
@@ -53,7 +53,7 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 // บริษัทที่ติดตาม: a follow on any id of a company is the company's
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
-import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcClean } from './jobs';
+import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcClean, svcText } from './jobs';
 import { CYCLE_YEAR_BLOCK, cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, isCycleJob, recontactErr, recontactOf } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
@@ -2668,14 +2668,63 @@ export class GccEngine {
     this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k]), ...(dated ? ['recontact' as const] : [])])], Object.keys(fl).length ? fl : undefined);
     const TH: Partial<Record<keyof Deal, string>> = {
       client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
-      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท',
       recontact: 'ติดต่อใหม่',
     };
-    const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
+    // a job's year is its own history line (เปลี่ยนปีของงานเป็น 2570), not one more word of "แก้ไข"
+    if (changed.includes('year')) this.salesLog(n, yearChangeWords(n.year));
+    const what = changed.filter((k) => k !== 'year').map((k) => TH[k]).filter(Boolean).join(', ');
     // closed and kept for a follow-up: one history line says so (the date in words)
     if (patch.jobStatus === 'closed' && n.recontact) this.salesLog(n, 'ปิดงาน', `เก็บไว้ติดตาม · ติดต่อใหม่ ${isoTh(n.recontact)}`);
     else if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     this.saveSales();
+  }
+  /**
+   * The job's year (ปีของงาน) as the deal panel changes it. The same right as any edit of the deal (edit.deal on
+   * its ผู้รับผิดชอบ, as the account's role scopes it); nothing else of the job changes (its contact date stays).
+   * A joint quotation's header takes its companies along, a member leaves it: moveJointYear, which the panel asks
+   * about first. The duplicate check of a send applies first (jobYearClash): a company that already has the
+   * service in that year does not take the job.
+   */
+  setJobYear(id: string, year: string) {
+    const d = this.sales.deals[id];
+    if (!d || year === d.year || !/^\d{4}$/.test(year)) return;
+    if (!this.canDeal('edit.deal', d)) return this.deny();
+    const why = this.jobYearClash(d, year);
+    if (why) {
+      this.teamNote = why;
+      this.emit();
+      return;
+    }
+    this.updateDeal(id, { year });
+  }
+  /**
+   * The duplicate check of a send (lib/jobs.ts sendState, as addDealsFrom applies it), for a job's year moving to
+   * `year`: a company that already has a job of that year sharing a service with the job is not moved (a send
+   * without its tick is refused the same way). A job with no service counts as the company's job too (nothing
+   * picked: "มีงานแล้ว"). A joint quotation's header moves its members, so each member's company is checked; a
+   * header itself is no company's job (jobsIn). Only companies are checked: a typed client has no send rule.
+   * Returns what to say, or '' when the year may change.
+   */
+  jobYearClash(d: Deal, year: string): string {
+    const S = this.sales;
+    if (year === d.year) return '';
+    const rows = jointRole(S, d) === 'header' ? (jointOf(S, d)?.members.map((m) => m.deal) ?? []) : [d];
+    const jobs = this.jobsIn(year);
+    for (const r of rows) {
+      const c = r.gid != null ? this.company(r.gid) : undefined;
+      if (!c) continue;
+      const others = jobs(c).filter((x) => x.id !== r.id);
+      // a member that leaves a joint quotation keeps its own services (leaveJoint does not change them), so the
+      // services it will have in the year are its own; a member that stays is sold under the header's
+      const svc = r.id === d.id ? svcClean(d.service) : jobServices(S, r);
+      if (sendState(svc, others.map((x) => jobServices(S, x))) !== 'dup') continue;
+      const clash = clashSvc(S, svc, others);
+      return clash.length
+        ? `ย้ายปีไม่ได้: ${c.name} มีงาน ${svcText(clash)} ในปี ${year} แล้ว`
+        : `ย้ายปีไม่ได้: ${c.name} มีงานในปี ${year} แล้ว เลือกบริการให้งานนี้ก่อน`;
+    }
+    return '';
   }
   /**
    * เปิดรอบใหม่ (lib/recontact.ts): a new job of a closed single job's company, for `year` (a later one): the
@@ -3153,12 +3202,16 @@ export class GccEngine {
     return rowFate(this.sales, d, hid, (x) => this.canDeal('edit.deal', x));
   }
   /** Why a joint quotation's header or member cannot move to another year now ('' = it can, after asking):
-   *  a member leaves the joint quotation (สร้างใบเสนอราคาร่วม), the header takes every company along (each
-   *  must be a row this account may edit). */
+   *  a member leaves the joint quotation, which takes the same right as removing its company from it
+   *  (setJointMembers: สร้างใบเสนอราคาร่วม, and edit.deal on the header); the header takes every company along
+   *  (each must be a row this account may edit). */
   jointYearBlock(d: Deal): string {
     const S = this.sales, r = jointRole(S, d);
     if (r === 'member' && isCycleJob(d)) return CYCLE_YEAR_BLOCK;
-    if (r === 'member') return this.can('edit.jqt') ? '' : 'บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี';
+    if (r === 'member') {
+      const head = jointOf(S, d)?.head;
+      return this.canJoint() && (!head || this.canDeal('edit.deal', head)) ? '' : 'บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี';
+    }
     if (r !== 'header') return '';
     if (!this.canJoint()) return 'บัญชีของคุณแก้ไขใบเสนอราคาร่วมไม่ได้';
     const x = jointOf(S, d)?.members.find((m) => !this.canDeal('edit.deal', m.deal));

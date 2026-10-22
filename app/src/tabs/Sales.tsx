@@ -40,7 +40,7 @@ import { askPay } from '../components/PayChk';
 import { previewOf } from '../lib/payCheck';
 import { cashLensOf, lensSum, lensWhere, yearMoneyLabel, type CashLens } from '../lib/cashUi';
 // joint quotations (package quotes, item 7): bands and member rows, counted once
-import { customersOf, jobServices, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum } from '../lib/sales';
+import { customersOf, jobServices, jointAttr, jointHeadOf, jointOf, jointRole, moneyHolds, moneySum, type QuoteF } from '../lib/sales';
 import { canMergeFrom, closedOrder, jointNo, jointRows, rowDeals, type JRow } from '../lib/joint';
 // the work count (jobs, companies worked for): the ปิดงาน tab's line and counter, its export
 import { closedExportSub, closedLine, closedMeta, closedTabRows } from '../lib/workUi';
@@ -84,7 +84,7 @@ const toSlF = (F: SalesFilter): UIState['slF'] => {
   return Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== '' && v !== null)) as UIState['slF'];
 };
 /** Anything that narrows the rows besides the quick view (the count and "ล้างทั้งหมด" show then). */
-const narrowed = (F: SalesFilter) => !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.result || (F.q || '').trim() || F.quick === 'paylate');
+const narrowed = (F: SalesFilter) => !!(F.date || F.resp || F.source || F.service || F.referral || F.section || F.result || F.quote || (F.q || '').trim() || F.quick === 'paylate');
 /** The date filter in force: its basis and today's range of it (a named preset is worked out again). */
 export interface DateIn { f: DateF; basis: DateBasis; r: Range }
 const dateIn = (F: SalesFilter, today: string): DateIn | null => (F.date ? { f: F.date, basis: F.date.basis, r: resolveDate(F.date, F.year, today) } : null);
@@ -555,8 +555,8 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
   const key = useDeferredValue(JSON.stringify(ui.slF));
   // (the lens "เงินเข้าตามปี" counts the other years' jobs with money in this one too)
   const fields = useMemo(() => trackerFields(S, normSalesFilter({ year: F.year, ...JSON.parse(key), money: F.money }), { yearDeals, job, me, today, hay: e.contactHay }), [ver, key, F.year, F.money, job, me, today]); // eslint-disable-line react-hooks/exhaustive-deps
-  const value: Record<string, FVal | undefined> = { resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section, result: F.result ? { v: [F.result] } : undefined };
-  const toF = (k: string, v: FVal | null): Partial<SalesFilter> => (k === 'result' ? { result: (v?.v[0] || '') as ResultF } : { [k]: v || undefined });
+  const value: Record<string, FVal | undefined> = { resp: F.resp, source: F.source, service: F.service, referral: F.referral, section: F.section, result: F.result ? { v: [F.result] } : undefined, quote: F.quote ? { v: [F.quote] } : undefined };
+  const toF = (k: string, v: FVal | null): Partial<SalesFilter> => (k === 'result' ? { result: (v?.v[0] || '') as ResultF } : k === 'quote' ? { quote: (v?.v[0] || '') as QuoteF } : { [k]: v || undefined });
   const search = (
     <label className="sl-search">
       <Icon name="search" size={17} />
@@ -626,7 +626,7 @@ function Toolbar({ S, F, yearDeals, base, today, job, shown, total }: { S: Sales
         onClearAll={() => set({ slF: job === 'open' ? { quick: quick === 'paylate' ? 'payment' : quick } : { quick: F.quick }, slCollapsed: {} })}
         count={on ? { shown, total } : null}
         unit={unit}
-        liveCount={(k, d) => liveCount(S, F, k, k === 'result' ? ((d?.v[0] || '') as ResultF) : d, job, today, e.contactHay)}
+        liveCount={(k, d) => liveCount(S, F, k, k === 'result' ? ((d?.v[0] || '') as ResultF) : k === 'quote' ? ((d?.v[0] || '') as QuoteF) : d, job, today, e.contactHay)}
       />
     </div>
   );
@@ -1347,7 +1347,7 @@ function ContactCell({ d, t }: { d: Deal; t?: DealSteps }) {
             <DateChip value={d.contactDate} onChange={(v) => e.updateDeal(d.id, { contactDate: v })} label="วันที่ติดต่อ" />
             {d.contactDate && <button type="button" className="quiet" onClick={() => e.updateDeal(d.id, { contactDate: '' })}>ล้าง</button>}
           </span>
-          <p>ติดต่อล่าสุดในตาราง คือวันที่นี้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า{from && from !== 'typed' ? ` · ตอนนี้${src} ${isoTh(date)}` : ''}</p>
+          <p>ติดต่อล่าสุดในตาราง คือวันที่นี้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า{d.contactDate > today ? ' · วันที่ในอนาคตจะนับเมื่อถึงวันนั้น' : ''}{from && from !== 'typed' ? ` · ตอนนี้${src} ${isoTh(date)}` : ''}</p>
         </div>
       )}
     </span>

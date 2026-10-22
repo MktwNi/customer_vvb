@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
-import { beYear } from '../lib/sales';
+import { beYear, jobYearOf } from '../lib/sales';
 import type { Company } from '../lib/types';
 import { Modal } from './Dialog';
 import { Notice, labelCol } from './ui';
@@ -52,7 +52,7 @@ export function AddCustomer() {
   const [init] = useState(f);
   const [section, setSection] = useState(a.section ?? e.sales.cfg.sections[0] ?? '');
   // the job's year and services (เพิ่มลูกค้า into the Sales Tracker)
-  const [year, setYear] = useState(ui.slYear || beYear());
+  const [year, setYear] = useState(jobYearOf(ui.slYear));
   const [svc, setSvc] = useState<string[]>([]);
   const [err, setErr] = useState('');
   // the four fields needed on day one first; the rest fold (open when editing, or one already has a value)
@@ -273,7 +273,7 @@ export function SendToTracker() {
   // several companies: by default each goes to the section of where it was found (TGO, SET/mai…)
   const AUTO = '\u0000auto';
   const [section, setSection] = useState(() => (cos.length > 1 ? AUTO : e.suggestSection(cos[0]) || e.sales.cfg.sections[0] || ''));
-  const [year, setYear] = useState(ui.slYear || beYear());
+  const [year, setYear] = useState(jobYearOf(ui.slYear));
   const [svc, setSvc] = useState<string[]>([]);
   const [all, setAll] = useState(false);
   const close = () => set({ sendIds: null });

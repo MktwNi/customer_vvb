@@ -2,8 +2,8 @@
 import { addDays, daysBetween, dmTh, dow, localDay, todayISO } from './format';
 import { basisDates, customersOf, filterDeals, jobServices, jointAttr, jointHeadOf, jointRole, listValues, NONE, payerDeal, sectionsFor, stepContactDay, withActIndex, workTally, type DateBasis, type ListF, type ListKey, type ResultF, type SalesFilter } from './sales';
 import {
-  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, stepCode, countedAt, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, dupCounted, fmtMoney, lastStage, mismatchText, overdueDays, payState, stepOf,
-  type Deal, type DealAct, type DealDoc, type DealSteps, type LineView, type PayLine, type PlanView, type SalesCfg, type SalesState, type SalesStats, type StepView,
+  DEAL_STAGE, HOW_TH, KIND_TH, PAY_STATUS_TH, QUOTE_STAGE, beYear, closeReady, stepCode, countedAt, dealMoney, dealResult, dealStatus, dealSteps, docMismatch, docsOf, dupCounted, fmtMoney, lastStage, mismatchText, overdueDays, payState, quoteSent, stepOf,
+  type Deal, type DealAct, type DealDoc, type DealSteps, type LineView, type PayLine, type PlanView, type QuoteF, type SalesCfg, type SalesState, type SalesStats, type StepView,
 } from './sales';
 import type { FField, FOpt } from '../components/FilterBar';
 import { withSvc } from './jobs';
@@ -52,6 +52,11 @@ export const BASIS_TH: Record<DateBasis, { label: string; sub: string; hint: str
   closed: { label: 'ปิดงาน', sub: 'วันที่กดปิดงาน', hint: 'นับวันที่กดปิดงาน งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”', short: 'ปิดงาน', head: 'ปิดงาน', sent: 'งานที่ปิด' },
 };
 
+/** ใบเสนอราคา's choices after ทั้งหมด (the filter's value, the rule is quoteSent) */
+export const QUOTE_OPTS: { v: Exclude<QuoteF, ''>; label: string; chip: string }[] = [
+  { v: 'sent', label: 'ส่งแล้ว', chip: 'ส่งแล้ว' },
+  { v: 'unsent', label: 'ยังไม่ส่ง', chip: 'ยังไม่ส่ง' },
+];
 /** ผลการขาย's choices (radios) and what its chip says. */
 export const RESULT_OPTS: { v: Exclude<ResultF, ''>; label: string; chip: string }[] = [
   { v: 'YES', label: 'ได้งาน (YES)', chip: 'ได้งาน' },
@@ -78,7 +83,7 @@ export function viewCount(S: SalesState, rows: Deal[], job: ViewJob, f: SalesFil
 /** The view with one filter replaced by a draft (a value popover's "เหลือ N งาน"; `key` 'date' takes a date
  *  draft), counted as the view counts (viewCount). `hay`: what else the search reads for a deal (the table's: the
  *  people linked to it, engine contactHay), so the count says what the rows will. */
-export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | SalesFilter['date'] | null, job: ViewJob, today: string, hay?: (d: Deal) => string): number {
+export function liveCount(S: SalesState, F: SalesFilter, key: string, draft: ListF | ResultF | QuoteF | SalesFilter['date'] | null, job: ViewJob, today: string, hay?: (d: Deal) => string): number {
   const f = { ...viewOf(F, job), [key]: draft ?? undefined };
   return viewCount(S, filterDeals(S, f, today, hay), job, f);
 }
@@ -176,6 +181,10 @@ function fieldsOf(S: SalesState, F: SalesFilter, ctx: FieldsCtx): FField[] {
     const f = { ...viewOf(F, job), result: '' as const }, rows = filterDeals(S, f, today, hay);
     const n = tally(job === 'closed' ? rows : customersOf(S, rows), (d) => [dealResult(S, d) || 'EMPTY'], (v) => ({ ...f, result: v as ResultF }));
     fields.push({ key: 'result', label: 'ผลการขาย', hint: 'ได้งาน / ไม่ได้งาน / รอผล', kind: 'single', all: 'ทั้งหมด', options: RESULT_OPTS.map((o) => ({ ...o, n: n.get(o.v) || 0 })) });
+    // ใบเสนอราคา: ส่งแล้ว (the QUOTATION step done, or a quotation attached) or ยังไม่ส่ง; the counts as the rows
+    const q = { ...viewOf(F, job), quote: '' as const }, qrows = filterDeals(S, q, today, hay);
+    const qn = tally(job === 'closed' ? qrows : customersOf(S, qrows), (d) => [quoteSent(S, d, today) ? 'sent' : 'unsent'], (v) => ({ ...q, quote: v as QuoteF }));
+    fields.push({ key: 'quote', label: 'ใบเสนอราคา', hint: 'ส่งแล้ว = ขั้นใบเสนอราคาเสร็จ หรือมีไฟล์ใบเสนอราคาแนบ', kind: 'single', all: 'ทั้งหมด', options: QUOTE_OPTS.map((o) => ({ ...o, n: qn.get(o.v) || 0 })) });
   }
   return fields;
 }

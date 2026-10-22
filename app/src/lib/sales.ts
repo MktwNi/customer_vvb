@@ -213,6 +213,11 @@ export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps
 
 /** Current Buddhist-era year as text. */
 export const beYear = (iso = new Date().toISOString()) => String(+iso.slice(0, 4) + 543);
+/** The year a job is added in: the year picked in the Sales Tracker, else this year (never the current year
+ *  while another is picked: a job added while looking at 2568 is a 2568 job). */
+export const jobYearOf = (picked: string, now = beYear()) => (/^\d{4}$/.test(picked) ? picked : now);
+/** The history line of a job's year change (the deal panel's ปีของงาน): "เปลี่ยนปีของงานเป็น 2570". */
+export const yearChangeWords = (year: string) => `เปลี่ยนปีของงานเป็น ${year}`;
 
 export function newDeal(p: Partial<Deal> & { id: string; client: string }, by: string, at = new Date().toISOString()): Deal {
   return {
@@ -1610,6 +1615,19 @@ export interface ListF { v: string[]; not?: true }
 export type ListKey = 'resp' | 'source' | 'service' | 'referral' | 'section' | 'unit';
 export const LIST_KEYS: ListKey[] = ['resp', 'source', 'service', 'referral', 'section', 'unit'];
 export type ResultF = '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY';
+/** ใบเสนอราคา (the table's filter): sent, not yet sent, or any ('' ). */
+export type QuoteF = '' | 'sent' | 'unsent';
+const QUOTES: QuoteF[] = ['', 'sent', 'unsent'];
+/**
+ * ส่งแล้ว: the QUOTATION step is done (recorded, and not planned ahead of today), or a quotation document is attached
+ * to the deal. A note or a date alone counts as recorded; an invoice or a receipt does not. Pure: the filter, its
+ * counts and the tests read this one rule.
+ */
+export function quoteSent(s: SalesState, d: Pick<Deal, 'id'>, today: string): boolean {
+  const st = s.steps[`${d.id}/${QUOTE_STAGE}`];
+  return (!!st && (!!st.d || !!st.n.trim()) && !(st.d > today)) || docsOf(s, d.id).some((x) => x.kind === 'quotation');
+}
+
 /** The table's filters (AND across fields). `quick`: a quick view; `job`: open or closed jobs only;
  *  `date`: a date range on one of a deal's dates (null = the whole year). */
 export interface SalesFilter {
@@ -1618,6 +1636,8 @@ export interface SalesFilter {
   /** หน่วยงาน (package dash): the units a deal's money goes to (lib/contrib.ts dealUnits; NONE = ยังไม่ระบุหน่วยงาน) */
   unit?: ListF;
   result?: ResultF; date?: DateF | null;
+  /** ใบเสนอราคา: sent (quoteSent) or not yet (the Sales Tracker's filter row; not the Dashboard's) */
+  quote?: QuoteF;
   /** 'cash' (the table's lens "เงินเข้าตามปี", the Cashflow tab): a deal of another year counts in this one
    *  when one of its installments is received or due in it. Unset: the deal's own year only (as always). */
   money?: 'cash';
@@ -1651,6 +1671,7 @@ export function normSalesFilter(f: SalesFilterIn): SalesFilter {
     if (list.length) out[k] = typeof v === 'object' && v.not ? { v: list, not: true } : { v: list };
   }
   if (f.result && RESULTS.includes(f.result)) out.result = f.result;
+  if (f.quote && QUOTES.includes(f.quote)) out.quote = f.quote;
   if (f.money === 'cash') out.money = 'cash';
   if (f.pay && PAYS.includes(f.pay)) out.pay = f.pay;
   let date = normDateF(f.date, f.year);
@@ -1786,6 +1807,7 @@ function filterPass(s: SalesState, fIn: SalesFilterIn, today: string, more?: (d:
         const r = dealResult(s, d);
         if (f.result === 'EMPTY' ? r !== '' : r !== f.result) return false;
       }
+      if (f.quote && quoteSent(s, d, today) !== (f.quote === 'sent')) return false;
       if (f.quick && !quickMatch(s, d, f.quick, today)) return false;
       if (range && !f.pay && !dateMatch(s, d, range, f.date!.basis, today)) return false;
       if (terms.length) {

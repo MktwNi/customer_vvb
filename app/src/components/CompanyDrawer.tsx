@@ -3,7 +3,7 @@ import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, STG, stageOf } from '../lib/constants';
 import { dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
 import type { Cert, Company, ContactForm, Detail, LogEntry, StageKey } from '../lib/types';
-import { ACT_TH, actsOf, beYear, dealMoney, fmtMoney, lastContact, stepLabel, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { ACT_TH, actsOf, dealMoney, fmtMoney, jobYearOf, lastContact, stepLabel, trackerStatus, type Deal, type DealAct } from '../lib/sales';
 import { fcFig } from '../lib/salesUi';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
@@ -476,7 +476,7 @@ function SalesBox({ c }: { c: Company }) {
   const money = e.can('view.money');
   const deals = newestFirst(e.dealsOf(c.id));
   const custom = e.custom[c.id];
-  const year = ui.slYear || beYear();
+  const year = jobYearOf(ui.slYear);
   // a joint quotation's header is the payer's row for that quotation, not the company's own row of the year
   const hasYear = deals.some((d) => d.year === year && jointRole(e.sales, d) !== 'header');
   return (
