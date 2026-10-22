@@ -178,7 +178,7 @@ export function FollowList() {
       />
       </div>
       {/* the bulk bar above the list, as on ค้นหา (outside the card, so it stays under the top while the list scrolls) */}
-      {canPick && rowsCo.length > 0 && <BulkBar view="co" rows={rowsCo} sel={sel} n={sv.n} store={followSel} sure onUnfollowed={(keyboard) => { if (keyboard) setUnfollowN((k) => k + 1); }} />}
+      {canPick && rowsCo.length > 0 && <BulkBar view="co" rows={rowsCo} sel={sel} n={sv.n} store={followSel} sure undo onUnfollowed={(keyboard) => { if (keyboard) setUnfollowN((k) => k + 1); }} />}
       <section ref={listRef} className="fw card" aria-label="บริษัทที่ติดตาม">
         {/* (the live region is always there, so the line is read out when it comes) */}
         <div role="status">

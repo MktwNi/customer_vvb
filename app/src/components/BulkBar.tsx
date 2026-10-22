@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from
 import { useApp, useEngineVersion } from '../state';
 import {
   BIG, bulkActs, confirmWords, createSel, followNote, followSplit, followedPicked, hintWord, localWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, rowFits,
-  selWord, tooManyWord, unfollowedWord, type Row, type SelStore,
+  selWord, tooManyWord, unfollowNote, unfollowedWord, type Row, type SelStore,
 } from '../lib/bulk';
 import { fmtN } from '../lib/format';
 import { Modal, DialogActions } from './Dialog';
@@ -33,15 +33,18 @@ type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'owner' | 'csv';
  * appointment dialog, spread per day), ตั้งผู้รับผิดชอบ, ส่งออก CSV, ล้างที่เลือก. It keeps one row (the same
  * height either way): when the buttons do not fit, they are one "ทำรายการ" menu (phones, narrow windows).
  * While something is picked it stays under the top of the page as the list scrolls. Acting on more than
- * BIG companies asks first (บริษัทที่ติดตาม: every unfollow asks, `sure`); an unfollow says how many it took off, with
- * เลิกทำ to put exactly those back. Each action says what it did at the bottom, with a link to where they went.
+ * BIG companies asks first (บริษัทที่ติดตาม: every unfollow asks, `sure`); on บริษัทที่ติดตาม (`undo`) an unfollow says
+ * how many it took off, with เลิกทำ to put exactly those back; elsewhere it keeps its earlier toast. Each action says
+ * what it did at the bottom, with a link to where they went.
  */
-export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, onUnfollowed }: {
+export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, undo = false, onUnfollowed }: {
   view: 'co' | 'cert'; rows: readonly Row[]; sel: ReadonlySet<number>; n: number;
   /** the store the picks are kept in (searchSel, or followSel on บริษัทที่ติดตาม) */
   store?: SelStore;
   /** ask before any unfollow, not only from BIG companies (บริษัทที่ติดตาม: every bulk unfollow is confirmed) */
   sure?: boolean;
+  /** a bulk unfollow's toast says what it took off and offers เลิกทำ (บริษัทที่ติดตาม); the search page's toast stays as it was */
+  undo?: boolean;
   /** after a bulk unfollow: the bar and its dialog go with the companies taken off. `keyboard`: it was confirmed from
    *  the keyboard, so the page keeps the focus on its list (a pointer's confirm leaves it as it falls) */
   onUnfollowed?: (keyboard: boolean) => void;
@@ -74,7 +77,8 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, o
     // puts exactly these back, not the others picked
     const gone = followedPicked(cos, e.crm.watch, (id) => e.canonical(id));
     const r = e.setWatchMany(cos, false);
-    say(unfollowedWord(r.changed, r.same) + localWord(r.local), { ms: 10000, acts: r.changed ? [{ label: 'เลิกทำ', act: 'refollow', ids: gone }] : undefined });
+    if (undo) say(unfollowedWord(r.changed, r.same) + localWord(r.local), { ms: 10000, acts: r.changed ? [{ label: 'เลิกทำ', act: 'refollow', ids: gone }] : undefined });
+    else say(unfollowNote(r.changed, r.same) + localWord(r.local), { ms: 6000 });
     onUnfollowed?.(keyboard);
   };
   const run = (a: Act) => {
