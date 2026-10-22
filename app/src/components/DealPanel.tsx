@@ -474,7 +474,7 @@ export function DealPanel() {
             <span className="dp-crumb">Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}{c ? ' · ' + c.code : ''}</span>
             <span className="dp-acts">
               {d.jobStatus === 'closed' && jr === 'plain' && (
-                <button type="button" className="btn xs" disabled={ro} title={ro ? 'บัญชีนี้แก้งานนี้ไม่ได้ จึงเปิดรอบใหม่ไม่ได้' : 'เปิดงานใหม่ของบริษัทนี้สำหรับปีถัดไป'} onClick={() => set({ cycleDlg: d.id })}>{CYCLE_LABEL}</button>
+                <button type="button" className="btn xs" disabled={ro} aria-describedby={ro ? 'dp-cycle-why' : undefined} title="เปิดงานใหม่ของบริษัทนี้สำหรับปีที่เลือก" onClick={() => set({ cycleDlg: d.id })}>{CYCLE_LABEL}</button>
               )}
               {!ro &&
                 (d.jobStatus === 'closed' ? (
@@ -782,6 +782,8 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
               <b>{asking ? (t.result === 'NO' ? 'ผลการขายเป็น NO แล้ว ปิดงานเลยไหม?' : 'รับชำระครบทุกงวดแล้ว ปิดงานเลยไหม?') : CLOSE_TITLE}</b>
               <p>{d.jobStatus === 'closed' ? `ปิดงานแล้ว${d.closedDate ? ' ' + isoTh(d.closedDate) : ''} งานอยู่ในแท็บ “ปิดงาน”${ro ? '' : ' เปิดกลับได้ที่ปุ่มด้านบน'}` : cv.text}</p>
               {d.jobStatus === 'closed' && jointRole(S, d) === 'plain' && (ro ? recontactOf(S, d) && <p className="t-meta">{keptLine(recontactOf(S, d))}</p> : <KeptDate d={d} onSave={(v) => e.updateDeal(d.id, { recontact: v })} />)}
+              {/* the reason the เปิดรอบใหม่ button above is off for this account, in words (aria-describedby) */}
+              {d.jobStatus === 'closed' && jointRole(S, d) === 'plain' && ro && <p id="dp-cycle-why" className="t-meta">บัญชีนี้แก้งานนี้ไม่ได้ จึงเปิดรอบใหม่ไม่ได้</p>}
               {cv.ready && !ro && d.jobStatus === 'open' && (
                 <span className="sl-closing-acts">
                   <button type="button" className="btn pri" onClick={() => acts.close(d.id)}>ปิดงาน</button>

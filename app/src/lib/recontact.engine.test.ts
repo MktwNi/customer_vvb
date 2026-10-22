@@ -187,6 +187,30 @@ describe('closing a single job and keeping it for a follow-up', () => {
     expect(L.e.newCycle(hid, '2570')).toBeNull();
     expect(Object.values(L.e.sales.deals).some((x) => x.from === m.id)).toBe(false);
   });
+
+  it('a date goes only on a closed job; a plain closing after a teammate set a date on the reopened job keeps nothing', async () => {
+    const L = await lead();
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    const B = await member(L, 'bee', 'บี', 'sales');
+    const [c1] = companies(L);
+    const d = A.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO', service: ['CFO'], resp: 'เอ' });
+    await settle(L, A, B);
+    // a date on an open job is not written at all
+    A.e.updateDeal(d.id, { recontact: '2027-12-01' });
+    expect(A.e.sales.deals[d.id].recontact).toBeUndefined();
+    // closed and kept; A reopens it while B, still seeing it closed, sets another date: the job is open with that date
+    A.e.updateDeal(d.id, { jobStatus: 'closed', recontact: '2027-10-22' });
+    await settle(A, B, L);
+    A.e.updateDeal(d.id, { jobStatus: 'open' });
+    B.e.updateDeal(d.id, { recontact: '2027-12-01' });
+    await settle(A, B, L);
+    expect(A.e.sales.deals[d.id]).toMatchObject({ jobStatus: 'open', recontact: '2027-12-01' });
+    // A's plain ปิดงาน (no date) keeps nothing, on every browser: the stale date does not carry over
+    A.e.updateDeal(d.id, { jobStatus: 'closed' });
+    await settle(A, B, L);
+    for (const t of [A, B, L]) expect(keptDeals(t)).toEqual([]);
+    expect(hist(A, d.id).at(-1)!.detail).not.toMatch(/เก็บไว้ติดตาม/);
+  });
 });
 
 describe('เปิดรอบใหม่: a new job for a later year, the old job unchanged', () => {
@@ -240,6 +264,24 @@ describe('เปิดรอบใหม่: a new job for a later year, the old
     expect(L.e.newCycle(closed.id, 'x')).toBeNull();
     expect(Object.keys(L.e.sales.deals)).toHaveLength(n0);
     expect(hist(L, closed.id).map((l) => l.action)).not.toContain('เปิดรอบใหม่ปี 2570');
+  });
+
+  it('one new job per job and year: a second cycle of the same job in that year is refused; a same-year job sharing a service refuses it, another service does not', async () => {
+    const L = await lead();
+    const [c1] = companies(L);
+    const old = L.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO', service: ['CFO'], resp: 'เอ' });
+    L.e.updateDeal(old.id, { jobStatus: 'closed' });
+    expect(L.e.newCycle(old.id, '2570')).not.toBeNull();
+    expect(L.e.newCycle(old.id, '2570')).toBeNull();
+    expect(L.e.teamNote).toMatch(/มีงานปี 2570 แล้ว/);
+    expect(Object.values(L.e.sales.deals).filter((x) => x.from === old.id && x.year === '2570')).toHaveLength(1);
+    // the company's own 2571 job with another service does not block a 2571 cycle of the old job
+    L.e.addDeal({ gid: c1.id, year: '2571', section: 'TGO', service: ['CFP'] });
+    expect(L.e.newCycle(old.id, '2571')).not.toBeNull();
+    // a same-year job with the old job's service blocks the cycle, however it was entered
+    L.e.addDeal({ gid: c1.id, year: '2572', section: 'TGO', service: ['CFO'] });
+    expect(L.e.newCycle(old.id, '2572')).toBeNull();
+    expect(Object.values(L.e.sales.deals).filter((x) => x.year === '2572')).toHaveLength(1);
   });
 
   it('a viewer cannot start a new cycle: nothing changes here and nothing is sent', async () => {

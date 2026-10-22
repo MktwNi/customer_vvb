@@ -53,8 +53,8 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 // บริษัทที่ติดตาม: a follow on any id of a company is the company's
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
-import { clashSvc, companyCount, sendState, surelyOther, svcClean } from './jobs';
-import { cycleBlock, cycleFields, cycleLogs, isoDay, recontactErr } from './recontact';
+import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcClean } from './jobs';
+import { cycleBlock, cycleFields, cycleLogs, recontactErr, recontactOf } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
 
@@ -2628,8 +2628,8 @@ export class GccEngine {
   updateDeal(id: string, patch: Partial<Deal>, opt: { keepJoint?: boolean } = {}) {
     const d = this.sales.deals[id];
     if (!d) return;
-    // a follow-up date is a real date, today or later ('' clears it): anything else is not written
-    if ('recontact' in patch && patch.recontact && recontactErr(patch.recontact, todayISO())) return;
+    // a follow-up date is a real date, today or later, and only on a closed job ('' clears it): anything else is not written
+    if ('recontact' in patch && patch.recontact && (recontactErr(patch.recontact, todayISO()) || (patch.jobStatus ?? d.jobStatus) !== 'closed')) return;
     // a joint quotation and its companies share a year (package quotes): moveJointYear
     if (!opt.keepJoint && patch.year != null && patch.year !== d.year && jointRole(this.sales, d) !== 'plain') return this.moveJointYear(d, patch);
     const n: Deal = { ...d, ...patch, id };
@@ -2641,6 +2641,8 @@ export class GccEngine {
     if (patch.jobStatus === 'open') n.closedDate = '';
     // a job reopened is no longer kept for a follow-up (lib/recontact.ts): its date goes with the closing
     if (patch.jobStatus === 'open' && d.recontact) n.recontact = '';
+    // a closing without a date keeps nothing: a date a teammate set meanwhile on the open job does not carry over
+    if (patch.jobStatus === 'closed' && d.jobStatus !== 'closed' && !('recontact' in patch)) n.recontact = '';
     if ('client' in patch) n.client = String(patch.client || '').trim().slice(0, 200) || d.client;
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
     const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
@@ -2670,7 +2672,8 @@ export class GccEngine {
    * company, its contact, who looks after it, the section, sources and services are copied, nothing of the work.
    * The old job is not changed beyond its history line. Refused (said) for an account that may not edit the job
    * (edit.deal on its own work, as closing it), and for a job still open, a joint quotation's row, or a year that is
-   * not later. Returns the new job, or null.
+   * not later, or a year where the company already has a job that may be the same (cycleYearBlock). Returns the new
+   * job, or null.
    */
   newCycle(id: string, year: string): Deal | null {
     const old = this.sales.deals[id];
@@ -2680,6 +2683,11 @@ export class GccEngine {
       return null;
     }
     if (cycleBlock(this.sales, old) || !/^\d{4}$/.test(year) || +year <= +old.year) return null;
+    const taken = this.cycleYearBlock(old, year);
+    if (taken) {
+      this.teamNote = taken;
+      return null;
+    }
     const logs = cycleLogs(old.year, year);
     return this.bulk(() => {
       const d = this.addDeal({ ...cycleFields(old, year) }, logs.next);
@@ -2687,6 +2695,18 @@ export class GccEngine {
       this.saveSales();
       return d;
     });
+  }
+  /**
+   * Why a new cycle of `old` may not start in `year` ('' when it may): the company already has a job that year that
+   * may be the same job (lib/jobs.ts maySame: a service in common, or neither names one). A joint quotation's header
+   * is not a job of the company, and a placeholder name is no company (jobCoKey '').
+   */
+  cycleYearBlock(old: Deal, year: string): string {
+    const S = this.sales, canon = (g: number) => this.canonical(g), k = jobCoKey(old, canon);
+    if (!k) return '';
+    const svc = jobServices(S, old);
+    const taken = Object.values(S.deals).some((d) => d.id !== old.id && d.year === year && jointRole(S, d) !== 'header' && jobCoKey(d, canon) === k && maySame(svc, jobServices(S, d)));
+    return taken ? `บริษัทนี้มีงานปี ${year} แล้ว จึงเปิดรอบใหม่ปีนี้ไม่ได้` : '';
   }
   /** A step's date + note at the stored stage `stage` (a step's id; an older stage, CALL2, when its own record
    *  is edited in place); a note without a date gets today's date. Only the step record is written —
@@ -4761,7 +4781,7 @@ export class GccEngine {
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(svcList.includes(x) ? '✓' : '')), [csvCell(svcList.filter((x) => !C.services.includes(x)).join(', '))])
         .concat(stepCells.map(csvCell), [csvCell(t.contacts), csvCell(otherSteps.join(' | '))])
-        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), isoDay(d.recontact), planCsv(S, d, today)].map(csvCell))
+        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), recontactOf(S, d), planCsv(S, d, today)].map(csvCell))
         .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
         .join(',');
     });

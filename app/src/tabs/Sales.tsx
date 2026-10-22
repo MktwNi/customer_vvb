@@ -2815,8 +2815,9 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                     </td>
                     <td className="r">
                       {e.canDeal('edit.deal', d) && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}
-                      {jointRole(S, d) === 'plain' && (
-                        <button type="button" className="lnk sl-cycle" disabled={!e.canDeal('edit.deal', d)} title={!e.canDeal('edit.deal', d) ? 'บัญชีนี้แก้งานนี้ไม่ได้ จึงเปิดรอบใหม่ไม่ได้' : 'เปิดงานใหม่ของบริษัทนี้สำหรับปีถัดไป'} onClick={() => set({ cycleDlg: d.id })}>{CYCLE_LABEL}</button>
+                      {/* as เปิดงานอีกครั้ง beside it: an account that may not edit the job sees no link (its reason is in the panel) */}
+                      {jointRole(S, d) === 'plain' && e.canDeal('edit.deal', d) && (
+                        <button type="button" className="lnk sl-cycle" title="เปิดงานใหม่ของบริษัทนี้สำหรับปีที่เลือก" onClick={() => set({ cycleDlg: d.id })}>{CYCLE_LABEL}</button>
                       )}
                     </td>
                   </tr>

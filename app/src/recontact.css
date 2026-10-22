@@ -13,8 +13,6 @@
 .sl-wait-who small{font-size:var(--fs-sec);overflow-wrap:anywhere}
 .sl-kept{display:block;margin-top:2px}
 .sl-cycle{margin-left:12px;font-size:var(--fs-sec)}
-.sl-cycle:disabled{color:var(--muted);cursor:default}
-.sl-cycle:disabled:hover{text-decoration:none}
 
 /* the choice in the closing dialog and the new-cycle dialog: plain labelled options, the choice in words */
 .cl-how{margin:12px 0 0;padding:0;border:0;min-width:0;display:grid;gap:8px}

@@ -216,29 +216,32 @@ function CloseJobDialog({ d, onClose }: { d: Deal; onClose: () => void }) {
   const err = keep ? recontactErr(date, today) : '';
   return (
     <Modal title="ปิดงานตอนนี้?" onClose={onClose} focus="dialog">
-      <p style={{ margin: 0, lineHeight: 1.6 }}>{q || `งาน “${name}” พร้อมปิดแล้ว งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`}</p>
-      <fieldset className="cl-how">
-        <legend>วิธีปิดงาน</legend>
-        <label className="cl-opt">
-          <input type="radio" name="close-how" checked={!keep} onChange={() => setKeep(false)} />
-          <span><b>ปิดงาน</b><small>งานจะย้ายไปแท็บปิดงาน</small></span>
-        </label>
-        <label className="cl-opt">
-          <input type="radio" name="close-how" checked={keep} onChange={() => setKeep(true)} />
-          <span><b>{KEEP_LABEL}</b><small>{KEEP_HINT}</small></span>
-        </label>
-      </fieldset>
-      {keep && (
-        <div className="cl-date">
-          <span>{RECONTACT_LABEL}</span>
-          <DateField value={date} onChange={setDate} label={RECONTACT_LABEL} min={today} />
-          {err && <small role="alert" className="t-warn">{err}</small>}
-        </div>
-      )}
-      <DialogActions>
-        <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
-        <button type="button" className="btn pri" disabled={!!err} onClick={() => acts.closeNow(d.id, keep ? date : '')}>{keep ? KEEP_LABEL : 'ปิดงาน'}</button>
-      </DialogActions>
+      {/* a form, so Enter on the choice confirms (display: contents keeps the dialog's layout) */}
+      <form style={{ display: 'contents' }} onSubmit={(ev) => { ev.preventDefault(); if (!err) acts.closeNow(d.id, keep ? date : ''); }}>
+        <p style={{ margin: 0, lineHeight: 1.6 }}>{q || `งาน “${name}” พร้อมปิดแล้ว งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`}</p>
+        <fieldset className="cl-how">
+          <legend>วิธีปิดงาน</legend>
+          <label className="cl-opt">
+            <input type="radio" name="close-how" checked={!keep} onChange={() => setKeep(false)} />
+            <span><b>ปิดงาน</b><small>งานจะย้ายไปแท็บปิดงาน</small></span>
+          </label>
+          <label className="cl-opt">
+            <input type="radio" name="close-how" checked={keep} onChange={() => setKeep(true)} />
+            <span><b>{KEEP_LABEL}</b><small>{KEEP_HINT}</small></span>
+          </label>
+        </fieldset>
+        {keep && (
+          <div className="cl-date">
+            <span>{RECONTACT_LABEL}</span>
+            <DateField value={date} onChange={setDate} label={RECONTACT_LABEL} min={today} />
+            {err && <small role="alert" className="t-warn">{err}</small>}
+          </div>
+        )}
+        <DialogActions>
+          <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
+          <button type="submit" className="btn pri" disabled={!!err}>{keep ? KEEP_LABEL : 'ปิดงาน'}</button>
+        </DialogActions>
+      </form>
     </Modal>
   );
 }
