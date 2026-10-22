@@ -53,7 +53,7 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 // บริษัทที่ติดตาม: a follow on any id of a company is the company's
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
-import { clashSvc, companyCount, sendState, surelyOther, svcClean } from './jobs';
+import { clashSvc, companyCount, sendState, surelyOther, svcClean, svcText } from './jobs';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
 
@@ -2662,13 +2662,46 @@ export class GccEngine {
    * The job's year (ปีของงาน) as the deal panel changes it. The same right as any edit of the deal (edit.deal on
    * its ผู้รับผิดชอบ, as the account's role scopes it); nothing else of the job changes (its contact date stays).
    * A joint quotation's header takes its companies along, a member leaves it: moveJointYear, which the panel asks
-   * about first.
+   * about first. The duplicate check of a send applies first (jobYearClash): a company that already has the
+   * service in that year does not take the job.
    */
   setJobYear(id: string, year: string) {
     const d = this.sales.deals[id];
     if (!d || year === d.year || !/^\d{4}$/.test(year)) return;
     if (!this.canDeal('edit.deal', d)) return this.deny();
+    const why = this.jobYearClash(d, year);
+    if (why) {
+      this.teamNote = why;
+      this.emit();
+      return;
+    }
     this.updateDeal(id, { year });
+  }
+  /**
+   * The duplicate check of a send (lib/jobs.ts sendState, as addDealsFrom applies it), for a job's year moving to
+   * `year`: a company that already has a job of that year sharing a service with the job is not moved (a send
+   * without its tick is refused the same way). A job with no service counts as the company's job too (nothing
+   * picked: "มีงานแล้ว"). A joint quotation's header moves its members, so each member's company is checked; a
+   * header itself is no company's job (jobsIn). Only companies are checked: a typed client has no send rule.
+   * Returns what to say, or '' when the year may change.
+   */
+  jobYearClash(d: Deal, year: string): string {
+    const S = this.sales;
+    if (year === d.year) return '';
+    const rows = jointRole(S, d) === 'header' ? (jointOf(S, d)?.members.map((m) => m.deal) ?? []) : [d];
+    const jobs = this.jobsIn(year);
+    for (const r of rows) {
+      const c = r.gid != null ? this.company(r.gid) : undefined;
+      if (!c) continue;
+      const others = jobs(c).filter((x) => x.id !== r.id);
+      const svc = jobServices(S, r);
+      if (sendState(svc, others.map((x) => jobServices(S, x))) !== 'dup') continue;
+      const clash = clashSvc(S, svc, others);
+      return clash.length
+        ? `ย้ายปีไม่ได้: ${c.name} มีงาน ${svcText(clash)} ในปี ${year} แล้ว`
+        : `ย้ายปีไม่ได้: ${c.name} มีงานในปี ${year} แล้ว เลือกบริการให้งานนี้ก่อน`;
+    }
+    return '';
   }
   /** A step's date + note at the stored stage `stage` (a step's id; an older stage, CALL2, when its own record
    *  is edited in place); a note without a date gets today's date. Only the step record is written —

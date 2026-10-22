@@ -1426,6 +1426,9 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · �
   /** ปีของงาน: a joint quotation's company leaves it, its header takes every company along (asked first). */
   const setYear = (y: string) => {
     if (y === d.year) return;
+    // the send's duplicate check first: a company that already has this service in y does not take the job
+    const clash = e.jobYearClash(d, y);
+    if (clash) return acts.say(clash);
     const jr = jointRole(S, d), g = jr === 'plain' ? null : jointOf(S, d);
     if (!g) return e.setJobYear(d.id, y);
     const why = e.jointYearBlock(d);

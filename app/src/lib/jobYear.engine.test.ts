@@ -186,6 +186,64 @@ describe('ปีของงาน: the deal panel\'s year choice', () => {
     await settle(L);
     expect(hist(L, ms[2].id).map((l) => l.action)).toContain('เปลี่ยนปีของงานเป็น 2571');
   });
+
+  it('the duplicate check of a send: a company that already has this service in the year does not take the job; said by name, nothing moves or queues', async () => {
+    const L = await lead();
+    const gid = base.rows[0][0] as number;
+    const co = L.e.company(gid)!.name;
+    const a = L.e.addDeal({ gid, year: '2569', service: ['CFP'], resp: 'หมิว' });
+    L.e.addDeal({ gid, year: '2570', service: ['CFP'], resp: 'หมิว' });
+    await settle(L);
+    L.e.setJobYear(a.id, '2570');
+    expect(L.e.sales.deals[a.id].year).toBe('2569');
+    expect(L.e.teamNote).toBe(`ย้ายปีไม่ได้: ${co} มีงาน CFP ในปี 2570 แล้ว`);
+    expect(hist(L, a.id).some((l) => l.action === yearChangeWords('2570'))).toBe(false);
+    expect(await queued(L)).toEqual([]);
+  });
+
+  it('the same company moves where the service differs, or to a year it has no job in', async () => {
+    const L = await lead();
+    const gid = base.rows[0][0] as number;
+    const a = L.e.addDeal({ gid, year: '2569', service: ['CFP'], resp: 'หมิว' });
+    const cfo = L.e.addDeal({ gid, year: '2569', service: ['CFO'], resp: 'หมิว' });
+    L.e.addDeal({ gid, year: '2570', service: ['CFP'], resp: 'หมิว' });
+    await settle(L);
+    L.e.setJobYear(cfo.id, '2570');
+    expect(L.e.sales.deals[cfo.id].year).toBe('2570');
+    L.e.setJobYear(a.id, '2571');
+    expect(L.e.sales.deals[a.id].year).toBe('2571');
+  });
+
+  it('a job with no service moves only where its company has no job that year (the send rule: nothing picked counts as a job); naming the service lets it move', async () => {
+    const L = await lead();
+    const gid = base.rows[1][0] as number;
+    const u = L.e.addDeal({ gid, year: '2569', service: [], resp: 'หมิว' });
+    L.e.addDeal({ gid, year: '2570', service: ['CFP'], resp: 'หมิว' });
+    await settle(L);
+    L.e.setJobYear(u.id, '2570');
+    expect(L.e.sales.deals[u.id].year).toBe('2569');
+    expect(L.e.teamNote).toBe(`ย้ายปีไม่ได้: ${L.e.company(gid)!.name} มีงานในปี 2570 แล้ว เลือกบริการให้งานนี้ก่อน`);
+    L.e.updateDeal(u.id, { service: ['CFO'] });
+    L.e.setJobYear(u.id, '2570');
+    expect(L.e.sales.deals[u.id].year).toBe('2570');
+  });
+
+  it('a joint quotation whose company already has its service in the year does not move (each member\'s company is checked, as a send is); the same move with no clash does', async () => {
+    const L = await lead();
+    const gids = [0, 1, 2].map((i) => base.rows[i][0] as number);
+    const ms = gids.map((gid) => L.e.addDeal({ gid, section: 'Event Exhibition', year: '2569', resp: 'หมิว' }));
+    const { hid } = await L.e.createJoint({ ...spec(), file: pdf('qt.pdf'), members: ms.map((x) => ({ deal: x.id, share: null, pct: null })) });
+    L.e.addDeal({ gid: gids[1], year: '2570', service: ['CFP'], resp: 'หมิว' });
+    await settle(L);
+    const S = L.e.sales;
+    L.e.setJobYear(hid, '2570');
+    expect([hid, ...ms.map((x) => x.id)].map((id) => S.deals[id].year)).toEqual(['2569', '2569', '2569', '2569']);
+    expect(L.e.teamNote).toBe(`ย้ายปีไม่ได้: ${L.e.company(gids[1])!.name} มีงาน CFP ในปี 2570 แล้ว`);
+    L.e.setJobYear(ms[1].id, '2570');
+    expect(S.deals[ms[1].id].year).toBe('2569');
+    L.e.setJobYear(hid, '2571');
+    expect([hid, ...ms.map((x) => x.id)].map((id) => S.deals[id].year)).toEqual(['2571', '2571', '2571', '2571']);
+  });
 });
 
 describe('ปีของงาน: the defaults of a new job and its history words', () => {
