@@ -42,14 +42,25 @@
 .fw-undo{display:flex;gap:6px 12px;align-items:baseline;flex-wrap:wrap;padding:10px 24px;background:var(--tint);font-size:var(--fs-sec);color:var(--ink-2)}
 @media (prefers-reduced-motion:reduce){.fw-r{transition:none}}
 @media (forced-colors:active){.fw-r:is(:hover,:has(:focus-visible)){outline:2px solid Highlight;outline-offset:-2px}}
+/* the row's first cell: its box (for an account that may pick: bulk actions, components/BulkBar.tsx) and the name.
+   The box's cell reaches the row's left edge, so a near miss on it does not open the company; the box is always
+   there, so ticking moves nothing. A picked row keeps the light tint. */
+.fw-who{display:flex;align-items:center;gap:12px;min-width:0}
+.fw-who>.fw-name{flex:1 1 auto}
+.fw-pk{display:flex;align-items:center;align-self:stretch;flex:none;cursor:pointer;margin:-12px -6px -12px -24px;padding:12px 6px 12px 24px}
+.fw-hd-who{display:flex;align-items:center;gap:12px;min-width:0}
+.fw-hd-pk{flex:none;width:22px;height:22px}
+.fw-r.on{background-color:var(--tint)}
+/* the list's "เลือกทั้งหมด" under its summary, the box on the left edge of the text */
+.fw-selall{margin:2px 0 0 -8px;align-self:flex-start}
 
 /* a narrower card (the icon rail, a tablet): the name and the buttons on one line, the facts under it */
 @container (max-width:980px){
   .fw-th{display:none}
   .fw-r{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 18px}
   /* the name and the buttons fill the first line, so the facts always start a line of their own */
-  .fw-name{flex:1 1 calc(100% - 200px);order:0}
-  .fw-r:not(:has(.fw-acts)) .fw-name{flex-basis:100%}
+  .fw-who{flex:1 1 calc(100% - 200px);order:0}
+  .fw-r:not(:has(.fw-acts)) .fw-who{flex-basis:100%}
   .fw-acts{flex:0 0 auto;order:1;margin-left:auto}
   .fw-c{flex:1 1 150px;order:2}
   .fw-lbl{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto;white-space:normal}
@@ -57,7 +68,7 @@
 }
 /* a phone's width: the buttons go under the facts */
 @container (max-width:520px){
-  .fw-name{flex-basis:100%}
+  .fw-who{flex-basis:100%}
   .fw-c{flex-basis:calc(50% - 9px)}
   .fw-acts{order:3;flex-basis:100%;justify-content:flex-start;gap:4px 16px}
 }
@@ -67,6 +78,8 @@
   .fw-top{padding:0 0 12px;border-bottom:0}
   .fw-list{display:flex;flex-direction:column;gap:10px}
   .fw-r,.fw-list>.fw-r:last-child{background-color:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);box-shadow:var(--sh-card);padding:14px 16px}
+  .fw-list>.fw-r.on{background-color:var(--tint)}
+  .fw-pk{margin:-14px -6px -14px -16px;padding:14px 6px 14px 16px}
   .fw-empty,.fw-none{background:var(--card);border:1px solid var(--line);border-radius:var(--r-inner);padding:18px 16px}
   .fw-more{padding:12px 0;border-top:0}
   .fw-undo{border-radius:var(--r-field);padding:10px 14px;margin-bottom:10px}

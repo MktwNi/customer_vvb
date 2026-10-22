@@ -119,6 +119,11 @@ export function SalesMessages() {
       go('track', { slToast: null, sel: null });
       return void requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('track-watch')?.scrollIntoView({ block: 'start' })));
     }
+    // a bulk unfollow taken back (BulkBar): exactly the companies it took off go back on the list
+    if (a.act === 'refollow' && a.ids) {
+      const r = e.setWatchMany(a.ids, true);
+      return acts.say(`ติดตามต่อ ${fmtN(r.changed)} บริษัทแล้ว`, { ms: 4000 });
+    }
     // a send just made, taken back (engine.undoSent: within 10 minutes, rows nobody has worked on since)
     if (a.act === 'sendUndo' && a.k) return acts.say(undoSentNote(e.undoSent(a.k)), { ms: 6000 });
     if (a.act === 'goSales') return go('sales', { slView: 'table', ...(a.year ? { slYear: a.year } : {}), slToast: null, sel: null });

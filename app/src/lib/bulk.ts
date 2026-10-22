@@ -139,6 +139,28 @@ export const followNote = (added: number, already: number) =>
   added ? `ติดตามเพิ่ม ${fmtN(added)} บริษัท${already ? ` (ติดตามอยู่แล้ว ${fmtN(already)})` : ''}` : `ติดตามอยู่แล้วทั้ง ${fmtN(already)} บริษัท`;
 export const unfollowNote = (removed: number, notOn: number) =>
   removed ? `เลิกติดตาม ${fmtN(removed)} บริษัท${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : 'บริษัทที่เลือกไม่ได้อยู่ใน “บริษัทที่ติดตาม”';
+/** After a bulk unfollow on บริษัทที่ติดตาม (and the search page's): how many were taken off, and how many of the
+ *  picked were not followed (said, not counted). Its เลิกทำ puts back exactly the ones taken off. */
+export const unfollowedWord = (removed: number, notOn: number) =>
+  removed ? `เลิกติดตาม ${fmtN(removed)} บริษัทแล้ว${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : unfollowNote(0, notOn);
+/** The picked companies the team follows, each once, in the order given (ids as the bar holds them, merged ids
+ *  resolved by `canon`): exactly what a bulk unfollow takes off, and what its เลิกทำ puts back. */
+export function followedPicked(cos: readonly number[], watch: ReadonlySet<number>, canon: (id: number) => number) {
+  const seen = new Set<number>(), out: number[] = [];
+  for (const id of cos) {
+    const c = canon(id);
+    if (watch.has(c) && !seen.has(c)) {
+      seen.add(c);
+      out.push(c);
+    }
+  }
+  return out;
+}
+/** บริษัทที่ติดตาม's "เลือกทั้งหมด" box, its name with the count: "เลือกทั้งหมด (116 บริษัท)". */
+export const allPickWord = (n: number) => `เลือกทั้งหมด (${fmtN(n)} บริษัท)`;
+/** Whether this account may pick companies to act on at all (the boxes and the bar of บริษัทที่ติดตาม): following
+ *  is ลูกค้าและผู้ติดต่อ (edit.cust). Without it the list has no boxes, as it has no ติดตาม button for a row. */
+export const bulkPickable = (can: (c: CapId) => boolean) => can('edit.cust');
 /** After a send: how many went in, and the companies skipped because a job of theirs that year may be the same
  *  work (`svc`: the services sent that those jobs have, engine.addDealsFromCompanies' clash; none when nothing
  *  was picked): "ข้าม 1 บริษัทที่มีงาน CFO ปี 2569 อยู่แล้ว". Nothing is skipped without being said. */
