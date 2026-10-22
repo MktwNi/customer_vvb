@@ -1346,7 +1346,7 @@ function ContactCell({ d, t }: { d: Deal; t?: DealSteps }) {
             <DateChip value={d.contactDate} onChange={(v) => e.updateDeal(d.id, { contactDate: v })} label="วันที่ติดต่อ" />
             {d.contactDate && <button type="button" className="quiet" onClick={() => e.updateDeal(d.id, { contactDate: '' })}>ล้าง</button>}
           </span>
-          <p>ติดต่อล่าสุดในตาราง คือวันที่นี้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า{from && from !== 'typed' ? ` · ตอนนี้${src} ${isoTh(date)}` : ''}</p>
+          <p>ติดต่อล่าสุดในตาราง คือวันที่นี้ วันที่ของขั้นตอนล่าสุด หรือการติดต่อที่บันทึกไว้ แล้วแต่วันไหนใหม่กว่า{d.contactDate > today ? ' · วันที่ในอนาคตจะนับเมื่อถึงวันนั้น' : ''}{from && from !== 'typed' ? ` · ตอนนี้${src} ${isoTh(date)}` : ''}</p>
         </div>
       )}
     </span>
