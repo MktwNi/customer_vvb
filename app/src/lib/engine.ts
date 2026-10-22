@@ -2167,8 +2167,8 @@ export class GccEngine {
    *  "เชื่อมให้ได้เลย", linkDealCompany). */
   contactNotHere(d: Deal, p: Person): boolean {
     if (d.gid != null) return this.contactElsewhere(d, p);
-    if (placeholderName(d.client)) return false;
-    return !this.personCos(p).some((x) => norm(x.c?.name || x.company) === norm(d.client));
+    // (a deal with no company yet: whoever they are, the deal's company is not linked, so the card's button links it)
+    return !placeholderName(d.client);
   }
   /** May this account set a deal's contact: edit the deal (its own, with an own-work scope) and the contacts. */
   canLink(d: Pick<Deal, 'resp'> | null | undefined) {
@@ -2182,19 +2182,34 @@ export class GccEngine {
     this.op(keyOf.plink(pid, dealId), { ...v });
   }
   /**
-   * The company a deal typed by its client name gets (lib/dealCompany.ts): the team's company of that name, else a new
-   * customer of it (addCustomer, with the id the name gets everywhere). The deal is linked to it (updateDeal). A deal
-   * that has its company: that one. Null: the client is a placeholder ("ลูกค้าใหม่"), or nothing may be added. The
-   * caller checks canLink.
+   * The team's company a deal gets for its client name, nothing written (lib/dealCompany.ts): the registry or hand-added
+   * company of that name (merged rows too); a deal that has its company: that one. Undefined: none of that name yet (a
+   * new customer is made by dealCompanyOf), or the client is a placeholder ("ลูกค้าใหม่") or nothing may be added.
+   */
+  private teamCompanyOf(d: Deal): number | undefined {
+    if (d.gid != null) return this.canonical(d.gid);
+    if (placeholderName(d.client) || !this.can('edit.cust')) return undefined;
+    const hit = findCompanyByName(d.client.trim(), this.namedRows());
+    return hit ? this.canonical(hit.id) : undefined;
+  }
+  /**
+   * The company a deal typed by its client name gets (lib/dealCompany.ts): the team's company of that name (teamCompanyOf),
+   * else a new customer of it (addCustomer, with the id the name gets everywhere). The deal is linked to it (updateDeal).
+   * A deal that has its company: that one. Null: the client is a placeholder ("ลูกค้าใหม่") or nothing may be added.
+   * The caller checks canLink.
    */
   private dealCompanyOf(d: Deal): number | null {
     if (d.gid != null) return this.canonical(d.gid);
     if (placeholderName(d.client) || !this.can('edit.cust')) return null;
     const name = d.client.trim();
-    const hit = findCompanyByName(name, this.B.companies);
-    const gid = hit ? this.canonical(hit.id) : this.addCustomer({ name, jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, { id: customIdOf(name) });
+    const gid = this.teamCompanyOf(d) ?? this.addCustomer({ name, jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' }, { id: customIdOf(name) });
     this.updateDeal(d.id, { gid });
     return gid;
+  }
+  /** Every company row the team has, registry and hand-added (merged rows too), each by its own name, as the company it is
+   *  now (a merged row maps to its company). */
+  private namedRows(): { id: number; name: string; jur?: string }[] {
+    return [...this.B.rawById.values()].map((r) => ({ id: this.canonical(r.id), name: r.name, jur: r.jur }));
   }
   /**
    * The one link a contact to a deal makes for the company as well (the owner's rule: linking a contact to a deal
@@ -2319,13 +2334,15 @@ export class GccEngine {
     const name = (t ? t.name : d0?.contactName || '').trim();
     if (!d0 || !name) return '';
     if (!this.canLink(d0)) return this.deny(), '';
-    // a deal typed by name gets its company first: the person is made at it, and its id is the one for that company
-    this.dealCompanyOf(d0);
-    const d = this.sales.deals[dealId];
-    const c = d.gid != null ? this.company(d.gid) : undefined;
+    // the company the deal gets (teamCompanyOf, nothing written yet): the typed numbers leave out its own
+    const co = this.teamCompanyOf(d0);
+    const c0 = co != null ? this.company(co) : undefined;
+    // the people and the id are looked for in the deal as it is now, before its company is linked: the id is the one the
+    // People page suggests for it, and a typed-only person of the client's name is the same person, not a second one
+    const pool = this.dealPool(d0);
     // the company's person with this name (one still there first)
-    const same = contactChoices(this.dealPool(d)).concat(this.dealPool(d)).find((p) => nameKey(p.name) === nameKey(name));
-    let id = suggestionId(this.personGid(d.gid), d.client, name);
+    const same = contactChoices(pool).concat(pool).find((p) => nameKey(p.name) === nameKey(name));
+    let id = suggestionId(this.personGid(d0.gid), d0.client, name);
     const gone = new Set(prefs.get<string[]>(PREF.peopleGone, []) || []);
     if (!this.people[id] && (gone.has(id) || this.goneKeys.has(keyOf.person(id)))) id = '';
     // someone recorded at another company, chosen on the card ("เพิ่มบริษัทนี้ให้ <ชื่อ>")
@@ -2333,22 +2350,28 @@ export class GccEngine {
     let pid = other ? '' : same ? same.id : id && this.people[id] ? this.resolvePid(id) : '';
     // the numbers and e-mails typed for them: a form's as typed, else the deal's that are not the company's
     // own (copied in when the deal was sent)
-    const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d, null, c);
+    const ex = t ? { phones: [t.phone.trim()].filter(Boolean), emails: [t.email.trim()].filter(Boolean) } : typedExtras(d0, null, c0);
     const typed = { name, phone: ex.phones.join(' | '), email: ex.emails.join(' | ') };
     // or, without asking (เพิ่มลูกค้า), the one person with this name and a phone or e-mail typed for them (never a
     // guess by name alone; the number typed in the form is theirs even when the new customer has it as its own)
     if (!pid && !other && !opt.fresh) {
-      const f = this.findExisting(typed, d.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
+      const f = this.findExisting(typed, d0.gid ?? null, '', { typedHere: !!t }).filter((x) => x.by.includes('name') && x.by.length > 1);
       if (f.length === 1) other = f[0].p.id;
     }
-    this.batchOps(() => {
+    return this.batchOps(() => {
       if (other) {
-        this.addToExisting(other, { gid: this.personGid(d.gid), phone: typed.phone, email: typed.email });
+        // (the numbers and e-mails here; the company is added below)
+        this.addToExisting(other, { gid: null, phone: typed.phone, email: typed.email });
         pid = other;
-      } else if (!pid) pid = this.addPerson({ name, gid: d.gid, company: c?.name || d.client, phone: typed.phone, email: typed.email }, id ? { id, nx: true } : {});
-      if (pid) this.linkPerson(dealId, pid);
+      } else if (!pid) pid = this.addPerson({ name, gid: d0.gid ?? co ?? null, company: c0?.name || d0.client, phone: typed.phone, email: typed.email }, id ? { id, nx: true } : {});
+      if (pid) {
+        // the deal's company and the contact's, in one action (linkPerson takes linkDealCompany for a deal typed by name);
+        // the duplicate prompt's "เพิ่มบริษัทนี้ให้คนเดิม" adds the deal's company to someone recorded elsewhere, the same way
+        this.linkPerson(dealId, pid);
+        if (other) this.linkDealCompany(dealId, pid);
+      }
+      return pid;
     });
-    return pid;
   }
   /** "เพิ่มให้ <ชื่อ>": the phone numbers and e-mails a deal holds for its contact that their record lacks
    *  (people.ts personExtras) go on the person's record. */

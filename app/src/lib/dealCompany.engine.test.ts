@@ -262,6 +262,80 @@ describe('a deal typed by name: its company and the contact\'s, in one action', 
   });
 });
 
+describe('the people already there: one company, nobody twice', () => {
+  it('a contact typed only at the client\'s name is not at a deal typed by name that has no team company yet: the card\'s button makes that company theirs and the deal\'s, once', async () => {
+    const [A, B] = await team();
+    const pid = A.e.addPerson({ name: 'คุณพิมพ์เอง ตัวอย่าง', company: SCG, gid: null, phone: '' });
+    const d = A.e.addDeal({ client: SCG, year: '2569' });
+    expect(A.e.contactNotHere(A.e.sales.deals[d.id], A.e.people[pid])).toBe(true);
+    const gid = A.e.linkDealCompany(d.id, pid);
+    expect(gid).not.toBeNull();
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(gid);
+      expect(cosOf(t, pid)).toEqual([[gid, true, '', 'active']]);
+      expect(t.e.contactNotHere(t.e.sales.deals[d.id], t.e.people[pid])).toBe(false);
+    }
+    expect(madeNamed(SCG).length).toBe(1);
+    const before = sheetText();
+    expect(A.e.linkDealCompany(d.id, pid)).toBe(gid);
+    await settle(A, B);
+    expect(sheetText()).toBe(before);
+  });
+
+  it('"บันทึกเป็นผู้ติดต่อ" on a deal typed by name: the typed-only person of the client\'s name is the contact, not a second record; the company is theirs once', async () => {
+    const [A, B] = await team();
+    const pid = A.e.addPerson({ name: 'คุณเดิม พิมพ์เอง', company: SCG, gid: null, phone: '' });
+    const d = A.e.addDeal({ client: SCG, year: '2569' });
+    expect(A.e.saveTypedContact(d.id, { name: 'คุณเดิม พิมพ์เอง', phone: '', email: '' })).toBe(pid);
+    await settle(A, B);
+    const gid = A.e.sales.deals[d.id].gid!;
+    expect(gid).not.toBeNull();
+    expect(Object.values(A.e.people).filter((p) => norm(p.name) === norm('คุณเดิม พิมพ์เอง')).length).toBe(1);
+    for (const t of [A, B]) {
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+      expect(cosOf(t, pid)).toEqual([[gid, true, '', 'active']]);
+    }
+    expect(madeNamed(SCG).length).toBe(1);
+  });
+
+  it('the duplicate prompt\'s "เพิ่มบริษัทนี้ให้คนเดิม" on a deal typed by name (the card\'s button for someone recorded elsewhere): the deal\'s company is added to them as one more company and they are the contact; again: nothing written', async () => {
+    const [A, B] = await team();
+    const [c1] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณซ้ำ ตัวอย่าง', gid: c1.id, phone: '080-000-0606' });
+    const d = A.e.addDeal({ client: SCG, year: '2569', contactName: 'คุณซ้ำ ตัวอย่าง', phone: '080-000-0606' });
+    expect(A.e.saveTypedContact(d.id, undefined, { pid })).toBe(pid);
+    await settle(A, B);
+    const gid = A.e.sales.deals[d.id].gid!;
+    expect(gid).not.toBeNull();
+    expect(madeNamed(SCG).length).toBe(1);
+    for (const t of [A, B]) {
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+      expect(cosOf(t, pid)).toEqual([[c1.id, true, '', 'active'], [gid, false, '', 'active']]);
+    }
+    const before = sheetText();
+    expect(A.e.saveTypedContact(d.id, undefined, { pid })).toBe(pid);
+    await settle(A, B);
+    expect(sheetText()).toBe(before);
+  });
+
+  it('the duplicate prompt in the dialog with the company box left blank on a deal typed by name: the deal\'s company is still theirs, with the position typed', async () => {
+    const [A, B] = await team();
+    const [c1] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณว่าง ตัวอย่าง', gid: c1.id });
+    const d = A.e.addDeal({ client: SCG, year: '2569' });
+    expect(A.e.addToExisting(pid, { gid: null, company: '', pos: 'ที่ปรึกษา', phone: '', email: '' }, { id: d.id, main: true })).toBe(true);
+    await settle(A, B);
+    const gid = A.e.sales.deals[d.id].gid!;
+    expect(gid).not.toBeNull();
+    for (const t of [A, B]) {
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+      expect(cosOf(t, pid)).toEqual([[c1.id, true, '', 'active'], [gid, false, 'ที่ปรึกษา', 'active']]);
+    }
+    expect(madeNamed(SCG).length).toBe(1);
+  });
+});
+
 // ---- the accounts (as the who-may-link tests of dealContact.engine.test.ts)
 async function lead() {
   sim = createGasSim({ teamKey: '', kdfIter: 1000 });
