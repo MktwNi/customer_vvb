@@ -4,9 +4,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  CYCLE_LABEL, KEEP_LABEL, cycleBlock, cycleDefault, cycleFields, cycleLogs, cycleYears, dueWords, isoDay, keptLine, nextYear, recontactDue, recontactErr, recontactList, recontactOf, yearLater,
+  CYCLE_LABEL, KEEP_LABEL, cycleBlock, cycleDefault, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, cycleYears, dueWords, isoDay, keptLine, nextYear, recontactDue, recontactErr, recontactList, recontactOf, yearLater,
 } from './recontact';
-import { emptySales, newDeal, type Deal, type SalesState } from './sales';
+import { emptySales, newDeal, toDeal, type Deal, type SalesState } from './sales';
 
 const TODAY = '2026-10-22';
 function deal(s: SalesState, id: string, p: Partial<Deal> = {}) {
@@ -137,5 +137,33 @@ describe('a new cycle (เปิดรอบใหม่)', () => {
     // the copies do not share arrays with the old job
     expect(f.service).not.toBe(old.service);
     expect(cycleLogs('2569', '2570')).toEqual({ old: 'เปิดรอบใหม่ปี 2570', next: 'ต่อจากรอบปี 2569' });
+  });
+});
+
+describe('the new job\'s id: one per old job and year, the same on every browser', () => {
+  it('the same id for the same old job and year; another year or another old job gives another id; a plain id with no "/"', () => {
+    const a = cycleIdOf('job-1', '2570');
+    expect(cycleIdOf('job-1', '2570')).toBe(a);
+    expect(cycleIdOf('job-1', '2571')).not.toBe(a);
+    expect(cycleIdOf('job-2', '2570')).not.toBe(a);
+    expect(a).toMatch(/^cy-[0-9a-z]+$/);
+    // the two history lines of one cycle: each its own id, the same on every browser
+    expect(cycleLogIdOf('job-1', '2570', 'old')).toBe(cycleLogIdOf('job-1', '2570', 'old'));
+    expect(cycleLogIdOf('job-1', '2570', 'old')).not.toBe(cycleLogIdOf('job-1', '2570', 'next'));
+    expect(cycleLogIdOf('job-1', '2570', 'old')).not.toBe(cycleLogIdOf('job-1', '2571', 'old'));
+    expect(cycleLogIdOf('job-1', '2570', 'old')).toMatch(/^cl-[0-9a-z]+$/);
+  });
+});
+
+describe('a recontact date is read only on a closed job', () => {
+  it('toDeal keeps the date of a closed job and drops it on an open one (a reopening or a stale write)', () => {
+    const row = { year: '2569', client: 'บริษัท ทองมงคล จำกัด', recontact: '2027-10-22', at: '2026-10-01T03:00:00.000Z', by: 'หมิว' };
+    expect(toDeal({ ...row, jobStatus: 'closed' }, 'a')!.recontact).toBe('2027-10-22');
+    expect(toDeal({ ...row, jobStatus: 'open' }, 'a')!.recontact).toBeUndefined();
+    expect(toDeal({ ...row }, 'a')!.recontact).toBeUndefined();
+    const s = emptySales();
+    s.deals.a = toDeal({ ...row, jobStatus: 'open' }, 'a')!;
+    expect(recontactOf(s, s.deals.a)).toBe('');
+    expect(recontactList(s, [s.deals.a])).toEqual([]);
   });
 });

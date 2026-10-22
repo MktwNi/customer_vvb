@@ -353,10 +353,10 @@ describe('the payment plan in the engine', () => {
       if (o.k.startsWith('ddoc/')) expect(keys(o.v)).toEqual(keys(toDoc(o.v, d.id, o.k.split('/')[2])));
       if (o.k.startsWith('dpay/')) expect(o.v).toEqual(toPay(o.v));
     }
-    // the CSV's last column
+    // the CSV's last columns: the plan, then ติดต่อใหม่ (empty here, the last column)
     const csv = A.salesCsv([A.sales.deals[d.id]]).split('\r\n');
-    expect(csv[0].endsWith('"แผนชำระ"')).toBe(true);
-    expect(csv[1].endsWith('"PAY1 53,500 (01/10/2026 โอน) รับแล้ว; PAY2 53,500 (โอน) รับแล้ว"')).toBe(true);
+    expect(csv[0].endsWith('"แผนชำระ","ติดต่อใหม่"')).toBe(true);
+    expect(csv[1].endsWith('"PAY1 53,500 (01/10/2026 โอน) รับแล้ว; PAY2 53,500 (โอน) รับแล้ว",""')).toBe(true);
     // a backup adds plan lines this browser doesn't have, never overwrites one, skips a broken one
     const C = mk('ซี');
     C.sales.pays['zz/PAY1'] = { ...toPay({ amt: 1 })! };

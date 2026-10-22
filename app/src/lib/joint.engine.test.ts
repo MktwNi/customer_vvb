@@ -296,7 +296,7 @@ describe('one row per company and year; the CSV; money once in Cashflow', () => 
     const at = (k: string) => head.findIndex((x) => x.replace(/"/g, '') === k);
     const cell = (row: string, k: string) => row.split('","')[at(k)]?.replace(/"/g, '');
     expect(at('ใบเสนอราคาร่วม')).toBeGreaterThan(0);
-    expect(csv[0].endsWith('"แผนชำระ"')).toBe(true);
+    expect(csv[0].endsWith('"แผนชำระ","ติดต่อใหม่"')).toBe(true);
     // (the payer first, then the quotation: the screens' order)
     expect(cell(csv[1], 'ใบเสนอราคาร่วม')).toBe(`${PAYER} · ใบเสนอราคาร่วม QT-2569-052 · CFP มจพ · ผู้จ่าย · 2 บริษัท`);
     expect(cell(csv[1], 'FORECAST (บาท)')).toBe('1284000');

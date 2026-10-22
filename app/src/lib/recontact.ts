@@ -117,3 +117,19 @@ export function cycleFields(d: Deal, year: string): Partial<Deal> {
 
 /** The history lines of a new cycle: the old job "เปิดรอบใหม่ปี <year>", the new one "ต่อจากรอบปี <old year>". */
 export const cycleLogs = (oldYear: string, year: string) => ({ old: `เปิดรอบใหม่ปี ${year}`, next: `ต่อจากรอบปี ${oldYear}` });
+
+/** A stable 53-bit hash of a text, in base 36: the same on every browser (the way customIdOf hashes a company name). */
+function hashId(text: string): string {
+  let h1 = 0x811c9dc5, h2 = 0x5bd1e995;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    h1 = Math.imul(h1 ^ cp, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ cp, 0x2c1b3c6d) >>> 0;
+  }
+  return (h1 * 0x200000 + (h2 & 0x1fffff)).toString(36);
+}
+/** The id of the job a new cycle starts: the same on every browser for one old job and year. So two browsers that start
+ *  the same cycle before they sync write the same record, create-only (engine newCycle): it is one job, not two. */
+export const cycleIdOf = (from: string, year: string) => `cy-${hashId(JSON.stringify([from, year]))}`;
+/** The id of one history line of a cycle: 'old' on the old job, 'next' on the new one. The same on every browser. */
+export const cycleLogIdOf = (from: string, year: string, side: 'old' | 'next') => `cl-${hashId(JSON.stringify([from, year, side]))}`;

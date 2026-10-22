@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { recontactList } from './recontact';
+import { cycleIdOf, recontactList } from './recontact';
 import type { Role } from './teamSync';
 import type { Company, Dataset, RoundRaw } from './types';
 
@@ -204,7 +204,9 @@ describe('closing a single job and keeping it for a follow-up', () => {
     A.e.updateDeal(d.id, { jobStatus: 'open' });
     B.e.updateDeal(d.id, { recontact: '2027-12-01' });
     await settle(A, B, L);
-    expect(A.e.sales.deals[d.id]).toMatchObject({ jobStatus: 'open', recontact: '2027-12-01' });
+    // (the date a teammate set on the reopened job is not read: an open job shows none, lib/sales toDeal)
+    expect(A.e.sales.deals[d.id]).toMatchObject({ jobStatus: 'open' });
+    expect(A.e.sales.deals[d.id].recontact || '').toBe('');
     // A's plain ปิดงาน (no date) keeps nothing, on every browser: the stale date does not carry over
     A.e.updateDeal(d.id, { jobStatus: 'closed' });
     await settle(A, B, L);
@@ -319,7 +321,7 @@ describe('the duplicate check reads the company\'s jobs of the same year only', 
 });
 
 describe('the tracker CSV', () => {
-  it('has the ติดต่อใหม่ column (the date, or empty), before the plan column that stays last', async () => {
+  it('has the ติดต่อใหม่ column (the date, or empty) as its last column: the plan column keeps its place before it', async () => {
     const L = await lead();
     const [c1] = companies(L);
     const d = L.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO' });
@@ -332,10 +334,94 @@ describe('the tracker CSV', () => {
       return r[h.indexOf(k)];
     };
     const csv = () => L.e.salesCsv([L.e.sales.deals[d.id]]);
-    expect(csv().split('\r\n')[0].endsWith('"แผนชำระ"')).toBe(true);
+    // no column before the new one moved: every column of the old layout keeps its index, the new one comes after the plan
+    const head = csv().split('\r\n')[0].split('","').map(unq);
+    expect(head.at(-1)).toBe('ติดต่อใหม่');
+    expect(head.at(-2)).toBe('แผนชำระ');
     expect(cell(csv(), 'ติดต่อใหม่')).toBe('2027-10-22');
     L.e.updateDeal(d.id, { recontact: '' });
     expect(cell(csv(), 'ติดต่อใหม่')).toBe('');
   });
 });
 
+
+describe('two browsers start the same new cycle before they sync', () => {
+  it('one new job and one history line on the old job; another year from the same job is its own job; a second cycle of a year is refused everywhere', async () => {
+    const L = await lead();
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    const B = await member(L, 'bee', 'บี', 'sales');
+    const [c1] = companies(L);
+    const old = A.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO', service: ['CFO'], resp: 'เอ' });
+    A.e.updateDeal(old.id, { jobStatus: 'closed' });
+    await settle(L, A, B);
+    // both start the 2570 cycle at the same moment, neither has synced: the same id on both
+    const a = A.e.newCycle(old.id, '2570');
+    vi.setSystemTime(new Date('2026-10-21T03:05:00Z')); // B's copy is made a little later
+    const b = B.e.newCycle(old.id, '2570');
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(a!.id).toBe(cycleIdOf(old.id, '2570'));
+    expect(b!.id).toBe(a!.id);
+    // B's cycle for another year from the same old job: a job of its own
+    const c = B.e.newCycle(old.id, '2571');
+    expect(c).not.toBeNull();
+    expect(c!.id).not.toBe(a!.id);
+    await settle(A, B, L);
+    for (const t of [A, B, L]) {
+      const news = Object.values(t.e.sales.deals).filter((x) => x.from === old.id);
+      expect(news.map((x) => x.year).sort()).toEqual(['2570', '2571']);
+      // create-only: the first browser's job stands, B's copy of it is a no-op on the team
+      expect(t.e.sales.deals[a!.id]).toMatchObject({ by: 'เอ', at: T0.toISOString() });
+      expect(hist(t, old.id).map((l) => l.action).filter((x) => x.startsWith('เปิดรอบใหม่')).sort()).toEqual(['เปิดรอบใหม่ปี 2570', 'เปิดรอบใหม่ปี 2571']);
+      expect(hist(t, a!.id).map((l) => l.action)).toEqual(['ต่อจากรอบปี 2569']);
+    }
+    // the second cycle of 2570 is refused on every browser now
+    expect(A.e.newCycle(old.id, '2570')).toBeNull();
+    expect(B.e.newCycle(old.id, '2570')).toBeNull();
+    expect(L.e.newCycle(old.id, '2570')).toBeNull();
+    for (const t of [A, B, L]) expect(Object.values(t.e.sales.deals).filter((x) => x.from === old.id && x.year === '2570')).toHaveLength(1);
+  });
+});
+
+describe('a date on a job that a teammate reopens', () => {
+  /** A closed job kept with a date, on all three browsers; A reopens it (its date goes) and the reopening is sent. */
+  async function reopenedByA() {
+    const L = await lead();
+    const A = await member(L, 'aem', 'เอ', 'sales');
+    const B = await member(L, 'bee', 'บี', 'sales');
+    const [c1] = companies(L);
+    const d = A.e.addDeal({ gid: c1.id, year: '2569', section: 'TGO', service: ['CFO'], resp: 'เอ' });
+    A.e.updateDeal(d.id, { jobStatus: 'closed', recontact: '2027-10-22' });
+    await settle(L, A, B);
+    A.e.updateDeal(d.id, { jobStatus: 'open' });
+    await settle(A);
+    return { L, A, B, d };
+  }
+
+  it('B, still seeing the job closed, sets a date that lands after the reopening: the open job shows no date on any browser', async () => {
+    const { L, A, B, d } = await reopenedByA();
+    B.e.updateDeal(d.id, { recontact: '2027-12-01' });
+    await settle(B, A, L);
+    for (const t of [A, B, L]) {
+      expect(t.e.sales.deals[d.id]).toMatchObject({ jobStatus: 'open' });
+      expect(t.e.sales.deals[d.id].recontact || '').toBe('');
+      expect(keptDeals(t)).toEqual([]);
+    }
+  });
+
+  it('a plain closing made before this browser has pulled the teammate\'s date clears that date too: closed, no date, on every browser', async () => {
+    const { L, A, B, d } = await reopenedByA();
+    B.e.updateDeal(d.id, { recontact: '2027-12-01' });
+    await settle(B); // the date reaches the team, on the open job
+    // A has not pulled it: its plain closing is queued first, then the date comes in and is rebased under the closing
+    A.e.updateDeal(d.id, { jobStatus: 'closed' });
+    await settle(A, B, L);
+    for (const t of [A, B, L]) {
+      expect(t.e.sales.deals[d.id]).toMatchObject({ jobStatus: 'closed' });
+      expect(t.e.sales.deals[d.id].recontact || '').toBe('');
+      expect(keptDeals(t)).toEqual([]);
+    }
+    expect(String((rows('deal/' + d.id).at(-1)!.v as { recontact?: string }).recontact || '')).toBe('');
+    expect(hist(A, d.id).at(-1)!.detail).not.toMatch(/เก็บไว้ติดตาม/);
+  });
+});

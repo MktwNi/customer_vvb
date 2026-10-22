@@ -54,7 +54,7 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
 import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcClean } from './jobs';
-import { cycleBlock, cycleFields, cycleLogs, recontactErr, recontactOf } from './recontact';
+import { cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, recontactErr, recontactOf } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
 
@@ -2447,26 +2447,28 @@ export class GccEngine {
     this.persist('sales', this.sales);
     this.emit();
   }
-  private salesLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail = '') {
+  private salesLog(d: Pick<Deal, 'id' | 'client'>, action: string, detail = '', fixedId = '') {
     const at = new Date().toISOString(), by = this.me();
     // typing in one field after another, or rewording a note, is one history entry: the same record
     // is rewritten (the sheet keeps only its last version) instead of a new row per keystroke-save
     const prev = d.id && (action === 'แก้ไข' || action.startsWith('อัปเดต ') || action === 'แก้แผนชำระ') ? this.lastLog : null;
     const same = prev && this.sales.log[prev.id] && prev.deal === d.id && prev.by === by && prev.action === action && Date.parse(at) - Date.parse(prev.at) < 10 * 60000;
     if (same && action === 'แก้ไข') detail = [...new Set([...prev.detail.split(', '), ...detail.split(', ')])].join(', ');
-    const id = same ? prev.id : uid();
+    // a line with a fixed id (a cycle's history line, lib/recontact.ts cycleLogIdOf) is create-only: browsers that write it make one line
+    const id = fixedId || (same ? prev.id : uid());
     const L: DealLog = { id, at, by, action, client: d.client, detail: detail.slice(0, 300), deal: d.id };
     this.lastLog = L;
     this.sales.log[id] = L;
-    this.op(keyOf.dlog(id), { ...L });
+    this.op(keyOf.dlog(id), { ...L }, fixedId ? { nx: true } : {});
   }
   /** The history entry this browser wrote last (see salesLog). */
   private lastLog: DealLog | null = null;
   /** Save a deal and queue it; `f` = the fields this edit changes (merged field by field with a
    *  teammate's concurrent edit, see rebaseOp); without it the whole record is this browser's. */
-  private putDeal(d: Deal, f?: (keyof Deal)[], fl?: Record<string, ListEdit>) {
+  private putDeal(d: Deal, f?: (keyof Deal)[], fl?: Record<string, ListEdit>, create = false) {
     this.sales.deals[d.id] = d;
-    this.op(keyOf.deal(d.id), { ...d }, { f, fl });
+    // `create`: a record with its own fixed id (a new cycle's job): create-only, and a teammate's deletion of it does not stop it
+    this.op(keyOf.deal(d.id), { ...d }, create ? { f, fl, nx: true, revive: true } : { f, fl });
   }
   /** Deals linked to a company (any of its merged ids). A company from the TGO website sync exists
    *  on this device only, so its deals are not linked by id: they are found by name. */
@@ -2495,7 +2497,7 @@ export class GccEngine {
    *  history entry (a joint quotation's header says what it is). `contact` (a deal made by an explicit action:
    *  a send, เพิ่มลูกค้า, a joint quotation's new row): its contact, person `contact`, or '' for the company's
    *  one person still there, if it has exactly one (autoContact). */
-  addDeal(p: Partial<Deal>, why = 'เพิ่มลูกค้า', opt: { contact?: string } = {}): Deal {
+  addDeal(p: Partial<Deal>, why = 'เพิ่มลูกค้า', opt: { contact?: string; fixed?: { id: string; log: string } } = {}): Deal {
     const c = p.gid != null ? this.company(p.gid) : undefined;
     const gid = c && !isLocalId(c.id) ? c.id : null; // TGO-sync companies exist on this device only
     const cc = c ? this.custom[c.id] : undefined;
@@ -2504,16 +2506,16 @@ export class GccEngine {
       {
         client: c?.name || '', phone: c?.phone || '', email: c?.email || '', contactName: cc?.contact || '',
         resp: (c && this.crm.owners[c.id]) || this.me(), section, source: [matchSource(this.sales.cfg.sources, section)].filter((x): x is string => !!x),
-        ...p, id: opId(), gid,
+        ...p, id: opt.fixed?.id || opId(), gid,
       },
       this.me(),
     );
     d.client = (d.client || '').trim().slice(0, 200) || 'ลูกค้าใหม่';
     // an account that may edit only its own deals adds deals of its own (else the team would refuse it)
     if (this.myCaps()?.['edit.deal'] === 'own') d.resp = this.me();
-    this.putDeal(d);
+    this.putDeal(d, undefined, undefined, !!opt.fixed);
     const who = opt.contact != null ? this.autoContact(d, opt.contact || undefined) : null;
-    this.salesLog(d, why, [d.section, who && `ผู้ติดต่อ ${who.name}${opt.contact ? '' : ' (เชื่อมให้อัตโนมัติ)'}`].filter(Boolean).join(' · '));
+    this.salesLog(d, why, [d.section, who && `ผู้ติดต่อ ${who.name}${opt.contact ? '' : ' (เชื่อมให้อัตโนมัติ)'}`].filter(Boolean).join(' · '), opt.fixed?.log);
     this.saveSales();
     return d;
   }
@@ -2639,10 +2641,11 @@ export class GccEngine {
     if (fcTyped) n.fcAt = this.stampAfter(docsOf(this.sales, id).filter((x) => x.target === 'forecast').map((x) => x.cAt || x.at));
     if (patch.jobStatus === 'closed' && d.jobStatus !== 'closed') n.closedDate = n.closedDate || todayISO();
     if (patch.jobStatus === 'open') n.closedDate = '';
-    // a job reopened is no longer kept for a follow-up (lib/recontact.ts): its date goes with the closing
-    if (patch.jobStatus === 'open' && d.recontact) n.recontact = '';
-    // a closing without a date keeps nothing: a date a teammate set meanwhile on the open job does not carry over
-    if (patch.jobStatus === 'closed' && d.jobStatus !== 'closed' && !('recontact' in patch)) n.recontact = '';
+    // the follow-up date (lib/recontact.ts): a closing without one keeps nothing, and a reopened job is no longer kept.
+    // Either way the date is dropped from the record here whatever this browser shows, since a teammate may have set one
+    // meanwhile: a field this record lacks clears the team's copy of it (teamSync withFields)
+    const closing = patch.jobStatus === 'closed' && d.jobStatus !== 'closed', reopening = patch.jobStatus === 'open' && d.jobStatus !== 'open';
+    if ((closing && !('recontact' in patch)) || reopening) delete n.recontact;
     if ('client' in patch) n.client = String(patch.client || '').trim().slice(0, 200) || d.client;
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
     const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
@@ -2654,8 +2657,9 @@ export class GccEngine {
       const a = d[k] || [], b = n[k] || [];
       fl[k] = { add: b.filter((x) => !a.includes(x)), rm: a.filter((x) => !b.includes(x)) };
     });
-    const dropped = n.recontact !== d.recontact && !n.recontact && !!d.recontact;
-    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k]), ...(dropped ? ['recontact' as const] : [])])], Object.keys(fl).length ? fl : undefined);
+    // the date is sent with a closing or a reopening even when this browser shows none: the team's may still be there
+    const dated = closing || reopening || n.recontact !== d.recontact;
+    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k]), ...(dated ? ['recontact' as const] : [])])], Object.keys(fl).length ? fl : undefined);
     const TH: Partial<Record<keyof Deal, string>> = {
       client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
       jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
@@ -2689,9 +2693,11 @@ export class GccEngine {
       return null;
     }
     const logs = cycleLogs(old.year, year);
+    // the new job and the two history lines have the same ids on every browser (lib/recontact.ts): browsers that start
+    // the same cycle before they sync write the same records, create-only, so it is one job and each line once
     return this.bulk(() => {
-      const d = this.addDeal({ ...cycleFields(old, year) }, logs.next);
-      this.salesLog(old, logs.old);
+      const d = this.addDeal({ ...cycleFields(old, year) }, logs.next, { fixed: { id: cycleIdOf(old.id, year), log: cycleLogIdOf(old.id, year, 'next') } });
+      this.salesLog(old, logs.old, '', cycleLogIdOf(old.id, year, 'old'));
       this.saveSales();
       return d;
     });
@@ -2703,6 +2709,8 @@ export class GccEngine {
    */
   cycleYearBlock(old: Deal, year: string): string {
     const S = this.sales, canon = (g: number) => this.canonical(g), k = jobCoKey(old, canon);
+    // the job this cycle would make is already here (a cycle of this job for the year, whatever its services are now)
+    if (S.deals[cycleIdOf(old.id, year)]) return `บริษัทนี้มีงานปี ${year} แล้ว จึงเปิดรอบใหม่ปีนี้ไม่ได้`;
     if (!k) return '';
     const svc = jobServices(S, old);
     const taken = Object.values(S.deals).some((d) => d.id !== old.id && d.year === year && jointRole(S, d) !== 'header' && jobCoKey(d, canon) === k && maySame(svc, jobServices(S, d)));
@@ -4726,8 +4734,10 @@ export class GccEngine {
     const S = this.sales, C = S.cfg, today = todayISO(), steps = teamSteps(C);
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], steps.flatMap((x) => [x.code + ' วันที่', x.code + (x.kind === 'close' ? ' ผล' : ' โน้ต')]), ['การติดต่อ (ครั้ง)', 'ขั้นตอนอื่น'])
-      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'ติดต่อใหม่', 'แผนชำระ'])
-      .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : []);
+      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ'])
+      .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : [])
+      // the follow-up date comes last: no column above it moves for a reader that uses positions
+      .concat(['ติดต่อใหม่']);
     const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
     const lines = list.map((x, i) => {
       const d = x.d;
@@ -4781,8 +4791,9 @@ export class GccEngine {
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(svcList.includes(x) ? '✓' : '')), [csvCell(svcList.filter((x) => !C.services.includes(x)).join(', '))])
         .concat(stepCells.map(csvCell), [csvCell(t.contacts), csvCell(otherSteps.join(' | '))])
-        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), recontactOf(S, d), planCsv(S, d, today)].map(csvCell))
+        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
         .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
+        .concat([csvCell(recontactOf(S, d))])
         .join(',');
     });
     return [head.map(csvCell).join(','), ...lines].join('\r\n');
