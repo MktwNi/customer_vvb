@@ -52,12 +52,12 @@ export const BASIS_TH: Record<DateBasis, { label: string; sub: string; hint: str
   closed: { label: 'ปิดงาน', sub: 'วันที่กดปิดงาน', hint: 'นับวันที่กดปิดงาน งานที่ปิดแล้วอยู่ในแท็บ “ปิดงาน”', short: 'ปิดงาน', head: 'ปิดงาน', sent: 'งานที่ปิด' },
 };
 
-/** ผลการขาย's choices (radios) and what its chip says. */
 /** ใบเสนอราคา's choices after ทั้งหมด (the filter's value, the rule is quoteSent) */
 export const QUOTE_OPTS: { v: Exclude<QuoteF, ''>; label: string; chip: string }[] = [
   { v: 'sent', label: 'ส่งแล้ว', chip: 'ส่งแล้ว' },
   { v: 'unsent', label: 'ยังไม่ส่ง', chip: 'ยังไม่ส่ง' },
 ];
+/** ผลการขาย's choices (radios) and what its chip says. */
 export const RESULT_OPTS: { v: Exclude<ResultF, ''>; label: string; chip: string }[] = [
   { v: 'YES', label: 'ได้งาน (YES)', chip: 'ได้งาน' },
   { v: 'NO', label: 'ไม่ได้งาน (NO)', chip: 'ไม่ได้งาน' },

@@ -1608,8 +1608,6 @@ export interface ListF { v: string[]; not?: true }
 export type ListKey = 'resp' | 'source' | 'service' | 'referral' | 'section' | 'unit';
 export const LIST_KEYS: ListKey[] = ['resp', 'source', 'service', 'referral', 'section', 'unit'];
 export type ResultF = '' | 'YES' | 'NO' | 'WAIT' | 'EMPTY';
-/** The table's filters (AND across fields). `quick`: a quick view; `job`: open or closed jobs only;
- *  `date`: a date range on one of a deal's dates (null = the whole year). */
 /** ใบเสนอราคา (the table's filter): sent, not yet sent, or any ('' ). */
 export type QuoteF = '' | 'sent' | 'unsent';
 const QUOTES: QuoteF[] = ['', 'sent', 'unsent'];
@@ -1623,6 +1621,8 @@ export function quoteSent(s: SalesState, d: Pick<Deal, 'id'>, today: string): bo
   return (!!st && (!!st.d || !!st.n.trim()) && !(st.d > today)) || docsOf(s, d.id).some((x) => x.kind === 'quotation');
 }
 
+/** The table's filters (AND across fields). `quick`: a quick view; `job`: open or closed jobs only;
+ *  `date`: a date range on one of a deal's dates (null = the whole year). */
 export interface SalesFilter {
   year: string; q?: string; quick?: QuickView; job?: '' | 'open' | 'closed';
   resp?: ListF; source?: ListF; service?: ListF; referral?: ListF; section?: ListF;
