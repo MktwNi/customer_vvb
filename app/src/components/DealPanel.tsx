@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FocusEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type FocusEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { dmTh, dtTh, isoTh, todayISO } from '../lib/format';
 import { norm } from '../lib/core';
@@ -1416,11 +1416,14 @@ function OtherDocs({ d, attach }: { d: Deal; attach: Attach }) {
 
 /** Contact details, the linked company, the หมวด, SOURCE and the year: folded by default. (The job's services
  *  are in the panel's header: DealSvcRow.) */
-function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · หมวด / SOURCE' }: { d: Deal; ro: boolean; title?: string }) {
+export function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · หมวด / SOURCE', startOpen = false }: { d: Deal; ro: boolean; title?: string; startOpen?: boolean }) {
   const { engine: e } = useApp();
   const acts = useSalesActs();
-  const [open, setOpen] = useState(false);
+  // (startOpen: the card's body is open at first, as a test of its controls needs it)
+  const [open, setOpen] = useState(startOpen);
   const [opts, setOpts] = useState(false);
+  // the reason ปีของงาน cannot change is read with the control (its aria-describedby)
+  const yearWhyId = useId();
   const S = e.sales, C = S.cfg;
   const up = (p: Partial<Deal>) => e.updateDeal(d.id, p);
   /** ปีของงาน: a joint quotation's company leaves it, its header takes every company along (asked first). */
@@ -1487,8 +1490,8 @@ function ContactCard({ d, ro, title = 'ข้อมูลติดต่อ · �
               {/* หมวด moves the deal: it changes only on a choice in the list, never on a key over the closed button */}
               <SelField style={labelCol} text={SECTION_LABEL} value={d.section} onChange={(v) => e.moveDeal(d.id, v, null)} options={[...new Set([...C.sections, d.section])].map((x) => ({ v: x, label: x || 'ไม่ระบุหมวด' }))} />
               <span style={labelCol}>
-                <SelField style={labelCol} text="ปีของงาน" value={d.year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} />
-                {ro && <span className="t-meta">{yearWhy}</span>}
+                <SelField style={labelCol} text="ปีของงาน" value={d.year} onChange={setYear} options={years.map((y) => ({ v: y, label: y }))} describedBy={ro ? yearWhyId : undefined} />
+                {ro && <span id={yearWhyId} className="t-meta">{yearWhy}</span>}
               </span>
             </div>
             <datalist id="sl-team">{e.crm.team.map((x) => <option key={x} value={x} />)}</datalist>
