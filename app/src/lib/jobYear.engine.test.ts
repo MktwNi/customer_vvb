@@ -13,7 +13,7 @@ import { GccEngine } from './engine';
 import { memoryStore } from './storage';
 import { BUILTIN } from './caps';
 import { CV, type Role, type SyncOp } from './teamSync';
-import { filterDeals, jointOf, yearChangeWords, jobYearOf } from './sales';
+import { filterDeals, jointOf, jointRole, yearChangeWords, jobYearOf } from './sales';
 import type { Dataset, RoundRaw } from './types';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -243,6 +243,62 @@ describe('ปีของงาน: the deal panel\'s year choice', () => {
     expect(S.deals[ms[1].id].year).toBe('2569');
     L.e.setJobYear(hid, '2571');
     expect([hid, ...ms.map((x) => x.id)].map((id) => S.deals[id].year)).toEqual(['2571', '2571', '2571', '2571']);
+  });
+
+  /** A joint quotation of two companies, its header with the services `hdr`; the first company's member row has
+   *  `own` services; the same company has a job in 2570 with `kept`. Then the member's year moves to 2570. */
+  async function leaveToYear(hdr: string[], own: string[], kept: string[]) {
+    const L = await lead();
+    const gid = base.rows[0][0] as number, g2 = base.rows[1][0] as number;
+    const m = L.e.addDeal({ gid, section: 'Event Exhibition', year: '2569', service: own, resp: 'หมิว' });
+    const m2 = L.e.addDeal({ gid: g2, section: 'Event Exhibition', year: '2569', resp: 'หมิว' });
+    const { hid } = await L.e.createJoint({ ...spec({ service: hdr }), file: pdf('qt.pdf'), members: [m, m2].map((x) => ({ deal: x.id, share: null, pct: null })) });
+    L.e.addDeal({ gid, year: '2570', service: kept, resp: 'หมิว' });
+    await settle(L);
+    L.e.setJobYear(m.id, '2570');
+    return { L, S: L.e.sales, m, hid, name: L.e.company(gid)!.name };
+  }
+  // a member that leaves keeps its own services (the header's stay with the members that stay): the duplicate check
+  // of the move reads the services the row will have in 2570, as a send of it would
+  const LEAVE = [
+    { label: 'the header CFP, the member CFO, the company has CFO in 2570', hdr: ['CFP'], own: ['CFO'], kept: ['CFO'], why: 'มีงาน CFO ในปี 2570 แล้ว' },
+    { label: 'the header CFO, the member CFP, the company has CFP in 2570', hdr: ['CFO'], own: ['CFP'], kept: ['CFP'], why: 'มีงาน CFP ในปี 2570 แล้ว' },
+    { label: 'the header CFO, the member with no service, the company has CFP in 2570', hdr: ['CFO'], own: [], kept: ['CFP'], why: 'มีงานในปี 2570 แล้ว เลือกบริการให้งานนี้ก่อน' },
+    { label: 'the header with no service, the member CFP, the company has CFP in 2570 (control)', hdr: [], own: ['CFP'], kept: ['CFP'], why: 'มีงาน CFP ในปี 2570 แล้ว' },
+  ];
+  it.each(LEAVE)('a member that leaves a joint quotation is refused where its company has the service in the year: $label', async ({ hdr, own, kept, why }) => {
+    const { L, S, m, hid, name } = await leaveToYear(hdr, own, kept);
+    expect(S.deals[m.id].year).toBe('2569');
+    expect(L.e.teamNote).toBe(`ย้ายปีไม่ได้: ${name} ${why}`);
+    expect(jointRole(S, S.deals[m.id])).toBe('member');
+    expect(jointOf(S, { id: hid })!.members.length).toBe(2);
+    expect(hist(L, m.id).some((l) => l.action === yearChangeWords('2570'))).toBe(false);
+    expect(await queued(L)).toEqual([]);
+  });
+  it('a member whose own service is not the one its company has in the year leaves the joint quotation by its move', async () => {
+    const { L, S, m, hid } = await leaveToYear(['CFP'], ['CFO'], ['CFP']);
+    expect(S.deals[m.id].year).toBe('2570');
+    expect(jointRole(S, S.deals[m.id])).toBe('plain');
+    expect(jointOf(S, { id: hid })!.members.length).toBe(1);
+    expect(L.e.teamNote).toBe('');
+  });
+  it('a member of another person\'s joint quotation leaves it by a year change only with the right to edit that quotation (as removing it does)', async () => {
+    const L = await lead();
+    const { id: own } = await L.e.roleSave({ n: 'ขายเฉพาะงานตัวเอง', d: '', c: { ...BUILTIN.sales.c, 'edit.deal': 'own' } });
+    const O = await member(L, 'orn', 'อร', own);
+    const mine = L.e.addDeal({ client: 'บริษัทของอร', section: 'Event Exhibition', year: '2569', resp: 'อร' });
+    const theirs = L.e.addDeal({ client: 'บริษัทของหมิว', section: 'Event Exhibition', year: '2569', resp: 'หมิว' });
+    const { hid } = await L.e.createJoint({ ...spec(), file: pdf('qt.pdf'), members: [mine, theirs].map((x) => ({ deal: x.id, share: null, pct: null })) });
+    await settle(L, O);
+    O.e.setJobYear(mine.id, '2570');
+    expect(O.e.sales.deals[mine.id].year).toBe('2569');
+    expect(O.e.teamNote).toBe('บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี');
+    expect(await queued(O)).toEqual([]);
+    await settle(L, O);
+    expect(jointOf(L.e.sales, { id: hid })!.members.map((x) => x.deal.id).sort()).toEqual([mine.id, theirs.id].sort());
+    L.e.setJobYear(mine.id, '2570');
+    expect(L.e.sales.deals[mine.id].year).toBe('2570');
+    expect(jointOf(L.e.sales, { id: hid })!.members.map((x) => x.deal.id)).toEqual([theirs.id]);
   });
 });
 

@@ -2694,7 +2694,9 @@ export class GccEngine {
       const c = r.gid != null ? this.company(r.gid) : undefined;
       if (!c) continue;
       const others = jobs(c).filter((x) => x.id !== r.id);
-      const svc = jobServices(S, r);
+      // a member that leaves a joint quotation keeps its own services (leaveJoint does not change them), so the
+      // services it will have in the year are its own; a member that stays is sold under the header's
+      const svc = r.id === d.id ? svcClean(d.service) : jobServices(S, r);
       if (sendState(svc, others.map((x) => jobServices(S, x))) !== 'dup') continue;
       const clash = clashSvc(S, svc, others);
       return clash.length
@@ -3134,11 +3136,15 @@ export class GccEngine {
     return rowFate(this.sales, d, hid, (x) => this.canDeal('edit.deal', x));
   }
   /** Why a joint quotation's header or member cannot move to another year now ('' = it can, after asking):
-   *  a member leaves the joint quotation (สร้างใบเสนอราคาร่วม), the header takes every company along (each
-   *  must be a row this account may edit). */
+   *  a member leaves the joint quotation, which takes the same right as removing its company from it
+   *  (setJointMembers: สร้างใบเสนอราคาร่วม, and edit.deal on the header); the header takes every company along
+   *  (each must be a row this account may edit). */
   jointYearBlock(d: Deal): string {
     const S = this.sales, r = jointRole(S, d);
-    if (r === 'member') return this.can('edit.jqt') ? '' : 'บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี';
+    if (r === 'member') {
+      const head = jointOf(S, d)?.head;
+      return this.canJoint() && (!head || this.canDeal('edit.deal', head)) ? '' : 'บริษัทนี้อยู่ในใบเสนอราคาร่วม ให้ผู้ที่แก้ไขใบเสนอราคาร่วมได้เอาออกก่อน แล้วจึงย้ายปี';
+    }
     if (r !== 'header') return '';
     if (!this.canJoint()) return 'บัญชีของคุณแก้ไขใบเสนอราคาร่วมไม่ได้';
     const x = jointOf(S, d)?.members.find((m) => !this.canDeal('edit.deal', m.deal));
