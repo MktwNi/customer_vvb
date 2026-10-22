@@ -36,15 +36,48 @@ describe('findCompanyByName: the same company by its normalised name', () => {
     expect(findCompanyByName('ทดสอบ', [co(LOCAL, 'บริษัท ทดสอบ จำกัด'), co(MADE, 'ทดสอบ')])?.id).toBe(MADE);
   });
 
-  it('the registry row first when a registry company and one added by hand share the name; never a duplicate', () => {
-    const cos = [co(MADE, 'เอสซีจี (ประเทศไทย)'), co(REG, 'บริษัท เอสซีจี (ประเทศไทย) จำกัด')];
+  it('the registry row first when a registry company and one added by hand share the exact name; never a duplicate', () => {
+    const cos = [co(MADE, 'เอสซีจี (ประเทศไทย)'), co(REG, 'เอสซีจี (ประเทศไทย)')];
     expect(findCompanyByName('เอสซีจี (ประเทศไทย)', cos)?.id).toBe(REG);
     expect(findCompanyByName('เอสซีจี (ประเทศไทย)', [co(MADE, 'เอสซีจี (ประเทศไทย)')])?.id).toBe(MADE);
   });
-  it('two team companies of one name and no registry row: the lowest id, whatever order the browser lists them in', () => {
-    const hi = co(1000000000009, 'เอ บี'), lo = co(1000000000003, 'เอ บี จำกัด');
+  it('two team companies of one exact name and no registry row: the lowest id, whatever order the browser lists them in', () => {
+    const hi = co(1000000000009, 'เอ บี'), lo = co(1000000000003, 'เอ บี');
     expect(findCompanyByName('เอ บี', [hi, lo])?.id).toBe(lo.id);
     expect(findCompanyByName('เอ บี', [lo, hi])?.id).toBe(lo.id);
+  });
+  it('a name typed exactly beats one that only matches after normalising, a registry row or a lower id notwithstanding', () => {
+    const loose = co(REG, 'บริษัท เอ จำกัด'), exact = co(MADE, 'เอ');
+    expect(findCompanyByName('เอ', [loose, exact])?.id).toBe(MADE);
+    expect(findCompanyByName('เอ', [exact, loose])?.id).toBe(MADE);
+    const low = co(1000, 'บริษัท เอ จำกัด'), high = co(2000, 'เอ');
+    expect(findCompanyByName('เอ', [low, high])?.id).toBe(high.id);
+    // (the typed name is also trimmed before it is compared exactly)
+    expect(findCompanyByName('  เอ  ', [low, high])?.id).toBe(high.id);
+  });
+  it('the exact-name choice is made before the contact\'s company: the contact at the looser match does not win', () => {
+    const exact = co(REG, 'เอ บี'), loose = co(REG + 5, 'เอ บี จำกัด');
+    expect(findCompanyByName('เอ บี', [exact, loose], [loose.id])?.id).toBe(REG);
+  });
+  it('the contact\'s own company beats a tie: of two companies of one exact name, the one the contact is at, whatever the id', () => {
+    const lo = co(1000000000003, 'เอ บี'), hi = co(1000000000009, 'เอ บี');
+    expect(findCompanyByName('เอ บี', [lo, hi], [hi.id])?.id).toBe(hi.id);
+    expect(findCompanyByName('เอ บี', [hi, lo], [hi.id])?.id).toBe(hi.id);
+    expect(findCompanyByName('เอ บี', [lo, hi], [lo.id])?.id).toBe(lo.id);
+    // a company of the contact's that is not one of the tie does not change the choice: the lowest id
+    expect(findCompanyByName('เอ บี', [lo, hi], [MADE])?.id).toBe(lo.id);
+    expect(findCompanyByName('เอ บี', [lo, hi], [])?.id).toBe(lo.id);
+  });
+  it('the contact\'s own company beats the registry row before a hand-added one in a tie', () => {
+    const cos = [co(REG, 'เอ บี'), co(MADE, 'เอ บี')];
+    expect(findCompanyByName('เอ บี', cos, [MADE])?.id).toBe(MADE);
+    expect(findCompanyByName('เอ บี', cos, [REG])?.id).toBe(REG);
+  });
+  it('a blank name and a placeholder match none, even with the contact at a company of that name', () => {
+    const cos = [co(REG, 'ลูกค้าใหม่'), co(MADE, '')];
+    expect(findCompanyByName('', cos, [REG, MADE])).toBeUndefined();
+    expect(findCompanyByName('ลูกค้าใหม่', cos, [REG])).toBeUndefined();
+    expect(findCompanyByName('  ', [co(REG, '')], [REG])).toBeUndefined();
   });
 });
 

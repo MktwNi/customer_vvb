@@ -371,8 +371,11 @@ export function whoLine(e: Engine, p: Person) {
 /**
  * The add dialog's check, under โทรศัพท์ / อีเมล: someone recorded already at another company is this contact
  * ("เพิ่มบริษัทนี้ให้คนเดิม" is the dialog's primary then, Enter chooses it); several: one to choose.
+ * `pick`: the company picked for a deal typed by name that has no company yet (the deal, its client's name, the company's
+ * id). Where that company is not the one the deal gets for a person, that person's line says so: they get that company
+ * only, and the deal is linked from its card's button, or from the company search on the deal when the card has none.
  */
-export function ExistsPrompt({ found, coName: co, typedCo = '', dealCo = '', onUse, onOpen }: { found: Found[]; coName: string; typedCo?: string; dealCo?: string; onUse: (pid: string) => void; onOpen: (pid: string) => void }) {
+export function ExistsPrompt({ found, coName: co, typedCo = '', dealCo = '', pick, onUse, onOpen }: { found: Found[]; coName: string; typedCo?: string; dealCo?: string; pick?: { deal: string; client: string; gid: number }; onUse: (pid: string) => void; onOpen: (pid: string) => void }) {
   const { engine: e } = useApp();
   const ref = useRef<HTMLDivElement>(null);
   const key = found.map((x) => x.p.id).join(',');
@@ -382,6 +385,14 @@ export function ExistsPrompt({ found, coName: co, typedCo = '', dealCo = '', onU
   }, [key]);
   if (!found.length) return null;
   const one = found.length === 1 ? found[0] : null;
+  const apart = (pid: string) => !!pick && !e.pickedIsDealCompany(pick.deal, pid, pick.gid);
+  // how the deal gets linked, for a person apart: the card's button when their card shows one (contactNotHere, as it
+  // is before the pick), else the company search on the deal
+  const linkHow = (pid: string) => {
+    const d = pick ? e.sales.deals[pick.deal] : undefined;
+    const p = e.people[pid];
+    return d && p && e.contactNotHere(d, p) ? '(กดปุ่มในการ์ดดีลถ้าจะเชื่อม)' : '(เชื่อมได้ที่ช่องค้นบริษัทของดีล)';
+  };
   return (
     <div ref={ref} className="pc-exists" role="status">
       <span className="pc-exists-h">{one ? `คนนี้มีอยู่แล้วในรายชื่อผู้ติดต่อ · ${foundWhy(one.by)}` : `อาจเป็นคนที่มีอยู่แล้ว ${fmtN(found.length)} คน · เลือกคนที่ใช่ หรือสร้างคนใหม่`}</span>
@@ -392,6 +403,11 @@ export function ExistsPrompt({ found, coName: co, typedCo = '', dealCo = '', onU
             <span style={{ fontWeight: 500 }}>{p.name}</span>
             {whoLine(e, p) && <span className="t-sec">{whoLine(e, p)}</span>}
             <span className="t-meta">{[splitList(p.phone)[0], splitList(p.email)[0], one ? '' : foundWhy(by)].filter(Boolean).join(' · ')}</span>
+            {pick && !one && apart(p.id) && (
+              <span className="t-sec">
+                จะเพิ่ม “{co}” ให้คนนี้เท่านั้น · ดีลยังไม่ได้เชื่อมกับ “{pick.client}” {linkHow(p.id)}
+              </span>
+            )}
           </span>
           <span className="pc-exists-a">
             <button type="button" className="pe-act" onClick={() => onOpen(p.id)}>เปิดดู</button>
@@ -401,7 +417,11 @@ export function ExistsPrompt({ found, coName: co, typedCo = '', dealCo = '', onU
       ))}
       {one && (
         <span className="t-sec">
-          {co ? `เพิ่ม ${co} ให้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · ตำแหน่งที่พิมพ์ไว้เป็นตำแหน่งที่บริษัทนี้ · ` : 'ใช้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · '}
+          {co && pick && apart(one.p.id)
+            ? `เพิ่ม “${co}” ให้ “${one.p.name}” และผูกกับดีลนี้ · ดีลยังไม่ได้เชื่อมกับ “${pick.client}” ${linkHow(one.p.id)} · `
+            : co
+              ? `เพิ่ม ${co} ให้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · ตำแหน่งที่พิมพ์ไว้เป็นตำแหน่งที่บริษัทนี้ · `
+              : 'ใช้คนเดิม ไม่ต้องสร้างรายชื่อซ้ำ · '}
           {/* (the deal's company, typed by name: added to them and the deal, made into one in the registry when it is not) */}
           {!co && dealCo ? `เพิ่ม “${dealCo}” ให้คนเดิม และเป็นบริษัทของดีลนี้ (ถ้ายังไม่อยู่ในทะเบียนจะเพิ่มให้ก่อน) · ` : ''}
           {/* (a company typed by name on the dialog alone can't be one more company of theirs: where it goes, said) */}

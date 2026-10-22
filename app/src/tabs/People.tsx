@@ -965,7 +965,15 @@ export function AddPerson() {
         <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
         {found.length > 0 && (
           <div style={{ gridColumn: '1 / -1' }}>
-            <ExistsPrompt found={found} coName={coOf?.name || ''} typedCo={coOf || dealCo ? '' : f.company.trim()} dealCo={dealCo} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
+            <ExistsPrompt
+              found={found}
+              coName={coOf?.name || ''}
+              typedCo={coOf || dealCo ? '' : f.company.trim()}
+              dealCo={dealCo}
+              pick={deal && deal.gid == null && co ? { deal: deal.id, client: deal.client.trim(), gid: co.id } : undefined}
+              onUse={useOld}
+              onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))}
+            />
           </div>
         )}
         <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
