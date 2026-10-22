@@ -6,7 +6,7 @@ import { jointCloseOf, jointLine } from '../lib/joint';
 import { closeConfirm, closePrompt, jobName } from '../lib/salesUi';
 import { errText } from '../lib/teamSync';
 import { docById, qtSentView } from '../lib/notify';
-import { followNote, refollowIds, undoSentNote } from '../lib/bulk';
+import { refollowIds, refollowWord, undoSentNote } from '../lib/bulk';
 import { planDayLink } from '../lib/planCal';
 import { recvUndoText, undoReceive } from '../lib/attachPlan';
 import { DialogActions, Modal } from './Dialog';
@@ -120,10 +120,7 @@ export function SalesMessages() {
       return void requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('track-watch')?.scrollIntoView({ block: 'start' })));
     }
     // a bulk unfollow taken back (BulkBar): exactly the ids it took off go back on the list (lib/bulk.ts refollowIds)
-    if (a.act === 'refollow' && a.ids) {
-      const r = refollowIds(e, a.ids);
-      return acts.say(r.changed ? `ติดตามต่อ ${fmtN(r.changed)} บริษัทแล้ว` : followNote(0, r.same), { ms: 4000 });
-    }
+    if (a.act === 'refollow' && a.ids) return acts.say(refollowWord(refollowIds(e, a.ids)), { ms: 4000 });
     // a send just made, taken back (engine.undoSent: within 10 minutes, rows nobody has worked on since)
     if (a.act === 'sendUndo' && a.k) return acts.say(undoSentNote(e.undoSent(a.k)), { ms: 6000 });
     if (a.act === 'goSales') return go('sales', { slView: 'table', ...(a.year ? { slYear: a.year } : {}), slToast: null, sel: null });

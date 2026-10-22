@@ -36,12 +36,15 @@ type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'owner' | 'csv';
  * BIG companies asks first (บริษัทที่ติดตาม: every unfollow asks, `sure`); an unfollow says how many it took off, with
  * เลิกทำ to put exactly those back. Each action says what it did at the bottom, with a link to where they went.
  */
-export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false }: {
+export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, onUnfollowed }: {
   view: 'co' | 'cert'; rows: readonly Row[]; sel: ReadonlySet<number>; n: number;
   /** the store the picks are kept in (searchSel, or followSel on บริษัทที่ติดตาม) */
   store?: SelStore;
   /** ask before any unfollow, not only from BIG companies (บริษัทที่ติดตาม: every bulk unfollow is confirmed) */
   sure?: boolean;
+  /** after a bulk unfollow: the bar and its dialog go with the companies taken off. `keyboard`: it was confirmed from
+   *  the keyboard, so the page keeps the focus on its list (a pointer's confirm leaves it as it falls) */
+  onUnfollowed?: (keyboard: boolean) => void;
 }) {
   const { engine: e, set, openSched } = useApp();
   const ver = useEngineVersion();
@@ -60,7 +63,7 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false }:
   const menuBtn = useRef<HTMLButtonElement>(null);
   const clear = () => store.set({ key: store.get().key, ids: new Set() });
 
-  const follow = (on: boolean) => {
+  const follow = (on: boolean, keyboard = false) => {
     setAsk(null);
     if (on) {
       const r = e.setWatchMany(cos, true);
@@ -72,6 +75,7 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false }:
     const gone = followedPicked(cos, e.crm.watch, (id) => e.canonical(id));
     const r = e.setWatchMany(cos, false);
     say(unfollowedWord(r.changed, r.same) + localWord(r.local), { ms: 10000, acts: r.changed ? [{ label: 'เลิกทำ', act: 'refollow', ids: gone }] : undefined });
+    onUnfollowed?.(keyboard);
   };
   const run = (a: Act) => {
     setMenu(false);
@@ -180,7 +184,8 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false }:
           <p style={{ margin: 0, lineHeight: 1.6 }}>{cw.body}</p>
           <DialogActions>
             <button type="button" className="quiet" onClick={() => setAsk(null)}>ยกเลิก</button>
-            <button type="button" className="btn pri" onClick={() => follow(ask === 'follow')}>{cw.ok}</button>
+            {/* (a keyboard's Enter or Space clicks with detail 0; a pointer's click has its count) */}
+            <button type="button" className="btn pri" onClick={(ev) => follow(ask === 'follow', ev.detail === 0)}>{cw.ok}</button>
           </DialogActions>
         </Modal>
       )}

@@ -161,10 +161,11 @@ export interface WatchSrc {
 /**
  * เลิกทำ of a bulk unfollow: the ids it took off go back on the watch list as they were (a company followed through
  * a merged row's own id comes back on that id), in one batch. A company someone has followed again since is left as
- * it is (counted in `same`). `changed`: the companies put back.
+ * it is (counted in `same`). `changed`: the companies put back. `refused`: this account may not change follows any
+ * more (the role changed inside the undo window), so nothing went back.
  */
-export function refollowIds(e: WatchSrc, ids: readonly number[]) {
-  if (!e.can('edit.cust')) return { changed: 0, same: 0 };
+export function refollowIds(e: WatchSrc, ids: readonly number[]): { changed: number; same: number; refused?: true } {
+  if (!e.can('edit.cust')) return { changed: 0, same: 0, refused: true };
   // followed before this, by any id: those stay as they are
   const was = new Set(e.crm.watch.map((id) => e.canonical(id)));
   const back = new Set<number>(), there = new Set<number>();
@@ -181,6 +182,10 @@ export function refollowIds(e: WatchSrc, ids: readonly number[]) {
   });
   return { changed: back.size, same: there.size };
 }
+/** The toast's words for เลิกทำ. A refused one is said as refused (the engine's words for a change it may not make),
+ *  never as "already followed". */
+export const refollowWord = (r: { changed: number; same: number; refused?: true }) =>
+  r.refused ? 'บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้' : r.changed ? `ติดตามต่อ ${fmtN(r.changed)} บริษัทแล้ว` : followNote(0, r.same);
 /** บริษัทที่ติดตาม's "เลือกทั้งหมด" box, its name with the count: "เลือกทั้งหมด (116 บริษัท)". */
 export const allPickWord = (n: number) => `เลือกทั้งหมด (${fmtN(n)} บริษัท)`;
 /** Whether this account may pick companies to act on at all (the boxes and the bar of บริษัทที่ติดตาม): following

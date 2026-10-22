@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUILTIN, type CapId } from './caps';
 import {
-  allPickWord, bulkActs, bulkPickable, confirmWords, followSplit, followedPicked, followNote, pickedCos, pruneSel, refollowIds, selView, toggleAll, toggleKey, unfollowNote, unfollowedWord,
+  allPickWord, bulkActs, bulkPickable, confirmWords, followSplit, followedPicked, followNote, pickedCos, pruneSel, refollowIds, refollowWord, selView, toggleAll, toggleKey, unfollowNote, unfollowedWord,
 } from './bulk';
 import { followFilter, followQOf, followSelKey, type FollowRow } from './follow';
 import type { Company } from './types';
@@ -144,9 +144,16 @@ describe('เลิกทำ of a bulk unfollow puts back exactly what it took o
   it('nothing changes for an account that may not change follows', () => {
     const watch: number[] = [];
     const { e, log } = stand(watch, false);
-    expect(refollowIds(e, [4, 5])).toEqual({ changed: 0, same: 0 });
+    expect(refollowIds(e, [4, 5])).toEqual({ changed: 0, same: 0, refused: true });
     expect(watch).toEqual([]);
     expect(log.batches).toBe(0);
+  });
+
+  it('a refused เลิกทำ is said as refused, never as "already followed" (the role can change inside the undo window)', () => {
+    const { e } = stand([], false);
+    expect(refollowWord(refollowIds(e, [4, 5]))).toBe('บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้');
+    expect(refollowWord({ changed: 2, same: 0 })).toBe('ติดตามต่อ 2 บริษัทแล้ว');
+    expect(refollowWord({ changed: 0, same: 1 })).toBe('ติดตามอยู่แล้วทั้ง 1 บริษัท');
   });
 
   it('the toast says how many came back, or that they were already followed', () => {

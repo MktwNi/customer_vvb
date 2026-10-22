@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { Icon } from '../components/icons';
 import { BulkBar, followSel, useSel } from '../components/BulkBar';
@@ -97,6 +97,16 @@ export function FollowList() {
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
   }, [picked, key]);
+  // a bulk unfollow confirmed from the keyboard: the bar and its dialog go with the companies taken off, and the focus
+  // would fall to the page's body. It moves to the list's own control instead (the header box, else the link of the
+  // empty state or of the filter that matched nothing). A pointer's confirm leaves the focus as it falls.
+  const selAllRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const [unfollowN, setUnfollowN] = useState(0);
+  useEffect(() => {
+    if (!unfollowN) return;
+    (selAllRef.current ?? listRef.current?.querySelector<HTMLElement>('.fw-empty .lnk, .fw-none .lnk'))?.focus();
+  }, [unfollowN]);
   /** A row's box, first in its name's cell. Its cell reaches the row's left edge (tabs track.css .fw-pk), so a near
    *  miss does not open the company. */
   const rowPick = (r: FollowRow) =>
@@ -168,8 +178,8 @@ export function FollowList() {
       />
       </div>
       {/* the bulk bar above the list, as on ค้นหา (outside the card, so it stays under the top while the list scrolls) */}
-      {canPick && rowsCo.length > 0 && <BulkBar view="co" rows={rowsCo} sel={sel} n={sv.n} store={followSel} sure />}
-      <section className="fw card" aria-label="บริษัทที่ติดตาม">
+      {canPick && rowsCo.length > 0 && <BulkBar view="co" rows={rowsCo} sel={sel} n={sv.n} store={followSel} sure onUnfollowed={(keyboard) => { if (keyboard) setUnfollowN((k) => k + 1); }} />}
+      <section ref={listRef} className="fw card" aria-label="บริษัทที่ติดตาม">
         {/* (the live region is always there, so the line is read out when it comes) */}
         <div role="status">
           {gone && (
@@ -200,7 +210,7 @@ export function FollowList() {
                 </p>
                 <span className="t-meta">เรียงจากเรื่องที่ต้องทำก่อน: นัดที่ถึงกำหนด ใบรับรองใกล้หมดอายุ แล้วบริษัทที่ยังไม่มีนัด</span>
                 {canPick && rowsCo.length > 0 && (
-                  <button type="button" role="checkbox" aria-checked={sv.mixed ? 'mixed' : sv.all} className="bk-all fw-selall hv" onClick={pickAll}>
+                  <button ref={selAllRef} type="button" role="checkbox" aria-checked={sv.mixed ? 'mixed' : sv.all} className="bk-all fw-selall hv" onClick={pickAll}>
                     <span className={'ckb' + (sv.all || sv.mixed ? ' on' : '')} aria-hidden="true">
                       {sv.mixed ? <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" focusable="false"><path d="M6.5 12h11" /></svg> : sv.all ? <Icon name="check" size={14} /> : null}
                     </span>
