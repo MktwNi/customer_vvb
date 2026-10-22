@@ -11,12 +11,14 @@ import { placeholderName } from './sales';
 /**
  * The team's company of the name `name`: a registry row or one added by hand (a company on this device only, from
  * the TGO website sync, is not the team's). A blank name or a placeholder ("ลูกค้าใหม่") matches none, and a partial
- * name is not the same company ("เอสซีจี" is not "เอสซีจี (ประเทศไทย)"). Registry first when two match.
+ * name is not the same company ("เอสซีจี" is not "เอสซีจี (ประเทศไทย)"). Registry first when two match, then the
+ * lowest id: the list's order differs from browser to browser (rows arrive in the order each one pulled them), and the
+ * same company must come out of every browser.
  */
 export function findCompanyByName<T extends { id: number; name: string }>(name: string, cos: readonly T[]): T | undefined {
   if (placeholderName(name)) return undefined;
   const k = norm(name);
-  const same = cos.filter((c) => !isLocalId(c.id) && norm(c.name) === k);
+  const same = cos.filter((c) => !isLocalId(c.id) && norm(c.name) === k).sort((a, b) => a.id - b.id);
   return same.find((c) => c.id < CUSTOM_ID_MIN) ?? same[0];
 }
 

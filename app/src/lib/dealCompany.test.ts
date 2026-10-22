@@ -41,6 +41,11 @@ describe('findCompanyByName: the same company by its normalised name', () => {
     expect(findCompanyByName('เอสซีจี (ประเทศไทย)', cos)?.id).toBe(REG);
     expect(findCompanyByName('เอสซีจี (ประเทศไทย)', [co(MADE, 'เอสซีจี (ประเทศไทย)')])?.id).toBe(MADE);
   });
+  it('two team companies of one name and no registry row: the lowest id, whatever order the browser lists them in', () => {
+    const hi = co(1000000000009, 'เอ บี'), lo = co(1000000000003, 'เอ บี จำกัด');
+    expect(findCompanyByName('เอ บี', [hi, lo])?.id).toBe(lo.id);
+    expect(findCompanyByName('เอ บี', [lo, hi])?.id).toBe(lo.id);
+  });
 });
 
 describe('customIdOf: the id a company added for a name gets, the same on every browser', () => {

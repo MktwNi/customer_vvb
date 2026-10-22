@@ -336,6 +336,130 @@ describe('the people already there: one company, nobody twice', () => {
   });
 });
 
+describe('review fixes: one company per typed name, its fields kept, the duplicate prompt on a linked deal', () => {
+  it('a browser that never pulled the company another made for the same typed name does not blank the phone and jur typed for it later', async () => {
+    const [A, B] = await team();
+    const [c1] = companies(A);
+    const pa = A.e.addPerson({ name: 'คุณทับ ข้อมูล เอ', gid: c1.id });
+    const d = A.e.addDeal({ client: 'บริษัท ทับ ข้อมูล จำกัด', year: '2569' });
+    expect(A.e.linkPerson(d.id, pa)).toBe(true);
+    await settle(A); // B has not pulled the company
+    const gid = A.e.sales.deals[d.id].gid!;
+    A.e.updateCustomer(gid, { phone: '02-555-0101', jur: '0105500000001' });
+    await settle(A);
+    // B types the same client from its copy, which does not have the company yet
+    const pb = B.e.addPerson({ name: 'คุณทับ ข้อมูล บี', gid: c1.id });
+    const db = B.e.addDeal({ client: 'ทับ ข้อมูล', year: '2569' });
+    expect(B.e.linkPerson(db.id, pb)).toBe(true);
+    await settle(A, B);
+    expect(B.e.sales.deals[db.id].gid).toBe(gid);
+    for (const t of [A, B]) {
+      expect(t.e.company(gid)?.phone).toBe('02-555-0101');
+      expect(t.e.company(gid)?.jur).toBe('0105500000001');
+    }
+    const last = rows('cust/').filter((r) => r.k === 'cust/' + gid).at(-1)!;
+    expect(last.del).toBeFalsy();
+    expect(last.v).toMatchObject({ phone: '02-555-0101', jur: '0105500000001' });
+  });
+
+  it('two team companies of one name (two juristic ids, made on two browsers): every browser picks the same one, so the deal and both contacts share it', async () => {
+    const [A, B] = await team();
+    const pA = A.e.addPerson({ name: 'คุณสองเลข เอ' });
+    const pB = B.e.addPerson({ name: 'คุณสองเลข บี' });
+    const blank = { prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' };
+    const x1 = A.e.addCustomer({ name: 'สองเลขคู่ ทดสอบ', jur: '0105500000011', ...blank });
+    const x2 = B.e.addCustomer({ name: 'สองเลขคู่ ทดสอบ', jur: '0105500000022', ...blank });
+    const dX = A.e.addDeal({ client: 'สองเลขคู่ ทดสอบ', year: '2569' });
+    await settle(A, B);
+    expect(A.e.linkPerson(dX.id, pA)).toBe(true);
+    expect(B.e.linkPerson(dX.id, pB)).toBe(true);
+    await settle(A, B);
+    const g = A.e.sales.deals[dX.id].gid!;
+    expect(g).toBe(Math.min(x1, x2));
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[dX.id].gid).toBe(g);
+      expect(cosOf(t, pA).map((x) => x[0])).toContain(g);
+      expect(cosOf(t, pB).map((x) => x[0])).toContain(g);
+    }
+  });
+
+  it('a company a teammate deleted: the same typed name later makes a new company, which stands on both browsers (it does not vanish on sync)', async () => {
+    const [A, B] = await team();
+    const pa = A.e.addPerson({ name: 'คุณลบแล้ว เอ' });
+    const d1 = A.e.addDeal({ client: 'ลบแล้ว ทดสอบ', year: '2569' });
+    expect(A.e.linkPerson(d1.id, pa)).toBe(true);
+    await settle(A, B);
+    const old = A.e.sales.deals[d1.id].gid!;
+    A.e.deleteCustomer(old);
+    await settle(A, B);
+    expect(B.e.company(old)).toBeUndefined();
+    // B makes a new deal of the same name and links a contact to it
+    const pb = B.e.addPerson({ name: 'คุณลบแล้ว บี' });
+    const d2 = B.e.addDeal({ client: 'ลบแล้ว ทดสอบ', year: '2569' });
+    expect(B.e.linkPerson(d2.id, pb)).toBe(true);
+    await settle(A, B);
+    const gid = B.e.sales.deals[d2.id].gid!;
+    expect(gid).not.toBeNull();
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d2.id].gid).toBe(gid);
+      expect(t.e.company(gid)?.name).toBe('ลบแล้ว ทดสอบ');
+      expect(cosOf(t, pb)).toEqual([[gid, true, '', 'active']]);
+    }
+    expect(rows('cust/').filter((r) => r.k === 'cust/' + gid).at(-1)!.del).toBeFalsy();
+  });
+
+  it('a browser that has not pulled the team\'s deletion of a company, and types its name for a new deal: its company stands on both browsers (the deletion does not stop it)', async () => {
+    const [A, B] = await team();
+    const [c1] = companies(A);
+    const pa = A.e.addPerson({ name: 'คุณเก่า เอ', gid: c1.id });
+    const d1 = A.e.addDeal({ client: 'เก่า ลบ ทดสอบ', year: '2569' });
+    expect(A.e.linkPerson(d1.id, pa)).toBe(true);
+    await settle(A); // B has not pulled the company
+    const old = A.e.sales.deals[d1.id].gid!;
+    A.e.deleteCustomer(old);
+    await settle(A); // the deletion is on the sheet; B has not pulled it
+    // B types the name for a new deal and links a contact (its copy has no company of the name)
+    const pb = B.e.addPerson({ name: 'คุณเก่า บี' });
+    const d2 = B.e.addDeal({ client: 'เก่า ลบ ทดสอบ', year: '2569' });
+    expect(B.e.linkPerson(d2.id, pb)).toBe(true);
+    await settle(A, B);
+    const gid = B.e.sales.deals[d2.id].gid!;
+    expect(gid).not.toBeNull();
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d2.id].gid).toBe(gid);
+      expect(t.e.company(gid)?.name).toBe('เก่า ลบ ทดสอบ');
+      expect(cosOf(t, pb)).toEqual([[gid, true, '', 'active']]);
+    }
+    expect(rows('cust/').filter((r) => r.k === 'cust/' + gid).at(-1)!.del).toBeFalsy();
+  });
+
+  it('the duplicate prompt on a deal already linked to its company, no company picked (or the deal\'s own name typed): the contact gets the deal\'s company once, with the position typed; again: nothing written', async () => {
+    const [A, B] = await team();
+    const [c1, c2] = companies(A);
+    const pid = A.e.addPerson({ name: 'คุณมีบริษัท', gid: c1.id });
+    const d = A.e.addDeal({ gid: c2.id, client: c2.name, year: '2569' });
+    expect(A.e.addToExisting(pid, { gid: null, company: '', pos: 'ผู้จัดการฝ่ายขาย', phone: '', email: '' }, { id: d.id, main: true })).toBe(true);
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(cosOf(t, pid)).toContainEqual([c2.id, false, 'ผู้จัดการฝ่ายขาย', 'active']);
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+      expect(t.e.sales.deals[d.id].gid).toBe(c2.id);
+    }
+    // the deal's name typed in the box: the same company, no note saying it is not in the registry
+    const pid2 = A.e.addPerson({ name: 'คุณชื่อเดียวกัน', gid: c1.id });
+    const d2 = A.e.addDeal({ gid: c2.id, client: c2.name, year: '2569' });
+    expect(A.e.addToExisting(pid2, { gid: null, company: c2.name, pos: '', phone: '', email: '' }, { id: d2.id })).toBe(true);
+    await settle(A, B);
+    expect(cosOf(B, pid2).map((x) => x[0])).toContain(c2.id);
+    expect(B.e.personLogs(B.e.people[pid2]).some((x) => /ไม่ได้อยู่ในทะเบียน/.test(x.l.text || ''))).toBe(false);
+    // again: nothing written
+    const before = sheetText();
+    expect(A.e.addToExisting(pid, { gid: null, company: '', pos: 'ผู้จัดการฝ่ายขาย' }, { id: d.id, main: true })).toBe(true);
+    await settle(A, B);
+    expect(sheetText()).toBe(before);
+  });
+});
+
 // ---- the accounts (as the who-may-link tests of dealContact.engine.test.ts)
 async function lead() {
   sim = createGasSim({ teamKey: '', kdfIter: 1000 });

@@ -1450,13 +1450,15 @@ export class GccEngine {
       .slice(0, 8);
   }
   /** Add a customer that is not in the registry; returns its company id. `opt.id`: the id to take when it is free
-   *  (a company made for a deal's typed name: customIdOf), else a random one. */
+   *  (a company made for a deal's typed name: customIdOf), else a random one. That id is create-only (SyncOp.nx): a
+   *  live row another browser made for the same name first stands, so its fields are not blanked by this browser's
+   *  copy; a deletion the team made of it does not stop this one (SyncOp.revive). */
   addCustomer(p: Omit<CustomCo, 'id' | 'at' | 'by'>, opt: { id?: number } = {}): number {
     let id = opt.id && !this.custom[opt.id] && !this.B.byId.has(opt.id) ? opt.id : 0;
     while (!id || this.custom[id] || this.B.byId.has(id)) id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
     const c: CustomCo = { ...p, name: p.name.trim().slice(0, 200), note: cap(p.note || ''), id, at: new Date().toISOString(), by: this.me() };
     this.custom[id] = c;
-    this.op(keyOf.cust(id), { ...c });
+    this.op(keyOf.cust(id), { ...c }, opt.id ? { nx: true, revive: true } : {});
     this.persist('customCos', this.custom);
     this.rebuild();
     this.emit();
@@ -1941,7 +1943,11 @@ export class GccEngine {
     const dl = deal ? this.sales.deals[deal.id] : undefined;
     const typed = t.gid == null ? (t.company || '').trim().slice(0, 200) : '';
     const viaDeal = t.gid == null && !!dl && dl.gid == null && !placeholderName(dl.client) && (!typed || norm(typed) === norm(dl.client));
-    const typedCo = viaDeal ? '' : typed;
+    // a deal linked to its company, none picked here (or the deal's own name typed): that company is the one this
+    // contact gets too, through linkDealCompany as the card's button does — the company the duplicate prompt names
+    const own = dl && dl.gid != null ? this.company(dl.gid) : undefined;
+    const viaLinked = t.gid == null && !!dl && !!own && (!typed || norm(typed) === norm(dl.client) || norm(typed) === norm(own.name));
+    const typedCo = viaDeal || viaLinked ? '' : typed;
     this.batchOps(() => {
       if (t.gid != null) this.addCompanyToPerson(p.id, t.gid, { pos: t.pos, role: t.role });
       // a company only typed by name (not in the registry) can't be one more company: their main one when they have
@@ -1960,6 +1966,7 @@ export class GccEngine {
       // (the position typed goes to the deal's company when that is the one made here: viaDeal; a registry company
       // picked above got it already)
       if (deal) this.linkPerson(deal.id, p.id, { main: !!deal.main, ...(viaDeal ? { pos: t.pos, role: t.role } : {}) });
+      if (viaLinked && deal) this.linkDealCompany(deal.id, p.id, { pos: t.pos, role: t.role });
     });
     return true;
   }
@@ -2163,8 +2170,8 @@ export class GccEngine {
     return !this.dealPool(d).some((x) => x.id === p.id);
   }
   /** Is the deal's contact `p` not at the deal's company: a deal with one, and they are not one of its people
-   *  (contactElsewhere); a deal typed by name with none yet, and they have no company of that name (the card's hint:
-   *  "เชื่อมให้ได้เลย", linkDealCompany). */
+   *  (contactElsewhere); a deal typed by name with none yet (and a client's name): every contact of it, as the company
+   *  is not linked yet and the card's button links it ("เชื่อมให้ได้เลย", linkDealCompany). */
   contactNotHere(d: Deal, p: Person): boolean {
     if (d.gid != null) return this.contactElsewhere(d, p);
     // (a deal with no company yet: whoever they are, the deal's company is not linked, so the card's button links it)
@@ -4801,7 +4808,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; revive?: boolean } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     if (!this.canWriteKey(k, v === undefined, v)) {
@@ -4820,7 +4827,8 @@ export class GccEngine {
     if (v !== undefined) {
       const nxPrev = !!prev?.nx && !prev.sent;
       // created by an import, or a stage set automatically by a logged call: only fills a gap
-      if (this.importNew || opt.nx) o.nx = true;
+      if (opt.revive) o.revive = true;
+      if (this.importNew || opt.nx || opt.revive) o.nx = true;
       else if (nxPrev && opt.f) {
         // a person's edit of an import row not shared yet: if the team has that row, their record wins
         // except for the fields edited here (rebaseOp), so the edit isn't lost
@@ -5816,7 +5824,7 @@ export class GccEngine {
             if (p.fl) o.fl = p.fl;
           }
           if (o.v !== undefined && p.lst && !p.del) o.lst = p.lst;
-          if (o.v !== undefined && p.nx && !p.del) o.nx = true; // still only filling a gap
+          if (o.v !== undefined && p.nx && !p.del) { o.nx = true; if (p.revive) o.revive = true; } // still only filling a gap
           if (p.base !== undefined) o.base = p.base; // still only over what was seen there
           return o;
         })

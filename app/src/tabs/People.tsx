@@ -921,8 +921,14 @@ export function AddPerson() {
   // several: one of them to choose ("ใช้คนนี้"), or a new person on purpose; Enter makes nobody
   const several = found.length > 1;
   const co = f.gid != null ? e.company(f.gid) : undefined;
-  // a deal typed by name, the company typed here is its client: that company is added to them and the deal (linkPerson)
-  const dealCo = deal && !co && !placeholderName(deal.client) && (!f.company.trim() || norm(f.company) === norm(deal.client)) ? deal.client.trim() : '';
+  // a deal already linked to its company, and no company picked here (or the deal's own name typed): that company is the
+  // one this contact gets (addToExisting, as the card's button does), so the prompt names it
+  const ownCo = deal && deal.gid != null ? e.company(deal.gid) : undefined;
+  const dealOwn = ownCo && !co && (!f.company.trim() || norm(f.company) === norm(deal?.client || '') || norm(f.company) === norm(ownCo.name)) ? ownCo : undefined;
+  const coOf = co ?? dealOwn;
+  // a deal typed by name (not linked yet), the company typed here is its client: that company is added to them and the
+  // deal (linkPerson)
+  const dealCo = deal && deal.gid == null && !co && !placeholderName(deal.client) && (!f.company.trim() || norm(f.company) === norm(deal.client)) ? deal.client.trim() : '';
   const create = () => {
     if (!f.name.trim()) return;
     const id = e.addPerson({ ...f, name: f.name.trim() });
@@ -959,7 +965,7 @@ export function AddPerson() {
         <label style={labelCol}>อีเมล<input value={f.email} onChange={up('email')} type="text" inputMode="email" autoComplete="off" maxLength={200} className="fld" /></label>
         {found.length > 0 && (
           <div style={{ gridColumn: '1 / -1' }}>
-            <ExistsPrompt found={found} coName={co?.name || ''} typedCo={co || dealCo ? '' : f.company.trim()} dealCo={dealCo} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
+            <ExistsPrompt found={found} coName={coOf?.name || ''} typedCo={coOf || dealCo ? '' : f.company.trim()} dealCo={dealCo} onUse={useOld} onOpen={(pid) => (set({ addPerson: null }), openPerson(pid))} />
           </div>
         )}
         <label style={labelCol}>LINE ID<input value={f.line} onChange={up('line')} maxLength={100} className="fld" /></label>
@@ -980,7 +986,7 @@ export function AddPerson() {
           {one ? (
             <>
               <button type="button" onClick={create} className="btn">สร้างคนใหม่</button>
-              <button type="submit" className="btn pri">{co || dealCo ? 'เพิ่มบริษัทนี้ให้คนเดิม' : deal ? 'ใช้คนเดิมในดีลนี้' : 'ใช้คนเดิม'}</button>
+              <button type="submit" className="btn pri">{coOf || dealCo ? 'เพิ่มบริษัทนี้ให้คนเดิม' : deal ? 'ใช้คนเดิมในดีลนี้' : 'ใช้คนเดิม'}</button>
             </>
           ) : several ? (
             <button type="button" onClick={create} className="btn">สร้างคนใหม่</button>
