@@ -28,6 +28,7 @@ import { commitFocus, isClosingBlur, useDialog } from './useDialog';
 import { PlanYears, YearChip } from './PlanYears';
 // joint quotations (package quotes, item 7): the header's own panel, a member's line and stages
 import { jointHeadOf, jointOf, jointRole } from '../lib/sales';
+import { CYCLE_LABEL, RECONTACT_LABEL, keptLine, recontactErr, recontactOf } from '../lib/recontact';
 import { isJointNote, jointNo, strayDocs } from '../lib/joint';
 import { JointPanel, MemberBanner, MemberStage, MemberStrip } from './JointQt';
 // สัดส่วนรายได้ (package dash, items 8 and 9b)
@@ -345,6 +346,35 @@ function DocCard({ d, doc, inUse, stray }: { d: Deal; doc: DealDoc; inUse: boole
   );
 }
 
+/**
+ * The date a closed job is kept to contact again (lib/recontact.ts), changed here or cleared back to a plain
+ * ปิดงาน. A date that is not one, or already past, is not saved (said under the field); an empty field while the
+ * date is typed is not a clearing (only ล้างวันที่ clears it).
+ */
+function KeptDate({ d, onSave }: { d: Deal; onSave: (date: string) => void }) {
+  const today = todayISO();
+  const [err, setErr] = useState('');
+  return (
+    <div className="kept-date">
+      <span>{RECONTACT_LABEL}</span>
+      <DateField
+        value={d.recontact || ''}
+        label={RECONTACT_LABEL}
+        placeholder="ยังไม่ได้เก็บไว้ติดตาม"
+        min={today}
+        onChange={(v) => {
+          if (!v) return;
+          const m = recontactErr(v, today);
+          setErr(m);
+          if (!m && v !== d.recontact) onSave(v);
+        }}
+      />
+      <button type="button" className="quiet xs" disabled={!d.recontact} onClick={() => (setErr(''), onSave(''))}>ล้างวันที่</button>
+      {err && <small role="alert" className="t-warn">{err}</small>}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ the panel
 
 /** Attach a document: the button's entry (lib/attachPlan) says what it is; with a dropped `file` the dialog
@@ -387,6 +417,8 @@ export function DealPanel() {
   const codes = (ids: string[]) => ids.map((p) => stepCode(S, d, p, today)).join(', ');
   const od = overdueDays(S, d, today);
   const ready = d.jobStatus === 'open' && closeReady(S, d, today);
+  // a closed single job kept to contact again (lib/recontact.ts); '' for a plain ปิดงาน
+  const kept = recontactOf(S, d);
   const c = d.gid != null ? e.company(d.gid) : undefined;
   const ct = e.dealContact(d);
   // (a document for the Actual at a stage accounting checked, or of a closed month: asked first, useAttach)
@@ -441,6 +473,9 @@ export function DealPanel() {
           <div className="dp-top">
             <span className="dp-crumb">Sales Tracker · ปี {d.year} · {d.section || 'ไม่ระบุหมวด'}{c ? ' · ' + c.code : ''}</span>
             <span className="dp-acts">
+              {d.jobStatus === 'closed' && jr === 'plain' && (
+                <button type="button" className="btn xs" disabled={ro} title={ro ? 'บัญชีนี้แก้งานนี้ไม่ได้ จึงเปิดรอบใหม่ไม่ได้' : 'เปิดงานใหม่ของบริษัทนี้สำหรับปีถัดไป'} onClick={() => set({ cycleDlg: d.id })}>{CYCLE_LABEL}</button>
+              )}
               {!ro &&
                 (d.jobStatus === 'closed' ? (
                   // a company of a joint quotation reopens with the whole quotation (it closed as one)
@@ -465,7 +500,7 @@ export function DealPanel() {
             <div>
               <span>สถานะ</span>
               <Status kind={stKind}>{stWord}</Status>
-              {d.jobStatus === 'closed' ? <small>ปิดงานแล้ว{d.closedDate ? ' ' + isoTh(d.closedDate) : ''}</small> : od != null ? <small className="bad">ไม่ได้ติดต่อ {od} วัน</small> : <small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small>}
+              {d.jobStatus === 'closed' ? <small>ปิดงานแล้ว{d.closedDate ? ' ' + isoTh(d.closedDate) : ''}{kept && <><br />{keptLine(kept)}</>}</small> : od != null ? <small className="bad">ไม่ได้ติดต่อ {od} วัน</small> : <small>ทำแล้ว {t.done} จาก {t.total} ขั้น</small>}
             </div>
             {money && jr === 'member' && <>
             <div><span>Forecast</span><MemberStrip d={d} /></div>
@@ -746,6 +781,7 @@ function StepsCard({ d, attach }: { d: Deal; attach: Attach }) {
             <div className={'sl-closing' + (cv.ready ? ' ready' : '')} role={asking ? 'status' : undefined}>
               <b>{asking ? (t.result === 'NO' ? 'ผลการขายเป็น NO แล้ว ปิดงานเลยไหม?' : 'รับชำระครบทุกงวดแล้ว ปิดงานเลยไหม?') : CLOSE_TITLE}</b>
               <p>{d.jobStatus === 'closed' ? `ปิดงานแล้ว${d.closedDate ? ' ' + isoTh(d.closedDate) : ''} งานอยู่ในแท็บ “ปิดงาน”${ro ? '' : ' เปิดกลับได้ที่ปุ่มด้านบน'}` : cv.text}</p>
+              {d.jobStatus === 'closed' && jointRole(S, d) === 'plain' && (ro ? recontactOf(S, d) && <p className="t-meta">{keptLine(recontactOf(S, d))}</p> : <KeptDate d={d} onSave={(v) => e.updateDeal(d.id, { recontact: v })} />)}
               {cv.ready && !ro && d.jobStatus === 'open' && (
                 <span className="sl-closing-acts">
                   <button type="button" className="btn pri" onClick={() => acts.close(d.id)}>ปิดงาน</button>

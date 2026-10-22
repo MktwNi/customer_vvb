@@ -54,6 +54,7 @@ import { UNDO_SEND_MS, dealSig, taskDates } from './bulk';
 import { followIdsOf } from './follow';
 // several jobs of one company in a year, told apart by their services
 import { clashSvc, companyCount, sendState, surelyOther, svcClean } from './jobs';
+import { cycleBlock, cycleFields, cycleLogs, isoDay, recontactErr } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
 
@@ -2627,6 +2628,8 @@ export class GccEngine {
   updateDeal(id: string, patch: Partial<Deal>, opt: { keepJoint?: boolean } = {}) {
     const d = this.sales.deals[id];
     if (!d) return;
+    // a follow-up date is a real date, today or later ('' clears it): anything else is not written
+    if ('recontact' in patch && patch.recontact && recontactErr(patch.recontact, todayISO())) return;
     // a joint quotation and its companies share a year (package quotes): moveJointYear
     if (!opt.keepJoint && patch.year != null && patch.year !== d.year && jointRole(this.sales, d) !== 'plain') return this.moveJointYear(d, patch);
     const n: Deal = { ...d, ...patch, id };
@@ -2636,6 +2639,8 @@ export class GccEngine {
     if (fcTyped) n.fcAt = this.stampAfter(docsOf(this.sales, id).filter((x) => x.target === 'forecast').map((x) => x.cAt || x.at));
     if (patch.jobStatus === 'closed' && d.jobStatus !== 'closed') n.closedDate = n.closedDate || todayISO();
     if (patch.jobStatus === 'open') n.closedDate = '';
+    // a job reopened is no longer kept for a follow-up (lib/recontact.ts): its date goes with the closing
+    if (patch.jobStatus === 'open' && d.recontact) n.recontact = '';
     if ('client' in patch) n.client = String(patch.client || '').trim().slice(0, 200) || d.client;
     if ('gid' in patch) n.gid = patch.gid != null && !isLocalId(patch.gid) ? this.canonical(patch.gid) : null;
     const changed = (Object.keys(patch) as (keyof Deal)[]).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(n[k]) || (k === 'forecast' && fcTyped));
@@ -2647,14 +2652,41 @@ export class GccEngine {
       const a = d[k] || [], b = n[k] || [];
       fl[k] = { add: b.filter((x) => !a.includes(x)), rm: a.filter((x) => !b.includes(x)) };
     });
-    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
+    const dropped = n.recontact !== d.recontact && !n.recontact && !!d.recontact;
+    this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k]), ...(dropped ? ['recontact' as const] : [])])], Object.keys(fl).length ? fl : undefined);
     const TH: Partial<Record<keyof Deal, string>> = {
       client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
       jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+      recontact: 'ติดต่อใหม่',
     };
     const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
-    if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
+    // closed and kept for a follow-up: one history line says so (the date in words)
+    if (patch.jobStatus === 'closed' && n.recontact) this.salesLog(n, 'ปิดงาน', `เก็บไว้ติดตาม · ติดต่อใหม่ ${isoTh(n.recontact)}`);
+    else if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     this.saveSales();
+  }
+  /**
+   * เปิดรอบใหม่ (lib/recontact.ts): a new job of a closed single job's company, for `year` (a later one): the
+   * company, its contact, who looks after it, the section, sources and services are copied, nothing of the work.
+   * The old job is not changed beyond its history line. Refused (said) for an account that may not edit the job
+   * (edit.deal on its own work, as closing it), and for a job still open, a joint quotation's row, or a year that is
+   * not later. Returns the new job, or null.
+   */
+  newCycle(id: string, year: string): Deal | null {
+    const old = this.sales.deals[id];
+    if (!old) return null;
+    if (!this.canDeal('edit.deal', old)) {
+      this.deny();
+      return null;
+    }
+    if (cycleBlock(this.sales, old) || !/^\d{4}$/.test(year) || +year <= +old.year) return null;
+    const logs = cycleLogs(old.year, year);
+    return this.bulk(() => {
+      const d = this.addDeal({ ...cycleFields(old, year) }, logs.next);
+      this.salesLog(old, logs.old);
+      this.saveSales();
+      return d;
+    });
   }
   /** A step's date + note at the stored stage `stage` (a step's id; an older stage, CALL2, when its own record
    *  is edited in place); a note without a date gets today's date. Only the step record is written —
@@ -4674,7 +4706,7 @@ export class GccEngine {
     const S = this.sales, C = S.cfg, today = todayISO(), steps = teamSteps(C);
     const head = ['NO.', 'หมวด', 'POTENTIAL CLIENT', 'รหัสบริษัท', 'ผู้ติดต่อ', 'เบอร์', 'อีเมล', 'RESPONSIBLE', 'REFERRAL', 'วันที่ติดต่อ', 'ติดต่อล่าสุด', 'สถานะงาน', 'สถานะ']
       .concat(C.sources.map((x) => 'SOURCE: ' + x), ['SOURCE อื่น'], C.services.map((x) => 'Service: ' + x), ['Services อื่น'], steps.flatMap((x) => [x.code + ' วันที่', x.code + (x.kind === 'close' ? ' ผล' : ' โน้ต')]), ['การติดต่อ (ครั้ง)', 'ขั้นตอนอื่น'])
-      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'แผนชำระ'])
+      .concat(['ใบเสนอราคาร่วม', 'FORECAST (บาท)', 'Forecast ยืนยันด้วยเอกสาร', 'ACTUAL (บาท)', 'Actual ยืนยันด้วยเอกสาร', 'เอกสารแนบ', 'ติดต่อใหม่', 'แผนชำระ'])
       .concat(rows ? ['นับเป็นงาน', 'นับเป็นบริษัทที่ทำงานให้'] : []);
     const list: (Partial<ClosedCsvRow> & { d: Deal })[] = rows || deals.map((d) => ({ d }));
     const lines = list.map((x, i) => {
@@ -4729,7 +4761,7 @@ export class GccEngine {
         .concat(C.sources.map((x) => csvCell(d.source.includes(x) ? '✓' : '')), [csvCell(d.source.filter((x) => !C.sources.includes(x)).join(', '))])
         .concat(C.services.map((x) => csvCell(svcList.includes(x) ? '✓' : '')), [csvCell(svcList.filter((x) => !C.services.includes(x)).join(', '))])
         .concat(stepCells.map(csvCell), [csvCell(t.contacts), csvCell(otherSteps.join(' | '))])
-        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), planCsv(S, d, today)].map(csvCell))
+        .concat([joint, m.forecast ?? '', m.fcConfirmed ? '✓' : '', m.actual ?? '', m.acConfirmed ? '✓' : '', docs.map((x) => `${KIND_TH[x.kind]} ${x.docNo || x.name}${x.amount != null ? ' ' + fmtMoney(x.amount) : ''}`).join(' | '), isoDay(d.recontact), planCsv(S, d, today)].map(csvCell))
         .concat(rows ? [csvCell(x.job ? 1 : ''), csvCell(x.work ? 1 : '')] : [])
         .join(',');
     });
