@@ -105,6 +105,8 @@ export interface UIState {
   /** A joint quotation's dialog (components/JointQt.tsx): make one (`from`: "รวมเป็นใบเสนอราคาร่วม" from that
    *  deal's quotation; `section`: the หมวด it starts in), change its companies, or close it. */
   jqDlg: { k: 'new'; from?: string; section?: string } | { k: 'members'; hid: string } | { k: 'close'; hid: string } | null;
+  /** The new-cycle dialog (components/CycleDialog.tsx) for this closed single job (its id), or null. */
+  cycleDlg: string | null;
 }
 
 /** A button of the bottom message: what it does is named, the handler lives with the message's host
@@ -141,7 +143,7 @@ const initial = (): UIState => {
     slLens: 'deal', slCashMode: 'm', slCashPick: null, slCashShow: '', slCashF: {}, slCashCsv: false, slChkM: null, slChkF: 'all', slChkSide: 'in', slXchkF: 'all',
     deal: null, dpPlan: '', addCust: null, sendIds: null, sendStay: false, sendMore: 0, sendPid: '', slNote: '',
     person: null, pQ: '', pView: 'all', pPage: 0, addPerson: null, last: {}, acctDlg: '', reqInit: null, usersSec: 'acc', hideRelogin: false,
-    bell: false, qtCheck: null, qtSig: '', jqDlg: null,
+    bell: false, qtCheck: null, qtSig: '', jqDlg: null, cycleDlg: null,
   };
 };
 

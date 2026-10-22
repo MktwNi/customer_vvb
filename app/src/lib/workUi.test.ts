@@ -89,7 +89,7 @@ describe('the ปิดงาน line, its counter, the Dashboard card and the e
     // a lost plain job: a job, no company worked for
     expect([x.csv.cell(13, 'POTENTIAL CLIENT'), x.csv.cell(13, 'นับเป็นงาน'), x.csv.cell(13, 'นับเป็นบริษัทที่ทำงานให้')]).toEqual(['บริษัท สหพัฒน์ จำกัด', '1', '']);
     // the other tabs' export keeps its columns (no count columns there)
-    expect(e.salesCsv(x.rows).split('\r\n')[0].endsWith('"แผนชำระ"')).toBe(true);
+    expect(e.salesCsv(x.rows).split('\r\n')[0].endsWith('"แผนชำระ","ติดต่อใหม่"')).toBe(true);
   });
 
   it('under ผู้รับผิดชอบ: หมิว 695,000 and คุณบี 160,000 on the line and in the file; the payer\'s row comes along with the part counted', () => {

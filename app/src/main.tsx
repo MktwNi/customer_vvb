@@ -33,6 +33,7 @@ import './expense.css';
 import './expense-money.css';
 // many search results at once: the boxes, เลือกทั้งหมด and the bar over the list (components/BulkBar)
 import './bulk.css';
+import './recontact.css';
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first

@@ -26,6 +26,7 @@ import { contactSummary } from '../components/DealContact';
 import { DateChip } from '../components/DateChip';
 import { Bead, Chevron, MiniTrack, beadOf, reachedOf } from '../components/StageTrack';
 import { useSalesActs } from '../components/SalesToast';
+import { CYCLE_LABEL, WAIT_TITLE, dueWords, keptLine, recontactList, recontactOf, recontactDue } from '../lib/recontact';
 // ค่าใช้จ่ายของงาน: the row menu's บันทึกค่าใช้จ่าย and the phone card's row
 import { BillsStuckNote, ExpMini, expMenuSub, openExp } from '../components/ExpCard';
 import { Av, insidePop } from '../components/Pop';
@@ -2763,8 +2764,11 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
     if (!why) e.reopenJoint(hid);
     else set((s) => ({ slToast: { text: why, ms: 6000, n: (s.slToast?.n || 0) + 1 } }));
   };
+  // the jobs kept for a follow-up (lib/recontact.ts), of every year: the list at the top of the tab
+  const waiting = recontactList(S, Object.values(S.deals));
   return (
     <>
+      {waiting.length > 0 && <WaitingList S={S} deals={waiting} today={today} />}
       <p className="sl-closed-sum">
         <span>
           {closedLine(t, money).map(([w, n, u], i) => (
@@ -2796,7 +2800,7 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                 const m = dealMoney(S, d), r = dealResult(S, d);
                 return (
                   <tr key={d.id}>
-                    <td><span className="sl-cl-nm"><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button><JobSvc svc={jobServices(S, d)} none={false} max={2} /></span></td>
+                    <td><span className="sl-cl-nm"><button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button><JobSvc svc={jobServices(S, d)} none={false} max={2} /></span>{recontactOf(S, d) && <span className="t-meta sl-kept">{keptLine(recontactOf(S, d))}</span>}</td>
                     <td className="c-opt t-sec">{d.section || 'ไม่ระบุหมวด'}</td>
                     <td className="c-opt">{d.resp || '—'}</td>
                     <td><Status kind={r === 'YES' ? 'ok' : r === 'NO' ? 'bad' : 'neutral'}>{r === 'YES' ? 'ได้งาน' : r === 'NO' ? 'ไม่ได้งาน' : 'ไม่ระบุผล'}</Status></td>
@@ -2809,7 +2813,13 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
                         return x && <span className="sl-bdate-w">{BASIS_TH[extra.basis].short} {dmTh(x.d)} · {x.what}</span>;
                       })()}
                     </td>
-                    <td className="r">{e.canDeal('edit.deal', d) && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}</td>
+                    <td className="r">
+                      {e.canDeal('edit.deal', d) && <button type="button" className="lnk sl-reopen" onClick={() => e.updateDeal(d.id, { jobStatus: 'open' })}>เปิดงานอีกครั้ง</button>}
+                      {/* as เปิดงานอีกครั้ง beside it: an account that may not edit the job sees no link (its reason is in the panel) */}
+                      {jointRole(S, d) === 'plain' && e.canDeal('edit.deal', d) && (
+                        <button type="button" className="lnk sl-cycle" title="เปิดงานใหม่ของบริษัทนี้สำหรับปีที่เลือก" onClick={() => set({ cycleDlg: d.id })}>{CYCLE_LABEL}</button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -2818,6 +2828,41 @@ function ClosedView({ S, F, deals, facets, total, today }: { S: SalesState; F: S
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * รอติดต่อใหม่ (the top of the ปิดงาน tab): the closed jobs kept to contact again, by the date, the due ones
+ * saying so in words (colour is never the only cue). A row is a list item, so it reads the same on a phone; its
+ * company opens the job.
+ */
+function WaitingList({ S, deals, today }: { S: SalesState; deals: Deal[]; today: string }) {
+  const { engine: e, set } = useApp();
+  const due = deals.filter((d) => recontactDue(recontactOf(S, d), today)).length;
+  return (
+    <section className="card sl-wait" aria-labelledby="sl-wait-h">
+      <header className="sl-wait-hd">
+        <h3 id="sl-wait-h">{WAIT_TITLE}</h3>
+        <span className="t-meta">{`${fmtN(deals.length)} งาน${due ? ` · ${fmtN(due)} งานถึงกำหนดแล้ว` : ''}`}</span>
+      </header>
+      <ul className="sl-wait-l">
+        {deals.map((d) => {
+          const date = recontactOf(S, d), words = dueWords(date, today), ct = e.dealContact(d);
+          return (
+            <li key={d.id}>
+              <span className="sl-wait-when">
+                <span className="sl-wait-d">{isoTh(date)}</span>
+                {words && <Status kind="warn">{words}</Status>}
+              </span>
+              <span className="sl-wait-who">
+                <button type="button" className="sl-nm-b hv-tx co-name dense" onClick={() => set({ deal: d.id })} title={d.client}>{shortName(d.client)}</button>
+                <small className="t-sec">{[ct.name || d.contactName || 'ยังไม่ระบุผู้ติดต่อ', `ปี ${d.year}`].join(' · ')}</small>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

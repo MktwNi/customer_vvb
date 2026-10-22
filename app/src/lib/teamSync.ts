@@ -26,7 +26,9 @@ export interface SyncOp {
   /** A write made on the strength of what this browser saw in the record (an auto-filled stage note):
    *  dropped if a teammate's row differs from it. null = the record was empty. */
   base?: { d: string; n: string } | null;
-  /** Create only (an import): dropped if the team already has any row for the record. */
+  /** Create only (an import, a new cycle's job and its history lines): dropped when a pull shows the team already has a row
+   *  for the record (rebaseOp). The team script does not check it on a push, so a teammate's write that reaches the team
+   *  after this browser's last pull and before its own push is overwritten by this create (a known limit). */
   nx?: boolean;
   /** With nx: a deletion the team made of the record does not stop this create (a company made again for a name the
    *  team had deleted); a live row still does. */

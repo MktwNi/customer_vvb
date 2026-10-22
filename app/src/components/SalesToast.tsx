@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp, useEngineVersion, type ToastAct } from '../state';
 import { fmtN, todayISO } from '../lib/format';
 import { closeReady, dealResult, hasPlan, jointOf, jointRole, planOf, type Deal } from '../lib/sales';
@@ -9,7 +9,10 @@ import { docById, qtSentView } from '../lib/notify';
 import { refollowIds, refollowWord, undoSentNote } from '../lib/bulk';
 import { planDayLink } from '../lib/planCal';
 import { recvUndoText, undoReceive } from '../lib/attachPlan';
+import { KEEP_HINT, KEEP_LABEL, RECONTACT_LABEL, keptLine, recontactErr, yearLater } from '../lib/recontact';
 import { DialogActions, Modal } from './Dialog';
+import { DateField } from './ui';
+import { CycleDialog } from './CycleDialog';
 
 /**
  * What the Sales Tracker's own actions say, and closing a job (tracker spec §1): the table, the phone
@@ -50,20 +53,21 @@ export function useSalesActs() {
       say('ได้งานแล้ว ตั้งแผนชำระเลยไหม? (ผลการขายยังไม่ใช่การปิดงาน)', { ms: 0, acts: [{ label: 'ตั้งแผนชำระ', act: 'plan', deal: d.id, primary: true }, { label: 'ไว้ก่อน', act: 'dismiss' }] });
     } else say(`ได้งานแล้ว · แผนชำระ ${planOf(e.sales, d, today)?.n} งวดเริ่มนับวันครบกำหนดจากวันนี้`);
   };
-  /** Move a finished job to the ปิดงาน tab: at once when it is ready, else after asking. A joint quotation
-   *  always asks, from its header or any of its companies: it closes as one (components/JointQt.tsx JointClose). */
+  /** Close a job (the ปิดงาน action). A joint quotation always asks, from its header or any of its companies: it
+   *  closes as one (components/JointQt.tsx JointClose). A single job asks how: plain ปิดงาน, or ปิดแต่เก็บไว้ติดตาม
+   *  on a date (CloseJobDialog). */
   const close = (id: string) => {
     const d = e.sales.deals[id];
     if (!d || !e.canDeal('edit.deal', d)) return;
     const hid = jointCloseOf(e.sales, d);
     if (hid) return set({ jqDlg: { k: 'close', hid }, slPrompt: null, slToast: null });
-    if (closeReady(e.sales, d, todayISO())) closeNow(id);
-    else set({ slConfirm: id });
+    set({ slConfirm: id, slPrompt: null, slToast: null });
   };
-  const closeNow = (id: string) => {
+  /** Move the job to the ปิดงาน tab; `keep`: the date it is kept to contact again ('' = a plain ปิดงาน). */
+  const closeNow = (id: string, keep = '') => {
     const d = e.sales.deals[id];
     if (!d) return;
-    e.updateDeal(id, { jobStatus: 'closed' });
+    e.updateDeal(id, keep ? { jobStatus: 'closed', recontact: keep } : { jobStatus: 'closed' });
     if (e.sales.deals[id]?.jobStatus !== 'closed') return; // refused (an account that can only read)
     set((s) => {
       const open = { ...s.slOpen };
@@ -72,7 +76,7 @@ export function useSalesActs() {
         slOpen: open, slPrompt: null, slConfirm: null,
         deal: s.deal === id ? null : s.deal,
         slEdit: s.slEdit?.id === id ? null : s.slEdit,
-        slToast: { text: `ย้าย ${jobName(d)} ไปแท็บปิดงานแล้ว`, ms: 8000, n: (s.slToast?.n || 0) + 1, acts: [{ label: 'ดูแท็บปิดงาน', act: 'closedTab', primary: true }, { label: 'เลิกทำ', act: 'undo', deal: id }] },
+        slToast: { text: `ย้าย ${jobName(d)} ไปแท็บปิดงานแล้ว` + (keep ? ` · ${keptLine(keep)}` : ''), ms: 8000, n: (s.slToast?.n || 0) + 1, acts: [{ label: 'ดูแท็บปิดงาน', act: 'closedTab', primary: true }, { label: 'เลิกทำ', act: 'undo', deal: id }] },
       };
     });
   };
@@ -174,7 +178,6 @@ export function SalesMessages() {
     set({ slToast: null, slPrompt: null });
   };
   const ask = ui.slConfirm ? e.sales.deals[ui.slConfirm] : undefined;
-  const q = ask ? closeConfirm(e.sales, ask, todayISO(), jobName(ask)) : '';
   return (
     <>
       {/* (centred in the deal panel while it is open) */}
@@ -191,15 +194,54 @@ export function SalesMessages() {
           </div>
         )}
       </div>
-      {ask && (
-        <Modal title="ปิดงานตอนนี้?" onClose={() => set({ slConfirm: null })} focus="dialog">
-          <p style={{ margin: 0, lineHeight: 1.6 }}>{q || `ปิดงาน “${jobName(ask)}” ตอนนี้? งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`}</p>
-          <DialogActions>
-            <button type="button" className="quiet" onClick={() => set({ slConfirm: null })}>ยกเลิก</button>
-            <button type="button" className="btn pri" onClick={() => acts.closeNow(ask.id)}>ปิดงาน</button>
-          </DialogActions>
-        </Modal>
-      )}
+      {ask && <CloseJobDialog d={ask} onClose={() => set({ slConfirm: null })} />}
+      {ui.cycleDlg && <CycleDialog id={ui.cycleDlg} />}
     </>
+  );
+}
+
+/**
+ * Closing a single job (the ปิดงาน action): the question when it is not finished yet (closeConfirm), then the
+ * choice. ปิดงาน closes it as it always did; ปิดแต่เก็บไว้ติดตาม closes it and keeps the date to contact again
+ * (lib/recontact.ts): the date is a real one, today or later, a year on when nothing is changed.
+ */
+function CloseJobDialog({ d, onClose }: { d: Deal; onClose: () => void }) {
+  const { engine: e } = useApp();
+  const acts = useSalesActs();
+  const today = todayISO();
+  const [keep, setKeep] = useState(false);
+  const [date, setDate] = useState(() => yearLater(today));
+  const name = jobName(d);
+  const q = closeConfirm(e.sales, d, today, name);
+  const err = keep ? recontactErr(date, today) : '';
+  return (
+    <Modal title="ปิดงานตอนนี้?" onClose={onClose} focus="dialog">
+      {/* a form, so Enter on the choice confirms (display: contents keeps the dialog's layout) */}
+      <form style={{ display: 'contents' }} onSubmit={(ev) => { ev.preventDefault(); if (!err) acts.closeNow(d.id, keep ? date : ''); }}>
+        <p style={{ margin: 0, lineHeight: 1.6 }}>{q || `งาน “${name}” พร้อมปิดแล้ว งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`}</p>
+        <fieldset className="cl-how">
+          <legend>วิธีปิดงาน</legend>
+          <label className="cl-opt">
+            <input type="radio" name="close-how" checked={!keep} onChange={() => setKeep(false)} />
+            <span><b>ปิดงาน</b><small>งานจะย้ายไปแท็บปิดงาน</small></span>
+          </label>
+          <label className="cl-opt">
+            <input type="radio" name="close-how" checked={keep} onChange={() => setKeep(true)} />
+            <span><b>{KEEP_LABEL}</b><small>{KEEP_HINT}</small></span>
+          </label>
+        </fieldset>
+        {keep && (
+          <div className="cl-date">
+            <span>{RECONTACT_LABEL}</span>
+            <DateField value={date} onChange={setDate} label={RECONTACT_LABEL} min={today} />
+            {err && <small role="alert" className="t-warn">{err}</small>}
+          </div>
+        )}
+        <DialogActions>
+          <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
+          <button type="submit" className="btn pri" disabled={!!err}>{keep ? KEEP_LABEL : 'ปิดงาน'}</button>
+        </DialogActions>
+      </form>
+    </Modal>
   );
 }
