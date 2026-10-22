@@ -4,7 +4,7 @@
  * a deal's contact date 0202-10-22 that showed "22 ต.ค." with no year and counted 666,202 days overdue).
  */
 import { describe, expect, it } from 'vitest';
-import { dateInputChange, keyedDateStep } from './dateInput';
+import { clearedOnLeave, dateInputChange, keyedDateStep } from './dateInput';
 
 describe('dateInputChange (the date chip\'s native input)', () => {
   it('commits a complete day: four digits in the year, a real calendar day', () => {
@@ -41,5 +41,24 @@ describe('dateInputChange (the date chip\'s native input)', () => {
     const typed = ['0002-10-22', '0020-10-22', '0202-10-22', '2027-10-22'].map(keyedDateStep);
     expect(typed.map((x) => x.commit).filter((x): x is string => x != null)).toEqual(['2027-10-22']);
     expect(typed.at(-1)).toEqual({ draft: null, commit: '2027-10-22' });
+  });
+});
+
+describe('clearedOnLeave (a keyed date field that loses focus: the deal\'s contact date can be cleared)', () => {
+  it('a field the user cleared as a whole (empty, no bad input) is saved as an empty date', () => {
+    expect(clearedOnLeave('', false)).toBe(true);
+  });
+
+  it('a field with a part of a day left (empty, bad input) is not cleared: the saved date shows again', () => {
+    expect(clearedOnLeave('', true)).toBe(false);
+  });
+
+  it('a field that holds a value, even a partial year, is not cleared', () => {
+    expect(clearedOnLeave('2026-10-01', false)).toBe(false);
+    expect(clearedOnLeave('0202-10-22', false)).toBe(false);
+  });
+
+  it('a browser that reports no bad-input flag clears nothing', () => {
+    expect(clearedOnLeave('', undefined as unknown as boolean)).toBe(false);
   });
 });

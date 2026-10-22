@@ -24,3 +24,12 @@ export function keyedDateStep(raw: string): { draft: string | null; commit: stri
   const r = dateInputChange(raw);
   return r.commit ? { draft: null, commit: r.commit } : { draft: r.draft, commit: null };
 }
+
+/** A keyed date field (DateField keyed, the deal's contact date) that loses focus: a field the user cleared as a
+ *  whole is an empty date and is saved (''). The browser shows "" with no bad input once every part of the day is
+ *  gone; a part left reports bad input and is not saved (the saved date shows again). The browser settles that flag
+ *  only after the key, so this is read when the field loses focus, not on the key. A browser that reports no flag
+ *  clears nothing. */
+export function clearedOnLeave(raw: string, badInput: boolean): boolean {
+  return raw === '' && badInput === false;
+}
