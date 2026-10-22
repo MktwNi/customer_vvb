@@ -1,8 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import {
-  BIG, bulkActs, confirmWords, createSel, followNote, followSplit, hintWord, localWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, rowFits, selWord,
-  tooManyWord, unfollowNote, type Row, type SelStore,
+  BIG, bulkActs, confirmWords, createSel, followNote, followSplit, followedPicked, hintWord, localWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, rowFits,
+  selWord, tooManyWord, unfollowNote, unfollowedWord, type Row, type SelStore,
 } from '../lib/bulk';
 import { fmtN } from '../lib/format';
 import { Modal, DialogActions } from './Dialog';
@@ -16,9 +16,11 @@ import { useSalesActs } from './SalesToast';
 /** What is picked on the search page: kept while the person opens a company or another page and comes
  *  back; let go when the filters change (tabs/Search.tsx). */
 export const searchSel = createSel();
+/** The same for บริษัทที่ติดตาม's list (tabs/TrackFollow.tsx): its own picks, let go when its quick filter changes. */
+export const followSel = createSel();
 /** The picked keys of a store; re-renders the page that reads them, not the whole app. */
 export function useSel(store: SelStore = searchSel) {
-  return useSyncExternalStore(store.sub, store.get);
+  return useSyncExternalStore(store.sub, store.get, store.get);
 }
 
 type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'owner' | 'csv';
@@ -31,9 +33,22 @@ type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'owner' | 'csv';
  * appointment dialog, spread per day), ตั้งผู้รับผิดชอบ, ส่งออก CSV, ล้างที่เลือก. It keeps one row (the same
  * height either way): when the buttons do not fit, they are one "ทำรายการ" menu (phones, narrow windows).
  * While something is picked it stays under the top of the page as the list scrolls. Acting on more than
- * BIG companies asks first; each action says what it did at the bottom, with a link to where they went.
+ * BIG companies asks first (บริษัทที่ติดตาม: every unfollow asks, `sure`); on บริษัทที่ติดตาม (`undo`) an unfollow says
+ * how many it took off, with เลิกทำ to put exactly those back; elsewhere it keeps its earlier toast. Each action says
+ * what it did at the bottom, with a link to where they went.
  */
-export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: readonly Row[]; sel: ReadonlySet<number>; n: number }) {
+export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, undo = false, onUnfollowed }: {
+  view: 'co' | 'cert'; rows: readonly Row[]; sel: ReadonlySet<number>; n: number;
+  /** the store the picks are kept in (searchSel, or followSel on บริษัทที่ติดตาม) */
+  store?: SelStore;
+  /** ask before any unfollow, not only from BIG companies (บริษัทที่ติดตาม: every bulk unfollow is confirmed) */
+  sure?: boolean;
+  /** a bulk unfollow's toast says what it took off and offers เลิกทำ (บริษัทที่ติดตาม); the search page's toast stays as it was */
+  undo?: boolean;
+  /** after a bulk unfollow: the bar and its dialog go with the companies taken off. `keyboard`: it was confirmed from
+   *  the keyboard, so the page keeps the focus on its list (a pointer's confirm leaves it as it falls) */
+  onUnfollowed?: (keyboard: boolean) => void;
+}) {
   const { engine: e, set, openSched } = useApp();
   const ver = useEngineVersion();
   const { say } = useSalesActs();
@@ -49,18 +64,27 @@ export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: rea
   const [owner, setOwner] = useState(false);
   const [menu, setMenu] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
-  const clear = () => searchSel.set({ key: searchSel.get().key, ids: new Set() });
+  const clear = () => store.set({ key: store.get().key, ids: new Set() });
 
-  const follow = (on: boolean) => {
+  const follow = (on: boolean, keyboard = false) => {
     setAsk(null);
-    const r = e.setWatchMany(cos, on);
-    if (on) say(followNote(r.changed, r.same) + localWord(r.local), { ms: 8000, acts: r.changed ? [{ label: 'ดูบริษัทที่ติดตาม', act: 'goTrack', primary: true }] : undefined });
+    if (on) {
+      const r = e.setWatchMany(cos, true);
+      say(followNote(r.changed, r.same) + localWord(r.local), { ms: 8000, acts: r.changed ? [{ label: 'ดูบริษัทที่ติดตาม', act: 'goTrack', primary: true }] : undefined });
+      return;
+    }
+    // the ids taken off, as stored (a company followed through a row since merged into it keeps that id): เลิกทำ
+    // puts exactly these back, not the others picked
+    const gone = followedPicked(cos, e.crm.watch, (id) => e.canonical(id));
+    const r = e.setWatchMany(cos, false);
+    if (undo) say(unfollowedWord(r.changed, r.same) + localWord(r.local), { ms: 10000, acts: r.changed ? [{ label: 'เลิกทำ', act: 'refollow', ids: gone }] : undefined });
     else say(unfollowNote(r.changed, r.same) + localWord(r.local), { ms: 6000 });
+    onUnfollowed?.(keyboard);
   };
   const run = (a: Act) => {
     setMenu(false);
     if (a === 'follow') return fs.off > BIG ? setAsk('follow') : follow(true);
-    if (a === 'unfollow') return fs.on > BIG ? setAsk('unfollow') : follow(false);
+    if (a === 'unfollow') return sure || fs.on > BIG ? setAsk('unfollow') : follow(false);
     if (a === 'tracker') return set({ sendIds: cos, sendStay: true });
     if (a === 'plan') return openSched({ ids: cos, stay: true });
     if (a === 'owner') return setOwner(true);
@@ -164,7 +188,8 @@ export function BulkBar({ view, rows, sel, n }: { view: 'co' | 'cert'; rows: rea
           <p style={{ margin: 0, lineHeight: 1.6 }}>{cw.body}</p>
           <DialogActions>
             <button type="button" className="quiet" onClick={() => setAsk(null)}>ยกเลิก</button>
-            <button type="button" className="btn pri" onClick={() => follow(ask === 'follow')}>{cw.ok}</button>
+            {/* (a keyboard's Enter or Space clicks with detail 0; a pointer's click has its count) */}
+            <button type="button" className="btn pri" onClick={(ev) => follow(ask === 'follow', ev.detail === 0)}>{cw.ok}</button>
           </DialogActions>
         </Modal>
       )}

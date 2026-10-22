@@ -4,7 +4,8 @@
  * planning appointments for many companies at once. Each is one batch (one write of the stored sync queue,
  * each local store written once, one emit), goes out 300 records a push however many there are, skips
  * what is already so and says how many, and is refused for an account without the capability. The words
- * and the selection are lib/bulk.test.ts.
+ * and the selection are lib/bulk.test.ts. The unfollow from บริษัทที่ติดตาม (the same path, its เลิกทำ) is the last
+ * describe here: it takes companies off and back on, and a second browser of the team sees both.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore, type KVStore } from './storage';
 import { jointRole } from './sales';
-import { UNDO_SEND_MS, taskDates } from './bulk';
+import { UNDO_SEND_MS, followedPicked, refollowIds, taskDates } from './bulk';
 import type { Role } from './teamSync';
 import type { Company, Dataset, RoundRaw } from './types';
 
@@ -388,5 +389,81 @@ describe('bulk actions in a team (Code.gs in the simulator)', () => {
     expect(V.e.crm.tasks).toEqual([]);
     expect(Object.keys(V.e.crm.owners)).toEqual([]);
     expect(V.e.teamPendingN).toBe(0);
+  });
+});
+
+describe('the unfollow from บริษัทที่ติดตาม (the same path as the search page\'s bar)', () => {
+  /** The picked keys of the list, taken off the way BulkBar does: the ids the picks stand for (raw, as stored),
+   *  then setWatchMany. */
+  const unfollowPicked = (T: Tab, picks: number[]) => {
+    const e = T.e;
+    const gone = followedPicked(picks, e.crm.watch, (id) => e.canonical(id));
+    const r = e.setWatchMany(picks, false);
+    return { gone, r };
+  };
+  it('follow 3, unfollow them with a fourth picked that is not followed: the list shrinks by 3, and the undo restores exactly those', () => {
+    const A = mk('A');
+    const [a, b, c, d, x] = cos(A, 5);
+    [a, b, c].forEach((id) => A.e.toggleWatch(id));
+    const before = [...A.e.crm.watch];
+    const { gone, r } = unfollowPicked(A, [a, b, c, d]);
+    expect(gone).toEqual([a, b, c]);
+    expect(r).toEqual({ changed: 3, same: 1, local: 0 });
+    expect(A.e.crm.watch).toEqual([]);
+    expect([a, b, c].map((id) => A.e.company(id)!.fl.watch)).toEqual([false, false, false]);
+    expect(A.e.feedItems('watch')).toEqual([]);
+    // the undo: the same companies come back, nothing else
+    expect(refollowIds(A.e, gone)).toEqual({ changed: 3, same: 0 });
+    expect([...A.e.crm.watch].sort()).toEqual([...before].sort());
+    expect(A.e.company(x)!.fl.watch).toBe(false);
+    expect(A.e.company(d)!.fl.watch).toBe(false);
+    expect([a, b, c].every((id) => A.e.company(id)!.fl.watch)).toBe(true);
+  });
+
+  it('a second browser of the team sees the bulk unfollow and its undo', async () => {
+    const L = await lead();
+    const S = await member(L, 'aek', 'เอก', 'sales');
+    await settle(L, S);
+    const ids = cos(L, 6);
+    L.e.setWatchMany(ids.slice(0, 3), true);
+    await settle(L, S);
+    expect(new Set(S.e.crm.watch)).toEqual(new Set(ids.slice(0, 3)));
+    // the sales account takes three off with the bar; the admin's list shrinks too
+    const { gone, r } = unfollowPicked(S, ids.slice(0, 4));
+    expect(gone).toEqual(ids.slice(0, 3));
+    expect(r).toEqual({ changed: 3, same: 1, local: 0 });
+    await settle(S, L);
+    expect(live(L, 'watch/')).toHaveLength(0);
+    expect(L.e.crm.watch).toEqual([]);
+    expect(L.e.company(ids[0])!.fl.watch).toBe(false);
+    // and the undo goes to the team the same way
+    refollowIds(S.e, gone);
+    await settle(S, L);
+    expect(new Set(L.e.crm.watch)).toEqual(new Set(ids.slice(0, 3)));
+    expect(live(L, 'watch/')).toHaveLength(3);
+    expect(live(L, 'watch/').map((x) => x.k.slice(6)).map(Number).sort()).toEqual([...ids.slice(0, 3)].sort((p, q) => p - q));
+  });
+
+  it('a company followed on a row merged into it comes back on that same id, in the team too (the undo is exactly what was taken off)', async () => {
+    const L = await lead();
+    const g = L.e.B.groups.find((x) => x.state === 'pending' && x.ids.length === 2);
+    expect(g).toBeDefined();
+    L.e.decide(g!.key, 'merge');
+    const main = L.e.canonical(g!.ids[0]);
+    const other = g!.ids.find((i) => i !== main)!;
+    expect(L.e.canonical(other)).toBe(main);
+    L.e.toggleWatch(other); // followed on the row before the merge: the list keeps that id
+    await settle(L);
+    expect(L.e.crm.watch).toEqual([other]);
+    const { gone, r } = unfollowPicked(L, [main]);
+    expect(gone).toEqual([other]);
+    expect(r).toEqual({ changed: 1, same: 0, local: 0 });
+    await settle(L);
+    expect(live(L, 'watch/')).toHaveLength(0);
+    expect(refollowIds(L.e, gone)).toEqual({ changed: 1, same: 0 });
+    await settle(L);
+    expect(L.e.crm.watch).toEqual([other]);
+    expect(live(L, 'watch/').map((x) => x.k)).toEqual(['watch/' + other]);
+    expect(L.e.company(main)!.fl.watch).toBe(true);
   });
 });

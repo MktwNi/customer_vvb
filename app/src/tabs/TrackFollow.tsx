@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
+import { Icon } from '../components/icons';
+import { BulkBar, followSel, useSel } from '../components/BulkBar';
+import { TickBox } from '../components/MonthCheck';
+import { useSalesActs } from '../components/SalesToast';
 import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { beYear, jobServices } from '../lib/sales';
 import { JobSvc } from '../components/SvcChips';
-import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followIdsOf, followMatch, followMeta, followRows, type FollowRow } from '../lib/follow';
-import { followedBatch, followedSendTip, followedSendWord } from '../lib/bulk';
+import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followFilter, followIdsOf, followMeta, followQOf, followRows, followSelKey, type FollowRow } from '../lib/follow';
+import { allPickWord, bulkPickable, clearedWord, followedBatch, followedSendTip, followedSendWord, pruneSel, selView, toggleAll, toggleKey } from '../lib/bulk';
 import type { CfoStatus, Task } from '../lib/types';
 import { PageHead, Status } from '../components/ui';
 import { CoAvatar } from '../components/CoAvatar';
@@ -18,12 +22,14 @@ const cfoStatus = (st: CfoStatus) =>
 const STEP = 40;
 /** A quick filter once the list is longer than this. */
 const FILTER_FROM = 8;
+const NONE: ReadonlySet<number> = new Set();
 
 /**
  * บริษัทที่ติดตาม, first on the ติดตาม page: the companies the team follows (crm.watch: one list for the
  * whole team once connected, else this browser's), each with its certificates, its row in the Sales
  * Tracker of the year, its next appointment and its owner, the ones needing attention first (lib/follow.ts).
- * A click on a row opens the company. Read-only accounts see the list without its buttons.
+ * A click on a row opens the company. Read-only accounts see the list without its buttons; an account that may change
+ * follows also gets a box on each row, "เลือกทั้งหมด" and the bulk bar (components/BulkBar.tsx), as on ค้นหา.
  */
 export function FollowList() {
   const { engine: e, ui, set, go, open, openSched } = useApp();
@@ -32,7 +38,8 @@ export function FollowList() {
   const today = todayISO();
   const year = ui.slYear || beYear();
   const rows = useMemo(() => followRows(e, year, today), [e, v, year, today]);
-  const [q, setQ] = useState('');
+  // the quick filter the picks were made under is read back (followSel's key), so a page that comes back keeps both
+  const [q, setQ] = useState(() => followQOf(followSel.get().key));
   const [lim, setLim] = useState(STEP);
   // the one just unfollowed, to take it back (gone after a while)
   const [gone, setGone] = useState<{ ids: number[]; name: string } | null>(null);
@@ -51,8 +58,63 @@ export function FollowList() {
   const team = !!e.teamCfg;
   // companies from the TGO website sync are this device's own: their follow is not shared with the team
   const localN = team ? rows.filter((r) => isLocalId(r.c.id)).length : 0;
-  const shownAll = q.trim() ? rows.filter((r) => followMatch(q, r, prov(r))) : rows;
+  // the quick filter's rows: all of them, not only the page shown (the select-all picks every one of them)
+  const shownAll = useMemo(() => followFilter(rows, q, (r) => D.prov[r.c.prov] || ''), [rows, q, D]);
   const shown = shownAll.slice(0, lim);
+
+  // ---- picking companies for the bulk bar (components/BulkBar.tsx, the same as ค้นหา): kept while the list is
+  // open; let go (and said) when the quick filter changes, and a company that left the list is let go
+  const rowsCo = useMemo(() => shownAll.map((r) => r.c), [shownAll]);
+  const key = followSelKey(q);
+  const S = useSel(followSel);
+  const sel = S.key === key ? S.ids : NONE;
+  const sv = useMemo(() => selView(sel, rowsCo), [sel, rowsCo]);
+  const { say } = useSalesActs();
+  useEffect(() => {
+    const cur = followSel.get();
+    if (cur.key !== key) {
+      if (cur.ids.size && cur.key) say(clearedWord(cur.ids.size, 'co'));
+      followSel.set({ key, ids: new Set() });
+    } else {
+      const p = pruneSel(cur.ids, rowsCo);
+      if (p !== cur.ids) followSel.set({ key, ids: p });
+    }
+  }, [key, rowsCo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // boxes and the bar only for an account that may change follows (as the row's ติดตาม button, canCust)
+  const canPick = bulkPickable((c) => e.can(c));
+  const pickOne = (id: number) => followSel.set({ key, ids: toggleKey(sel, id) });
+  const pickAll = () => followSel.set({ key, ids: toggleAll(sel, rowsCo) });
+  // Escape lets the picks go, but not while a dialog or a menu is open, nor from a field
+  const picked = sv.n > 0;
+  useEffect(() => {
+    if (!picked) return;
+    const h = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape' || ev.defaultPrevented) return;
+      const t = ev.target instanceof Element ? ev.target : null;
+      if (t?.closest('input, textarea, select, [contenteditable]') || document.querySelector('[role=dialog], [role=menu]')) return;
+      followSel.set({ key, ids: new Set() });
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [picked, key]);
+  // a bulk unfollow confirmed from the keyboard: the bar and its dialog go with the companies taken off, and the focus
+  // would fall to the page's body. It moves to the list's own control instead (the header box, else the link of the
+  // empty state or of the filter that matched nothing). A pointer's confirm leaves the focus as it falls.
+  const selAllRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const [unfollowN, setUnfollowN] = useState(0);
+  useEffect(() => {
+    if (!unfollowN) return;
+    (selAllRef.current ?? listRef.current?.querySelector<HTMLElement>('.fw-empty .lnk, .fw-none .lnk'))?.focus();
+  }, [unfollowN]);
+  /** A row's box, first in its name's cell. Its cell reaches the row's left edge (tabs track.css .fw-pk), so a near
+   *  miss does not open the company. */
+  const rowPick = (r: FollowRow) =>
+    canPick && (
+      <span className="fw-pk" onClick={() => pickOne(r.c.id)}>
+        <TickBox checkbox on={sel.has(r.c.id)} label={'เลือก ' + r.c.name} onClick={() => pickOne(r.c.id)} />
+      </span>
+    );
   const n = followCounts(rows, today);
   const notIn = rows.filter((r) => !r.deal);
   const pageActs = (canSend && notIn.length > 0) || canPlan;
@@ -70,7 +132,7 @@ export function FollowList() {
   };
   /** A click anywhere on a row opens the company (not on its buttons, nor when text was selected). */
   const rowOpen = (ev: MouseEvent, id: number) => {
-    if ((ev.target as HTMLElement).closest('button, a, input')) return;
+    if ((ev.target as HTMLElement).closest('button, a, input, .fw-pk')) return;
     if (window.getSelection()?.toString()) return;
     open(id);
   };
@@ -115,7 +177,9 @@ export function FollowList() {
         ) : undefined}
       />
       </div>
-      <section className="fw card" aria-label="บริษัทที่ติดตาม">
+      {/* the bulk bar above the list, as on ค้นหา (outside the card, so it stays under the top while the list scrolls) */}
+      {canPick && rowsCo.length > 0 && <BulkBar view="co" rows={rowsCo} sel={sel} n={sv.n} store={followSel} sure undo onUnfollowed={(keyboard) => { if (keyboard) setUnfollowN((k) => k + 1); }} />}
+      <section ref={listRef} className="fw card" aria-label="บริษัทที่ติดตาม">
         {/* (the live region is always there, so the line is read out when it comes) */}
         <div role="status">
           {gone && (
@@ -145,6 +209,14 @@ export function FollowList() {
                   {sumOn.length ? sumOn.map(([l, x, cls]) => <span key={l} className={cls || undefined}>{l} {fmtN(x)}</span>) : <span>ทุกบริษัทมีนัดแล้ว และไม่มีใบรับรองใกล้หมดอายุ</span>}
                 </p>
                 <span className="t-meta">เรียงจากเรื่องที่ต้องทำก่อน: นัดที่ถึงกำหนด ใบรับรองใกล้หมดอายุ แล้วบริษัทที่ยังไม่มีนัด</span>
+                {canPick && rowsCo.length > 0 && (
+                  <button ref={selAllRef} type="button" role="checkbox" aria-checked={sv.mixed ? 'mixed' : sv.all} className="bk-all fw-selall hv" onClick={pickAll}>
+                    <span className={'ckb' + (sv.all || sv.mixed ? ' on' : '')} aria-hidden="true">
+                      {sv.mixed ? <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" focusable="false"><path d="M6.5 12h11" /></svg> : sv.all ? <Icon name="check" size={14} /> : null}
+                    </span>
+                    {allPickWord(rowsCo.length)}
+                  </button>
+                )}
               </div>
               {(rows.length > FILTER_FROM || q !== '') && (
                 <input
@@ -158,7 +230,7 @@ export function FollowList() {
               )}
             </div>
             <div className="fw-th thead" style={{ gridTemplateColumns: cols }} aria-hidden="true">
-              <span>บริษัท</span>
+              <span className="fw-hd-who">{canPick && <span className="fw-hd-pk" />}<span>บริษัท</span></span>
               <span>CFO · GI</span>
               {seeSales && <span>Sales Tracker ปี {year}</span>}
               <span>นัดถัดไป</span>
@@ -167,14 +239,17 @@ export function FollowList() {
             </div>
             <div className="fw-list">
               {shown.map((r) => (
-                <div key={r.c.id} className="fw-r" style={{ gridTemplateColumns: cols }} onClick={(ev) => rowOpen(ev, r.c.id)}>
-                  <button onClick={() => open(r.c.id)} className="fw-name">
-                    <CoAvatar name={r.c.name} web={r.c.web} set={r.c.set} size={32} />
-                    <span className="fw-name-t">
-                      <span className="co-name">{r.c.name}</span>
-                      <span className="t-sec" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
-                    </span>
-                  </button>
+                <div key={r.c.id} className={'fw-r' + (sel.has(r.c.id) ? ' on' : '')} style={{ gridTemplateColumns: cols }} onClick={(ev) => rowOpen(ev, r.c.id)}>
+                  <span className="fw-who">
+                    {rowPick(r)}
+                    <button onClick={() => open(r.c.id)} className="fw-name">
+                      <CoAvatar name={r.c.name} web={r.c.web} set={r.c.set} size={32} />
+                      <span className="fw-name-t">
+                        <span className="co-name">{r.c.name}</span>
+                        <span className="t-sec" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
+                      </span>
+                    </button>
+                  </span>
                   <Cell label="CFO · GI">
                     {cfoStatus(r.cfoSt)}
                     <CertLine r={r} />

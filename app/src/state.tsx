@@ -111,12 +111,14 @@ export interface UIState {
  *  (components/SalesToast.tsx). */
 export interface ToastAct {
   label: string;
-  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify' | 'goTrack' | 'goSales' | 'goPlan' | 'sendUndo' | 'recvEdit' | 'recvUndo';
+  act: 'close' | 'dismiss' | 'closedTab' | 'undo' | 'plan' | 'qtUndo' | 'jqUndo' | 'payUndo' | 'expUndo' | 'notify' | 'goTrack' | 'goSales' | 'goPlan' | 'sendUndo' | 'recvEdit' | 'recvUndo' | 'refollow';
   deal?: string; primary?: boolean; /** qtUndo: the document (`deal/docId`); sendUndo: the send (engine.lastSent.k); recvEdit / recvUndo: the installment */ k?: string;
   /** recvUndo: what the one tap changed, put back as it was (lib/attachPlan undoReceive) */
   recv?: RecvUndo;
   /** goSales: the table's year; goPlan: the day the calendar opens at */
   year?: string; day?: string;
+  /** refollow: the companies a bulk unfollow took off (their ids), put back by เลิกทำ */
+  ids?: number[];
 }
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
@@ -234,7 +236,8 @@ export function useApp() {
 /** Re-render on any engine change; returns the engine version (use it as a memo key). */
 export function useEngineVersion() {
   const { engine } = useApp();
-  return useSyncExternalStore(engine.subscribe, engine.getVersion);
+  // (the server snapshot too: a page rendered to markup in a test reads the same version)
+  return useSyncExternalStore(engine.subscribe, engine.getVersion, engine.getVersion);
 }
 export function useNarrow(px = 760) {
   const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < px);

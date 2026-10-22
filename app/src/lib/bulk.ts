@@ -139,6 +139,58 @@ export const followNote = (added: number, already: number) =>
   added ? `ติดตามเพิ่ม ${fmtN(added)} บริษัท${already ? ` (ติดตามอยู่แล้ว ${fmtN(already)})` : ''}` : `ติดตามอยู่แล้วทั้ง ${fmtN(already)} บริษัท`;
 export const unfollowNote = (removed: number, notOn: number) =>
   removed ? `เลิกติดตาม ${fmtN(removed)} บริษัท${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : 'บริษัทที่เลือกไม่ได้อยู่ใน “บริษัทที่ติดตาม”';
+/** After a bulk unfollow on บริษัทที่ติดตาม (and the search page's): how many were taken off, and how many of the
+ *  picked were not followed (said, not counted). Its เลิกทำ puts back exactly the ones taken off. */
+export const unfollowedWord = (removed: number, notOn: number) =>
+  removed ? `เลิกติดตาม ${fmtN(removed)} บริษัทแล้ว${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : unfollowNote(0, notOn);
+/** The ids on the watch list (as stored, raw: a row merged into a company keeps its own id there) that stand for
+ *  the picked companies, in the list's order: exactly what a bulk unfollow takes off, and what its เลิกทำ puts back.
+ *  `canon`: an id to the company it is now (GccEngine.canonical). */
+export function followedPicked(cos: readonly number[], watch: readonly number[], canon: (id: number) => number) {
+  const want = new Set(cos.map(canon));
+  return watch.filter((id) => want.has(canon(id)));
+}
+/** What refollowIds needs of the engine (GccEngine has all of it). */
+export interface WatchSrc {
+  crm: { watch: number[] };
+  canonical(id: number): number;
+  can(c: CapId): boolean;
+  toggleWatch(id: number): void;
+  bulk(fn: () => void): void;
+}
+/**
+ * เลิกทำ of a bulk unfollow: the ids it took off go back on the watch list as they were (a company followed through
+ * a merged row's own id comes back on that id), in one batch. A company someone has followed again since is left as
+ * it is (counted in `same`). `changed`: the companies put back. `refused`: this account may not change follows any
+ * more (the role changed inside the undo window), so nothing went back.
+ */
+export function refollowIds(e: WatchSrc, ids: readonly number[]): { changed: number; same: number; refused?: true } {
+  if (!e.can('edit.cust')) return { changed: 0, same: 0, refused: true };
+  // followed before this, by any id: those stay as they are
+  const was = new Set(e.crm.watch.map((id) => e.canonical(id)));
+  const back = new Set<number>(), there = new Set<number>();
+  e.bulk(() => {
+    for (const id of ids) {
+      const c = e.canonical(id);
+      if (was.has(c)) {
+        there.add(c);
+        continue;
+      }
+      back.add(c);
+      if (!e.crm.watch.includes(id)) e.toggleWatch(id);
+    }
+  });
+  return { changed: back.size, same: there.size };
+}
+/** The toast's words for เลิกทำ. A refused one is said as refused (the engine's words for a change it may not make),
+ *  never as "already followed". */
+export const refollowWord = (r: { changed: number; same: number; refused?: true }) =>
+  r.refused ? 'บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้' : r.changed ? `ติดตามต่อ ${fmtN(r.changed)} บริษัทแล้ว` : followNote(0, r.same);
+/** บริษัทที่ติดตาม's "เลือกทั้งหมด" box, its name with the count: "เลือกทั้งหมด (116 บริษัท)". */
+export const allPickWord = (n: number) => `เลือกทั้งหมด (${fmtN(n)} บริษัท)`;
+/** Whether this account may pick companies to act on at all (the boxes and the bar of บริษัทที่ติดตาม): following
+ *  is ลูกค้าและผู้ติดต่อ (edit.cust). Without it the list has no boxes, as it has no ติดตาม button for a row. */
+export const bulkPickable = (can: (c: CapId) => boolean) => can('edit.cust');
 /** After a send: how many went in, and the companies skipped because a job of theirs that year may be the same
  *  work (`svc`: the services sent that those jobs have, engine.addDealsFromCompanies' clash; none when nothing
  *  was picked): "ข้าม 1 บริษัทที่มีงาน CFO ปี 2569 อยู่แล้ว". Nothing is skipped without being said. */
