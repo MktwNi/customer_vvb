@@ -209,6 +209,11 @@ export const emptySales = (): SalesState => ({ cfg: emptyCfg(), deals: {}, steps
 
 /** Current Buddhist-era year as text. */
 export const beYear = (iso = new Date().toISOString()) => String(+iso.slice(0, 4) + 543);
+/** The year a job is added in: the year picked in the Sales Tracker, else this year (never the current year
+ *  while another is picked: a job added while looking at 2568 is a 2568 job). */
+export const jobYearOf = (picked: string, now = beYear()) => (/^\d{4}$/.test(picked) ? picked : now);
+/** The history line of a job's year change (the deal panel's ปีของงาน): "เปลี่ยนปีของงานเป็น 2570". */
+export const yearChangeWords = (year: string) => `เปลี่ยนปีของงานเป็น ${year}`;
 
 export function newDeal(p: Partial<Deal> & { id: string; client: string }, by: string, at = new Date().toISOString()): Deal {
   return {

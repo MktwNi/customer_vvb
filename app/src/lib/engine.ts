@@ -31,7 +31,7 @@ import {
   toAct, toCust, toDeal, toDoc, toLog, toPay, toStep, dealStatus, emptyCfg, emptySales, fmtMoney, importId, importJobId, importKey, matchSource, newDeal, parseCsv, parseTrackerJson, parseTrackerSheet, stepOf, withActIndex,
   type ActType, type Deal, type DealAct, type DealDoc, type DealLog, type DealStep, type DocKind, type DocTarget, type PayHow, type PayLine, type PlanInput, type SalesCfg, type SalesState, type TrackerData,
 } from './sales';
-import { cashYear, setMoneyHidden, type CashLine } from './sales';
+import { cashYear, setMoneyHidden, yearChangeWords, type CashLine } from './sales';
 import { expDocId, purgeExpenses, toExpense, type DealExp, type JobExp } from './expense';
 import { expChanged, type ExpInput, type ExpKey } from './expenseJob';
 import { NAME_MAX, freeSlot, isUnitId, newUnitId, paysComm, shareValid, slotTaken, staffKey, toShare, toUnit, toUnitMember, unitCtx, unitWire, withOff, withRate, type ShareLine, type UnitCtx, type UnitRec } from './contrib';
@@ -2650,11 +2650,25 @@ export class GccEngine {
     this.putDeal(n, [...new Set([...changed, ...(['fcAt', 'closedDate'] as const).filter((k) => n[k] !== d[k])])], Object.keys(fl).length ? fl : undefined);
     const TH: Partial<Record<keyof Deal, string>> = {
       client: 'ชื่อลูกค้า', contactName: 'ผู้ติดต่อ', phone: 'เบอร์', email: 'อีเมล', resp: 'ผู้รับผิดชอบ', referral: 'แหล่งที่มา', contactDate: 'วันที่ติดต่อ',
-      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท', year: 'ปี',
+      jobStatus: 'สถานะงาน', forecast: 'Forecast', actual: 'Actual', source: 'SOURCE', service: 'บริการ', section: 'หมวด', gid: 'เชื่อมกับบริษัท',
     };
-    const what = changed.map((k) => TH[k]).filter(Boolean).join(', ');
+    // a job's year is its own history line (เปลี่ยนปีของงานเป็น 2570), not one more word of "แก้ไข"
+    if (changed.includes('year')) this.salesLog(n, yearChangeWords(n.year));
+    const what = changed.filter((k) => k !== 'year').map((k) => TH[k]).filter(Boolean).join(', ');
     if (what) this.salesLog(n, patch.jobStatus === 'closed' ? 'ปิดงาน' : patch.jobStatus === 'open' ? 'เปิดงานอีกครั้ง' : 'แก้ไข', what);
     this.saveSales();
+  }
+  /**
+   * The job's year (ปีของงาน) as the deal panel changes it. The same right as any edit of the deal (edit.deal on
+   * its ผู้รับผิดชอบ, as the account's role scopes it); nothing else of the job changes (its contact date stays).
+   * A joint quotation's header takes its companies along, a member leaves it: moveJointYear, which the panel asks
+   * about first.
+   */
+  setJobYear(id: string, year: string) {
+    const d = this.sales.deals[id];
+    if (!d || year === d.year || !/^\d{4}$/.test(year)) return;
+    if (!this.canDeal('edit.deal', d)) return this.deny();
+    this.updateDeal(id, { year });
   }
   /** A step's date + note at the stored stage `stage` (a step's id; an older stage, CALL2, when its own record
    *  is edited in place); a note without a date gets today's date. Only the step record is written —
