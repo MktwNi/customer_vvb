@@ -1,13 +1,19 @@
-import { useRef, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { addDays, isoTh, todayISO } from '../lib/format';
+import { dateInputChange } from '../lib/dateInput';
 
 /**
  * A date as Thai text on a button ("8 ต.ค. 2569", design §7.10): one tab stop with its own focus ring.
  * A click (Enter / Space) opens the browser's calendar of a hidden date input; ↑ / ↓ move it a day.
  * `text` replaces the label (e.g. "วันนี้ 8 ต.ค. 2569"); `label` names it for screen readers.
+ *
+ * The hidden input is controlled by `value` only when no year is being typed into it: while it is, the field
+ * shows its own draft (lib/dateInput), so a partial year is neither saved nor written back over what was typed.
  */
 export function DateChip({ value, onChange, label, text, className = '', id, empty = 'ใส่วันที่' }: { value: string; onChange: (iso: string) => void; label: string; text?: string; className?: string; id?: string; empty?: string }) {
   const inp = useRef<HTMLInputElement>(null);
+  // the field's text while a year is typed (null: it shows `value`); dropped when the field loses focus
+  const [draft, setDraft] = useState<string | null>(null);
   const open = () => {
     const el = inp.current;
     if (!el) return;
@@ -24,13 +30,27 @@ export function DateChip({ value, onChange, label, text, className = '', id, emp
     ev.preventDefault();
     onChange(addDays(value || todayISO(), ev.key === 'ArrowUp' ? 1 : -1));
   };
+  const change = (raw: string) => {
+    const r = dateInputChange(raw);
+    setDraft(r.commit ? null : r.draft);
+    if (r.commit) onChange(r.commit);
+  };
   const shown = text ?? (value ? isoTh(value) : empty);
   return (
     <span className={'sl-dc ' + className}>
       <button type="button" id={id} className={'sl-datechip hv' + (value ? '' : ' empty')} onClick={open} onKeyDown={key} aria-label={`${label} ${value ? isoTh(value) : 'ยังไม่ระบุ'} — เปลี่ยน`} title="เลือกวันที่ · ลูกศรขึ้นลงเลื่อนทีละวัน">
         {shown}
       </button>
-      <input ref={inp} type="date" tabIndex={-1} aria-hidden="true" className="sl-dc-in" value={value} onChange={(ev) => ev.target.value && onChange(ev.target.value)} />
+      <input
+        ref={inp}
+        type="date"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="sl-dc-in"
+        value={draft ?? value}
+        onChange={(ev) => change(ev.target.value)}
+        onBlur={() => setDraft(null)}
+      />
     </span>
   );
 }
