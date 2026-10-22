@@ -68,11 +68,12 @@ export function AddCustomer() {
   useEffect(() => {
     if (!edit) void e.teamSyncNow();
   }, [e, edit]);
+  // (a job of the year being added in the Sales Tracker: a company whose jobs are all in other years is not offered, similarFor)
   useEffect(() => {
     if (edit) return;
-    const t = setTimeout(() => setSimilar(e.similarCompanies(f.name, f.jur)), 300);
+    const t = setTimeout(() => setSimilar(e.similarFor(f.name, f.jur, a.deal ? year : undefined)), 300);
     return () => clearTimeout(t);
-  }, [f.name, f.jur, e, edit, ver]);
+  }, [f.name, f.jur, e, edit, ver, a.deal, year]);
   const up = (k: keyof typeof EMPTY) => (ev: { target: { value: string } }) => setF({ ...f, [k]: ev.target.value });
 
   /** The contact typed here (name, phone, e-mail as typed; '' each when nothing was). */

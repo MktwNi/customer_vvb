@@ -57,6 +57,7 @@ import { clashSvc, companyCount, jobCoKey, maySame, sendState, surelyOther, svcC
 import { CYCLE_YEAR_BLOCK, cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cycleLogs, isCycleJob, recontactErr, recontactOf } from './recontact';
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
+import { cardHides } from './similarCard';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -1450,6 +1451,20 @@ export class GccEngine {
       .filter((c) => (j.length >= 10 && c.jur.replace(/\D/g, '') === j) || (k.length >= 3 && (norm(c.name) === k || (k.length >= 6 && norm(c.name).includes(k)))))
       .slice(0, 8);
   }
+  /** The companies the registry-match card offers for a new customer typed `name` and `jur` (AddCustomer): similarCompanies,
+   *  less those cardHides leaves off for `year`, the job being added in a Sales Tracker (no `year`: all of them). */
+  similarFor(name: string, jur: string, year?: string): Company[] {
+    const cos = this.similarCompanies(name, jur);
+    if (year === undefined) return cos;
+    return cos.filter((c) => {
+      const sameName = this.B.companies.filter((x) => norm(x.name) === norm(c.name)).length;
+      return !cardHides({ jobYears: this.jobYearsOf(c.id), sameName, hasJur: !!c.jur }, year);
+    });
+  }
+  /** The years of a company's jobs, as the card counts them (a joint quotation's header is not one of its jobs). */
+  private jobYearsOf(gid: number): string[] {
+    return this.dealsOf(gid).filter((x) => jointRole(this.sales, x) !== 'header').map((x) => x.year);
+  }
   /** Add a customer that is not in the registry; returns its company id. `opt.id`: the id to take when it is free
    *  (a company made for a deal's typed name: customIdOf), else a random one. That id is create-only (SyncOp.nx): a
    *  live row another browser made for the same name first stands, so its fields are not blanked by this browser's
@@ -1516,6 +1531,24 @@ export class GccEngine {
     this.persist('people', this.people);
     this.emit();
     return id;
+  }
+  /**
+   * "สร้างคนใหม่" and "เพิ่มและใช้ในดีลนี้" (AddPerson): a new person from the form, made a contact of `deal` when the dialog
+   * was opened from one. On a deal with no company yet, a company picked that is not the one the deal's typed client name
+   * gives (pickedIsDealCompany) is the person's company only: the deal's company is not made or linked here (linkPerson
+   * `dealCompany: false`), and the deal's card offers it, one button, as after the duplicate prompt's pick (addToExisting).
+   * Refused for an account that may not add contacts or link the deal: nothing written, ''.
+   */
+  addNewPerson(p: Partial<PersonForm> & { name: string }, deal?: { id: string; main?: boolean }): string {
+    const d = deal ? this.sales.deals[deal.id] : undefined;
+    if (deal ? !this.canLink(d) : !this.can('edit.cust')) return this.deny(), '';
+    return this.batchOps(() => {
+      const id = this.addPerson(p);
+      if (!id || !deal || !d) return id;
+      const apart = p.gid != null && d.gid == null && !this.pickedIsDealCompany(d.id, id, p.gid);
+      this.linkPerson(d.id, id, { main: !!deal.main, dealCompany: !apart });
+      return id;
+    });
   }
   /**
    * Add several contacts found in the Sales Tracker at once ("เพิ่มทั้งหมด"; one queue write, one save). One human

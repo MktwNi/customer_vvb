@@ -609,6 +609,83 @@ describe('the same name, two companies: the exact name first, the contact\'s own
   });
 });
 
+describe('the add-person dialog\'s create on a deal typed by name: the company picked is the contact\'s, the typed client\'s is not made', () => {
+  it('a company picked that is not the one the typed name gives: the person has that company only, no company made for the client, the deal stays unlinked, the contact is linked, the card offers the one button; the other browser sees the same', async () => {
+    const [A, B] = await team();
+    const [c1] = companies(A);
+    const d = A.e.addDeal({ client: 'ทดสอบสร้างคน จำกัด', year: '2569' });
+    const pid = A.e.addNewPerson({ name: 'คุณสร้างใหม่ ตัวอย่าง', gid: c1.id, phone: '080-000-0707' }, { id: d.id, main: true });
+    expect(pid).not.toBe('');
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(cosOf(t, pid)).toEqual([[c1.id, true, '', 'active']]);
+      expect(t.e.sales.deals[d.id].gid).toBeNull();
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+      expect(t.e.contactNotHere(t.e.sales.deals[d.id], t.e.people[pid])).toBe(true); // the card's one button
+    }
+    expect(namedIn(A, 'ทดสอบสร้างคน จำกัด')).toBe(0);
+    expect(madeNamed('ทดสอบสร้างคน จำกัด').length).toBe(0);
+    // the card's button then makes the deal's company, and the contact has it too, once
+    expect(A.e.linkDealCompany(d.id, pid)).not.toBeNull();
+    await settle(A, B);
+    expect(madeNamed('ทดสอบสร้างคน จำกัด').length).toBe(1);
+    for (const t of [A, B]) expect(t.e.contactNotHere(t.e.sales.deals[d.id], t.e.people[pid])).toBe(false);
+  });
+
+  it('the company picked is the one the typed name gives: as before, the deal gets it and the person has it once', async () => {
+    const [A, B] = await team();
+    const [, c2] = companies(A);
+    const d = A.e.addDeal({ client: c2.name, year: '2569' });
+    const pid = A.e.addNewPerson({ name: 'คุณตรงกับชื่อ ตัวอย่าง', gid: c2.id }, { id: d.id, main: true });
+    await settle(A, B);
+    for (const t of [A, B]) {
+      expect(t.e.sales.deals[d.id].gid).toBe(c2.id);
+      expect(cosOf(t, pid)).toEqual([[c2.id, true, '', 'active']]);
+      expect(t.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+    }
+  });
+
+  it('the deal already has its company: the person gets the company picked, as before (the deal\'s company is not added to them), and the deal\'s company stays', async () => {
+    const [A] = await team();
+    const [c1, c2] = companies(A);
+    const d = A.e.addDeal({ gid: c2.id, year: '2569' });
+    const pid = A.e.addNewPerson({ name: 'คุณมีบริษัทแล้ว ตัวอย่าง', gid: c1.id }, { id: d.id, main: true });
+    expect(A.e.sales.deals[d.id].gid).toBe(c2.id);
+    expect(cosOf(A, pid)).toEqual([[c1.id, true, '', 'active']]);
+    expect(A.e.dealPeople(d.id).map((p) => p.id)).toEqual([pid]);
+  });
+
+  it('no deal (the People page): the person is made with the company picked, and no deal is touched', async () => {
+    const [A] = await team();
+    const [c1] = companies(A);
+    const deals = Object.keys(A.e.sales.deals).length;
+    const pid = A.e.addNewPerson({ name: 'คุณหน้าคน ตัวอย่าง', gid: c1.id });
+    expect(cosOf(A, pid)).toEqual([[c1.id, true, '', 'active']]);
+    expect(Object.keys(A.e.sales.deals).length).toBe(deals);
+  });
+
+  it('a viewer and an account that may not link are refused: nothing written, the person not made either', async () => {
+    const L = await lead();
+    const V = await member(L, 'pla3', 'ปลา', 'viewer');
+    const { id: dealOnly } = await L.e.roleSave({ n: 'ดีลอย่างเดียว สาม', d: '', c: { 'view.sales': 'all', 'view.money': 'all', 'edit.deal': 'all' } });
+    const D = await member(L, 'dao3', 'ดาว', dealOnly);
+    const [c1] = companies(L);
+    const d = L.e.addDeal({ client: 'ห้ามสร้าง สาม', year: '2569', resp: 'หมิว' });
+    await settle(L, V, D);
+    const before = sheetText();
+    const who = { name: 'คุณถูกห้าม สร้าง', gid: c1.id };
+    expect(V.e.addNewPerson(who, { id: d.id, main: true })).toBe('');
+    expect(V.e.addNewPerson(who)).toBe('');
+    expect(D.e.addNewPerson(who, { id: d.id, main: true })).toBe('');
+    await settle(L, V, D);
+    expect(sheetText()).toBe(before);
+    expect(L.e.sales.deals[d.id].gid).toBeNull();
+    expect(L.e.dealPeople(d.id)).toEqual([]);
+    expect(Object.values(L.e.people).some((p) => p.name === who.name)).toBe(false);
+    expect(namedIn(L, 'ห้ามสร้าง สาม')).toBe(0);
+  });
+});
+
 // ---- the accounts (as the who-may-link tests of dealContact.engine.test.ts)
 async function lead() {
   sim = createGasSim({ teamKey: '', kdfIter: 1000 });
