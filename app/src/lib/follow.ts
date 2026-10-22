@@ -141,6 +141,13 @@ export function followRows(e: FollowSrc, year: string, today: string): FollowRow
   return sortFollow(rows, today);
 }
 
+/** The picked keys of บริษัทที่ติดตาม (components/BulkBar.tsx followSel) are kept under the quick filter they were
+ *  picked in: the key is this prefix and the filter's words. The page reads the filter back from the key when it
+ *  opens again, so the picks and the filter it shows stay together (no "เปลี่ยนคำค้นหา" for a page coming back). */
+export const FOLLOW_SEL_PREFIX = 'follow\u0001';
+export const followSelKey = (q: string) => FOLLOW_SEL_PREFIX + q.trim();
+export const followQOf = (key: string) => (key.startsWith(FOLLOW_SEL_PREFIX) ? key.slice(FOLLOW_SEL_PREFIX.length) : '');
+
 /** The rows the quick filter keeps (`prov`: a row's province as the list shows it); the list itself when nothing
  *  is typed. Its companies are what "เลือกทั้งหมด" picks: every one of them, not only the page shown. */
 export function followFilter(rows: FollowRow[], q: string, prov: (r: FollowRow) => string): FollowRow[] {

@@ -67,8 +67,9 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false }:
       say(followNote(r.changed, r.same) + localWord(r.local), { ms: 8000, acts: r.changed ? [{ label: 'ดูบริษัทที่ติดตาม', act: 'goTrack', primary: true }] : undefined });
       return;
     }
-    // the ones taken off (the team follows them now): เลิกทำ puts exactly these back, not the others picked
-    const gone = followedPicked(cos, watch, (id) => e.canonical(id));
+    // the ids taken off, as stored (a company followed through a row since merged into it keeps that id): เลิกทำ
+    // puts exactly these back, not the others picked
+    const gone = followedPicked(cos, e.crm.watch, (id) => e.canonical(id));
     const r = e.setWatchMany(cos, false);
     say(unfollowedWord(r.changed, r.same) + localWord(r.local), { ms: 10000, acts: r.changed ? [{ label: 'เลิกทำ', act: 'refollow', ids: gone }] : undefined });
   };

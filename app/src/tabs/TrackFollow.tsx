@@ -8,7 +8,7 @@ import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
 import { beYear, jobServices } from '../lib/sales';
 import { JobSvc } from '../components/SvcChips';
-import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followFilter, followIdsOf, followMeta, followRows, type FollowRow } from '../lib/follow';
+import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followFilter, followIdsOf, followMeta, followQOf, followRows, followSelKey, type FollowRow } from '../lib/follow';
 import { allPickWord, bulkPickable, clearedWord, followedBatch, followedSendTip, followedSendWord, pruneSel, selView, toggleAll, toggleKey } from '../lib/bulk';
 import type { CfoStatus, Task } from '../lib/types';
 import { PageHead, Status } from '../components/ui';
@@ -38,7 +38,8 @@ export function FollowList() {
   const today = todayISO();
   const year = ui.slYear || beYear();
   const rows = useMemo(() => followRows(e, year, today), [e, v, year, today]);
-  const [q, setQ] = useState('');
+  // the quick filter the picks were made under is read back (followSel's key), so a page that comes back keeps both
+  const [q, setQ] = useState(() => followQOf(followSel.get().key));
   const [lim, setLim] = useState(STEP);
   // the one just unfollowed, to take it back (gone after a while)
   const [gone, setGone] = useState<{ ids: number[]; name: string } | null>(null);
@@ -64,7 +65,7 @@ export function FollowList() {
   // ---- picking companies for the bulk bar (components/BulkBar.tsx, the same as ค้นหา): kept while the list is
   // open; let go (and said) when the quick filter changes, and a company that left the list is let go
   const rowsCo = useMemo(() => shownAll.map((r) => r.c), [shownAll]);
-  const key = 'follow\u0001' + q.trim();
+  const key = followSelKey(q);
   const S = useSel(followSel);
   const sel = S.key === key ? S.ids : NONE;
   const sv = useMemo(() => selView(sel, rowsCo), [sel, rowsCo]);
@@ -101,7 +102,7 @@ export function FollowList() {
   const rowPick = (r: FollowRow) =>
     canPick && (
       <span className="fw-pk" onClick={() => pickOne(r.c.id)}>
-        <TickBox on={sel.has(r.c.id)} label={'เลือก ' + r.c.name} onClick={() => pickOne(r.c.id)} />
+        <TickBox checkbox on={sel.has(r.c.id)} label={'เลือก ' + r.c.name} onClick={() => pickOne(r.c.id)} />
       </span>
     );
   const n = followCounts(rows, today);

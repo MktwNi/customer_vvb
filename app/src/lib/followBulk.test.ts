@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import { BUILTIN, type CapId } from './caps';
 import {
-  allPickWord, bulkActs, bulkPickable, confirmWords, followSplit, followedPicked, pickedCos, pruneSel, selView, toggleAll, toggleKey, unfollowNote, unfollowedWord,
+  allPickWord, bulkActs, bulkPickable, confirmWords, followSplit, followedPicked, followNote, pickedCos, pruneSel, refollowIds, selView, toggleAll, toggleKey, unfollowNote, unfollowedWord,
 } from './bulk';
-import { followFilter, type FollowRow } from './follow';
+import { followFilter, followQOf, followSelKey, type FollowRow } from './follow';
 import type { Company } from './types';
 
 const PAGE = 40;
@@ -66,23 +66,25 @@ describe('"เลือกทั้งหมด" on บริษัทที่�
 });
 
 describe('the unfollow of the picked companies is the search page\'s', () => {
-  it('removes exactly the picked companies the team follows, each once, in the list\'s order', () => {
-    const watch = new Set([2, 4, 5]);
+  it('takes off exactly the ids of the picked companies the team follows, each once, in the list\'s order', () => {
+    const watch = [2, 4, 5];
     expect(followedPicked([1, 2, 3, 4, 4], watch, canon)).toEqual([2, 4]);
-    // a company followed by an id since merged into it counts once, as the company
-    expect(followedPicked([10, 5], new Set([4, 5]), canon)).toEqual([4, 5]);
+    // a company followed by an id since merged into it: both ids are that company's, as stored
+    expect(followedPicked([10, 5], [4, 5], canon)).toEqual([4, 5]);
+    expect(followedPicked([4], [10, 5], canon)).toEqual([10]);
+    expect(followedPicked([4], [10, 5, 4], canon)).toEqual([10, 4]);
     expect(followedPicked([1, 3], watch, canon)).toEqual([]);
   });
 
   it('the same keys give the same unfollow on the list as on the search page (same companies, same count)', () => {
     const companies = Array.from({ length: 30 }, (_, i) => co(i + 1));
-    const watch = new Set([2, 5, 7, 9, 11]);
+    const watch = [2, 5, 7, 9, 11];
     const sel = new Set([2, 3, 5, 30]);
     // the search page: its rows are the companies; the follow page: its rows are the followed rows' companies
     const searchCos = pickedCos(sel, companies);
     const followCos = pickedCos(sel, followFilter(companies.map((c) => fr(c)), '', provOf).map((r) => r.c));
     expect(followCos).toEqual(searchCos);
-    const fs = followSplit(searchCos.map(canon), new Set([...watch]));
+    const fs = followSplit(searchCos.map(canon), new Set(watch));
     const removed = followedPicked(followCos, watch, canon);
     expect(removed).toEqual([2, 5]);
     expect(removed).toHaveLength(fs.on);
@@ -94,6 +96,72 @@ describe('the unfollow of the picked companies is the search page\'s', () => {
     expect(unfollowedWord(3, 0)).toBe('เลิกติดตาม 3 บริษัทแล้ว');
     expect(unfollowedWord(2, 1)).toBe('เลิกติดตาม 2 บริษัทแล้ว (ไม่ได้ติดตามอยู่ 1)');
     expect(unfollowedWord(0, 3)).toBe(unfollowNote(0, 3));
+  });
+});
+
+/** A stand-in for the engine's watch list: toggleWatch and bulk as GccEngine has them, canonical through canon. */
+function stand(watch: number[], can = true) {
+  const log = { batches: 0, toggled: [] as number[] };
+  const e = {
+    crm: { watch },
+    canonical: canon,
+    can: () => can,
+    toggleWatch(id: number) {
+      const i = watch.indexOf(id);
+      if (i >= 0) watch.splice(i, 1);
+      else watch.push(id);
+      log.toggled.push(id);
+    },
+    bulk(fn: () => void) {
+      log.batches++;
+      fn();
+    },
+  };
+  return { e, log };
+}
+
+describe('เลิกทำ of a bulk unfollow puts back exactly what it took off', () => {
+  it('the ids come back as they were, the merged row\'s own id included, in one batch', () => {
+    const watch = [10, 5]; // company 4 (10 merged into 4) and company 5
+    const gone = followedPicked([4, 5], watch, canon);
+    expect(gone).toEqual([10, 5]);
+    watch.length = 0; // the unfollow
+    const { e, log } = stand(watch);
+    expect(refollowIds(e, gone)).toEqual({ changed: 2, same: 0 });
+    expect([...watch].sort((a, b) => a - b)).toEqual([5, 10]);
+    expect(log.batches).toBe(1);
+    expect(log.toggled).toEqual([10, 5]);
+  });
+
+  it('a company followed again since is left as it is: its other id does not come back as well', () => {
+    const watch: number[] = [];
+    const { e } = stand(watch);
+    watch.push(4); // followed again by someone, on its main id
+    expect(refollowIds(e, [10, 5])).toEqual({ changed: 1, same: 1 });
+    expect([...watch].sort((a, b) => a - b)).toEqual([4, 5]);
+  });
+
+  it('nothing changes for an account that may not change follows', () => {
+    const watch: number[] = [];
+    const { e, log } = stand(watch, false);
+    expect(refollowIds(e, [4, 5])).toEqual({ changed: 0, same: 0 });
+    expect(watch).toEqual([]);
+    expect(log.batches).toBe(0);
+  });
+
+  it('the toast says how many came back, or that they were already followed', () => {
+    expect(followNote(2, 0)).toBe('ติดตามเพิ่ม 2 บริษัท');
+    expect(followNote(0, 2)).toBe('ติดตามอยู่แล้วทั้ง 2 บริษัท');
+  });
+});
+
+describe('the picks of บริษัทที่ติดตาม keep the quick filter they were made under', () => {
+  it('the key carries the filter (trimmed), and the page reads it back when it opens again', () => {
+    expect(followQOf(followSelKey(' นนทบุรี '))).toBe('นนทบุรี');
+    expect(followQOf(followSelKey(''))).toBe('');
+    expect(followQOf('')).toBe('');
+    // a key of another store (the search page's) is not a filter of this list
+    expect(followQOf('นนทบุรี')).toBe('');
   });
 });
 

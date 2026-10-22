@@ -14,7 +14,7 @@ import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore, type KVStore } from './storage';
 import { jointRole } from './sales';
-import { UNDO_SEND_MS, followedPicked, taskDates } from './bulk';
+import { UNDO_SEND_MS, followedPicked, refollowIds, taskDates } from './bulk';
 import type { Role } from './teamSync';
 import type { Company, Dataset, RoundRaw } from './types';
 
@@ -393,11 +393,11 @@ describe('bulk actions in a team (Code.gs in the simulator)', () => {
 });
 
 describe('the unfollow from บริษัทที่ติดตาม (the same path as the search page\'s bar)', () => {
-  /** The picked keys of the list, taken off the way BulkBar does: the followed ones, then setWatchMany. */
+  /** The picked keys of the list, taken off the way BulkBar does: the ids the picks stand for (raw, as stored),
+   *  then setWatchMany. */
   const unfollowPicked = (T: Tab, picks: number[]) => {
     const e = T.e;
-    const watch = new Set(e.crm.watch.map((id) => e.canonical(id)));
-    const gone = followedPicked(picks, watch, (id) => e.canonical(id));
+    const gone = followedPicked(picks, e.crm.watch, (id) => e.canonical(id));
     const r = e.setWatchMany(picks, false);
     return { gone, r };
   };
@@ -413,7 +413,7 @@ describe('the unfollow from บริษัทที่ติดตาม (the s
     expect([a, b, c].map((id) => A.e.company(id)!.fl.watch)).toEqual([false, false, false]);
     expect(A.e.feedItems('watch')).toEqual([]);
     // the undo: the same companies come back, nothing else
-    expect(A.e.setWatchMany(gone, true)).toEqual({ changed: 3, same: 0, local: 0 });
+    expect(refollowIds(A.e, gone)).toEqual({ changed: 3, same: 0 });
     expect([...A.e.crm.watch].sort()).toEqual([...before].sort());
     expect(A.e.company(x)!.fl.watch).toBe(false);
     expect(A.e.company(d)!.fl.watch).toBe(false);
@@ -437,10 +437,33 @@ describe('the unfollow from บริษัทที่ติดตาม (the s
     expect(L.e.crm.watch).toEqual([]);
     expect(L.e.company(ids[0])!.fl.watch).toBe(false);
     // and the undo goes to the team the same way
-    S.e.setWatchMany(gone, true);
+    refollowIds(S.e, gone);
     await settle(S, L);
     expect(new Set(L.e.crm.watch)).toEqual(new Set(ids.slice(0, 3)));
     expect(live(L, 'watch/')).toHaveLength(3);
     expect(live(L, 'watch/').map((x) => x.k.slice(6)).map(Number).sort()).toEqual([...ids.slice(0, 3)].sort((p, q) => p - q));
+  });
+
+  it('a company followed on a row merged into it comes back on that same id, in the team too (the undo is exactly what was taken off)', async () => {
+    const L = await lead();
+    const g = L.e.B.groups.find((x) => x.state === 'pending' && x.ids.length === 2);
+    expect(g).toBeDefined();
+    L.e.decide(g!.key, 'merge');
+    const main = L.e.canonical(g!.ids[0]);
+    const other = g!.ids.find((i) => i !== main)!;
+    expect(L.e.canonical(other)).toBe(main);
+    L.e.toggleWatch(other); // followed on the row before the merge: the list keeps that id
+    await settle(L);
+    expect(L.e.crm.watch).toEqual([other]);
+    const { gone, r } = unfollowPicked(L, [main]);
+    expect(gone).toEqual([other]);
+    expect(r).toEqual({ changed: 1, same: 0, local: 0 });
+    await settle(L);
+    expect(live(L, 'watch/')).toHaveLength(0);
+    expect(refollowIds(L.e, gone)).toEqual({ changed: 1, same: 0 });
+    await settle(L);
+    expect(L.e.crm.watch).toEqual([other]);
+    expect(live(L, 'watch/').map((x) => x.k)).toEqual(['watch/' + other]);
+    expect(L.e.company(main)!.fl.watch).toBe(true);
   });
 });

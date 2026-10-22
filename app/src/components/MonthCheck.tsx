@@ -79,10 +79,13 @@ const mineToFix = (r: ChkRow, me: string) => !!me && (r.by.some((b) => sameName(
 
 // ------------------------------------------------------------------ small parts
 
-/** The app's own tick box (.ckb, as DoneBox in Plan.tsx): a button with aria-pressed; "mixed" draws a bar. */
-export function TickBox({ on, mixed, label, disabled, onClick }: { on: boolean; mixed?: boolean; label: string; disabled?: boolean; onClick?: () => void }) {
+/** The app's own tick box (.ckb, as DoneBox in Plan.tsx): a button with aria-pressed; "mixed" draws a bar. `checkbox`:
+ *  announced as a checkbox (role, aria-checked) instead, as the boxes of บริษัทที่ติดตาม's rows are. */
+export function TickBox({ on, mixed, label, disabled, checkbox, onClick }: { on: boolean; mixed?: boolean; label: string; disabled?: boolean; checkbox?: boolean; onClick?: () => void }) {
+  const state: boolean | 'mixed' = mixed ? 'mixed' : on;
+  const aria: { role?: 'checkbox'; 'aria-checked'?: boolean | 'mixed'; 'aria-pressed'?: boolean | 'mixed' } = checkbox ? { role: 'checkbox', 'aria-checked': state } : { 'aria-pressed': state };
   return (
-    <button type="button" className={'ckb mc-cb ' + (on || mixed ? 'hv-dk on' : 'hv')} aria-pressed={mixed ? 'mixed' : on} aria-label={label} disabled={disabled} onClick={(ev) => (ev.stopPropagation(), onClick?.())}>
+    <button type="button" className={'ckb mc-cb ' + (on || mixed ? 'hv-dk on' : 'hv')} {...aria} aria-label={label} disabled={disabled} onClick={(ev) => (ev.stopPropagation(), onClick?.())}>
       {mixed ? (
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true" focusable="false"><path d="M6.5 12h11" /></svg>
       ) : on ? (

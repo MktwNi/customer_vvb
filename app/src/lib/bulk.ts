@@ -143,18 +143,43 @@ export const unfollowNote = (removed: number, notOn: number) =>
  *  picked were not followed (said, not counted). Its เลิกทำ puts back exactly the ones taken off. */
 export const unfollowedWord = (removed: number, notOn: number) =>
   removed ? `เลิกติดตาม ${fmtN(removed)} บริษัทแล้ว${notOn ? ` (ไม่ได้ติดตามอยู่ ${fmtN(notOn)})` : ''}` : unfollowNote(0, notOn);
-/** The picked companies the team follows, each once, in the order given (ids as the bar holds them, merged ids
- *  resolved by `canon`): exactly what a bulk unfollow takes off, and what its เลิกทำ puts back. */
-export function followedPicked(cos: readonly number[], watch: ReadonlySet<number>, canon: (id: number) => number) {
-  const seen = new Set<number>(), out: number[] = [];
-  for (const id of cos) {
-    const c = canon(id);
-    if (watch.has(c) && !seen.has(c)) {
-      seen.add(c);
-      out.push(c);
+/** The ids on the watch list (as stored, raw: a row merged into a company keeps its own id there) that stand for
+ *  the picked companies, in the list's order: exactly what a bulk unfollow takes off, and what its เลิกทำ puts back.
+ *  `canon`: an id to the company it is now (GccEngine.canonical). */
+export function followedPicked(cos: readonly number[], watch: readonly number[], canon: (id: number) => number) {
+  const want = new Set(cos.map(canon));
+  return watch.filter((id) => want.has(canon(id)));
+}
+/** What refollowIds needs of the engine (GccEngine has all of it). */
+export interface WatchSrc {
+  crm: { watch: number[] };
+  canonical(id: number): number;
+  can(c: CapId): boolean;
+  toggleWatch(id: number): void;
+  bulk(fn: () => void): void;
+}
+/**
+ * เลิกทำ of a bulk unfollow: the ids it took off go back on the watch list as they were (a company followed through
+ * a merged row's own id comes back on that id), in one batch. A company someone has followed again since is left as
+ * it is (counted in `same`). `changed`: the companies put back.
+ */
+export function refollowIds(e: WatchSrc, ids: readonly number[]) {
+  if (!e.can('edit.cust')) return { changed: 0, same: 0 };
+  // followed before this, by any id: those stay as they are
+  const was = new Set(e.crm.watch.map((id) => e.canonical(id)));
+  const back = new Set<number>(), there = new Set<number>();
+  e.bulk(() => {
+    for (const id of ids) {
+      const c = e.canonical(id);
+      if (was.has(c)) {
+        there.add(c);
+        continue;
+      }
+      back.add(c);
+      if (!e.crm.watch.includes(id)) e.toggleWatch(id);
     }
-  }
-  return out;
+  });
+  return { changed: back.size, same: there.size };
 }
 /** บริษัทที่ติดตาม's "เลือกทั้งหมด" box, its name with the count: "เลือกทั้งหมด (116 บริษัท)". */
 export const allPickWord = (n: number) => `เลือกทั้งหมด (${fmtN(n)} บริษัท)`;

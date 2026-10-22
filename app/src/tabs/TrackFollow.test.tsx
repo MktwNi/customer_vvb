@@ -54,6 +54,12 @@ describe('บริษัทที่ติดตาม for an account that may 
     expect(html).toContain('เลือกทั้งหมด (6 บริษัท)');
   });
 
+  it('every box is a checkbox (the rows and the header), none is a toggle button', () => {
+    expect(count(html, /role="checkbox"/g)).toBe(7);
+    expect(count(html, /aria-checked="false"/g)).toBe(7);
+    expect(html).not.toContain('aria-pressed');
+  });
+
   it('the bar is there in its quiet state, before anything is picked', () => {
     expect(html).toContain('bk-bar idle');
     expect(html).toContain('ติ๊กเลือกหลายบริษัท');
@@ -64,6 +70,7 @@ describe('บริษัทที่ติดตาม for an account that may 
   const html = listFor((c) => c.startsWith('view.'), 6);
 
   it('no boxes, no header box, no bar: the rows and their names stay', () => {
+    expect(html).not.toContain('role="checkbox"');
     expect(html).not.toContain('fw-pk');
     expect(html).not.toContain('aria-label="เลือก ');
     expect(html).not.toContain('เลือกทั้งหมด');
