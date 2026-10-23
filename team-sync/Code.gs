@@ -77,10 +77,11 @@
  *     comes as a deletion, since builds before expenses would list it as a cancelled income check.
  *   { action: 'push', key, ops: Op[] }          -> { ok, seq, n, rejected: string[] }   (+ denied: string[] and qt with tok:
  *                                                 what the push did about the quotations it stored, see "E-mail" below)
+ *                                                 (+ rows: Row[] for each nx op refused: the live record as the sheet holds it)
  *   { action: 'upload', key, docId, name, mime, data }  -> { ok, fileId, size }   (data = base64)
  *   { action: 'file', key, fileId }             -> { ok, name, mime, size, data }
  *   { action: 'delfile', key, fileId }          -> { ok }   (moves the file to the owner's Drive trash)
- *   Op  = { k: string, v?: any, del?: boolean, by?: string }
+ *   Op  = { k: string, v?: any, del?: boolean, by?: string, nx?: boolean }   nx = create only: refused while the record is live (push_)
  *   Row = { seq: number, k: string, v: any, del: boolean, by: string, at: string }
  *   With a token, `by` is always the account's display name (the op's by is ignored), every reply adds
  *   me, and a remembered session with fewer than 15 days left also gets a new tok + exp.
@@ -808,12 +809,26 @@ function push_(ops, actor) {
     const kept = {}; // each of them: 1 = a value, 0 = deleted (its last op in this push)
     const got = {}; // deal/ and ddoc/ rows as this push stores them (the quotation mails read them): { seq, v, del }
     const shares = []; // dshare/<id> of the deals this push deletes
+    // the create-only ops (nx) of this push: the sheet's latest row of each record they write, read once; cur also
+    // takes the rows this push stores. refused: the live record each refused op found, for the reply (rows)
+    const creates = {};
+    list.forEach((x) => {
+      if (x.op.nx && !x.delR && x.k && x.k.length <= 500) creates[x.k] = 1;
+    });
+    const cur = latestRows_(creates);
+    const refused = {};
     for (let i = 0; i < list.length; i++) {
       const x = list[i], op = x.op, k = x.k, del = x.del, delR = x.delR;
       if (!k || k.length > 500) continue;
       if (allowed ? !allowed(x) : k.indexOf('qchk/') === 0) {
         // not stored and uses no seq (qchk/ is written only by the qt_check action, also for the team code)
         (allowed ? denied : rejected).push(k);
+        continue;
+      }
+      // a create-only write does not replace a live record (one whose latest row is a value, by this push or before):
+      // not stored, and the record as the sheet holds it goes back in the reply, for the browser to rebase on
+      if (op.nx && !delR && has_(cur, k) && liveRow_(cur[k])) {
+        refused[k] = cur[k];
         continue;
       }
       let val = op.v;
@@ -835,7 +850,9 @@ function push_(ops, actor) {
       if (allowed) allowed.done(x, val);
       seq++;
       // with a token the row's author is the account, whatever the op says
-      rows.push([String(seq), k, v, del ? '1' : '0', String(actor.legacy ? op.by || '' : actor.name).slice(0, 100), now]);
+      const made = [String(seq), k, v, del ? '1' : '0', String(actor.legacy ? op.by || '' : actor.name).slice(0, 100), now];
+      rows.push(made);
+      cur[k] = made;
       stored[k] = 1;
       kept[k] = delR ? 0 : 1;
       if (/^(deal|ddoc)\//.test(k) || k === 'scfg/notify.cfg') got[k] = { seq: seq, v: delR ? null : val, del: delR };
@@ -894,6 +911,9 @@ function push_(ops, actor) {
     }
     const out = { ok: true, seq: seq, n: rows.length, rejected: rejected };
     if (!actor.legacy) out.denied = denied;
+    // the records the refused create-only ops found, as pull_ would show them to this account
+    const held = Object.keys(refused);
+    if (held.length) out.rows = held.map((k) => (actor.legacy ? rowOut_(refused[k]) : redact_(rowOut_(refused[k]), actor.caps)));
     if (qn) out._qn = qn; // taken off again by qtNowSend_ before the reply
     return out;
   });
@@ -1998,6 +2018,30 @@ function liveKeys_(test) {
     if (!(vals[i][2] === 1 || vals[i][2] === true || vals[i][2] === '1') && vals[i][1] !== '') out[k] = 1;
   }
   return out;
+}
+
+/**
+ * The latest row of each key `want` names that the sheet has, as stored ([seq, k, v, del, by, at]); keys it does not
+ * have are left out. Reads the sheet only when `want` names a key (caller holds the lock).
+ */
+function latestRows_(want) {
+  const out = {};
+  if (!Object.keys(want).length) return out;
+  const sh = sheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return out;
+  const vals = sh.getRange(2, 1, last - 1, HEADER.length).getValues();
+  for (let i = vals.length - 1; i >= 0; i--) {
+    const k = String(vals[i][1]);
+    if (has_(want, k) && !has_(out, k)) out[k] = vals[i];
+  }
+  return out;
+}
+
+/** A stored row that is a value the pull would show (not a deletion, not null): what a create-only write must not replace. */
+function liveRow_(r) {
+  const x = rowOut_(r);
+  return !x.del && x.v != null;
 }
 
 /** Two display names are the same person: compared as names are typed (spaces, case, NFC); '' never matches. */
