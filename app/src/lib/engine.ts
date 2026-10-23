@@ -5160,7 +5160,8 @@ export class GccEngine {
           if (fl) o.fl = fl;
           else delete o.fl;
         } else if (o.f) {
-          const f = mergeFields(p, o.f);
+          // an edit of a whole-record create still unanswered keeps its fields, so a refused create rebases it (rebaseOp)
+          const f = p.nx && !p.f ? o.f : mergeFields(p, o.f);
           if (f && p.f && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object') {
             // keep that tab's values for the fields it changed and this tab didn't; a list both edited
             // item by item is that tab's list with this tab's items added and removed
@@ -5902,6 +5903,22 @@ export class GccEngine {
         } else {
           drop.add(o.id!);
           dropped.push(row);
+        }
+      }
+      // a change queued after the batch, on a record the sheet refused (its edit made while the create was in flight):
+      // rebased on the same row, so it goes out on the team's record, not over it
+      for (const row of r.rows || []) {
+        const n = this.pending.get(row.k);
+        if (!n || batch.some((x) => x.id === n.id)) continue;
+        const res = rebaseOp(row, n);
+        if (!res) continue;
+        if ('drop' in res) {
+          drop.add(n.id!);
+          dropped.push(row);
+        } else {
+          const { nx: _nx, revive: _rv, sent: _s, ...plain } = n;
+          redo.set(n.id!, { ...plain, v: res.v });
+          applied.push({ ...row, v: res.v, del: false });
         }
       }
       const done = (o: SyncOp) => {

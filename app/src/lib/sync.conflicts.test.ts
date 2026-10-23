@@ -574,6 +574,79 @@ describe('create-only writes (a company typed by name, made by two people)', () 
     for (const e of [A, B]) expect(e.sales.deals[d.id]).toMatchObject({ forecast: 500000, phone: '021234567' });
     done(A, B);
   });
+
+  it('B edits its new company while its create is in flight: the teammate\'s phone stays and B\'s e-mail goes on top', async () => {
+    const N = NAME + ' แก้ระหว่างส่ง';
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const id = customIdOf(N);
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r)); // B's create waits in flight
+    B.addCustomer(co(N), { id });
+    const round = B.teamSync();
+    await tick();
+    A.addCustomer(co(N), { id }); // A types the same name, syncs and fills in the phone
+    await A.teamSync();
+    A.updateCustomer(id, { phone: '02-555-0101' });
+    await A.teamSync();
+    B.updateCustomer(id, { email: 'b@example.co.th' }); // B's own change, made while its create is in flight
+    await stored(B);
+    release();
+    await round;
+    await settle(A, B);
+    expect(sheet('cust/' + id)).toMatchObject({ name: N, phone: '02-555-0101', email: 'b@example.co.th' });
+    for (const e of [A, B]) expect(e.custom[id]).toMatchObject({ phone: '02-555-0101', email: 'b@example.co.th' });
+    expect(B.teamPendingN).toBe(0);
+    done(A, B);
+  });
+
+  it('B edits its imported company while its import rows are in flight: A\'s forecast stays and B\'s phone goes on top', async () => {
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const s0 = A.sales.cfg.sources[0];
+    const file = () => Object.assign(new Blob([JSON.stringify({ sources: [s0], rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'นำเข้าระหว่างส่ง', source: [s0] }] })]), { name: 'imp.json' }) as File;
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r));
+    await B.importTracker(file(), '2561');
+    const round = B.teamSync(); // B's import rows wait in flight
+    await tick();
+    await A.importTracker(file(), '2561'); // A imports the same file and changes the forecast
+    await A.teamSync();
+    const d = Object.values(A.sales.deals).find((x) => x.client === 'นำเข้าระหว่างส่ง')!;
+    A.updateDeal(d.id, { forecast: 500000 });
+    await A.teamSync();
+    B.updateDeal(d.id, { phone: '021234567' }); // B's edit of its own row, made while the import is in flight
+    await stored(B);
+    release();
+    await round;
+    await settle(A, B);
+    expect(sheet('deal/' + d.id)).toMatchObject({ forecast: 500000, phone: '021234567' });
+    for (const e of [A, B]) expect(e.sales.deals[d.id]).toMatchObject({ forecast: 500000, phone: '021234567' });
+    done(A, B);
+  });
+
+  it('B types the same new company again while its create is in flight: that second create is dropped too and the team\'s record stands', async () => {
+    const N = NAME + ' ซ้ำระหว่างส่ง';
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const id = customIdOf(N);
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r));
+    B.addCustomer(co(N), { id });
+    const round = B.teamSync();
+    await tick();
+    A.addCustomer(co(N), { id });
+    await A.teamSync();
+    A.updateCustomer(id, { phone: '02-555-0101' });
+    await A.teamSync();
+    B.addCustomer({ ...co(N), email: 'b@example.co.th' }, { id }); // typed again, still in flight
+    await stored(B);
+    release();
+    await round;
+    await settle(A, B);
+    expect(sheet('cust/' + id)).toMatchObject({ name: N, phone: '02-555-0101' });
+    expect(sheet('cust/' + id)).not.toHaveProperty('email', 'b@example.co.th');
+    for (const e of [A, B]) expect(e.custom[id]).toMatchObject({ phone: '02-555-0101' });
+    expect(B.teamPendingN).toBe(0);
+    done(A, B);
+  });
 });
 
 describe('the team script and its create-only flag (nx), on its own', () => {
