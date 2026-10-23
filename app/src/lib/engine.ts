@@ -5160,7 +5160,8 @@ export class GccEngine {
           if (fl) o.fl = fl;
           else delete o.fl;
         } else if (o.f) {
-          const f = mergeFields(p, o.f);
+          // an edit of a whole-record create still unanswered keeps its fields, so a refused create rebases it (rebaseOp)
+          const f = p.nx && !p.f ? o.f : mergeFields(p, o.f);
           if (f && p.f && p.v && typeof p.v === 'object' && o.v && typeof o.v === 'object') {
             // keep that tab's values for the fields it changed and this tab didn't; a list both edited
             // item by item is that tab's list with this tab's items added and removed
@@ -5859,9 +5860,12 @@ export class GccEngine {
       batch.forEach((o) => (o.sent = at));
       await this.writePending(this.qk(cfg), (ops) => ops.map((x) => (ids.has(x.id) ? { ...x, sent: at } : x))).catch(() => {});
       if (!live()) return;
-      let r: { rejected?: string[]; denied?: string[]; qt?: unknown };
+      let r: { rejected?: string[]; denied?: string[]; qt?: unknown; rows?: SyncRow[] };
       try {
-        r = await call<{ rejected?: string[]; denied?: string[]; qt?: unknown }>(this.transport, cfg.url, this.cred(cfg), { action: 'push', ops: batch.map(({ k, v, del, by }) => ({ k, v, del, by })) });
+        r = await call<{ rejected?: string[]; denied?: string[]; qt?: unknown; rows?: SyncRow[] }>(this.transport, cfg.url, this.cred(cfg), {
+          action: 'push',
+          ops: batch.map(({ k, v, del, by, nx }) => ({ k, v, del, by, ...(nx && { nx: true }) })), // nx: the script refuses it on a live record (rows)
+        });
       } catch (e) {
         // the sheet answered and refused (busy, wrong code): these were certainly not delivered
         if (e instanceof TeamSyncError && e.code) {
@@ -5884,19 +5888,55 @@ export class GccEngine {
       // done: the op that was sent, or an older change to a record whose newer value was sent;
       // a change made while the request was in flight stays queued
       const sent = new Map(batch.map((o) => [o.k, o]));
+      // A create-only op (nx) the sheet refused: the record it found comes back in the reply (rows). rebaseOp decides
+      // on it as on a pulled row: the create is dropped (the team's record stands), or its fields go on top of the
+      // team's record and that is sent again as an ordinary change (nx off). Neither counts as delivered.
+      const drop = new Set<string>(), redo = new Map<string, SyncOp>(), applied: SyncRow[] = [], dropped: SyncRow[] = [];
+      for (const row of r.rows || []) {
+        const o = batch.find((x) => x.nx && x.k === row.k);
+        if (!o) continue;
+        const res = rebaseOp(row, o);
+        if (res && !('drop' in res)) {
+          const { nx: _nx, revive: _rv, sent: _s, ...plain } = o;
+          redo.set(o.id!, { ...plain, v: res.v });
+          applied.push({ ...row, v: res.v, del: false });
+        } else {
+          drop.add(o.id!);
+          dropped.push(row);
+        }
+      }
+      // a change queued after the batch, on a record the sheet refused (its edit made while the create was in flight):
+      // rebased on the same row, so it goes out on the team's record, not over it
+      for (const row of r.rows || []) {
+        const n = this.pending.get(row.k);
+        if (!n || batch.some((x) => x.id === n.id)) continue;
+        const res = rebaseOp(row, n);
+        if (!res) continue;
+        if ('drop' in res) {
+          drop.add(n.id!);
+          dropped.push(row);
+        } else {
+          const { nx: _nx, revive: _rv, sent: _s, ...plain } = n;
+          redo.set(n.id!, { ...plain, v: res.v });
+          applied.push({ ...row, v: res.v, del: false });
+        }
+      }
       const done = (o: SyncOp) => {
+        if (drop.has(o.id!)) return true;
+        if (redo.has(o.id!)) return false;
         const x = sent.get(o.k);
         return !!x && (x.id === o.id || !newer(o, x));
       };
-      this.unsaved.forEach((o, k) => done(o) && this.unsaved.delete(k));
+      const instead = (o: SyncOp) => redo.get(o.id!) ?? o;
+      this.unsaved.forEach((o, k) => (done(o) ? this.unsaved.delete(k) : this.unsaved.set(k, instead(o))));
       // acknowledged in this sheet's own queue even if the session changed meanwhile (they were delivered)
-      const left = await this.writePending(this.qk(cfg), (ops) => ops.filter((o) => !done(o) && !this.wasDelivered(o))).then(
+      const left = await this.writePending(this.qk(cfg), (ops) => ops.filter((o) => !done(o) && !this.wasDelivered(o)).map(instead)).then(
         (l) => {
           this.delivered.clear(); // the stored queue no longer lists them
           return l;
         },
         () => {
-          batch.forEach((o) => {
+          batch.filter(done).forEach((o) => {
             const d = this.delivered.get(o.k);
             if (!d || newer(o, d)) this.delivered.set(o.k, o);
           });
@@ -5904,7 +5944,9 @@ export class GccEngine {
         },
       );
       if (!live()) return;
-      this.pending = this.withUnsaved(new Map((left || [...this.pending.values()].filter((o) => !done(o))).map((o) => [o.k, o])));
+      this.pending = this.withUnsaved(new Map((left || [...this.pending.values()].filter((o) => !done(o)).map(instead)).map((o) => [o.k, o])));
+      // the team's records as the refused creates found them (a record still queued keeps its own change, as a pull does)
+      this.applyRows(applied.concat(dropped.filter((x) => !this.pending.has(x.k))));
     }
     if (seeding && !cfg.seeded && sg === this.seedGen && live()) {
       cfg.seeded = true; // everything local was pushed from memory

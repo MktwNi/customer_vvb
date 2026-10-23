@@ -6,9 +6,10 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
+import { customIdOf } from './dealCompany';
 import { memoryStore } from './storage';
 import { TeamSyncError } from './teamSync';
 import type { PlanInput } from './sales';
@@ -494,5 +495,192 @@ describe('payment plan installments (dpay) edited by two people', () => {
     await settle(A2, A, B);
     for (const e of [A, A2, B]) expect(e.sales.pays[`${d.id}/PAY1`]).toMatchObject({ note: 'แก้ในแท็บแรก', rcv: '2026-10-04' });
     done(A, A2, B);
+  });
+});
+
+/** What each push of a browser carried, and what the script replied (its create-only ops show as nx). */
+function recordPushes(e: GccEngine) {
+  const t = e.transport;
+  const log: { ops: { k: string; nx?: boolean }[]; reply: { rows?: { k: string; v: Record<string, unknown> }[] } }[] = [];
+  e.transport = async (u, body) => {
+    const r = await t(u, body);
+    if (body.action === 'push') log.push({ ops: body.ops as { k: string; nx?: boolean }[], reply: r as (typeof log)[number]['reply'] });
+    return r;
+  };
+  return log;
+}
+
+describe('create-only writes (a company typed by name, made by two people)', () => {
+  const NAME = 'บริษัทพิมพ์พร้อมกัน';
+  const co = (name: string) => ({ name, jur: '', prov: '', ind: '', biz: '', addr: '', phone: '', email: '', web: '', contact: '', note: '' });
+
+  it('B pulls, A creates the company and edits it, then B\'s create reaches the sheet: A\'s edit stays and B rebases to it', async () => {
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const id = customIdOf(NAME);
+    const pushes = recordPushes(B);
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r)); // B's pull is done; its push waits
+    B.addCustomer(co(NAME), { id }); // B typed the name
+    const round = B.teamSync();
+    await tick();
+    A.addCustomer(co(NAME), { id }); // A typed the same name and syncs it ...
+    await A.teamSync();
+    A.updateCustomer(id, { phone: '02-555-0101' }); // ... then fills in the phone
+    await A.teamSync();
+    release();
+    await round;
+    await settle(A, B);
+    // the create went out as create-only, the script refused it and replied with the record as it stood
+    const sentNx = pushes.find((p) => p.ops.some((o) => o.k === 'cust/' + id && o.nx));
+    expect(sentNx?.reply.rows).toEqual([expect.objectContaining({ k: 'cust/' + id, v: expect.objectContaining({ phone: '02-555-0101' }) })]);
+    expect(sheet('cust/' + id)).toMatchObject({ name: NAME, phone: '02-555-0101' });
+    for (const e of [A, B]) expect(e.custom[id]).toMatchObject({ name: NAME, phone: '02-555-0101' });
+    expect(B.teamPendingN).toBe(0);
+    done(A, B);
+  });
+
+  it('a company a teammate deleted is made again by a create-only write with revive: the create goes through', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const id = customIdOf(NAME + ' ลบแล้ว');
+    A.addCustomer(co(NAME + ' ลบแล้ว'), { id });
+    await A.teamSync();
+    A.deleteCustomer(id);
+    await A.teamSync();
+    expect(sheet('cust/' + id)).toBeNull();
+    B.addCustomer(co(NAME + ' ลบแล้ว'), { id }); // B typed the same name after the deletion
+    await settle(B, A);
+    expect(sheet('cust/' + id)).toMatchObject({ name: NAME + ' ลบแล้ว' });
+    for (const e of [A, B]) expect(e.custom[id]).toMatchObject({ name: NAME + ' ลบแล้ว' });
+    done(A, B);
+  });
+  it('an imported company edited here before the import reached the team: the edit goes on top of a teammate\'s change', async () => {
+    const [{ e: A }, { e: B }] = await team({ name: 'A' }, { name: 'B' });
+    const s0 = A.sales.cfg.sources[0];
+    const file = () => Object.assign(new Blob([JSON.stringify({ sources: [s0], rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'นำเข้าแล้วแก้', source: [s0] }] })]), { name: 'imp.json' }) as File;
+    await A.importTracker(file(), '2561');
+    await A.teamSync();
+    await B.importTracker(file(), '2561'); // B has not pulled A's import: create-only rows
+    await stored(B);
+    const d = Object.values(B.sales.deals).find((x) => x.client === 'นำเข้าแล้วแก้')!;
+    const pushes = recordPushes(B);
+    A.updateDeal(d.id, { forecast: 500000 }); // A changes the company meanwhile
+    await A.teamSync();
+    B.updateDeal(d.id, { phone: '021234567' }); // B's edit of its own imported row
+    await stored(B);
+    await settle(B, A);
+    // B's edit was sent create-only, refused on the live row, and sent again as an ordinary change on top of A's record
+    expect(pushes.some((p) => p.ops.some((o) => o.k === 'deal/' + d.id && o.nx) && p.reply.rows?.some((x) => x.k === 'deal/' + d.id))).toBe(true);
+    expect(sheet('deal/' + d.id)).toMatchObject({ forecast: 500000, phone: '021234567' });
+    for (const e of [A, B]) expect(e.sales.deals[d.id]).toMatchObject({ forecast: 500000, phone: '021234567' });
+    done(A, B);
+  });
+
+  it('B edits its new company while its create is in flight: the teammate\'s phone stays and B\'s e-mail goes on top', async () => {
+    const N = NAME + ' แก้ระหว่างส่ง';
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const id = customIdOf(N);
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r)); // B's create waits in flight
+    B.addCustomer(co(N), { id });
+    const round = B.teamSync();
+    await tick();
+    A.addCustomer(co(N), { id }); // A types the same name, syncs and fills in the phone
+    await A.teamSync();
+    A.updateCustomer(id, { phone: '02-555-0101' });
+    await A.teamSync();
+    B.updateCustomer(id, { email: 'b@example.co.th' }); // B's own change, made while its create is in flight
+    await stored(B);
+    release();
+    await round;
+    await settle(A, B);
+    expect(sheet('cust/' + id)).toMatchObject({ name: N, phone: '02-555-0101', email: 'b@example.co.th' });
+    for (const e of [A, B]) expect(e.custom[id]).toMatchObject({ phone: '02-555-0101', email: 'b@example.co.th' });
+    expect(B.teamPendingN).toBe(0);
+    done(A, B);
+  });
+
+  it('B edits its imported company while its import rows are in flight: A\'s forecast stays and B\'s phone goes on top', async () => {
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const s0 = A.sales.cfg.sources[0];
+    const file = () => Object.assign(new Blob([JSON.stringify({ sources: [s0], rows: [{ type: 'section', name: 'TGO' }, { type: 'client', client: 'นำเข้าระหว่างส่ง', source: [s0] }] })]), { name: 'imp.json' }) as File;
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r));
+    await B.importTracker(file(), '2561');
+    const round = B.teamSync(); // B's import rows wait in flight
+    await tick();
+    await A.importTracker(file(), '2561'); // A imports the same file and changes the forecast
+    await A.teamSync();
+    const d = Object.values(A.sales.deals).find((x) => x.client === 'นำเข้าระหว่างส่ง')!;
+    A.updateDeal(d.id, { forecast: 500000 });
+    await A.teamSync();
+    B.updateDeal(d.id, { phone: '021234567' }); // B's edit of its own row, made while the import is in flight
+    await stored(B);
+    release();
+    await round;
+    await settle(A, B);
+    expect(sheet('deal/' + d.id)).toMatchObject({ forecast: 500000, phone: '021234567' });
+    for (const e of [A, B]) expect(e.sales.deals[d.id]).toMatchObject({ forecast: 500000, phone: '021234567' });
+    done(A, B);
+  });
+
+  it('B types the same new company again while its create is in flight: that second create is dropped too and the team\'s record stands', async () => {
+    const N = NAME + ' ซ้ำระหว่างส่ง';
+    const [{ e: A }, { e: B, net: nb }] = await team({ name: 'A' }, { name: 'B' });
+    const id = customIdOf(N);
+    let release!: () => void;
+    nb.hold = new Promise<void>((r) => (release = r));
+    B.addCustomer(co(N), { id });
+    const round = B.teamSync();
+    await tick();
+    A.addCustomer(co(N), { id });
+    await A.teamSync();
+    A.updateCustomer(id, { phone: '02-555-0101' });
+    await A.teamSync();
+    B.addCustomer({ ...co(N), email: 'b@example.co.th' }, { id }); // typed again, still in flight
+    await stored(B);
+    release();
+    await round;
+    await settle(A, B);
+    expect(sheet('cust/' + id)).toMatchObject({ name: N, phone: '02-555-0101' });
+    expect(sheet('cust/' + id)).not.toHaveProperty('email', 'b@example.co.th');
+    for (const e of [A, B]) expect(e.custom[id]).toMatchObject({ phone: '02-555-0101' });
+    expect(B.teamPendingN).toBe(0);
+    done(A, B);
+  });
+});
+
+describe('the team script and its create-only flag (nx), on its own', () => {
+  const put = (ops: unknown[]) => sim.post({ action: 'push', key: KEY, ops }) as { ok: boolean; n: number; rows?: { k: string; v: unknown; del: boolean; by: string }[] };
+
+  beforeEach(() => {
+    sim = createGasSim({ teamKey: KEY });
+  });
+
+  it('a create-only write on a live row stores nothing and replies with the row as the sheet holds it', () => {
+    put([{ k: 'cust/9', v: { name: 'หนึ่ง' }, by: 'A' }]);
+    expect(put([{ k: 'cust/9', v: { name: 'สอง' }, by: 'B', nx: true }])).toMatchObject({ ok: true, n: 0, rows: [{ k: 'cust/9', v: { name: 'หนึ่ง' }, del: false, by: 'A' }] });
+    expect(sheet('cust/9')).toEqual({ name: 'หนึ่ง' });
+  });
+
+  it('a create-only write on a deleted row, or on no row, is stored as before', () => {
+    put([{ k: 'cust/8', v: { name: 'ก' }, by: 'A' }, { k: 'cust/8', del: true, by: 'A' }]);
+    expect(put([{ k: 'cust/8', v: { name: 'ข' }, by: 'B', nx: true }])).toMatchObject({ ok: true, n: 1 });
+    expect(sheet('cust/8')).toEqual({ name: 'ข' });
+    expect(put([{ k: 'cust/7', v: { name: 'ค' }, by: 'B', nx: true }])).toMatchObject({ ok: true, n: 1 });
+    expect(sheet('cust/7')).toEqual({ name: 'ค' });
+  });
+
+  it('a create-only write after a value stored for the same record in the same push is refused too', () => {
+    const r = put([{ k: 'cust/5', v: { name: 'หนึ่ง' }, by: 'A' }, { k: 'cust/5', v: { name: 'สอง' }, by: 'B', nx: true }]);
+    expect(r).toMatchObject({ ok: true, n: 1, rows: [{ k: 'cust/5', v: { name: 'หนึ่ง' } }] });
+    expect(sheet('cust/5')).toEqual({ name: 'หนึ่ง' });
+  });
+
+  it('an ordinary write over a live row still overwrites it, and its reply has no rows', () => {
+    put([{ k: 'cust/6', v: { name: 'หนึ่ง' }, by: 'A' }]);
+    const r = put([{ k: 'cust/6', v: { name: 'สอง' }, by: 'B' }]);
+    expect(r).toMatchObject({ ok: true, n: 1 });
+    expect(r.rows).toBeUndefined();
+    expect(sheet('cust/6')).toEqual({ name: 'สอง' });
   });
 });
