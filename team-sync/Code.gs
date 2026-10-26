@@ -77,7 +77,7 @@
  *     comes as a deletion, since builds before expenses would list it as a cancelled income check.
  *   { action: 'push', key, ops: Op[] }          -> { ok, seq, n, rejected: string[] }   (+ denied: string[] and qt with tok:
  *                                                 what the push did about the quotations it stored, see "E-mail" below)
- *                                                 (+ rows: Row[] for each nx op refused, and for each tgo/ write that would change a
+ *                                                 (+ rows: Row[] for each nx op refused, and for each tgo/ write or deletion that would change a
  *                                                 decision a teammate made: the live record as the sheet holds it)
  *     dep (optional, a key or a list of keys): the op is stored only when one of those rows is an accepted tgo/ record
  *     (a company made for certificates); otherwise it is refused and listed in rejected, not stored.
@@ -324,7 +324,7 @@ const KEY_CAP = [
   // the TGO review queue (lib/tgoSync.ts): a pulled certificate is tgo/<id> = 'p' (pending), then 'a' (accepted, its
   // company and certificate join the registry) or 'r' (rejected, kept so a pull never adds it again). Pulling, accepting
   // and rejecting are edits of the registry, so edit.cust (the same as the customers' records); a viewer only reads it.
-  // A decision is final: once a row is 'a' or 'r', a write that changes it is refused (push_, tgoDecided_).
+  // A decision is final: once a row is 'a' or 'r', a write that changes it or deletes it is refused (push_, tgoDecided_).
   { p: 'tgo/', w: 'edit.cust', d: 'edit.cust' },
 ];
 /** Capabilities that write something by push: an account with none of them may not push at all. */
@@ -856,9 +856,10 @@ function push_(ops, actor) {
         refused[k] = cur[k];
         continue;
       }
-      // a certificate a teammate accepted or rejected keeps that decision: a write that would change it is refused
-      // (the record as the sheet holds it goes back in the reply, so the browser takes the decision it was refused)
-      if (k.indexOf('tgo/') === 0 && !op.nx && !delR && has_(cur, k) && liveRow_(cur[k]) && tgoDecided_(cur[k], op.v)) {
+      // a write that changes a decided row (accepted or rejected by a teammate) is refused, and so is a deletion of one
+      // (a browser that still sees it as waiting cannot take it away); a waiting row may be deleted (a revert). The record
+      // as the sheet holds it goes back in the reply, so the browser takes the decision it was refused
+      if (k.indexOf('tgo/') === 0 && has_(cur, k) && liveRow_(cur[k]) && tgoDecided_(cur[k], del ? null : op.v)) {
         refused[k] = cur[k];
         continue;
       }
@@ -2085,11 +2086,20 @@ function tgoState_(r) {
   const v = rowOut_(r).v;
   return v && typeof v === 'object' && typeof v.st === 'string' ? v.st : '';
 }
-/** A decision (accepted or rejected) that a write to the row would change: any other value, a deletion or nothing. */
+/**
+ * A decision (accepted or rejected) that a write to the row would change: any other value, a deletion, or the same st
+ * with another decider's by, another at, another note or another company (gid): a stale second decision would overwrite
+ * the first. The same decision again (a retry after a lost reply) changes nothing and is stored.
+ */
 function tgoDecided_(r, v) {
   const was = tgoState_(r);
   if (was !== 'a' && was !== 'r') return false;
-  return !v || typeof v !== 'object' || v.st !== was;
+  if (!v || typeof v !== 'object' || v.st !== was) return true;
+  const old = rowOut_(r).v || {};
+  return String(v.by == null ? '' : v.by) !== String(old.by == null ? '' : old.by) ||
+    String(v.at == null ? '' : v.at) !== String(old.at == null ? '' : old.at) ||
+    String(v.note == null ? '' : v.note) !== String(old.note == null ? '' : old.note) ||
+    (v.gid == null ? null : v.gid) !== (old.gid == null ? null : old.gid);
 }
 /** An op with dep goes through when one of those queue rows is accepted: as stored in this push, or before. */
 function depsAccepted_(cur, op) {

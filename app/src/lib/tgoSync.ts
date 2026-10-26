@@ -150,7 +150,8 @@ const be2iso = (s: string) => {
   if (y > 2400) y -= 543;
   return `${y}-${pad(m[2])}-${pad(m[1])}`;
 };
-const normOrg = (s: string) => String(s || '').replace(/\s+/g, '').toLowerCase();
+// a repeated บริษัท prefix counts once, as a sheet's organisation name is read (core fixName), so both sources key alike
+export const normOrg = (s: string) => String(s || '').trim().replace(/^(บริษัท\s*)+(?=บริษัท)/, '').replace(/\s+/g, '').toLowerCase();
 export const key = (cert: string, org: string) => String(cert || '').replace(/\s+/g, '').toUpperCase() + '|' + normOrg(org);
 
 async function get(url: string, proxy: string) {

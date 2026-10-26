@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
+import type { CertFields } from './registryXlsx';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -249,5 +250,155 @@ describe('team mode: a browser that has not synced cannot undo a teammate\'s dec
     const big = 'tgo/' + 'x'.repeat(600);
     const out = sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'big1', t: 1, k: big, v: { st: 'p' } }] });
     expect(out).toMatchObject({ ok: true, rejected: [big] });
+  });
+});
+
+describe('team mode: a removal cannot take away a row the team decided', () => {
+  it('the script refuses a deletion of an accepted row from a browser that still sees it as waiting, and returns the row', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [Q1];
+    await L.e.runSync(false);
+    await settle(L, A); // A holds the row as waiting
+    expect(L.e.approveTgo(['77001'])).toBe(1);
+    await settle(L); // the team accepted it; A has not synced since
+    // A removes its waiting copy (what a revert of its save sends): the script refuses it and reports the row as it stands
+    const out = sim.post({ action: 'push', cv: 5, tok: A.e.session!.tok, ops: [{ id: 'del77001', t: 1, k: 'tgo/77001', del: true }] });
+    expect(out).toMatchObject({ ok: true, n: 0, rows: [{ k: 'tgo/77001', del: false, v: { st: 'a' } }] });
+    const last = teamRows().filter((r: unknown[]) => r[1] === 'tgo/77001').pop();
+    expect(last?.[3]).toBe('0');
+    expect(String(last?.[2])).toContain('"st":"a"');
+    await settle(A, L);
+    for (const t of [L, A]) expect(rids(t.e.tgoRows('a'))).toEqual(['77001']);
+  });
+
+  it('a revert of a sheet save keeps a row the team accepted since, and the result says so', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    // the lead saves a sheet with a new certificate (typed web id 77101): it waits in the queue for the team
+    const f: CertFields = {
+      cert: 'TGO CFO FY27-781', org: 'บริษัท ชีตทดสอบ จำกัด', branch: 'สำนักงานใหญ่', act: 'ผลิตอาหาร', addr: '1 ถนนทดสอบ กรุงเทพฯ 10110', zip: '10110',
+      prov: 'กรุงเทพมหานคร', ind: 'อาหาร', size: 'SME', ap: '2026-02-01', ex: '2027-01-31', s1: 0.6, s2: 0.3, s3: 0.1, fy: 'FY27', note: '', webId: '77101',
+    };
+    expect(await L.e.applyCertRows([{ rowNo: 2, f, errors: [] }], 'a.xlsx')).toMatch(/^บันทึกแล้ว: เข้ารอตรวจ 1 ใบ/);
+    await settle(L, A);
+    expect(rids(A.e.tgoRows('p'))).toEqual(['77101']);
+    expect(A.e.approveTgo(['77101'])).toBe(1);
+    await settle(A); // the team accepted it; L has not synced since its save
+    // L reverts its save: its copy still says waiting, so the script is asked to remove a row the team has accepted
+    const feedStub = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => new Response(JSON.stringify(json(String(u).split('/').pop()!)))));
+    try {
+      await L.e.revertUpload();
+    } finally {
+      vi.stubGlobal('fetch', feedStub);
+    }
+    expect(L.e.tgoRows('p')).toEqual([]);
+    expect(rids(L.e.tgoRows('a'))).toEqual(['77101']);
+    expect(L.e.B.certs.some((c) => c.cert === f.cert)).toBe(true);
+    expect(L.e.up.msg).toContain('คงไว้ 1 ใบ');
+    expect(L.e.up.msg).toContain('ลบจากทีมไม่ได้');
+    expect(L.e.up.msg).not.toContain('ลบใบที่รอตรวจจากการบันทึกชีต 1 ใบ');
+    await settle(L, A);
+    for (const t of [L, A]) expect(rids(t.e.tgoRows('a'))).toEqual(['77101']);
+  });
+
+  it('a waiting row one browser wrote is removed by a revert from the lead\'s other browser, on the server and locally', async () => {
+    const L = await lead();
+    // the lead's second browser (the same account) logs in before any sheet is saved
+    const L2 = mk('L2');
+    expect(await L2.e.teamOpen(URL)).toBe('accounts');
+    await L2.e.teamLogin('lead', 'lead-pass-123', true);
+    for (const t of [L, L2]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    await settle(L, L2);
+    const f: CertFields = {
+      cert: 'TGO CFO FY27-782', org: 'บริษัท ชีตลบได้ จำกัด', branch: 'สำนักงานใหญ่', act: 'ผลิตอาหาร', addr: '2 ถนนทดสอบ กรุงเทพฯ 10110', zip: '10110',
+      prov: 'กรุงเทพมหานคร', ind: 'อาหาร', size: 'SME', ap: '2026-02-01', ex: '2027-01-31', s1: 0.6, s2: 0.3, s3: 0.1, fy: 'FY27', note: '', webId: '77102',
+    };
+    // browser L saves a sheet with the certificate: its row waits in the queue, and the team holds it
+    expect(await L.e.applyCertRows([{ rowNo: 2, f, errors: [] }], 'b.xlsx')).toMatch(/^บันทึกแล้ว: เข้ารอตรวจ 1 ใบ/);
+    await settle(L);
+    // browser L2 saves the same sheet before it has synced: the team's row is live, so its create is refused and L2 takes
+    // the team's waiting row as its own. L2's save is the one that reverts it
+    expect(await L2.e.applyCertRows([{ rowNo: 2, f, errors: [] }], 'b.xlsx')).toMatch(/^บันทึกแล้ว: เข้ารอตรวจ 1 ใบ/);
+    await settle(L2, L);
+    expect(rids(L2.e.tgoRows('p'))).toEqual(['77102']);
+    expect(rids(L.e.tgoRows('p'))).toEqual(['77102']);
+    // L2 reverts its save: the waiting row goes off this browser and the script stores the removal (it is not refused)
+    const feedStub = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => new Response(JSON.stringify(json(String(u).split('/').pop()!)))));
+    try {
+      await L2.e.revertUpload();
+    } finally {
+      vi.stubGlobal('fetch', feedStub);
+    }
+    expect(L2.e.tgoRows('p')).toEqual([]);
+    expect(L2.e.up.msg).toContain('ลบใบที่รอตรวจจากการบันทึกชีต 1 ใบ');
+    expect(L2.e.up.msg).not.toContain('ลบจากทีมไม่ได้');
+    const last = teamRows().filter((r: unknown[]) => r[1] === 'tgo/77102').pop();
+    expect(last?.[3]).toBe('1');
+    expect(last?.[2]).toBe('');
+    // the team's other browser drops the row too, and nothing is left waiting anywhere
+    await settle(L2, L);
+    for (const t of [L, L2]) expect(t.e.tgoRows('p')).toEqual([]);
+  });
+
+  it('a stale second approval of a row the team accepted is refused, and the first decider\'s by, at and note stay', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [Q1];
+    await L.e.runSync(false);
+    await settle(L, A); // A holds the row as waiting
+    expect(L.e.approveTgo(['77001'])).toBe(1);
+    await settle(L); // the team accepted it: the lead's decision is the stored one
+    const first = teamRows().filter((r: unknown[]) => r[1] === 'tgo/77001').pop();
+    const firstV = JSON.parse(String(first?.[2]));
+    expect(firstV).toMatchObject({ st: 'a', by: 'หมิว' });
+    // A has not synced since before the decision: it still sees the row waiting and accepts it too (same st, another decider)
+    expect(A.e.approveTgo(['77001'])).toBe(1);
+    await settle(A, L);
+    const last = teamRows().filter((r: unknown[]) => r[1] === 'tgo/77001').pop();
+    expect(last?.[2]).toBe(first?.[2]); // the stored decision is the lead's: nothing was written over it
+    expect(last?.[3]).toBe(first?.[3]);
+    for (const t of [L, A]) {
+      expect(rids(t.e.tgoRows('a'))).toEqual(['77001']);
+      expect(t.e.tgoRows('a')[0].rec).toMatchObject({ by: 'หมิว' });
+    }
+  });
+
+  it('a resend of the same decision, unchanged, is still stored (a retry after a lost reply changes nothing)', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [Q1];
+    await L.e.runSync(false);
+    await settle(L, A);
+    expect(L.e.approveTgo(['77001'])).toBe(1);
+    await settle(L);
+    const stored = JSON.parse(String(teamRows().filter((r: unknown[]) => r[1] === 'tgo/77001').pop()?.[2]));
+    const out = sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'retry77001', t: 1, k: 'tgo/77001', v: stored }] });
+    expect(out).toMatchObject({ ok: true, n: 1 });
+    expect(out).not.toHaveProperty('rows');
+  });
+
+  it('a deletion that also carries a value is still a deletion: the script refuses it for an accepted row', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [Q1];
+    await L.e.runSync(false);
+    await settle(L, A);
+    expect(L.e.approveTgo(['77001'])).toBe(1);
+    await settle(L);
+    // a push that marks the accepted row deleted, and still sends its decided value, is refused like a plain deletion
+    const out = sim.post({ action: 'push', cv: 5, tok: A.e.session!.tok, ops: [{ id: 'delv77001', t: 1, k: 'tgo/77001', del: true, v: { st: 'a' } }] });
+    expect(out).toMatchObject({ ok: true, n: 0, rows: [{ k: 'tgo/77001', del: false, v: { st: 'a' } }] });
+    const last = teamRows().filter((r: unknown[]) => r[1] === 'tgo/77001').pop();
+    expect(last?.[3]).toBe('0');
+    await settle(A, L);
+    for (const t of [L, A]) expect(rids(t.e.tgoRows('a'))).toEqual(['77001']);
   });
 });

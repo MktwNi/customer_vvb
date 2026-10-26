@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.setConfig({ testTimeout: 30000 }); // each pull and approval rebuilds the whole registry
 import { GccEngine } from './engine';
 import { memoryStore, PREF } from './storage';
-import { feedUrl, fetchFeed, fromFeed, provName, type FeedRow } from './tgoSync';
+import { FEED_URL, feedUrl, fetchFeed, fromFeed, provName, type FeedRow } from './tgoSync';
 import type { Cert, Dataset, RoundRaw } from './types';
 
 const DATA = join(__dirname, '..', '..', '..', 'project', 'data');
@@ -218,6 +218,37 @@ describe('pull into the review queue', () => {
     expect(c.addr).toBe(NEW_CO.addr);
   });
 
+  it('a queued certificate without details gets them from the feed row with its number, even when another row with its web id comes after it', async () => {
+    const e = engine();
+    const bare = { ...NEW_CO, addr: '', ind: '', size: '', zip: '', changwat: '', s1: null, s2: null, s3: null } as FeedRow;
+    serve({ ok: true, rows: [bare], webTotal: 2 });
+    await e.runSync(false);
+    // the same web id again, in one pull: the full row of the certificate (under its organisation's other spelling, so the
+    // organisation key does not find it), then another certificate with that web id, which comes last
+    const full = { ...NEW_CO, org: 'บริษัท ทดสอบซิงก์ชีต (เปลี่ยนชื่อ) จำกัด' } as FeedRow;
+    const other = row({ id: '99002', cert: 'TGO CFO FY27-950', org: 'บริษัท อื่นที่ใช้รหัสเดียวกัน จำกัด', addr: '9 ถนนอื่น กรุงเทพฯ 10110', ind: 'การผลิต', size: 'SME' });
+    serve({ ok: true, rows: [full, other], webTotal: 3 });
+    await e.runSync(false);
+    const c = e.tgoRows('p').find((x) => x.rec.cert === NEW_CO.cert)!;
+    expect(c.rec).toMatchObject({ addr: full.addr, ind: full.ind, size: full.size });
+    expect(e.tgoRows('p').map((x) => x.rec.cert).sort()).toEqual([NEW_CO.cert, other.cert].sort());
+  });
+
+  it('two feed rows with one web id and organisation but different numbers are two certificates, in one pull or in two', async () => {
+    const A = row({ id: '99010', cert: 'TGO CFO FY27-910', org: 'บริษัท คู่รหัสเดียวกัน จำกัด (สำนักงานใหญ่)', addr: '1 ถนนทดสอบ กรุงเทพฯ 10110', changwat: 'กรุงเทพฯ', ind: 'การผลิต', size: 'SME' });
+    const B = { ...A, cert: 'TGO CFO FY27-911' } as FeedRow;
+    const one = engine();
+    serve({ ok: true, rows: [A, B], webTotal: 2 });
+    await one.runSync(false);
+    expect(one.tgoRows('p').map((x) => x.rec.cert).sort()).toEqual(['TGO CFO FY27-910', 'TGO CFO FY27-911']);
+    const two = engine();
+    serve({ ok: true, rows: [A], webTotal: 1 });
+    await two.runSync(false);
+    serve({ ok: true, rows: [B], webTotal: 1 });
+    await two.runSync(false);
+    expect(two.tgoRows('p').map((x) => x.rec.cert).sort()).toEqual(['TGO CFO FY27-910', 'TGO CFO FY27-911']);
+  });
+
   it('a pulled row waits in the store, so it is still there after a reload', async () => {
     const e = engine();
     serve({ ok: true, rows: [NEW_CO, SAME_CO], webTotal: 4491 });
@@ -242,6 +273,18 @@ describe('pull into the review queue', () => {
     expect(e.company(r.gid!)!.name).toBe('บริษัท เก่าในเครื่อง จำกัด');
     expect(e.B.certs.find((c) => c.cert === 'TGO CFO FY25-5')!.gid).toBe(r.gid);
   });
+
+  it('two legacy certificates with one web id are both adopted: the second under its number and organisation, not dropped', () => {
+    const e = engine();
+    const leg = (cert: string, org: string) => ({
+      webId: '55002', cert, org, branch: 'สำนักงานใหญ่', act: 'ค้าปลีก', ap: '2025-07-01', ex: '2026-06-30', ind: -1, size: -1, addr: '', prov: -1,
+      provTxt: 'ชลบุรี', zip: '', fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', note: '',
+    });
+    e.adoptLegacyCerts([leg('TGO CFO FY25-6', 'บริษัท เก่า ก จำกัด'), leg('TGO CFO FY25-7', 'บริษัท เก่า ข จำกัด')] as unknown as Partial<Cert>[]);
+    e.rebuild();
+    expect(e.tgo['55002']).toMatchObject({ st: 'a', cert: 'TGO CFO FY25-6' });
+    expect(Object.values(e.tgo).filter((r) => r.st === 'a').map((r) => r.cert).sort()).toEqual(['TGO CFO FY25-6', 'TGO CFO FY25-7']);
+  });
 });
 
 describe('name keys', () => {
@@ -255,13 +298,17 @@ describe('name keys', () => {
   });
 });
 
-describe('proxy path', () => {
-  it('the old way (TGO page through a proxy) still runs when the feed link is empty, and fails in Thai when blocked', async () => {
-    localStorage.setItem(PREF.sync, JSON.stringify({ feed: '', freq: 'off' }));
+describe('the feed link', () => {
+  it('an empty link, also one saved by the build without a built-in link, means the built-in link', async () => {
+    localStorage.setItem(PREF.sync, JSON.stringify({ feed: '', freq: 'off', proxy: '' }));
     const e = engine();
-    serve('<html>blocked</html>');
+    expect(e.syncCfg().feed).toBe(FEED_URL);
+    serve({ ok: true, rows: [KNOWN], webTotal: 4491 });
     await e.runSync(false);
-    expect(urls[0]).toContain('thaicarbonlabel.tgo.or.th');
-    expect(e.sy.status).toBe('error');
+    expect(urls[0].startsWith(FEED_URL + '?format=json')).toBe(true);
+    expect(e.sy.msg).toContain('ข้อมูลตรงกับ Google Sheet แล้ว');
+    // a link typed in the field wins
+    e.saveSync({ feed: FEED });
+    expect(e.syncCfg().feed).toBe(FEED);
   });
 });

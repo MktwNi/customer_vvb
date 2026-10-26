@@ -17,7 +17,7 @@ import { useDialog } from './useDialog';
 import { jobServices, jointOf, jointRole } from '../lib/sales';
 import { JobSvc } from './SvcChips';
 import { jointHead, jointLine } from '../lib/joint';
-import { followIdsOf } from '../lib/follow';
+import { followContact, followIdsOf } from '../lib/follow';
 
 const box: CSSProperties = { background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--r-card)', boxShadow: 'var(--sh-card)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10 };
 const field: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--ink-2)' };
@@ -77,23 +77,22 @@ export function CompanyDrawer() {
   const watched = watchIds.length > 0;
   const certs = (e.certsBy.get(c.id) || []).slice().sort((a, b) => (b.ex || '').localeCompare(a.ex || ''));
   const logs = (C.log[c.id] || []).slice().sort((a, b) => b.at.localeCompare(a.at));
-  const lastC = logs.find((l) => ['call', 'email', 'meet', 'follow'].includes(l.type));
   // the Sales Tracker's view of this customer, so the header doesn't say "ยังไม่ติดต่อ" for one the
   // tracker shows as called or won (the contact-plan stage below is kept separately)
   const deals = newestFirst(e.dealsOf(c.id));
   const deal = deals[0];
   const owner = C.owners[c.id] || deal?.resp || '';
-  // the latest real contact: the contact log, or a deal's typed contact date / stage dates (not the day it was sent to the tracker)
+  // the contact as the list's line reads it (lib/follow.ts followContact): the header's latest contact day (the contact log, or
+  // a deal's typed contact date / stage dates, not the day it was sent to the tracker), and the count the tab shows
   const today = todayISO();
-  const lastAt = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => lastContact(e.sales, x, today))].reduce((a, b) => (b > a ? b : a), '');
+  const tasks = e.tasksOf(c.id).sort((a, b) => a.date.localeCompare(b.date));
+  const contact = followContact(logs, deals, e.sales, today, tasks);
   // the contact history: this company's log and the contacts recorded on its deals (read from the
   // deals' records, never copied here), merged by date; a deal's says which deal
   const hist: { k: string; day: string; at: string; log?: LogEntry; act?: { a: DealAct; deal: Deal } }[] = [
     ...logs.map((l, i) => ({ k: 'l' + (l.id || l.at + i), day: localDay(l.at), at: l.at, log: l })),
     ...deals.flatMap((x) => actsOf(e.sales, x.id).map((a) => ({ k: 'a' + a.id, day: a.d, at: a.at, act: { a, deal: x } }))),
   ].sort((x, y) => y.day.localeCompare(x.day) || y.at.localeCompare(x.at));
-  const tasks = e.tasksOf(c.id).sort((a, b) => a.date.localeCompare(b.date));
-  const nOpenT = tasks.filter((t) => !t.done).length;
   const pendingG = e.B.groups.filter(dedupFilter('pending'));
   const myG = pendingG.filter((g) => g.ids.some((i) => c.ids.includes(i)));
 
@@ -146,7 +145,7 @@ export function CompanyDrawer() {
     ['info', <>ข้อมูล<span className="dr-long">บริษัท</span></>, 0],
     ['cfo', <>CFO<span className="dr-long"> · รอบ อบก.</span></>, certs.length],
     ['src', <>GI<span className="dr-long"> · โรงงาน</span> · SET</>, srcN],
-    ['crm', 'การติดต่อ', hist.length + nOpenT],
+    ['crm', 'การติดต่อ', contact.count],
   ];
 
   const cvT = CST[c.cfoSt];
@@ -211,7 +210,7 @@ export function CompanyDrawer() {
           <span className="dr-line">
             {owner ? <>ผู้รับผิดชอบ <b>{owner}</b></> : 'ยังไม่มีผู้รับผิดชอบ'}
             {' · '}
-            {lastAt ? <>ติดต่อล่าสุด <b>{isoTh(lastAt)}</b></> : 'ยังไม่เคยติดต่อ'}
+            {contact.last ? <>ติดต่อล่าสุด <b>{isoTh(contact.last)}</b></> : 'ยังไม่ได้ติดต่อ'}
           </span>
         </div>
 
