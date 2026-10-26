@@ -8,6 +8,7 @@ import type {
   SetSnap, StageKey, SyncCfg, Task, TaskForm, TaskType,
 } from './types';
 import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
+import { applyCertPlan, heldFrom, planCertRows, type CertLine } from './registryXlsx';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF, type KVStore } from './storage';
@@ -927,6 +928,39 @@ export class GccEngine {
     this.rebuild();
     this.up = { status: 'done', msg: 'กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บแล้ว' };
     this.emit();
+  }
+
+  // ------------------------------------------------------------------ certificate sheet (lib/registryXlsx.ts)
+  /** The sheet's rows against the certificates held now: what would be new, same, changed or skipped. Saves nothing. */
+  certPlan(lines: CertLine[]) {
+    return planCertRows(lines, heldFrom(this.B.certs, this.base.certs.length, this.B.CD), this.B.companies.map((c) => ({ id: c.id, name: c.name })));
+  }
+  /**
+   * Saves a sheet's plan. Same store and rebuild as the workbook upload (applyUpload): the base dataset is written
+   * to this browser's store and becomes an uploaded one (revertUpload undoes it). Only this browser holds it: the
+   * team sheet is not written (team-sync/Code.gs is unchanged). Gated by set.data, the backup import's rule.
+   */
+  async applyCertRows(lines: CertLine[], fileName: string): Promise<string> {
+    if (!this.can('set.data')) {
+      this.deny();
+      return 'บัญชีของคุณไม่มีสิทธิ์นำเข้าข้อมูล';
+    }
+    const plan = this.certPlan(lines);
+    const r = applyCertPlan(plan, this.base, this.tgoCerts, this.added, fileName, new Date().toISOString());
+    if (!r.changed) return 'ไม่มีการเปลี่ยนแปลงให้บันทึก';
+    try {
+      await this.store.set('dataset', r.base);
+    } catch {
+      return 'บันทึกไม่สำเร็จ ข้อมูลยังไม่เปลี่ยน ลองใหม่อีกครั้ง';
+    }
+    if (r.tgoChanged) this.persist('tgoCerts', r.tgo);
+    if (r.addedChanged) this.persist('addedCos', r.added);
+    this.base = r.base;
+    this.tgoCerts = r.tgo;
+    this.added = r.added;
+    this.rebuild();
+    this.emit();
+    return `บันทึกแล้ว: ใบรับรองใหม่ ${fmtN(plan.news.length)} ใบ · เปลี่ยนแปลง ${fmtN(plan.changed.length)} ใบ · บริษัทใหม่ ${fmtN(plan.companies.length)} แห่ง`;
   }
 
   // ------------------------------------------------------------------ dedup
