@@ -7,8 +7,8 @@ import type {
   Built, Cert, Company, ContactEdit, ContactForm, Crm, CustomCo, Person, PersonRole, Dataset, FeedKey, LogEntry, MonitorCfg, RawCompany, Round, RoundRaw,
   SetSnap, StageKey, SyncCfg, Task, TaskForm, TaskType,
 } from './types';
-import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
-import { applyCertPlan, heldFrom, planCertRows, type CertImportRec, type CertLine } from './registryXlsx';
+import { build, dataUrl, fixName, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
+import { IMPORT_TAG, applyCertPlan, changedFields, heldFrom, planCertRows, sameRecord, sheetNoteOf, type CertImportRec, type CertLine, type CertFields, type CertPlan, type PlanNew, type PlanWaiting } from './registryXlsx';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF, type KVStore } from './storage';
@@ -19,7 +19,7 @@ import { contactChoices, dealContact, linkIndex, linkOrder, nameKey, personExtra
 // one person, several companies (person/<pid>/co/<gid>) and records merged into one (person/<gone>/into/<keep>)
 import { aliasIndex, coKey, coRecOf, coRecsOn, cosOf, dupPairs, findExisting, intoKey, intoValue, mergePlan, pairKey, pcoValue, personKey, phoneKeys, reachPatch, suggestionHeads, toPCo, toPInto, type DupPair, type Found, type PCo, type PInto, type PersonAt, type PersonCo } from './people';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  CUSTOM_ID_MIN, LOCAL_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
@@ -119,10 +119,26 @@ const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
 export interface UploadState { status?: 'busy' | 'error' | 'done' | 'preview'; msg?: string; head?: string; preview?: { k: string; v: string }[] }
 export interface SyncState { status?: 'running' | 'error' | 'done' | 'ready' | ''; msg?: string }
-export interface PendingSync extends TGOSync.TgoResult { nw: (TGOSync.TgoItem & { gid: number | null })[]; at: string }
 
 /** An expense's bill kept in this browser (GccEngine.billKey). */
 interface BillBlob { name: string; mime: string; data: ArrayBuffer; by: string; fid?: string }
+/** A certificate's company for the TGO queue: its id, and the new record when this pull or approval made it (companyFor). */
+type CoRef = { id: number; fresh: CustomCo | null };
+/** The fields a pull fills in on a queued certificate (fillDetails): only these are written, so a decision stands. */
+const TGO_DETAILS = ['addr', 'zip', 'changwat', 'ind', 'size', 's1', 's2', 's3', 'fy', 'id'];
+/** A sheet row as a queue item: the feed's fields, so one certificate is one record whichever way it came in. */
+const sheetItem = (f: CertFields): TGOSync.TgoItem => ({
+  cert: f.cert, act: f.act, org: f.org, branch: f.branch, prov: f.prov, apBE: beOf(f.ap), exBE: beOf(f.ex), ap: f.ap, ex: f.ex, fy: f.fy, id: f.webId,
+  addr: f.addr, zip: f.zip, changwat: f.prov, ind: f.ind, size: f.size, s1: f.s1, s2: f.s2, s3: f.s3,
+});
+const beOf = (iso: string) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${+iso.slice(0, 4) + 543}` : '');
+/** A queue record's values as a sheet row carries them (the same fields sheetItem writes), to compare a row with it. */
+const queueFields = (r: TGOSync.TgoRec): CertFields => ({
+  cert: r.cert, org: fixName(r.org), branch: r.branch, act: r.act, addr: r.addr ?? '', zip: r.zip ?? '', prov: TGOSync.provName(r.changwat || r.prov),
+  ind: r.ind ?? '', size: r.size ?? '', ap: r.ap, ex: r.ex, fy: r.fy, s1: r.s1 ?? null, s2: r.s2 ?? null, s3: r.s3 ?? null, note: sheetNoteOf(r.note), webId: r.id,
+});
+/** Why a sheet row that changes a certificate the queue brought in is not saved (no change exists for a queue row). */
+const TGO_EDIT_REFUSED = 'ใบนี้อยู่ในรายการ TGO แล้ว แก้จากไฟล์นี้ไม่ได้ ไม่บันทึกแถวนี้ · ใบที่ยังรอตรวจให้รับหรือไม่รับในรายการรอตรวจ TGO ก่อน ใบที่รับเข้าทะเบียนแล้วให้แจ้งผู้ดูแลทะเบียนเพื่อแก้ใบนั้น';
 
 const emptyCrm = (): Crm => ({ stages: {}, notes: {}, tasks: [], watch: [], owners: {}, team: [], log: {} });
 
@@ -145,7 +161,12 @@ export class GccEngine {
   contacts: Record<string, ContactEdit> = {};
   crm: Crm = emptyCrm();
   added: Partial<RawCompany>[] = [];
+  /** Certificates accepted from the TGO review queue, as registry rows (derived from `tgo` by rebuild). */
   tgoCerts: Partial<Cert>[] = [];
+  /** The TGO review queue, shared by the team (lib/tgoSync.ts TgoRec): waiting, accepted and rejected certificates. */
+  tgo: Record<string, TGOSync.TgoRec> = {};
+  /** Certificates from before the queue, read at load and adopted once the registry is built (adoptLegacyCerts). */
+  private legacyCerts: Partial<Cert>[] = [];
   /** what each certificate-sheet save added or changed in the saved lists, newest last (revert takes it back) */
   certImports: CertImportRec[] = [];
   setSnap: SetSnap | null = null;
@@ -165,8 +186,8 @@ export class GccEngine {
   certsBy = new Map<number, Cert[]>();
   byNorm = new Map<string, number>();
   certKeys = new Set<string>();
-  /** TGO's record ids (webId) of every certificate held */
-  certIds = new Set<string>();
+  /** The TGO web ids of the certificates held and of every queue row, each with the certificates that carry it (isKnownCert) */
+  certIds = new Map<string, { cert: string; org: string }[]>();
   T = 0;
   W = CONFIG.soonWindow;
   minYm = '';
@@ -176,7 +197,6 @@ export class GccEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private syncing = false;
   private pendingUpload: ParsedUpload | null = null;
-  pendingSync: PendingSync | null = null;
 
   // ---- team sync (shared CRM data via Google Apps Script; see lib/teamSync.ts)
   team: TeamState = { status: 'off', msg: '', last: '' };
@@ -379,7 +399,7 @@ export class GccEngine {
       if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks, certImports] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks, tgoRecs, certImports] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -394,6 +414,7 @@ export class GccEngine {
         this.store.get<Record<string, CustomCo>>('customCos'),
         this.store.get<Record<string, Person>>('people'),
         this.store.get<Record<string, PLink>>('plinks'),
+        this.store.get<Record<string, TGOSync.TgoRec>>('tgoRecs'),
         this.store.get<CertImportRec[]>('certImports'),
       ]);
       this.people = people || {};
@@ -405,7 +426,8 @@ export class GccEngine {
       this.contacts = contacts || {};
       this.crm = { ...emptyCrm(), ...(crm || {}) };
       this.added = added || [];
-      this.tgoCerts = tgoCerts || [];
+      this.tgo = tgoRecs || {};
+      this.legacyCerts = tgoCerts || [];
       this.certImports = certImports || [];
       this.setSnap = setSnap || null;
       this.sources = sources;
@@ -449,6 +471,11 @@ export class GccEngine {
       this.loadMsg = 'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…';
       this.emit();
       await new Promise((r) => setTimeout(r, 30));
+      if (this.legacyCerts.length) {
+        const legacy = this.legacyCerts;
+        this.legacyCerts = [];
+        this.adoptLegacyCerts(legacy); // the rebuild below (after this) puts the adopted rows in the registry
+      }
       this.rebuild();
       this.day = todayISO();
       this.loading = false;
@@ -517,6 +544,7 @@ export class GccEngine {
 
   // ------------------------------------------------------------------ build / recalc
   rebuild() {
+    this.tgoCerts = this.tgoCertRows();
     const B = build(this.base, this.dec, { added: [...this.added, ...this.customRaw()], contacts: this.contacts, certs: this.tgoCerts.map((c) => ({ ...c, tgo: true })) });
     this.B = B;
     // certificates pulled from the TGO website count towards their company's CFO state
@@ -537,10 +565,19 @@ export class GccEngine {
     this.byNorm = new Map();
     B.companies.forEach((c) => {
       const k = norm(c.name);
-      if (k && !this.byNorm.has(k)) this.byNorm.set(k, c.id);
+      // names under 3 characters are not matched (build's duplicate check skips them too)
+      if (k.length >= 3 && !this.byNorm.has(k)) this.byNorm.set(k, c.id);
     });
-    this.certKeys = new Set(B.certs.map((ct) => TGOSync.key(ct.cert, ct.org)));
-    this.certIds = new Set(B.certs.map((ct) => String(ct.webId ?? '').trim()).filter(Boolean));
+    // held certificates and every queue row (waiting, accepted or rejected): a pull never adds them again
+    const queued = Object.values(this.tgo);
+    this.certKeys = new Set([...B.certs.map((ct) => TGOSync.key(ct.cert, ct.org)), ...queued.map((r) => TGOSync.key(r.cert, r.org))]);
+    this.certIds = new Map();
+    const withId = (id: string | undefined, c: { cert: string; org: string }) => {
+      const k = String(id ?? '').trim();
+      if (k) this.certIds.set(k, [...(this.certIds.get(k) ?? []), c]);
+    };
+    B.certs.forEach((ct) => withId(ct.webId, ct));
+    queued.forEach((r) => withId(r.id, r));
     // SET snapshot → "newly listed" detection on the next dataset
     const syms = [...new Set(B.companies.map((c) => c.set).filter(Boolean))];
     const today = todayISO();
@@ -639,7 +676,7 @@ export class GccEngine {
       ct.apT = ct.ap ? Date.parse(ct.ap) : 0;
       ct.exM = ct.ex ? ct.ex.slice(0, 7) : '';
       // submission year (B.E.): from "FYxx" in the certificate no., else the fiscal year (Oct–Sep) of approval
-      const fy = CD.fy[ct.fy] || (/FY(\d\d)/i.exec(ct.cert || '') || [])[0] || '';
+      const fy = CD.fy[ct.fy] || ct.fyTxt || (/FY(\d\d)/i.exec(ct.cert || '') || [])[0] || '';
       const m = /^FY(\d\d)$/i.exec(fy);
       if (m) {
         const v = +m[1];
@@ -721,9 +758,9 @@ export class GccEngine {
     this.emit();
   }
 
-  // ------------------------------------------------------------------ TGO sync
+  // ------------------------------------------------------------------ TGO sync (the review queue)
   syncCfg(): SyncCfg {
-    const c: SyncCfg = { freq: 'daily', proxy: '', feed: '', autoApply: true, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
+    const c: SyncCfg = { freq: 'off', proxy: '', feed: TGOSync.FEED_URL, autoApply: false, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
     // an empty link (also one saved by a build that had no built-in link) means the built-in one
     c.feed = String(c.feed || '').trim() || TGOSync.FEED_URL;
     return c;
@@ -739,34 +776,60 @@ export class GccEngine {
     if (!c.last || c.freq === 'open') return true;
     return Date.now() - Date.parse(c.last) >= (c.freq === 'weekly' ? 168 : 24) * 36e5;
   }
-  /** Already held: same TGO record id, else same certificate no. + organisation. */
+  /** Already held, or already in the review queue (waiting, accepted or rejected): the same certificate no. + organisation,
+   *  or the same TGO record id with the same number (sameRecord, as a sheet row is matched: a web id typed for another
+   *  certificate does not block this one). A pull never adds such a row again. */
   isKnownCert(it: TGOSync.TgoItem) {
-    return (!!it.id && this.certIds.has(it.id)) || this.certKeys.has(TGOSync.key(it.cert, it.org));
-  }
-  /** The feed is asked for records approved within 180 days of the newest one held — late additions to a round included. */
-  feedSince() {
-    let mx = '';
-    this.B.certs.forEach((ct) => {
-      if (ct.ap && ct.ap > mx) mx = ct.ap;
-    });
-    return mx ? addDays(mx, -180) : '';
+    const web = it.id ? this.certIds.get(it.id) : undefined;
+    return !!web?.some((h) => sameRecord(it, h)) || this.certKeys.has(TGOSync.key(it.cert, it.org));
   }
   /** Fields of a pulled certificate that come from the feed (the list page has none of them). */
   certDetail(it: TGOSync.TgoItem): Partial<Cert> {
-    const CD = this.B.CD;
+    const CD = this.base.cdicts;
     const ix = (a: string[], v?: string) => (v ? a.indexOf(v) : -1);
     const pn = TGOSync.provName(it.changwat || it.prov);
     const prov = ix(CD.prov, pn);
-    const ind = ix(CD.ind, it.ind);
+    const ind = ix(CD.ind, it.ind), size = ix(CD.size, it.size), fy = ix(CD.fy, it.fy);
     return {
-      ind, indTxt: ind < 0 && it.ind ? it.ind : '', size: ix(CD.size, it.size), addr: it.addr || '', prov, provTxt: prov >= 0 ? '' : pn || it.prov,
-      zip: it.zip || '', fy: ix(CD.fy, it.fy), s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null,
+      ind, indTxt: ind < 0 && it.ind ? it.ind : '', size, sizeTxt: size < 0 && it.size ? it.size : '', addr: it.addr || '', prov, provTxt: prov >= 0 ? '' : pn || it.prov,
+      zip: it.zip || '', fy, fyTxt: fy < 0 && it.fy ? it.fy : '', s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null,
     };
   }
+  /** The review queue by state. `gid`: for a waiting row, the registry company its organisation already has (null = a
+   *  new one); for an accepted row, the company it went to; a rejected row has none. */
+  tgoRows(st: TGOSync.TgoSt): { rid: string; rec: TGOSync.TgoRec; gid: number | null }[] {
+    return Object.entries(this.tgo)
+      .filter(([, r]) => r.st === st)
+      .map(([rid, rec]) => ({ rid, rec, gid: st === 'a' ? rec.gid : st === 'p' ? this.byNorm.get(norm(rec.org)) ?? null : null }))
+      .sort((a, b) => a.rec.org.localeCompare(b.rec.org, 'th') || a.rec.cert.localeCompare(b.rec.cert));
+  }
+  /** Certificates accepted from the queue, as the registry's certificate rows (rebuild gives them to build()). */
+  private tgoCertRows(): Partial<Cert>[] {
+    return Object.values(this.tgo)
+      .filter((r) => r.st === 'a' && r.gid != null)
+      .map((r) => ({
+        gid: r.gid!, cert: r.cert, org: r.org, branch: r.branch, act: r.act, ind: -1, size: -1, addr: '', prov: -1, provTxt: r.prov, zip: '', ap: r.ap, ex: r.ex,
+        fy: -1, fyTxt: r.fy || '', s1: null, s2: null, s3: null, phone: '', email: '', webId: r.id, note: r.note, ...(r.addr != null ? this.certDetail(r) : {}),
+      }));
+  }
+  /** One queue record: this browser's copy and the team's (a change of the queue is a write of that record). `nx`: a
+   *  certificate pulled as new, which a team row for it (a decision made since) stands over; `f`: only these fields
+   *  change (the details a pull fills in), so a decision a teammate made meanwhile is not undone. */
+  private setTgo(rid: string, rec: TGOSync.TgoRec, opt: { nx?: boolean; f?: string[] } = {}) {
+    this.tgo[rid] = rec;
+    this.op(keyOf.tgo(rid), { ...rec }, opt);
+  }
+  /** Pull the feed (or the TGO page through a proxy) into the review queue. A new certificate waits there (st 'p') for an
+   *  approver; a pull never adds to the registry. Needs edit.cust: a viewer reads the queue and cannot change it. */
   async runSync(auto: boolean) {
     if (this.syncing || !this.B) return;
     const c = this.syncCfg();
     const feed = (c.feed || '').trim();
+    if (!this.can('edit.cust')) {
+      this.sy = { status: 'error', msg: 'บัญชีของคุณดูรายการรอตรวจได้อย่างเดียว ให้ผู้ที่แก้ข้อมูลลูกค้าได้เป็นผู้ดึงข้อมูล' };
+      this.emit();
+      return;
+    }
     this.syncing = true;
     this.sy = { status: 'running', msg: feed ? 'กำลังอ่านข้อมูลจาก Google Sheet…' : 'กำลังเชื่อมต่อเว็บไซต์ TGO…' };
     this.emit();
@@ -776,36 +839,46 @@ export class GccEngine {
         this.emit();
       };
       const res = feed
-        ? await TGOSync.fetchFeed({ url: feed, since: this.feedSince(), onProgress })
+        ? await TGOSync.fetchFeed({ url: feed, onProgress })
         : await TGOSync.fetchAll({ proxy: c.proxy, maxPages: 3, isKnown: (it) => this.isKnownCert(it), onProgress });
-      // certificates pulled earlier from the list page have no details: fill them in from the feed
+      // certificates pulled earlier without details: the feed's address, industry, size and scopes
       const filled = feed ? this.fillDetails(res.items) : 0;
+      // a certificate (its number + organisation) is queued once per pull
       const seen = new Set<string>();
-      const nw = res.items
-        .filter((it) => {
-          const k = it.id || TGOSync.key(it.cert, it.org);
-          if (this.isKnownCert(it) || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        })
-        .map((it) => ({ ...it, gid: this.byNorm.get(norm(it.org)) || null }));
-      this.pendingSync = { ...res, nw, at: new Date().toISOString() };
-      if (!nw.length) {
-        this.saveSync({ last: this.pendingSync.at, lastMsg: 'ไม่มีใบรับรองใหม่', total: res.total });
-        this.pendingSync = null;
-        const fillMsg = filled ? ` · เติมรายละเอียดใบที่ดึงไว้ ${fmtN(filled)} ใบ` : '';
+      const nw = res.items.filter((it) => {
+        const k = TGOSync.key(it.cert, it.org);
+        if (this.isKnownCert(it) || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      const at = new Date().toISOString();
+      if (nw.length) {
+        const by = this.me();
+        this.batchOps(() =>
+          nw.forEach((it) => {
+            // a web id another queue record holds is not this row's key (that record would be overwritten): number + organisation is
+            const rid = it.id && this.tgo[it.id] ? 'h' + TGOSync.shortHash(TGOSync.key(it.cert, it.org)) : TGOSync.ridOf(it);
+            this.setTgo(rid, { ...it, st: 'p', gid: null, by, at, note: '' }, { nx: true });
+          }),
+        );
+        this.persist('tgoRecs', this.tgo);
+        this.rebuild();
+      }
+      this.saveSync({ last: at, lastMsg: nw.length ? `รอตรวจ ${fmtN(nw.length)} ใบ` : 'ไม่มีใบรับรองใหม่', total: res.total });
+      const waiting = Object.values(this.tgo).filter((r) => r.st === 'p').length;
+      const fillMsg = filled ? ` · เติมรายละเอียดใบที่ดึงไว้ ${fmtN(filled)} ใบ` : '';
+      const waitMsg = waiting ? ` · รอตรวจ ${fmtN(waiting)} ใบ` : '';
+      if (nw.length) {
+        this.sy = { status: 'ready', msg: `พบใบรับรองใหม่ ${fmtN(nw.length)} ใบ รอตรวจก่อนเข้าระบบ${fillMsg}` };
+      } else {
         this.sy = {
           status: auto && !filled ? '' : 'done',
           msg: feed
-            ? `ข้อมูลตรงกับ Google Sheet แล้ว (ตรวจ ${fmtN(res.items.length)} รายการที่อนุมัติตั้งแต่ ${res.since ? isoTh(res.since) : 'ต้น'})${fillMsg}`
-            : `ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)`,
+            ? `ข้อมูลตรงกับ Google Sheet แล้ว (ตรวจ ${fmtN(res.items.length)} รายการ)${fillMsg}${waitMsg}`
+            : `ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)${fillMsg}${waitMsg}`,
         };
-      } else if (auto && c.autoApply) {
-        this.applySync(true);
-      } else {
-        this.saveSync({ total: res.total });
-        this.sy = { status: 'ready' };
       }
+      this.saveSync({ total: res.total });
     } catch (e) {
       this.sy = { status: 'error', msg: (auto ? 'ซิงก์อัตโนมัติไม่สำเร็จ: ' : '') + ((e as Error)?.message || e) };
     } finally {
@@ -813,63 +886,162 @@ export class GccEngine {
       this.emit();
     }
   }
-  /** Gives pulled certificates that lack details (from the list page) the feed's address, industry, size and scopes. */
+  /** Gives queued and accepted certificates that lack details (the list page, or a feed row with no address yet) the
+   *  feed's address, industry, size and scopes. Returns how many were filled in. */
   fillDetails(items: TGOSync.TgoItem[]) {
-    const byId = new Map(items.filter((it) => it.id).map((it) => [it.id, it]));
+    // several feed rows may carry one web id (a typed id of another certificate): each is tried with sameRecord, as queueIndex does
+    const byId = new Map<string, TGOSync.TgoItem[]>();
+    items.forEach((it) => {
+      if (it.id) byId.set(it.id, [...(byId.get(it.id) ?? []), it]);
+    });
     const byKey = new Map(items.map((it) => [TGOSync.key(it.cert, it.org), it]));
     let n = 0;
-    this.tgoCerts.forEach((tc, i) => {
-      if (tc.addr || (tc.ind != null && tc.ind >= 0) || tc.indTxt) return;
-      const it = (tc.webId && byId.get(String(tc.webId))) || byKey.get(TGOSync.key(tc.cert || '', tc.org || ''));
-      if (!it || it.addr == null) return;
-      this.tgoCerts[i] = { ...tc, ...this.certDetail(it), webId: tc.webId || it.id };
-      n++;
-    });
+    this.batchOps(() =>
+      Object.entries(this.tgo).forEach(([rid, r]) => {
+        if (r.st === 'r' || r.addr || r.ind) return;
+        // a web id names the record only with the same number (sameRecord), as a sheet row is matched
+        const web = r.id ? (byId.get(r.id) ?? []).find((h) => sameRecord(r, h)) : undefined;
+        const it = web || byKey.get(TGOSync.key(r.cert, r.org));
+        if (!it || (!it.addr && !it.ind)) return;
+        this.setTgo(rid, { ...r, addr: it.addr || '', zip: it.zip || '', changwat: it.changwat || '', ind: it.ind || '', size: it.size || '', s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null, fy: it.fy || r.fy, id: r.id || it.id }, { f: TGO_DETAILS });
+        n++;
+      }),
+    );
     if (n) {
-      this.persist('tgoCerts', this.tgoCerts);
+      this.persist('tgoRecs', this.tgo);
       this.rebuild();
     }
     return n;
   }
-  applySync(auto: boolean) {
-    const st = this.pendingSync;
-    if (!st) return;
-    const D = this.B.D;
-    let made = 0;
-    st.nw.forEach((it) => {
-      let gid = it.gid;
-      if (!gid) {
-        gid = 900001 + this.added.length;
-        made++;
-        const pi = D.prov.indexOf(TGOSync.provName(it.changwat || it.prov));
-        this.added.push({
-          id: gid, name: it.org, jur: '', type: Math.max(0, D.type.indexOf('ไม่ระบุ')), prov: pi >= 0 ? pi : D.prov.indexOf(''), addr: it.addr || '',
-          ind: Math.max(0, D.ind.indexOf('ไม่ระบุ')), biz: it.act, src: 1, tgt: 0, cfo: Math.max(0, D.cfo.indexOf('อยู่ในอายุ')), cfoN: 0, cfoEx: '',
-          giNow: null, giMax: null, giUntil: '', newYm: '', invest: null, fac: null, set: '', mkt: '', phone: '', email: '', web: '', ct: 0, match: 0,
-        });
-        this.byNorm.set(norm(it.org), gid);
-      }
-      const fromFeed = it.addr != null;
-      this.tgoCerts.push({
-        gid, cert: it.cert, org: it.org, branch: it.branch, act: it.act, ind: -1, size: -1, addr: '', prov: -1, provTxt: it.prov, zip: '',
-        ap: it.ap, ex: it.ex, fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', webId: it.id,
-        ...(fromFeed ? this.certDetail(it) : {}),
-        note: (fromFeed ? 'ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. ' : 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ') + isoTh(todayISO()),
-      });
-    });
-    this.persist('addedCos', this.added);
-    this.persist('tgoCerts', this.tgoCerts);
-    this.rebuild();
-    const msg = `${auto ? 'อัปเดตอัตโนมัติ' : 'อัปเดต'}จาก TGO แล้ว: ใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ · ผูกกับบริษัทเดิม ${fmtN(st.nw.length - made)} · สร้างบริษัทใหม่ ${fmtN(made)}`;
-    this.saveSync({ last: st.at, lastMsg: `ใหม่ ${fmtN(st.nw.length)} ใบ`, total: st.total });
-    this.pendingSync = null;
-    this.sy = { status: 'done', msg };
-    this.emit();
+  /** The registry company for a pulled certificate's organisation: the one with that name, else a new customer kept on
+   *  this device (`fresh`, shared by saveCos with the decisions that made it). `made` keeps the companies made in this
+   *  batch, so two certificates of one new organisation make one. */
+  private companyFor(r: Pick<TGOSync.TgoItem, 'org' | 'act' | 'addr' | 'prov' | 'changwat' | 'ind'>, made: Map<string, number>, by: string, at: string): CoRef {
+    const k = norm(r.org);
+    const have = this.byNorm.get(k) ?? made.get(k);
+    if (have != null) return { id: have, fresh: null };
+    let id = customIdOf(r.org);
+    if (this.custom[id] || this.B.byId.has(id)) id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
+    const D = this.base.dicts;
+    const c: CustomCo = {
+      id, name: r.org.trim().slice(0, 200), jur: '', prov: TGOSync.provName(r.changwat || r.prov || ''), ind: r.ind && D.ind.includes(r.ind) ? r.ind : 'ไม่ระบุ',
+      biz: r.act || '', addr: r.addr || '', phone: '', email: '', web: '', contact: '', note: '', at, by,
+    };
+    this.custom[id] = c;
+    made.set(k, id);
+    return { id, fresh: c };
   }
-  cancelSync() {
-    this.pendingSync = null;
-    this.sy = {};
+  /** A certificate's company, for saveCos: a new one is recorded with the queue keys of the certificates that made it. */
+  private noteCo(fresh: Map<number, { c: CustomCo; rids: string[] }>, co: CoRef, rid: string) {
+    if (co.fresh) fresh.set(co.id, { c: co.fresh, rids: [rid] });
+    else fresh.get(co.id)?.rids.push(rid);
+  }
+  /** The new companies go to the team after the decisions of the batch (dep): stored only when one of them is accepted,
+   *  so a refused decision leaves no company behind. Create-only and shared by id: two browsers making the same
+   *  organisation make one company. */
+  private saveCos(fresh: Map<number, { c: CustomCo; rids: string[] }>) {
+    fresh.forEach(({ c, rids }) => this.op(keyOf.cust(c.id), { ...c }, { nx: true, revive: true, dep: rids.map((rid) => keyOf.tgo(rid)) }));
+  }
+  /** Accept waiting certificates into the registry: each one's company (the registry's own by name, else a new customer
+   *  shared with the team) and the certificate itself. Returns how many were accepted. */
+  approveTgo(rids: string[]) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return 0;
+    }
+    const made = new Map<string, number>();
+    const at = new Date().toISOString(), by = this.me();
+    const fresh = new Map<number, { c: CustomCo; rids: string[] }>();
+    let n = 0;
+    this.batchOps(() => {
+      rids.forEach((rid) => {
+        const r = this.tgo[rid];
+        if (!r || r.st !== 'p') return;
+        const co = this.companyFor(r, made, by, at);
+        // a sheet row keeps the note it was saved with; a pulled row gets the note of its pull
+        const note = r.note || ((r.addr != null ? 'ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. ' : 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ') + isoTh(todayISO()));
+        this.setTgo(rid, { ...r, st: 'a', gid: co.id, by, at, note });
+        this.noteCo(fresh, co, rid);
+        n++;
+      });
+      this.saveCos(fresh);
+    });
+    if (n) {
+      this.persist('customCos', this.custom);
+      this.persist('tgoRecs', this.tgo);
+      this.rebuild();
+    }
     this.emit();
+    return n;
+  }
+  /** Turn waiting certificates down: kept as rejected, so no pull adds them again; nothing reaches the registry. */
+  rejectTgo(rids: string[]) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return 0;
+    }
+    const at = new Date().toISOString(), by = this.me();
+    let n = 0;
+    this.batchOps(() =>
+      rids.forEach((rid) => {
+        const r = this.tgo[rid];
+        if (!r || r.st !== 'p') return;
+        this.setTgo(rid, { ...r, st: 'r', gid: null, by, at });
+        n++;
+      }),
+    );
+    if (n) {
+      this.persist('tgoRecs', this.tgo);
+      this.rebuild();
+    }
+    this.emit();
+    return n;
+  }
+  /** Certificates pulled before the queue existed (this browser's `tgoCerts`) become accepted queue records, and their
+   *  companies become shared ones: a company made on this device only (a local id) is replaced by a shared one.
+   *  It rebuilds only before it adopts: a caller rebuilds after it to show the adopted rows in the registry. */
+  adoptLegacyCerts(legacy: Partial<Cert>[]) {
+    const CD = this.base.cdicts;
+    const addedName = new Map(this.added.map((a) => [a.id as number, a.name as string]));
+    // the local companies leave first, so the names below find only the shared companies
+    this.added = this.added.filter((a) => !(a.id! >= LOCAL_ID_MIN && a.id! < CUSTOM_ID_MIN));
+    this.rebuild();
+    const made = new Map<string, number>();
+    const at = new Date().toISOString();
+    const fresh = new Map<number, { c: CustomCo; rids: string[] }>();
+    this.batchOps(() => {
+      legacy.forEach((c) => {
+        const id = c.webId ? String(c.webId) : '';
+        const item = { cert: c.cert || '', org: c.org || '' };
+        // a web id another queue record holds is not this row's key (runSync and applyCertRows key it so): number + organisation is
+        const taken = id ? this.tgo[id] : undefined;
+        const rid = taken && !sameRecord(item, taken) ? 'h' + TGOSync.shortHash(TGOSync.key(item.cert, item.org)) : TGOSync.ridOf({ id, ...item });
+        if (this.tgo[rid] || (!c.cert && !c.org)) return;
+        const local = c.gid != null && c.gid >= LOCAL_ID_MIN && c.gid < CUSTOM_ID_MIN;
+        const org = (local ? addedName.get(c.gid!) : undefined) ?? c.org ?? '';
+        const prov = c.prov != null && c.prov >= 0 ? CD.prov[c.prov] || '' : c.provTxt || '';
+        const ind = c.ind != null && c.ind >= 0 ? CD.ind[c.ind] || '' : c.indTxt || '';
+        const co: CoRef = local || c.gid == null ? this.companyFor({ org, act: c.act || '', addr: c.addr, prov, changwat: '', ind }, made, '', at) : { id: c.gid, fresh: null };
+        // a team decision for the certificate (made since) stands: the create does not replace it (nx)
+        this.setTgo(
+          rid,
+          {
+            st: 'a', gid: co.id, by: '', at, note: c.note || '', cert: c.cert || '', org, act: c.act || '', branch: c.branch || '', prov, apBE: '', exBE: '',
+            ap: c.ap || '', ex: c.ex || '', fy: c.fy != null && c.fy >= 0 ? CD.fy[c.fy] || '' : '', id,
+            ...(c.addr != null ? { addr: c.addr || '', zip: c.zip || '', changwat: prov, ind, size: c.size != null && c.size >= 0 ? CD.size[c.size] || '' : '', s1: c.s1 ?? null, s2: c.s2 ?? null, s3: c.s3 ?? null } : {}),
+          },
+          { nx: true },
+        );
+        this.noteCo(fresh, co, rid);
+      });
+      this.saveCos(fresh);
+    });
+    // the companies made on this device are now the shared ones
+    this.added = this.added.filter((a) => !(a.id! >= LOCAL_ID_MIN && a.id! < CUSTOM_ID_MIN));
+    this.persist('addedCos', this.added);
+    this.persist('customCos', this.custom);
+    this.persist('tgoRecs', this.tgo);
+    this.persist('tgoCerts', []);
   }
 
   // ------------------------------------------------------------------ upload
@@ -927,21 +1099,34 @@ export class GccEngine {
   }
   async revertUpload() {
     if (!this.can('set.data')) return this.deny();
-    // the sheet saves' additions go too, newest first: their rows (by position, rows only ever appended) and companies
-    // (by id). Rows the TGO feed brought in after a save stay, and a feed row a save changed goes back to its values.
-    let tgo = this.tgoCerts.slice();
+    // removing a waiting row is an edit of the queue (edit.cust, as a pull and a decision are): refused without it
+    if (!this.can('edit.cust') && this.certImports.some((imp) => (imp.rids ?? []).some((rid) => this.tgo[rid]?.st === 'p'))) return this.deny();
+    // a sheet save's companies go back (by id), and the queue rows it made that are still waiting are removed. Rows the
+    // team has decided since (accepted or rejected) stay, and so does every row a pull brought in after the save. A company
+    // an accepted row now goes to stays too.
     let added = this.added.slice();
+    const used = new Set(Object.values(this.tgo).filter((r) => r.st === 'a' && r.gid != null).map((r) => r.gid));
+    let kept = 0;
+    const removed: string[] = []; // the waiting rows this revert takes off this browser and sends to the team
     for (const imp of [...this.certImports].reverse()) {
-      for (const p of imp.tgoPrev) if (p.idx < tgo.length) tgo[p.idx] = p.cert;
-      tgo.splice(imp.tgoStart, imp.tgoAdded);
-      added = added.filter((c) => !imp.coIds.includes(c.id as number));
+      // a save made before the queue has no rids: it made no queue rows
+      for (const rid of imp.rids ?? []) {
+        const r = this.tgo[rid];
+        if (!r) continue;
+        if (r.st === 'p') {
+          delete this.tgo[rid];
+          this.op(keyOf.tgo(rid));
+          removed.push(rid);
+        } else kept++;
+      }
+      added = added.filter((c) => !imp.coIds.includes(c.id as number) || used.has(c.id as number));
     }
-    if (this.certImports.length) {
-      this.tgoCerts = tgo;
+    const saved = this.certImports.length > 0;
+    if (saved) {
       this.added = added;
       this.certImports = [];
-      this.persist('tgoCerts', tgo);
       this.persist('addedCos', added);
+      this.persist('tgoRecs', this.tgo);
       this.persist('certImports', []);
     }
     try {
@@ -952,50 +1137,131 @@ export class GccEngine {
     }
     this.base = await loadBase();
     this.rebuild();
-    this.up = { status: 'done', msg: 'กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บแล้ว' };
+    // the removals go to the team now. The script refuses a removal of a row a teammate decided since: the row comes back as
+    // the team has it (accepted or rejected) and stays, so the result counts only the rows the team took away
+    if (removed.length && this.teamCfg) await this.teamSyncNow().catch(() => {});
+    const refused = removed.filter((rid) => !!this.tgo[rid]).length;
+    const unsent = removed.filter((rid) => !this.tgo[rid] && this.pending.has(keyOf.tgo(rid))).length;
+    const gone = removed.length - refused - unsent;
+    const keptAll = kept + refused;
+    this.up = {
+      status: 'done',
+      msg:
+        'กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บแล้ว' +
+        (gone + keptAll + unsent
+          ? ` · ลบใบที่รอตรวจจากการบันทึกชีต ${fmtN(gone)} ใบ · คงไว้ ${fmtN(keptAll)} ใบที่รับหรือไม่รับแล้ว` +
+            (refused ? ` (รวม ${fmtN(refused)} ใบที่ทีมรับหรือไม่รับไปแล้ว ลบจากทีมไม่ได้)` : '') +
+            (unsent ? ` · ยังไม่ส่งถึงทีม ${fmtN(unsent)} ใบ (ถ้าทีมรับหรือไม่รับไปแล้ว ใบนั้นจะคงอยู่)` : '')
+          : ''),
+    };
     this.emit();
   }
 
   // ------------------------------------------------------------------ certificate sheet (lib/registryXlsx.ts)
-  /** The sheet's rows against the certificates held now: what would be new, same, changed or skipped. Saves nothing. */
-  certPlan(lines: CertLine[]) {
-    return planCertRows(lines, heldFrom(this.B.certs, this.base.certs.length, this.B.CD), this.B.companies.map((c) => ({ id: c.id, name: c.name })));
+  /** The sheet's rows against the certificates held now and the review queue. Saves nothing.
+   *  A new certificate is planned as a row to queue (`news`), unless the queue holds it (`waiting`). The queue record a row
+   *  means is found as a pull finds one (queueIndex): a web id that names the same certificate, else the same certificate
+   *  no. + organisation (TGOSync.key). A row that changes a certificate the queue brought in is refused (an error): the
+   *  queue keeps one row per certificate and has no change to wait for. Changes to the dataset's own rows are as before. */
+  certPlan(lines: CertLine[]): CertPlan & { waiting: PlanWaiting[] } {
+    const p = planCertRows(lines, heldFrom(this.B.certs, this.base.certs.length, this.B.CD), this.B.companies.map((c) => ({ id: c.id, name: c.name })));
+    const q = this.queueIndex();
+    const news: PlanNew[] = [], waiting: PlanWaiting[] = [], queued: { rowNo: number; reason: string }[] = [];
+    for (const n of p.news) {
+      const h = q.of(n.f);
+      if (!h) {
+        news.push(n);
+        continue;
+      }
+      // the queue keeps one row per certificate and has no change to wait for: a row that changes it is refused
+      if (changedFields(n.f, queueFields(h)).length) queued.push({ rowNo: n.rowNo, reason: TGO_EDIT_REFUSED });
+      else waiting.push({ rowNo: n.rowNo, f: n.f, st: h.st });
+    }
+    const changed = p.changed.filter((c) => c.origin !== 'tgo');
+    const refused = [...p.changed.filter((c) => c.origin === 'tgo').map((c) => ({ rowNo: c.rowNo, reason: TGO_EDIT_REFUSED })), ...queued];
+    // a company is made when a row needs it now (a changed dataset row); a queued row's company is made when it is accepted
+    const used = new Set(changed.map((c) => c.gid));
+    return {
+      ...p,
+      news,
+      waiting,
+      changed,
+      errors: [...p.errors, ...refused].sort((a, b) => a.rowNo - b.rowNo),
+      companies: p.companies.filter((c) => used.has(c.id)),
+    };
+  }
+  /** The review queue's records, to find the one a sheet row means (`of`): its web id with the same number (sameRecord),
+   *  else the same number + organisation (TGOSync.key), as a pull matches them. */
+  private queueIndex() {
+    // several records may carry one web id (a typed id of another certificate): each is tried with sameRecord
+    const byId = new Map<string, TGOSync.TgoRec[]>(), byKey = new Map<string, TGOSync.TgoRec>();
+    Object.values(this.tgo).forEach((r) => {
+      if (r.id) byId.set(r.id, [...(byId.get(r.id) ?? []), r]);
+      byKey.set(TGOSync.key(r.cert, r.org), r);
+    });
+    const of = (f: CertFields): TGOSync.TgoRec | undefined => {
+      const byWeb = f.webId ? (byId.get(f.webId) ?? []).find((r) => sameRecord(f, r)) : undefined;
+      return byWeb ?? byKey.get(TGOSync.key(f.cert, f.org));
+    };
+    return { of };
   }
   /**
-   * Saves a sheet's plan. Same store and rebuild as the workbook upload (applyUpload): the base dataset is written
-   * to this browser's store and becomes an uploaded one (revertUpload undoes it). Only this browser holds it: the
-   * team sheet is not written (team-sync/Code.gs is unchanged). Gated by set.data, the backup import's rule.
+   * Saves a sheet's plan. A new TGO certificate is not written to the registry: it waits in the review queue (tgoRecs,
+   * st 'p') the way a feed pull does, and enters the registry only when a reviewer accepts it. Changed dataset rows are
+   * saved as before: the base dataset goes to this browser's store and becomes an uploaded one (revertUpload undoes
+   * it). Gated by set.data (the backup import's rule) and edit.cust (a queue row is the team's, as a pull's is).
    */
   async applyCertRows(lines: CertLine[], fileName: string): Promise<string> {
-    if (!this.can('set.data')) {
+    if (!this.can('set.data') || !this.can('edit.cust')) {
       this.deny();
       return 'บัญชีของคุณไม่มีสิทธิ์นำเข้าข้อมูล';
     }
     const plan = this.certPlan(lines);
-    const at = new Date().toISOString();
-    const tgoStart = this.tgoCerts.length, addStart = this.added.length;
-    const r = applyCertPlan(plan, this.base, this.tgoCerts, this.added, fileName, at);
-    if (!r.changed) return 'ไม่มีการเปลี่ยนแปลงให้บันทึก';
-    try {
-      await this.store.set('dataset', r.base);
-    } catch {
-      return 'บันทึกไม่สำเร็จ ข้อมูลยังไม่เปลี่ยน ลองใหม่อีกครั้ง';
+    if (!plan.news.length && !plan.changed.length) {
+      return plan.waiting.length ? 'ไม่มีการเปลี่ยนแปลงให้บันทึก (ใบที่อยู่ในรายการ TGO แล้วไม่เพิ่มซ้ำ)' : 'ไม่มีการเปลี่ยนแปลงให้บันทึก';
     }
-    const rec: CertImportRec = {
-      at, fileName, tgoStart, tgoAdded: plan.news.length,
-      coIds: r.added.slice(addStart).map((c) => c.id as number),
-      tgoPrev: plan.changed.filter((c) => c.origin === 'tgo').map((c) => ({ idx: c.idx, cert: this.tgoCerts[c.idx] })),
-    };
-    if (r.tgoChanged) this.persist('tgoCerts', r.tgo);
+    const at = new Date().toISOString();
+    const addStart = this.added.length;
+    const r = applyCertPlan({ ...plan, news: [] }, this.base, this.tgoCerts, this.added, fileName, at);
+    if (r.changed) {
+      try {
+        await this.store.set('dataset', r.base);
+      } catch {
+        return 'บันทึกไม่สำเร็จ ข้อมูลยังไม่เปลี่ยน ลองใหม่อีกครั้ง';
+      }
+    }
+    // a pull that landed during that write may have queued one of these certificates: it is not queued twice
+    const q = this.queueIndex();
+    const news = plan.news.filter((n) => !q.of(n.f));
+    const by = this.me();
+    const rids: string[] = [];
+    this.batchOps(() =>
+      news.forEach((n) => {
+        const it = sheetItem(n.f);
+        // a web id another queue record holds is not this row's key (that record would be overwritten): number + organisation is
+        const rid = it.id && this.tgo[it.id] ? 'h' + TGOSync.shortHash(TGOSync.key(it.cert, it.org)) : TGOSync.ridOf(it);
+        const note = (n.f.note ? n.f.note + ' · ' : '') + IMPORT_TAG + fileName + ' ' + isoTh(todayISO());
+        this.setTgo(rid, { ...it, st: 'p', gid: null, by, at, note }, { nx: true });
+        rids.push(rid);
+      }),
+    );
+    if (rids.length) this.persist('tgoRecs', this.tgo);
     if (r.addedChanged) this.persist('addedCos', r.added);
+    const rec: CertImportRec = { at, fileName, rids, coIds: r.added.slice(addStart).map((c) => c.id as number) };
     this.certImports = [...this.certImports, rec];
     this.persist('certImports', this.certImports);
     this.base = r.base;
-    this.tgoCerts = r.tgo;
     this.added = r.added;
     this.rebuild();
     this.emit();
-    return `บันทึกแล้ว: ใบรับรองใหม่ ${fmtN(plan.news.length)} ใบ · เปลี่ยนแปลง ${fmtN(plan.changed.length)} ใบ · บริษัทใหม่ ${fmtN(plan.companies.length)} แห่ง`;
+    const parts: string[] = [];
+    if (news.length) parts.push(`เข้ารอตรวจ ${fmtN(news.length)} ใบ`);
+    const waitingN = plan.waiting.length + (plan.news.length - news.length);
+    if (waitingN) parts.push(`อยู่ในรายการ TGO แล้ว ${fmtN(waitingN)} ใบ (ไม่เพิ่มซ้ำ)`);
+    if (plan.changed.length) parts.push(`เปลี่ยนแปลง ${fmtN(plan.changed.length)} ใบ`);
+    if (plan.companies.length) parts.push(`บริษัทใหม่ ${fmtN(plan.companies.length)} แห่ง`);
+    if (plan.errors.length) parts.push(`ข้าม ${fmtN(plan.errors.length)} แถว`);
+    return `บันทึกแล้ว: ${parts.join(' · ')}${news.length ? ' · ใบที่เข้ารอตรวจจะเข้าทะเบียนเมื่อผู้ตรวจรับแล้ว' : ''}`;
   }
 
   // ------------------------------------------------------------------ dedup
@@ -5146,7 +5412,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; revive?: boolean } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; revive?: boolean; dep?: string[] } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     if (!this.canWriteKey(k, v === undefined, v)) {
@@ -5189,6 +5455,7 @@ export class GccEngine {
     }
     // conditional only while every queued write to this record is a document's own (setStep auto)
     if (opt.base !== undefined && (!prev || prev.base !== undefined)) o.base = prev ? prev.base : opt.base;
+    if (opt.dep) o.dep = opt.dep;
     this.pending.set(k, o);
     this.unsaved.delete(k);
     if (this.opBatch) this.opBatch.push(o);
@@ -5356,7 +5623,7 @@ export class GccEngine {
   }
   /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
   private async storedShared(): Promise<SharedState> {
-    const [crm, contacts, dec, sales, custom, people, plinks] = await Promise.all([
+    const [crm, contacts, dec, sales, custom, people, plinks, tgo] = await Promise.all([
       this.store.get<Partial<Crm>>('crm'),
       this.store.get<Record<string, ContactEdit>>('contacts'),
       this.store.get<Record<string, string>>('dedup'),
@@ -5364,6 +5631,7 @@ export class GccEngine {
       this.store.get<Record<string, CustomCo>>('customCos'),
       this.store.get<Record<string, Person>>('people'),
       this.store.get<Record<string, PLink>>('plinks'),
+      this.store.get<Record<string, TGOSync.TgoRec>>('tgoRecs'),
     ]);
     // where this tab's own last save failed, the stored copy is older than this tab's: use this tab's
     const ok = (k: string, v: unknown) => !!v && !this.unstored.has(k);
@@ -5375,6 +5643,7 @@ export class GccEngine {
       custom: ok('customCos', custom) ? custom! : this.custom,
       people: ok('people', people) ? people! : this.people,
       plinks: ok('plinks', plinks) ? plinks! : this.plinks,
+      tgo: ok('tgoRecs', tgo) ? tgo! : this.tgo,
     };
   }
   /** The stored queue of a team session: per sheet, and per account when the team signs in (one
@@ -5994,7 +6263,7 @@ export class GccEngine {
       try {
         r = await call<{ rejected?: string[]; denied?: string[]; qt?: unknown; rows?: SyncRow[] }>(this.transport, cfg.url, this.cred(cfg), {
           action: 'push',
-          ops: batch.map(({ k, v, del, by, nx }) => ({ k, v, del, by, ...(nx && { nx: true }) })), // nx: the script refuses it on a live record (rows)
+          ops: batch.map(({ k, v, del, by, nx, dep }) => ({ k, v, del, by, ...(nx && { nx: true }), ...(dep && { dep }) })), // nx: the script refuses it on a live record (rows)
         });
       } catch (e) {
         // the sheet answered and refused (busy, wrong code): these were certainly not delivered
@@ -6006,7 +6275,16 @@ export class GccEngine {
       }
       this.meta(cfg, r);
       this.heardQt(r, batch);
-      rejected += (r.rejected || []).length;
+      // a company whose certificates' decisions the team refused is not made (the script refuses it too: dep). It is taken
+      // off this browser and is not counted as a refused change: it went with its decision
+      const refusedKeys = new Set((r.rows || []).map((x) => x.k));
+      const orphans = batch.filter((o) => o.dep && (r.rejected || []).includes(o.k) && o.dep.some((d) => refusedKeys.has(d)));
+      if (orphans.length) {
+        orphans.forEach((o) => delete this.custom[o.k.slice('cust/'.length)]);
+        this.persist('customCos', this.custom);
+        this.rebuild();
+      }
+      rejected += (r.rejected || []).filter((k) => !orphans.some((o) => o.k === k)).length;
       // changes this account may not make (the script decides): dropped below with the batch, and the
       // team's value put back by the next round
       const den = r.denied || [];
@@ -6022,8 +6300,9 @@ export class GccEngine {
       // on it as on a pulled row: the create is dropped (the team's record stands), or its fields go on top of the
       // team's record and that is sent again as an ordinary change (nx off). Neither counts as delivered.
       const drop = new Set<string>(), redo = new Map<string, SyncOp>(), applied: SyncRow[] = [], dropped: SyncRow[] = [];
+      // (a queue decision the team already made is refused too: rebaseOp drops it, and the team's decision is applied)
       for (const row of r.rows || []) {
-        const o = batch.find((x) => x.nx && x.k === row.k);
+        const o = batch.find((x) => (x.nx || x.k.indexOf('tgo/') === 0) && x.k === row.k);
         if (!o) continue;
         const res = rebaseOp(row, o);
         if (res && !('drop' in res)) {
@@ -6117,7 +6396,8 @@ export class GccEngine {
       unmark(s.sales);
       return s;
     };
-    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {}, plinks: {} };
+    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {}, plinks: {}, tgo: {} };
+    if (fx.tgo) this.store.update<Record<string, TGOSync.TgoRec>>('tgoRecs', (cur) => (cur ? merged({ ...none, tgo: cur }).tgo! : this.tgo)).catch(() => {});
     if (fx.crm) this.store.update<Partial<Crm>>('crm', (cur) => (cur ? merged({ ...none, crm: { ...emptyCrm(), ...cur } }).crm : this.crm)).catch(() => {});
     if (fx.contacts.size || fx.contactDel)
       this.store.update<Record<string, ContactEdit>>('contacts', (cur) => (cur ? merged({ ...none, contacts: cur }).contacts : this.contacts)).catch(() => {});
@@ -6132,8 +6412,8 @@ export class GccEngine {
       this.coPeople = null;
       this.store.update<Record<string, PLink>>('plinks', (cur) => (cur ? merged({ ...none, plinks: cur }).plinks! : this.plinks)).catch(() => {});
     }
-    if (fx.dedup || fx.contactDel || fx.custom) {
-      this.rebuild(); // regroups companies / restores original contact data
+    if (fx.dedup || fx.contactDel || fx.custom || fx.tgo) {
+      this.rebuild(); // regroups companies / restores original contact data / the certificates of the queue
     } else {
       // records are keyed by the company id they were made on; on this device that id may be an
       // alias of a merged company, which shows only its own id's records

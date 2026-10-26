@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { build } from './core';
-import { applyCertPlan, certKey, exportSheets, heldFrom, planCertRows, readCertSheet, readDateBE, readPct, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine } from './registryXlsx';
+import { applyCertPlan, certKey, exportSheets, heldFrom, planCertRows, readCertSheet, readDateBE, readPct, sheetNoteOf, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine } from './registryXlsx';
 import { xlsxBytes, type XCell, type XSheet } from './xlsx';
 import { parseXlsx } from './core';
+import * as TGOSync from './tgoSync';
 import type { Cert, CertDicts, Dataset } from './types';
 
 const TODAY = '2026-10-26';
@@ -106,6 +107,17 @@ describe('export and round trip', () => {
 });
 
 describe('reading values', () => {
+  it('a province typed as กรุงเทพฯ reads as the dictionary name, as TGO\'s cards are read', async () => {
+    const [l] = await lines([row({ ...BASE_ROW, 'จังหวัด': 'กรุงเทพฯ' })]);
+    expect(l.f.prov).toBe('กรุงเทพมหานคร');
+  });
+  it('a queue note keeps the sheet\'s own text: the import tag and a pull\'s tag are not part of it', () => {
+    expect(sheetNoteOf('')).toBe('');
+    expect(sheetNoteOf('นำเข้าจากไฟล์ rev.xlsx 26 ต.ค. 2569')).toBe('');
+    expect(sheetNoteOf('ทดสอบ · นำเข้าจากไฟล์ rev.xlsx 26 ต.ค. 2569')).toBe('ทดสอบ');
+    expect(sheetNoteOf('ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. 26 ต.ค. 2569')).toBe('');
+    expect(sheetNoteOf('หมายเหตุของผู้ใช้')).toBe('หมายเหตุของผู้ใช้');
+  });
   it('percent: "12.20%", "12.2" and 0.122 are the same value; 1% is written 1%', async () => {
     const ls = await lines([
       row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'P1', 'ประเภทที่ 1 (%)': '12.20%', 'ประเภทที่ 2 (%)': 12.2, 'ประเภทที่ 3 (%)': 0.122 }),
@@ -218,6 +230,17 @@ describe('planning', () => {
     expect(plan.changed[0].gid).toBe(900001);
     expect(plan.companies.map((c) => c.name)).toEqual(['บริษัท เอ (ใหม่) จำกัด']);
   });
+  it('a row that copies a held certificate\'s web id and organisation with another number is a new certificate: the held one is not changed', () => {
+    const plan = planCertRows([L(2, { cert: 'NEWNO-9', s1: 0.9 })], held, companies);
+    expect(plan.changed).toEqual([]);
+    expect(plan.news.map((n) => [n.rowNo, n.f.cert])).toEqual([[2, 'NEWNO-9']]);
+    expect(plan.errors).toEqual([]);
+  });
+  it('a row with the held certificate\'s web id and number is still that certificate, whatever its organisation says', () => {
+    const plan = planCertRows([L(2, { org: 'บริษัท เอ (ใหม่) จำกัด' })], held, companies);
+    expect(plan.changed.map((c) => [c.rowNo, c.origin, c.fields])).toEqual([[2, 'base', ['ชื่อองค์กร']]]);
+    expect(plan.news).toEqual([]);
+  });
   it('two held certificates with one number and organisation and no web ids: the rows pair with them in order', () => {
     const two = [
       { origin: 'base' as const, idx: 0, gid: 1, f: F({ webId: '' }) },
@@ -308,7 +331,10 @@ describe('the old full workbook still goes through core.ts', () => {
     expect(parsed.base.fileName).toBe('old.xlsx');
   });
   it('the key the registry matches on is the TGO sync key', () => {
-    expect(certKey(' cfo 1 ', 'บริษัท เอ  จำกัด')).toBe('CFO1|เอ');
-    expect(certKey('CFO-1', 'บริษัท เอ จำกัด')).toBe(certKey(' cfo-1 ', 'เอ'));
+    // the legal form is part of the organisation, as the queue keys it: a sheet and the queue name one certificate alike
+    expect(certKey(' cfo 1 ', 'บริษัท เอ  จำกัด')).toBe('CFO1|บริษัทเอจำกัด');
+    expect(certKey(' cfo 1 ', 'บริษัท เอ  จำกัด')).toBe(TGOSync.key(' cfo 1 ', 'บริษัท เอ  จำกัด'));
+    expect(certKey('CFO-1', 'บริษัท เอ จำกัด')).toBe(certKey(' cfo-1 ', 'บริษัท  เอ จำกัด'));
+    expect(certKey('CFO-1', 'บริษัท เอ จำกัด')).not.toBe(certKey('CFO-1', 'เอ'));
   });
 });

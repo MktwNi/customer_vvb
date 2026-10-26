@@ -65,7 +65,7 @@ export interface Company extends RawCompany {
 
 export interface Cert {
   cid: number; gid: number; gid0: number; cert: string; org: string; branch: string; act: string;
-  ind: number; size: number; addr: string; prov: number; provTxt?: string; indTxt?: string; zip: string;
+  ind: number; size: number; addr: string; prov: number; provTxt?: string; indTxt?: string; sizeTxt?: string; fyTxt?: string; zip: string;
   ap: string; ex: string; fy: number; s1: number | null; s2: number | null; s3: number | null;
   phone: string; email: string; webId: string; note: string;
   tgo?: boolean;

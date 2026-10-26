@@ -15,6 +15,7 @@ import { parseMyNotify, parseNotifyCfg, parseNotifyFlag, toQtCheck, type MyNotif
 import { applyUnitRow, unitRecords } from './contrib';
 import { parsePayChkCfg, toMonthClose, toPayCheck } from './payCheck';
 import { toExpense } from './expense';
+import { toTgoRec, type TgoRec } from './tgoSync';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -33,6 +34,9 @@ export interface SyncOp {
   /** With nx: a deletion the team made of the record does not stop this create (a company made again for a name the
    *  team had deleted); a live row still does. */
   revive?: boolean;
+  /** A company made for certificates (cust/): the queue keys (tgo/) of the decisions that made it. The script stores it
+   *  only when one of them is accepted (Code.gs push_, dep), so a refused decision leaves no company behind. */
+  dep?: string[];
   /** Items added and removed in list fields named in `f` (a deal's SOURCE / Services): applied to the
    *  teammate's list, so two people ticking different items both keep theirs. */
   fl?: Record<string, ListEdit>;
@@ -321,6 +325,8 @@ export const keyOf = {
   dlogExp: (id: string) => `dlog/exp.${id}`,
   dchkExp: (id: string, expId: string) => `dchk/${id}/exp.${expId}`,
   mcloseOut: (ym: string) => `mclose/${ym}/out`,
+  /** a pulled TGO certificate in the review queue (lib/tgoSync.ts TgoRec), by its queue id (ridOf) */
+  tgo: (rid: string) => `tgo/${rid}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -360,7 +366,7 @@ export function uniqueTaskIds(tasks: Task[]) {
 
 /** `plinks`: the deals' contacts, keyed `<pid>/<dealId>` (lib/people.ts PLink), with a person's other companies
  *  (`<pid>/co/<gid>`, PCo) and merge aliases (`<gone>/into/<keep>`). */
-export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>; plinks?: Record<string, PLink> }
+export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>; plinks?: Record<string, PLink>; tgo?: Record<string, TgoRec> }
 
 /** Every shared record currently held locally, keyed like the server. */
 export function localRecords(s: SharedState): Map<string, unknown> {
@@ -408,12 +414,14 @@ export function localRecords(s: SharedState): Map<string, unknown> {
     const x = personKey(k);
     m.set('person/' + k, x?.co != null ? pcoValue(v as PCo) : x?.into ? intoValue(v as PInto) : { ...v });
   });
+  // the TGO review queue and the certificates accepted from it (shared: the whole team sees them)
+  Object.entries(s.tgo || {}).forEach(([rid, v]) => m.set(keyOf.tgo(rid), { ...v }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
-export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean; plinks: boolean }
-export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false, plinks: false });
+export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean; plinks: boolean; tgo: boolean }
+export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false, plinks: false, tgo: false });
 
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
@@ -679,6 +687,19 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
       }
       fx.custom = true;
       break;
+    case 'tgo': {
+      // the TGO review queue: a record that does not read is skipped, as every shared record is
+      if (del) {
+        if (!s.tgo || !(rest in s.tgo)) return;
+        delete s.tgo[rest];
+      } else {
+        const v = toTgoRec(row.v);
+        if (!v) return;
+        (s.tgo || (s.tgo = {}))[rest] = v;
+      }
+      fx.tgo = true;
+      break;
+    }
     case 'person': {
       const pk = personKey(rest);
       if (!pk) return;
@@ -713,7 +734,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|dexp|person|jqt|jqm)\/|scfg\/unit\.)/;
+const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|dexp|person|jqt|jqm|tgo)\/|scfg\/unit\.)/;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.

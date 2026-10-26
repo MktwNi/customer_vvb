@@ -70,6 +70,8 @@ const TABLE: [string, string | string[] | null, string | string[] | null][] = [
   ['dedup/', 'set.dedup', 'set.dedup'],
   ['team/', 'set.users', 'set.users'],
   ['dundo/', 'set.data', 'set.data'],
+  // the TGO review queue: approving or rejecting a pulled certificate is an edit of the registry
+  ['tgo/', 'edit.cust', 'edit.cust'],
 ];
 /** Records whose own work is the deal's ผู้รับผิดชอบ (deal/ by the new value too), to write and to delete. */
 const DEAL_OWN = { w: ['deal/', 'dstep/', 'dact/', 'dpay/', 'dexp/'], d: ['dstep/', 'dpay/', 'dexp/'] };

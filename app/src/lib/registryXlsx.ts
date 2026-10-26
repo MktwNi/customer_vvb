@@ -7,6 +7,7 @@
 import type { Cert, CertDicts, Dataset, Dicts, RawCompany } from './types';
 import { CCOLS, fixName, norm } from './core';
 import type { XCell, XSheet } from './xlsx';
+import { normOrg, provName } from './tgoSync';
 
 export const SHEET = 'ใบรับรอง CFO';
 /** The TGO sheet tab, read the same way (the 27 headers are its own). */
@@ -69,8 +70,27 @@ const validDate = (y: number, m: number, d: number) => {
   const t = new Date(Date.UTC(y, m - 1, d));
   return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
 };
-/** The certificate key the registry matches on (cert no. + organisation), as the TGO sync builds it. */
-export const certKey = (cert: string, org: string) => cert.replace(/\s+/g, '').toUpperCase() + '|' + norm(org);
+/** The certificate key the registry matches on (cert no. + organisation), as the TGO sync builds it: the queue's organisation
+ *  key (normOrg, which keeps the legal form), so a sheet and the queue name one certificate the same way. */
+export const certKey = (cert: string, org: string) => cert.replace(/\s+/g, '').toUpperCase() + '|' + normOrg(org);
+const numberOf = (c: string) => c.replace(/\s+/g, '').toUpperCase();
+/** The same certificate, as a web id names it: when both carry a number, the number decides, so a web id copied onto a
+ *  certificate with another number (even of the same organisation) is another certificate and never overwrites it; with
+ *  no number on one side, the same organisation. */
+export const sameRecord = (a: { cert: string; org: string }, b: { cert: string; org: string }) => {
+  const an = numberOf(a.cert), bn = numberOf(b.cert);
+  if (an && bn) return an === bn;
+  return !!a.org && normOrg(a.org) === normOrg(b.org);
+};
+/** The import tag a sheet save puts on a queue row's note, after the sheet's own note. */
+export const IMPORT_TAG = 'นำเข้าจากไฟล์ ';
+/** The sheet's own part of a queue certificate's note: the import tag and a pull's tag are the app's, not the sheet's. */
+export const sheetNoteOf = (note: string): string => {
+  const t = String(note || '').trim();
+  const i = t.lastIndexOf(IMPORT_TAG);
+  if (i >= 0) return t.slice(0, i).replace(/ · $/, '').trim();
+  return /^ดึงจาก/.test(t) ? '' : t;
+};
 const txtOf = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /* ---------- reading ---------- */
@@ -251,7 +271,7 @@ export async function readCertSheet(file: XlsxInput, sheet: string): Promise<Cer
       });
       const f: CertFields = {
         cert: textOf(C('cert')), org: fixName(textOf(C('org'))), branch: textOf(C('branch')), act: textOf(C('act')),
-        addr: textOf(C('addr')), zip: textOf(C('zip')), prov: textOf(C('prov')), ind: textOf(C('ind')), size: textOf(C('size')),
+        addr: textOf(C('addr')), zip: textOf(C('zip')), prov: provName(textOf(C('prov'))), ind: textOf(C('ind')), size: textOf(C('size')),
         ap: 'v' in ap ? ap.v : '', ex: 'v' in ex ? ex.v : '', fy: textOf(C('fy')), s1: pcts[0], s2: pcts[1], s3: pcts[2],
         note: textOf(C('note')), webId: idOf(C('webId')),
       };
@@ -290,7 +310,8 @@ const DESC_WORDS: [string, string][] = [
   ['ยังไม่มี CFO', 'บริษัทที่ยังไม่มีใบรับรองในระบบ'],
   ['ประเภทที่ 1–3', 'สัดส่วนของ CFO แยกตามประเภทที่ อบก. กำหนด'],
   ['ปีงบประมาณ (FY)', 'ปีงบประมาณที่ใบรับรองอ้างถึง เช่น FY67'],
-  ['บริษัทใหม่', 'บริษัทที่ไม่พบชื่อในระบบ จะถูกสร้างเมื่อบันทึกการนำเข้า'],
+  ['บริษัทใหม่', 'บริษัทที่ไม่พบชื่อในระบบ จะถูกสร้างเมื่อรับใบรับรองของบริษัทนั้นเข้าทะเบียน'],
+  ['รอตรวจ', 'ใบรับรองใหม่ที่บันทึกจากชีตนี้ รอการรับในรายการรอตรวจ TGO ยังไม่เข้าทะเบียนจนกว่าจะรับ'],
 ];
 /** The description sheet: each column, whether it is required, its format and what it means, then the words the app uses. */
 function descSheet(): XSheet {
@@ -331,18 +352,17 @@ function todayOf() {
 export interface HeldCert { origin: 'base' | 'tgo'; idx: number; gid: number; f: CertFields }
 export interface PlanNew { rowNo: number; f: CertFields; gid: number }
 export interface PlanChange { rowNo: number; f: CertFields; gid: number; fields: string[]; origin: 'base' | 'tgo'; idx: number }
-/** What one sheet save added or changed in the saved lists, so the revert takes exactly that back (engine.revertUpload). */
+/** What one sheet save did, so the revert takes exactly that back (engine.revertUpload). */
 export interface CertImportRec {
   at: string;
   fileName: string;
-  /** the TGO-list rows the save appended: from `tgoStart`, `tgoAdded` of them */
-  tgoStart: number;
-  tgoAdded: number;
-  /** the company ids the save created */
+  /** the TGO review-queue records (tgoRecs keys) the save made as waiting rows; a revert removes those still waiting */
+  rids: string[];
+  /** the company ids the save created (for changed dataset rows that moved to a new company name) */
   coIds: number[];
-  /** the TGO-list rows the save changed, as they were before */
-  tgoPrev: { idx: number; cert: Partial<Cert> }[];
 }
+/** A sheet row for a certificate the TGO review queue already holds (waiting, or decided): nothing is added for it. */
+export interface PlanWaiting { rowNo: number; f: CertFields; st: 'p' | 'a' | 'r' }
 export interface CertPlan {
   read: number;
   news: PlanNew[];
@@ -357,12 +377,16 @@ const fieldText = (f: CertFields, k: keyof CertFields) => {
   if (k === 's1' || k === 's2' || k === 's3') return v == null ? '' : String(Math.round((v as number) * 10000));
   return txtOf(String(v ?? ''));
 };
+/** The labels of the compared fields that differ between a row and a certificate, in the sheet's order. The organisation is
+ *  compared with the identity key's normalisation (normOrg, as certKey does), so a repeated บริษัท prefix or a leading space
+ *  is not a change of it; the name shown on screen stays as fixName reads it. */
+export const changedFields = (a: CertFields, b: CertFields): string[] =>
+  COMPARE.filter(([k]) => (k === 'org' ? normOrg(a.org) !== normOrg(b.org) : fieldText(a, k) !== fieldText(b, k))).map(([, label]) => label);
 
 /** Cells a certificate must have to be new; a held one may not have them blanked. */
 const REQUIRED: [keyof CertFields, string][] = [['cert', 'เลขที่ใบรับรอง'], ['org', 'ชื่อองค์กร'], ['ap', 'วันที่อนุมัติ (พ.ศ.)'], ['ex', 'วันที่หมดอายุ (พ.ศ.)']];
 const missingOf = (f: CertFields, held?: CertFields) =>
   REQUIRED.filter(([k]) => !f[k] && (held === undefined || held[k])).map(([, label]) => `ต้องกรอก ${label}`);
-const numberOf = (c: string) => c.replace(/\s+/g, '').toUpperCase();
 
 /** The sheet's rows against what the app holds: new, same, changed (which fields), and rows that cannot be saved. */
 export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { id: number; name: string }[]): CertPlan {
@@ -392,11 +416,10 @@ export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { i
       push(byNo, numberOf(h.f.cert), h);
     }
   });
-  // a web id names a record only with the same number or the same organisation (a typed id is not enough)
-  const sameRecord = (f: CertFields, h: HeldCert) => (!!f.cert && numberOf(f.cert) === numberOf(h.f.cert)) || (!!f.org && norm(f.org) === norm(h.f.org));
   // the held certificate a row means: the web id, else number + organisation, else the only one with its number
   const find = (f: CertFields): HeldCert | undefined => {
-    const w = f.webId ? (byWeb.get(f.webId) || []).find((h) => sameRecord(f, h)) : undefined;
+    // a web id names a record only with the same number (sameRecord): a typed id on another certificate is not enough
+    const w = f.webId ? (byWeb.get(f.webId) || []).find((h) => sameRecord(f, h.f)) : undefined;
     if (w) return w;
     if (!f.cert) return undefined;
     const k = byKey.get(certKey(f.cert, f.org));
@@ -441,7 +464,7 @@ export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { i
       continue;
     }
     usedBy.set(h, L.rowNo);
-    const fields = COMPARE.filter(([k]) => fieldText(f, k) !== fieldText(h.f, k)).map(([, label]) => label);
+    const fields = changedFields(f, h.f);
     const gid = norm(f.org) === norm(h.f.org) ? h.gid : gidOf(f.org);
     if (fields.length) plan.changed.push({ rowNo: L.rowNo, f, gid, fields, origin: h.origin, idx: h.idx });
     else plan.same++;
@@ -451,20 +474,20 @@ export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { i
 
 /** The held certificates of the registry, with where each is kept (`baseCount`: how many are in the base dataset). */
 export function heldFrom(certs: Cert[], baseCount: number, CD: CertDicts): HeldCert[] {
-  return certs.map((c) => ({
-    origin: c.cid < baseCount ? 'base' : 'tgo',
-    idx: c.cid < baseCount ? c.cid : c.cid - baseCount,
-    gid: c.gid0 ?? c.gid,
-    f: certFields(c, CD),
-  }));
+  return certs.map((c) => {
+    const origin = c.cid < baseCount ? 'base' : 'tgo';
+    const f = certFields(c, CD);
+    // a queue certificate's note carries the app's tags: compare the sheet's own part of it
+    return { origin, idx: c.cid < baseCount ? c.cid : c.cid - baseCount, gid: c.gid0 ?? c.gid, f: origin === 'tgo' ? { ...f, note: sheetNoteOf(f.note) } : f };
+  });
 }
 /** A stored or built certificate's values as text (the dictionaries resolve the indexes; the text fields are the fallback). */
 export function certFields(c: Partial<Cert>, CD: CertDicts): CertFields {
   const at = (a: string[], i: number | undefined) => (i != null && i >= 0 ? a[i] || '' : '');
   return {
     cert: c.cert || '', org: fixName(c.org || ''), branch: c.branch || '', act: c.act || '', addr: c.addr || '', zip: c.zip || '',
-    prov: c.provTxt || at(CD.prov, c.prov), ind: at(CD.ind, c.ind) || c.indTxt || '', size: at(CD.size, c.size),
-    ap: c.ap || '', ex: c.ex || '', fy: at(CD.fy, c.fy), s1: c.s1 ?? null, s2: c.s2 ?? null, s3: c.s3 ?? null,
+    prov: c.provTxt || at(CD.prov, c.prov), ind: at(CD.ind, c.ind) || c.indTxt || '', size: at(CD.size, c.size) || c.sizeTxt || '',
+    ap: c.ap || '', ex: c.ex || '', fy: at(CD.fy, c.fy) || c.fyTxt || '', s1: c.s1 ?? null, s2: c.s2 ?? null, s3: c.s3 ?? null,
     note: c.note || '', webId: String(c.webId ?? '').trim(),
   };
 }

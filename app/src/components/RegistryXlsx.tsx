@@ -48,7 +48,9 @@ export function RegistryXlsx() {
   const status = `ข้อมูล ณ ${isoTh(e.base.asOf)} · ${st} · ${fmtN(e.B.companies.length)} บริษัท · ${fmtN(e.B.certs.length)} ใบรับรอง CFO`;
   const plan = pick ? e.certPlan(pick.lines) : null;
   const canSet = e.can('set.data');
-  const toSave = plan ? plan.news.length + plan.changed.length + plan.companies.length : 0;
+  // a save writes queue rows for the team too, so it also needs the queue's right (edit.cust)
+  const canSave = canSet && e.can('edit.cust');
+  const toSave = plan ? plan.news.length + plan.changed.length : 0;
 
   async function onPick(f: File) {
     setErr('');
@@ -95,7 +97,7 @@ export function RegistryXlsx() {
           <input ref={fileIn} type="file" accept=".xlsx" hidden onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) void onPick(f); }} />
         </>
       }
-      more={`ใช้แม่แบบ "ใบรับรอง CFO" ที่มี 27 คอลัมน์เดียวกับชีต ข้อมูล CFO ของ TGO และมีชีต "คำอธิบาย" บอกว่าแต่ละคอลัมน์ต้องกรอกอย่างไร ระบบอ่านจากชื่อหัวคอลัมน์ในแถวแรก ลำดับคอลัมน์ไม่สำคัญ ก่อนบันทึกจะแสดงจำนวนใบใหม่ ใบที่มีอยู่แล้ว ใบที่เปลี่ยน (พร้อมฟิลด์ที่เปลี่ยน) และแถวที่บันทึกไม่ได้พร้อมเลขแถวและเหตุผล แถวที่มีข้อผิดพลาดจะถูกข้าม ไม่บันทึกครึ่งแถว ไฟล์ฐานข้อมูลลูกค้าแบบเดิม (มีชีต ทะเบียนบริษัท) ยังใช้ได้เหมือนเดิม การบันทึกเก็บไว้ในเบราว์เซอร์เครื่องนี้ ไม่ส่งไปชีตทีม`}
+      more={`ใช้แม่แบบ "ใบรับรอง CFO" ที่มี 27 คอลัมน์เดียวกับชีต ข้อมูล CFO ของ TGO และมีชีต "คำอธิบาย" บอกว่าแต่ละคอลัมน์ต้องกรอกอย่างไร ระบบอ่านจากชื่อหัวคอลัมน์ในแถวแรก ลำดับคอลัมน์ไม่สำคัญ ก่อนบันทึกจะแสดงจำนวนใบใหม่ ใบที่มีอยู่แล้ว ใบที่เปลี่ยน (พร้อมฟิลด์ที่เปลี่ยน) ใบที่อยู่ในรายการ TGO แล้ว และแถวที่บันทึกไม่ได้พร้อมเลขแถวและเหตุผล แถวที่มีข้อผิดพลาดจะถูกข้าม ไม่บันทึกครึ่งแถว ใบรับรองใหม่จากชีตจะเข้ารายการรอตรวจ TGO ที่ทั้งทีมเห็น ยังไม่เข้าทะเบียนจนกว่าผู้ตรวจจะกดรับ บันทึกแถวเดิมซ้ำจะไม่เพิ่มซ้ำ ใบที่รับเข้าจาก TGO แล้วแก้จากไฟล์นี้ไม่ได้ การแก้ใบเดิมในทะเบียนเก็บไว้ในเบราว์เซอร์เครื่องนี้ ไฟล์ฐานข้อมูลลูกค้าแบบเดิม (มีชีต ทะเบียนบริษัท) ยังใช้ได้เหมือนเดิม`}
     >
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={() => void download('แม่แบบใบรับรอง_CFO.xlsx', templateSheets())} className="btn">ดาวน์โหลดแม่แบบ</button>
@@ -129,8 +131,9 @@ export function RegistryXlsx() {
         <div style={{ borderTop: '1px solid var(--divider)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <span className="t-name">{`${pick.name} · ชีต ${pick.sheet} · อ่านได้ ${fmtN(plan.read)} แถว`}</span>
           <div className="upd-line" role="status">
-            <span><span className="t-muted">ใบรับรองใหม่</span> {fmtN(plan.news.length)}</span>
+            <span><span className="t-muted">ใบรับรองใหม่ (เข้ารอตรวจ)</span> {fmtN(plan.news.length)}</span>
             <span><span className="t-muted">มีอยู่แล้ว</span> {fmtN(plan.same)}</span>
+            <span><span className="t-muted">อยู่ในรายการ TGO แล้ว</span> {fmtN(plan.waiting.length)}</span>
             <span><span className="t-muted">เปลี่ยนแปลง</span> {fmtN(plan.changed.length)}</span>
             <span><span className="t-muted">บริษัทใหม่</span> {fmtN(plan.companies.length)}</span>
             <span><span className="t-muted">แถวที่ข้าม</span> {fmtN(plan.errors.length)}</span>
@@ -151,11 +154,11 @@ export function RegistryXlsx() {
           )}
           {plan.news.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span className="t-muted" style={{ fontSize: 14 }}>ใบรับรองใหม่</span>
+              <span className="t-muted" style={{ fontSize: 14 }}>ใบรับรองใหม่ เข้ารายการรอตรวจ TGO ยังไม่เข้าทะเบียนจนกว่าจะรับ</span>
               <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 280, overflow: 'auto' }}>
                 {plan.news.slice(0, SHOWN).map((n) => (
                   <div key={n.rowNo} style={{ borderTop: '1px solid var(--divider)', padding: '8px 0', overflowWrap: 'anywhere' }}>
-                    {`แถว ${n.rowNo} · ${n.f.org} · ${n.f.cert}${e.B.byId.has(n.gid) ? '' : ' · บริษัทใหม่'}`}
+                    {`แถว ${n.rowNo} · ${n.f.org} · ${n.f.cert}`}
                   </div>
                 ))}
                 {plan.news.length > SHOWN && <span className="t-meta">{`และอีก ${fmtN(plan.news.length - SHOWN)} ใบ`}</span>}
@@ -175,15 +178,16 @@ export function RegistryXlsx() {
               </div>
             </div>
           )}
-          {!canSet && <span className="t-meta">บัญชีนี้นำเข้าข้อมูลไม่ได้ ดูตัวอย่างได้เท่านั้น</span>}
+          {!canSave && <span className="t-meta">บัญชีนี้นำเข้าข้อมูลไม่ได้ ดูตัวอย่างได้เท่านั้น</span>}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button onClick={() => void save()} disabled={!canSet || !toSave || busy} className="btn pri sm">บันทึกเข้าระบบ</button>
+            <button onClick={() => void save()} disabled={!canSave || !toSave || busy} className="btn pri sm">บันทึกเข้าระบบ</button>
             <button onClick={() => setPick(null)} className="quiet">ยกเลิก</button>
           </div>
         </div>
       )}
 
-      {e.base.source === 'upload' && canSet && <button onClick={() => e.revertUpload()} className="lnk" style={{ alignSelf: 'flex-start' }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
+      {/* a save of new certificates only leaves the base as it was, but its waiting rows are still undone here */}
+      {(e.base.source === 'upload' || e.certImports.length > 0) && canSet && <button onClick={() => e.revertUpload()} className="lnk" style={{ alignSelf: 'flex-start' }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
     </Block>
   );
 }
