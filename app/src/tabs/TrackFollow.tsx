@@ -40,7 +40,7 @@ export function FollowList() {
   const rows = useMemo(() => followRows(e, year, today), [e, v, year, today]);
   // each company's contact, as its drawer header and ติดต่อ tab count it (lib/follow.ts followContact): the line under its name
   const contacts = useMemo(
-    () => withActIndex(e.sales, () => new Map(rows.map((r) => [r.c.id, followContact(e.crm.log[r.c.id] || [], e.dealsOf(r.c.id), e.sales, today)]))),
+    () => withActIndex(e.sales, () => new Map(rows.map((r) => [r.c.id, followContact(e.crm.log[r.c.id] || [], e.dealsOf(r.c.id), e.sales, today, e.tasksOf(r.c.id))]))),
     [e, v, rows, today],
   );
   // the quick filter the picks were made under is read back (followSel's key), so a page that comes back keeps both

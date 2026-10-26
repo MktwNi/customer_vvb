@@ -145,21 +145,25 @@ export function followRows(e: FollowSrc, year: string, today: string): FollowRow
  *  contact with these (CompanyDrawer.tsx), and the list's line under a name does the same. */
 export const COMPANY_CONTACT = ['call', 'email', 'meet', 'follow'];
 
-/** A followed company's contact, as the company drawer shows it: `last` is the day of its latest contact ('' = none,
- *  the drawer's "ติดต่อล่าสุด"), `count` the entries the ติดต่อ tab lists under การติดต่อ (its log and the contact
- *  records of its deals; its appointments are not counted). */
+/** A followed company's contact, as the list's line, the company drawer's header and its tab read it: `last` is the day
+ *  of its latest contact ('' = none, the drawer's "ติดต่อล่าสุด"), `count` the entries the ติดต่อ tab shows (its log,
+ *  the contact records of its deals) plus its open appointments (นัดหมาย not done yet). */
 export interface FollowContact { last: string; count: number }
 
 /**
- * A company's contact from the same data the company drawer reads for its header and its ติดต่อ tab (CompanyDrawer.tsx):
- * the latest of its company-level log entries (COMPANY_CONTACT) and of each deal's last contact (lastContact: the typed
- * date, the steps' dates, the contact records up to today), and the entries of the log and of its deals' contact records.
- * `logs`: the company's log (crm.log); `deals`: every deal of the company (engine dealsOf).
+ * A company's contact from the data the company drawer reads (CompanyDrawer.tsx) and the list reads (TrackFollow.tsx), the one
+ * function both call, so the list's line, the drawer's header and its tab count are the same answer. The last contact is the
+ * latest of its company-level log entries (COMPANY_CONTACT) and of each deal's last contact (lastContact: the typed date, the
+ * steps' dates, the contact records up to today), as a local day (localDay). The count is the entries the tab lists (its log
+ * and its deals' contact records) and its open appointments.
+ * `logs`: the company's log (crm.log); `deals`: every deal of the company (engine dealsOf); `tasks`: its appointments (engine
+ * tasksOf), of which the ones not done are counted.
  */
-export function followContact(logs: readonly LogEntry[], deals: readonly Deal[], s: SalesState, today: string): FollowContact {
+export function followContact(logs: readonly LogEntry[], deals: readonly Deal[], s: SalesState, today: string, tasks: readonly Task[]): FollowContact {
   const lastC = logs.slice().sort((a, b) => b.at.localeCompare(a.at)).find((l) => COMPANY_CONTACT.includes(l.type));
   const last = [lastC ? localDay(lastC.at) : '', ...deals.map((x) => lastContact(s, x, today))].reduce((a, b) => (b > a ? b : a), '');
-  return { last, count: logs.length + deals.reduce((n, x) => n + actsOf(s, x.id).length, 0) };
+  const open = tasks.filter((t) => !t.done).length;
+  return { last, count: logs.length + open + deals.reduce((n, x) => n + actsOf(s, x.id).length, 0) };
 }
 
 /** The date and the count are kept whole (no-break spaces inside them), so a wrapped line never parts "2" from "ครั้ง". */
