@@ -19,11 +19,66 @@ export interface TgoItem {
 }
 export interface TgoResult { items: TgoItem[]; total: number | null; pages: number; paged: boolean; via: string; since?: string; lastCheck?: string }
 
-/** One row of the feed (the cleaned sheet "ข้อมูล CFO"); s1–s3 are fractions (0.25 = 25%). */
+/** One cell of the sheet as the feed sends it: text as typed (percent, thousands commas, Buddhist dates), or a number. */
+export type Cell = string | number | null;
+/** One row of the feed (the cleaned sheet "ข้อมูล CFO"); s1–s3 are shares (0.25 or "25%"), dates are text or JSON dates. */
 export interface FeedRow {
-  id: string; cert: string; act: string; org: string; branch: string; prov: string; addr: string; tambon: string; amphoe: string; changwat: string;
-  zip: string; ind: string; size: string; apBE: string; exBE: string; ap: string; ex: string; s1: number | null; s2: number | null; s3: number | null;
+  id: Cell; cert: string; act: string; org: string; branch: string; prov: string; addr: string; tambon: string; amphoe: string; changwat: string;
+  zip: string; ind: string; size: string; apBE: string; exBE: string; ap: Cell; ex: Cell; s1: Cell; s2: Cell; s3: Cell;
   fy: string; note: string; flags: string;
+}
+
+/** A pulled certificate in the shared review queue (tgo/<id>): 'p' waits for a decision, 'a' is accepted (its
+ *  company and certificate are in the registry), 'r' is rejected (kept, so a later pull never adds it again). */
+export type TgoSt = 'p' | 'a' | 'r';
+export interface TgoRec extends TgoItem { st: TgoSt; gid: number | null; by: string; at: string; note: string }
+
+/** An id as the sheet shows it: "32,040", 32040, "32040.0" → "32040". */
+export const idOf = (v: unknown) => String(v ?? '').trim().replace(/,/g, '').replace(/\.0+$/, '');
+
+/** A share as a fraction: "12.20%" or "12.20 %" or 0.122 → 0.122; a bare number above 1 is a percentage; else null. */
+export function shareOf(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const pct = typeof v === 'string' && /%\s*$/.test(v.trim());
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/%\s*$/, '').replace(/,/g, '').trim());
+  if (!isFinite(n) || String(v).trim() === '' || n < 0) return null;
+  return pct || n > 1 ? +(n / 100).toFixed(6) : n;
+}
+
+/** A date as yyyy-mm-dd (Bangkok's calendar day): yyyy-mm-dd as is; dd/mm/yyyy (Buddhist or Gregorian year); a JSON or
+ *  Date string with a zone (read as the Bangkok day, UTC+7); a clock time without a zone as its own day. '' if unknown. */
+export function dateOf(v: unknown): string {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dm = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (dm) return be2iso(s);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) return s.slice(0, 10);
+  const t = Date.parse(s);
+  if (isNaN(t)) return '';
+  const zoned = /(Z|GMT[+-]\d{4}|UTC|[+-]\d{2}:?\d{2})\s*(\(.*\))?$/.test(s);
+  const d = zoned ? new Date(t + 7 * 36e5) : new Date(t);
+  const part = zoned ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()] : [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+  return `${part[0]}-${pad(part[1])}-${pad(part[2])}`;
+}
+
+/** The queue key of a pulled certificate: its TGO id, else its certificate no. + organisation. */
+export const ridOf = (it: Pick<TgoItem, 'id' | 'cert' | 'org'>) => (it.id ? it.id : 'k' + encodeURIComponent(key(it.cert, it.org)));
+
+/** A queue record as the sheet or this browser stores it, read tolerantly; null when it is not one. */
+export function toTgoRec(v: unknown): TgoRec | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const st = o.st === 'p' || o.st === 'a' || o.st === 'r' ? o.st : null;
+  if (!st || typeof o.cert !== 'string' || typeof o.org !== 'string') return null;
+  const s = (x: unknown) => (x == null ? '' : String(x));
+  const sh = (x: unknown) => (typeof x === 'number' && isFinite(x) ? x : null);
+  const out: TgoRec = {
+    st, gid: typeof o.gid === 'number' && isFinite(o.gid) ? o.gid : null, by: s(o.by), at: s(o.at), note: s(o.note),
+    cert: o.cert, act: s(o.act), org: o.org, branch: s(o.branch), prov: s(o.prov), apBE: s(o.apBE), exBE: s(o.exBE), ap: s(o.ap), ex: s(o.ex), fy: s(o.fy), id: s(o.id),
+  };
+  if (o.addr != null) Object.assign(out, { addr: s(o.addr), zip: s(o.zip), changwat: s(o.changwat), ind: s(o.ind), size: s(o.size), s1: sh(o.s1), s2: sh(o.s2), s3: sh(o.s3) });
+  return out;
 }
 
 /** TGO's cards say "กรุงเทพฯ"; the registry's dictionaries spell it out. */
@@ -37,8 +92,6 @@ export const feedUrl = (base: string, since?: string) => {
   return u + (u.includes('?') ? '&' : '?') + 'format=json' + (since ? '&since=' + since : '');
 };
 
-const num = (v: unknown) => (v === null || v === undefined || v === '' || isNaN(Number(v)) ? null : Number(v));
-
 export function fromFeed(r: FeedRow): TgoItem {
   const s = (v: unknown) => String(v ?? '').trim();
   const cert = s(r.cert);
@@ -46,8 +99,8 @@ export function fromFeed(r: FeedRow): TgoItem {
   const fy = s(r.fy) || (fm ? 'FY' + fm[1] : '');
   return {
     cert, act: s(r.act), org: s(r.org), branch: s(r.branch), prov: s(r.prov), apBE: s(r.apBE), exBE: s(r.exBE),
-    ap: s(r.ap) || be2iso(s(r.apBE)), ex: s(r.ex) || be2iso(s(r.exBE)), fy, id: s(r.id).replace(/\.0+$/, ''),
-    addr: s(r.addr), zip: s(r.zip), changwat: s(r.changwat), ind: s(r.ind), size: s(r.size), s1: num(r.s1), s2: num(r.s2), s3: num(r.s3),
+    ap: dateOf(r.ap) || dateOf(r.apBE), ex: dateOf(r.ex) || dateOf(r.exBE), fy, id: idOf(r.id),
+    addr: s(r.addr), zip: s(r.zip), changwat: s(r.changwat), ind: s(r.ind), size: s(r.size), s1: shareOf(r.s1), s2: shareOf(r.s2), s3: shareOf(r.s3),
   };
 }
 
