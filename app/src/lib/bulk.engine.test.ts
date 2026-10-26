@@ -140,16 +140,17 @@ const pushes = () => sent.filter((b) => b.action === 'push').map((b) => (b.ops a
 const pendWrites = (t: Tab) => [...t.io.n.update].filter(([k]) => k.startsWith('teamPending:')).reduce((a, [, n]) => a + n, 0);
 /** Companies of the registry this browser built (the search results, in order). */
 const cos = (t: Tab, n: number, from = 0) => t.e.B.companies.slice(from, from + n).map((c) => c.id);
-/** Companies made the way the TGO website sync makes them (engine.applySync): ids of this browser only. */
+/** Companies made the way the TGO review queue makes them: pulled rows, approved (engine.approveTgo). They are shared
+ *  customers (ids from 1e12), like every company the team sees. */
 function tgoCos(t: Tab, names: string[]) {
-  const raw = t.e as unknown as { pendingSync: unknown; applySync: (auto: boolean) => void };
-  raw.pendingSync = {
-    total: names.length, at: new Date().toISOString(),
-    nw: names.map((org, i) => ({ org, prov: '', act: 'ผลิต', cert: 'TGO-' + i, branch: '', ap: '2026-01-05', ex: '2028-01-04', id: 'w' + i, gid: null })),
-  };
-  raw.applySync(false);
+  const raw = t.e as unknown as { tgo: Record<string, unknown> };
+  names.forEach((org, i) => {
+    raw.tgo['w' + i] = { st: 'p', id: 'w' + i, cert: 'TGO-' + i, org, prov: 'กรุงเทพมหานคร', act: 'ผลิต', branch: '', apBE: '', exBE: '', ap: '2026-01-05', ex: '2028-01-04', fy: '', gid: null, by: '', at: '', note: '' };
+  });
+  expect(t.e.approveTgo(names.map((_, i) => 'w' + i))).toBe(names.length);
   const ids = t.e.B.companies.filter((c) => names.includes(c.name)).map((c) => c.id);
-  expect(ids.every((id) => id >= 900001 && id < 1e12)).toBe(true);
+  expect(ids).toHaveLength(names.length);
+  expect(ids.every((id) => id >= 1e12)).toBe(true);
   return ids;
 }
 
@@ -353,20 +354,20 @@ describe('bulk actions in a team (Code.gs in the simulator)', () => {
     expect(Object.values(S.e.sales.deals).filter((d) => d.year === '2569')).toHaveLength(20);
   });
 
-  it('companies from the TGO website sync: ติดตาม, ผู้รับผิดชอบ and นัด stay on this browser and are counted apart (review: the toasts counted them as shared)', async () => {
+  it('companies from the TGO review queue are shared like every registry company: ติดตาม, ผู้รับผิดชอบ and นัด go to the team', async () => {
     const L = await lead();
     await settle(L);
-    const local = tgoCos(L, ['บริษัท เว็บหนึ่ง จำกัด', 'บริษัท เว็บสอง จำกัด', 'บริษัท เว็บสาม จำกัด']);
-    const ids = [...cos(L, 4), ...local];
-    expect(L.e.setWatchMany(ids, true)).toEqual({ changed: 7, same: 0, local: 3 });
-    expect(L.e.setOwners(ids, 'หมิว')).toEqual({ changed: 7, same: 0, kept: 0, local: 3 });
-    expect(L.e.addTasks(ids, { type: 'call', date: '2026-10-13', time: '', note: '' }, 5)).toMatchObject({ n: 7, local: 3 });
+    const tgo = tgoCos(L, ['บริษัท เว็บหนึ่ง จำกัด', 'บริษัท เว็บสอง จำกัด', 'บริษัท เว็บสาม จำกัด']);
+    const ids = [...cos(L, 4), ...tgo];
+    expect(L.e.setWatchMany(ids, true)).toEqual({ changed: 7, same: 0, local: 0 });
+    expect(L.e.setOwners(ids, 'หมิว')).toEqual({ changed: 7, same: 0, kept: 0, local: 0 });
+    expect(L.e.addTasks(ids, { type: 'call', date: '2026-10-13', time: '', note: '' }, 5)).toMatchObject({ n: 7, local: 0 });
     await settle(L);
-    expect(live(L, 'watch/')).toHaveLength(4);
-    expect(live(L, 'owner/')).toHaveLength(4);
-    expect(live(L, 'task/')).toHaveLength(4);
+    expect(live(L, 'watch/')).toHaveLength(7);
+    expect(live(L, 'owner/')).toHaveLength(7);
+    expect(live(L, 'task/')).toHaveLength(7);
     // their tracker rows are shared (by name)
-    expect(L.e.addDealsFromCompanies(local, { year: '2569' })).toMatchObject({ added: 3 });
+    expect(L.e.addDealsFromCompanies(tgo, { year: '2569' })).toMatchObject({ added: 3 });
     await settle(L);
     expect(live(L, 'deal/')).toHaveLength(3);
     // with no team, nothing is "apart": everything is this browser's

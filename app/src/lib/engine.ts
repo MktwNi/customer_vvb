@@ -18,7 +18,7 @@ import { contactChoices, dealContact, linkIndex, linkOrder, nameKey, personExtra
 // one person, several companies (person/<pid>/co/<gid>) and records merged into one (person/<gone>/into/<keep>)
 import { aliasIndex, coKey, coRecOf, coRecsOn, cosOf, dupPairs, findExisting, intoKey, intoValue, mergePlan, pairKey, pcoValue, personKey, phoneKeys, reachPatch, suggestionHeads, toPCo, toPInto, type DupPair, type Found, type PCo, type PInto, type PersonAt, type PersonCo } from './people';
 import {
-  CUSTOM_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
+  CUSTOM_ID_MIN, LOCAL_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
   parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
 } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
@@ -118,7 +118,6 @@ const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
 export interface UploadState { status?: 'busy' | 'error' | 'done' | 'preview'; msg?: string; head?: string; preview?: { k: string; v: string }[] }
 export interface SyncState { status?: 'running' | 'error' | 'done' | 'ready' | ''; msg?: string }
-export interface PendingSync extends TGOSync.TgoResult { nw: (TGOSync.TgoItem & { gid: number | null })[]; at: string }
 
 /** An expense's bill kept in this browser (GccEngine.billKey). */
 interface BillBlob { name: string; mime: string; data: ArrayBuffer; by: string; fid?: string }
@@ -144,7 +143,12 @@ export class GccEngine {
   contacts: Record<string, ContactEdit> = {};
   crm: Crm = emptyCrm();
   added: Partial<RawCompany>[] = [];
+  /** Certificates accepted from the TGO review queue, as registry rows (derived from `tgo` by rebuild). */
   tgoCerts: Partial<Cert>[] = [];
+  /** The TGO review queue, shared by the team (lib/tgoSync.ts TgoRec): waiting, accepted and rejected certificates. */
+  tgo: Record<string, TGOSync.TgoRec> = {};
+  /** Certificates from before the queue, read at load and adopted once the registry is built (adoptLegacyCerts). */
+  private legacyCerts: Partial<Cert>[] = [];
   setSnap: SetSnap | null = null;
   R: Round[] = [];
   sources: unknown[][] = [];
@@ -173,7 +177,6 @@ export class GccEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private syncing = false;
   private pendingUpload: ParsedUpload | null = null;
-  pendingSync: PendingSync | null = null;
 
   // ---- team sync (shared CRM data via Google Apps Script; see lib/teamSync.ts)
   team: TeamState = { status: 'off', msg: '', last: '' };
@@ -376,7 +379,7 @@ export class GccEngine {
       if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks, tgoRecs] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -391,6 +394,7 @@ export class GccEngine {
         this.store.get<Record<string, CustomCo>>('customCos'),
         this.store.get<Record<string, Person>>('people'),
         this.store.get<Record<string, PLink>>('plinks'),
+        this.store.get<Record<string, TGOSync.TgoRec>>('tgoRecs'),
       ]);
       this.people = people || {};
       this.plinks = plinks || {};
@@ -401,7 +405,8 @@ export class GccEngine {
       this.contacts = contacts || {};
       this.crm = { ...emptyCrm(), ...(crm || {}) };
       this.added = added || [];
-      this.tgoCerts = tgoCerts || [];
+      this.tgo = tgoRecs || {};
+      this.legacyCerts = tgoCerts || [];
       this.setSnap = setSnap || null;
       this.sources = sources;
       // migrate free-form notes (older prototype) into the contact log
@@ -444,6 +449,11 @@ export class GccEngine {
       this.loadMsg = 'กำลังรวมข้อมูลและตรวจข้อมูลซ้ำ…';
       this.emit();
       await new Promise((r) => setTimeout(r, 30));
+      if (this.legacyCerts.length) {
+        const legacy = this.legacyCerts;
+        this.legacyCerts = [];
+        this.adoptLegacyCerts(legacy); // rebuilds the registry itself
+      }
       this.rebuild();
       this.day = todayISO();
       this.loading = false;
@@ -512,6 +522,7 @@ export class GccEngine {
 
   // ------------------------------------------------------------------ build / recalc
   rebuild() {
+    this.tgoCerts = this.tgoCertRows();
     const B = build(this.base, this.dec, { added: [...this.added, ...this.customRaw()], contacts: this.contacts, certs: this.tgoCerts.map((c) => ({ ...c, tgo: true })) });
     this.B = B;
     // certificates pulled from the TGO website count towards their company's CFO state
@@ -532,10 +543,13 @@ export class GccEngine {
     this.byNorm = new Map();
     B.companies.forEach((c) => {
       const k = norm(c.name);
-      if (k && !this.byNorm.has(k)) this.byNorm.set(k, c.id);
+      // names under 3 characters are not matched (build's duplicate check skips them too)
+      if (k.length >= 3 && !this.byNorm.has(k)) this.byNorm.set(k, c.id);
     });
-    this.certKeys = new Set(B.certs.map((ct) => TGOSync.key(ct.cert, ct.org)));
-    this.certIds = new Set(B.certs.map((ct) => String(ct.webId ?? '').trim()).filter(Boolean));
+    // held certificates and every queue row (waiting, accepted or rejected): a pull never adds them again
+    const queued = Object.values(this.tgo);
+    this.certKeys = new Set([...B.certs.map((ct) => TGOSync.key(ct.cert, ct.org)), ...queued.map((r) => TGOSync.key(r.cert, r.org))]);
+    this.certIds = new Set([...B.certs.map((ct) => String(ct.webId ?? '').trim()), ...queued.map((r) => r.id)].filter(Boolean));
     // SET snapshot → "newly listed" detection on the next dataset
     const syms = [...new Set(B.companies.map((c) => c.set).filter(Boolean))];
     const today = todayISO();
@@ -716,9 +730,9 @@ export class GccEngine {
     this.emit();
   }
 
-  // ------------------------------------------------------------------ TGO sync
+  // ------------------------------------------------------------------ TGO sync (the review queue)
   syncCfg(): SyncCfg {
-    return { freq: 'daily', proxy: '', feed: TGOSync.FEED_URL, autoApply: true, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
+    return { freq: 'off', proxy: '', feed: TGOSync.FEED_URL, autoApply: false, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
   }
   saveSync(p: Partial<SyncCfg>) {
     const c = { ...this.syncCfg(), ...p };
@@ -731,21 +745,14 @@ export class GccEngine {
     if (!c.last || c.freq === 'open') return true;
     return Date.now() - Date.parse(c.last) >= (c.freq === 'weekly' ? 168 : 24) * 36e5;
   }
-  /** Already held: same TGO record id, else same certificate no. + organisation. */
+  /** Already held, or already in the review queue (waiting, accepted or rejected): same TGO record id, else same
+   *  certificate no. + organisation. A pull never adds such a row again. */
   isKnownCert(it: TGOSync.TgoItem) {
     return (!!it.id && this.certIds.has(it.id)) || this.certKeys.has(TGOSync.key(it.cert, it.org));
   }
-  /** The feed is asked for records approved within 180 days of the newest one held — late additions to a round included. */
-  feedSince() {
-    let mx = '';
-    this.B.certs.forEach((ct) => {
-      if (ct.ap && ct.ap > mx) mx = ct.ap;
-    });
-    return mx ? addDays(mx, -180) : '';
-  }
   /** Fields of a pulled certificate that come from the feed (the list page has none of them). */
   certDetail(it: TGOSync.TgoItem): Partial<Cert> {
-    const CD = this.B.CD;
+    const CD = this.base.cdicts;
     const ix = (a: string[], v?: string) => (v ? a.indexOf(v) : -1);
     const pn = TGOSync.provName(it.changwat || it.prov);
     const prov = ix(CD.prov, pn);
@@ -755,10 +762,39 @@ export class GccEngine {
       zip: it.zip || '', fy: ix(CD.fy, it.fy), s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null,
     };
   }
+  /** The review queue by state. `gid`: for a waiting row, the registry company its organisation already has (null = a
+   *  new one); for an accepted row, the company it went to; a rejected row has none. */
+  tgoRows(st: TGOSync.TgoSt): { rid: string; rec: TGOSync.TgoRec; gid: number | null }[] {
+    return Object.entries(this.tgo)
+      .filter(([, r]) => r.st === st)
+      .map(([rid, rec]) => ({ rid, rec, gid: st === 'a' ? rec.gid : st === 'p' ? this.byNorm.get(norm(rec.org)) ?? null : null }))
+      .sort((a, b) => a.rec.org.localeCompare(b.rec.org, 'th') || a.rec.cert.localeCompare(b.rec.cert));
+  }
+  /** Certificates accepted from the queue, as the registry's certificate rows (rebuild gives them to build()). */
+  private tgoCertRows(): Partial<Cert>[] {
+    return Object.values(this.tgo)
+      .filter((r) => r.st === 'a' && r.gid != null)
+      .map((r) => ({
+        gid: r.gid!, cert: r.cert, org: r.org, branch: r.branch, act: r.act, ind: -1, size: -1, addr: '', prov: -1, provTxt: r.prov, zip: '', ap: r.ap, ex: r.ex,
+        fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', webId: r.id, note: r.note, ...(r.addr != null ? this.certDetail(r) : {}),
+      }));
+  }
+  /** One queue record: this browser's copy and the team's (a change of the queue is a write of that record). */
+  private setTgo(rid: string, rec: TGOSync.TgoRec) {
+    this.tgo[rid] = rec;
+    this.op(keyOf.tgo(rid), { ...rec });
+  }
+  /** Pull the feed (or the TGO page through a proxy) into the review queue. A new certificate waits there (st 'p') for an
+   *  approver; a pull never adds to the registry. Needs edit.cust: a viewer reads the queue and cannot change it. */
   async runSync(auto: boolean) {
     if (this.syncing || !this.B) return;
     const c = this.syncCfg();
     const feed = (c.feed || '').trim();
+    if (!this.can('edit.cust')) {
+      this.sy = { status: 'error', msg: 'บัญชีของคุณดูรายการรอตรวจได้อย่างเดียว ให้ผู้ที่แก้ข้อมูลลูกค้าได้เป็นผู้ดึงข้อมูล' };
+      this.emit();
+      return;
+    }
     this.syncing = true;
     this.sy = { status: 'running', msg: feed ? 'กำลังอ่านข้อมูลจาก Google Sheet…' : 'กำลังเชื่อมต่อเว็บไซต์ TGO…' };
     this.emit();
@@ -768,36 +804,39 @@ export class GccEngine {
         this.emit();
       };
       const res = feed
-        ? await TGOSync.fetchFeed({ url: feed, since: this.feedSince(), onProgress })
+        ? await TGOSync.fetchFeed({ url: feed, onProgress })
         : await TGOSync.fetchAll({ proxy: c.proxy, maxPages: 3, isKnown: (it) => this.isKnownCert(it), onProgress });
-      // certificates pulled earlier from the list page have no details: fill them in from the feed
+      // certificates pulled earlier without details: the feed's address, industry, size and scopes
       const filled = feed ? this.fillDetails(res.items) : 0;
       const seen = new Set<string>();
-      const nw = res.items
-        .filter((it) => {
-          const k = it.id || TGOSync.key(it.cert, it.org);
-          if (this.isKnownCert(it) || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        })
-        .map((it) => ({ ...it, gid: this.byNorm.get(norm(it.org)) || null }));
-      this.pendingSync = { ...res, nw, at: new Date().toISOString() };
-      if (!nw.length) {
-        this.saveSync({ last: this.pendingSync.at, lastMsg: 'ไม่มีใบรับรองใหม่', total: res.total });
-        this.pendingSync = null;
-        const fillMsg = filled ? ` · เติมรายละเอียดใบที่ดึงไว้ ${fmtN(filled)} ใบ` : '';
+      const nw = res.items.filter((it) => {
+        const k = TGOSync.ridOf(it);
+        if (this.isKnownCert(it) || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      const at = new Date().toISOString();
+      if (nw.length) {
+        const by = this.me();
+        this.batchOps(() => nw.forEach((it) => this.setTgo(TGOSync.ridOf(it), { ...it, st: 'p', gid: null, by, at, note: '' })));
+        this.persist('tgoRecs', this.tgo);
+        this.rebuild();
+      }
+      this.saveSync({ last: at, lastMsg: nw.length ? `รอตรวจ ${fmtN(nw.length)} ใบ` : 'ไม่มีใบรับรองใหม่', total: res.total });
+      const waiting = Object.values(this.tgo).filter((r) => r.st === 'p').length;
+      const fillMsg = filled ? ` · เติมรายละเอียดใบที่ดึงไว้ ${fmtN(filled)} ใบ` : '';
+      const waitMsg = waiting ? ` · รอตรวจ ${fmtN(waiting)} ใบ` : '';
+      if (nw.length) {
+        this.sy = { status: 'ready', msg: `พบใบรับรองใหม่ ${fmtN(nw.length)} ใบ รอตรวจก่อนเข้าระบบ${fillMsg}` };
+      } else {
         this.sy = {
           status: auto && !filled ? '' : 'done',
           msg: feed
-            ? `ข้อมูลตรงกับ Google Sheet แล้ว (ตรวจ ${fmtN(res.items.length)} รายการที่อนุมัติตั้งแต่ ${res.since ? isoTh(res.since) : 'ต้น'})${fillMsg}`
-            : `ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)`,
+            ? `ข้อมูลตรงกับ Google Sheet แล้ว (ตรวจ ${fmtN(res.items.length)} รายการ)${fillMsg}${waitMsg}`
+            : `ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)${fillMsg}${waitMsg}`,
         };
-      } else if (auto && c.autoApply) {
-        this.applySync(true);
-      } else {
-        this.saveSync({ total: res.total });
-        this.sy = { status: 'ready' };
       }
+      this.saveSync({ total: res.total });
     } catch (e) {
       this.sy = { status: 'error', msg: (auto ? 'ซิงก์อัตโนมัติไม่สำเร็จ: ' : '') + ((e as Error)?.message || e) };
     } finally {
@@ -805,63 +844,130 @@ export class GccEngine {
       this.emit();
     }
   }
-  /** Gives pulled certificates that lack details (from the list page) the feed's address, industry, size and scopes. */
+  /** Gives queued and accepted certificates that lack details (the list page, or a feed row with no address yet) the
+   *  feed's address, industry, size and scopes. Returns how many were filled in. */
   fillDetails(items: TGOSync.TgoItem[]) {
     const byId = new Map(items.filter((it) => it.id).map((it) => [it.id, it]));
     const byKey = new Map(items.map((it) => [TGOSync.key(it.cert, it.org), it]));
     let n = 0;
-    this.tgoCerts.forEach((tc, i) => {
-      if (tc.addr || (tc.ind != null && tc.ind >= 0) || tc.indTxt) return;
-      const it = (tc.webId && byId.get(String(tc.webId))) || byKey.get(TGOSync.key(tc.cert || '', tc.org || ''));
-      if (!it || it.addr == null) return;
-      this.tgoCerts[i] = { ...tc, ...this.certDetail(it), webId: tc.webId || it.id };
-      n++;
-    });
+    this.batchOps(() =>
+      Object.entries(this.tgo).forEach(([rid, r]) => {
+        if (r.st === 'r' || r.addr || r.ind) return;
+        const it = (r.id && byId.get(r.id)) || byKey.get(TGOSync.key(r.cert, r.org));
+        if (!it || (!it.addr && !it.ind)) return;
+        this.setTgo(rid, { ...r, addr: it.addr || '', zip: it.zip || '', changwat: it.changwat || '', ind: it.ind || '', size: it.size || '', s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null, fy: it.fy || r.fy, id: r.id || it.id });
+        n++;
+      }),
+    );
     if (n) {
-      this.persist('tgoCerts', this.tgoCerts);
+      this.persist('tgoRecs', this.tgo);
       this.rebuild();
     }
     return n;
   }
-  applySync(auto: boolean) {
-    const st = this.pendingSync;
-    if (!st) return;
-    const D = this.B.D;
-    let made = 0;
-    st.nw.forEach((it) => {
-      let gid = it.gid;
-      if (!gid) {
-        gid = 900001 + this.added.length;
-        made++;
-        const pi = D.prov.indexOf(TGOSync.provName(it.changwat || it.prov));
-        this.added.push({
-          id: gid, name: it.org, jur: '', type: Math.max(0, D.type.indexOf('ไม่ระบุ')), prov: pi >= 0 ? pi : D.prov.indexOf(''), addr: it.addr || '',
-          ind: Math.max(0, D.ind.indexOf('ไม่ระบุ')), biz: it.act, src: 1, tgt: 0, cfo: Math.max(0, D.cfo.indexOf('อยู่ในอายุ')), cfoN: 0, cfoEx: '',
-          giNow: null, giMax: null, giUntil: '', newYm: '', invest: null, fac: null, set: '', mkt: '', phone: '', email: '', web: '', ct: 0, match: 0,
-        });
-        this.byNorm.set(norm(it.org), gid);
-      }
-      const fromFeed = it.addr != null;
-      this.tgoCerts.push({
-        gid, cert: it.cert, org: it.org, branch: it.branch, act: it.act, ind: -1, size: -1, addr: '', prov: -1, provTxt: it.prov, zip: '',
-        ap: it.ap, ex: it.ex, fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', webId: it.id,
-        ...(fromFeed ? this.certDetail(it) : {}),
-        note: (fromFeed ? 'ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. ' : 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ') + isoTh(todayISO()),
-      });
-    });
-    this.persist('addedCos', this.added);
-    this.persist('tgoCerts', this.tgoCerts);
-    this.rebuild();
-    const msg = `${auto ? 'อัปเดตอัตโนมัติ' : 'อัปเดต'}จาก TGO แล้ว: ใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ · ผูกกับบริษัทเดิม ${fmtN(st.nw.length - made)} · สร้างบริษัทใหม่ ${fmtN(made)}`;
-    this.saveSync({ last: st.at, lastMsg: `ใหม่ ${fmtN(st.nw.length)} ใบ`, total: st.total });
-    this.pendingSync = null;
-    this.sy = { status: 'done', msg };
-    this.emit();
+  /** The registry company for a pulled certificate's organisation: the one with that name, else a new customer shared
+   *  with the team. `made` keeps the companies made in this batch, so two certificates of one new organisation make one. */
+  private companyFor(r: Pick<TGOSync.TgoItem, 'org' | 'act' | 'addr' | 'prov' | 'changwat' | 'ind'>, made: Map<string, number>, by: string, at: string): number {
+    const k = norm(r.org);
+    const have = this.byNorm.get(k) ?? made.get(k);
+    if (have != null) return have;
+    let id = customIdOf(r.org);
+    if (this.custom[id] || this.B.byId.has(id)) id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
+    const D = this.base.dicts;
+    const c: CustomCo = {
+      id, name: r.org.trim().slice(0, 200), jur: '', prov: TGOSync.provName(r.changwat || r.prov || ''), ind: r.ind && D.ind.includes(r.ind) ? r.ind : 'ไม่ระบุ',
+      biz: r.act || '', addr: r.addr || '', phone: '', email: '', web: '', contact: '', note: '', at, by,
+    };
+    this.custom[id] = c;
+    // create-only and shared by id: two browsers making the same organisation make one company
+    this.op(keyOf.cust(id), { ...c }, { nx: true, revive: true });
+    made.set(k, id);
+    return id;
   }
-  cancelSync() {
-    this.pendingSync = null;
-    this.sy = {};
+  /** Accept waiting certificates into the registry: each one's company (the registry's own by name, else a new customer
+   *  shared with the team) and the certificate itself. Returns how many were accepted. */
+  approveTgo(rids: string[]) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return 0;
+    }
+    const made = new Map<string, number>();
+    const at = new Date().toISOString(), by = this.me();
+    let n = 0;
+    this.batchOps(() =>
+      rids.forEach((rid) => {
+        const r = this.tgo[rid];
+        if (!r || r.st !== 'p') return;
+        const gid = this.companyFor(r, made, by, at);
+        const note = (r.addr != null ? 'ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. ' : 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ') + isoTh(todayISO());
+        this.setTgo(rid, { ...r, st: 'a', gid, by, at, note });
+        n++;
+      }),
+    );
+    if (n) {
+      this.persist('customCos', this.custom);
+      this.persist('tgoRecs', this.tgo);
+      this.rebuild();
+    }
     this.emit();
+    return n;
+  }
+  /** Turn waiting certificates down: kept as rejected, so no pull adds them again; nothing reaches the registry. */
+  rejectTgo(rids: string[]) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return 0;
+    }
+    const at = new Date().toISOString(), by = this.me();
+    let n = 0;
+    this.batchOps(() =>
+      rids.forEach((rid) => {
+        const r = this.tgo[rid];
+        if (!r || r.st !== 'p') return;
+        this.setTgo(rid, { ...r, st: 'r', gid: null, by, at });
+        n++;
+      }),
+    );
+    if (n) {
+      this.persist('tgoRecs', this.tgo);
+      this.rebuild();
+    }
+    this.emit();
+    return n;
+  }
+  /** Certificates pulled before the queue existed (this browser's `tgoCerts`) become accepted queue records, and their
+   *  companies become shared ones: a company made on this device only (a local id) is replaced by a shared one. */
+  adoptLegacyCerts(legacy: Partial<Cert>[]) {
+    const CD = this.base.cdicts;
+    const addedName = new Map(this.added.map((a) => [a.id as number, a.name as string]));
+    // the local companies leave first, so the names below find only the shared companies
+    this.added = this.added.filter((a) => !(a.id! >= LOCAL_ID_MIN && a.id! < CUSTOM_ID_MIN));
+    this.rebuild();
+    const made = new Map<string, number>();
+    const at = new Date().toISOString();
+    this.batchOps(() =>
+      legacy.forEach((c) => {
+        const id = c.webId ? String(c.webId) : '';
+        const rid = id || 'k' + encodeURIComponent(TGOSync.key(c.cert || '', c.org || ''));
+        if (this.tgo[rid] || (!c.cert && !c.org)) return;
+        const local = c.gid != null && c.gid >= LOCAL_ID_MIN && c.gid < CUSTOM_ID_MIN;
+        const org = (local ? addedName.get(c.gid!) : undefined) ?? c.org ?? '';
+        const prov = c.prov != null && c.prov >= 0 ? CD.prov[c.prov] || '' : c.provTxt || '';
+        const ind = c.ind != null && c.ind >= 0 ? CD.ind[c.ind] || '' : c.indTxt || '';
+        const gid = local || c.gid == null ? this.companyFor({ org, act: c.act || '', addr: c.addr, prov, changwat: '', ind }, made, '', at) : c.gid;
+        this.setTgo(rid, {
+          st: 'a', gid, by: '', at, note: c.note || '', cert: c.cert || '', org, act: c.act || '', branch: c.branch || '', prov, apBE: '', exBE: '',
+          ap: c.ap || '', ex: c.ex || '', fy: c.fy != null && c.fy >= 0 ? CD.fy[c.fy] || '' : '', id,
+          ...(c.addr != null ? { addr: c.addr || '', zip: c.zip || '', changwat: prov, ind, size: c.size != null && c.size >= 0 ? CD.size[c.size] || '' : '', s1: c.s1 ?? null, s2: c.s2 ?? null, s3: c.s3 ?? null } : {}),
+        });
+      }),
+    );
+    // the companies made on this device are now the shared ones
+    this.added = this.added.filter((a) => !(a.id! >= LOCAL_ID_MIN && a.id! < CUSTOM_ID_MIN));
+    this.persist('addedCos', this.added);
+    this.persist('customCos', this.custom);
+    this.persist('tgoRecs', this.tgo);
+    this.persist('tgoCerts', []);
   }
 
   // ------------------------------------------------------------------ upload
@@ -5287,7 +5393,7 @@ export class GccEngine {
   }
   /** This browser's shared records as stored (every tab saves there); this tab's copy if unreadable. */
   private async storedShared(): Promise<SharedState> {
-    const [crm, contacts, dec, sales, custom, people, plinks] = await Promise.all([
+    const [crm, contacts, dec, sales, custom, people, plinks, tgo] = await Promise.all([
       this.store.get<Partial<Crm>>('crm'),
       this.store.get<Record<string, ContactEdit>>('contacts'),
       this.store.get<Record<string, string>>('dedup'),
@@ -5295,6 +5401,7 @@ export class GccEngine {
       this.store.get<Record<string, CustomCo>>('customCos'),
       this.store.get<Record<string, Person>>('people'),
       this.store.get<Record<string, PLink>>('plinks'),
+      this.store.get<Record<string, TGOSync.TgoRec>>('tgoRecs'),
     ]);
     // where this tab's own last save failed, the stored copy is older than this tab's: use this tab's
     const ok = (k: string, v: unknown) => !!v && !this.unstored.has(k);
@@ -5306,6 +5413,7 @@ export class GccEngine {
       custom: ok('customCos', custom) ? custom! : this.custom,
       people: ok('people', people) ? people! : this.people,
       plinks: ok('plinks', plinks) ? plinks! : this.plinks,
+      tgo: ok('tgoRecs', tgo) ? tgo! : this.tgo,
     };
   }
   /** The stored queue of a team session: per sheet, and per account when the team signs in (one
@@ -6048,7 +6156,8 @@ export class GccEngine {
       unmark(s.sales);
       return s;
     };
-    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {}, plinks: {} };
+    const none = { crm: emptyCrm(), contacts: {}, dec: {}, sales: emptySales(), custom: {}, people: {}, plinks: {}, tgo: {} };
+    if (fx.tgo) this.store.update<Record<string, TGOSync.TgoRec>>('tgoRecs', (cur) => (cur ? merged({ ...none, tgo: cur }).tgo! : this.tgo)).catch(() => {});
     if (fx.crm) this.store.update<Partial<Crm>>('crm', (cur) => (cur ? merged({ ...none, crm: { ...emptyCrm(), ...cur } }).crm : this.crm)).catch(() => {});
     if (fx.contacts.size || fx.contactDel)
       this.store.update<Record<string, ContactEdit>>('contacts', (cur) => (cur ? merged({ ...none, contacts: cur }).contacts : this.contacts)).catch(() => {});
@@ -6063,8 +6172,8 @@ export class GccEngine {
       this.coPeople = null;
       this.store.update<Record<string, PLink>>('plinks', (cur) => (cur ? merged({ ...none, plinks: cur }).plinks! : this.plinks)).catch(() => {});
     }
-    if (fx.dedup || fx.contactDel || fx.custom) {
-      this.rebuild(); // regroups companies / restores original contact data
+    if (fx.dedup || fx.contactDel || fx.custom || fx.tgo) {
+      this.rebuild(); // regroups companies / restores original contact data / the certificates of the queue
     } else {
       // records are keyed by the company id they were made on; on this device that id may be an
       // alias of a merged company, which shows only its own id's records

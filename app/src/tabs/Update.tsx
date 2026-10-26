@@ -37,7 +37,7 @@ export function Update() {
   // a team that signs in has no use for the team block: who you are is your account, the team list
   // is the users page's (names without an account), and so are an admin's backup files
   const accounts = e.role() != null;
-  const u = e.up, y = e.sy, st = e.pendingSync, sc = e.syncCfg(), mon = e.monCfg();
+  const u = e.up, y = e.sy, sc = e.syncCfg(), mon = e.monCfg();
   const me = e.me();
   const ownN: Record<string, number> = {};
   Object.values(C.owners).forEach((v) => (ownN[v] = (ownN[v] || 0) + 1));
@@ -146,23 +146,6 @@ export function Update() {
         {y.status === 'running' && <span className="t-link" style={{ fontSize: 14 }}>{y.msg}</span>}
         {y.status === 'error' && <Notice kind="error">{y.msg}</Notice>}
         {y.status === 'done' && <Notice kind="ok">{y.msg}</Notice>}
-        {y.status === 'ready' && st && (
-          <div style={{ borderTop: '1px solid var(--divider)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <span className="t-name">{`พบใบรับรองใหม่ ${fmtN(st.nw.length)} ใบ จาก ${fmtN(st.items.length)} รายการล่าสุด (ผ่าน ${st.via})`}</span>
-            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 280, overflow: 'auto' }}>
-              {st.nw.slice(0, 60).map((it, i) => (
-                <div key={i} style={{ borderTop: '1px solid var(--divider)', padding: '8px 0', display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span className="co-name dense">{it.org}</span>
-                  <span className="t-meta">{`${it.gid ? 'ผูกกับบริษัทเดิม' : 'บริษัทใหม่'} · ${it.cert} · ${it.prov} · อนุมัติ ${it.apBE}`}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button onClick={() => e.applySync(false)} className="btn sm">อัปเดตเข้าระบบ</button>
-              <button onClick={() => e.cancelSync()} className="quiet">ยกเลิก</button>
-            </div>
-          </div>
-        )}
       </UpdSection>
 
       {!accounts && (
