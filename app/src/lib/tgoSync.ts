@@ -9,7 +9,7 @@ import { pad } from './format';
 
 export const TGO_URL = 'https://thaicarbonlabel.tgo.or.th/index.php?lang=TH&mod=YjNKbllXNXBlbUYwYVc5dVgyRndjSEp2ZG1Gcw';
 /** The web app's address (ends in /exec). Empty = read TGO's page through a proxy as before. */
-export const FEED_URL = '';
+export const FEED_URL = 'https://script.google.com/macros/s/AKfycbzq7vOzZryh9-JjfGfdYLOSO2j9xCBTwUgsm0HS46aYdhjnj0QGQ7GRYIhchuICtKfpmg/exec';
 const PROXIES = ['https://api.allorigins.win/raw?url={u}', 'https://corsproxy.io/?url={u}', 'https://api.codetabs.com/v1/proxy?quest={u}'];
 
 export interface TgoItem {
