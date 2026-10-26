@@ -274,6 +274,8 @@ button.kpi{cursor:pointer}
 .upd-line{display:flex;flex-wrap:wrap;gap:4px 0;font-size:var(--fs-sec);color:var(--ink)}
 .upd-line>span{padding-right:14px}
 .upd-line>span+span{border-left:1px solid var(--line);padding-left:14px}
+.tgo-act{min-height:24px;padding-top:4px;padding-bottom:4px}
+#tgo-queue:focus{outline:none}
 .upd-more>summary{list-style:none;display:inline-block;font-size:var(--fs-sec)}
 .upd-more>summary::-webkit-details-marker{display:none}
 .upd-more-b{display:flex;flex-direction:column;gap:8px;padding-top:8px;font-size:var(--fs-sec);color:var(--ink-2);line-height:1.6;text-wrap:pretty}

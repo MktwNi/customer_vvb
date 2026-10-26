@@ -11,7 +11,7 @@ import { Icon } from '../components/icons';
  *  explanation folds under "รายละเอียด". */
 export function UpdSection({ title, status, action, more, children, id }: { title: string; status?: ReactNode; action?: ReactNode; more?: ReactNode; children?: ReactNode; id?: string }) {
   return (
-    <section id={id} className="card upd-sec">
+    <section id={id} className="card upd-sec" tabIndex={id ? -1 : undefined}>
       <div className="upd-head">
         <div className="upd-t">
           <h3 className="card-t">{title}</h3>
@@ -32,13 +32,34 @@ export function UpdSection({ title, status, action, more, children, id }: { titl
 
 /** Companies per page of the review queue: every waiting row is listed on some page. */
 const QUEUE_PAGE = 40;
+/** A date on the queue's rows stays on one line: no break between the day, the month and the year. */
+const nbDate = (iso: string) => isoTh(iso).replace(/ /g, ' ');
+
+/** Runs a queue action and keeps the focus where it was: after the action the control at the same place in the queue
+ *  (the next row's or the next company's button, else the one before it) takes the focus, so a keyboard user keeps
+ *  their place; with none left, the queue's heading does. */
+function queueAct(btn: HTMLElement, run: () => void) {
+  const at = queueControls('tgo-queue').indexOf(btn as HTMLButtonElement);
+  run();
+  requestAnimationFrame(() => keepFocus('tgo-queue', at));
+}
+/** The enabled buttons of a queue block, in order. */
+const queueControls = (id: string) => Array.from(document.getElementById(id)?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
+function keepFocus(id: string, at: number) {
+  const ctrls = queueControls(id);
+  const el = document.getElementById(id);
+  if (ctrls.length) ctrls[Math.max(0, Math.min(at, ctrls.length - 1))].focus();
+  else el?.focus();
+}
 
 /** The TGO review queue (lib/tgoSync.ts): what the pull found, by company, waiting for an approver. Accept or
  *  reject per certificate or per company; a viewer reads it and gets no buttons. Every waiting row is listed, a
- *  page of companies at a time. */
-function TgoQueue({ canEdit }: { canEdit: boolean }) {
+ *  page of companies at a time. Rejecting a whole company asks first: a rejected certificate does not come back. */
+export function TgoQueue({ canEdit }: { canEdit: boolean }) {
   const { engine: e } = useApp();
   const [page, setPage] = useState(0);
+  const [sure, setSure] = useState<string | null>(null); // the company whose rejection waits for a yes
+  const [msg, setMsg] = useState(''); // what the last action did, read out by a screen reader
   const rows = e.tgoRows('p');
   const groups: { org: string; rows: typeof rows }[] = [];
   rows.forEach((r) => {
@@ -51,6 +72,20 @@ function TgoQueue({ canEdit }: { canEdit: boolean }) {
   const shown = groups.slice(cur * QUEUE_PAGE, (cur + 1) * QUEUE_PAGE);
   const accepted = e.tgoRows('a').length, rejected = e.tgoRows('r').length;
   const today = todayISO();
+  const accept = (ids: string[]) => {
+    const n = e.approveTgo(ids);
+    setMsg(n ? `รับแล้ว ${fmtN(n)} ใบ` : '');
+  };
+  const reject = (ids: string[]) => {
+    const n = e.rejectTgo(ids);
+    setSure(null);
+    setMsg(n ? `ไม่รับแล้ว ${fmtN(n)} ใบ` : '');
+  };
+  const turn = (to: number, btn: HTMLElement) => {
+    const at = queueControls('tgo-pager').indexOf(btn as HTMLButtonElement);
+    setPage(to);
+    requestAnimationFrame(() => keepFocus('tgo-pager', at));
+  };
   return (
     <UpdSection
       id="tgo-queue"
@@ -64,6 +99,7 @@ function TgoQueue({ canEdit }: { canEdit: boolean }) {
       }
       more="ใบที่ดึงมาจะรอตรวจที่นี่ทั้งทีม ยังไม่เข้าทะเบียนจนกว่าจะกดรับ การรับใบของบริษัทที่ยังไม่มีในทะเบียนจะสร้างบริษัทใหม่ให้ทุกคนเห็นพร้อมกัน (บริษัทเดียวกันในรอบเดียวกันเป็นบริษัทเดียว) ไม่รับแล้วจะไม่ถูกดึงเป็นรายการใหม่อีก ไม่มีอะไรเข้าทะเบียน"
     >
+      <div role="status" aria-live="polite" className="t-meta">{msg}</div>
       {!canEdit && <span className="t-meta">บัญชีของคุณดูรายการนี้ได้อย่างเดียว การรับหรือไม่รับทำได้เฉพาะผู้ที่แก้ข้อมูลลูกค้าได้</span>}
       {!rows.length && <span className="empty">ไม่มีใบที่รอตรวจ กดดึงข้อมูลล่าสุดเมื่อ อบก. ประกาศรอบใหม่</span>}
       {shown.map((g) => {
@@ -77,21 +113,30 @@ function TgoQueue({ canEdit }: { canEdit: boolean }) {
               </span>
               {canEdit && (
                 <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => e.approveTgo(ids)} className="btn sm">รับทั้งบริษัท</button>
-                  <button onClick={() => e.rejectTgo(ids)} className="quiet">ไม่รับทั้งบริษัท</button>
+                  <button onClick={(ev) => queueAct(ev.currentTarget, () => accept(ids))} className="btn sm" aria-label={`รับทั้งบริษัท ${g.org}`}>รับทั้งบริษัท</button>
+                  <button onClick={() => setSure(g.org)} className="quiet tgo-act" aria-label={`ไม่รับทั้งบริษัท ${g.org}`} aria-expanded={sure === g.org}>ไม่รับทั้งบริษัท</button>
                 </span>
               )}
             </div>
+            {canEdit && sure === g.org && (
+              <div role="group" aria-label={`ยืนยันไม่รับ ${g.org}`} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', paddingLeft: 12 }}>
+                <span className="t-meta">{`ไม่รับ ${fmtN(ids.length)} ใบของบริษัทนี้ ใบที่ไม่รับแล้วจะไม่กลับมาในรายการรอตรวจ`}</span>
+                <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                  <button onClick={(ev) => queueAct(ev.currentTarget, () => reject(ids))} className="quiet tgo-act">ยืนยันไม่รับ</button>
+                  <button onClick={() => setSure(null)} className="quiet tgo-act" autoFocus>ยกเลิก</button>
+                </span>
+              </div>
+            )}
             {g.rows.map((r) => {
               const expired = !!r.rec.ex && r.rec.ex < today;
               return (
                 <div key={r.rid} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', paddingLeft: 12 }}>
                   <span className="t-meta">{r.rec.cert}</span>
-                  <span className="t-meta">{`${r.rec.act || 'ไม่ระบุกิจกรรม'} · ${r.rec.prov || 'ไม่ระบุจังหวัด'} · อนุมัติ ${r.rec.ap ? isoTh(r.rec.ap) : '—'} · ${expired ? 'หมดอายุแล้ว ' : 'ถึง '}${r.rec.ex ? isoTh(r.rec.ex) : '—'}`}</span>
+                  <span className="t-meta">{`${r.rec.act || 'ไม่ระบุกิจกรรม'} · ${r.rec.prov || 'ไม่ระบุจังหวัด'} · อนุมัติ ${r.rec.ap ? nbDate(r.rec.ap) : '—'} · ${expired ? 'หมดอายุแล้ว ' : 'ถึง '}${r.rec.ex ? nbDate(r.rec.ex) : '—'}`}</span>
                   {canEdit && (
                     <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-                      <button onClick={() => e.approveTgo([r.rid])} className="quiet">รับ</button>
-                      <button onClick={() => e.rejectTgo([r.rid])} className="quiet">ไม่รับ</button>
+                      <button onClick={(ev) => queueAct(ev.currentTarget, () => accept([r.rid]))} className="quiet tgo-act" aria-label={`รับใบ ${r.rec.cert}`}>รับ</button>
+                      <button onClick={(ev) => queueAct(ev.currentTarget, () => reject([r.rid]))} className="quiet tgo-act" aria-label={`ไม่รับใบ ${r.rec.cert}`}>ไม่รับ</button>
                     </span>
                   )}
                 </div>
@@ -101,10 +146,10 @@ function TgoQueue({ canEdit }: { canEdit: boolean }) {
         );
       })}
       {pages > 1 && (
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--divider)', paddingTop: 10 }}>
+        <div id="tgo-pager" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--divider)', paddingTop: 10 }}>
           <span className="t-meta">{`หน้า ${cur + 1} จาก ${fmtN(pages)} · บริษัทที่ ${fmtN(cur * QUEUE_PAGE + 1)}–${fmtN(Math.min(groups.length, (cur + 1) * QUEUE_PAGE))} จาก ${fmtN(groups.length)}`}</span>
-          <button onClick={() => setPage(cur - 1)} disabled={cur === 0} className="quiet">ก่อนหน้า</button>
-          <button onClick={() => setPage(cur + 1)} disabled={cur >= pages - 1} className="quiet">ถัดไป</button>
+          <button onClick={(ev) => turn(cur - 1, ev.currentTarget)} disabled={cur === 0} className="quiet tgo-act">ก่อนหน้า</button>
+          <button onClick={(ev) => turn(cur + 1, ev.currentTarget)} disabled={cur >= pages - 1} className="quiet tgo-act">ถัดไป</button>
         </div>
       )}
     </UpdSection>
