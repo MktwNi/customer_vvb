@@ -1,6 +1,6 @@
-import { type FormEvent, type ReactNode } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { dtTh, fmtN, isoTh } from '../lib/format';
+import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
 import { Notice, PageHead, labelCol } from '../components/ui';
 import { SelField } from '../components/Select';
@@ -30,6 +30,87 @@ export function UpdSection({ title, status, action, more, children, id }: { titl
   );
 }
 
+/** Companies per page of the review queue: every waiting row is listed on some page. */
+const QUEUE_PAGE = 40;
+
+/** The TGO review queue (lib/tgoSync.ts): what the pull found, by company, waiting for an approver. Accept or
+ *  reject per certificate or per company; a viewer reads it and gets no buttons. Every waiting row is listed, a
+ *  page of companies at a time. */
+function TgoQueue({ canEdit }: { canEdit: boolean }) {
+  const { engine: e } = useApp();
+  const [page, setPage] = useState(0);
+  const rows = e.tgoRows('p');
+  const groups: { org: string; rows: typeof rows }[] = [];
+  rows.forEach((r) => {
+    const g = groups[groups.length - 1];
+    if (g && g.org === r.rec.org) g.rows.push(r);
+    else groups.push({ org: r.rec.org, rows: [r] });
+  });
+  const pages = Math.max(1, Math.ceil(groups.length / QUEUE_PAGE));
+  const cur = Math.min(page, pages - 1);
+  const shown = groups.slice(cur * QUEUE_PAGE, (cur + 1) * QUEUE_PAGE);
+  const accepted = e.tgoRows('a').length, rejected = e.tgoRows('r').length;
+  const today = todayISO();
+  return (
+    <UpdSection
+      id="tgo-queue"
+      title="รอตรวจก่อนเข้าระบบ"
+      status={
+        <span className="upd-line">
+          <span><span className="t-muted">รอตรวจ</span> {fmtN(rows.length)} ใบ จาก {fmtN(groups.length)} บริษัท</span>
+          <span><span className="t-muted">รับแล้ว</span> {fmtN(accepted)} ใบ</span>
+          <span><span className="t-muted">ไม่รับ</span> {fmtN(rejected)} ใบ</span>
+        </span>
+      }
+      more="ใบที่ดึงมาจะรอตรวจที่นี่ทั้งทีม ยังไม่เข้าทะเบียนจนกว่าจะกดรับ การรับใบของบริษัทที่ยังไม่มีในทะเบียนจะสร้างบริษัทใหม่ให้ทุกคนเห็นพร้อมกัน (บริษัทเดียวกันในรอบเดียวกันเป็นบริษัทเดียว) ไม่รับแล้วจะไม่ถูกดึงเป็นรายการใหม่อีก ไม่มีอะไรเข้าทะเบียน"
+    >
+      {!canEdit && <span className="t-meta">บัญชีของคุณดูรายการนี้ได้อย่างเดียว การรับหรือไม่รับทำได้เฉพาะผู้ที่แก้ข้อมูลลูกค้าได้</span>}
+      {!rows.length && <span className="empty">ไม่มีใบที่รอตรวจ กดดึงข้อมูลล่าสุดเมื่อ อบก. ประกาศรอบใหม่</span>}
+      {shown.map((g) => {
+        const ids = g.rows.map((r) => r.rid);
+        return (
+          <div key={g.org} style={{ borderTop: '1px solid var(--divider)', padding: '10px 0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              <span style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', minWidth: 0 }}>
+                <span className="co-name dense">{g.org}</span>
+                <span className="t-meta">{`${g.rows[0].gid != null ? 'ผูกกับบริษัทเดิม' : 'บริษัทใหม่'} · ${fmtN(g.rows.length)} ใบ`}</span>
+              </span>
+              {canEdit && (
+                <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={() => e.approveTgo(ids)} className="btn sm">รับทั้งบริษัท</button>
+                  <button onClick={() => e.rejectTgo(ids)} className="quiet">ไม่รับทั้งบริษัท</button>
+                </span>
+              )}
+            </div>
+            {g.rows.map((r) => {
+              const expired = !!r.rec.ex && r.rec.ex < today;
+              return (
+                <div key={r.rid} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', paddingLeft: 12 }}>
+                  <span className="t-meta">{r.rec.cert}</span>
+                  <span className="t-meta">{`${r.rec.act || 'ไม่ระบุกิจกรรม'} · ${r.rec.prov || 'ไม่ระบุจังหวัด'} · อนุมัติ ${r.rec.ap ? isoTh(r.rec.ap) : '—'} · ${expired ? 'หมดอายุแล้ว ' : 'ถึง '}${r.rec.ex ? isoTh(r.rec.ex) : '—'}`}</span>
+                  {canEdit && (
+                    <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                      <button onClick={() => e.approveTgo([r.rid])} className="quiet">รับ</button>
+                      <button onClick={() => e.rejectTgo([r.rid])} className="quiet">ไม่รับ</button>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {pages > 1 && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--divider)', paddingTop: 10 }}>
+          <span className="t-meta">{`หน้า ${cur + 1} จาก ${fmtN(pages)} · บริษัทที่ ${fmtN(cur * QUEUE_PAGE + 1)}–${fmtN(Math.min(groups.length, (cur + 1) * QUEUE_PAGE))} จาก ${fmtN(groups.length)}`}</span>
+          <button onClick={() => setPage(cur - 1)} disabled={cur === 0} className="quiet">ก่อนหน้า</button>
+          <button onClick={() => setPage(cur + 1)} disabled={cur >= pages - 1} className="quiet">ถัดไป</button>
+        </div>
+      )}
+    </UpdSection>
+  );
+}
+
 export function Update() {
   const { engine: e } = useApp();
   useEngineVersion();
@@ -37,6 +118,8 @@ export function Update() {
   // a team that signs in has no use for the team block: who you are is your account, the team list
   // is the users page's (names without an account), and so are an admin's backup files
   const accounts = e.role() != null;
+  // pulling and deciding the queue are edits of the registry: a viewer reads the queue only
+  const canEdit = e.can('edit.cust');
   const u = e.up, y = e.sy, sc = e.syncCfg(), mon = e.monCfg();
   const me = e.me();
   const ownN: Record<string, number> = {};
@@ -61,7 +144,7 @@ export function Update() {
     ['ผลล่าสุด', sc.lastMsg || '—'],
     ['แหล่ง', sc.feed ? 'Google Sheet (อัปเดตจากเว็บ อบก.)' : 'หน้าเว็บ TGO'],
     ['บนเว็บ TGO', sc.total ? fmtN(sc.total) + ' รายการ' : '—'],
-    ['ดึงเพิ่มไว้', fmtN(e.tgoCerts.length) + ' ใบ'],
+    ['รับเข้าแล้ว', fmtN(e.tgoRows('a').length) + ' ใบ'],
   ];
 
   return (
@@ -108,14 +191,14 @@ export function Update() {
             ))}
           </span>
         }
-        action={<button onClick={() => e.runSync(false)} disabled={y.status === 'running'} className="btn pri" style={{ flex: 'none' }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>}
+        action={<button onClick={() => e.runSync(false)} disabled={y.status === 'running' || !canEdit} className="btn pri" style={{ flex: 'none' }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>}
         more={
           <>
             <span>
               {sc.feed
                 ? 'อ่านจาก Google Sheet “TGO” ที่ระบบอัปเดตรายชื่อ CFO ดึงจากหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ได้ครบทุกรายการพร้อมที่อยู่ อุตสาหกรรม ขนาด และสัดส่วนประเภท 1–3'
                 : 'อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. โดยตรง (3 หน้าแรก ไม่มีรายละเอียดที่อยู่และอุตสาหกรรม)'}
-              {' '}ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO)
+              {' '}ใบที่ดึงได้ รวมใบที่หมดอายุแล้ว จะรอตรวจในส่วน “รอตรวจก่อนเข้าระบบ” ก่อนเข้าทะเบียน ไม่เข้าทันที
             </span>
             {sc.feed && (
               <span>
@@ -138,15 +221,13 @@ export function Update() {
             onChange={(v) => e.saveSync({ freq: v as SyncCfg['freq'] })}
             options={[{ v: 'open', label: 'ทุกครั้งที่เปิดเว็บ' }, { v: 'daily', label: 'วันละครั้ง' }, { v: 'weekly', label: 'สัปดาห์ละครั้ง' }, { v: 'off', label: 'ปิด (กดเองเท่านั้น)' }]}
           />
-          <label className="hv" style={{ display: 'flex', gap: 8, alignItems: 'center', height: 40, padding: '0 8px', margin: '0 -8px', borderRadius: 10, fontSize: 14, cursor: 'pointer' }}>
-            <input type="checkbox" checked={!!sc.autoApply} onChange={(ev) => e.saveSync({ autoApply: ev.target.checked })} style={{ width: 18, height: 18 }} />
-            เมื่อถึงรอบ ให้อัปเดตทันทีโดยไม่ต้องยืนยัน
-          </label>
         </div>
         {y.status === 'running' && <span className="t-link" style={{ fontSize: 14 }}>{y.msg}</span>}
         {y.status === 'error' && <Notice kind="error">{y.msg}</Notice>}
-        {y.status === 'done' && <Notice kind="ok">{y.msg}</Notice>}
+        {(y.status === 'done' || y.status === 'ready') && <Notice kind="ok">{y.msg}</Notice>}
       </UpdSection>
+
+      <TgoQueue canEdit={canEdit} />
 
       {!accounts && (
         <UpdSection
