@@ -28,6 +28,9 @@
 .fw-name{cursor:pointer;border:0;background:transparent;padding:0;font:inherit;text-align:left;display:flex;gap:12px;align-items:center;min-width:0;color:var(--ink)}
 .fw-name-t{display:flex;flex-direction:column;gap:2px;min-width:0}
 .fw-name .co-name{text-wrap:pretty;overflow-wrap:anywhere;line-height:1.4}
+/* the contact line under a name: its dot and words wrap inside the name's cell (a phone's card), not run past it */
+.fw-ct{min-width:0;max-width:100%}
+.fw-ct .st{white-space:normal;overflow-wrap:anywhere;min-width:0}
 .fw-c{position:relative;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0;overflow-wrap:anywhere}
 /* a cell's column name: read out with the cell in the table (the header row is for the eye), shown when
    the cells stack */

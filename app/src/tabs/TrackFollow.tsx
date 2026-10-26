@@ -6,9 +6,9 @@ import { TickBox } from '../components/MonthCheck';
 import { useSalesActs } from '../components/SalesToast';
 import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
-import { beYear, jobServices } from '../lib/sales';
+import { beYear, jobServices, withActIndex } from '../lib/sales';
 import { JobSvc } from '../components/SvcChips';
-import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followCounts, followFilter, followIdsOf, followMeta, followQOf, followRows, followSelKey, type FollowRow } from '../lib/follow';
+import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followContact, followContactWords, followCounts, followFilter, followIdsOf, followMeta, followQOf, followRows, followSelKey, type FollowRow } from '../lib/follow';
 import { allPickWord, bulkPickable, clearedWord, followedBatch, followedSendTip, followedSendWord, pruneSel, selView, toggleAll, toggleKey } from '../lib/bulk';
 import type { CfoStatus, Task } from '../lib/types';
 import { PageHead, Status } from '../components/ui';
@@ -38,6 +38,11 @@ export function FollowList() {
   const today = todayISO();
   const year = ui.slYear || beYear();
   const rows = useMemo(() => followRows(e, year, today), [e, v, year, today]);
+  // each company's contact, as its drawer header and ติดต่อ tab count it (lib/follow.ts followContact): the line under its name
+  const contacts = useMemo(
+    () => withActIndex(e.sales, () => new Map(rows.map((r) => [r.c.id, followContact(e.crm.log[r.c.id] || [], e.dealsOf(r.c.id), e.sales, today)]))),
+    [e, v, rows, today],
+  );
   // the quick filter the picks were made under is read back (followSel's key), so a page that comes back keeps both
   const [q, setQ] = useState(() => followQOf(followSel.get().key));
   const [lim, setLim] = useState(STEP);
@@ -247,6 +252,8 @@ export function FollowList() {
                       <span className="fw-name-t">
                         <span className="co-name">{r.c.name}</span>
                         <span className="t-sec" title={team && isLocalId(r.c.id) ? 'บริษัทที่ดึงเพิ่มจากเว็บ TGO เก็บเฉพาะเครื่องนี้ เพื่อนร่วมทีมไม่เห็นในรายชื่อ' : undefined}>{followMeta(r.c, prov(r), team)}</span>
+                        {/* whether it was contacted, the words and a dot ("ยังไม่ได้ติดต่อ" neutral: the words carry it) */}
+                        <span className="fw-ct"><Status kind={contacts.get(r.c.id)!.last ? 'ok' : 'neutral'}>{followContactWords(contacts.get(r.c.id)!)}</Status></span>
                       </span>
                     </button>
                   </span>

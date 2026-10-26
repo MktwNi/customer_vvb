@@ -79,3 +79,39 @@ describe('บริษัทที่ติดตาม for an account that may 
     expect(count(html, /class="fw-r/g)).toBe(6);
   });
 });
+
+/** The text as React writes it into markup (its entities), to find a name in the page. */
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+
+describe('บริษัทที่ติดตาม: the contact line under each name', () => {
+  it('a contacted company says so with its latest contact, a company with none says ยังไม่ได้ติดต่อ', () => {
+    const e = engine();
+    const [a, b] = e.B.companies.slice(0, 2);
+    e.crm.watch.push(a.id, b.id);
+    // a: a call and a note; the note is no company-level contact, so the call's day is the last one (20 ต.ค.)
+    e.crm.log[a.id] = [
+      { at: '2026-10-20T10:00:00', by: 'คุณ ก', type: 'call', result: '', text: '' },
+      { at: '2026-10-24T09:00:00', by: 'คุณ ก', type: 'note', text: 'รอใบเสนอราคา' },
+    ];
+    e.rebuild();
+    e.can = (c) => c.startsWith('view.');
+    const html = renderToStaticMarkup(
+      <AppProvider engine={e}>
+        <FollowList />
+      </AppProvider>,
+    );
+    // the row of each company: from its row's start to the next row's
+    const rowOf = (name: string) => {
+      const parts = html.split('class="fw-r');
+      return parts.find((p) => p.includes(`class="co-name">${esc(name)}<`))!;
+    };
+    const rowA = rowOf(a.name), rowB = rowOf(b.name);
+    // (the date and the count keep no-break spaces inside them: lib/follow.ts followContactWords)
+    expect(rowA).toContain('ติดต่อแล้ว · ล่าสุด 20 ต.ค. 2569 · 2 ครั้ง');
+    expect(rowA).toContain('class="st ok"');
+    expect(rowA).not.toContain('ยังไม่ได้ติดต่อ');
+    expect(rowB).toContain('ยังไม่ได้ติดต่อ');
+    expect(rowB).toContain('class="st neutral"');
+    expect(rowB).not.toContain('ติดต่อแล้ว');
+  });
+});

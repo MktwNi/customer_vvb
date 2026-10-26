@@ -4,11 +4,11 @@
  * Sales Tracker of the year and its owner, in the order of what needs attention first.
  * Pure functions only (no DOM, no engine import at run time), so everything here is unit-tested.
  */
-import { addDays, daysBetween, isoTh } from './format';
+import { addDays, daysBetween, fmtN, isoTh } from './format';
 import { TT } from './constants';
 import { isLocalId } from './teamSync';
-import { jointRole, trackerStatus, type Deal, type SalesState } from './sales';
-import type { CfoStatus, Company, Task } from './types';
+import { actsOf, jointRole, lastContact, trackerStatus, type Deal, type SalesState } from './sales';
+import type { CfoStatus, Company, LogEntry, Task } from './types';
 
 /** What decides a followed company's place in the list. */
 export interface FollowFacts {
@@ -140,6 +140,34 @@ export function followRows(e: FollowSrc, year: string, today: string): FollowRow
   }
   return sortFollow(rows, today);
 }
+
+/** The log types that are a contact with the company; a note is not. The company drawer's header reads its last
+ *  contact with these (CompanyDrawer.tsx), and the list's line under a name does the same. */
+export const COMPANY_CONTACT = ['call', 'email', 'meet', 'follow'];
+
+/** A followed company's contact, as the company drawer shows it: `last` is the day of its latest contact ('' = none,
+ *  the drawer's "ติดต่อล่าสุด"), `count` the entries the ติดต่อ tab lists under การติดต่อ (its log and the contact
+ *  records of its deals; its appointments are not counted). */
+export interface FollowContact { last: string; count: number }
+
+/**
+ * A company's contact from the same data the company drawer reads for its header and its ติดต่อ tab (CompanyDrawer.tsx):
+ * the latest of its company-level log entries (COMPANY_CONTACT) and of each deal's last contact (lastContact: the typed
+ * date, the steps' dates, the contact records up to today), and the entries of the log and of its deals' contact records.
+ * `logs`: the company's log (crm.log); `deals`: every deal of the company (engine dealsOf).
+ */
+export function followContact(logs: readonly LogEntry[], deals: readonly Deal[], s: SalesState, today: string): FollowContact {
+  const lastC = logs.slice().sort((a, b) => b.at.localeCompare(a.at)).find((l) => COMPANY_CONTACT.includes(l.type));
+  const last = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => lastContact(s, x, today))].reduce((a, b) => (b > a ? b : a), '');
+  return { last, count: logs.length + deals.reduce((n, x) => n + actsOf(s, x.id).length, 0) };
+}
+
+/** The date and the count are kept whole (no-break spaces inside them), so a wrapped line never parts "2" from "ครั้ง". */
+const whole = (s: string) => s.replace(/ /g, ' ');
+/** The line under a followed company's name: "ติดต่อแล้ว · ล่าสุด 25 ต.ค. 2569", with " · 3 ครั้ง" when it has more
+ *  than one entry; "ยังไม่ได้ติดต่อ" when it has no contact. */
+export const followContactWords = (c: FollowContact) =>
+  c.last ? `ติดต่อแล้ว · ล่าสุด ${whole(isoTh(c.last))}${c.count > 1 ? ` · ${whole(`${fmtN(c.count)} ครั้ง`)}` : ''}` : 'ยังไม่ได้ติดต่อ';
 
 /** The picked keys of บริษัทที่ติดตาม (components/BulkBar.tsx followSel) are kept under the quick filter they were
  *  picked in: the key is this prefix and the filter's words. The page reads the filter back from the key when it
