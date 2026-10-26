@@ -121,6 +121,10 @@ export interface SyncState { status?: 'running' | 'error' | 'done' | 'ready' | '
 
 /** An expense's bill kept in this browser (GccEngine.billKey). */
 interface BillBlob { name: string; mime: string; data: ArrayBuffer; by: string; fid?: string }
+/** A certificate's company for the TGO queue: its id, and the new record when this pull or approval made it (companyFor). */
+type CoRef = { id: number; fresh: CustomCo | null };
+/** The fields a pull fills in on a queued certificate (fillDetails): only these are written, so a decision stands. */
+const TGO_DETAILS = ['addr', 'zip', 'changwat', 'ind', 'size', 's1', 's2', 's3', 'fy', 'id'];
 
 const emptyCrm = (): Crm => ({ stages: {}, notes: {}, tasks: [], watch: [], owners: {}, team: [], log: {} });
 
@@ -779,10 +783,12 @@ export class GccEngine {
         fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', webId: r.id, note: r.note, ...(r.addr != null ? this.certDetail(r) : {}),
       }));
   }
-  /** One queue record: this browser's copy and the team's (a change of the queue is a write of that record). */
-  private setTgo(rid: string, rec: TGOSync.TgoRec) {
+  /** One queue record: this browser's copy and the team's (a change of the queue is a write of that record). `nx`: a
+   *  certificate pulled as new, which a team row for it (a decision made since) stands over; `f`: only these fields
+   *  change (the details a pull fills in), so a decision a teammate made meanwhile is not undone. */
+  private setTgo(rid: string, rec: TGOSync.TgoRec, opt: { nx?: boolean; f?: string[] } = {}) {
     this.tgo[rid] = rec;
-    this.op(keyOf.tgo(rid), { ...rec });
+    this.op(keyOf.tgo(rid), { ...rec }, opt);
   }
   /** Pull the feed (or the TGO page through a proxy) into the review queue. A new certificate waits there (st 'p') for an
    *  approver; a pull never adds to the registry. Needs edit.cust: a viewer reads the queue and cannot change it. */
@@ -818,7 +824,7 @@ export class GccEngine {
       const at = new Date().toISOString();
       if (nw.length) {
         const by = this.me();
-        this.batchOps(() => nw.forEach((it) => this.setTgo(TGOSync.ridOf(it), { ...it, st: 'p', gid: null, by, at, note: '' })));
+        this.batchOps(() => nw.forEach((it) => this.setTgo(TGOSync.ridOf(it), { ...it, st: 'p', gid: null, by, at, note: '' }, { nx: true })));
         this.persist('tgoRecs', this.tgo);
         this.rebuild();
       }
@@ -855,7 +861,7 @@ export class GccEngine {
         if (r.st === 'r' || r.addr || r.ind) return;
         const it = (r.id && byId.get(r.id)) || byKey.get(TGOSync.key(r.cert, r.org));
         if (!it || (!it.addr && !it.ind)) return;
-        this.setTgo(rid, { ...r, addr: it.addr || '', zip: it.zip || '', changwat: it.changwat || '', ind: it.ind || '', size: it.size || '', s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null, fy: it.fy || r.fy, id: r.id || it.id });
+        this.setTgo(rid, { ...r, addr: it.addr || '', zip: it.zip || '', changwat: it.changwat || '', ind: it.ind || '', size: it.size || '', s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null, fy: it.fy || r.fy, id: r.id || it.id }, { f: TGO_DETAILS });
         n++;
       }),
     );
@@ -865,12 +871,13 @@ export class GccEngine {
     }
     return n;
   }
-  /** The registry company for a pulled certificate's organisation: the one with that name, else a new customer shared
-   *  with the team. `made` keeps the companies made in this batch, so two certificates of one new organisation make one. */
-  private companyFor(r: Pick<TGOSync.TgoItem, 'org' | 'act' | 'addr' | 'prov' | 'changwat' | 'ind'>, made: Map<string, number>, by: string, at: string): number {
+  /** The registry company for a pulled certificate's organisation: the one with that name, else a new customer kept on
+   *  this device (`fresh`, shared by saveCos with the decisions that made it). `made` keeps the companies made in this
+   *  batch, so two certificates of one new organisation make one. */
+  private companyFor(r: Pick<TGOSync.TgoItem, 'org' | 'act' | 'addr' | 'prov' | 'changwat' | 'ind'>, made: Map<string, number>, by: string, at: string): CoRef {
     const k = norm(r.org);
     const have = this.byNorm.get(k) ?? made.get(k);
-    if (have != null) return have;
+    if (have != null) return { id: have, fresh: null };
     let id = customIdOf(r.org);
     if (this.custom[id] || this.B.byId.has(id)) id = CUSTOM_ID_MIN + Math.floor(Math.random() * 8e12);
     const D = this.base.dicts;
@@ -879,10 +886,19 @@ export class GccEngine {
       biz: r.act || '', addr: r.addr || '', phone: '', email: '', web: '', contact: '', note: '', at, by,
     };
     this.custom[id] = c;
-    // create-only and shared by id: two browsers making the same organisation make one company
-    this.op(keyOf.cust(id), { ...c }, { nx: true, revive: true });
     made.set(k, id);
-    return id;
+    return { id, fresh: c };
+  }
+  /** A certificate's company, for saveCos: a new one is recorded with the queue keys of the certificates that made it. */
+  private noteCo(fresh: Map<number, { c: CustomCo; rids: string[] }>, co: CoRef, rid: string) {
+    if (co.fresh) fresh.set(co.id, { c: co.fresh, rids: [rid] });
+    else fresh.get(co.id)?.rids.push(rid);
+  }
+  /** The new companies go to the team after the decisions of the batch (dep): stored only when one of them is accepted,
+   *  so a refused decision leaves no company behind. Create-only and shared by id: two browsers making the same
+   *  organisation make one company. */
+  private saveCos(fresh: Map<number, { c: CustomCo; rids: string[] }>) {
+    fresh.forEach(({ c, rids }) => this.op(keyOf.cust(c.id), { ...c }, { nx: true, revive: true, dep: rids.map((rid) => keyOf.tgo(rid)) }));
   }
   /** Accept waiting certificates into the registry: each one's company (the registry's own by name, else a new customer
    *  shared with the team) and the certificate itself. Returns how many were accepted. */
@@ -893,17 +909,20 @@ export class GccEngine {
     }
     const made = new Map<string, number>();
     const at = new Date().toISOString(), by = this.me();
+    const fresh = new Map<number, { c: CustomCo; rids: string[] }>();
     let n = 0;
-    this.batchOps(() =>
+    this.batchOps(() => {
       rids.forEach((rid) => {
         const r = this.tgo[rid];
         if (!r || r.st !== 'p') return;
-        const gid = this.companyFor(r, made, by, at);
+        const co = this.companyFor(r, made, by, at);
         const note = (r.addr != null ? 'ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. ' : 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ') + isoTh(todayISO());
-        this.setTgo(rid, { ...r, st: 'a', gid, by, at, note });
+        this.setTgo(rid, { ...r, st: 'a', gid: co.id, by, at, note });
+        this.noteCo(fresh, co, rid);
         n++;
-      }),
-    );
+      });
+      this.saveCos(fresh);
+    });
     if (n) {
       this.persist('customCos', this.custom);
       this.persist('tgoRecs', this.tgo);
@@ -945,23 +964,31 @@ export class GccEngine {
     this.rebuild();
     const made = new Map<string, number>();
     const at = new Date().toISOString();
-    this.batchOps(() =>
+    const fresh = new Map<number, { c: CustomCo; rids: string[] }>();
+    this.batchOps(() => {
       legacy.forEach((c) => {
         const id = c.webId ? String(c.webId) : '';
-        const rid = id || 'k' + encodeURIComponent(TGOSync.key(c.cert || '', c.org || ''));
+        const rid = TGOSync.ridOf({ id, cert: c.cert || '', org: c.org || '' });
         if (this.tgo[rid] || (!c.cert && !c.org)) return;
         const local = c.gid != null && c.gid >= LOCAL_ID_MIN && c.gid < CUSTOM_ID_MIN;
         const org = (local ? addedName.get(c.gid!) : undefined) ?? c.org ?? '';
         const prov = c.prov != null && c.prov >= 0 ? CD.prov[c.prov] || '' : c.provTxt || '';
         const ind = c.ind != null && c.ind >= 0 ? CD.ind[c.ind] || '' : c.indTxt || '';
-        const gid = local || c.gid == null ? this.companyFor({ org, act: c.act || '', addr: c.addr, prov, changwat: '', ind }, made, '', at) : c.gid;
-        this.setTgo(rid, {
-          st: 'a', gid, by: '', at, note: c.note || '', cert: c.cert || '', org, act: c.act || '', branch: c.branch || '', prov, apBE: '', exBE: '',
-          ap: c.ap || '', ex: c.ex || '', fy: c.fy != null && c.fy >= 0 ? CD.fy[c.fy] || '' : '', id,
-          ...(c.addr != null ? { addr: c.addr || '', zip: c.zip || '', changwat: prov, ind, size: c.size != null && c.size >= 0 ? CD.size[c.size] || '' : '', s1: c.s1 ?? null, s2: c.s2 ?? null, s3: c.s3 ?? null } : {}),
-        });
-      }),
-    );
+        const co: CoRef = local || c.gid == null ? this.companyFor({ org, act: c.act || '', addr: c.addr, prov, changwat: '', ind }, made, '', at) : { id: c.gid, fresh: null };
+        // a team decision for the certificate (made since) stands: the create does not replace it (nx)
+        this.setTgo(
+          rid,
+          {
+            st: 'a', gid: co.id, by: '', at, note: c.note || '', cert: c.cert || '', org, act: c.act || '', branch: c.branch || '', prov, apBE: '', exBE: '',
+            ap: c.ap || '', ex: c.ex || '', fy: c.fy != null && c.fy >= 0 ? CD.fy[c.fy] || '' : '', id,
+            ...(c.addr != null ? { addr: c.addr || '', zip: c.zip || '', changwat: prov, ind, size: c.size != null && c.size >= 0 ? CD.size[c.size] || '' : '', s1: c.s1 ?? null, s2: c.s2 ?? null, s3: c.s3 ?? null } : {}),
+          },
+          { nx: true },
+        );
+        this.noteCo(fresh, co, rid);
+      });
+      this.saveCos(fresh);
+    });
     // the companies made on this device are now the shared ones
     this.added = this.added.filter((a) => !(a.id! >= LOCAL_ID_MIN && a.id! < CUSTOM_ID_MIN));
     this.persist('addedCos', this.added);
@@ -5183,7 +5210,7 @@ export class GccEngine {
   // ------------------------------------------------------------------ team sync
   /** Queue a shared-record change (v === undefined → delete). No-op until connected — connecting
    *  uploads everything local that the team sheet doesn't have yet. */
-  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; revive?: boolean } = {}) {
+  private op(k: string, v?: unknown, opt: { f?: string[]; lst?: ListEdit; fl?: Record<string, ListEdit>; base?: SyncOp['base']; nx?: boolean; revive?: boolean; dep?: string[] } = {}) {
     const cfg = this.teamCfg;
     if (!cfg || this.importing || isLocalOnly(k, v)) return;
     if (!this.canWriteKey(k, v === undefined, v)) {
@@ -5226,6 +5253,7 @@ export class GccEngine {
     }
     // conditional only while every queued write to this record is a document's own (setStep auto)
     if (opt.base !== undefined && (!prev || prev.base !== undefined)) o.base = prev ? prev.base : opt.base;
+    if (opt.dep) o.dep = opt.dep;
     this.pending.set(k, o);
     this.unsaved.delete(k);
     if (this.opBatch) this.opBatch.push(o);
@@ -6033,7 +6061,7 @@ export class GccEngine {
       try {
         r = await call<{ rejected?: string[]; denied?: string[]; qt?: unknown; rows?: SyncRow[] }>(this.transport, cfg.url, this.cred(cfg), {
           action: 'push',
-          ops: batch.map(({ k, v, del, by, nx }) => ({ k, v, del, by, ...(nx && { nx: true }) })), // nx: the script refuses it on a live record (rows)
+          ops: batch.map(({ k, v, del, by, nx, dep }) => ({ k, v, del, by, ...(nx && { nx: true }), ...(dep && { dep }) })), // nx: the script refuses it on a live record (rows)
         });
       } catch (e) {
         // the sheet answered and refused (busy, wrong code): these were certainly not delivered
@@ -6045,7 +6073,16 @@ export class GccEngine {
       }
       this.meta(cfg, r);
       this.heardQt(r, batch);
-      rejected += (r.rejected || []).length;
+      // a company whose certificates' decisions the team refused is not made (the script refuses it too: dep). It is taken
+      // off this browser and is not counted as a refused change: it went with its decision
+      const refusedKeys = new Set((r.rows || []).map((x) => x.k));
+      const orphans = batch.filter((o) => o.dep && (r.rejected || []).includes(o.k) && o.dep.some((d) => refusedKeys.has(d)));
+      if (orphans.length) {
+        orphans.forEach((o) => delete this.custom[o.k.slice('cust/'.length)]);
+        this.persist('customCos', this.custom);
+        this.rebuild();
+      }
+      rejected += (r.rejected || []).filter((k) => !orphans.some((o) => o.k === k)).length;
       // changes this account may not make (the script decides): dropped below with the batch, and the
       // team's value put back by the next round
       const den = r.denied || [];
@@ -6061,8 +6098,9 @@ export class GccEngine {
       // on it as on a pulled row: the create is dropped (the team's record stands), or its fields go on top of the
       // team's record and that is sent again as an ordinary change (nx off). Neither counts as delivered.
       const drop = new Set<string>(), redo = new Map<string, SyncOp>(), applied: SyncRow[] = [], dropped: SyncRow[] = [];
+      // (a queue decision the team already made is refused too: rebaseOp drops it, and the team's decision is applied)
       for (const row of r.rows || []) {
-        const o = batch.find((x) => x.nx && x.k === row.k);
+        const o = batch.find((x) => (x.nx || x.k.indexOf('tgo/') === 0) && x.k === row.k);
         if (!o) continue;
         const res = rebaseOp(row, o);
         if (res && !('drop' in res)) {

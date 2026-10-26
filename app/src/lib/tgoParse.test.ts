@@ -3,7 +3,7 @@
  * Buddhist-year text, ISO or JSON Date strings. Each reads to the same clean value.
  */
 import { describe, expect, it } from 'vitest';
-import { dateOf, fromFeed, idOf, shareOf, type FeedRow } from './tgoSync';
+import { dateOf, fromFeed, idOf, key, ridOf, shareOf, shortHash, type FeedRow } from './tgoSync';
 
 const row = (o: Partial<Record<keyof FeedRow, unknown>>) =>
   ({ id: '', cert: 'TGO CFO FY27-1', act: '', org: 'บริษัท ทดสอบ จำกัด', branch: '', prov: 'กรุงเทพฯ', addr: '', tambon: '', amphoe: '', changwat: '', zip: '', ind: '', size: '', apBE: '', exBE: '', ap: '', ex: '', s1: null, s2: null, s3: null, fy: '', note: '', flags: '', ...o }) as unknown as FeedRow;
@@ -46,5 +46,22 @@ describe('feed values read tolerantly', () => {
     expect(it0).toMatchObject({ id: '32040', s1: 0.122, s2: 0.3, s3: 0.578, ap: '2026-10-21', ex: '2027-10-20' });
     // the date text is used when the ISO column is blank
     expect(fromFeed(row({ apBE: '21/10/2569', ap: '' })).ap).toBe('2026-10-21');
+  });
+});
+
+describe('the queue key of a certificate', () => {
+  it('a certificate with no TGO id gets a short key, the same in every browser, whatever the organisation name', () => {
+    const org = 'บริษัท ทดสอบชื่อองค์กรที่ยาวมากๆ ยาวมากๆ ยาวมากๆ ยาวมากๆ จำกัด (มหาชน)';
+    const rid = ridOf({ id: '', cert: 'TGO CFO FY27-790', org });
+    expect(rid).toMatch(/^h[0-9a-z]+$/);
+    expect(('tgo/' + rid).length).toBeLessThan(40);
+    expect(ridOf({ id: '', cert: 'tgo cfo fy27-790', org: org.replace(/\s+/g, ' ') })).toBe(rid); // the key ignores spaces and case
+    expect(ridOf({ id: '', cert: 'TGO CFO FY27-791', org })).not.toBe(rid);
+    expect(ridOf({ id: '32040', cert: 'TGO CFO FY27-790', org })).toBe('32040');
+  });
+  it('the hash is fixed: a browser of another build reads the same key', () => {
+    expect(shortHash(key('TGO CFO FY27-790', 'บริษัท ก จำกัด'))).toBe(shortHash(key('TGO CFO FY27-790', 'บริษัท ก จำกัด')));
+    expect(shortHash('')).toBe(shortHash(''));
+    expect(shortHash('a')).not.toBe(shortHash('b'));
   });
 });

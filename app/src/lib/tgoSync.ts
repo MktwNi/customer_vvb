@@ -62,8 +62,19 @@ export function dateOf(v: unknown): string {
   return `${part[0]}-${pad(part[1])}-${pad(part[2])}`;
 }
 
-/** The queue key of a pulled certificate: its TGO id, else its certificate no. + organisation. */
-export const ridOf = (it: Pick<TgoItem, 'id' | 'cert' | 'org'>) => (it.id ? it.id : 'k' + encodeURIComponent(key(it.cert, it.org)));
+/** A short, deterministic hash of a text (two 32-bit hashes, base 36): the same value in every browser. */
+export function shortHash(s: string): string {
+  let a = 0x811c9dc5, b = 0x5bd1e995;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x2c1b3c6d) >>> 0;
+  }
+  return a.toString(36) + b.toString(36);
+}
+/** The queue key of a pulled certificate: its TGO id, else a short hash of its certificate no. + organisation (a sheet
+ *  key holds 500 characters, and a Thai organisation name takes up to nine per character once encoded). */
+export const ridOf = (it: Pick<TgoItem, 'id' | 'cert' | 'org'>) => (it.id ? it.id : 'h' + shortHash(key(it.cert, it.org)));
 
 /** A queue record as the sheet or this browser stores it, read tolerantly; null when it is not one. */
 export function toTgoRec(v: unknown): TgoRec | null {

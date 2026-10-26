@@ -77,7 +77,10 @@
  *     comes as a deletion, since builds before expenses would list it as a cancelled income check.
  *   { action: 'push', key, ops: Op[] }          -> { ok, seq, n, rejected: string[] }   (+ denied: string[] and qt with tok:
  *                                                 what the push did about the quotations it stored, see "E-mail" below)
- *                                                 (+ rows: Row[] for each nx op refused: the live record as the sheet holds it)
+ *                                                 (+ rows: Row[] for each nx op refused, and for each tgo/ write that would change a
+ *                                                 decision a teammate made: the live record as the sheet holds it)
+ *     dep (optional, a key or a list of keys): the op is stored only when one of those rows is an accepted tgo/ record
+ *     (a company made for certificates); otherwise it is refused and listed in rejected, not stored.
  *   { action: 'upload', key, docId, name, mime, data }  -> { ok, fileId, size }   (data = base64)
  *   { action: 'file', key, fileId }             -> { ok, name, mime, size, data }
  *   { action: 'delfile', key, fileId }          -> { ok }   (moves the file to the owner's Drive trash)
@@ -321,6 +324,7 @@ const KEY_CAP = [
   // the TGO review queue (lib/tgoSync.ts): a pulled certificate is tgo/<id> = 'p' (pending), then 'a' (accepted, its
   // company and certificate join the registry) or 'r' (rejected, kept so a pull never adds it again). Pulling, accepting
   // and rejecting are edits of the registry, so edit.cust (the same as the customers' records); a viewer only reads it.
+  // A decision is final: once a row is 'a' or 'r', a write that changes it is refused (push_, tgoDecided_).
   { p: 'tgo/', w: 'edit.cust', d: 'edit.cust' },
 ];
 /** Capabilities that write something by push: an account with none of them may not push at all. */
@@ -818,20 +822,43 @@ function push_(ops, actor) {
     const creates = {};
     list.forEach((x) => {
       if (x.op.nx && !x.delR && x.k && x.k.length <= 500) creates[x.k] = 1;
+      // a queue record a write may change (tgo/), and the queue rows a company depends on (dep), are read too
+      if (x.k.indexOf('tgo/') === 0 && x.k.length <= 500) creates[x.k] = 1;
+      depsOf_(x.op).forEach((d) => {
+        if (d.length <= 500) creates[d] = 1;
+      });
     });
     const cur = latestRows_(creates);
     const refused = {};
     for (let i = 0; i < list.length; i++) {
       const x = list[i], op = x.op, k = x.k, del = x.del, delR = x.delR;
-      if (!k || k.length > 500) continue;
+      if (!k) continue;
+      // a key the sheet cannot hold is reported by name (the browser keeps the change on this device and says so),
+      // never skipped as if it were stored
+      if (k.length > 500) {
+        rejected.push(k);
+        continue;
+      }
       if (allowed ? !allowed(x) : k.indexOf('qchk/') === 0) {
         // not stored and uses no seq (qchk/ is written only by the qt_check action, also for the team code)
         (allowed ? denied : rejected).push(k);
         continue;
       }
+      // a company made for certificates is stored only when one of their decisions is accepted (dep): a refused
+      // decision leaves no company behind
+      if (op.dep && !depsAccepted_(cur, op)) {
+        rejected.push(k);
+        continue;
+      }
       // a create-only write does not replace a live record (one whose latest row is a value, by this push or before):
       // not stored, and the record as the sheet holds it goes back in the reply, for the browser to rebase on
       if (op.nx && !delR && has_(cur, k) && liveRow_(cur[k])) {
+        refused[k] = cur[k];
+        continue;
+      }
+      // a certificate a teammate accepted or rejected keeps that decision: a write that would change it is refused
+      // (the record as the sheet holds it goes back in the reply, so the browser takes the decision it was refused)
+      if (k.indexOf('tgo/') === 0 && !op.nx && !delR && has_(cur, k) && liveRow_(cur[k]) && tgoDecided_(cur[k], op.v)) {
         refused[k] = cur[k];
         continue;
       }
@@ -2046,6 +2073,27 @@ function latestRows_(want) {
 function liveRow_(r) {
   const x = rowOut_(r);
   return !x.del && x.v != null;
+}
+
+/** The keys an op depends on (its dep: a key or a list of keys), as strings. */
+function depsOf_(op) {
+  if (!op || op.dep == null || op.dep === '') return [];
+  return [].concat(op.dep).map(String);
+}
+/** The queue state of a live tgo/ row: 'p', 'a' or 'r' ('' for anything else). */
+function tgoState_(r) {
+  const v = rowOut_(r).v;
+  return v && typeof v === 'object' && typeof v.st === 'string' ? v.st : '';
+}
+/** A decision (accepted or rejected) that a write to the row would change: any other value, a deletion or nothing. */
+function tgoDecided_(r, v) {
+  const was = tgoState_(r);
+  if (was !== 'a' && was !== 'r') return false;
+  return !v || typeof v !== 'object' || v.st !== was;
+}
+/** An op with dep goes through when one of those queue rows is accepted: as stored in this push, or before. */
+function depsAccepted_(cur, op) {
+  return depsOf_(op).some((d) => has_(cur, d) && liveRow_(cur[d]) && tgoState_(cur[d]) === 'a');
 }
 
 /** Two display names are the same person: compared as names are typed (spaces, case, NFC); '' never matches. */

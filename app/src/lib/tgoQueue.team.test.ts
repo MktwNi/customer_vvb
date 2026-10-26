@@ -166,3 +166,88 @@ describe('team mode: the review queue is one shared list', () => {
     expect(V.e.rejectTgo(['77003'])).toBe(0);
   });
 });
+
+/** The team's sheet rows (the simulated script's sync sheet). */
+const teamRows = (): unknown[][] => sim.sheet()?.rows ?? [];
+const LONG_ORG = 'บริษัท ทดสอบชื่อองค์กรที่ยาวมากๆ ยาวมากๆ ยาวมากๆ ยาวมากๆ จำกัด (มหาชน)';
+describe('team mode: a browser that has not synced cannot undo a teammate\'s decision', () => {
+  it('a pull by a browser behind the team keeps a rejection and an acceptance made since', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [Q1, Q4];
+    await L.e.runSync(false);
+    expect(L.e.approveTgo(['77001'])).toBe(1);
+    expect(L.e.rejectTgo(['77004'])).toBe(1);
+    await settle(L); // the team holds a and r; A has not synced since before them
+    // A pulls the same feed: both certificates look new to it, but they are the team's decided rows
+    await A.e.runSync(false);
+    await settle(A, L);
+    for (const t of [L, A]) {
+      expect(rids(t.e.tgoRows('a'))).toEqual(['77001']);
+      expect(rids(t.e.tgoRows('r'))).toEqual(['77004']);
+      expect(rids(t.e.tgoRows('p'))).toEqual([]);
+    }
+    const last77004 = teamRows().filter((r: unknown[]) => r[1] === 'tgo/77004').pop();
+    expect(String(last77004?.[2])).toContain('"st":"r"');
+  });
+
+  it('filling in details on a stale waiting row does not put an accepted certificate back to waiting', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [{ ...Q1, addr: '', ind: '', size: '', zip: '', changwat: '' }];
+    await L.e.runSync(false);
+    await settle(L, A); // A has the row without its details
+    expect(rids(A.e.tgoRows('p'))).toEqual(['77001']);
+    expect(L.e.approveTgo(['77001'])).toBe(1);
+    await settle(L); // the team accepted it; A still shows it waiting
+    feedRows = [Q1]; // the feed now has the details: A fills them in on its stale copy
+    await A.e.runSync(false);
+    await settle(A, L);
+    for (const t of [L, A]) {
+      expect(rids(t.e.tgoRows('a'))).toEqual(['77001']);
+      expect(rids(t.e.tgoRows('p'))).toEqual([]);
+    }
+    expect(A.e.tgoRows('a')[0].rec.addr).toBe(Q1.addr);
+  });
+
+  it('a stale approval of a certificate the team rejected neither accepts it nor leaves a company', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [Q4];
+    await L.e.runSync(false);
+    await settle(L, A); // both browsers hold the waiting row
+    expect(L.e.rejectTgo(['77004'])).toBe(1);
+    await settle(L); // the team rejected it; A has not synced yet
+    expect(A.e.approveTgo(['77004'])).toBe(1);
+    await settle(A, L);
+    for (const t of [L, A]) {
+      expect(rids(t.e.tgoRows('r'))).toEqual(['77004']);
+      expect(t.e.tgoRows('a')).toEqual([]);
+      expect(t.e.B.companies.some((c) => c.name === Q4.org)).toBe(false);
+    }
+    expect(teamRows().some((r: unknown[]) => String(r[1]).indexOf('cust/') === 0 && String(r[2]).indexOf(Q4.org) >= 0)).toBe(false);
+  });
+
+  it('a certificate with no TGO id and a long organisation name reaches the team under a short key', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
+    feedRows = [feedRow({ id: '', cert: 'TGO CFO FY27-790', org: LONG_ORG, addr: '1 ถนนสีลม กรุงเทพฯ 10500' })];
+    expect(encodeURIComponent(LONG_ORG.replace(/\s+/g, '').toUpperCase()).length).toBeGreaterThan(500);
+    const hits = feedHits;
+    await L.e.runSync(false);
+    await settle(L, A);
+    expect(rids(A.e.tgoRows('p'))).toHaveLength(1); // A never fetched the feed: the row came from the team
+    expect(feedHits - hits).toBe(1);
+    const keys = teamRows().map((r: unknown[]) => String(r[1])).filter((k: string) => k.indexOf('tgo/') === 0);
+    expect(keys).toHaveLength(1);
+    expect((keys[0] ?? '').length).toBeLessThan(40);
+    // a key the script cannot store is refused by name, never silently dropped
+    const big = 'tgo/' + 'x'.repeat(600);
+    const out = sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'big1', t: 1, k: big, v: { st: 'p' } }] });
+    expect(out).toMatchObject({ ok: true, rejected: [big] });
+  });
+});

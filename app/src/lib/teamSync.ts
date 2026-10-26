@@ -34,6 +34,9 @@ export interface SyncOp {
   /** With nx: a deletion the team made of the record does not stop this create (a company made again for a name the
    *  team had deleted); a live row still does. */
   revive?: boolean;
+  /** A company made for certificates (cust/): the queue keys (tgo/) of the decisions that made it. The script stores it
+   *  only when one of them is accepted (Code.gs push_, dep), so a refused decision leaves no company behind. */
+  dep?: string[];
   /** Items added and removed in list fields named in `f` (a deal's SOURCE / Services): applied to the
    *  teammate's list, so two people ticking different items both keep theirs. */
   fl?: Record<string, ListEdit>;
@@ -731,7 +734,7 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
 }
 
 /** Records whose value is an object of fields that people edit separately. */
-const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|dexp|person|jqt|jqm)\/|scfg\/unit\.)/;
+const MERGED = /^(?:(deal|ddoc|cust|contact|task|dstep|dpay|dexp|person|jqt|jqm|tgo)\/|scfg\/unit\.)/;
 /**
  * A pulled row for a record this browser still has a queued change for. Without this, the queued
  * value (a copy taken before the pull) would be pushed and undo whatever the teammate changed.
