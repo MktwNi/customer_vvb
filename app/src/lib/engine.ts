@@ -8,7 +8,7 @@ import type {
   SetSnap, StageKey, SyncCfg, Task, TaskForm, TaskType,
 } from './types';
 import { build, dataUrl, getDetail, loadBase, norm, parseXlsx, readXlsxRows, status, type ParsedUpload } from './core';
-import { applyCertPlan, heldFrom, planCertRows, type CertLine } from './registryXlsx';
+import { applyCertPlan, heldFrom, planCertRows, type CertImportRec, type CertLine } from './registryXlsx';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF, type KVStore } from './storage';
@@ -146,6 +146,8 @@ export class GccEngine {
   crm: Crm = emptyCrm();
   added: Partial<RawCompany>[] = [];
   tgoCerts: Partial<Cert>[] = [];
+  /** what each certificate-sheet save added or changed in the saved lists, newest last (revert takes it back) */
+  certImports: CertImportRec[] = [];
   setSnap: SetSnap | null = null;
   R: Round[] = [];
   sources: unknown[][] = [];
@@ -377,7 +379,7 @@ export class GccEngine {
       if (this.auth === 'connect') this.teamRetry();
       const signN = this.sessionN; // a sign-in finished during the load wins over what was read here
       const queue = team0 && team0.url ? (team0.mode === 'accounts' ? (acct ? pendKey(team0.url) + '#' + acct.u : '') : pendKey(team0.url)) : '';
-      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks] = await Promise.all([
+      const [base, dec, contacts, crm, added, tgoCerts, setSnap, R, sources, pending, sales, custom, people, plinks, certImports] = await Promise.all([
         loadBase(),
         this.store.get<Record<string, string>>('dedup'),
         this.store.get<Record<string, ContactEdit>>('contacts'),
@@ -392,6 +394,7 @@ export class GccEngine {
         this.store.get<Record<string, CustomCo>>('customCos'),
         this.store.get<Record<string, Person>>('people'),
         this.store.get<Record<string, PLink>>('plinks'),
+        this.store.get<CertImportRec[]>('certImports'),
       ]);
       this.people = people || {};
       this.plinks = plinks || {};
@@ -403,6 +406,7 @@ export class GccEngine {
       this.crm = { ...emptyCrm(), ...(crm || {}) };
       this.added = added || [];
       this.tgoCerts = tgoCerts || [];
+      this.certImports = certImports || [];
       this.setSnap = setSnap || null;
       this.sources = sources;
       // migrate free-form notes (older prototype) into the contact log
@@ -896,6 +900,7 @@ export class GccEngine {
     this.emit();
   }
   async applyUpload() {
+    if (!this.can('set.data')) return this.deny();
     const r = this.pendingUpload;
     if (!r) return;
     this.up = { status: 'busy', msg: 'กำลังบันทึกและคำนวณใหม่…' };
@@ -918,6 +923,24 @@ export class GccEngine {
     this.emit();
   }
   async revertUpload() {
+    if (!this.can('set.data')) return this.deny();
+    // the sheet saves' additions go too, newest first: their rows (by position, rows only ever appended) and companies
+    // (by id). Rows the TGO feed brought in after a save stay, and a feed row a save changed goes back to its values.
+    let tgo = this.tgoCerts.slice();
+    let added = this.added.slice();
+    for (const imp of [...this.certImports].reverse()) {
+      for (const p of imp.tgoPrev) if (p.idx < tgo.length) tgo[p.idx] = p.cert;
+      tgo.splice(imp.tgoStart, imp.tgoAdded);
+      added = added.filter((c) => !imp.coIds.includes(c.id as number));
+    }
+    if (this.certImports.length) {
+      this.tgoCerts = tgo;
+      this.added = added;
+      this.certImports = [];
+      this.persist('tgoCerts', tgo);
+      this.persist('addedCos', added);
+      this.persist('certImports', []);
+    }
     try {
       await this.store.del('dataset');
       await this.store.del('details');
@@ -946,15 +969,24 @@ export class GccEngine {
       return 'บัญชีของคุณไม่มีสิทธิ์นำเข้าข้อมูล';
     }
     const plan = this.certPlan(lines);
-    const r = applyCertPlan(plan, this.base, this.tgoCerts, this.added, fileName, new Date().toISOString());
+    const at = new Date().toISOString();
+    const tgoStart = this.tgoCerts.length, addStart = this.added.length;
+    const r = applyCertPlan(plan, this.base, this.tgoCerts, this.added, fileName, at);
     if (!r.changed) return 'ไม่มีการเปลี่ยนแปลงให้บันทึก';
     try {
       await this.store.set('dataset', r.base);
     } catch {
       return 'บันทึกไม่สำเร็จ ข้อมูลยังไม่เปลี่ยน ลองใหม่อีกครั้ง';
     }
+    const rec: CertImportRec = {
+      at, fileName, tgoStart, tgoAdded: plan.news.length,
+      coIds: r.added.slice(addStart).map((c) => c.id as number),
+      tgoPrev: plan.changed.filter((c) => c.origin === 'tgo').map((c) => ({ idx: c.idx, cert: this.tgoCerts[c.idx] })),
+    };
     if (r.tgoChanged) this.persist('tgoCerts', r.tgo);
     if (r.addedChanged) this.persist('addedCos', r.added);
+    this.certImports = [...this.certImports, rec];
+    this.persist('certImports', this.certImports);
     this.base = r.base;
     this.tgoCerts = r.tgo;
     this.added = r.added;

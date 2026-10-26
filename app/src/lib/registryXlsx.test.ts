@@ -3,12 +3,12 @@ import { build } from './core';
 import { applyCertPlan, certKey, exportSheets, heldFrom, planCertRows, readCertSheet, readDateBE, readPct, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine } from './registryXlsx';
 import { xlsxBytes, type XCell, type XSheet } from './xlsx';
 import { parseXlsx } from './core';
-import type { CertDicts, Dataset } from './types';
+import type { Cert, CertDicts, Dataset } from './types';
 
 const TODAY = '2026-10-26';
 const F = (o: Partial<CertFields> = {}): CertFields => ({
   cert: 'CFO-1', org: 'บริษัท เอ จำกัด', branch: 'สำนักงานใหญ่', act: 'การผลิต', addr: '1 ถนนทดสอบ กรุงเทพมหานคร 10110', zip: '10110',
-  prov: 'กรุงเทพมหานคร', ind: 'การผลิต', size: 'ขนาดเล็ก', ap: '2025-03-15', ex: '2027-03-14', fy: 'FY67', s1: 60, s2: 30, s3: 10,
+  prov: 'กรุงเทพมหานคร', ind: 'การผลิต', size: 'ขนาดเล็ก', ap: '2025-03-15', ex: '2027-03-14', fy: 'FY67', s1: 0.6, s2: 0.3, s3: 0.1,
   note: '', webId: '32040', ...o,
 });
 /** A sheet row of 27 cells, by header name. */
@@ -43,7 +43,7 @@ describe('template', () => {
     expect(ls).toHaveLength(1);
     expect(ls[0].errors).toEqual([]);
     expect(ls[0].f.ap).toBe('2025-01-01');
-    expect(ls[0].f.s1).toBe(60);
+    expect(ls[0].f.s1).toBe(0.6);
   });
 });
 
@@ -53,7 +53,7 @@ describe('export and round trip', () => {
       F(),
       F({ cert: 'CFO-2', org: 'บริษัท บี จำกัด', s1: 0.5, s2: null, s3: null, zip: '01234', note: 'ทดสอบ & <หมายเหตุ> "1"', webId: '32041', ap: '2024-11-01', ex: '2026-10-31', fy: 'FY66' }),
       F({ cert: 'CFO-3', org: 'บริษัท ซี  จำกัด', webId: '', s1: null, s2: null, s3: null, branch: '', fy: '' }),
-      F({ cert: 'CFO-4', org: 'บริษัท ดี จำกัด', webId: '40001', s1: 100, s2: 0, s3: 0, ap: '2026-01-10', ex: '2028-01-09' }),
+      F({ cert: 'CFO-4', org: 'บริษัท ดี จำกัด', webId: '40001', s1: 1, s2: 0, s3: 0, ap: '2026-01-10', ex: '2028-01-09' }),
     ];
     const bytes = await xlsxBytes(exportSheets(certs, TODAY));
     const ls = await readCertSheet(bytes, SHEET);
@@ -85,6 +85,14 @@ describe('export and round trip', () => {
     expect(plan.changed).toEqual([]);
     expect(plan.news.map((n) => n.f.cert)).toEqual(['OTHER-9']);
   });
+  it('a stored share is a fraction: it exports as a percent, and the same percent reads back as the same value', async () => {
+    const stored = [F({ cert: 'CFO-S', webId: '', s1: 0.0029, s2: 0.1448, s3: 0.8523 })];
+    const rows = exportSheets(stored, TODAY)[0].rows;
+    expect([rows[0][17], rows[0][18], rows[0][19], rows[0][20]]).toEqual(['0.29%', '14.48%', '85.23%', '100%']);
+    expect([readPct({ t: 's', v: '0.29%' }, 'x'), readPct({ t: 's', v: '14.48' }, 'x'), readPct({ t: 'n', v: '0.8523' }, 'x')]).toEqual([{ v: 0.0029 }, { v: 0.1448 }, { v: 0.8523 }]);
+    const ls = await readCertSheet(await xlsxBytes(exportSheets(stored, TODAY)), SHEET);
+    expect(planCertRows(ls, [{ origin: 'base', idx: 0, gid: 1, f: stored[0] }], [{ id: 1, name: 'บริษัท เอ จำกัด' }])).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
+  });
   it('the status and the total follow the held values', () => {
     const rows = exportSheets([F({ ex: '2026-10-31' }), F({ cert: 'C2', ex: '2026-01-01' }), F({ cert: 'C3', ex: '', s1: null, s2: null, s3: null })], TODAY)[0].rows;
     expect(SHEET_HEADS[22]).toBe('สถานะ ณ วันที่ดึงข้อมูล');
@@ -103,8 +111,8 @@ describe('reading values', () => {
       row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'P1', 'ประเภทที่ 1 (%)': '12.20%', 'ประเภทที่ 2 (%)': 12.2, 'ประเภทที่ 3 (%)': 0.122 }),
       row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'P2', 'ประเภทที่ 1 (%)': '1%', 'ประเภทที่ 2 (%)': 1, 'ประเภทที่ 3 (%)': '0.5' }),
     ]);
-    expect([ls[0].f.s1, ls[0].f.s2, ls[0].f.s3]).toEqual([12.2, 12.2, 12.2]);
-    expect([ls[1].f.s1, ls[1].f.s2, ls[1].f.s3]).toEqual([1, 100, 50]);
+    expect([ls[0].f.s1, ls[0].f.s2, ls[0].f.s3]).toEqual([0.122, 0.122, 0.122]);
+    expect([ls[1].f.s1, ls[1].f.s2, ls[1].f.s3]).toEqual([0.01, 1, 0.5]);
     expect(readPct({ t: 's', v: 'abc' }, 'ประเภทที่ 1 (%)')).toEqual({ err: 'ประเภทที่ 1 (%) ไม่ใช่ตัวเลข: abc' });
   });
   it('ids with thousands commas read as plain digits', async () => {
@@ -127,6 +135,15 @@ describe('reading values', () => {
     expect(readDateBE({ t: 's', v: '15-03-2568' }, 'x')).toEqual({ v: '2025-03-15' });
     expect(readDateBE({ t: 's', v: '2568-03-15' }, 'x')).toEqual({ v: '2025-03-15' });
     expect(readDateBE({ t: 's', v: '31/02/2568' }, 'x')).toEqual({ err: 'x อ่านไม่ได้: 31/02/2568' });
+  });
+  it('a bare year typed as a number into a date cell is an error, not a date in 1907; a real Excel date still reads', () => {
+    expect(readDateBE({ t: 'n', v: '2568' }, 'x')).toEqual({ err: 'x ต้องเป็นวว/ดด/ปปปป เป็น พ.ศ. เช่น 15/03/2568: 2568' });
+    expect(readDateBE({ t: 'n', v: '2025' }, 'x')).toEqual({ err: 'x ต้องเป็นวว/ดด/ปปปป เป็น พ.ศ. เช่น 15/03/2568: 2025' });
+    expect(readDateBE({ t: 'n', v: '45730' }, 'x')).toEqual({ v: '2025-03-14' });
+  });
+  it('a file that is not an xlsx is refused in Thai', async () => {
+    await expect(workbookKind(new Uint8Array([80, 75, 1, 2]))).rejects.toThrow('ไฟล์นี้ไม่ใช่ไฟล์ .xlsx');
+    await expect(readCertSheet(new Uint8Array([1, 2, 3]), SHEET)).rejects.toThrow('ไฟล์นี้ไม่ใช่ไฟล์ .xlsx');
   });
   it('error rows are listed with their row number and reason, and are not planned', async () => {
     const ls = await lines([
@@ -174,7 +191,7 @@ describe('planning', () => {
   it('new, same, changed (with the fields), a duplicate, and a new company for an unknown name', () => {
     const plan = planCertRows(
       [
-        L(2, { s1: 50 }),
+        L(2, { s1: 0.5 }),
         L(3, { cert: 'CFO-B', org: 'บริษัท บี จำกัด', webId: '', ap: '2024-01-01' }),
         L(4, { cert: 'NEW-1', org: 'บริษัท ใหม่ จำกัด', webId: '' }),
         L(5, { cert: 'NEW-1', org: 'บริษัท ใหม่ จำกัด', webId: '' }),
@@ -201,6 +218,25 @@ describe('planning', () => {
     expect(plan.changed[0].gid).toBe(900001);
     expect(plan.companies.map((c) => c.name)).toEqual(['บริษัท เอ (ใหม่) จำกัด']);
   });
+  it('two held certificates with one number and organisation and no web ids: the rows pair with them in order', () => {
+    const two = [
+      { origin: 'base' as const, idx: 0, gid: 1, f: F({ webId: '' }) },
+      { origin: 'base' as const, idx: 1, gid: 1, f: F({ webId: '', s1: 0.5, s2: 0.4, s3: 0.1 }) },
+    ];
+    const plan = planCertRows([L(2, { webId: '' }), L(3, { webId: '', s1: 0.5, s2: 0.4, s3: 0.1 })], two, companies);
+    expect(plan.errors).toEqual([]);
+    expect(plan.same).toBe(2);
+  });
+  it('a changed certificate keeps the company id it is stored under, even when that company is merged into another', () => {
+    const stored = {
+      cid: 0, gid: 1, gid0: 2, cert: 'CFO-1', org: 'บริษัท เอ จำกัด', branch: 'สำนักงานใหญ่', act: 'การผลิต', ind: 0, size: 0,
+      addr: '1 ถนนทดสอบ กรุงเทพมหานคร 10110', prov: 0, zip: '10110', ap: '2025-03-15', ex: '2027-03-14', fy: 0, s1: 0.6, s2: 0.3, s3: 0.1,
+      phone: '', email: '', webId: '', note: '',
+    } as unknown as Cert;
+    const held = heldFrom([stored], 1, { ind: ['การผลิต'], size: ['ขนาดเล็ก'], prov: ['กรุงเทพมหานคร'], fy: ['FY67'] });
+    const plan = planCertRows([L(2, { webId: '', s1: 0.5 })], held, [{ id: 1, name: 'บริษัท เอ จำกัด' }]);
+    expect(plan.changed.map((c) => [c.fields, c.gid])).toEqual([[['ประเภทที่ 1 (%)'], 2]]);
+  });
   it('two rows for one held certificate: the second is skipped', () => {
     const plan = planCertRows([L(2, {}), L(3, { s1: 1 })], held, companies);
     expect(plan.same).toBe(1);
@@ -213,7 +249,7 @@ describe('saving', () => {
   const base = {
     asOf: TODAY, dicts: { type: ['ไม่ระบุ'], prov: ['กรุงเทพมหานคร'], ind: ['ไม่ระบุ'], tgt: [], cfo: ['อยู่ในอายุ'], ct: [], match: [] },
     rows: [], cdicts: CD,
-    certs: [[1, 'CFO-1', 'บริษัท เอ จำกัด', 'สำนักงานใหญ่', 'การผลิต', 0, 0, '1 ถนนทดสอบ', 0, '10110', '2025-03-15', '2027-03-14', 0, 60, 30, 10, '', '', '32040', '']],
+    certs: [[1, 'CFO-1', 'บริษัท เอ จำกัด', 'สำนักงานใหญ่', 'การผลิต', 0, 0, '1 ถนนทดสอบ', 0, '10110', '2025-03-15', '2027-03-14', 0, 0.6, 0.3, 0.1, '', '', '32040', '']],
     source: 'file',
   } as unknown as Dataset;
   const save = (ls: CertLine[]) => {
@@ -233,7 +269,7 @@ describe('saving', () => {
     expect(r.base.source).toBe('upload');
     expect(r.base.fileName).toBe('sheet.xlsx');
     expect((r.base.certs[0] as unknown[])[12]).toBe(0);
-    expect((r.base.certs[0] as unknown[]).slice(13, 16)).toEqual([50, 40, 10]);
+    expect((r.base.certs[0] as unknown[]).slice(13, 16)).toEqual([0.5, 0.4, 0.1]);
     expect(r.tgo).toHaveLength(1);
     expect(r.tgo[0]).toMatchObject({ cert: 'CFO-5', gid: 900001, org: 'บริษัท ห้า จำกัด' });
     expect(r.base.cdicts.ind).toContain('บริการ');

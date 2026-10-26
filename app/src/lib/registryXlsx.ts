@@ -47,7 +47,7 @@ export const SHEET_COLS: { key: string; head: string; alias?: string[]; kind: Ki
 ];
 export const SHEET_HEADS = SHEET_COLS.map((c) => c.head);
 
-/** The values of one certificate as a sheet shows them and as the registry compares them. */
+/** The values of one certificate as a sheet shows them and as the registry compares them (s1–s3 are fractions: 0.25 = 25%). */
 export interface CertFields {
   cert: string; org: string; branch: string; act: string; addr: string; zip: string; prov: string; ind: string; size: string;
   ap: string; ex: string; fy: string; s1: number | null; s2: number | null; s3: number | null; note: string; webId: string;
@@ -89,7 +89,11 @@ const colIdx = (letters: string) => [...letters].reduce((n, ch) => n * 26 + ch.c
 export type XlsxInput = Blob | ArrayBuffer | Uint8Array;
 async function openZip(file: XlsxInput) {
   const { default: JSZip } = await import('jszip');
-  return JSZip.loadAsync(file);
+  try {
+    return await JSZip.loadAsync(file);
+  } catch {
+    throw new Error('ไฟล์นี้ไม่ใช่ไฟล์ .xlsx ที่เปิดได้ ลองบันทึกเป็น .xlsx ใหม่');
+  }
 }
 async function sheetList(zx: Awaited<ReturnType<typeof openZip>>) {
   const wb = (await zx.file('xl/workbook.xml')?.async('string')) ?? '';
@@ -173,6 +177,8 @@ export function readDateBE(c: Cell, label: string): { v: string } | { err: strin
     const d = new Date(Date.UTC(1899, 11, 30) + n * 864e5);
     let y = d.getUTCFullYear();
     if (y > 2400) y -= 543; // a year typed as พ.ศ. into a date cell
+    // a bare 2568 is a serial day in 1907: a certificate date is never that old
+    if (y < 1950) return { err: `${label} ต้องเป็นวว/ดด/ปปปป เป็น พ.ศ. เช่น 15/03/2568: ${c.v}` };
     return { v: isoOf(y, d.getUTCMonth() + 1, d.getUTCDate()) };
   }
   const t = c.v.trim();
@@ -193,7 +199,10 @@ export function readDateBE(c: Cell, label: string): { v: string } | { err: strin
   return { v: isoOf(y, mo, dd) };
 }
 
-/** A percent: "12.20%", "12.2", 0.122 (a fraction, up to 1) → a number of percent; '' → null. */
+/**
+ * A share read as a fraction, the way the app keeps it (0.6 = 60%): "12.20%" and "12.2" are 0.122, and 0.122 (up to 1
+ * without a % sign) is already a fraction. A number above 1 without % is a percent. '' → null.
+ */
 export function readPct(c: Cell, label: string): { v: number | null } | { err: string } {
   if (!c || !c.v.trim()) return { v: null };
   const t = c.v.trim();
@@ -201,9 +210,8 @@ export function readPct(c: Cell, label: string): { v: number | null } | { err: s
   const body = isPct ? t.replace(/%$/, '').trim() : t;
   const x = c.t === 'n' ? +body : /^-?\d+(\.\d+)?$/.test(body) ? +body : NaN;
   if (!isFinite(x) || x < 0) return { err: `${label} ไม่ใช่ตัวเลข: ${t}` };
-  // up to 1 without a % sign is a fraction (0.122 = 12.2%); write 1% as "1%"
-  const pct = !isPct && x > 0 && x <= 1 ? x * 100 : x;
-  return { v: Math.round(pct * 100) / 100 };
+  const frac = isPct || x > 1 ? x / 100 : x;
+  return { v: Math.round(frac * 10000) / 10000 };
 }
 
 /** Rows of the certificate sheet (SHEET or the TGO tab), read by header name. Blank rows are not rows. */
@@ -253,7 +261,8 @@ export async function readCertSheet(file: XlsxInput, sheet: string): Promise<Cer
 
 /* ---------- writing: the template and the export ---------- */
 
-const pctText = (v: number | null): XCell => (v == null ? null : `${Math.round(v * 100) / 100}%`);
+/** A fraction as the percent the sheet shows: 0.6 → "60%", 0.0029 → "0.29%". */
+const pctText = (v: number | null): XCell => (v == null ? null : `${Math.round(v * 10000) / 100}%`);
 const beText = (iso: string): XCell => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${+iso.slice(0, 4) + 543}` : null);
 const adDate = (iso: string): XCell => (iso ? { date: iso } : null);
 const txt = (s: string): XCell => s || null;
@@ -299,7 +308,7 @@ function registrySheet(rows: CertFields[], today: string): XSheet {
 const EXAMPLE: CertFields = {
   cert: 'CFO-EXAMPLE-0001', org: 'บริษัท ตัวอย่าง จำกัด', branch: 'สำนักงานใหญ่', act: 'การผลิตสินค้า',
   addr: '1 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร 10110', zip: '10110', prov: 'กรุงเทพมหานคร', ind: 'การผลิต',
-  size: 'ขนาดเล็ก', ap: '2025-01-01', ex: '2027-12-31', fy: 'FY67', s1: 60, s2: 30, s3: 10,
+  size: 'ขนาดเล็ก', ap: '2025-01-01', ex: '2027-12-31', fy: 'FY67', s1: 0.6, s2: 0.3, s3: 0.1,
   note: 'แถวตัวอย่าง ลบทิ้งก่อนนำเข้า', webId: '32040',
 };
 /** The template: the example row in the registry sheet, then the description sheet. */
@@ -318,9 +327,22 @@ function todayOf() {
 /* ---------- planning and saving ---------- */
 
 /** A certificate the app holds: where it is kept (the base dataset or the added list) and its values. */
+/** `gid` is the company id the certificate is stored under (not the id of the company it is merged into). */
 export interface HeldCert { origin: 'base' | 'tgo'; idx: number; gid: number; f: CertFields }
 export interface PlanNew { rowNo: number; f: CertFields; gid: number }
 export interface PlanChange { rowNo: number; f: CertFields; gid: number; fields: string[]; origin: 'base' | 'tgo'; idx: number }
+/** What one sheet save added or changed in the saved lists, so the revert takes exactly that back (engine.revertUpload). */
+export interface CertImportRec {
+  at: string;
+  fileName: string;
+  /** the TGO-list rows the save appended: from `tgoStart`, `tgoAdded` of them */
+  tgoStart: number;
+  tgoAdded: number;
+  /** the company ids the save created */
+  coIds: number[];
+  /** the TGO-list rows the save changed, as they were before */
+  tgoPrev: { idx: number; cert: Partial<Cert> }[];
+}
 export interface CertPlan {
   read: number;
   news: PlanNew[];
@@ -332,7 +354,7 @@ export interface CertPlan {
 
 const fieldText = (f: CertFields, k: keyof CertFields) => {
   const v = f[k];
-  if (k === 's1' || k === 's2' || k === 's3') return v == null ? '' : String(Math.round((v as number) * 100));
+  if (k === 's1' || k === 's2' || k === 's3') return v == null ? '' : String(Math.round((v as number) * 10000));
   return txtOf(String(v ?? ''));
 };
 
@@ -378,7 +400,8 @@ export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { i
     if (w) return w;
     if (!f.cert) return undefined;
     const k = byKey.get(certKey(f.cert, f.org));
-    if (k) return k[0];
+    // the first one with this number and organisation that an earlier row has not taken
+    if (k) return k.find((h) => !usedBy.has(h)) ?? k[0];
     const n = byNo.get(numberOf(f.cert));
     return n && n.length === 1 ? n[0] : undefined;
   };
@@ -431,7 +454,7 @@ export function heldFrom(certs: Cert[], baseCount: number, CD: CertDicts): HeldC
   return certs.map((c) => ({
     origin: c.cid < baseCount ? 'base' : 'tgo',
     idx: c.cid < baseCount ? c.cid : c.cid - baseCount,
-    gid: c.gid,
+    gid: c.gid0 ?? c.gid,
     f: certFields(c, CD),
   }));
 }
