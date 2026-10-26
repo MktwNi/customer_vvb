@@ -1,10 +1,11 @@
 import { type FormEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { dtTh, fmtN, isoTh } from '../lib/format';
+import { dtTh, fmtN } from '../lib/format';
 import type { SyncCfg } from '../lib/types';
 import { Notice, PageHead, labelCol } from '../components/ui';
 import { SelField } from '../components/Select';
 import { TeamSyncCard } from '../components/TeamSync';
+import { RegistryXlsx } from '../components/RegistryXlsx';
 import { Icon } from '../components/icons';
 
 /** One block of the page (design §8): title, one grey status line, the one action at the right; the long
@@ -37,12 +38,10 @@ export function Update() {
   // a team that signs in has no use for the team block: who you are is your account, the team list
   // is the users page's (names without an account), and so are an admin's backup files
   const accounts = e.role() != null;
-  const u = e.up, y = e.sy, st = e.pendingSync, sc = e.syncCfg(), mon = e.monCfg();
+  const y = e.sy, st = e.pendingSync, sc = e.syncCfg(), mon = e.monCfg();
   const me = e.me();
   const ownN: Record<string, number> = {};
   Object.values(C.owners).forEach((v) => (ownN[v] = (ownN[v] || 0) + 1));
-  const srcLine = e.base.source === 'upload' ? `ไฟล์ที่อัปโหลด ${e.base.fileName || ''}` : 'ไฟล์ข้อมูลต้นฉบับของเว็บ';
-  const dataLine = `ข้อมูล ณ ${isoTh(e.base.asOf)} · ${srcLine} · ${fmtN(e.B.companies.length)} บริษัท · ${fmtN(e.B.certs.length)} ใบรับรอง CFO`;
   const addTeam = (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const f = ev.currentTarget;
@@ -68,36 +67,7 @@ export function Update() {
     <>
       <PageHead title="อัปเดตข้อมูล" />
       <TeamSyncCard />
-      <UpdSection
-        title="อัปโหลดฐานข้อมูลลูกค้าฉบับใหม่"
-        status={dataLine}
-        action={
-          <label className="btn" style={{ flex: 'none' }}>
-            เลือกไฟล์ .xlsx
-            <input type="file" accept=".xlsx" onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) e.onFile(f); }} style={{ display: 'none' }} />
-          </label>
-        }
-        more="ไฟล์ Excel รูปแบบเดียวกับ ฐานข้อมูลลูกค้า_GCC (ชีต ทะเบียนบริษัท, TGO_CFO, GI, กรอ., SET) ระบบจะแทนข้อมูลบริษัททั้งหมด ส่วนที่ทีมบันทึก (ติดตาม สถานะการขาย โน้ต นัด ข้อมูลติดต่อที่แก้ การตัดสินข้อมูลซ้ำ) ยังอยู่ครบ"
-      >
-        {u.status === 'busy' && <span className="t-link" style={{ fontSize: 14 }}>{u.msg}</span>}
-        {u.status === 'error' && <Notice kind="error">{u.msg}</Notice>}
-        {u.status === 'done' && <Notice kind="ok">{u.msg}</Notice>}
-        {u.status === 'preview' && (
-          <div style={{ borderTop: '1px solid var(--divider)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <span className="t-name">{u.head}</span>
-            <div className="upd-line">
-              {(u.preview || []).map((b) => (
-                <span key={b.k}><span className="t-muted">{b.k}</span> {b.v}</span>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button onClick={() => e.applyUpload()} className="btn sm">ใช้ข้อมูลชุดนี้</button>
-              <button onClick={() => e.cancelUpload()} className="quiet">ยกเลิก</button>
-            </div>
-          </div>
-        )}
-        {e.base.source === 'upload' && <button onClick={() => e.revertUpload()} className="lnk" style={{ alignSelf: 'flex-start' }}>กลับไปใช้ไฟล์ข้อมูลต้นฉบับของเว็บ</button>}
-      </UpdSection>
+      <RegistryXlsx />
 
       <UpdSection
         title="ดึงใบรับรอง CFO ใหม่จาก อบก."
