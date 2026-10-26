@@ -318,6 +318,10 @@ const KEY_CAP = [
   { p: 'dedup/', w: 'set.dedup', d: 'set.dedup' },
   { p: 'team/', w: 'set.users', d: 'set.users' },
   { p: 'dundo/', w: 'set.data', d: 'set.data' },
+  // the TGO review queue (lib/tgoSync.ts): a pulled certificate is tgo/<id> = 'p' (pending), then 'a' (accepted, its
+  // company and certificate join the registry) or 'r' (rejected, kept so a pull never adds it again). Pulling, accepting
+  // and rejecting are edits of the registry, so edit.cust (the same as the customers' records); a viewer only reads it.
+  { p: 'tgo/', w: 'edit.cust', d: 'edit.cust' },
 ];
 /** Capabilities that write something by push: an account with none of them may not push at all. */
 const WRITE_CAPS_ = KEY_CAP.reduce((a, r) => a.concat(r.w || [], r.d || []), ['set.users']).filter((c, i, a) => a.indexOf(c) === i);
