@@ -65,7 +65,7 @@ export interface Company extends RawCompany {
 
 export interface Cert {
   cid: number; gid: number; gid0: number; cert: string; org: string; branch: string; act: string;
-  ind: number; size: number; addr: string; prov: number; provTxt?: string; zip: string;
+  ind: number; size: number; addr: string; prov: number; provTxt?: string; indTxt?: string; zip: string;
   ap: string; ex: string; fy: number; s1: number | null; s2: number | null; s3: number | null;
   phone: string; email: string; webId: string; note: string;
   tgo?: boolean;
@@ -115,5 +115,6 @@ export interface Detail { t: { src: number; x: unknown[] }[]; g: { src: number; 
 
 export interface MonEvent { t: string; id: number; at: string }
 export interface MonitorCfg { snap: Record<string, string> | null; events: MonEvent[]; last: string | null; seenAt: string | null; notify: boolean }
-export interface SyncCfg { freq: 'open' | 'daily' | 'weekly' | 'off'; proxy: string; autoApply: boolean; last?: string; lastMsg?: string; total?: number | null }
+/** `feed`: the CFO web app's link (Google Sheet feed); empty = read TGO's page through `proxy`. */
+export interface SyncCfg { freq: 'open' | 'daily' | 'weekly' | 'off'; proxy: string; feed: string; autoApply: boolean; last?: string; lastMsg?: string; total?: number | null }
 export interface SetSnap { syms: string[]; at: string; newSyms: Record<string, string> }

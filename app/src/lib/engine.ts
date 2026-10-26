@@ -162,6 +162,8 @@ export class GccEngine {
   certsBy = new Map<number, Cert[]>();
   byNorm = new Map<string, number>();
   certKeys = new Set<string>();
+  /** TGO's record ids (webId) of every certificate held */
+  certIds = new Set<string>();
   T = 0;
   W = CONFIG.soonWindow;
   minYm = '';
@@ -533,6 +535,7 @@ export class GccEngine {
       if (k && !this.byNorm.has(k)) this.byNorm.set(k, c.id);
     });
     this.certKeys = new Set(B.certs.map((ct) => TGOSync.key(ct.cert, ct.org)));
+    this.certIds = new Set(B.certs.map((ct) => String(ct.webId ?? '').trim()).filter(Boolean));
     // SET snapshot → "newly listed" detection on the next dataset
     const syms = [...new Set(B.companies.map((c) => c.set).filter(Boolean))];
     const today = todayISO();
@@ -627,7 +630,7 @@ export class GccEngine {
       ct.isLatest = !!(c && c.cfoEx === ct.ex);
       ct.hay = (ct.cert + ' ' + ct.org + ' ' + ct.act).toLowerCase();
       ct.provName = ct.provTxt || CD.prov[ct.prov] || '';
-      ct.indName = CD.ind[ct.ind] || '';
+      ct.indName = CD.ind[ct.ind] || ct.indTxt || '';
       ct.apT = ct.ap ? Date.parse(ct.ap) : 0;
       ct.exM = ct.ex ? ct.ex.slice(0, 7) : '';
       // submission year (B.E.): from "FYxx" in the certificate no., else the fiscal year (Oct–Sep) of approval
@@ -715,7 +718,7 @@ export class GccEngine {
 
   // ------------------------------------------------------------------ TGO sync
   syncCfg(): SyncCfg {
-    return { freq: 'daily', proxy: '', autoApply: true, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
+    return { freq: 'daily', proxy: '', feed: TGOSync.FEED_URL, autoApply: true, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
   }
   saveSync(p: Partial<SyncCfg>) {
     const c = { ...this.syncCfg(), ...p };
@@ -728,30 +731,67 @@ export class GccEngine {
     if (!c.last || c.freq === 'open') return true;
     return Date.now() - Date.parse(c.last) >= (c.freq === 'weekly' ? 168 : 24) * 36e5;
   }
+  /** Already held: same TGO record id, else same certificate no. + organisation. */
+  isKnownCert(it: TGOSync.TgoItem) {
+    return (!!it.id && this.certIds.has(it.id)) || this.certKeys.has(TGOSync.key(it.cert, it.org));
+  }
+  /** The feed is asked for records approved within 180 days of the newest one held — late additions to a round included. */
+  feedSince() {
+    let mx = '';
+    this.B.certs.forEach((ct) => {
+      if (ct.ap && ct.ap > mx) mx = ct.ap;
+    });
+    return mx ? addDays(mx, -180) : '';
+  }
+  /** Fields of a pulled certificate that come from the feed (the list page has none of them). */
+  certDetail(it: TGOSync.TgoItem): Partial<Cert> {
+    const CD = this.B.CD;
+    const ix = (a: string[], v?: string) => (v ? a.indexOf(v) : -1);
+    const pn = TGOSync.provName(it.changwat || it.prov);
+    const prov = ix(CD.prov, pn);
+    const ind = ix(CD.ind, it.ind);
+    return {
+      ind, indTxt: ind < 0 && it.ind ? it.ind : '', size: ix(CD.size, it.size), addr: it.addr || '', prov, provTxt: prov >= 0 ? '' : pn || it.prov,
+      zip: it.zip || '', fy: ix(CD.fy, it.fy), s1: it.s1 ?? null, s2: it.s2 ?? null, s3: it.s3 ?? null,
+    };
+  }
   async runSync(auto: boolean) {
     if (this.syncing || !this.B) return;
     const c = this.syncCfg();
+    const feed = (c.feed || '').trim();
     this.syncing = true;
-    this.sy = { status: 'running', msg: 'กำลังเชื่อมต่อเว็บไซต์ TGO…' };
+    this.sy = { status: 'running', msg: feed ? 'กำลังอ่านข้อมูลจาก Google Sheet…' : 'กำลังเชื่อมต่อเว็บไซต์ TGO…' };
     this.emit();
     try {
-      const res = await TGOSync.fetchAll({
-        proxy: c.proxy,
-        maxPages: 3,
-        isKnown: (it) => this.certKeys.has(TGOSync.key(it.cert, it.org)),
-        onProgress: (m) => {
-          this.sy = { status: 'running', msg: m };
-          this.emit();
-        },
-      });
+      const onProgress = (m: string) => {
+        this.sy = { status: 'running', msg: m };
+        this.emit();
+      };
+      const res = feed
+        ? await TGOSync.fetchFeed({ url: feed, since: this.feedSince(), onProgress })
+        : await TGOSync.fetchAll({ proxy: c.proxy, maxPages: 3, isKnown: (it) => this.isKnownCert(it), onProgress });
+      // certificates pulled earlier from the list page have no details: fill them in from the feed
+      const filled = feed ? this.fillDetails(res.items) : 0;
+      const seen = new Set<string>();
       const nw = res.items
-        .filter((it) => !this.certKeys.has(TGOSync.key(it.cert, it.org)))
+        .filter((it) => {
+          const k = it.id || TGOSync.key(it.cert, it.org);
+          if (this.isKnownCert(it) || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        })
         .map((it) => ({ ...it, gid: this.byNorm.get(norm(it.org)) || null }));
       this.pendingSync = { ...res, nw, at: new Date().toISOString() };
       if (!nw.length) {
         this.saveSync({ last: this.pendingSync.at, lastMsg: 'ไม่มีใบรับรองใหม่', total: res.total });
         this.pendingSync = null;
-        this.sy = { status: auto ? '' : 'done', msg: `ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)` };
+        const fillMsg = filled ? ` · เติมรายละเอียดใบที่ดึงไว้ ${fmtN(filled)} ใบ` : '';
+        this.sy = {
+          status: auto && !filled ? '' : 'done',
+          msg: feed
+            ? `ข้อมูลตรงกับ Google Sheet แล้ว (ตรวจ ${fmtN(res.items.length)} รายการที่อนุมัติตั้งแต่ ${res.since ? isoTh(res.since) : 'ต้น'})${fillMsg}`
+            : `ข้อมูลตรงกับเว็บไซต์ TGO แล้ว (ตรวจ ${fmtN(res.items.length)} รายการล่าสุด)`,
+        };
       } else if (auto && c.autoApply) {
         this.applySync(true);
       } else {
@@ -765,6 +805,24 @@ export class GccEngine {
       this.emit();
     }
   }
+  /** Gives pulled certificates that lack details (from the list page) the feed's address, industry, size and scopes. */
+  fillDetails(items: TGOSync.TgoItem[]) {
+    const byId = new Map(items.filter((it) => it.id).map((it) => [it.id, it]));
+    const byKey = new Map(items.map((it) => [TGOSync.key(it.cert, it.org), it]));
+    let n = 0;
+    this.tgoCerts.forEach((tc, i) => {
+      if (tc.addr || (tc.ind != null && tc.ind >= 0) || tc.indTxt) return;
+      const it = (tc.webId && byId.get(String(tc.webId))) || byKey.get(TGOSync.key(tc.cert || '', tc.org || ''));
+      if (!it || it.addr == null) return;
+      this.tgoCerts[i] = { ...tc, ...this.certDetail(it), webId: tc.webId || it.id };
+      n++;
+    });
+    if (n) {
+      this.persist('tgoCerts', this.tgoCerts);
+      this.rebuild();
+    }
+    return n;
+  }
   applySync(auto: boolean) {
     const st = this.pendingSync;
     if (!st) return;
@@ -775,17 +833,20 @@ export class GccEngine {
       if (!gid) {
         gid = 900001 + this.added.length;
         made++;
-        const pi = D.prov.indexOf(it.prov);
+        const pi = D.prov.indexOf(TGOSync.provName(it.changwat || it.prov));
         this.added.push({
-          id: gid, name: it.org, jur: '', type: Math.max(0, D.type.indexOf('ไม่ระบุ')), prov: pi >= 0 ? pi : D.prov.indexOf(''), addr: '',
+          id: gid, name: it.org, jur: '', type: Math.max(0, D.type.indexOf('ไม่ระบุ')), prov: pi >= 0 ? pi : D.prov.indexOf(''), addr: it.addr || '',
           ind: Math.max(0, D.ind.indexOf('ไม่ระบุ')), biz: it.act, src: 1, tgt: 0, cfo: Math.max(0, D.cfo.indexOf('อยู่ในอายุ')), cfoN: 0, cfoEx: '',
           giNow: null, giMax: null, giUntil: '', newYm: '', invest: null, fac: null, set: '', mkt: '', phone: '', email: '', web: '', ct: 0, match: 0,
         });
         this.byNorm.set(norm(it.org), gid);
       }
+      const fromFeed = it.addr != null;
       this.tgoCerts.push({
         gid, cert: it.cert, org: it.org, branch: it.branch, act: it.act, ind: -1, size: -1, addr: '', prov: -1, provTxt: it.prov, zip: '',
-        ap: it.ap, ex: it.ex, fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', webId: it.id, note: 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ' + isoTh(todayISO()),
+        ap: it.ap, ex: it.ex, fy: -1, s1: null, s2: null, s3: null, phone: '', email: '', webId: it.id,
+        ...(fromFeed ? this.certDetail(it) : {}),
+        note: (fromFeed ? 'ดึงจาก Google Sheet ที่อัปเดตจากเว็บ อบก. ' : 'ดึงจากเว็บไซต์ TGO อัตโนมัติ ') + isoTh(todayISO()),
       });
     });
     this.persist('addedCos', this.added);

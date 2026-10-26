@@ -59,6 +59,7 @@ export function Update() {
   const syncLine: [string, string][] = [
     ['ซิงก์ล่าสุด', sc.last ? dtTh(sc.last) : 'ยังไม่เคย'],
     ['ผลล่าสุด', sc.lastMsg || '—'],
+    ['แหล่ง', sc.feed ? 'Google Sheet (อัปเดตจากเว็บ อบก.)' : 'หน้าเว็บ TGO'],
     ['บนเว็บ TGO', sc.total ? fmtN(sc.total) + ' รายการ' : '—'],
     ['ดึงเพิ่มไว้', fmtN(e.tgoCerts.length) + ' ใบ'],
   ];
@@ -99,7 +100,7 @@ export function Update() {
       </UpdSection>
 
       <UpdSection
-        title="ดึงใบรับรอง CFO ใหม่จากเว็บไซต์ TGO"
+        title="ดึงใบรับรอง CFO ใหม่จาก อบก."
         status={
           <span className="upd-line">
             {syncLine.map(([k, v]) => (
@@ -110,8 +111,21 @@ export function Update() {
         action={<button onClick={() => e.runSync(false)} disabled={y.status === 'running'} className="btn pri" style={{ flex: 'none' }}>{y.status === 'running' ? 'กำลังดึงข้อมูล…' : 'ดึงข้อมูลล่าสุดตอนนี้'}</button>}
         more={
           <>
-            <span>อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO)</span>
-            <span>Proxy (ขั้นสูง): ใช้ {'{u}'} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ project/tools/tgo-proxy-worker.js</span>
+            <span>
+              {sc.feed
+                ? 'อ่านจาก Google Sheet “TGO” ที่ระบบอัปเดตรายชื่อ CFO ดึงจากหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. ได้ครบทุกรายการพร้อมที่อยู่ อุตสาหกรรม ขนาด และสัดส่วนประเภท 1–3'
+                : 'อ่านหน้า "รายชื่อบริษัทและองค์กรที่ขอการรับรอง" ของ อบก. โดยตรง (3 หน้าแรก ไม่มีรายละเอียดที่อยู่และอุตสาหกรรม)'}
+              {' '}ใบรับรองใหม่จะผูกกับบริษัทที่ชื่อตรงกัน ถ้าไม่พบจะสร้างบริษัทใหม่ (แหล่ง TGO)
+            </span>
+            {sc.feed && (
+              <span>
+                เมื่อ อบก. ประกาศรอบใหม่ ให้กด “อัปเดตข้อมูล” ที่{' '}
+                <a href={sc.feed} target="_blank" rel="noopener" className="lnk">หน้าอัปเดตรายชื่อ CFO</a> ก่อน แล้วกด “ดึงข้อมูลล่าสุดตอนนี้” ที่นี่
+              </span>
+            )}
+            <span>ลิงก์ข้อมูล: ลิงก์เว็บแอปอัปเดตรายชื่อ CFO (ลงท้าย /exec) · เว้นว่าง = อ่านหน้าเว็บ TGO ผ่าน Proxy</span>
+            <input defaultValue={sc.feed} onBlur={(ev) => e.saveSync({ feed: ev.target.value.trim() })} placeholder="https://script.google.com/macros/s/…/exec" aria-label="ลิงก์ข้อมูล" className="fld" style={{ maxWidth: 560 }} />
+            <span>Proxy (ขั้นสูง ใช้เมื่อไม่มีลิงก์ข้อมูล): ใช้ {'{u}'} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ project/tools/tgo-proxy-worker.js</span>
             <input defaultValue={sc.proxy} onBlur={(ev) => e.saveSync({ proxy: ev.target.value.trim() })} placeholder="https://tgo-proxy.example.workers.dev/?url={u}" aria-label="Proxy" className="fld" style={{ maxWidth: 560 }} />
           </>
         }
