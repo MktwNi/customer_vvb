@@ -39,6 +39,20 @@ describe('followContact: the company drawer\'s contact, for the ติดตา�
     expect(followContactWords(c)).toBe(`ติดต่อแล้ว · ล่าสุด ${nb('10 ต.ค. 2569')} · ${nb('4 ครั้ง')}`);
   });
 
+  it('the day is the local day, as the drawer history reads it: a UTC stamp near midnight is the next day in Thailand', () => {
+    const tz = process.env.TZ;
+    process.env.TZ = 'Asia/Bangkok';
+    try {
+      // 19:30 UTC on 25 Oct is 02:30 on 26 Oct in Bangkok
+      const c = followContact([log('2026-10-25T19:30:00.000Z', 'call')], [], emptySales(), TODAY);
+      expect(c).toEqual({ last: '2026-10-26', count: 1 });
+      expect(followContactWords(c)).toBe(`ติดต่อแล้ว · ล่าสุด ${nb('26 ต.ค. 2569')}`);
+    } finally {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
+  });
+
   it('the date is in Thai: the day without a leading zero, the month short, the year in พ.ศ.', () => {
     expect(followContactWords({ last: '2026-01-05', count: 1 })).toBe(`ติดต่อแล้ว · ล่าสุด ${nb('5 ม.ค. 2569')}`);
     expect(followContactWords({ last: '2026-12-31', count: 3 })).toBe(`ติดต่อแล้ว · ล่าสุด ${nb('31 ธ.ค. 2569')} · ${nb('3 ครั้ง')}`);

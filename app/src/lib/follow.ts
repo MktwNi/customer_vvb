@@ -4,7 +4,7 @@
  * Sales Tracker of the year and its owner, in the order of what needs attention first.
  * Pure functions only (no DOM, no engine import at run time), so everything here is unit-tested.
  */
-import { addDays, daysBetween, fmtN, isoTh } from './format';
+import { addDays, daysBetween, fmtN, isoTh, localDay } from './format';
 import { TT } from './constants';
 import { isLocalId } from './teamSync';
 import { actsOf, jointRole, lastContact, trackerStatus, type Deal, type SalesState } from './sales';
@@ -158,7 +158,7 @@ export interface FollowContact { last: string; count: number }
  */
 export function followContact(logs: readonly LogEntry[], deals: readonly Deal[], s: SalesState, today: string): FollowContact {
   const lastC = logs.slice().sort((a, b) => b.at.localeCompare(a.at)).find((l) => COMPANY_CONTACT.includes(l.type));
-  const last = [lastC ? lastC.at.slice(0, 10) : '', ...deals.map((x) => lastContact(s, x, today))].reduce((a, b) => (b > a ? b : a), '');
+  const last = [lastC ? localDay(lastC.at) : '', ...deals.map((x) => lastContact(s, x, today))].reduce((a, b) => (b > a ? b : a), '');
   return { last, count: logs.length + deals.reduce((n, x) => n + actsOf(s, x.id).length, 0) };
 }
 
