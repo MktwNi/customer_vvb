@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GccEngine } from './engine';
 import { memoryStore, PREF } from './storage';
-import { feedUrl, fetchFeed, fromFeed, provName, type FeedRow } from './tgoSync';
+import { FEED_URL, feedUrl, fetchFeed, fromFeed, provName, type FeedRow } from './tgoSync';
 import type { Dataset, RoundRaw } from './types';
 
 const DATA = join(__dirname, '..', '..', '..', 'project', 'data');
@@ -145,12 +145,16 @@ describe('sync from the Google Sheet feed', () => {
     expect(a.zip).toBe('20160');
   });
 
-  it('keeps the old way (TGO page through a proxy) when the feed link is empty', async () => {
-    localStorage.setItem(PREF.sync, JSON.stringify({ feed: '', freq: 'off' }));
+  it('an empty link, also one saved by the build without a built-in link, means the built-in link', async () => {
+    localStorage.setItem(PREF.sync, JSON.stringify({ feed: '', freq: 'off', proxy: '' }));
     const e = engine();
-    serve('<html>blocked</html>');
+    expect(e.syncCfg().feed).toBe(FEED_URL);
+    serve({ ok: true, rows: [KNOWN], webTotal: 4491 });
     await e.runSync(false);
-    expect(urls[0]).toContain('thaicarbonlabel.tgo.or.th');
-    expect(e.sy.status).toBe('error');
+    expect(urls[0].startsWith(FEED_URL + '?format=json')).toBe(true);
+    expect(e.sy.msg).toContain('ข้อมูลตรงกับ Google Sheet แล้ว');
+    // a link typed in the field wins
+    e.saveSync({ feed: FEED });
+    expect(e.syncCfg().feed).toBe(FEED);
   });
 });
