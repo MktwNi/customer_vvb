@@ -718,7 +718,10 @@ export class GccEngine {
 
   // ------------------------------------------------------------------ TGO sync
   syncCfg(): SyncCfg {
-    return { freq: 'daily', proxy: '', feed: TGOSync.FEED_URL, autoApply: true, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
+    const c: SyncCfg = { freq: 'daily', proxy: '', feed: '', autoApply: true, ...prefs.get<Partial<SyncCfg>>(PREF.sync, {}) };
+    // an empty link (also one saved by a build that had no built-in link) means the built-in one
+    c.feed = String(c.feed || '').trim() || TGOSync.FEED_URL;
+    return c;
   }
   saveSync(p: Partial<SyncCfg>) {
     const c = { ...this.syncCfg(), ...p };

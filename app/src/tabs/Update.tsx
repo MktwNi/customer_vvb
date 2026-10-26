@@ -123,7 +123,7 @@ export function Update() {
                 <a href={sc.feed} target="_blank" rel="noopener" className="lnk">หน้าอัปเดตรายชื่อ CFO</a> ก่อน แล้วกด “ดึงข้อมูลล่าสุดตอนนี้” ที่นี่
               </span>
             )}
-            <span>ลิงก์ข้อมูล: ลิงก์เว็บแอปอัปเดตรายชื่อ CFO (ลงท้าย /exec) · เว้นว่าง = อ่านหน้าเว็บ TGO ผ่าน Proxy</span>
+            <span>ลิงก์ข้อมูล: ลิงก์เว็บแอปอัปเดตรายชื่อ CFO (ลงท้าย /exec) · เว้นว่าง = ใช้ลิงก์ตั้งต้นของระบบ</span>
             <input defaultValue={sc.feed} onBlur={(ev) => e.saveSync({ feed: ev.target.value.trim() })} placeholder="https://script.google.com/macros/s/…/exec" aria-label="ลิงก์ข้อมูล" className="fld" style={{ maxWidth: 560 }} />
             <span>Proxy (ขั้นสูง ใช้เมื่อไม่มีลิงก์ข้อมูล): ใช้ {'{u}'} แทนตำแหน่ง URL · ตัวอย่างสำหรับ Cloudflare Worker อยู่ที่ project/tools/tgo-proxy-worker.js</span>
             <input defaultValue={sc.proxy} onBlur={(ev) => e.saveSync({ proxy: ev.target.value.trim() })} placeholder="https://tgo-proxy.example.workers.dev/?url={u}" aria-label="Proxy" className="fld" style={{ maxWidth: 560 }} />
