@@ -326,6 +326,10 @@ const KEY_CAP = [
   // and rejecting are edits of the registry, so edit.cust (the same as the customers' records); a viewer only reads it.
   // A decision is final: once a row is 'a' or 'r', a write that changes it or deletes it is refused (push_, tgoDecided_).
   { p: 'tgo/', w: 'edit.cust', d: 'edit.cust' },
+  // the review list of certificate-sheet rows (lib/sheetReview.ts, R16): a row the sheet cannot apply waits here for a decision;
+  // pulling it from a save, accepting and rejecting it are edits of the registry (edit.cust). A decided record (a or r) is
+  // final, as a tgo/ row is: a change or a deletion of it is refused (push_, reviewDecided_).
+  { p: 'sheetrev/', w: 'edit.cust', d: 'edit.cust' },
 ];
 /** Capabilities that write something by push: an account with none of them may not push at all. */
 const WRITE_CAPS_ = KEY_CAP.reduce((a, r) => a.concat(r.w || [], r.d || []), ['set.users']).filter((c, i, a) => a.indexOf(c) === i);
@@ -824,6 +828,7 @@ function push_(ops, actor) {
       if (x.op.nx && !x.delR && x.k && x.k.length <= 500) creates[x.k] = 1;
       // a queue record a write may change (tgo/), and the queue rows a company depends on (dep), are read too
       if (x.k.indexOf('tgo/') === 0 && x.k.length <= 500) creates[x.k] = 1;
+      if (x.k.indexOf('sheetrev/') === 0 && x.k.length <= 500) creates[x.k] = 1;
       depsOf_(x.op).forEach((d) => {
         if (d.length <= 500) creates[d] = 1;
       });
@@ -860,6 +865,11 @@ function push_(ops, actor) {
       // (a browser that still sees it as waiting cannot take it away); a waiting row may be deleted (a revert). The record
       // as the sheet holds it goes back in the reply, so the browser takes the decision it was refused
       if (k.indexOf('tgo/') === 0 && has_(cur, k) && liveRow_(cur[k]) && tgoDecided_(cur[k], del ? null : op.v)) {
+        refused[k] = cur[k];
+        continue;
+      }
+      // a decided review record (sheetrev/) is final the same way: a change or a deletion of it is refused (reviewDecided_)
+      if (k.indexOf('sheetrev/') === 0 && has_(cur, k) && liveRow_(cur[k]) && reviewDecided_(cur[k], del ? null : op.v)) {
         refused[k] = cur[k];
         continue;
       }
@@ -2100,6 +2110,16 @@ function tgoDecided_(r, v) {
     String(v.at == null ? '' : v.at) !== String(old.at == null ? '' : old.at) ||
     String(v.note == null ? '' : v.note) !== String(old.note == null ? '' : old.note) ||
     (v.gid == null ? null : v.gid) !== (old.gid == null ? null : old.gid);
+}
+/**
+ * A decided review record (sheetrev/: accepted or rejected) is final: a write that changes it, and a deletion, are refused;
+ * the same record again (a retry after a lost reply) changes nothing and is stored.
+ */
+function reviewDecided_(r, v) {
+  const was = tgoState_(r);
+  if (was !== 'a' && was !== 'r') return false;
+  if (!v || typeof v !== 'object') return true;
+  return JSON.stringify(v) !== JSON.stringify(rowOut_(r).v || {});
 }
 /** An op with dep goes through when one of those queue rows is accepted: as stored in this push, or before. */
 function depsAccepted_(cur, op) {

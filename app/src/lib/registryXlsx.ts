@@ -3,11 +3,17 @@
  * reader that turns a sheet back into rows. Columns are read by HEADER NAME in row 1 (aliases below, the old
  * apBE/exBE names of project/cfo-import.js included), never by letter. A workbook with a ทะเบียนบริษัท sheet is
  * the old full upload: core.ts still reads it (sheet TGO_CFO by letter), and this module leaves it alone.
+ *
+ * A save plans every row against the companies, the held certificates, the TGO review queue and the review list
+ * (planCertRows) and reports what each row does (CertLogEntry). No import creates a company: a row whose company
+ * cannot be settled goes to the review list (sheetReview.ts) instead.
  */
 import type { Cert, CertDicts, Dataset, Dicts, RawCompany } from './types';
-import { CCOLS, fixName, norm } from './core';
+import { CCOLS, fixName } from './core';
+import { gccCode } from './format';
 import type { XCell, XSheet } from './xlsx';
 import { normOrg, provName } from './tgoSync';
+import { reviewIdOf } from './sheetReview';
 
 export const SHEET = 'ใบรับรอง CFO';
 /** The TGO sheet tab, read the same way (the 27 headers are its own). */
@@ -21,8 +27,8 @@ export const SHEET_COLS: { key: string; head: string; alias?: string[]; kind: Ki
   { key: 'n', head: 'ลำดับ', kind: 'skip', format: 'ตัวเลข', meaning: 'ลำดับในไฟล์ ระบบไม่ใช้ค่านี้' },
   { key: 'cert', head: 'เลขที่ใบรับรอง', kind: 'text', req: true, format: 'ข้อความ', meaning: 'เลขที่ใบรับรองจาก อบก. ใช้จับคู่กับใบที่มีในระบบ' },
   { key: 'act', head: 'ชื่อกิจกรรม/ประเภทธุรกิจ', alias: ['ชื่อกิจกรรม'], kind: 'text', format: 'ข้อความ', meaning: 'กิจกรรมหรือประเภทธุรกิจที่ขอการรับรอง' },
-  { key: 'org', head: 'ชื่อองค์กร', kind: 'text', req: true, format: 'ข้อความ', meaning: 'ชื่อตรงกับบริษัทในระบบจะผูกใบรับรองกับบริษัทนั้น ถ้าไม่พบจะสร้างบริษัทใหม่' },
-  { key: 'branch', head: 'สาขา/รหัสสาขา', alias: ['สาขา'], kind: 'text', format: 'ข้อความ', meaning: 'สาขาหรือรหัสสาขา (ถ้ามี)' },
+  { key: 'org', head: 'ชื่อองค์กร', kind: 'text', req: true, format: 'ข้อความ', meaning: 'ชื่อตรงกับบริษัทในระบบจะผูกใบรับรองกับบริษัทนั้น ถ้าไม่พบใบนี้จะไปอยู่ในรายการรอตรวจสอบ ไม่สร้างบริษัทใหม่' },
+  { key: 'branch', head: 'สาขา/รหัสสาขา', alias: ['สาขา'], kind: 'text', format: 'ข้อความ', meaning: 'สาขาหรือรหัสสาขา (ถ้าไม่มี ใช้เลขในวงเล็บท้ายชื่อองค์กร)' },
   { key: 'prov', head: 'จังหวัด', kind: 'text', format: 'ชื่อจังหวัด', meaning: 'จังหวัดของที่ตั้งตามใบรับรอง' },
   { key: 'addr', head: 'ที่อยู่', kind: 'text', format: 'ข้อความ', meaning: 'ที่อยู่เต็มของสถานที่ที่ขอการรับรอง' },
   { key: 'tambon', head: 'ตำบล/แขวง (จากที่อยู่)', alias: ['ตำบล/แขวง'], kind: 'skip', format: 'ไม่ต้องกรอก', meaning: 'ระบบไม่เก็บแยก ไม่ใช้ค่านี้' },
@@ -47,6 +53,17 @@ export const SHEET_COLS: { key: string; head: string; alias?: string[]; kind: Ki
   { key: 'extra', head: 'ข้อความเพิ่มเติมในการ์ด', kind: 'skip', format: 'ไม่ต้องกรอก', meaning: 'ระบบยังไม่เก็บค่านี้ ไม่ใช้ค่านี้' },
 ];
 export const SHEET_HEADS = SHEET_COLS.map((c) => c.head);
+/** Columns beyond the template. The GCC code and the e-mail are read (R3a, R8); the e-mail source, its check note are
+ *  read-only (R9). The check note's head carries the check date after it, so it is matched by its start (`prefix`). */
+export const EXTRA_COLS: { key: string; head: string; prefix?: boolean }[] = [
+  { key: 'gcc', head: 'รหัสบริษัท (GCC)' },
+  { key: 'email', head: 'อีเมล' },
+  { key: 'emailSrc', head: 'แหล่งที่มาของอีเมล' },
+  { key: 'emailSt', head: 'สถานะการค้นหาอีเมล' },
+  { key: 'emailNote', head: 'หมายเหตุการตรวจสอบอีเมล', prefix: true },
+];
+/** The two columns the export writes after the template's 27 (R12). */
+export const EXPORT_HEADS = ['รหัสบริษัท (GCC)', 'อีเมล'];
 
 /** The values of one certificate as a sheet shows them and as the registry compares them (s1–s3 are fractions: 0.25 = 25%). */
 export interface CertFields {
@@ -61,8 +78,12 @@ const COMPARE: [keyof CertFields, string][] = [
   ['s3', 'ประเภทที่ 3 (%)'], ['fy', 'ปีงบประมาณ (FY)'], ['note', 'ข้อสังเกตข้อมูล'], ['webId', 'รหัสรายการในเว็บ'],
 ];
 
-/** One data row of a sheet, read: its values, and the format errors that stop it (dates, percentages). */
-export interface CertLine { rowNo: number; f: CertFields; errors: string[] }
+/** One data row of a sheet, read: its values, and the format errors that stop it (dates, percentages). `gcc`, `email` and
+ *  `emailSt` are the cells as written; `vals` is every column's text by its header (the review list keeps them). */
+export interface CertLine {
+  rowNo: number; f: CertFields; errors: string[];
+  gcc?: string; email?: string; emailSt?: string; vals?: Record<string, string>;
+}
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const isoOf = (y: number, m: number, d: number) => `${y}-${pad2(m)}-${pad2(d)}`;
@@ -92,6 +113,61 @@ export const sheetNoteOf = (note: string): string => {
   return /^ดึงจาก/.test(t) ? '' : t;
 };
 const txtOf = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** The header a column is matched by: no spaces, lower case (the template's own spelling is the reference). */
+const headKey = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+const KNOWN_HEADS = [...SHEET_COLS.flatMap((c) => [c.head, ...(c.alias || [])]), ...EXTRA_COLS.map((c) => c.head)].map(headKey);
+/** A header the import knows: a template column (or its alias), an extra column, or a check note with its date. */
+const isKnownHead = (h: string) => {
+  const k = headKey(h);
+  return KNOWN_HEADS.includes(k) || EXTRA_COLS.some((c) => c.prefix && k.startsWith(headKey(c.head)));
+};
+
+/** Why a sheet row is not applied as an ordinary import row (the change report's messages). */
+export const TGO_EDIT_REFUSED = 'ใบนี้อยู่ในรายการ TGO แล้ว แก้จากไฟล์นี้ไม่ได้ ไม่บันทึกแถวนี้ · ใบที่ยังรอตรวจให้รับหรือไม่รับในรายการรอตรวจ TGO ก่อน ใบที่รับเข้าทะเบียนแล้วให้แจ้งผู้ดูแลทะเบียนเพื่อแก้ใบนั้น';
+/** The template's example row (R11): skipped on a save. */
+const EXAMPLE_CERT = 'CFO-EXAMPLE-0001';
+/** The status of the e-mail search that makes a row's e-mail count (R8). */
+const EMAIL_FOUND = 'พบ';
+
+/* ---------- codes, names, branches ---------- */
+
+/** The company id a GCC code names: the inverse of gccCode (format.ts). GCC-000361 → 361, TGO-n → 900000 + n (a device-local
+ *  company), NEW-x → 1e12 + x (a customer added by hand). Digits need not be padded. Anything else → null. */
+export function gccIdOf(code: string): number | null {
+  const t = String(code ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  let m = /^GCC-(\d{1,9})$/.exec(t);
+  if (m) return +m[1];
+  if ((m = /^TGO-(\d{1,9})$/.exec(t))) return 900000 + +m[1];
+  if ((m = /^NEW-([0-9A-Z]{1,12})$/.exec(t))) {
+    const n = parseInt(m[1], 36);
+    return Number.isFinite(n) ? 1e12 + n : null;
+  }
+  return null;
+}
+/** The name a sheet's organisation is matched on (R3b): legal forms, spaces, case, head-office markers (สำนักงานใหญ่) and
+ *  a bracketed numeric suffix such as (65), (0001), (00000) are ignored. Separate from core's norm, which other callers keep. */
+export function importNameKey(s: unknown): string {
+  return String(s ?? '')
+    .replace(/\(\s*(?:สำนักงานใหญ่|\d+)\s*\)/g, '')
+    .replace(/สำนักงานใหญ่/g, '')
+    .replace(/บริษัท|บจก\.?|บมจ\.?|จำกัด|มหาชน|ห้างหุ้นส่วน|หจก\.?|สามัญ|นิติบุคคล/g, '')
+    .replace(/[().,\s]+/g, '')
+    .toLowerCase();
+}
+/** The branch a bracketed numeric suffix names ("(65)" → "65", "(0001)" → "0001"); '' when there is none, or for the head
+ *  office's (00000). */
+export function branchOfName(s: unknown): string {
+  const m = /\(\s*(\d+)\s*\)\s*$/.exec(String(s ?? ''));
+  return m && !/^0+$/.test(m[1]) ? m[1] : '';
+}
+/** An e-mail cell's addresses: split on ";", "," or "|", trimmed, duplicates dropped (case does not count), in order. */
+export function splitEmails(s: string): string[] {
+  const seen = new Map<string, string>();
+  String(s ?? '').split(/[;,|]/).map((x) => x.trim()).filter(Boolean).forEach((a) => {
+    if (!seen.has(a.toLowerCase())) seen.set(a.toLowerCase(), a);
+  });
+  return [...seen.values()];
+}
 
 /* ---------- reading ---------- */
 
@@ -234,27 +310,39 @@ export function readPct(c: Cell, label: string): { v: number | null } | { err: s
   return { v: Math.round(frac * 10000) / 10000 };
 }
 
-/** Rows of the certificate sheet (SHEET or the TGO tab), read by header name. Blank rows are not rows. */
-export async function readCertSheet(file: XlsxInput, sheet: string): Promise<CertLine[]> {
+/** Rows of the certificate sheet (SHEET or the TGO tab), read by header name, and the headers the import does not know
+ *  (R10: listed in the preview, never silent). Blank rows are not rows. */
+export async function readCertSheetFull(file: XlsxInput, sheet: string): Promise<{ lines: CertLine[]; unknown: string[] }> {
   const rows = await sheetRows(file, sheet);
   const head = rows.find((r) => r.rowNo === 1);
   if (!head) throw new Error('ไม่พบหัวคอลัมน์ในแถวที่ 1');
   const at: Record<string, number> = {};
-  const hn = (s: string) => s.replace(/\s+/g, '').toLowerCase();
   const byName = new Map<string, number>();
-  head.cells.forEach((c, i) => c && c.v.trim() && byName.set(hn(c.v), i));
+  const headTxt: string[] = [];
+  head.cells.forEach((c, i) => {
+    if (c && c.v.trim()) {
+      headTxt[i] = c.v.trim();
+      byName.set(headKey(c.v), i);
+    }
+  });
   for (const col of SHEET_COLS) {
     for (const name of [col.head, ...(col.alias || [])]) {
-      const i = byName.get(hn(name));
+      const i = byName.get(headKey(name));
       if (i != null) {
         at[col.key] = i;
         break;
       }
     }
   }
+  for (const col of EXTRA_COLS) {
+    const pre = col.prefix ? [...byName.keys()].find((n) => n.startsWith(headKey(col.head))) : undefined;
+    const i = byName.get(headKey(col.head)) ?? (pre != null ? byName.get(pre) : undefined);
+    if (i != null) at[col.key] = i;
+  }
   const missing = SHEET_COLS.filter((c) => c.req && at[c.key] == null).map((c) => `"${c.head}"`);
   if (missing.length) throw new Error(`ไม่พบคอลัมน์ ${missing.join(', ')} ในแถวที่ 1`);
-  return rows
+  const unknown = headTxt.filter((h) => !isKnownHead(h));
+  const lines = rows
     .filter((r) => r.rowNo > 1)
     .map(({ rowNo, cells }) => {
       const C = (k: string): Cell => (at[k] == null ? undefined : cells[at[k]]);
@@ -275,15 +363,27 @@ export async function readCertSheet(file: XlsxInput, sheet: string): Promise<Cer
         ap: 'v' in ap ? ap.v : '', ex: 'v' in ex ? ex.v : '', fy: textOf(C('fy')), s1: pcts[0], s2: pcts[1], s3: pcts[2],
         note: textOf(C('note')), webId: idOf(C('webId')),
       };
-      return { rowNo, f, errors };
+      const vals: Record<string, string> = {};
+      headTxt.forEach((h, i) => {
+        const t = textOf(cells[i]);
+        if (t) vals[h] = t;
+      });
+      return { rowNo, f, errors, gcc: textOf(C('gcc')), email: textOf(C('email')), emailSt: textOf(C('emailSt')), vals };
     });
+  return { lines, unknown };
+}
+/** The rows only (readCertSheetFull without the unknown headers). */
+export async function readCertSheet(file: XlsxInput, sheet: string): Promise<CertLine[]> {
+  return (await readCertSheetFull(file, sheet)).lines;
 }
 
 /* ---------- writing: the template and the export ---------- */
 
 /** A fraction as the percent the sheet shows: 0.6 → "60%", 0.0029 → "0.29%". */
 const pctText = (v: number | null): XCell => (v == null ? null : `${Math.round(v * 10000) / 100}%`);
-const beText = (iso: string): XCell => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${+iso.slice(0, 4) + 543}` : null);
+/** An ISO date as the พ.ศ. text the sheet shows ("15/03/2568"); '' when none. */
+const beStr = (iso: string) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${+iso.slice(0, 4) + 543}` : '');
+const beText = (iso: string): XCell => beStr(iso) || null;
 const adDate = (iso: string): XCell => (iso ? { date: iso } : null);
 const txt = (s: string): XCell => s || null;
 
@@ -310,7 +410,7 @@ const DESC_WORDS: [string, string][] = [
   ['ยังไม่มี CFO', 'บริษัทที่ยังไม่มีใบรับรองในระบบ'],
   ['ประเภทที่ 1–3', 'สัดส่วนของ CFO แยกตามประเภทที่ อบก. กำหนด'],
   ['ปีงบประมาณ (FY)', 'ปีงบประมาณที่ใบรับรองอ้างถึง เช่น FY67'],
-  ['บริษัทใหม่', 'บริษัทที่ไม่พบชื่อในระบบ จะถูกสร้างเมื่อรับใบรับรองของบริษัทนั้นเข้าทะเบียน'],
+  ['บริษัทที่ไม่พบในระบบ', 'ชื่อหรือรหัส GCC ไม่ตรงกับบริษัทในระบบ ใบนี้ไปอยู่ในรายการรอตรวจสอบจากไฟล์ชีต ระบบไม่สร้างบริษัทใหม่'],
   ['รอตรวจ', 'ใบรับรองใหม่ที่บันทึกจากชีตนี้ รอการรับในรายการรอตรวจ TGO ยังไม่เข้าทะเบียนจนกว่าจะรับ'],
 ];
 /** The description sheet: each column, whether it is required, its format and what it means, then the words the app uses. */
@@ -321,24 +421,33 @@ function descSheet(): XSheet {
   rows.push([], ['หมายเหตุ'], [null, 'ใส่ 12.5% หรือ 12.5 สำหรับเปอร์เซ็นต์ ค่า 1 หรือต่ำกว่าที่ไม่มีเครื่องหมาย % ระบบถือเป็นเศษส่วน (0.122 = 12.2%)']);
   rows.push([null, 'แถวตัวอย่างในชีต ใบรับรอง CFO ลบทิ้งก่อนนำเข้า ไม่เช่นนั้นระบบจะนำเข้าเป็นใบรับรองจริง']);
   rows.push([null, 'ค่าที่ระบบคำนวณให้ (ค.ศ. รวม ประเภทที่มีสัดส่วนสูงสุด สถานะ) จะถูกละเว้นเมื่อนำเข้า']);
+  rows.push([null, 'ค่าว่างไม่เปลี่ยนค่าที่มีอยู่ในระบบ แต่ช่องที่ต้องกรอก (เลขที่ใบรับรอง ชื่อองค์กร วันที่อนุมัติ วันที่หมดอายุ) ว่างไม่ได้ แถวนั้นจะไม่ถูกนำเข้า']);
+  rows.push([null, 'ท้ายไฟล์ส่งออกมีรหัสบริษัท (GCC) และอีเมล ใช้จับคู่บริษัทตอนนำเข้า อีเมลถูกเติมเฉพาะบริษัทที่ยังไม่มีอีเมล']);
   return { name: SHEET_DESC, head: ['ลำดับ', 'คอลัมน์', 'ต้องกรอก', 'รูปแบบ', 'ความหมาย'], rows, widths: [8, 30, 14, 48, 64] };
 }
-function registrySheet(rows: CertFields[], today: string): XSheet {
-  return { name: SHEET, head: SHEET_HEADS, rows: rows.map((f, i) => certRow(f, i, today)), widths: WIDTHS };
+/** A certificate to write, with the company it belongs to: its GCC code and e-mail (the export's last two columns). */
+export interface ExportRow { f: CertFields; gcc: string; email: string }
+function registrySheet(rows: ExportRow[], today: string, withCo: boolean): XSheet {
+  return {
+    name: SHEET,
+    head: withCo ? [...SHEET_HEADS, ...EXPORT_HEADS] : SHEET_HEADS,
+    rows: rows.map((r, i) => [...certRow(r.f, i, today), ...(withCo ? [txt(r.gcc), txt(r.email)] : [])]),
+    widths: withCo ? [...WIDTHS, 18, 40] : WIDTHS,
+  };
 }
 const EXAMPLE: CertFields = {
-  cert: 'CFO-EXAMPLE-0001', org: 'บริษัท ตัวอย่าง จำกัด', branch: 'สำนักงานใหญ่', act: 'การผลิตสินค้า',
+  cert: EXAMPLE_CERT, org: 'บริษัท ตัวอย่าง จำกัด', branch: 'สำนักงานใหญ่', act: 'การผลิตสินค้า',
   addr: '1 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร 10110', zip: '10110', prov: 'กรุงเทพมหานคร', ind: 'การผลิต',
   size: 'ขนาดเล็ก', ap: '2025-01-01', ex: '2027-12-31', fy: 'FY67', s1: 0.6, s2: 0.3, s3: 0.1,
   note: 'แถวตัวอย่าง ลบทิ้งก่อนนำเข้า', webId: '32040',
 };
 /** The template: the example row in the registry sheet, then the description sheet. */
 export function templateSheets(): XSheet[] {
-  return [registrySheet([EXAMPLE], todayOf()), descSheet()];
+  return [registrySheet([{ f: EXAMPLE, gcc: '', email: '' }], todayOf(), false), descSheet()];
 }
-/** The export: the certificates given (CertFields), in the same headers and description. */
-export function exportSheets(certs: CertFields[], today: string): XSheet[] {
-  return [registrySheet(certs, today), descSheet()];
+/** The export: the certificates given (with their GCC code and e-mail), in the same headers and description. */
+export function exportSheets(rows: ExportRow[], today: string): XSheet[] {
+  return [registrySheet(rows, today, true), descSheet()];
 }
 function todayOf() {
   const d = new Date();
@@ -351,71 +460,161 @@ function todayOf() {
 /** `gid` is the company id the certificate is stored under (not the id of the company it is merged into). */
 export interface HeldCert { origin: 'base' | 'tgo'; idx: number; gid: number; f: CertFields }
 export interface PlanNew { rowNo: number; f: CertFields; gid: number }
-export interface PlanChange { rowNo: number; f: CertFields; gid: number; fields: string[]; origin: 'base' | 'tgo'; idx: number }
-/** What one sheet save did, so the revert takes exactly that back (engine.revertUpload). */
+/** `held`: the certificate's values as the app holds them (a blank cell of the row keeps them, keepHeld). */
+export interface PlanChange { rowNo: number; f: CertFields; gid: number; fields: string[]; origin: 'base' | 'tgo'; idx: number; held: CertFields }
+/** A sheet row for a certificate the TGO review queue already holds (waiting, accepted or rejected): nothing is added for it. */
+export interface PlanWaiting { rowNo: number; f: CertFields; st: 'p' | 'a' | 'r' }
+/** What one sheet save did, so the revert takes exactly that back (engine.revertUpload). `log`: the change report of the save (R14). */
 export interface CertImportRec {
   at: string;
   fileName: string;
   /** the TGO review-queue records (tgoRecs keys) the save made as waiting rows; a revert removes those still waiting */
   rids: string[];
-  /** the company ids the save created (for changed dataset rows that moved to a new company name) */
+  /** the company ids the save created (none now: an import creates no company, R15) */
   coIds: number[];
+  log?: CertLogEntry[];
 }
-/** A sheet row for a certificate the TGO review queue already holds (waiting, or decided): nothing is added for it. */
-export interface PlanWaiting { rowNo: number; f: CertFields; st: 'p' | 'a' | 'r' }
+/** What a row does, as the change report names it (CertLogEntry.action). ACTION_TH is the Thai label of each. */
+export type CertAction = 'attached' | 'updated' | 'unchanged' | 'queued' | 'already queued' | 'rejected' | 'refused' | 'error' | 'review' | 'already in review' | 'declined before';
+export const ACTION_TH: Record<CertAction, string> = {
+  attached: 'ตรงกับใบที่รับจาก TGO แล้ว',
+  updated: 'อัปเดตใบรับรอง',
+  unchanged: 'ไม่เปลี่ยนแปลง',
+  queued: 'เข้ารอตรวจ TGO',
+  'already queued': 'อยู่ในรายการ TGO แล้ว',
+  rejected: 'ข้ามแถว',
+  refused: 'ต้องแก้ที่รายการ TGO',
+  error: 'ข้อผิดพลาด',
+  review: 'รอตรวจสอบ',
+  'already in review': 'อยู่ในรายการรอตรวจสอบแล้ว',
+  'declined before': 'ถูกปฏิเสธไว้แล้ว',
+};
+/** An e-mail decision for a row's company: filled (the company had none), kept (it had one), skipped (the row's company is not
+ *  applied), none (no e-mail to take from the row). */
+export type EmailAction = 'none' | 'filled' | 'kept' | 'skipped';
+/** One row of the change report (R14): the preview shows it, and the import record keeps it. */
+export interface CertLogEntry {
+  row: number; action: CertAction; co: number | null; gcc: string; company: string; cert: string;
+  changes: { field: string; from: string; to: string }[];
+  email: { action: EmailAction; from: string; to: string };
+  msg: string;
+  /** a review row's reason (R1, R3), so the report counts the rows sent to review by reason (R19) */
+  reason?: string;
+}
+/** A row for the review list (R16): its reason, and the row itself. */
+export interface PlanReview { rowNo: number; reason: string; line: CertLine }
+/** A company's e-mail from the sheet: `filled` writes `to`; `kept` leaves the company's own (`from`). */
+export interface PlanEmail { co: number; name: string; from: string; to: string; action: 'filled' | 'kept' }
+/** What the app tells the planner: its companies, the held certificates, the queue and the review list. */
+export interface PlanCtx {
+  held: HeldCert[];
+  /** every company the app has (its canonical id); `local`: a device-only company (ids from 900000), which a new certificate
+   *  may not attach to, since the team does not share it */
+  companies: { id: number; name: string; local: boolean }[];
+  /** the canonical id of a company id (a merged company's own id is an alias) */
+  canon: (id: number) => number;
+  /** the company's e-mail now ('' when none) */
+  emailOf: (id: number) => string;
+  /** the queue record a row means, with its values as a sheet row reads them */
+  queue: (f: CertFields) => { st: 'p' | 'a' | 'r'; f: CertFields } | undefined;
+  /** the state of the review record a row would make (sheetReview.reviewIdOf) */
+  review: (id: string) => 'p' | 'a' | 'r' | undefined;
+  /** accept (R16): the company the row is decided for; the GCC code and the name are not read */
+  force?: number;
+}
 export interface CertPlan {
   read: number;
+  /** new certificates, to the TGO queue (state p) */
   news: PlanNew[];
+  /** rows that match the registry and need no change (also attached ones) */
   same: number;
+  /** held base certificates with changed fields */
   changed: PlanChange[];
   errors: { rowNo: number; reason: string }[];
+  /** always empty: an import creates no company (R15). Kept so the preview lists them as before. */
   companies: { id: number; name: string }[];
+  /** rows the queue already holds (waiting, accepted, rejected) */
+  waiting: PlanWaiting[];
+  /** rows kept for the review list (R16), new records only */
+  reviews: PlanReview[];
+  /** company e-mails the save takes from the sheet (R8) */
+  emails: PlanEmail[];
+  /** the change report, row by row (R14, R19) */
+  log: CertLogEntry[];
+  /** unknown headers (R10) */
+  warnings: string[];
 }
 
+const blankOf = (v: unknown) => v == null || (typeof v === 'string' && v.trim() === '');
 const fieldText = (f: CertFields, k: keyof CertFields) => {
   const v = f[k];
   if (k === 's1' || k === 's2' || k === 's3') return v == null ? '' : String(Math.round((v as number) * 10000));
   return txtOf(String(v ?? ''));
 };
-/** The labels of the compared fields that differ between a row and a certificate, in the sheet's order. The organisation is
- *  compared with the identity key's normalisation (normOrg, as certKey does), so a repeated บริษัท prefix or a leading space
- *  is not a change of it; the name shown on screen stays as fixName reads it. */
+/** A value as the change report shows it: a percent, a พ.ศ. date, or the text. */
+const showOf = (k: keyof CertFields, v: CertFields[keyof CertFields]): string => {
+  if (blankOf(v)) return '';
+  if (k === 's1' || k === 's2' || k === 's3') return `${Math.round((v as number) * 10000) / 100}%`;
+  if (k === 'ap' || k === 'ex') return beStr(v as string);
+  return txtOf(String(v));
+};
+/** The labels of the compared fields that differ between a row and a certificate, in the sheet's order. A blank row cell is never a
+ *  change (R2). The organisation is compared with the identity key's normalisation (normOrg, as certKey does), so a repeated บริษัท
+ *  prefix or a leading space is not a change of it; the name shown on screen stays as fixName reads it. */
 export const changedFields = (a: CertFields, b: CertFields): string[] =>
-  COMPARE.filter(([k]) => (k === 'org' ? normOrg(a.org) !== normOrg(b.org) : fieldText(a, k) !== fieldText(b, k))).map(([, label]) => label);
+  COMPARE.filter(([k]) => !blankOf(a[k]) && (k === 'org' ? normOrg(a.org) !== normOrg(b.org) : fieldText(a, k) !== fieldText(b, k))).map(([, label]) => label);
+/** The changes of a row against a certificate, as the change report lists them: field, from (held), to (sheet). */
+export const diffFields = (a: CertFields, b: CertFields): { field: string; from: string; to: string }[] =>
+  COMPARE.filter(([k]) => !blankOf(a[k]) && (k === 'org' ? normOrg(a.org) !== normOrg(b.org) : fieldText(a, k) !== fieldText(b, k))).map(([k, label]) => ({
+    field: label, from: showOf(k, b[k]), to: showOf(k, a[k]),
+  }));
+/** A row's values with its blank cells taken from the certificate held (a blank never clears a held value, R2). */
+export const keepHeld = (f: CertFields, held: CertFields): CertFields => ({
+  ...held,
+  ...(Object.fromEntries(Object.entries(f).filter(([, v]) => !blankOf(v))) as Partial<CertFields>),
+});
 
-/** Cells a certificate must have to be new; a held one may not have them blanked. */
+/** Cells a certificate must have to be new; a held one may not have them blanked (it keeps its value). */
 const REQUIRED: [keyof CertFields, string][] = [['cert', 'เลขที่ใบรับรอง'], ['org', 'ชื่อองค์กร'], ['ap', 'วันที่อนุมัติ (พ.ศ.)'], ['ex', 'วันที่หมดอายุ (พ.ศ.)']];
+/** The required cells a row lacks (R2). A blank required cell is an error row, unless the held certificate is blank in that cell
+ *  too: there is no value to keep, so the row matches the certificate as it is (an unchanged export reads back, R12, R13). */
 const missingOf = (f: CertFields, held?: CertFields) =>
-  REQUIRED.filter(([k]) => !f[k] && (held === undefined || held[k])).map(([, label]) => `ต้องกรอก ${label}`);
+  REQUIRED.filter(([k]) => blankOf(f[k]) && !(held && blankOf(held[k]))).map(([, label]) => `ต้องกรอก ${label}`);
+/** The reasons a row goes to the review list (R1, R3). */
+const R_NO_CO = 'ไม่พบบริษัทในระบบ';
+const R_NO_GCC = 'รหัส GCC ไม่พบในระบบ';
+const R_DUP_CO = 'พบบริษัทซ้ำ';
+const R_GCC_NAME = 'รหัส GCC กับชื่อไม่ตรงกัน';
+const R_GCC_HELD = 'รหัส GCC ไม่ตรงกับบริษัทของใบรับรองนี้';
+/** The change report's actions that take the row's e-mail (the company is applied, or the row would be). */
+const NO_MAIL: CertAction[] = ['error', 'review', 'already in review', 'rejected'];
 
-/** The sheet's rows against what the app holds: new, same, changed (which fields), and rows that cannot be saved. */
-export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { id: number; name: string }[]): CertPlan {
-  const byNorm = new Map<string, number>();
-  companies.forEach((c) => {
-    const k = norm(c.name);
-    if (k && !byNorm.has(k)) byNorm.set(k, c.id);
+/**
+ * The sheet's rows against what the app holds, row by row (the company rules R3, the certificate rules R5–R7, the e-mail R8,
+ * the review list R16). Saves nothing. A new certificate of an existing company is planned as a queue row (`news`); a row whose
+ * company cannot be settled is planned for the review list (`reviews`); the change report (`log`) has one entry per row.
+ */
+export function planCertRows(lines: CertLine[], ctx: PlanCtx, warnings: string[] = []): CertPlan {
+  const canon = ctx.canon;
+  const coName = new Map(ctx.companies.map((c) => [c.id, c.name] as const));
+  const all = new Set(ctx.companies.map((c) => c.id));
+  const shared = new Set(ctx.companies.filter((c) => !c.local).map((c) => c.id));
+  // a new certificate attaches to a shared company only: by its GCC code, else by its name (importNameKey)
+  const byName = new Map<string, number[]>();
+  ctx.companies.filter((c) => !c.local).forEach((c) => {
+    const k = importNameKey(c.name);
+    if (k) byName.set(k, [...(byName.get(k) ?? []), c.id]);
   });
-  let nextId = Math.max(900000, ...companies.filter((c) => c.id < 1e12).map((c) => c.id)) + 1;
-  const newCos: { id: number; name: string }[] = [];
-  const gidOf = (org: string) => {
-    const k = norm(org);
-    let g = byNorm.get(k);
-    if (g == null) {
-      g = nextId++;
-      byNorm.set(k, g);
-      newCos.push({ id: g, name: org });
-    }
-    return g;
-  };
   const push = <T>(m: Map<string, T[]>, k: string, v: T) => m.set(k, [...(m.get(k) || []), v]);
   const byWeb = new Map<string, HeldCert[]>(), byKey = new Map<string, HeldCert[]>(), byNo = new Map<string, HeldCert[]>();
-  held.forEach((h) => {
+  ctx.held.forEach((h) => {
     if (h.f.webId) push(byWeb, h.f.webId, h);
     if (h.f.cert) {
       push(byKey, certKey(h.f.cert, h.f.org), h);
       push(byNo, numberOf(h.f.cert), h);
     }
   });
+  const usedBy = new Map<HeldCert, number>();
   // the held certificate a row means: the web id, else number + organisation, else the only one with its number
   const find = (f: CertFields): HeldCert | undefined => {
     // a web id names a record only with the same number (sameRecord): a typed id on another certificate is not enough
@@ -428,48 +627,182 @@ export function planCertRows(lines: CertLine[], held: HeldCert[], companies: { i
     const n = byNo.get(numberOf(f.cert));
     return n && n.length === 1 ? n[0] : undefined;
   };
-  const usedBy = new Map<HeldCert, number>();
+  /** A GCC code's company among `pool`, or the reason it names none (R3a). */
+  const byCode = (gcc: string, pool: Set<number>): { co: number } | { reason: string } => {
+    const id = gccIdOf(gcc);
+    const co = id == null ? null : canon(id);
+    return co != null && pool.has(co) ? { co } : { reason: R_NO_GCC };
+  };
+  /** A new certificate's company (R3a–d): by the GCC code (checked against the name), else by the name alone. */
+  const newCo = (gcc: string, org: string): { co: number } | { reason: string } => {
+    const cands = byName.get(importNameKey(org)) ?? [];
+    if (gcc) {
+      const r = byCode(gcc, shared);
+      if (!('co' in r)) return r;
+      return cands.length && !cands.includes(r.co) ? { reason: R_GCC_NAME } : r;
+    }
+    if (!cands.length) return { reason: R_NO_CO };
+    if (cands.length > 1) return { reason: R_DUP_CO };
+    return { co: cands[0] };
+  };
+  /** The company a new certificate goes to: the one an accept names (ctx.force), else as newCo settles it. */
+  const coFor = (g: string, org: string): { co: number } | { reason: string } => (ctx.force != null ? { co: ctx.force } : newCo(g, org));
+
+  const log: CertLogEntry[] = [];
+  const plan: CertPlan = { read: lines.length, news: [], same: 0, changed: [], errors: [], companies: [], waiting: [], reviews: [], emails: [], log, warnings };
   const newKeys = new Map<string, number>();
-  const plan: CertPlan = { read: lines.length, news: [], same: 0, changed: [], errors: [], companies: newCos };
+  const reviewIds = new Map<string, number>();
+  // the e-mail each company gets from the rows that carry one (R8): the rows, and the distinct addresses across them
+  const mails = new Map<number, { rows: CertLogEntry[]; addrs: Map<string, string> }>();
+
+  const rowLog = (L: CertLine, action: CertAction, msg: string, co: number | null, changes: CertLogEntry['changes'] = []): CertLogEntry => {
+    const gcc = (L.gcc ?? '').trim();
+    return {
+      row: L.rowNo, action, co, gcc: co != null ? gccCode(co) : gcc, company: co != null ? coName.get(co) ?? L.f.org : L.f.org,
+      cert: L.f.cert, changes, email: { action: 'none', from: '', to: '' }, msg,
+    };
+  };
+  /** Records a row's entry, and its e-mail: taken by its company when the company is applied, skipped when it is not. */
+  const note = (L: CertLine, entry: CertLogEntry) => {
+    log.push(entry);
+    const addrs = (L.emailSt ?? '').trim() === EMAIL_FOUND ? splitEmails(L.email ?? '') : [];
+    if (!addrs.length) return;
+    if (entry.co == null || NO_MAIL.includes(entry.action)) {
+      entry.email = { action: 'skipped', from: '', to: addrs.join(' | ') };
+      return;
+    }
+    const m = mails.get(entry.co) ?? { rows: [], addrs: new Map<string, string>() };
+    mails.set(entry.co, m);
+    addrs.forEach((a) => !m.addrs.has(a.toLowerCase()) && m.addrs.set(a.toLowerCase(), a));
+    m.rows.push(entry);
+  };
+  const review = (L: CertLine, reason: string, co: number | null) => {
+    const gcc = (L.gcc ?? '').trim();
+    const id = reviewIdOf(L.f.cert, L.f.org, gcc);
+    // an accept (ctx.force) decides its own record, which is waiting: that record is not a duplicate of the row
+    const known = ctx.force == null ? ctx.review(id) : undefined;
+    const dup = reviewIds.has(id) ? 'already in review' : known === 'p' ? 'already in review' : known === 'r' ? 'declined before' : undefined;
+    if (dup === 'already in review') return note(L, rowLog(L, dup, 'อยู่ในรายการรอตรวจสอบแล้ว ไม่เพิ่มซ้ำ', co));
+    if (dup === 'declined before') return note(L, rowLog(L, dup, 'ถูกปฏิเสธไว้แล้ว ไม่เพิ่มซ้ำ', co));
+    reviewIds.set(id, L.rowNo);
+    plan.reviews.push({ rowNo: L.rowNo, reason, line: L });
+    note(L, { ...rowLog(L, 'review', `${reason} · ส่งไปรายการรอตรวจสอบจากไฟล์ชีต`, co), reason });
+  };
+  const errorRow = (L: CertLine, reason: string) => {
+    plan.errors.push({ rowNo: L.rowNo, reason });
+    note(L, rowLog(L, 'error', reason, null));
+  };
+
   for (const L of lines) {
-    if (L.errors.length) {
-      plan.errors.push({ rowNo: L.rowNo, reason: L.errors.join(' · ') });
-      continue;
-    }
     const f = L.f;
+    const gcc = (L.gcc ?? '').trim();
+    // the template's example row is skipped (R11)
+    if (f.cert.toUpperCase() === EXAMPLE_CERT) {
+      note(L, rowLog(L, 'rejected', 'แถวตัวอย่างจากแม่แบบ ข้ามแถวนี้', null));
+      continue;
+    }
+    if (L.errors.length) {
+      errorRow(L, L.errors.join(' · '));
+      continue;
+    }
+    // a row missing a required cell is an error row (R2), unless the held certificate is blank in that cell too; the other blank cells keep the held values
     const h = find(f);
-    if (!h) {
-      const missing = missingOf(f);
-      if (missing.length) {
-        plan.errors.push({ rowNo: L.rowNo, reason: missing.join(' · ') });
+    const missing = missingOf(f, h?.f);
+    if (missing.length) {
+      errorRow(L, missing.join(' · '));
+      continue;
+    }
+    if (h) {
+      const first = usedBy.get(h);
+      if (first != null) {
+        errorRow(L, `ตรงกับใบรับรองเดียวกับแถว ${first}`);
         continue;
       }
-      const k = certKey(f.cert, f.org);
-      if (newKeys.has(k)) {
-        plan.errors.push({ rowNo: L.rowNo, reason: `ซ้ำกับแถว ${newKeys.get(k)}` });
+      usedBy.set(h, L.rowNo);
+      // a held certificate keeps its company: a GCC code that names another company is a review, never a move (R3e)
+      const hco = canon(h.gid);
+      let reason = '';
+      if (ctx.force != null) reason = ctx.force === hco ? '' : R_GCC_HELD;
+      else if (gcc) {
+        const r = byCode(gcc, all);
+        reason = 'reason' in r ? r.reason : r.co === hco ? '' : R_GCC_HELD;
+      }
+      if (reason) {
+        review(L, reason, hco);
         continue;
       }
-      newKeys.set(k, L.rowNo);
-      plan.news.push({ rowNo: L.rowNo, f, gid: gidOf(f.org) });
+      const fields = changedFields(f, h.f);
+      if (!fields.length) {
+        plan.same++;
+        note(L, rowLog(L, h.origin === 'tgo' ? 'attached' : 'unchanged', h.origin === 'tgo' ? 'ตรงกับใบที่รับจากรายการ TGO แล้ว ไม่เปลี่ยน' : 'ตรงกับทะเบียนแล้ว ไม่มีการเปลี่ยนแปลง', hco));
+        continue;
+      }
+      const changes = diffFields(f, h.f);
+      // a certificate the queue brought in is changed in the queue, not here (R7); the others are updated
+      if (h.origin === 'tgo') {
+        note(L, rowLog(L, 'refused', TGO_EDIT_REFUSED, hco, changes));
+        continue;
+      }
+      plan.changed.push({ rowNo: L.rowNo, f, gid: h.gid, fields, origin: h.origin, idx: h.idx, held: h.f });
+      note(L, rowLog(L, 'updated', 'อัปเดตใบรับรองในทะเบียนแล้ว', hco, changes));
       continue;
     }
-    const first = usedBy.get(h);
-    if (first != null) {
-      plan.errors.push({ rowNo: L.rowNo, reason: `ตรงกับใบรับรองเดียวกับแถว ${first}` });
+    const q = ctx.queue(f);
+    if (q) {
+      const qco = newCo(gcc, f.org);
+      const co = 'co' in qco ? qco.co : null;
+      plan.waiting.push({ rowNo: L.rowNo, f, st: q.st });
+      if (q.st === 'r') {
+        note(L, rowLog(L, 'declined before', 'ถูกปฏิเสธไว้แล้ว ไม่เพิ่มซ้ำ', co));
+      } else if (changedFields(f, q.f).length) {
+        note(L, rowLog(L, 'refused', TGO_EDIT_REFUSED, co, diffFields(f, q.f)));
+      } else {
+        note(L, rowLog(L, 'already queued', 'อยู่ในรายการ TGO แล้ว ไม่เพิ่มซ้ำ', co));
+      }
       continue;
     }
-    const blanked = missingOf(f, h.f);
-    if (blanked.length) {
-      plan.errors.push({ rowNo: L.rowNo, reason: blanked.join(' · ') });
+    // a new certificate: one row per certificate and company in the file (the second is an error)
+    const k = certKey(f.cert, f.org);
+    if (newKeys.has(k)) {
+      errorRow(L, `ซ้ำกับแถว ${newKeys.get(k)}`);
       continue;
     }
-    usedBy.set(h, L.rowNo);
-    const fields = changedFields(f, h.f);
-    const gid = norm(f.org) === norm(h.f.org) ? h.gid : gidOf(f.org);
-    if (fields.length) plan.changed.push({ rowNo: L.rowNo, f, gid, fields, origin: h.origin, idx: h.idx });
-    else plan.same++;
+    newKeys.set(k, L.rowNo);
+    const r = coFor(gcc, f.org);
+    if ('reason' in r) {
+      review(L, r.reason, null);
+      continue;
+    }
+    // a new certificate with no branch cell takes the branch named in the company's bracketed suffix (R4)
+    plan.news.push({ rowNo: L.rowNo, f: { ...f, branch: f.branch || branchOfName(f.org) }, gid: r.co });
+    note(L, rowLog(L, 'queued', 'เข้ารอตรวจ TGO (เข้าทะเบียนเมื่อผู้ตรวจรับแล้ว)', r.co));
   }
+
+  // one e-mail decision per company: filled when the company has none, else kept (R8)
+  mails.forEach((m, co) => {
+    const have = ctx.emailOf(co);
+    const to = [...m.addrs.values()].join(' | ');
+    const action = have ? 'kept' : 'filled';
+    plan.emails.push({ co, name: coName.get(co) ?? '', from: have, to, action });
+    m.rows.forEach((r) => (r.email = { action, from: have, to }));
+  });
+  plan.companies = [];
   return plan;
+}
+
+/** The change report's counts (R14): rows per action, the rows sent to review by reason (R19), and the companies whose e-mail
+ *  was filled or kept. The preview and the saved result both count the same log list. */
+export function countLog(log: CertLogEntry[]) {
+  const by: Record<CertAction, number> = {
+    attached: 0, updated: 0, unchanged: 0, queued: 0, 'already queued': 0, rejected: 0, refused: 0, error: 0, review: 0, 'already in review': 0, 'declined before': 0,
+  };
+  const reasons: Record<string, number> = {};
+  log.forEach((r) => {
+    by[r.action] += 1;
+    if (r.action === 'review' && r.reason) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
+  });
+  const cos = (a: EmailAction) => new Set(log.filter((r) => r.email.action === a && r.co != null).map((r) => r.co)).size;
+  return { ...by, reasons, emailFilled: cos('filled'), emailKept: cos('kept') };
 }
 
 /** The held certificates of the registry, with where each is kept (`baseCount`: how many are in the base dataset). */
@@ -493,9 +826,9 @@ export function certFields(c: Partial<Cert>, CD: CertDicts): CertFields {
 }
 
 /**
- * The plan written into the saved lists: changed base certificates in the base dataset, changed added ones and
- * new certificates in the added list (tgoCerts), new companies into addedCos, dictionary texts appended to the
- * base dictionaries. Returns the new lists; nothing is mutated.
+ * The plan written into the saved lists: changed base certificates in the base dataset (blank cells keep the held value),
+ * changed added ones and new certificates in the added list, new companies into addedCos (none now, R15), dictionary texts
+ * appended to the base dictionaries. Returns the new lists; nothing is mutated.
  */
 export function applyCertPlan(plan: CertPlan, base: Dataset, tgo: Partial<Cert>[], added: Partial<RawCompany>[], fileName: string, at: string) {
   const changes = plan.news.length + plan.changed.length + plan.companies.length;
@@ -526,15 +859,16 @@ export function applyCertPlan(plan: CertPlan, base: Dataset, tgo: Partial<Cert>[
   const tgo2 = tgo.slice();
   let tgoChanged = false;
   for (const ch of plan.changed) {
+    const next = keepHeld(ch.f, ch.held);
     if (ch.origin === 'base') {
       const a = certs[ch.idx] as unknown;
       const o: Record<string, unknown> = {};
       if (Array.isArray(a)) CCOLS.forEach((c, j) => (o[c] = a[j]));
       else Object.assign(o, a);
-      Object.assign(o, write(ch.f, ch.gid));
+      Object.assign(o, write(next, ch.gid));
       certs[ch.idx] = CCOLS.map((c) => o[c]);
     } else {
-      tgo2[ch.idx] = { ...tgo2[ch.idx], ...write(ch.f, ch.gid), indTxt: undefined, provTxt: undefined };
+      tgo2[ch.idx] = { ...tgo2[ch.idx], ...write(next, ch.gid), indTxt: undefined, provTxt: undefined };
       tgoChanged = true;
     }
   }

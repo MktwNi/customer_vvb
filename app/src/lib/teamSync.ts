@@ -16,6 +16,7 @@ import { applyUnitRow, unitRecords } from './contrib';
 import { parsePayChkCfg, toMonthClose, toPayCheck } from './payCheck';
 import { toExpense } from './expense';
 import { toTgoRec, type TgoRec } from './tgoSync';
+import { toReviewRec, type ReviewRec } from './sheetReview';
 
 /** `id` identifies this queued change locally (for acknowledging it across tabs), `t` (ms) orders
  *  changes to the same record, and `sent` is the sheet's seq when it was last pushed; the server
@@ -327,6 +328,8 @@ export const keyOf = {
   mcloseOut: (ym: string) => `mclose/${ym}/out`,
   /** a pulled TGO certificate in the review queue (lib/tgoSync.ts TgoRec), by its queue id (ridOf) */
   tgo: (rid: string) => `tgo/${rid}`,
+  /** a row of a certificate sheet the import could not apply, waiting for a decision or decided (lib/sheetReview.ts) */
+  sheetrev: (id: string) => `sheetrev/${id}`,
 };
 const CFG_KEYS = ['sections', 'sources', 'services', 'stages'];
 
@@ -366,7 +369,7 @@ export function uniqueTaskIds(tasks: Task[]) {
 
 /** `plinks`: the deals' contacts, keyed `<pid>/<dealId>` (lib/people.ts PLink), with a person's other companies
  *  (`<pid>/co/<gid>`, PCo) and merge aliases (`<gone>/into/<keep>`). */
-export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>; plinks?: Record<string, PLink>; tgo?: Record<string, TgoRec> }
+export interface SharedState { crm: Crm; contacts: Record<string, ContactEdit>; dec: Record<string, string>; sales: SalesState; custom: Record<string, CustomCo>; people?: Record<string, Person>; plinks?: Record<string, PLink>; tgo?: Record<string, TgoRec>; sheetrev?: Record<string, ReviewRec> }
 
 /** Every shared record currently held locally, keyed like the server. */
 export function localRecords(s: SharedState): Map<string, unknown> {
@@ -416,12 +419,13 @@ export function localRecords(s: SharedState): Map<string, unknown> {
   });
   // the TGO review queue and the certificates accepted from it (shared: the whole team sees them)
   Object.entries(s.tgo || {}).forEach(([rid, v]) => m.set(keyOf.tgo(rid), { ...v }));
+  Object.entries(s.sheetrev || {}).forEach(([id, v]) => m.set(keyOf.sheetrev(id), { ...v }));
   [...m].forEach(([k, v]) => isLocalOnly(k, v) && m.delete(k));
   return m;
 }
 
-export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean; plinks: boolean; tgo: boolean }
-export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false, plinks: false, tgo: false });
+export interface ApplyEffects { crm: boolean; contacts: Set<number>; contactDel: boolean; dedup: boolean; watch: Set<number>; sales: boolean; custom: boolean; people: boolean; plinks: boolean; tgo: boolean; sheetrev: boolean }
+export const noEffects = (): ApplyEffects => ({ crm: false, contacts: new Set(), contactDel: false, dedup: false, watch: new Set(), sales: false, custom: false, people: false, plinks: false, tgo: false, sheetrev: false });
 
 /** Apply one server row to local state (mutates `s`); records what needs recomputing in `fx`. */
 export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
@@ -698,6 +702,19 @@ export function applyRow(s: SharedState, row: SyncRow, fx: ApplyEffects) {
         (s.tgo || (s.tgo = {}))[rest] = v;
       }
       fx.tgo = true;
+      break;
+    }
+    case 'sheetrev': {
+      // the review list (R16): a record that does not read is skipped, as every shared record is
+      if (del) {
+        if (!s.sheetrev || !(rest in s.sheetrev)) return;
+        delete s.sheetrev[rest];
+      } else {
+        const v = toReviewRec(row.v);
+        if (!v) return;
+        (s.sheetrev || (s.sheetrev = {}))[rest] = v;
+      }
+      fx.sheetrev = true;
       break;
     }
     case 'person': {

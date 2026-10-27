@@ -282,6 +282,8 @@ export function keyRule(k: string, del: boolean): KeyRule | null | 'never' {
       return r('set.data', 'set.data');
     case 'tgo/':
       return r('edit.cust', 'edit.cust');
+    case 'sheetrev/':
+      return r('edit.cust', 'edit.cust');
     case 'scfg/': {
       const name = k.slice(5);
       if (/^paychk\./.test(name) || /^notify\./.test(name)) return r('set.users', 'set.users');
@@ -294,7 +296,7 @@ export function keyRule(k: string, del: boolean): KeyRule | null | 'never' {
   return null;
 }
 /** The record prefixes the allow-list knows (for tests and the parity check). */
-export const KNOWN_PREFIXES = ['stage/', 'owner/', 'watch/', 'contact/', 'ccol/', 'cust/', 'person/', 'log/', 'task/', 'deal/', 'dstep/', 'dact/', 'dlog/exp.', 'dlog/', 'ddoc/', 'dpay/', 'dexp/', 'ctag/', 'jqt/', 'jqm/', 'dshare/', 'dchk/', 'mclose/', 'dedup/', 'team/', 'dundo/', 'tgo/', 'scfg/', 'qchk/'];
+export const KNOWN_PREFIXES = ['stage/', 'owner/', 'watch/', 'contact/', 'ccol/', 'cust/', 'person/', 'log/', 'task/', 'deal/', 'dstep/', 'dact/', 'dlog/exp.', 'dlog/', 'ddoc/', 'dpay/', 'dexp/', 'ctag/', 'jqt/', 'jqm/', 'dshare/', 'dchk/', 'mclose/', 'dedup/', 'team/', 'dundo/', 'tgo/', 'sheetrev/', 'scfg/', 'qchk/'];
 
 /**
  * May this account write (or delete) record `k`? `own`: whether the record is the account's, for a rule

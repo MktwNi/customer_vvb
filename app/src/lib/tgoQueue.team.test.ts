@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import type { CertFields } from './registryXlsx';
+import { importNameKey, type CertFields } from './registryXlsx';
 import type { Role } from './teamSync';
 import type { Dataset, RoundRaw } from './types';
 
@@ -108,6 +108,12 @@ async function member(L: Tab, u: string, name: string, role: Role) {
   return M;
 }
 const rids = (rows: { rid: string }[]) => rows.map((r) => r.rid).sort();
+/** A company of the base data whose name no other company shares (an import attaches a row to the companies the app has). */
+const onlyCo = (e: GccEngine) => {
+  const keys = e.B.companies.map((c) => importNameKey(c.name));
+  return e.B.companies.find((c) => c.id < 900000 && keys.filter((k) => k === importNameKey(c.name)).length === 1)!;
+};
+const F9 = { cert: 'SR-9', org: 'บริษัท รีวิว จำกัด', branch: '', act: '', addr: '', zip: '', prov: '', ind: '', size: '', ap: '2025-01-01', ex: '2027-01-01', fy: '', s1: 0.6, s2: null, s3: null, note: '', webId: '' };
 
 const ORG = 'บริษัท คิวทดสอบ จำกัด (สำนักงานใหญ่)';
 const feedRow = (o: Record<string, unknown>) => ({
@@ -279,7 +285,7 @@ describe('team mode: a removal cannot take away a row the team decided', () => {
     for (const t of [L, A]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
     // the lead saves a sheet with a new certificate (typed web id 77101): it waits in the queue for the team
     const f: CertFields = {
-      cert: 'TGO CFO FY27-781', org: 'บริษัท ชีตทดสอบ จำกัด', branch: 'สำนักงานใหญ่', act: 'ผลิตอาหาร', addr: '1 ถนนทดสอบ กรุงเทพฯ 10110', zip: '10110',
+      cert: 'TGO CFO FY27-781', org: onlyCo(L.e).name, branch: 'สำนักงานใหญ่', act: 'ผลิตอาหาร', addr: '1 ถนนทดสอบ กรุงเทพฯ 10110', zip: '10110',
       prov: 'กรุงเทพมหานคร', ind: 'อาหาร', size: 'SME', ap: '2026-02-01', ex: '2027-01-31', s1: 0.6, s2: 0.3, s3: 0.1, fy: 'FY27', note: '', webId: '77101',
     };
     expect(await L.e.applyCertRows([{ rowNo: 2, f, errors: [] }], 'a.xlsx')).toMatch(/^บันทึกแล้ว: เข้ารอตรวจ 1 ใบ/);
@@ -314,7 +320,7 @@ describe('team mode: a removal cannot take away a row the team decided', () => {
     for (const t of [L, L2]) t.e.saveSync({ feed: FEED, freq: 'off', autoApply: false });
     await settle(L, L2);
     const f: CertFields = {
-      cert: 'TGO CFO FY27-782', org: 'บริษัท ชีตลบได้ จำกัด', branch: 'สำนักงานใหญ่', act: 'ผลิตอาหาร', addr: '2 ถนนทดสอบ กรุงเทพฯ 10110', zip: '10110',
+      cert: 'TGO CFO FY27-782', org: onlyCo(L.e).name, branch: 'สำนักงานใหญ่', act: 'ผลิตอาหาร', addr: '2 ถนนทดสอบ กรุงเทพฯ 10110', zip: '10110',
       prov: 'กรุงเทพมหานคร', ind: 'อาหาร', size: 'SME', ap: '2026-02-01', ex: '2027-01-31', s1: 0.6, s2: 0.3, s3: 0.1, fy: 'FY27', note: '', webId: '77102',
     };
     // browser L saves a sheet with the certificate: its row waits in the queue, and the team holds it
@@ -400,5 +406,38 @@ describe('team mode: a removal cannot take away a row the team decided', () => {
     expect(last?.[3]).toBe('0');
     await settle(A, L);
     for (const t of [L, A]) expect(rids(t.e.tgoRows('a'))).toEqual(['77001']);
+  });
+});
+
+/** A review record of a certificate sheet (sheetrev/, lib/sheetReview.ts): written by an account that may edit customers, and
+ *  final once a teammate decided it (accepted or rejected), as a queue row is (team-sync/Code.gs push_, reviewDecided_). */
+describe('team mode: a review record of a certificate sheet is shared, and a decided one is final', () => {
+  const REC = {
+    id: 'rABC', reason: 'ไม่พบบริษัทในระบบ', cert: 'SR-9', org: 'บริษัท รีวิว จำกัด', gcc: '', f: F9, email: '', emailSt: '', vals: {},
+    file: 'rv.xlsx', at: '2026-10-26T03:00:00Z', by: 'หมิว', st: 'p', co: null,
+  };
+  it('a viewer cannot write a review record; an account with edit.cust can, and it is stored once', async () => {
+    const L = await lead();
+    const V = await member(L, 'vew', 'ผู้ดู', 'viewer');
+    const refused = sim.post({ action: 'push', cv: 5, tok: V.e.session!.tok, ops: [{ id: 'rv1', t: 1, k: 'sheetrev/rABC', v: REC, nx: true }] });
+    // a viewer may not write at all: the whole push is forbidden, the record is not stored
+    expect(refused).toMatchObject({ ok: false, error: 'forbidden' });
+    const stored = sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'rv2', t: 1, k: 'sheetrev/rABC', v: REC, nx: true }] });
+    expect(stored).toMatchObject({ ok: true, n: 1 });
+    expect(teamRows().filter((r: unknown[]) => r[1] === 'sheetrev/rABC')).toHaveLength(1);
+  });
+  it('a decided record is final: a teammate\'s stale rejection or a deletion is refused and the record comes back; the same decision again is stored', async () => {
+    const L = await lead();
+    const A = await member(L, 'aek', 'เอก', 'sales');
+    sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'rv3', t: 1, k: 'sheetrev/rABC', v: REC, nx: true }] });
+    const decided = { ...REC, st: 'a', co: 77, dBy: 'หมิว', dAt: '2026-10-27T00:00:00Z' };
+    expect(sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'rv4', t: 1, k: 'sheetrev/rABC', v: decided }] })).toMatchObject({ ok: true, n: 1 });
+    // a teammate who still sees it waiting tries to reject it: refused, and the accepted record comes back as the team has it
+    const stale = sim.post({ action: 'push', cv: 5, tok: A.e.session!.tok, ops: [{ id: 'rv5', t: 1, k: 'sheetrev/rABC', v: { ...REC, st: 'r' } }] });
+    expect(stale).toMatchObject({ ok: true, n: 0, rows: [{ k: 'sheetrev/rABC', v: { st: 'a' } }] });
+    const del = sim.post({ action: 'push', cv: 5, tok: A.e.session!.tok, ops: [{ id: 'rv6', t: 1, k: 'sheetrev/rABC', del: true }] });
+    expect(del).toMatchObject({ ok: true, n: 0, rows: [{ k: 'sheetrev/rABC', del: false, v: { st: 'a' } }] });
+    // the same decision again (a retry after a lost reply) changes nothing and is stored
+    expect(sim.post({ action: 'push', cv: 5, tok: L.e.session!.tok, ops: [{ id: 'rv7', t: 1, k: 'sheetrev/rABC', v: decided }] })).toMatchObject({ ok: true, n: 1 });
   });
 });
