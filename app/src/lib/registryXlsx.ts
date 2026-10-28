@@ -160,13 +160,31 @@ export function branchOfName(s: unknown): string {
   const m = /\(\s*(\d+)\s*\)\s*$/.exec(String(s ?? ''));
   return m && !/^0+$/.test(m[1]) ? m[1] : '';
 }
-/** An e-mail cell's addresses: split on ";", "," or "|", trimmed, duplicates dropped (case does not count), in order. */
+/** The addresses a text lists: split on ";", ",", "|" or a line break, trimmed, empty parts dropped (R8). */
+const addressesOf = (s: string): string[] => String(s ?? '').split(/[;,|\r\n]/).map((x) => x.trim()).filter(Boolean);
+/** A sheet's e-mail cell as addresses (R8): addressesOf, duplicates dropped (case does not count), in order. */
 export function splitEmails(s: string): string[] {
   const seen = new Map<string, string>();
-  String(s ?? '').split(/[;,|]/).map((x) => x.trim()).filter(Boolean).forEach((a) => {
+  addressesOf(s).forEach((a) => {
     if (!seen.has(a.toLowerCase())) seen.set(a.toLowerCase(), a);
   });
   return [...seen.values()];
+}
+/**
+ * A company's e-mail after the sheet's addresses (R8, v3). The addresses the company holds come first, as they are: none is
+ * removed or replaced. Then come the sheet's addresses it does not hold yet (case does not count), and the result is joined
+ * with " | ". `filled` when one such address is new, with `to` the combined value. `kept` when none is new: the company's value
+ * stays as it is and nothing is written.
+ */
+export function mergeCoEmail(have: string, sheet: string[]): { action: 'filled' | 'kept'; to: string } {
+  const own = addressesOf(have);
+  const seen = new Set(own.map((a) => a.toLowerCase()));
+  const fresh = sheet.filter((a) => {
+    if (seen.has(a.toLowerCase())) return false;
+    seen.add(a.toLowerCase());
+    return true;
+  });
+  return fresh.length ? { action: 'filled', to: [...own, ...fresh].join(' | ') } : { action: 'kept', to: have };
 }
 
 /* ---------- reading ---------- */
@@ -256,6 +274,8 @@ async function sheetRows(file: XlsxInput, sheet: string): Promise<{ rowNo: numbe
 
 /** A text cell as text (a number as it is written, no thousands separators added). */
 const textOf = (c: Cell) => (c ? txtOf(c.t === 'n' ? String(+c.v) : c.v) : '');
+/** A cell's text as written, its line breaks kept: an e-mail cell may list one address to a line (R8). */
+const rawOf = (c: Cell) => (c ? (c.t === 'n' ? String(+c.v) : c.v) : '');
 /** A certificate id: digits, optionally with thousands commas ("32,040" is 32040). */
 const idOf = (c: Cell) => {
   if (!c) return '';
@@ -368,7 +388,7 @@ export async function readCertSheetFull(file: XlsxInput, sheet: string): Promise
         const t = textOf(cells[i]);
         if (t) vals[h] = t;
       });
-      return { rowNo, f, errors, gcc: textOf(C('gcc')), email: textOf(C('email')), emailSt: textOf(C('emailSt')), vals };
+      return { rowNo, f, errors, gcc: textOf(C('gcc')), email: rawOf(C('email')), emailSt: textOf(C('emailSt')), vals };
     });
   return { lines, unknown };
 }
@@ -422,7 +442,7 @@ function descSheet(): XSheet {
   rows.push([null, 'แถวตัวอย่างในชีต ใบรับรอง CFO ลบทิ้งก่อนนำเข้า ไม่เช่นนั้นระบบจะนำเข้าเป็นใบรับรองจริง']);
   rows.push([null, 'ค่าที่ระบบคำนวณให้ (ค.ศ. รวม ประเภทที่มีสัดส่วนสูงสุด สถานะ) จะถูกละเว้นเมื่อนำเข้า']);
   rows.push([null, 'ค่าว่างไม่เปลี่ยนค่าที่มีอยู่ในระบบ แต่ช่องที่ต้องกรอก (เลขที่ใบรับรอง ชื่อองค์กร วันที่อนุมัติ วันที่หมดอายุ) ว่างไม่ได้ แถวนั้นจะไม่ถูกนำเข้า']);
-  rows.push([null, 'ท้ายไฟล์ส่งออกมีรหัสบริษัท (GCC) และอีเมล ใช้จับคู่บริษัทตอนนำเข้า อีเมลถูกเติมเฉพาะบริษัทที่ยังไม่มีอีเมล']);
+  rows.push([null, 'ท้ายไฟล์ส่งออกมีรหัสบริษัท (GCC) และอีเมล ใช้จับคู่บริษัทตอนนำเข้า อีเมลจากชีตจะเพิ่มเฉพาะอีเมลที่บริษัทยังไม่มี ต่อท้ายอีเมลเดิม ไม่ลบและไม่แทนที่อีเมลเดิม']);
   return { name: SHEET_DESC, head: ['ลำดับ', 'คอลัมน์', 'ต้องกรอก', 'รูปแบบ', 'ความหมาย'], rows, widths: [8, 30, 14, 48, 64] };
 }
 /** A certificate to write, with the company it belongs to: its GCC code and e-mail (the export's last two columns). */
@@ -489,8 +509,9 @@ export const ACTION_TH: Record<CertAction, string> = {
   'already in review': 'อยู่ในรายการรอตรวจสอบแล้ว',
   'declined before': 'ถูกปฏิเสธไว้แล้ว',
 };
-/** An e-mail decision for a row's company: filled (the company had none), kept (it had one), skipped (the row's company is not
- *  applied), none (no e-mail to take from the row). */
+/** An e-mail decision for a row's company (R8, v3): filled (the sheet brings an address the company does not hold: the company's
+ *  e-mail becomes the old one plus the new ones), kept (every sheet address is held already: nothing is written), skipped (the
+ *  row's company is not applied), none (no e-mail to take from the row). */
 export type EmailAction = 'none' | 'filled' | 'kept' | 'skipped';
 /** One row of the change report (R14): the preview shows it, and the import record keeps it. */
 export interface CertLogEntry {
@@ -503,7 +524,8 @@ export interface CertLogEntry {
 }
 /** A row for the review list (R16): its reason, and the row itself. */
 export interface PlanReview { rowNo: number; reason: string; line: CertLine }
-/** A company's e-mail from the sheet: `filled` writes `to`; `kept` leaves the company's own (`from`). */
+/** A company's e-mail from the sheet (R8, v3): `filled` writes `to` (the company's own addresses, then the new ones); `kept` writes
+ *  nothing, and `to` is the company's value as it is. `from` is the value the company has now. */
 export interface PlanEmail { co: number; name: string; from: string; to: string; action: 'filled' | 'kept' }
 /** What the app tells the planner: its companies, the held certificates, the queue and the review list. */
 export interface PlanCtx {
@@ -778,11 +800,10 @@ export function planCertRows(lines: CertLine[], ctx: PlanCtx, warnings: string[]
     note(L, rowLog(L, 'queued', 'เข้ารอตรวจ TGO (เข้าทะเบียนเมื่อผู้ตรวจรับแล้ว)', r.co));
   }
 
-  // one e-mail decision per company: filled when the company has none, else kept (R8)
+  // one e-mail decision per company, from all its rows at once (R8, v3): the sheet's new addresses are added to the company's own
   mails.forEach((m, co) => {
     const have = ctx.emailOf(co);
-    const to = [...m.addrs.values()].join(' | ');
-    const action = have ? 'kept' : 'filled';
+    const { action, to } = mergeCoEmail(have, [...m.addrs.values()]);
     plan.emails.push({ co, name: coName.get(co) ?? '', from: have, to, action });
     m.rows.forEach((r) => (r.email = { action, from: have, to }));
   });

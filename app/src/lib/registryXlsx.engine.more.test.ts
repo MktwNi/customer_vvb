@@ -300,7 +300,7 @@ describe('the review list, the e-mail and the report of a sheet save (owner v2)'
     const co = e.B.companies.find((c) => c.name === 'บริษัท ABC จำกัด')!;
     expect(co.email).toBe('');
     const line = { ...row(newCert({ cert: 'EM-1', org: 'บริษัท ABC จำกัด' })), gcc: '', email: 'x@x.co; y@x.co', emailSt: 'พบ' };
-    expect(await e.applyCertRows([line], 'em.xlsx')).toMatch(/เติมอีเมล 1 บริษัท/);
+    expect(await e.applyCertRows([line], 'em.xlsx')).toMatch(/เพิ่มอีเมล 1 บริษัท/);
     expect(e.B.companies.find((c) => c.id === co.id)!.email).toBe('x@x.co | y@x.co');
     expect(e.contacts[co.id]).toMatchObject({ email: 'x@x.co | y@x.co' });
     expect(await e.applyCertRows([line], 'em.xlsx')).toBe('ไม่มีการเปลี่ยนแปลงให้บันทึก (ใบที่อยู่ในรายการ TGO แล้วไม่เพิ่มซ้ำ)');
@@ -334,5 +334,50 @@ describe('the review list, the e-mail and the report of a sheet save (owner v2)'
     const c = e.B.certs[0];
     const co = e.B.byId.get(e.canonical(c.gid))!;
     expect(rows[0]).toMatchObject({ gcc: gccCode(co.id), email: co.email });
+  });
+});
+
+// v3 (owner rule R8): the company's e-mail is the union of its own addresses and the sheet's new ones, written through its contact record
+describe('the company e-mail union through the contact record (R8, v3)', () => {
+  const abc = (e: ReturnType<typeof engine>) => e.B.companies.find((c) => c.name === 'บริษัท ABC จำกัด')!;
+  const emailOfCo = (e: ReturnType<typeof engine>, id: number) => e.B.companies.find((c) => c.id === id)!.email;
+
+  it('a company with one e-mail A and a sheet e-mail B is saved as "A | B" through its contact record, and the report says filled', async () => {
+    const e = engine();
+    const co = abc(e);
+    e.saveContact(co, { phone: '', email: 'a@example.test', web: '', note: '' });
+    const line = { ...row(newCert({ cert: 'UN-1', org: 'บริษัท ABC จำกัด' })), gcc: '', email: 'b@example.test', emailSt: 'พบ' };
+    expect(await e.applyCertRows([line], 'un.xlsx')).toMatch(/เพิ่มอีเมล 1 บริษัท/);
+    expect(emailOfCo(e, co.id)).toBe('a@example.test | b@example.test');
+    expect(e.contacts[co.id]).toMatchObject({ email: 'a@example.test | b@example.test' });
+    expect(e.certImports[e.certImports.length - 1].log?.[0].email).toEqual({ action: 'filled', from: 'a@example.test', to: 'a@example.test | b@example.test' });
+  });
+
+  it('a sheet e-mail the company holds already, in any case, writes nothing: the contact record keeps its value', async () => {
+    const e = engine();
+    const co = abc(e);
+    e.saveContact(co, { phone: '', email: 'a@example.test', web: '', note: '' });
+    const cert = newCert({ cert: 'KP-1', org: 'บริษัท ABC จำกัด' });
+    await e.applyCertRows([row(cert)], 'kp.xlsx');
+    const before = JSON.stringify(e.contacts[co.id]);
+    const line = { ...row(cert), gcc: '', email: 'A@Example.TEST', emailSt: 'พบ' };
+    expect(e.certPlan([line]).emails).toEqual([expect.objectContaining({ action: 'kept', to: 'a@example.test' })]);
+    expect(await e.applyCertRows([line], 'kp.xlsx')).toBe('ไม่มีการเปลี่ยนแปลงให้บันทึก (ใบที่อยู่ในรายการ TGO แล้วไม่เพิ่มซ้ำ)');
+    expect(JSON.stringify(e.contacts[co.id])).toBe(before);
+    expect(emailOfCo(e, co.id)).toBe('a@example.test');
+  });
+
+  it('two rows of one company with B and C write the company e-mail once, with both; a second save of the file writes nothing (R13)', async () => {
+    const e = engine();
+    const co = abc(e);
+    e.saveContact(co, { phone: '', email: 'a@example.test', web: '', note: '' });
+    const lines = [
+      { ...row(newCert({ cert: 'UN-2', org: 'บริษัท ABC จำกัด' }), 2), gcc: '', email: 'b@example.test', emailSt: 'พบ' },
+      { ...row(newCert({ cert: 'UN-3', org: 'บริษัท ABC จำกัด' }), 3), gcc: '', email: 'c@example.test; B@example.test', emailSt: 'พบ' },
+    ];
+    expect(await e.applyCertRows(lines, 'un2.xlsx')).toMatch(/เพิ่มอีเมล 1 บริษัท/);
+    expect(emailOfCo(e, co.id)).toBe('a@example.test | b@example.test | c@example.test');
+    expect(await e.applyCertRows(lines, 'un2.xlsx')).toBe('ไม่มีการเปลี่ยนแปลงให้บันทึก (ใบที่อยู่ในรายการ TGO แล้วไม่เพิ่มซ้ำ)');
+    expect(emailOfCo(e, co.id)).toBe('a@example.test | b@example.test | c@example.test');
   });
 });

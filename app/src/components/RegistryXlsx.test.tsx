@@ -56,18 +56,22 @@ describe('the change report of a certificate-sheet save', () => {
     expect(h).not.toContain('>บริษัทใหม่<');
   });
 
-  it('shows each changed field as the old value and the new one, and the e-mail decision with the sheet address', () => {
+  it('shows each changed field as the old value and the new one, and the e-mail decision: an added address with the value before and after, a kept one as it is (R8 v3)', () => {
+    // v3: a filled e-mail is the company's old one followed by the new address; a kept one stays as the company has it
     const log = [
       logRow({
         row: 5, action: 'updated', gcc: 'GCC-000361', company: 'บริษัท ทดสอบ ห้า จำกัด', cert: 'SYN-5',
         changes: [{ field: 'ประเภทที่ 1 (%)', from: '60%', to: '50%' }, { field: 'สาขา/รหัสสาขา', from: '', to: '(65)' }],
-        email: { action: 'kept', from: 'old@example.test', to: 'new@example.test' },
+        email: { action: 'filled', from: 'old@example.test', to: 'old@example.test | new@example.test' },
       }),
+      logRow({ row: 6, co: 1e12 + 2, cert: 'SYN-6', email: { action: 'kept', from: 'old@example.test', to: 'old@example.test' } }),
     ];
     const h = renderToStaticMarkup(<ChangeReport log={log} warnings={[]} />);
     expect(h).toContain('ประเภทที่ 1 (%): เดิม 60% เป็น 50%');
     expect(h).toContain('สาขา/รหัสสาขา: เดิม ว่าง เป็น (65)');
-    expect(h).toContain('มีอีเมลอยู่แล้ว ไม่เปลี่ยน · ในชีต new@example.test');
+    expect(h).toContain('เพิ่มอีเมล: เดิม old@example.test เป็น old@example.test | new@example.test');
+    expect(h).toContain('มีอยู่แล้ว ไม่เพิ่ม: old@example.test');
+    expect(h).toContain('เพิ่ม 1 · มีอยู่แล้ว 1');
     expect(h).toContain('GCC-000361 · บริษัท ทดสอบ ห้า จำกัด · เลขที่ใบรับรอง SYN-5');
   });
 });
