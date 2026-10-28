@@ -1,7 +1,8 @@
 import type { Cert, Company, FeedKey } from './types';
 import type { GccEngine } from './engine';
 
-/** Search-tab filters. '' = no filter. Selects hold dictionary indices as strings. */
+/** Search-tab filters. '' = no filter. Selects hold dictionary indices as strings. `rnd` holds one round key, or
+ *  several comma-joined (see joinVals). */
 export interface Filters {
   view: 'co' | 'cert';
   q: string; tgt: string; src: string; ind: string; prov: string; type: string; cfo: string; gi: string; ph: string; inv: string;
@@ -9,6 +10,17 @@ export interface Filters {
   // certificate-level filters set from the CFO dashboard
   expM: string; cInd: string; cFy: string; cProv: string;
 }
+/** A filter that takes several values (the rounds) keeps them in one string, comma-joined: "6/2569,1/2570". One
+ *  value is that value alone, which is how Notes sets a single round. Round keys never contain a comma. */
+export const VAL_SEP = ',';
+/** The values a filter string holds, spaces trimmed, empty ones dropped; '' holds none (no filter). One entry is
+ *  kept: filterAll asks for the same string once per company, so it is split once, not per row. */
+let lastSplit: { s: string; v: readonly string[] } = { s: '', v: [] };
+export function splitVals(s: string): readonly string[] {
+  if (lastSplit.s !== s) lastSplit = { s, v: s.split(VAL_SEP).map((x) => x.trim()).filter(Boolean) };
+  return lastSplit.v;
+}
+export const joinVals = (v: readonly string[]) => v.join(VAL_SEP);
 export const EMPTY_FILTERS: Filters = {
   view: 'co', q: '', tgt: '', src: '', ind: '', prov: '', type: '', cfo: '', gi: '', ph: '', inv: '', feed: '', ym: '', rnd: '', stage: '', owner: '', sort: 'default',
   expM: '', cInd: '', cFy: '', cProv: '',
@@ -38,7 +50,11 @@ function matchCo(e: GccEngine, c: Company, s: Filters, q: string[] | null, skipT
   if (s.inv && !((c.invest || 0) >= +s.inv)) return false;
   if (s.feed && !c.fl[s.feed]) return false;
   if (s.ym && c.newYm !== s.ym) return false;
-  if (s.rnd && c.rndKey !== s.rnd) return false;
+  // several rounds: the company's round is one of them; none chosen = no filter
+  if (s.rnd) {
+    const rs = splitVals(s.rnd);
+    if (rs.length && !rs.includes(c.rndKey)) return false;
+  }
   if (s.stage && (C.stages[c.id] || 'none') !== s.stage) return false;
   if (s.owner && (s.owner === '-' ? !!C.owners[c.id] : C.owners[c.id] !== s.owner)) return false;
   if (q) for (const w of q) if (!c.hay.includes(w)) return false;
