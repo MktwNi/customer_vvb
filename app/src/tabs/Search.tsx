@@ -2,7 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { scrollTop, useApp, useEngineVersion, useNarrow } from '../state';
 import { CONFIG, CST, FEEDS, GDESC, SRCC, STG, TGT, stageOf } from '../lib/constants';
 import { fmtN, isoTh, ymTh } from '../lib/format';
-import { CLEAR_FILTERS, filterAll, type Filters } from '../lib/search';
+import { CLEAR_FILTERS, filterAll, joinVals, splitVals, type Filters } from '../lib/search';
 import type { CfoStatus, Cert, Company } from '../lib/types';
 import { Pager, Status, card, srcWords, tabular } from '../components/ui';
 import { Icon } from '../components/icons';
@@ -121,11 +121,18 @@ export function Search() {
   // the filter row: each field one choice, "ทั้งหมด" first; counts where the lists have them (provinces,
   // industries, operator types), a find field over a long list
   const unit = s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท';
+  // the rounds take several ticks; every other field is one choice
   const fields: FField[] = [...mainSel, ...moreSel].map(([label, k, options], i) => ({
-    key: k, label, kind: 'single', all: 'ทั้งหมด', sep: i === MAIN.length,
+    key: k, label, kind: k === 'rnd' ? 'multi' : 'single', all: 'ทั้งหมด', sep: i === MAIN.length,
     options: options.map((o) => ({ v: o.v, label: 'l' in o ? String(o.l) : o.label, n: 'n' in o ? Number(o.n) : undefined })),
   }));
-  const fval: Record<string, FVal | undefined> = Object.fromEntries(fields.map((f) => [f.key, s[f.key as keyof Filters] !== '' ? { v: [String(s[f.key as keyof Filters])] } : undefined]));
+  // a field's value in the filter state: several values comma-joined (lib/search.ts), one value as it is
+  const stored = (x: FVal | null) => joinVals(x?.v ?? []);
+  const fval: Record<string, FVal | undefined> = Object.fromEntries(fields.map((f) => {
+    const raw = String(s[f.key as keyof Filters]);
+    const v = f.kind === 'multi' ? [...splitVals(raw)] : raw === '' ? [] : [raw];
+    return [f.key, v.length ? { v } : undefined];
+  }));
   // screen readers hear the count once typing / filtering settles, not on every keystroke
   const [said, setSaid] = useState('');
   const sayNow = `${fmtN(F.out.length)} ${s.view === 'cert' ? 'ใบรับรอง' : 'บริษัท'}`;
@@ -230,14 +237,14 @@ export function Search() {
             <FilterBar
               fields={fields}
               value={fval}
-              onChange={(k, x) => setF({ [k]: x?.v[0] ?? '' } as Partial<Filters>)}
+              onChange={(k, x) => setF({ [k]: stored(x) } as Partial<Filters>)}
               // a drill-down from another page (ภาพรวม, ติดตาม, แผนที่): × only
               extra={activeChips.length ? activeChips.map((c) => <ReadChip key={c.label} text={c.label} onClear={() => setF(c.p)} />) : undefined}
               anySet={hasFilter}
               // the keyword too, as the help says
               onClearAll={() => setF(CLEAR_FILTERS)}
               unit={unit}
-              liveCount={(k, x) => filterAll(e, { ...fs, [k]: x?.v[0] ?? '' } as Filters, { sort: false }).out.length}
+              liveCount={(k, x) => filterAll(e, { ...fs, [k]: stored(x) } as Filters, { sort: false }).out.length}
             />
           </div>
           <span className="sr-only" role="status">{said}</span>

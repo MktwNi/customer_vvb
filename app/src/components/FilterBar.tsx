@@ -19,7 +19,8 @@ export interface FField {
   ops?: boolean;
   /** people's names: an initial before each */
   people?: boolean;
-  /** single choice: the first radio, meaning no filter ("ทั้งหมด") */
+  /** the first choice, meaning no filter ("ทั้งหมด"): a single choice's first radio, or a list's first tick, which
+   *  clears the ticks */
   all?: string;
   options: FOpt[];
   /** always shown as a pill (not in the field menu) */
@@ -52,6 +53,13 @@ export const valText = (f: FField, v: string[]) => {
 const opWord = (f: FField, v?: FVal) => (f.kind === 'multi' && v?.not ? 'ไม่ใช่' : 'คือ');
 /** The whole sentence of a filter in use: "ผู้รับผิดชอบ คือ หมิว (ฉัน), คุณบี, คุณเอ". */
 export const sentence = (f: FField, v: FVal) => `${f.label} ${opWord(f, v)} ${v.v.map((x) => chipWord(f, x)).join(', ')}`;
+/** The draft's values after one row is pressed: a single choice takes that one alone, a list toggles it. ""
+ *  is the "ทั้งหมด" row, which clears. */
+export function flipVal(single: boolean, sel: string[], v: string): string[] {
+  if (!v) return [];
+  if (single) return [v];
+  return sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v];
+}
 
 /**
  * The filter row (the reference's pattern, in the brand): the date chip (`lead`), the pinned pills,
@@ -340,7 +348,8 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
   const [sel, setSel] = useState<string[]>(init?.v || []);
   const [not, setNot] = useState(!!init?.not);
   const [q, setQ] = useState('');
-  const [act, setAct] = useState(0);
+  // the box the focus rests on: the first chosen tick when it opens (after "ทั้งหมด" when there is one), else "ทั้งหมด"
+  const [act, setAct] = useState(() => (f.all != null && sel.length ? 1 : 0));
   const listRef = useRef<HTMLDivElement>(null);
   const hl = useHL();
   const long = f.options.length > 7;
@@ -352,14 +361,16 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
   });
   const t = q.trim().toLocaleLowerCase('th');
   const list = t ? order.filter((o) => o.label.toLocaleLowerCase('th').includes(t)) : order;
+  // the "ทั้งหมด" row is the first box (not while a find narrows the list): the list's boxes come after it
+  const first = f.all != null && !t ? 1 : 0;
   // the roving stop of the ticks: on the list as it is now (the find field narrows it)
-  const actI = Math.max(0, Math.min(act, list.length - 1));
+  const actI = Math.max(0, Math.min(act, list.length + first - 1));
   const draft: FVal | null = sel.length ? { v: sel, ...(f.ops && not ? { not: true as const } : {}) } : null;
   // "เหลือ N": a pass over every row (55,000 companies on ค้นหา), so once per draft, not on every key
   const dKey = JSON.stringify(draft);
   const left = useMemo(() => liveCount?.(f.key, draft), [dKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [allN] = useState(() => (single && f.all != null ? liveCount?.(f.key, null) : undefined));
-  const flip = (v: string) => setSel(single ? (v ? [v] : []) : sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v]);
+  const [allN] = useState(() => (f.all != null ? liveCount?.(f.key, null) : undefined));
+  const flip = (v: string) => setSel(flipVal(single, sel, v));
   const apply = () => onApply(draft);
   const boxes = () => [...(listRef.current?.querySelectorAll<HTMLInputElement>('input') || [])];
   const moveTo = (i: number) => {
@@ -382,7 +393,7 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
   const findWord = f.find ?? (f.people ? 'ค้นหาชื่อ' : 'ค้นหา' + (/^[A-Za-z]/.test(f.label) ? ' ' : '') + f.label);
   const rich = f.options.some((o) => o.desc);
   const row = (v: string, label: string, n: number | undefined, sub?: string, i = 0, desc?: string, meta?: ReactNode) => {
-    const isOn = single ? (v ? sel[0] === v : !sel.length) : sel.includes(v);
+    const isOn = v ? (single ? sel[0] === v : sel.includes(v)) : !sel.length;
     return (
       <label key={v || '~all'} data-hl="" className={'fck' + (isOn ? ' on' : '') + (n === 0 && meta == null ? ' zero' : '')}>
         <input
@@ -507,8 +518,8 @@ function ValuePop({ id, f, init, anchor, place, back, unit, liveCount, onClose, 
           onBlur={hl.bind.onBlur}
         >
           <i className="hl" aria-hidden="true" />
-          {single && f.all != null && !t && row('', f.all, allN, undefined, 0, f.allDesc, f.allDesc && allN != null ? `${fmtN(allN)} ${unit}` : undefined)}
-          {list.map((o, i) => row(o.v, o.label, o.n, o.sub, i, o.desc, o.meta))}
+          {f.all != null && !t && row('', f.all, allN, undefined, 0, f.allDesc, f.allDesc && allN != null ? `${fmtN(allN)} ${unit}` : undefined)}
+          {list.map((o, i) => row(o.v, o.label, o.n, o.sub, i + first, o.desc, o.meta))}
           {!list.length && <div className="pop-empty" aria-hidden="true">ไม่พบ “{q.trim()}”</div>}
         </div>
         <span className="sr-only" role="status">{list.length ? '' : `ไม่พบ “${q.trim()}”`}</span>
