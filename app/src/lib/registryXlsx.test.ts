@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { build } from './core';
-import { applyCertPlan, certKey, exportSheets, heldFrom, planCertRows, readCertSheet, readDateBE, readPct, sheetNoteOf, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine } from './registryXlsx';
+import { ACTION_TH, applyCertPlan, branchOfName, certKey, countLog, diffFields, exportSheets, gccIdOf, heldFrom, importNameKey, keepHeld, planCertRows, readCertSheet, readCertSheetFull, readDateBE, readPct, sheetNoteOf, splitEmails, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine, type HeldCert, type PlanCtx } from './registryXlsx';
 import { xlsxBytes, type XCell, type XSheet } from './xlsx';
 import { parseXlsx } from './core';
 import * as TGOSync from './tgoSync';
@@ -19,6 +19,16 @@ const BASE_ROW = {
   'เลขที่ใบรับรอง': 'CFO-9', 'ชื่อองค์กร': 'บริษัท ทดสอบ จำกัด', 'วันที่อนุมัติ (พ.ศ. ตามเว็บ)': '15/03/2568', 'วันที่หมดอายุ (พ.ศ. ตามเว็บ)': '14/03/2570',
 };
 const lines = async (rows: XCell[][]) => readCertSheet(await xlsxBytes([sheetOf(rows)]), SHEET);
+/** The planner's context: the companies given (all shared, below the device-local range), the held certificates, and the
+ *  queue, review and e-mail lookups the test sets (none by default). */
+const ctxOf = (held: HeldCert[], companies: { id: number; name: string }[], extra: Partial<PlanCtx> = {}): PlanCtx => ({
+  held, companies: companies.map((c) => ({ ...c, local: false })), canon: (id) => id, emailOf: () => '', queue: () => undefined, review: () => undefined, ...extra,
+});
+/** The planner on these rows, against the held certificates and companies given. */
+const planWith = (ls: CertLine[], held: HeldCert[], companies: { id: number; name: string }[], extra: Partial<PlanCtx> = {}) =>
+  planCertRows(ls, ctxOf(held, companies, extra));
+/** The export of certificates that carry neither a GCC code nor an e-mail. */
+const exportOf = (certs: CertFields[], today: string) => exportSheets(certs.map((f) => ({ f, gcc: '', email: '' })), today);
 
 describe('template', () => {
   it('has the 27 TGO headers in order, one example row and the description sheet', () => {
@@ -56,46 +66,62 @@ describe('export and round trip', () => {
       F({ cert: 'CFO-3', org: 'บริษัท ซี  จำกัด', webId: '', s1: null, s2: null, s3: null, branch: '', fy: '' }),
       F({ cert: 'CFO-4', org: 'บริษัท ดี จำกัด', webId: '40001', s1: 1, s2: 0, s3: 0, ap: '2026-01-10', ex: '2028-01-09' }),
     ];
-    const bytes = await xlsxBytes(exportSheets(certs, TODAY));
+    const bytes = await xlsxBytes(exportOf(certs, TODAY));
     const ls = await readCertSheet(bytes, SHEET);
     expect(ls).toHaveLength(4);
     expect(ls.flatMap((l) => l.errors)).toEqual([]);
     const held = certs.map((f, i) => ({ origin: i < 2 ? ('base' as const) : ('tgo' as const), idx: i < 2 ? i : i - 2, gid: 100 + i, f }));
-    const plan = planCertRows(ls, held, held.map((h) => ({ id: h.gid, name: h.f.org })));
+    const plan = planWith(ls, held, held.map((h) => ({ id: h.gid, name: h.f.org })));
     expect(plan.read).toBe(4);
     expect(plan.news).toEqual([]);
     expect(plan.changed).toEqual([]);
     expect(plan.same).toBe(4);
     expect(plan.errors).toEqual([]);
   });
-  it('a held certificate with a blank expiry date round-trips as the same; blanking a held value is an error', async () => {
-    const held = [{ origin: 'base' as const, idx: 0, gid: 1, f: F({ ex: '', cert: '' }) }];
+  it('a blank required cell is an error row (R2) unless the held certificate is blank in it too; a blank other cell keeps the held value', async () => {
     const companies = [{ id: 1, name: 'บริษัท เอ จำกัด' }];
-    const same = await readCertSheet(await xlsxBytes(exportSheets([F({ ex: '', cert: '' })], TODAY)), SHEET);
+    // no web id names the held certificate, so there is no held value to keep: the blank required cells are an error row
+    const held = [{ origin: 'base' as const, idx: 0, gid: 1, f: F({ ex: '', cert: '', webId: '' }) }];
+    const same = await readCertSheet(await xlsxBytes(exportOf([F({ ex: '', cert: '', webId: '' })], TODAY)), SHEET);
     expect(same[0].errors).toEqual([]);
-    expect(planCertRows(same, held, companies)).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
-    const blanked = await readCertSheet(await xlsxBytes(exportSheets([F({ ex: '' })], TODAY)), SHEET);
-    const plan = planCertRows(blanked, [{ origin: 'base', idx: 0, gid: 1, f: F({ cert: 'CFO-1' }) }], companies);
+    expect(planWith(same, held, companies)).toMatchObject({ news: [], changed: [], same: 0, errors: [{ rowNo: 2, reason: 'ต้องกรอก เลขที่ใบรับรอง · ต้องกรอก วันที่หมดอายุ (พ.ศ.)' }] });
+    // the held certificate is named by its web id and is blank in those cells too: nothing to keep, so the row matches it (R2, R12)
+    const named = [{ origin: 'base' as const, idx: 0, gid: 1, f: F({ ex: '', cert: '', webId: '32040' }) }];
+    const exported = await readCertSheet(await xlsxBytes(exportOf([F({ ex: '', cert: '', webId: '32040' })], TODAY)), SHEET);
+    expect(planWith(exported, named, companies)).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
+    // the held certificate has a value in the blank cell: the row is an error row, and the held value is not cleared (R2)
+    const valued = [{ origin: 'base' as const, idx: 0, gid: 1, f: F({ ex: '2027-03-14' }) }];
+    expect(planWith(await readCertSheet(await xlsxBytes(exportOf([F({ ex: '' })], TODAY)), SHEET), valued, companies)).toMatchObject({
+      news: [], changed: [], errors: [{ rowNo: 2, reason: 'ต้องกรอก วันที่หมดอายุ (พ.ศ.)' }],
+    });
+    const blanked = await readCertSheet(await xlsxBytes(exportOf([F({ ex: '' })], TODAY)), SHEET);
+    const plan = planWith(blanked, [{ origin: 'base', idx: 0, gid: 1, f: F({ cert: 'CFO-1' }) }], companies);
+    // R2: the expiry date is required: the blank one is an error row, not a change of the held value
     expect([plan.news, plan.changed, plan.same]).toEqual([[], [], 0]);
     expect(plan.errors).toEqual([{ rowNo: 2, reason: 'ต้องกรอก วันที่หมดอายุ (พ.ศ.)' }]);
+    // a blank cell that is not required keeps the held value: no change, no error
+    const noZip = await readCertSheet(await xlsxBytes(exportOf([F({ zip: '' })], TODAY)), SHEET);
+    expect(planWith(noZip, [{ origin: 'base', idx: 0, gid: 1, f: F({ cert: 'CFO-1' }) }], companies)).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
   });
   it('a web id alone does not name a held certificate: a different number and organisation is a new row', () => {
     const held = [{ origin: 'base' as const, idx: 0, gid: 1, f: F({ webId: '32040' }) }];
     const row: CertLine = { rowNo: 2, f: F({ cert: 'OTHER-9', org: 'บริษัท อื่น จำกัด', webId: '32040' }), errors: [] };
-    const plan = planCertRows([row], held, [{ id: 1, name: 'บริษัท เอ จำกัด' }]);
+    const plan = planWith([row], held, [{ id: 1, name: 'บริษัท เอ จำกัด' }]);
     expect(plan.changed).toEqual([]);
-    expect(plan.news.map((n) => n.f.cert)).toEqual(['OTHER-9']);
+    // the company is not in the app: the row is kept for review and no company is made (R1)
+    expect(plan.news).toEqual([]);
+    expect(plan.reviews.map((r) => [r.line.f.cert, r.reason])).toEqual([['OTHER-9', 'ไม่พบบริษัทในระบบ']]);
   });
   it('a stored share is a fraction: it exports as a percent, and the same percent reads back as the same value', async () => {
     const stored = [F({ cert: 'CFO-S', webId: '', s1: 0.0029, s2: 0.1448, s3: 0.8523 })];
-    const rows = exportSheets(stored, TODAY)[0].rows;
+    const rows = exportOf(stored, TODAY)[0].rows;
     expect([rows[0][17], rows[0][18], rows[0][19], rows[0][20]]).toEqual(['0.29%', '14.48%', '85.23%', '100%']);
     expect([readPct({ t: 's', v: '0.29%' }, 'x'), readPct({ t: 's', v: '14.48' }, 'x'), readPct({ t: 'n', v: '0.8523' }, 'x')]).toEqual([{ v: 0.0029 }, { v: 0.1448 }, { v: 0.8523 }]);
-    const ls = await readCertSheet(await xlsxBytes(exportSheets(stored, TODAY)), SHEET);
-    expect(planCertRows(ls, [{ origin: 'base', idx: 0, gid: 1, f: stored[0] }], [{ id: 1, name: 'บริษัท เอ จำกัด' }])).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
+    const ls = await readCertSheet(await xlsxBytes(exportOf(stored, TODAY)), SHEET);
+    expect(planWith(ls, [{ origin: 'base', idx: 0, gid: 1, f: stored[0] }], [{ id: 1, name: 'บริษัท เอ จำกัด' }])).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
   });
   it('the status and the total follow the held values', () => {
-    const rows = exportSheets([F({ ex: '2026-10-31' }), F({ cert: 'C2', ex: '2026-01-01' }), F({ cert: 'C3', ex: '', s1: null, s2: null, s3: null })], TODAY)[0].rows;
+    const rows = exportOf([F({ ex: '2026-10-31' }), F({ cert: 'C2', ex: '2026-01-01' }), F({ cert: 'C3', ex: '', s1: null, s2: null, s3: null })], TODAY)[0].rows;
     expect(SHEET_HEADS[22]).toBe('สถานะ ณ วันที่ดึงข้อมูล');
     expect(rows[0][22]).toBe('อยู่ในอายุ');
     expect(rows[1][22]).toBe('หมดอายุ');
@@ -171,7 +197,7 @@ describe('reading values', () => {
     expect(ls[2].errors).toEqual([]);
     expect(ls[3].errors).toEqual([]);
     expect(ls[4].errors).toEqual([]);
-    const plan = planCertRows(ls, [], []);
+    const plan = planWith(ls, [], [{ id: 1, name: 'บริษัท ทดสอบ จำกัด' }]);
     expect(plan.read).toBe(5);
     expect(plan.news.map((n) => n.f.cert)).toEqual(['OK-1']);
     expect(plan.errors.map((e) => e.rowNo)).toEqual([2, 3, 4, 5]);
@@ -200,44 +226,47 @@ describe('planning', () => {
   ];
   const companies = [{ id: 1, name: 'บริษัท เอ จำกัด' }, { id: 2, name: 'บริษัท บี จำกัด' }];
   const L = (rowNo: number, f: Partial<CertFields>, errors: string[] = []): CertLine => ({ rowNo, f: F(f), errors });
-  it('new, same, changed (with the fields), a duplicate, and a new company for an unknown name', () => {
-    const plan = planCertRows(
+  it('new, same, changed (with the fields), a duplicate, a missing cell, and an unknown company goes to review; no company is made', () => {
+    const plan = planWith(
       [
         L(2, { s1: 0.5 }),
         L(3, { cert: 'CFO-B', org: 'บริษัท บี จำกัด', webId: '', ap: '2024-01-01' }),
-        L(4, { cert: 'NEW-1', org: 'บริษัท ใหม่ จำกัด', webId: '' }),
-        L(5, { cert: 'NEW-1', org: 'บริษัท ใหม่ จำกัด', webId: '' }),
-        L(6, { cert: 'NEW-2', org: 'บริษัท ใหม่ จำกัด', webId: '' }),
+        L(4, { cert: 'NEW-1', org: 'บริษัท เอ จำกัด', webId: '' }),
+        L(5, { cert: 'NEW-1', org: 'บริษัท เอ จำกัด', webId: '' }),
+        L(6, { cert: 'NEW-2', org: 'บริษัท เอ จำกัด', webId: '' }),
         L(7, {}, ['ต้องกรอก ชื่อองค์กร']),
+        L(8, { cert: 'NEW-3', org: 'บริษัท ใหม่ จำกัด', webId: '' }),
       ],
       held,
       companies,
     );
-    expect(plan.read).toBe(6);
+    expect(plan.read).toBe(7);
     expect(plan.same).toBe(0);
     expect(plan.changed.map((c) => [c.rowNo, c.fields, c.origin, c.idx, c.gid])).toEqual([
       [2, ['ประเภทที่ 1 (%)'], 'base', 0, 1],
-      [3, ['วันที่อนุมัติ (พ.ศ.)'], 'tgo', 0, 2],
     ]);
-    expect(plan.news.map((n) => [n.rowNo, n.gid])).toEqual([[4, 900001], [6, 900001]]);
+    // a certificate the queue brought in is changed in the queue, not here (R7): row 3 is refused, nothing is written
+    expect(plan.log.find((e) => e.row === 3)?.action).toBe('refused');
+    expect(plan.news.map((n) => [n.rowNo, n.gid])).toEqual([[4, 1], [6, 1]]);
     expect(plan.errors).toEqual([{ rowNo: 5, reason: 'ซ้ำกับแถว 4' }, { rowNo: 7, reason: 'ต้องกรอก ชื่อองค์กร' }]);
-    expect(plan.companies).toEqual([{ id: 900001, name: 'บริษัท ใหม่ จำกัด' }]);
+    expect(plan.reviews.map((r) => [r.rowNo, r.reason])).toEqual([[8, 'ไม่พบบริษัทในระบบ']]);
+    expect(plan.companies).toEqual([]);
   });
   it('a row whose number is unique but whose organisation changed is a change of the organisation', () => {
-    const plan = planCertRows([L(2, { org: 'บริษัท เอ (ใหม่) จำกัด' })], held, companies);
+    const plan = planWith([L(2, { org: 'บริษัท เอ (ใหม่) จำกัด' })], held, companies);
     expect(plan.changed).toHaveLength(1);
     expect(plan.changed[0].fields).toEqual(['ชื่อองค์กร']);
-    expect(plan.changed[0].gid).toBe(900001);
-    expect(plan.companies.map((c) => c.name)).toEqual(['บริษัท เอ (ใหม่) จำกัด']);
+    expect(plan.changed[0].gid).toBe(1);
+    expect(plan.companies).toEqual([]);
   });
   it('a row that copies a held certificate\'s web id and organisation with another number is a new certificate: the held one is not changed', () => {
-    const plan = planCertRows([L(2, { cert: 'NEWNO-9', s1: 0.9 })], held, companies);
+    const plan = planWith([L(2, { cert: 'NEWNO-9', s1: 0.9 })], held, companies);
     expect(plan.changed).toEqual([]);
     expect(plan.news.map((n) => [n.rowNo, n.f.cert])).toEqual([[2, 'NEWNO-9']]);
     expect(plan.errors).toEqual([]);
   });
   it('a row with the held certificate\'s web id and number is still that certificate, whatever its organisation says', () => {
-    const plan = planCertRows([L(2, { org: 'บริษัท เอ (ใหม่) จำกัด' })], held, companies);
+    const plan = planWith([L(2, { org: 'บริษัท เอ (ใหม่) จำกัด' })], held, companies);
     expect(plan.changed.map((c) => [c.rowNo, c.origin, c.fields])).toEqual([[2, 'base', ['ชื่อองค์กร']]]);
     expect(plan.news).toEqual([]);
   });
@@ -246,7 +275,7 @@ describe('planning', () => {
       { origin: 'base' as const, idx: 0, gid: 1, f: F({ webId: '' }) },
       { origin: 'base' as const, idx: 1, gid: 1, f: F({ webId: '', s1: 0.5, s2: 0.4, s3: 0.1 }) },
     ];
-    const plan = planCertRows([L(2, { webId: '' }), L(3, { webId: '', s1: 0.5, s2: 0.4, s3: 0.1 })], two, companies);
+    const plan = planWith([L(2, { webId: '' }), L(3, { webId: '', s1: 0.5, s2: 0.4, s3: 0.1 })], two, companies);
     expect(plan.errors).toEqual([]);
     expect(plan.same).toBe(2);
   });
@@ -257,11 +286,11 @@ describe('planning', () => {
       phone: '', email: '', webId: '', note: '',
     } as unknown as Cert;
     const held = heldFrom([stored], 1, { ind: ['การผลิต'], size: ['ขนาดเล็ก'], prov: ['กรุงเทพมหานคร'], fy: ['FY67'] });
-    const plan = planCertRows([L(2, { webId: '', s1: 0.5 })], held, [{ id: 1, name: 'บริษัท เอ จำกัด' }]);
+    const plan = planWith([L(2, { webId: '', s1: 0.5 })], held, [{ id: 1, name: 'บริษัท เอ จำกัด' }]);
     expect(plan.changed.map((c) => [c.fields, c.gid])).toEqual([[['ประเภทที่ 1 (%)'], 2]]);
   });
   it('two rows for one held certificate: the second is skipped', () => {
-    const plan = planCertRows([L(2, {}), L(3, { s1: 1 })], held, companies);
+    const plan = planWith([L(2, {}), L(3, { s1: 1 })], held, companies);
     expect(plan.same).toBe(1);
     expect(plan.errors).toEqual([{ rowNo: 3, reason: 'ตรงกับใบรับรองเดียวกับแถว 2' }]);
   });
@@ -275,37 +304,38 @@ describe('saving', () => {
     certs: [[1, 'CFO-1', 'บริษัท เอ จำกัด', 'สำนักงานใหญ่', 'การผลิต', 0, 0, '1 ถนนทดสอบ', 0, '10110', '2025-03-15', '2027-03-14', 0, 0.6, 0.3, 0.1, '', '', '32040', '']],
     source: 'file',
   } as unknown as Dataset;
-  const save = (ls: CertLine[]) => {
+  const save = (ls: CertLine[], companies = [{ id: 5, name: 'บริษัท เอ จำกัด' }]) => {
     const B = build(base, {}, {});
-    const plan = planCertRows(ls, heldFrom(B.certs, base.certs.length, B.CD), B.companies.map((c) => ({ id: c.id, name: c.name })));
+    const plan = planWith(ls, heldFrom(B.certs, base.certs.length, B.CD), companies);
     return { plan, r: applyCertPlan(plan, base, [], [], 'sheet.xlsx', '2026-10-26T00:00:00.000Z') };
   };
   it('changed base row stays in the base; new ones go to the added list with their company; nothing else moves', async () => {
     const ls = await lines([
       row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'CFO-1', 'ชื่อองค์กร': 'บริษัท เอ จำกัด', 'วันที่อนุมัติ (พ.ศ. ตามเว็บ)': '15/03/2568', 'วันที่หมดอายุ (พ.ศ. ตามเว็บ)': '14/03/2570', 'ประเภทที่ 1 (%)': '50%', 'ประเภทที่ 2 (%)': '40%', 'ประเภทที่ 3 (%)': '10%', 'ปีงบประมาณ (FY)': 'FY67', 'รหัสรายการในเว็บ': '32040' }),
-      row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'CFO-5', 'ชื่อองค์กร': 'บริษัท ห้า จำกัด', 'ขนาดอุตสาหกรรม': 'ขนาดกลาง', 'อุตสาหกรรม': 'บริการ', 'จังหวัด': 'นนทบุรี' }),
+      row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'CFO-5', 'ชื่อองค์กร': 'บริษัท เอ จำกัด', 'ขนาดอุตสาหกรรม': 'ขนาดกลาง', 'อุตสาหกรรม': 'บริการ', 'จังหวัด': 'นนทบุรี' }),
     ]);
     const { plan, r } = save(ls);
     expect(plan.changed).toHaveLength(1);
     expect(plan.news).toHaveLength(1);
-    expect(r.changed && r.baseChanged && r.tgoChanged && r.addedChanged).toBe(true);
+    expect(r.changed && r.baseChanged && r.tgoChanged).toBe(true);
+    expect(r.addedChanged).toBe(false); // no company is made (R15)
     expect(r.base.source).toBe('upload');
     expect(r.base.fileName).toBe('sheet.xlsx');
     expect((r.base.certs[0] as unknown[])[12]).toBe(0);
     expect((r.base.certs[0] as unknown[]).slice(13, 16)).toEqual([0.5, 0.4, 0.1]);
     expect(r.tgo).toHaveLength(1);
-    expect(r.tgo[0]).toMatchObject({ cert: 'CFO-5', gid: 900001, org: 'บริษัท ห้า จำกัด' });
+    expect(r.tgo[0]).toMatchObject({ cert: 'CFO-5', gid: 5, org: 'บริษัท เอ จำกัด' });
     expect(r.base.cdicts.ind).toContain('บริการ');
-    expect(r.added.map((a) => [a.id, a.name])).toEqual([[900001, 'บริษัท ห้า จำกัด']]);
+    expect(r.added).toEqual([]);
   });
   it('after the save, the same sheet plans no new and no changed rows', async () => {
     const ls = await lines([
       row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'CFO-1', 'ชื่อองค์กร': 'บริษัท เอ จำกัด', 'วันที่อนุมัติ (พ.ศ. ตามเว็บ)': '15/03/2568', 'วันที่หมดอายุ (พ.ศ. ตามเว็บ)': '14/03/2570', 'ประเภทที่ 1 (%)': '50%', 'ประเภทที่ 2 (%)': '40%', 'ประเภทที่ 3 (%)': '10%' }),
-      row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'CFO-5', 'ชื่อองค์กร': 'บริษัท ห้า จำกัด', 'ขนาดอุตสาหกรรม': 'ขนาดกลาง', 'อุตสาหกรรม': 'บริการ', 'จังหวัด': 'นนทบุรี' }),
+      row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'CFO-5', 'ชื่อองค์กร': 'บริษัท เอ จำกัด', 'ขนาดอุตสาหกรรม': 'ขนาดกลาง', 'อุตสาหกรรม': 'บริการ', 'จังหวัด': 'นนทบุรี' }),
     ]);
     const { r } = save(ls);
     const after = build(r.base, {}, { added: r.added, certs: r.tgo.map((c) => ({ ...c, tgo: true })) });
-    const again = planCertRows(ls, heldFrom(after.certs, r.base.certs.length, after.CD), after.companies.map((c) => ({ id: c.id, name: c.name })));
+    const again = planWith(ls, heldFrom(after.certs, r.base.certs.length, after.CD), [{ id: 5, name: 'บริษัท เอ จำกัด' }]);
     expect(again.news).toEqual([]);
     expect(again.changed).toEqual([]);
     expect(again.same).toBe(2);
@@ -336,5 +366,112 @@ describe('the old full workbook still goes through core.ts', () => {
     expect(certKey(' cfo 1 ', 'บริษัท เอ  จำกัด')).toBe(TGOSync.key(' cfo 1 ', 'บริษัท เอ  จำกัด'));
     expect(certKey('CFO-1', 'บริษัท เอ จำกัด')).toBe(certKey(' cfo-1 ', 'บริษัท  เอ จำกัด'));
     expect(certKey('CFO-1', 'บริษัท เอ จำกัด')).not.toBe(certKey('CFO-1', 'เอ'));
+  });
+});
+
+describe('the sheet rules of the owner v2 spec', () => {
+  const CO = [{ id: 1, name: 'บริษัท เอ จำกัด' }, { id: 2, name: 'บริษัท บี จำกัด' }];
+  const NEW = { webId: '' };
+  const LG = (rowNo: number, f: Partial<CertFields>, extra: Partial<CertLine> = {}): CertLine => ({ rowNo, f: F(f), errors: [], ...extra });
+  it('a GCC code that names an existing company attaches a new certificate to it; no company is made (R3a, R15)', () => {
+    const plan = planWith([LG(2, { cert: 'G-1', org: 'บริษัท บี จำกัด', ...NEW }, { gcc: 'GCC-000002' })], [], CO);
+    expect(plan.news.map((n) => [n.rowNo, n.gid])).toEqual([[2, 2]]);
+    expect(plan.log[0]).toMatchObject({ action: 'queued', co: 2, gcc: 'GCC-000002', company: 'บริษัท บี จำกัด', cert: 'G-1' });
+    expect(plan.companies).toEqual([]);
+  });
+  it('a GCC row that matches a certificate the queue accepted, with the same values, is attached: no company is made (R3a)', () => {
+    const accepted = [{ origin: 'tgo' as const, idx: 0, gid: 2, f: F({ cert: 'G-A', org: 'บริษัท บี จำกัด', webId: '' }) }];
+    const plan = planWith([LG(2, { cert: 'G-A', org: 'บริษัท บี จำกัด', webId: '' }, { gcc: 'GCC-000002' })], accepted, CO);
+    expect(plan.log[0]).toMatchObject({ action: 'attached', co: 2, gcc: 'GCC-000002', company: 'บริษัท บี จำกัด' });
+    expect([plan.news, plan.changed, plan.companies]).toEqual([[], [], []]);
+  });
+  it('a GCC code that names no company goes to the review list with its reason (R3a)', () => {
+    const plan = planWith([LG(2, { cert: 'G-2', org: 'บริษัท บี จำกัด', ...NEW }, { gcc: 'GCC-000999' })], [], CO);
+    expect(plan.news).toEqual([]);
+    expect(plan.reviews.map((r) => [r.rowNo, r.reason])).toEqual([[2, 'รหัส GCC ไม่พบในระบบ']]);
+    expect(plan.log[0].action).toBe('review');
+  });
+  it('a name with a bracketed branch suffix matches the base company; the queued certificate takes the branch from the suffix (R3b, R4)', () => {
+    const plan = planWith([LG(2, { cert: 'B-1', org: 'บริษัท เอ จำกัด (65)', branch: '', ...NEW })], [], CO);
+    expect(plan.news).toHaveLength(1);
+    expect(plan.news[0]).toMatchObject({ gid: 1, f: { branch: '65' } });
+    expect(importNameKey('บริษัท เอ จำกัด (65)')).toBe(importNameKey('บริษัท เอ จำกัด (สำนักงานใหญ่)'));
+  });
+  it('a GCC code and a name that name different companies go to review (R3d)', () => {
+    const plan = planWith([LG(2, { cert: 'D-1', org: 'บริษัท เอ จำกัด', ...NEW }, { gcc: 'GCC-000002' })], [], CO);
+    expect(plan.reviews.map((r) => r.reason)).toEqual(['รหัส GCC กับชื่อไม่ตรงกัน']);
+  });
+  it('a name that matches two companies goes to review as a duplicate (R3b)', () => {
+    const plan = planWith([LG(2, { cert: 'D-2', org: 'บริษัท เอ จำกัด', ...NEW })], [], [...CO, { id: 3, name: 'บริษัท เอ (65) จำกัด' }]);
+    expect(plan.reviews.map((r) => r.reason)).toEqual(['พบบริษัทซ้ำ']);
+  });
+  it('a held certificate keeps its company: a GCC code of another company is a review, and the certificate is not moved (R3e)', () => {
+    const plan = planWith([LG(2, { s1: 0.5 }, { gcc: 'GCC-000002' })], [{ origin: 'base', idx: 0, gid: 1, f: F() }], CO);
+    expect(plan.changed).toEqual([]);
+    expect(plan.reviews.map((r) => [r.rowNo, r.reason])).toEqual([[2, 'รหัส GCC ไม่ตรงกับบริษัทของใบรับรองนี้']]);
+  });
+  it('blank cells keep the held values; a change lists only the non-blank cells, old -> new (R2, R6)', () => {
+    const plan = planWith([LG(2, { s1: 0.5, zip: '', prov: '' })], [{ origin: 'base', idx: 0, gid: 1, f: F() }], CO);
+    expect(plan.changed.map((c) => c.fields)).toEqual([['ประเภทที่ 1 (%)']]);
+    expect(plan.log[0].changes).toEqual([{ field: 'ประเภทที่ 1 (%)', from: '60%', to: '50%' }]);
+    expect(keepHeld(F({ zip: '', s1: null }), F())).toEqual(F());
+    expect(diffFields(F({ s1: 0.5 }), F())).toEqual([{ field: 'ประเภทที่ 1 (%)', from: '60%', to: '50%' }]);
+  });
+  it('e-mail: a row with status พบ fills an empty company e-mail; an existing one is kept and reported; other statuses are ignored; addresses are split and joined (R8)', () => {
+    const rows = [
+      LG(2, { cert: 'E-1', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'a@x.co; b@x.co, a@x.co' }),
+      LG(3, { cert: 'E-2', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'x@x.co' }),
+      LG(4, { cert: 'E-3', org: 'บริษัท เอ จำกัด', ...NEW }, { emailSt: 'ค้นแล้วไม่พบ', email: 'z@x.co' }),
+    ];
+    const plan = planWith(rows, [], CO, { emailOf: (id) => (id === 2 ? '' : 'old@x.co') });
+    expect(plan.emails).toEqual([expect.objectContaining({ co: 2, action: 'filled', to: 'a@x.co | b@x.co | x@x.co' })]);
+    expect(plan.log.map((e) => e.email)).toEqual([
+      { action: 'filled', from: '', to: 'a@x.co | b@x.co | x@x.co' },
+      { action: 'filled', from: '', to: 'a@x.co | b@x.co | x@x.co' },
+      { action: 'none', from: '', to: '' },
+    ]);
+    const kept = planWith([LG(2, { cert: 'E-4', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'new@x.co' })], [], CO, { emailOf: () => 'old@x.co' });
+    expect(kept.emails).toEqual([expect.objectContaining({ co: 2, action: 'kept', from: 'old@x.co', to: 'new@x.co' })]);
+    expect(kept.log[0].email).toEqual({ action: 'kept', from: 'old@x.co', to: 'new@x.co' });
+    expect(splitEmails('a@x.co; b@x.co, a@x.co |c@x.co')).toEqual(['a@x.co', 'b@x.co', 'c@x.co']);
+  });
+  it('the template example row is skipped with its message (R11)', () => {
+    const plan = planWith([LG(2, { cert: 'CFO-EXAMPLE-0001', org: 'บริษัท ตัวอย่าง จำกัด' })], [], CO);
+    expect([plan.news, plan.errors, plan.reviews]).toEqual([[], [], []]);
+    expect(plan.log[0]).toMatchObject({ action: 'rejected', msg: 'แถวตัวอย่างจากแม่แบบ ข้ามแถวนี้' });
+  });
+  it('a queue record that was rejected is declined before, and a waiting one is already queued; neither is added again (R5)', () => {
+    const rows = [LG(2, { cert: 'R-1', org: 'บริษัท บี จำกัด', ...NEW }), LG(3, { cert: 'W-1', org: 'บริษัท บี จำกัด', ...NEW })];
+    const plan = planWith(rows, [], CO, { queue: (f) => (f.cert === 'R-1' ? { st: 'r', f } : f.cert === 'W-1' ? { st: 'p', f } : undefined) });
+    expect(plan.news).toEqual([]);
+    expect(plan.waiting.map((w) => w.st)).toEqual(['r', 'p']);
+    expect(plan.log.map((e) => e.action)).toEqual(['declined before', 'already queued']);
+    expect(ACTION_TH['declined before']).toBe('ถูกปฏิเสธไว้แล้ว');
+  });
+  it('an unknown header is listed as a warning; the known ones (the e-mail check note by its start) are not (R10)', async () => {
+    const bytes = await xlsxBytes([{ name: SHEET, head: [...SHEET_HEADS, 'คอลัมน์ไม่รู้จัก', 'หมายเหตุการตรวจสอบอีเมล (ค้นเมื่อ 27/10/2026)', 'อีเมล'], rows: [] }]);
+    const r = await readCertSheetFull(bytes, SHEET);
+    expect(r.unknown).toEqual(['คอลัมน์ไม่รู้จัก']);
+    expect(planCertRows([], ctxOf([], CO), r.unknown).warnings).toEqual(['คอลัมน์ไม่รู้จัก']);
+  });
+  it('export writes รหัสบริษัท (GCC) and อีเมล after the 27 columns, and its round trip gives no change (R12, R13)', async () => {
+    const sheet = exportSheets([{ f: F(), gcc: 'GCC-000001', email: 'a@x.co | b@x.co' }], TODAY)[0];
+    expect(sheet.head.slice(27)).toEqual(['รหัสบริษัท (GCC)', 'อีเมล']);
+    expect(sheet.rows[0].slice(27)).toEqual(['GCC-000001', 'a@x.co | b@x.co']);
+    const ls = await readCertSheet(await xlsxBytes([sheet]), SHEET);
+    expect([ls[0].gcc, ls[0].email, ls[0].emailSt]).toEqual(['GCC-000001', 'a@x.co | b@x.co', '']);
+    expect(planWith(ls, [{ origin: 'base', idx: 0, gid: 1, f: F() }], CO)).toMatchObject({ news: [], changed: [], same: 1, errors: [] });
+  });
+  it('the change report counts rows per action, and the companies whose e-mail was filled (R14)', () => {
+    const plan = planWith([LG(2, { cert: 'C-1', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'a@x.co' }), LG(3, { cert: 'C-2', org: 'บริษัท ไม่มี จำกัด', ...NEW })], [], CO);
+    const c = countLog(plan.log);
+    expect([c.queued, c.review, c.emailFilled, c.emailKept]).toEqual([1, 1, 1, 0]);
+  });
+  it('a GCC code reads back the company id it names; a name key ignores legal form, spaces, head office and branch numbers (R3)', () => {
+    expect([gccIdOf('GCC-000361'), gccIdOf(' gcc-361 '), gccIdOf('TGO-7'), gccIdOf('NEW-A'), gccIdOf('GCC-'), gccIdOf('361')]).toEqual([361, 361, 900007, 1e12 + 10, null, null]);
+    expect(importNameKey('บริษัท เอ จำกัด')).toBe('เอ');
+    expect(importNameKey('บริษัท  เอ  จำกัด (00000)')).toBe('เอ');
+    expect(importNameKey('บริษัท เอ จำกัด (0001)')).toBe('เอ');
+    expect([branchOfName('บริษัท เอ จำกัด (65)'), branchOfName('บริษัท เอ (0001)'), branchOfName('บริษัท เอ จำกัด (00000)'), branchOfName('บริษัท เอ')]).toEqual(['65', '0001', '', '']);
   });
 });

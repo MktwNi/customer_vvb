@@ -1,12 +1,14 @@
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
-import { dtTh, fmtN, isoTh, todayISO } from '../lib/format';
-import type { SyncCfg } from '../lib/types';
+import { dtTh, fmtN, gccCode, isoTh, todayISO } from '../lib/format';
+import type { Company, SyncCfg } from '../lib/types';
 import { Notice, PageHead, labelCol } from '../components/ui';
 import { SelField } from '../components/Select';
 import { TeamSyncCard } from '../components/TeamSync';
 import { RegistryXlsx } from '../components/RegistryXlsx';
 import { Icon } from '../components/icons';
+import { canAcceptReview, missingFields, type ReviewRec } from '../lib/sheetReview';
+import { isLocalId } from '../lib/teamSync';
 
 /** One block of the page (design §8): title, one grey status line, the one action at the right; the long
  *  explanation folds under "รายละเอียด". */
@@ -157,6 +159,106 @@ export function TgoQueue({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+/** A search key for a company: lower case, no spaces; the GCC code is matched without its dash too. */
+const coKey = (s: string) => s.toLowerCase().replace(/\s+/g, '');
+
+/** One row of the review list (R16): its reason, the certificate, the organisation, the GCC code as the sheet wrote it and
+ *  the sheet's values. A reviewer picks an existing company (search by name or GCC code), then "รับ" (needs the company and
+ *  the required fields) or "ไม่รับ". A viewer reads the row only. */
+function SheetReviewItem({ rec, canEdit, companies, onDone }: { rec: ReviewRec; canEdit: boolean; companies: Company[]; onDone: (msg: string) => void }) {
+  const { engine: e } = useApp();
+  const [q, setQ] = useState('');
+  const [co, setCo] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const picked = co != null ? companies.find((c) => c.id === co) : undefined;
+  const k = coKey(q);
+  const kd = k.replace(/-/g, '');
+  const found = k ? companies.filter((c) => coKey(c.name).includes(k) || coKey(gccCode(c.id)).replace(/-/g, '').includes(kd)).slice(0, 8) : [];
+  const missing = missingFields(rec.f);
+  const ok = canAcceptReview(rec, co);
+  const decide = async (accept: boolean) => {
+    if (accept && co == null) return;
+    setBusy(true);
+    const msg = accept ? await e.acceptReview(rec.id, co as number) : e.rejectReview(rec.id);
+    setBusy(false);
+    onDone(msg);
+  };
+  const vals = Object.entries(rec.vals);
+  return (
+    <div style={{ borderTop: '1px solid var(--divider)', padding: '10px 0', display: 'flex', flexDirection: 'column', gap: 6, overflowWrap: 'anywhere' }}>
+      <span className="co-name dense">{rec.org || 'ไม่ระบุชื่อองค์กร'}</span>
+      <span className="t-meta">{`เหตุผล ${rec.reason} · เลขที่ใบรับรอง ${rec.cert || 'ไม่ระบุ'} · รหัส GCC ตามชีต ${rec.gcc || 'ไม่ได้กรอก'}`}</span>
+      <span className="t-meta">{`จากไฟล์ ${rec.file} · ${dtTh(rec.at)}`}</span>
+      <details className="upd-more">
+        <summary className="lnk">{`ค่าในชีต (${fmtN(vals.length)} คอลัมน์)`}</summary>
+        <div className="upd-more-b">
+          {vals.map(([h, v]) => <span key={h}>{`${h}: ${v}`}</span>)}
+        </div>
+      </details>
+      {canEdit && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {picked ? (
+            <span style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', minWidth: 0 }}>
+              <span className="t-meta">เลือกแล้ว</span>
+              <span className="co-name dense">{`${gccCode(picked.id)} · ${picked.name}`}</span>
+              <button type="button" className="quiet tgo-act" onClick={() => setCo(null)}>เปลี่ยนบริษัท</button>
+            </span>
+          ) : (
+            <>
+              <input value={q} onChange={(ev) => setQ(ev.target.value)} placeholder="ค้นหาบริษัทจากชื่อหรือรหัส GCC" aria-label={`ค้นหาบริษัทสำหรับใบ ${rec.cert}`} className="fld" style={{ maxWidth: 420 }} />
+              {found.map((c) => (
+                <button type="button" key={c.id} className="quiet tgo-act" style={{ textAlign: 'left' }} onClick={() => setCo(c.id)} aria-label={`เลือก ${gccCode(c.id)} ${c.name}`}>
+                  {`${gccCode(c.id)} · ${c.name}`}
+                </button>
+              ))}
+              {k ? (!found.length && <span className="t-meta">ไม่พบบริษัทนี้ในระบบ</span>) : <span className="t-meta">ยังไม่ได้เลือกบริษัท</span>}
+            </>
+          )}
+          {missing.length > 0 && <span className="t-meta">{missing.join(' · ')}</span>}
+          <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => void decide(true)} disabled={!ok || busy} className="btn pri sm" aria-label={`รับใบ ${rec.cert}`}>รับ</button>
+            <button type="button" onClick={() => void decide(false)} disabled={busy} className="quiet tgo-act" aria-label={`ไม่รับใบ ${rec.cert}`}>ไม่รับ</button>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The review list of the certificate sheet (R16, lib/sheetReview.ts): the rows a sheet save could not apply, kept for the
+ *  whole team, next to the TGO queue. Decided rows leave the list; a viewer reads it and gets no buttons. */
+export function SheetReview({ canEdit }: { canEdit: boolean }) {
+  const { engine: e } = useApp();
+  useEngineVersion();
+  const [msg, setMsg] = useState(''); // what the last decision did, read out by a screen reader
+  const recs = e.reviewRecs();
+  const waiting = recs.filter((r) => r.st === 'p');
+  const accepted = recs.filter((r) => r.st === 'a').length, rejected = recs.filter((r) => r.st === 'r').length;
+  // a device-local company (ids from 900000) is not the team's, so a row cannot be attached to it (R16)
+  const companies = e.B.companies.filter((c) => !isLocalId(c.id));
+  return (
+    <UpdSection
+      id="sheet-review"
+      title="รอตรวจสอบจากไฟล์ชีต"
+      status={
+        <span className="upd-line">
+          <span><span className="t-muted">รอตรวจ</span> {fmtN(waiting.length)} แถว</span>
+          <span><span className="t-muted">รับแล้ว</span> {fmtN(accepted)} แถว</span>
+          <span><span className="t-muted">ไม่รับ</span> {fmtN(rejected)} แถว</span>
+        </span>
+      }
+      more="แถวจากไฟล์ใบรับรอง CFO ที่บันทึกเข้าระบบไม่ได้ จะมาอยู่ที่นี่แทนที่จะถูกทิ้ง ได้แก่ หาบริษัทในระบบไม่พบ รหัส GCC ไม่พบหรือไม่ตรงกับชื่อ มีบริษัทชื่อเดียวกันหลายแห่ง หรือรหัส GCC ไม่ตรงกับบริษัทของใบรับรองที่มีอยู่แล้ว ระบบไม่สร้างบริษัทใหม่ให้ เลือกบริษัทที่มีอยู่แล้ว แล้วกด “รับ” ระบบจะบันทึกแถวนั้นให้บริษัทที่เลือก เหมือนแถวปกติของไฟล์ (ใบใหม่เข้ารอตรวจ TGO ใบที่มีอยู่แล้วแก้เฉพาะช่องที่มีค่าในชีต) กด “ไม่รับ” แล้วแถวนั้นจะไม่ถูกเพิ่มซ้ำจากไฟล์ใดอีก"
+    >
+      <div role="status" aria-live="polite" className="t-meta">{msg}</div>
+      {!canEdit && <span className="t-meta">บัญชีของคุณดูรายการนี้ได้อย่างเดียว การรับหรือไม่รับทำได้เฉพาะผู้ที่แก้ข้อมูลลูกค้าได้</span>}
+      {!waiting.length && <span className="empty">ไม่มีแถวที่รอตรวจจากไฟล์ชีต</span>}
+      {waiting.map((r) => (
+        <SheetReviewItem key={r.id} rec={r} canEdit={canEdit} companies={companies} onDone={setMsg} />
+      ))}
+    </UpdSection>
+  );
+}
+
 export function Update() {
   const { engine: e } = useApp();
   useEngineVersion();
@@ -243,6 +345,7 @@ export function Update() {
       </UpdSection>
 
       <TgoQueue canEdit={canEdit} />
+      <SheetReview canEdit={canEdit} />
 
       {!accounts && (
         <UpdSection
