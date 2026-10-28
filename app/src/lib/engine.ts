@@ -1306,8 +1306,8 @@ export class GccEngine {
     if (c.review) parts.push(`รอตรวจสอบ ${fmtN(c.review)} ใบ`);
     if (c['already in review']) parts.push(`อยู่ในรายการรอตรวจสอบแล้ว ${fmtN(c['already in review'])} ใบ`);
     if (c.error + c.rejected) parts.push(`ข้าม ${fmtN(c.error + c.rejected)} แถว`);
-    if (c.emailFilled) parts.push(`เติมอีเมล ${fmtN(c.emailFilled)} บริษัท`);
-    if (c.emailKept) parts.push(`คงอีเมลเดิม ${fmtN(c.emailKept)} บริษัท`);
+    if (c.emailFilled) parts.push(`เพิ่มอีเมล ${fmtN(c.emailFilled)} บริษัท`);
+    if (c.emailKept) parts.push(`มีอีเมลอยู่แล้ว ${fmtN(c.emailKept)} บริษัท ไม่เพิ่ม`);
     return `บันทึกแล้ว: ${parts.join(' · ') || 'ไม่มีการเปลี่ยนแปลง'} · ไม่มีการสร้างบริษัทใหม่${c.queued ? ' · ใบที่เข้ารอตรวจจะเข้าทะเบียนเมื่อผู้ตรวจรับแล้ว' : ''}`;
   }
   /** The sheet's rows saved (the save needs set.data and edit.cust: a queue row is the team's), with the change report the

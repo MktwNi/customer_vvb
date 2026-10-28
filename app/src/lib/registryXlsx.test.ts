@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { build } from './core';
-import { ACTION_TH, applyCertPlan, branchOfName, certKey, countLog, diffFields, exportSheets, gccIdOf, heldFrom, importNameKey, keepHeld, planCertRows, readCertSheet, readCertSheetFull, readDateBE, readPct, sheetNoteOf, splitEmails, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine, type HeldCert, type PlanCtx } from './registryXlsx';
+import { ACTION_TH, applyCertPlan, branchOfName, certKey, countLog, diffFields, exportSheets, gccIdOf, heldFrom, importNameKey, keepHeld, mergeCoEmail, planCertRows, readCertSheet, readCertSheetFull, readDateBE, readPct, sheetNoteOf, splitEmails, SHEET, SHEET_DESC, SHEET_HEADS, SHEET_TGO, templateSheets, workbookKind, type CertFields, type CertLine, type HeldCert, type PlanCtx } from './registryXlsx';
 import { xlsxBytes, type XCell, type XSheet } from './xlsx';
 import { parseXlsx } from './core';
 import * as TGOSync from './tgoSync';
@@ -417,7 +417,7 @@ describe('the sheet rules of the owner v2 spec', () => {
     expect(keepHeld(F({ zip: '', s1: null }), F())).toEqual(F());
     expect(diffFields(F({ s1: 0.5 }), F())).toEqual([{ field: 'ประเภทที่ 1 (%)', from: '60%', to: '50%' }]);
   });
-  it('e-mail: a row with status พบ fills an empty company e-mail; an existing one is kept and reported; other statuses are ignored; addresses are split and joined (R8)', () => {
+  it('e-mail: a row with status พบ fills an empty company e-mail; other statuses are ignored; addresses are split and joined (R8). An existing address is never removed or replaced; the rule is v3, a new address is added after it (see the union tests)', () => {
     const rows = [
       LG(2, { cert: 'E-1', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'a@x.co; b@x.co, a@x.co' }),
       LG(3, { cert: 'E-2', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'x@x.co' }),
@@ -430,9 +430,10 @@ describe('the sheet rules of the owner v2 spec', () => {
       { action: 'filled', from: '', to: 'a@x.co | b@x.co | x@x.co' },
       { action: 'none', from: '', to: '' },
     ]);
-    const kept = planWith([LG(2, { cert: 'E-4', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'new@x.co' })], [], CO, { emailOf: () => 'old@x.co' });
-    expect(kept.emails).toEqual([expect.objectContaining({ co: 2, action: 'kept', from: 'old@x.co', to: 'new@x.co' })]);
-    expect(kept.log[0].email).toEqual({ action: 'kept', from: 'old@x.co', to: 'new@x.co' });
+    // v3: the old rule kept the existing address and added nothing; now the new address follows it, the old one stays first
+    const added = planWith([LG(2, { cert: 'E-4', org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email: 'new@x.co' })], [], CO, { emailOf: () => 'old@x.co' });
+    expect(added.emails).toEqual([expect.objectContaining({ co: 2, action: 'filled', from: 'old@x.co', to: 'old@x.co | new@x.co' })]);
+    expect(added.log[0].email).toEqual({ action: 'filled', from: 'old@x.co', to: 'old@x.co | new@x.co' });
     expect(splitEmails('a@x.co; b@x.co, a@x.co |c@x.co')).toEqual(['a@x.co', 'b@x.co', 'c@x.co']);
   });
   it('the template example row is skipped with its message (R11)', () => {
@@ -473,5 +474,67 @@ describe('the sheet rules of the owner v2 spec', () => {
     expect(importNameKey('บริษัท  เอ  จำกัด (00000)')).toBe('เอ');
     expect(importNameKey('บริษัท เอ จำกัด (0001)')).toBe('เอ');
     expect([branchOfName('บริษัท เอ จำกัด (65)'), branchOfName('บริษัท เอ (0001)'), branchOfName('บริษัท เอ จำกัด (00000)'), branchOfName('บริษัท เอ')]).toEqual(['65', '0001', '', '']);
+  });
+  // v3 (owner rule R8): the company's e-mail is the union of its own addresses and the sheet's new ones, never a replacement
+  describe('the company e-mail union (R8, v3)', () => {
+    /** Sheet rows of company 2 (บริษัท บี), each with one e-mail cell and status พบ, against a company that holds `have`. */
+    const union = (have: string, cells: string[]) =>
+      planWith(cells.map((email, i) => LG(i + 2, { cert: `U-${i + 1}`, org: 'บริษัท บี จำกัด', ...NEW }, { emailSt: 'พบ', email })), [], CO, {
+        emailOf: (id) => (id === 2 ? have : ''),
+      });
+    it('a company with one e-mail A and a sheet e-mail B gets "A | B", and the change is filled', () => {
+      const plan = union('a@example.test', ['b@example.test']);
+      expect(plan.emails).toEqual([{ co: 2, name: 'บริษัท บี จำกัด', from: 'a@example.test', to: 'a@example.test | b@example.test', action: 'filled' }]);
+      expect(plan.log[0].email).toEqual({ action: 'filled', from: 'a@example.test', to: 'a@example.test | b@example.test' });
+      expect(countLog(plan.log)).toMatchObject({ emailFilled: 1, emailKept: 0 });
+    });
+    it('a sheet e-mail equal to A, in any case, is kept: the company keeps A and nothing is written', () => {
+      const plan = union('a@example.test', ['A@Example.TEST']);
+      expect(plan.emails).toEqual([{ co: 2, name: 'บริษัท บี จำกัด', from: 'a@example.test', to: 'a@example.test', action: 'kept' }]);
+      expect(plan.log[0].email).toEqual({ action: 'kept', from: 'a@example.test', to: 'a@example.test' });
+      expect(countLog(plan.log)).toMatchObject({ emailFilled: 0, emailKept: 1 });
+    });
+    it('a sheet cell "A; B" on a company with A gives "A | B"; an existing ";" list is read, and its addresses stay', () => {
+      expect(union('a@example.test', ['a@example.test; b@example.test']).emails[0]).toMatchObject({ action: 'filled', to: 'a@example.test | b@example.test' });
+      expect(union('a@example.test;c@example.test', ['b@example.test']).emails[0]).toMatchObject({ action: 'filled', to: 'a@example.test | c@example.test | b@example.test' });
+    });
+    it('two rows of one company with B and C give both once: the distinct addresses across the rows, one planned write', () => {
+      const plan = union('a@example.test', ['b@example.test', 'c@example.test; B@example.test', 'C@example.test']);
+      const to = 'a@example.test | b@example.test | c@example.test';
+      expect(plan.emails).toEqual([expect.objectContaining({ co: 2, action: 'filled', to })]);
+      expect(plan.log.map((e) => e.email)).toEqual([0, 1, 2].map(() => ({ action: 'filled', from: 'a@example.test', to })));
+    });
+    it('a company with no e-mail gets the sheet addresses, each once', () => {
+      expect(union('', ['x@example.test; y@example.test', 'X@example.test']).emails).toEqual([expect.objectContaining({ action: 'filled', from: '', to: 'x@example.test | y@example.test' })]);
+    });
+    it('an existing address is never removed or replaced, and one it holds is not written again', () => {
+      expect(union('a@example.test | b@example.test', ['c@example.test']).emails[0].to).toBe('a@example.test | b@example.test | c@example.test');
+      expect(union('a@example.test | a@example.test', ['A@example.test']).emails[0]).toMatchObject({ action: 'kept', to: 'a@example.test | a@example.test' });
+    });
+    it('a second import of the same file is a no-op for e-mail: the addresses are there, so nothing is filled (R13)', () => {
+      const saved = union('a@example.test', ['b@example.test; c@example.test']).emails[0].to;
+      const second = union(saved, ['b@example.test; c@example.test']);
+      expect(second.emails).toEqual([expect.objectContaining({ action: 'kept', to: saved })]);
+      expect(countLog(second.log)).toMatchObject({ emailFilled: 0, emailKept: 1 });
+      // the row itself is unchanged too: its held certificate matches, so the file writes nothing at all
+      const held: HeldCert[] = [{ origin: 'base', idx: 0, gid: 2, f: F({ cert: 'U-1', org: 'บริษัท บี จำกัด', webId: '' }) }];
+      const again = planWith([LG(2, { cert: 'U-1', org: 'บริษัท บี จำกัด', webId: '' }, { emailSt: 'พบ', email: 'b@example.test; c@example.test' })], held, CO, { emailOf: () => saved });
+      expect([again.news, again.changed, again.reviews, again.same]).toEqual([[], [], [], 1]);
+      expect(again.emails.filter((x) => x.action === 'filled')).toEqual([]);
+    });
+    it('the e-mail cell read from a workbook keeps its line breaks, so one address to a line is split', async () => {
+      const sheet = { name: SHEET, head: [...SHEET_HEADS, 'อีเมล', 'สถานะการค้นหาอีเมล'], rows: [[...row({ ...BASE_ROW, 'เลขที่ใบรับรอง': 'U-9', 'ชื่อองค์กร': 'บริษัท บี จำกัด' }), 'b@example.test\nc@example.test', 'พบ']] };
+      const read = await readCertSheet(await xlsxBytes([sheet]), SHEET);
+      expect(read[0].email).toBe('b@example.test\nc@example.test');
+      expect(planWith(read, [], CO, { emailOf: () => 'a@example.test' }).emails).toEqual([expect.objectContaining({ action: 'filled', to: 'a@example.test | b@example.test | c@example.test' })]);
+    });
+    it('splitEmails takes ";", ",", "|" and line breaks, trims, and drops empties and repeats (case does not count)', () => {
+      expect(splitEmails(' a@example.test\r\nb@example.test\n;| ,A@example.test ,  ')).toEqual(['a@example.test', 'b@example.test']);
+    });
+    it('mergeCoEmail: the company\'s own addresses come first as they are, the new ones after them; nothing new is kept as it is', () => {
+      expect(mergeCoEmail('A;B', ['C'])).toEqual({ action: 'filled', to: 'A | B | C' });
+      expect(mergeCoEmail('A | B', ['b'])).toEqual({ action: 'kept', to: 'A | B' });
+      expect(mergeCoEmail('', ['C', 'c'])).toEqual({ action: 'filled', to: 'C' });
+    });
   });
 });

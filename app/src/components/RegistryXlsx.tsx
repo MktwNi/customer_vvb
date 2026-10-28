@@ -29,16 +29,18 @@ function Block({ title, status, action, more, children }: { title: string; statu
 
 const EMAIL_TH: Record<EmailAction, string> = {
   none: '',
-  filled: 'เติมอีเมลให้บริษัท',
-  kept: 'มีอีเมลอยู่แล้ว ไม่เปลี่ยน',
+  filled: 'เพิ่มอีเมล',
+  kept: 'มีอยู่แล้ว ไม่เพิ่ม',
   skipped: 'ไม่นำอีเมลไปใช้ เพราะแถวนี้ไม่ได้บันทึก',
 };
-/** A row's e-mail decision as the report writes it, with the address the sheet has. */
+/** A row's e-mail decision as the report writes it (R8, v3): filled shows the company's e-mail before and after, kept shows the
+ *  address it keeps, and a skipped row shows the sheet's addresses it did not use. */
 const emailLine = (r: CertLogEntry): string => {
   const a = r.email;
   if (a.action === 'none') return '';
-  if (a.action === 'filled') return `${EMAIL_TH.filled}: ${a.to}`;
-  return `${EMAIL_TH[a.action]} · ในชีต ${a.to}`;
+  if (a.action === 'filled') return `${EMAIL_TH.filled}: เดิม ${a.from || 'ว่าง'} เป็น ${a.to}`;
+  if (a.action === 'kept') return `${EMAIL_TH.kept}: ${a.from}`;
+  return `${EMAIL_TH.skipped} · ในชีต ${a.to}`;
 };
 
 /** One row of the change report: its number and action, the company (GCC code and name), the certificate, what changed
@@ -85,7 +87,7 @@ export function ChangeReport({ log, warnings }: { log: CertLogEntry[]; warnings:
         {count('รอตรวจสอบจากไฟล์ชีต', c.review)}
         {count('อยู่ในรายการรอตรวจสอบแล้ว', c['already in review'])}
         {count('แถวที่ข้าม', c.error + c.rejected)}
-        <span><span className="t-muted">อีเมลบริษัท</span> {`เติม ${fmtN(c.emailFilled)} · คงเดิม ${fmtN(c.emailKept)}`}</span>
+        <span><span className="t-muted">อีเมลบริษัท</span> {`เพิ่ม ${fmtN(c.emailFilled)} · มีอยู่แล้ว ${fmtN(c.emailKept)}`}</span>
         <span>ไม่สร้างบริษัทใหม่</span>
       </div>
       {reasons.length > 0 && <span className="t-meta">{`รอตรวจสอบ ${fmtN(c.review)} แถว · ${reasons.join(' · ')}`}</span>}
