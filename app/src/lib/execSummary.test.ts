@@ -171,6 +171,21 @@ describe('deals won and their value', () => {
   });
 });
 
+describe('lost is a count of companies, as the ปิดงาน tab counts it', () => {
+  it('two lost jobs of one company are one company lost; the jobs are counted apart', () => {
+    const S = emptySales();
+    const job = (id: string, gid: number, result: 'YES' | 'NO') => {
+      S.deals[id] = newDeal({ id, year: YEAR, section: 'Retention', order: Object.keys(S.deals).length, client: 'Company C', gid, jobStatus: 'closed', closedDate: '2026-10-13' }, 'ทดสอบ', at('2026-09-01'));
+      S.steps[`${id}/CLOSED DEAL`] = { d: '2026-10-13', n: result };
+    };
+    job('l1', 103, 'NO');
+    job('l2', 103, 'NO');
+    job('l3', 101, 'NO');
+    const s = execSummary(engine({ sales: S }), 'month', TODAY);
+    expect(s.kpis.won).toMatchObject({ closedJobs: 3, lost: 2 });
+  });
+});
+
 describe('the period in a Sales Tracker year outside the bounds of today\'s year', () => {
   // year 2567 (CE 2024): a job of Company B closed in March 2025, a job of Company A closed on 13 Oct 2026
   const S = emptySales();
@@ -205,7 +220,7 @@ describe('funnel: the year\'s customers, each stage counted from the app\'s own 
   });
 });
 
-describe('follow-ups: the ติดตาม page\'s counts, overdue first, then today, then upcoming', () => {
+describe('follow-ups: the ติดตาม page\'s counts, overdue first, then today (no later appointment)', () => {
   const tasks: Task[] = [
     { id: 't1', gid: 101, title: '', type: 'call', date: '2026-10-10', time: '10:00', note: '', done: false },
     { id: 't2', gid: 104, title: '', type: 'call', date: '2026-10-14', time: '', note: '', done: false },
@@ -222,16 +237,22 @@ describe('follow-ups: the ติดตาม page\'s counts, overdue first, then
     expect([s.kpis.followOverdue, s.kpis.followDue]).toEqual([1, 1]);
   });
 
-  it('the list: overdue, then today, then upcoming, with the appointment in words', () => {
+  it('the list: overdue, then today, with the appointment in words', () => {
     const s = execSummary(e, 'month', TODAY);
+    // Company C's appointment (20 Oct) is after today, so it is not in the list (the KPI counts overdue and today only)
     expect(s.followUps.map((r) => [r.name, r.group])).toEqual([
       ['Company A', 'overdue'],
       ['Company B', 'today'],
-      ['Company C', 'upcoming'],
     ]);
     expect(s.followUps[0].when.kind).toBe('bad');
     expect(s.followUps[1].line).toContain('14 ต.ค.');
     expect(s.followUps[0].contact.startsWith('ติดต่อแล้ว')).toBe(true);
+  });
+
+  it('the list has no appointment after today, and its length is the KPI (overdue plus today)', () => {
+    const s = execSummary(e, 'month', TODAY);
+    expect(s.followUps.every((r) => r.next <= TODAY)).toBe(true);
+    expect(s.followUps).toHaveLength(s.kpis.followOverdue + s.kpis.followDue);
   });
 
   it('the list shows at most ten companies, the oldest appointments first', () => {
@@ -258,6 +279,17 @@ describe('recent contacts and the four buckets of the period', () => {
     expect(days[0]).toBe('2026-10-14');
     expect(s.recent.some((r) => r.name === 'Synthetic Person')).toBe(true);
     expect(s.recent.every((r) => r.day >= '2026-10-12')).toBe(true);
+  });
+
+  it('a contact filed at a step shows the step in Thai, the close step without "(YES / NO)", not its code', () => {
+    const S = tracker();
+    const acts: Record<string, DealAct> = S.acts ?? {};
+    acts['d1/a2'].stage = 'FOLLOW'; // LINE on Company A's job, filed at FOLLOW
+    acts['d2/a4'].stage = 'CLOSED DEAL'; // an e-mail to Company D, filed at the close step
+    acts['d3/a5'].stage = 'QUOTATION'; // a meeting on Company A's free-text row, filed at QUOTATION
+    const s = execSummary(engine({ sales: S, log: logs(), people: PEOPLE }), 'week', TODAY);
+    expect(Object.fromEntries(s.recent.filter((r) => r.deal).map((r) => [r.deal, r.result]))).toEqual({ d1: 'ติดตามผล', d2: 'ผลการขาย', d3: 'ส่งใบเสนอราคา' });
+    expect(s.recent.some((r) => /[A-Z]/.test(r.result))).toBe(false);
   });
 
   it('a month in four buckets that cover it in order, their counts adding to the contacts', () => {
