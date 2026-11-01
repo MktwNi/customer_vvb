@@ -24,6 +24,7 @@ export const NAV: { title: string; items: NavItem[] }[] = [
     title: 'งานขาย',
     items: [
       { key: 'overview', label: 'ภาพรวม', icon: 'overview' },
+      { key: 'exec', label: 'สรุปผู้บริหาร', icon: 'summary', cap: 'view.sales' },
       { key: 'sales', label: 'Sales Tracker', icon: 'sales', cap: 'view.sales' },
       { key: 'people', label: 'ผู้ติดต่อ', icon: 'people', cap: 'view.sales' },
       { key: 'search', label: 'ค้นหา', icon: 'search' },

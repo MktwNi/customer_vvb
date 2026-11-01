@@ -23,6 +23,13 @@ const PATHS = {
       <path d="M18 14.6a6.5 6.5 0 0 1 3.5 5.4" />
     </>
   ),
+  // a page with three bars: the one-page summary (สรุปผู้บริหาร)
+  summary: (
+    <>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 16v-3M12 16V8M16 16v-5" />
+    </>
+  ),
   sales: (
     <>
       <path d="M3 17l6-6 4 4 8-8" />
