@@ -150,7 +150,7 @@ describe('the page with synthetic data for the week', () => {
   it('the won total: one job, its forecast in money, and the funnel by its own labels', () => {
     expect(page).toContain('มูลค่า Forecast 250,000 บาท');
     expect(page).toContain('ได้งานในช่วงที่เลือก 1 งาน · ทำงานให้ 1 บริษัท');
-    expect(page).toContain('ปิดงานในช่วงที่เลือกทั้งหมด 2 งาน · ไม่ได้งาน 1 งาน');
+    expect(page).toContain('ปิดงานในช่วงที่เลือกทั้งหมด 2 งาน · ไม่ได้งาน 1 บริษัท'); // the lost figure counts companies, as the ปิดงาน line does
     for (const label of ['ติดต่อประสานงาน', 'ส่งใบเสนอราคา', 'ติดตามผล', 'ได้งาน']) expect(page).toContain(label);
     expect(page).toContain('ทั้งปี 2569 · ไม่ตามช่วงเวลา');
   });

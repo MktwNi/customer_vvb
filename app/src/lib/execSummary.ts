@@ -52,6 +52,8 @@ const CHANNELS: { key: ExecChannel; label: string }[] = [
   { key: 'other', label: `${ACT_TH.line}/${ACT_TH.other}` },
 ];
 const chOfAct = (t: ActType): ExecChannel => (t === 'call' || t === 'email' || t === 'meet' ? t : 'other');
+/** A step's Thai name as the deal panel shows it (the close step without its "(YES / NO)"); its code when it has none. */
+const stepTh = (w: { code: string; th: string }) => (w.th || w.code).replace(/\s*\(YES \/ NO\)$/, '');
 const RECENT_MAX = 8;
 const FOLLOW_MAX = 10;
 
@@ -75,7 +77,8 @@ export type ExecStageKey = 'contact' | 'quote' | 'follow' | 'won';
 export interface ExecStage { key: ExecStageKey; label: string; count: number }
 /** One contact. `deal`: the job it was logged on ('' for a company's or a person's own log). */
 export interface ExecEntry { day: string; name: string; channel: string; result: string; companyId: number | null; deal: string }
-export type ExecGroup = 'overdue' | 'today' | 'upcoming';
+/** A follow-up is overdue (its appointment before today) or due today; a later appointment is not listed. */
+export type ExecGroup = 'overdue' | 'today';
 export interface ExecFollowUp {
   id: number; name: string; group: ExecGroup; next: string;
   when: { text: string; kind: 'bad' | 'warn' | '' };
@@ -145,7 +148,7 @@ function contactsOf(src: ExecSrc, S: SalesState, from: string, today: string): E
       out.push({
         day: a.d, at: a.at || a.d, ch: chOfAct(a.type),
         name: co?.name || d.client,
-        result: a.stage ? stepLabel(S, d, a.stage, today).code : '',
+        result: a.stage ? stepTh(stepLabel(S, d, a.stage, today)) : '',
         companyId: co ? co.id : null,
         row: d,
         deal: d.id,
@@ -156,7 +159,7 @@ function contactsOf(src: ExecSrc, S: SalesState, from: string, today: string): E
 }
 
 const change = (value: number, prev: number): ExecChange => ({ value, prev, delta: value - prev, pct: prev ? (value - prev) / prev : null });
-const FOLLOW_ORDER: Record<ExecGroup, number> = { overdue: 0, today: 1, upcoming: 2 };
+const FOLLOW_ORDER: Record<ExecGroup, number> = { overdue: 0, today: 1 };
 
 /**
  * The summary for a period of the team's work, read on `today`. `opts.year`: the Sales Tracker year the jobs and the
@@ -212,12 +215,12 @@ function summarize(src: ExecSrc, S: SalesState, P: ExecPeriod, today: string, ye
   const won = src.workTally(wonRows, { attr });
   const money = moneySum(S, wonRows, attr);
 
-  // the follow-ups: the ติดตาม page's companies with an appointment, overdue first, then today, then upcoming
+  // the follow-ups: the ติดตาม page's companies with an appointment due today or overdue (the two KPI counts), overdue first
   const fRows = followRows(src, year, today);
   const fc = followCounts(fRows, today);
-  const groupOf = (r: FollowRow): ExecGroup => (r.next < today ? 'overdue' : r.next === today ? 'today' : 'upcoming');
+  const groupOf = (r: FollowRow): ExecGroup => (r.next < today ? 'overdue' : 'today');
   const followUps: ExecFollowUp[] = fRows
-    .filter((r) => r.next)
+    .filter((r) => r.next && r.next <= today)
     .map((r) => ({ r, group: groupOf(r) }))
     .sort((a, b) => FOLLOW_ORDER[a.group] - FOLLOW_ORDER[b.group] || a.r.next.localeCompare(b.r.next) || a.r.name.localeCompare(b.r.name, 'th'))
     .slice(0, FOLLOW_MAX)

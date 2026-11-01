@@ -149,7 +149,7 @@ export function SummaryPage({ s, kind, year, today, canMoney, onKind, onOpen, on
               </span>
             )}
           </div>
-          <p className="t-meta">ปิดงานในช่วงที่เลือกทั้งหมด {fmtN(won.closedJobs)} งาน · ไม่ได้งาน {fmtN(won.lost)} งาน</p>
+          <p className="t-meta">ปิดงานในช่วงที่เลือกทั้งหมด {fmtN(won.closedJobs)} งาน · ไม่ได้งาน {fmtN(won.lost)} บริษัท</p>
         </section>
       </div>
 
@@ -187,7 +187,7 @@ export function SummaryPage({ s, kind, year, today, canMoney, onKind, onOpen, on
         </section>
 
         <section className="card ex-card" aria-labelledby="ex-fu-h">
-          <SectionHead as="h3" id="ex-fu-h" title="ต้องติดตามต่อ" sub="เลยกำหนดก่อน แล้วนัดวันนี้ และนัดถัดไป" />
+          <SectionHead as="h3" id="ex-fu-h" title="ต้องติดตามต่อ" sub="เลยกำหนดก่อน แล้วนัดวันนี้" />
           {s.followUps.length === 0 ? (
             <p className="empty">ไม่มีรายการที่ต้องติดตามต่อ</p>
           ) : (
