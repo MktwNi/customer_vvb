@@ -324,6 +324,52 @@ button.kpi{cursor:pointer}
 .no-scrollbar{scrollbar-width:none}
 .no-scrollbar::-webkit-scrollbar{display:none}
 
+/* ---- สรุปผู้บริหาร (tabs/Summary.tsx): the four KPIs are the shared .kpis row; then two cards side by side and
+   two lists. A bar is .ex-bar (the track --bar-track, the fill --bar); every figure is tabular. Phones: one column */
+.ex-cols{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:var(--sp-4);align-items:start}
+.ex-card{display:flex;flex-direction:column;gap:var(--sp-4);padding:var(--sp-5);min-width:0}
+.ex-card .sec-h{margin:0}
+.ex-cap{margin:0 0 var(--sp-2)}
+.ex-chan{display:grid;gap:10px}
+.ex-row{display:grid;grid-template-columns:minmax(0,88px) minmax(0,1fr) minmax(0,76px);gap:10px;align-items:center;font-size:var(--fs-body);color:var(--ink)}
+.ex-bar{display:block;height:10px;border-radius:var(--r-pill);background:var(--bar-track);overflow:hidden}
+.ex-bar i{display:block;height:100%;border-radius:var(--r-pill);background:var(--bar)}
+.ex-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ex-wk{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:end;padding-top:var(--sp-3);border-top:1px solid var(--divider)}
+.ex-wk-c{display:grid;gap:var(--sp-1);justify-items:center;text-align:center;font-size:var(--fs-sec);min-width:0}
+.ex-wk-b{display:flex;align-items:flex-end;width:100%;height:96px}
+.ex-wk-b i{display:block;width:100%;max-width:56px;margin:0 auto;border-radius:6px 6px 2px 2px;background:var(--bar)}
+.ex-stages{display:grid;gap:12px}
+.ex-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;font-size:var(--fs-body);color:var(--ink)}
+.ex-stage .ex-bar{grid-column:1/-1}
+.ex-stage b{font-weight:500;font-variant-numeric:tabular-nums}
+.ex-won{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 12px;padding-top:var(--sp-3);border-top:1px solid var(--divider)}
+.ex-won b{font-size:var(--fs-section);font-weight:500;color:var(--ink)}
+.ex-money{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:baseline}
+.ex-tbl{width:100%;border-collapse:collapse;table-layout:fixed;font-size:var(--fs-body);color:var(--ink)}
+.ex-tbl th,.ex-tbl td{padding:9px 6px;text-align:left;vertical-align:top;border-bottom:1px solid var(--divider);overflow-wrap:anywhere}
+.ex-tbl th{font-size:var(--fs-meta);font-weight:400;color:var(--muted);border-bottom:1px solid var(--line)}
+.ex-tbl tbody tr:last-child td{border-bottom:0}
+.ex-tbl .ex-d{width:76px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ex-tbl .ex-ch{width:92px}
+.ex-tbl .ex-rs{width:30%}
+.ex-name{cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);border-radius:6px;overflow-wrap:anywhere}
+@media (hover:hover){.ex-name:hover{text-decoration:underline}}
+.ex-fu{list-style:none;margin:0;padding:0;display:grid}
+.ex-fu li{display:grid;gap:4px;padding:12px 0;border-bottom:1px solid var(--divider);min-width:0}
+.ex-fu li:first-child{padding-top:0}
+.ex-fu li:last-child{border-bottom:0;padding-bottom:0}
+.ex-fu-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0}
+.ex-more{align-self:flex-start}
+.ex-foot{margin:0;font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+@media (max-width:900px){.ex-cols{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){
+  .ex-card{padding:var(--sp-4)}
+  .ex-row{grid-template-columns:minmax(0,72px) minmax(0,1fr) minmax(0,64px)}
+  .ex-tbl .ex-ch{width:72px}
+  .ex-tbl .ex-rs{display:none}
+}
+
 /* map */
 .map-tip{position:absolute;pointer-events:none;background:#081247;color:#fff;border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.5;transition:opacity .12s;z-index:3;min-width:180px}
 .map-zoom button{width:36px;height:36px;border-radius:50%;border:1px solid var(--field);background:#fff;cursor:pointer;font-size:18px;line-height:1;color:var(--ink);transition:background-color .12s}

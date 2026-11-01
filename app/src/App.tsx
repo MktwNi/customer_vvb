@@ -16,6 +16,7 @@ import { Dedup } from './tabs/Dedup';
 import { Update } from './tabs/Update';
 import { Notes } from './tabs/Notes';
 import { Sales } from './tabs/Sales';
+import { Summary } from './tabs/Summary';
 import { DealPanel } from './components/DealPanel';
 import { SalesMessages } from './components/SalesToast';
 import { PayGuardHost } from './components/PayChk';
@@ -231,6 +232,7 @@ export default function App() {
               {!ready && ui.tab !== 'help' && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
                 {ready && (ui.tab === 'overview' || !allowed) && <Overview />}
+                {ready && allowed && ui.tab === 'exec' && <Summary />}
                 {ready && allowed && ui.tab === 'sales' && <Sales />}
                 {ready && allowed && ui.tab === 'people' && <People />}
                 {ready && ui.tab === 'search' && <Search />}
