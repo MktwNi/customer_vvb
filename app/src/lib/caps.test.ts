@@ -13,11 +13,11 @@ const HEAD: CapSet = { ...BUILTIN.sales.c, 'view.comm': 'all', 'edit.share': 'al
 const ACCT: CapSet = Object.fromEntries((['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'docs.open', 'edit.pay', 'docs.up', 'qt.check', 'pay.check', 'notify.mail', 'set.units'] as CapId[]).map((k) => [k, 'all']));
 
 describe('the catalogue', () => {
-  it('has the 26 ids of the shared contract, unique, in their groups', () => {
+  it('has the 28 ids of the shared contract, unique, in their groups', () => {
     expect(CAP_IDS).toEqual([
       'view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'view.exp', 'docs.open',
       'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'edit.exp', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log',
-      'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users',
+      'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'mp.view', 'mp.edit', 'set.users',
     ]);
     expect(new Set(CAP_IDS).size).toBe(CAP_IDS.length);
     expect(CAPS.every((c) => GROUPS.some((g) => g.id === c.g))).toBe(true);
@@ -106,7 +106,7 @@ describe('needs, scopes and resolving', () => {
     expect(parseCaps('x')).toBeNull();
     expect(capsWire({ 'del.log': 'own', 'view.sales': 'all', 'edit.cust': undefined })).toEqual({ 'del.log': 'own', 'view.sales': 1 });
     // role_save names the job-expense capabilities, 0 when off (the script keeps them for a save that does not)
-    expect(roleWire({ 'view.sales': 'all' })).toEqual({ 'view.sales': 1, 'view.exp': 0, 'edit.exp': 0 });
+    expect(roleWire({ 'view.sales': 'all' })).toEqual({ 'view.sales': 1, 'view.exp': 0, 'edit.exp': 0, 'mp.view': 0, 'mp.edit': 0 });
     expect(roleWire(BUILTIN.sales.c)).toMatchObject({ 'view.exp': 1, 'edit.exp': 'own' });
   });
   it('lateUnknown: the job-expense capabilities a script\'s ผู้ดูแลระบบ lacks (a script from before them); none when it can\'t tell', () => {
@@ -141,7 +141,7 @@ describe('needs, scopes and resolving', () => {
   it('capsOf: the script\'s me.caps; without them the built-in caps of me.role (the deployed script) less job expenses; unknown role nothing', () => {
     expect(capsOf(null)).toBeNull();
     const less = (c: CapSet) => Object.fromEntries(Object.entries(c).filter(([k]) => !LATE_CAPS.includes(k as CapId)));
-    expect(LATE_CAPS).toEqual(['view.exp', 'edit.exp']);
+    expect(LATE_CAPS).toEqual(['view.exp', 'edit.exp', 'mp.view', 'mp.edit']);
     // a script before capabilities neither hides nor guards job expenses: no account gets them from it
     expect(capsOf({ role: 'sales' })).toEqual(less(BUILTIN.sales.c));
     expect(capsOf({ role: 'viewer' })).toEqual(BUILTIN.viewer.c);

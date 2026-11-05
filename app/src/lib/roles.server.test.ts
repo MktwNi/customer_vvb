@@ -19,8 +19,8 @@ const REFRESH = 'มีเวอร์ชันใหม่ กรุณาร�
 
 // ------------------------------------------------------------------ the catalogue as designed
 
-const IDS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'view.exp', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'edit.exp', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'set.users'];
-const NEEDS: Record<string, string> = { 'view.cash': 'view.money', 'view.comm': 'view.money', 'view.exp': 'view.money', 'docs.open': 'view.money', 'edit.deal': 'view.money', 'edit.pay': 'view.money', 'edit.exp': 'view.exp', 'docs.up': 'view.money', 'edit.jqt': 'view.money', 'edit.share': 'view.comm', 'qt.check': 'view.money', 'pay.check': 'view.cash', 'set.units': 'view.comm' };
+const IDS = ['view.sales', 'view.plan', 'view.money', 'view.cash', 'view.comm', 'view.exp', 'docs.open', 'edit.cust', 'edit.deal', 'edit.task', 'edit.pay', 'edit.exp', 'docs.up', 'edit.ctag', 'edit.jqt', 'edit.share', 'del.rec', 'del.log', 'qt.check', 'pay.check', 'notify.mail', 'set.lists', 'set.units', 'set.dedup', 'set.data', 'mp.view', 'mp.edit', 'set.users'];
+const NEEDS: Record<string, string> = { 'mp.edit': 'mp.view', 'view.cash': 'view.money', 'view.comm': 'view.money', 'view.exp': 'view.money', 'docs.open': 'view.money', 'edit.deal': 'view.money', 'edit.pay': 'view.money', 'edit.exp': 'view.exp', 'docs.up': 'view.money', 'edit.jqt': 'view.money', 'edit.share': 'view.comm', 'qt.check': 'view.money', 'pay.check': 'view.cash', 'set.units': 'view.comm' };
 const SCOPED = ['edit.deal', 'edit.pay', 'edit.exp', 'del.log'];
 const REAL = ['view.money', 'view.comm', 'view.exp'];
 const ones = (l: string[]): Caps => Object.fromEntries(l.map((c) => [c, 1]));
@@ -149,7 +149,7 @@ afterEach(() => {
 describe('the capability catalogue (CAPS_)', () => {
   const { CAPS_, KEY_CAP, BUILTIN_ROLES } = mk().consts;
 
-  it('has exactly the 26 designed ids, in the designed order, with their needs, scopes and real redaction', () => {
+  it('has exactly the 28 designed ids, in the designed order, with their needs, scopes and real redaction', () => {
     expect(CAPS_!.map((c) => c.id)).toEqual(IDS);
     for (const c of CAPS_!) {
       expect([c.id, c.needs ?? null]).toEqual([c.id, NEEDS[c.id] ?? null]);
