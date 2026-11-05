@@ -17,7 +17,7 @@
 export type CapId =
   | 'view.sales' | 'view.plan' | 'view.money' | 'view.cash' | 'view.comm' | 'view.exp' | 'docs.open'
   | 'edit.cust' | 'edit.deal' | 'edit.task' | 'edit.pay' | 'edit.exp' | 'docs.up' | 'edit.ctag' | 'edit.jqt' | 'edit.share' | 'del.rec' | 'del.log'
-  | 'qt.check' | 'pay.check' | 'notify.mail' | 'set.lists' | 'set.units' | 'set.dedup' | 'set.data' | 'set.users';
+  | 'qt.check' | 'pay.check' | 'notify.mail' | 'set.lists' | 'set.units' | 'set.dedup' | 'set.data' | 'mp.view' | 'mp.edit' | 'set.users';
 export type Scope = 'all' | 'own';
 /** The capabilities an account or role holds, with their scope. */
 export type CapSet = Partial<Record<CapId, Scope>>;
@@ -52,6 +52,8 @@ export const CAPS: CapDef[] = [
   { id: 'set.units', g: 'a', label: 'ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น', desc: 'รายชื่อหน่วยงาน คนในหน่วยงาน และอัตรา %', needs: 'view.comm' },
   { id: 'set.dedup', g: 'a', label: 'ตรวจข้อมูลซ้ำ', desc: 'ตัดสินว่าบริษัทซ้ำกันหรือไม่' },
   { id: 'set.data', g: 'a', label: 'นำเข้าข้อมูลและไฟล์สำรอง', desc: 'นำเข้า Sales Tracker เดิม ไฟล์สำรองทีม (ส่งออก CSV ทำได้ทุกคนที่เห็นหน้านั้น)' },
+  { id: 'mp.view', g: 'a', label: 'ดู Master Plan (CFO)', desc: 'เปิดหน้า Master Plan เห็นแผนทวนสอบและ Gantt ของทุกเคส' },
+  { id: 'mp.edit', g: 'a', label: 'แก้ไข Master Plan (CFO)', desc: 'เพิ่ม แก้ไข และลบแผนทวนสอบในหน้า Master Plan', needs: 'mp.view' },
   { id: 'set.users', g: 'a', label: 'จัดการผู้ใช้และสิทธิ์', desc: 'บัญชี บทบาท และอนุมัติคำขอ · เฉพาะผู้ดูแลระบบ' },
 ];
 export const CAP = Object.fromEntries(CAPS.map((c) => [c.id, c])) as Record<CapId, CapDef>;
@@ -134,7 +136,7 @@ export const capsWire = (c: CapSet) => Object.fromEntries((Object.entries(c) as 
  * this build names each of them, 0 when off (roleWire). They only ever come from the script: one before
  * capabilities (no me.caps) never stored or hid their records, so its built-in role gives none (capsOf).
  */
-export const LATE_CAPS: CapId[] = ['view.exp', 'edit.exp'];
+export const LATE_CAPS: CapId[] = ['view.exp', 'edit.exp', 'mp.view', 'mp.edit'];
 /** A role's capabilities as role_save sends them: capsWire, plus 0 for every LATE_CAPS one that is off. */
 export const roleWire = (c: CapSet): Record<string, 1 | 'own' | 0> => ({ ...Object.fromEntries(LATE_CAPS.map((k) => [k, 0 as const])), ...(capsWire(c) as Record<string, 1 | 'own'>) });
 /**

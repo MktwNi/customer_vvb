@@ -50,6 +50,11 @@
  *   { action: 'notify_test', tok }               -> { ok }   (notify.mail: one mail to one's own verified address,
  *     at most 3 an hour and 6 a day: 'too_many_tests')
  *   { action: 'qt_check', tok, k, st, note?, fp, s? } -> { ok, seq, chk }   (qt.check: see "quotation check" below)
+ * Token, mp.view / mp.edit (the CFO Master Plan page, gcc-master-plan; see "Master Plan" at the end of this file):
+ *   { action: 'mp_list', tok }                   -> { ok, cases: [{ id, v, by, at, data, del: 0 }] }   (mp.view; data = the plan as JSON text)
+ *   { action: 'mp_save', tok, id, v, data }      -> { ok, id, v, by, at } | { ok: false, error: 'conflict', current }   (mp.edit)
+ *   { action: 'mp_del', tok, id, v }             -> { ok, id, v } | { ok: false, error: 'conflict', current }   (mp.edit)
+ *     v = the version this client last saw (0 = a new case): anything else answers conflict with the stored row.
  * Token, set.users (an admin):
  *   { action: 'users', tok }                     -> { ok, users: [{ u, name, role, on, mc, ll, c, locked, em, ok, notify }],
  *                                                     roles, grants, reqs, audit }
@@ -263,6 +268,8 @@ const CAPS_ = [
   { id: 'set.units', g: 'a', th: 'ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น', needs: 'view.comm', d: [1, 0, 0] },
   { id: 'set.dedup', g: 'a', th: 'ตรวจข้อมูลซ้ำ', d: [1, 0, 0] },
   { id: 'set.data', g: 'a', th: 'นำเข้าข้อมูลและไฟล์สำรอง', d: [1, 0, 0] },
+  { id: 'mp.view', g: 'a', th: 'ดู Master Plan (CFO)', d: [1, 0, 0] },
+  { id: 'mp.edit', g: 'a', th: 'แก้ไข Master Plan (CFO)', needs: 'mp.view', d: [1, 0, 0] },
   { id: 'set.users', g: 'a', th: 'จัดการผู้ใช้และสิทธิ์', d: [1, 0, 0] },
 ];
 /** The built-in roles: their ids are what USERS has always stored. admin is locked to everything. */
@@ -275,7 +282,7 @@ const BUILTIN_ROLES = [
  * Capabilities added after the first web app with capabilities shipped (job expenses). That build cannot show
  * them, so a role_save whose `c` does not name one keeps what the role has (roleSave_); later builds send 0.
  */
-const LATE_CAPS_ = ['view.exp', 'edit.exp'];
+const LATE_CAPS_ = ['view.exp', 'edit.exp', 'mp.view', 'mp.edit'];
 /**
  * What writing (w) and deleting (d) a record needs, by key prefix; the first match wins. A capability id,
  * a list (any one of them), or '' = nobody (qchk/: only the qt_check action writes it). ow / od: when the
@@ -541,6 +548,8 @@ function doPost(e) {
     if (!actor.legacy && actor.mc && ['me', 'passwd', 'logout'].indexOf(action) < 0) return reply_(actor, { ok: false, error: 'must_change_password' });
     const acct = account_(action, req, actor); // null for the actions below
     if (acct) return acct;
+    // Master Plan keeps its own tab and capabilities: nothing below applies to it, and nothing of the team's data changes
+    if (action === 'mp_list' || action === 'mp_save' || action === 'mp_del') return reply_(actor, mp_(action, req, actor));
     if (!actor.legacy) {
       // a tab still open on a build from before the capabilities may read, but not write: it would
       // send records shaped by the old rules (its queue is kept, and sent again after a refresh)
@@ -1033,9 +1042,9 @@ function hello_() {
     }
     tid = p.TEAM_ID;
     it = Number(p.KDF_ITER || KDF_ITER_DEFAULT);
-    return { ok: true, app: 'gcc-team-sync', v: API_V, files: true, mode: mode_(A), tid: tid, it: it, notify: notifyOf_(p) };
+    return { ok: true, app: 'gcc-team-sync', v: API_V, files: true, mp: 1, mode: mode_(A), tid: tid, it: it, notify: notifyOf_(p) };
   }
-  return { ok: true, app: 'gcc-team-sync', v: API_V, files: true, mode: mode_(A), tid: tid, it: it, notify: notifyState_(A) };
+  return { ok: true, app: 'gcc-team-sync', v: API_V, files: true, mp: 1, mode: mode_(A), tid: tid, it: it, notify: notifyState_(A) };
 }
 
 /** hello's notify: { on, since } (see the protocol); from the cached directory, else from Properties. */
@@ -4652,4 +4661,93 @@ function cleanName_(s) {
     n = chars.slice(0, 150 - ext.length).join('') + ext;
   }
   return n || 'เอกสาร';
+}
+
+// ---------------------------------------------------------------- Master Plan
+/*
+ * CFO verification plans of the Master Plan page (repo gcc-master-plan). They live in a tab of their own, so
+ * pull_ never sends them to the sales web app and no sales key or capability changes. Who may read or write is
+ * mp.view / mp.edit, given from the same page as every other capability. Deleting only marks the row, so the
+ * owner of the sheet can still restore a case. `by` and `at` are written here and cannot be supplied.
+ */
+const MP_SHEET = 'master_plan';
+const MP_HEADER = ['id', 'v', 'data', 'by', 'at', 'del'];
+const MP_ID_RE = /^[\w-]{1,40}$/;
+const MP_SCHEMA = 'gcc-master-plan-cfo';
+const MP_MAX_CHARS = 45000; // a sheet cell holds 50,000 characters
+
+function mp_(action, req, actor) {
+  if (actor.legacy || !actor.caps['mp.view']) return { ok: false, error: 'forbidden' };
+  if (action === 'mp_list') return { ok: true, cases: mpRows_().filter((r) => !r.del).map(mpOut_) };
+  if (!actor.caps['mp.edit']) return { ok: false, error: 'forbidden' };
+  return action === 'mp_save' ? mpSave_(req, actor) : mpDel_(req, actor);
+}
+
+/** The tab, created on the first save (caller holds the lock). */
+function mpSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(MP_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(MP_SHEET);
+    if (sh.getMaxColumns() > MP_HEADER.length) sh.deleteColumns(MP_HEADER.length + 1, sh.getMaxColumns() - MP_HEADER.length);
+    sh.getRange(1, 1, 1, MP_HEADER.length).setValues([MP_HEADER]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function mpRows_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MP_SHEET);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, MP_HEADER.length).getValues().map((r, i) => ({
+    row: i + 2, id: String(r[0]), v: Number(r[1]) || 0, data: String(r[2]), by: String(r[3]), at: String(r[4]), del: String(r[5]) === '1',
+  }));
+}
+
+function mpOut_(r) {
+  return { id: r.id, v: r.v, by: r.by, at: r.at, data: r.data, del: r.del ? 1 : 0 };
+}
+
+/** Writes one row as text, so Sheets never reads a name, a date or a JSON value as something else. */
+function mpWrite_(sh, row, id, v, data, by, at, del) {
+  const need = row - sh.getMaxRows();
+  if (need > 0) sh.insertRowsAfter(sh.getMaxRows(), need);
+  const rng = sh.getRange(row, 1, 1, MP_HEADER.length);
+  rng.setNumberFormat('@');
+  rng.setValues([[id, String(v), data, by, at, del ? '1' : '0']]);
+}
+
+function mpVersion_(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : -1;
+}
+
+function mpSave_(req, actor) {
+  const id = String(req.id || ''), v = mpVersion_(req.v), d = req.data;
+  if (!MP_ID_RE.test(id) || v < 0 || !d || typeof d !== 'object' || d.schema !== MP_SCHEMA) return { ok: false, error: 'bad_data' };
+  d.id = id;
+  const text = JSON.stringify(d);
+  if (text.length > MP_MAX_CHARS) return { ok: false, error: 'too_large' };
+  return withLock_(() => {
+    const sh = mpSheet_();
+    const r = mpRows_().filter((x) => x.id === id)[0];
+    if (v !== (r ? r.v : 0)) return { ok: false, error: 'conflict', current: r ? mpOut_(r) : null };
+    const at = new Date().toISOString(), next = v + 1;
+    mpWrite_(sh, r ? r.row : sh.getLastRow() + 1, id, next, text, actor.name, at, false);
+    return { ok: true, id: id, v: next, by: actor.name, at: at };
+  });
+}
+
+function mpDel_(req, actor) {
+  const id = String(req.id || ''), v = mpVersion_(req.v);
+  if (!MP_ID_RE.test(id) || v < 0) return { ok: false, error: 'bad_data' };
+  return withLock_(() => {
+    const sh = mpSheet_();
+    const r = mpRows_().filter((x) => x.id === id)[0];
+    if (!r) return { ok: false, error: 'not_found' };
+    if (r.del) return { ok: true, id: id, v: r.v };
+    if (v !== r.v) return { ok: false, error: 'conflict', current: mpOut_(r) };
+    mpWrite_(sh, r.row, id, v + 1, r.data, actor.name, new Date().toISOString(), true);
+    return { ok: true, id: id, v: v + 1 };
+  });
 }

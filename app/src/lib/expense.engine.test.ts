@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createGasSim, type GasSim } from '../../../team-sync/sim.mjs';
 import { GccEngine } from './engine';
 import { memoryStore } from './storage';
-import { BUILTIN, CAPS, LATE_CAPS, type CapSet } from './caps';
+import { BUILTIN, CAPS, type CapSet } from './caps';
 import { expensesOf } from './expense';
 import { cashLines } from './sales';
 import { chkRows } from './payCheck';
@@ -245,7 +245,7 @@ describe('a team script with configurable roles from before job expenses (v4, no
     const L = await lead(BEFORE);
     const S = await member(L, 'aek', 'เอก', 'sales');
     const ids = (e: GccEngine) => e.capsShown().map((c) => c.id);
-    const rest = CAPS.map((c) => c.id).filter((k) => !LATE_CAPS.includes(k));
+    const rest = CAPS.map((c) => c.id).filter((k) => k !== 'view.exp' && k !== 'edit.exp'); // the two this script lacks
     // the admin page reads the roles: its ผู้ดูแลระบบ has every capability the script knows
     const dir = await L.e.adminDir();
     expect(ids(L.e)).toEqual(rest);
