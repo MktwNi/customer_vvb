@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { STG, TT, stageOf } from '../lib/constants';
-import { TH_M, addDays, daysBetween, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
+import { TH_M, addDays, daysBetween, dmTh, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
 import { beYear, fmtMoney, jobServices, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { ccVars, custKey, dealKey } from '../lib/custColor';
@@ -65,6 +65,10 @@ export function Plan() {
   const first = `${calM}-01`;
   const start = addDays(first, -dow(first));
   const selISO = ui.calDay || today;
+  // the right card opens on the upcoming work (งานที่กำลังจะถึง, five a page); a day pressed in the calendar, or a
+  // link to a day (planDayLink sets calDay), opens that day's list instead
+  const [dayOn, setDayOn] = useState(() => !!ui.calDay);
+  const [upPage, setUpPage] = useState(0);
   // the Sales Tracker (for an account that sees it) and its year: the contact list's jobs and every
   // customer's service types (lib/svcType.ts), read from the Services of its jobs, never stored
   const sees = e.can('view.sales');
@@ -168,8 +172,21 @@ export function Plan() {
     const c = e.company(gid);
     return <CoAvatar key={key} name={c ? c.name : title} web={c?.web} set={c?.set} size={size} />;
   };
-  const upcoming = pick(tasksK).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || '')).slice(0, 8);
-  const upPays = pick(paysK).filter((x) => x.line.due >= today).slice(0, 4);
+  // งานที่กำลังจะถึง: the appointments and installments still to come, by date, five a page
+  const upcoming = pick(tasksK).filter((x) => !x.t.done && x.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.t.time || '').localeCompare(b.t.time || ''));
+  const upPays = pick(paysK).filter((x) => x.line.due >= today);
+  const upRows = [...upcoming.map((u) => ({ at: u.date, u, x: undefined as PayK | undefined })), ...upPays.map((x) => ({ at: x.line.due, u: undefined as TaskK | undefined, x }))].sort((a, b) => a.at.localeCompare(b.at));
+  const UP_N = 5;
+  const upPages = Math.max(1, Math.ceil(upRows.length / UP_N));
+  const upNow = Math.min(upPage, upPages - 1);
+  const upShown = upRows.slice(upNow * UP_N, upNow * UP_N + UP_N);
+  // นัดที่ผ่านมา: the latest two appointments before today (under the calendar)
+  const past = pick(tasksK).filter((x) => x.date < today).sort((a, b) => b.date.localeCompare(a.date) || (b.t.time || '').localeCompare(a.t.time || '')).slice(0, 2);
+  /** a day pressed in the calendar or a row: that day's list */
+  const goDay = (d: string) => {
+    set({ calDay: d, calM: d.slice(0, 7) });
+    setDayOn(true);
+  };
   /** "กรีนวัลเลย์ ฟู้ดส์" with its deal's service types, "รับชำระ PAY2 · 53,500 บาท" ("PAY" for a single installment) under it: opens the deal (the
    *  receipt is recorded there). It keeps its status look in both colour modes. In งานที่กำลังจะถึง (`when`) the
    *  name is 14px, as the appointments there: a short list under the day's 16px cards. */
@@ -247,7 +264,7 @@ export function Plan() {
               </div>
             )}
             <div className="pl-nav">
-              {calM !== today.slice(0, 7) && <button className="btn xs" onClick={() => set({ calM: today.slice(0, 7), calDay: today })}>วันนี้</button>}
+              {calM !== today.slice(0, 7) && <button className="btn xs" onClick={() => { set({ calM: today.slice(0, 7), calDay: today }); setDayOn(true); }}>วันนี้</button>}
               <button className="btn xs" onClick={() => set({ calM: new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7) })}>เดือนก่อน</button>
               <button className="btn xs" onClick={() => set({ calM: new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7) })}>เดือนถัดไป</button>
             </div>
@@ -265,7 +282,7 @@ export function Plan() {
               // by type, each name says its types ("ซากิโนมิยะ ประเทศไทย (CFO, CFP)"): the colour is not seen
               const said = (name: string, types: readonly SvcTypeId[]) => (mode === 'type' ? `${name} (${typeWords(types)})` : name);
               return (
-                <button key={d} className={cls} onClick={() => set({ calDay: d })} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => said(x.name, x.types)), ps.map((x) => ({ name: said(shortName(x.deal.client), x.types), late: x.line.lateDays > 0 })))}>
+                <button key={d} className={cls} onClick={() => { set({ calDay: d }); setDayOn(true); }} aria-pressed={isSel} aria-label={cellLabel(isoTh(d), d === today, ts.map((x) => said(x.name, x.types)), ps.map((x) => ({ name: said(shortName(x.deal.client), x.types), late: x.line.lateDays > 0 })))}>
                   <span className="pl-dn">{+d.slice(8)}</span>
                   {entries.length > 0 && (
                     <>
@@ -333,9 +350,29 @@ export function Plan() {
               </>
             )}
           </div>
+          <div className="pl-past">
+            <h3 className="pl-up-h">นัดที่ผ่านมา</h3>
+            {!past.length && <span className="pl-empty">ยังไม่มีนัดที่ผ่านมา</span>}
+            {past.map((x) => {
+              const ti = taskInfo(e, x.t);
+              const tyName = (TT.find((y) => y[0] === x.t.type) || TT[0])[1];
+              return (
+                <button key={x.t.id} className="pl-up-row hv" onClick={() => goDay(x.t.date)} style={markVars(x.ck, x.types)}>
+                  <span className="pl-up-date"><b>{dmTh(x.t.date)}</b><span className="pl-up-when">{x.t.done ? 'เสร็จแล้ว' : 'ยังไม่ได้ทำ'}</span></span>
+                  <i className="pl-up-bar" aria-hidden="true" />
+                  <span className="pl-up-body">
+                    <span className="pl-up-co">{ti.title}</span>
+                    <span className="pl-up-tt">{tyName}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="pl-day card">
+          {dayOn ? (<>
+          <button className="lnk pl-up-back" onClick={() => setDayOn(false)}>กลับไปนัดที่กำลังจะถึง</button>
           <div className="pl-day-head">
             <span className="pl-day-dn">{+selISO.slice(8)}</span>
             <span className="pl-day-t">
@@ -383,21 +420,43 @@ export function Plan() {
               </div>
             );
           })}
-          <span className="pl-up-h">งานที่กำลังจะถึง</span>
-          {!upcoming.length && !upPays.length && <span className="pl-empty">ยังไม่มีงานที่กำลังจะถึง</span>}
-          {/* contacts and installments in one list by date */}
-          {[...upcoming.map((u) => ({ at: u.date, u, x: undefined })), ...upPays.map((x) => ({ at: x.line.due, u: undefined, x }))].sort((a, b) => a.at.localeCompare(b.at)).slice(0, 10).map(({ u, x }) => {
-            // an installment keeps its status look and has no customer bar
+          </>) : (<>
+          <div className="pl-day-head pl-up-head">
+            <span className="pl-day-t"><b>นัดที่กำลังจะถึง</b><span>{upRows.length ? `${fmtN(upRows.length)} รายการ · หน้า ${fmtN(upNow + 1)} จาก ${fmtN(upPages)}` : 'ยังไม่มีงานที่กำลังจะถึง'}</span></span>
+            {upPages > 1 && (
+              <div className="pl-nav">
+                <button className="btn xs" aria-label="หน้าก่อน" disabled={upNow === 0} onClick={() => setUpPage(upNow - 1)}>ก่อนหน้า</button>
+                <button className="btn xs" aria-label="หน้าถัดไป" disabled={upNow >= upPages - 1} onClick={() => setUpPage(upNow + 1)}>ถัดไป</button>
+              </div>
+            )}
+          </div>
+          {/* contacts and installments in one list by date: an installment keeps its status look (payItem); a contact
+              is its date, its customer's colour bar, the company, the type, its note and an arrow to its day */}
+          {upShown.map(({ u, x }) => {
             if (x) return payItem(x, true);
             if (!u) return null;
             const t = u.t, ti = taskInfo(e, t);
+            const tyName = (TT.find((y) => y[0] === t.type) || TT[0])[1];
             return (
-              <button key={t.id} className="pl-up hv" onClick={() => set({ calDay: t.date, calM: t.date.slice(0, 7) })} style={{ cursor: 'pointer', border: 0, borderTop: '1px solid var(--divider)', textAlign: 'left', padding: '8px', margin: '0 4px', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 14, color: 'var(--ink)' }}>
-                <span style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}><i className="pl-bar" style={markVars(u.ck, u.types)} aria-hidden="true" />{avOf(t.id, t.gid, t.title, 28)}<span className="pl-up-n"><span className="co-name dense">{ti.title}</span>{sees && <SvcChips ct={u.ct} />}</span></span>
-                <span className="pl-up-when">{ti.when}</span>
+              <button key={t.id} className="pl-up-row hv" onClick={() => goDay(t.date)} style={markVars(u.ck, u.types)}>
+                <span className="pl-up-date"><b>{dmTh(t.date)}</b><span className="pl-up-when">{t.time || 'ไม่ระบุเวลา'}</span></span>
+                <i className="pl-up-bar" aria-hidden="true" />
+                <span className="pl-up-body">
+                  <span className="pl-up-co">{ti.title}{sees && <SvcChips ct={u.ct} />}</span>
+                  <span className="pl-up-tt">{tyName}</span>
+                  {t.note && <span className="pl-up-note">{t.note}</span>}
+                </span>
               </button>
             );
           })}
+          {upPages > 1 && (
+            <nav className="pl-pager" aria-label="เลือกหน้า">
+              {Array.from({ length: upPages }, (_, i) => (
+                <button key={i} aria-current={i === upNow ? 'page' : undefined} aria-label={`หน้า ${i + 1}`} className={'pl-pg' + (i === upNow ? ' on' : '')} onClick={() => setUpPage(i)}>{i + 1}</button>
+              ))}
+            </nav>
+          )}
+          </>)}
         </div>
       </section>
 
