@@ -801,6 +801,19 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .pl-up-when{font-size:var(--fs-sec);color:var(--muted);white-space:nowrap}
 .pl-up-h{font-size:var(--fs-card);font-weight:500;padding-top:8px;color:var(--ink)}
 .pl-up{align-items:center}
+/* งานที่กำลังจะถึง and นัดที่ผ่านมา: a row is its date, the customer's colour bar, the company, the type, its note and an arrow */
+.pl-up-row{display:grid;grid-template-columns:72px 3px minmax(0,1fr);gap:12px;align-items:center;width:100%;padding:12px 0;border:0;border-top:1px solid var(--divider);background:transparent;color:var(--ink);text-align:left;font:inherit;cursor:pointer}
+.pl-up-date{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:var(--fs-body)}
+.pl-up-date>b{font-weight:500;font-variant-numeric:tabular-nums}
+.pl-up-bar{align-self:stretch;width:3px;border-radius:2px;background:var(--c)}
+.pl-up-body{min-width:0;display:flex;flex-direction:column;gap:2px}
+.pl-up-co{font-size:var(--fs-sec);color:var(--ink-2);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.pl-up-tt{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
+.pl-up-note{font-size:var(--fs-sec);color:var(--muted);overflow-wrap:anywhere}
+.pl-up-back{align-self:flex-start;font-size:var(--fs-sec)}
+.pl-pager{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;padding-top:4px}
+.pl-pg{min-width:32px;height:32px;padding:0 8px;border-radius:999px;border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+.pl-pg.on{background:var(--brand);color:#fff;font-weight:500}
 /* the stage in the list: a cell picker that reads as plain text until the pointer is on it */
 .sel-btn.cell.pl-stage{font-size:var(--fs-sec);color:var(--ink-2);margin-left:0;max-width:100%}
 /* "รายชื่อที่ต้องติดต่อ" (lib/planList.ts): the name, then where it comes from as calm tags (ติดตาม, the tracker
