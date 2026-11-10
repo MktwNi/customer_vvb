@@ -14,6 +14,7 @@
 import { inRange, monthStart, weekStart, type Range } from './dateRange';
 import { addDays, daysBetween, localDay } from './format';
 import { LOG_TYPES } from './constants';
+import { OFFER_RESULT, OFFER_TYPE, offerOf } from './offer';
 import { COMPANY_CONTACT, apptLine, apptWhen, followContact, followContactWords, followCounts, followRows, type FollowRow, type FollowSrc } from './follow';
 import {
   ACT_TH, actsOf, beYear, customersOf, dateMatch, dealResult, filterDeals, jointAttr, moneySum, newDeal, normSalesFilter, quoteSent, salesStats, stepLabel, withActIndex,
@@ -96,6 +97,8 @@ export interface ExecSummary {
     won: { jobs: number; worked: number; fc: number; ac: number; closedJobs: number; lost: number };
     followOverdue: number;
     followDue: number;
+    /** เสนอบริการ: the companies sent an offer in the period, and those still waiting for a reply now (a snapshot). */
+    offers: { sent: number; waiting: number };
   };
   channels: ExecChannelRow[];
   total: number;
@@ -158,6 +161,19 @@ function contactsOf(src: ExecSrc, S: SalesState, from: string, today: string): E
   return out;
 }
 
+/** Each company's contact log by its canonical id (a merged company's logs under both of its ids together); persons left out. */
+function logsByCompany(src: ExecSrc): Map<number, LogEntry[]> {
+  const out = new Map<number, LogEntry[]>();
+  for (const [key, logs] of Object.entries(src.crm.log)) {
+    if (key.startsWith('p-')) continue;
+    const id = src.canonical(Number(key));
+    if (!src.company(id)) continue;
+    out.set(id, [...(out.get(id) || []), ...logs]);
+  }
+  return out;
+}
+/** An offer entry (lib/offer.ts): an e-mail whose result waits for a reply. */
+const isOfferEntry = (l: LogEntry) => l.type === OFFER_TYPE && l.result === OFFER_RESULT;
 const change = (value: number, prev: number): ExecChange => ({ value, prev, delta: value - prev, pct: prev ? (value - prev) / prev : null });
 const FOLLOW_ORDER: Record<ExecGroup, number> = { overdue: 0, today: 1 };
 
@@ -219,6 +235,10 @@ function summarize(src: ExecSrc, S: SalesState, P: ExecPeriod, today: string, ye
   const fRows = followRows(src, year, today);
   const fc = followCounts(fRows, today);
   const groupOf = (r: FollowRow): ExecGroup => (r.next < today ? 'overdue' : 'today');
+  // เสนอบริการ: the companies sent an offer in the period, and those whose latest contact is still an offer now
+  const byCo = logsByCompany(src);
+  const sent = (r: Range) => [...byCo.values()].filter((ls) => ls.some((l) => isOfferEntry(l) && !!l.at && inRange(localDay(l.at), r))).length;
+  const offers = { sent: sent(cur), waiting: [...byCo.values()].filter((ls) => offerOf(ls)).length };
   const followUps: ExecFollowUp[] = fRows
     .filter((r) => r.next && r.next <= today)
     .map((r) => ({ r, group: groupOf(r) }))
@@ -246,6 +266,7 @@ function summarize(src: ExecSrc, S: SalesState, P: ExecPeriod, today: string, ye
       won: { jobs: won.jobs, worked: won.worked, fc: money.fc, ac: money.ac, closedJobs: closed.jobs, lost: closed.lost },
       followOverdue: fc.late,
       followDue: fc.today,
+      offers,
     },
     channels, total, weeks, funnel, recent, followUps,
   };

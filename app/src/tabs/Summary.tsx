@@ -82,9 +82,10 @@ export function SummaryPage({ s, kind, year, today, canMoney, onKind, onOpen, on
         right={<Segmented value={kind} label="ช่วงเวลา" options={PERIODS.map((p) => ({ v: p.v, label: p.label }))} onChange={onKind} />}
       />
 
-      <section className="kpis" aria-label="ตัวเลขหลัก">
+      <section className="kpis k5" aria-label="ตัวเลขหลัก">
         <Kpi label="ติดต่อทั้งหมด" value={fmtN(s.kpis.contacts.value)} unit="ครั้ง" foot={changeWords(s.kpis.contacts, 'ครั้ง')} />
         <Kpi label="บริษัทที่ติดต่อ" value={fmtN(s.kpis.companies.value)} unit="บริษัท" foot={changeWords(s.kpis.companies, 'บริษัท')} />
+        <Kpi label="ส่งเสนอบริการ" value={fmtN(s.kpis.offers.sent)} unit="บริษัท" foot={`รอติดต่อกลับอยู่ ${fmtN(s.kpis.offers.waiting)} บริษัท`} />
         <Kpi
           label="งานที่ปิดได้"
           value={fmtN(won.jobs)}

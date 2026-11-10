@@ -131,6 +131,26 @@ describe('contacts and channels', () => {
   });
 });
 
+describe('เสนอบริการ: the companies sent an offer in the period, and those still waiting for a reply now', () => {
+  const L = (day: string, type: string, result = '') => ({ at: at(day), by: 'ทดสอบ', type, result }) as LogEntry;
+  const OFFER = 'รอติดต่อกลับ';
+  // 101: offered in the month and still waiting; 102: offered last month, a later call got through; 103: offered and
+  // waiting; 999: not in the registry, left out
+  const log: Record<string, LogEntry[]> = {
+    '101': [L('2026-10-13', 'email', OFFER)],
+    '102': [L('2026-09-10', 'email', OFFER), L('2026-10-06', 'call', 'ติดต่อได้')],
+    '103': [L('2026-10-13', 'email', OFFER)],
+    '999': [L('2026-10-13', 'email', OFFER)],
+  };
+
+  it('a month: two companies sent in it, and two still waiting; the one a later call got through is not waiting', () => {
+    expect(execSummary(engine({ sales: tracker(), log, people: PEOPLE }), 'month', TODAY).kpis.offers).toEqual({ sent: 2, waiting: 2 });
+  });
+  it('a week: the two sent on Tuesday are in it; the one sent last month is not, and the waiting count is the same', () => {
+    expect(execSummary(engine({ sales: tracker(), log, people: PEOPLE }), 'week', TODAY).kpis.offers).toEqual({ sent: 2, waiting: 2 });
+  });
+});
+
 describe('companies', () => {
   const e = engine({ sales: tracker(), log: logs(), people: PEOPLE });
 
@@ -319,6 +339,7 @@ describe('an empty engine gives zeros and empty lists', () => {
       won: { jobs: 0, worked: 0, fc: 0, ac: 0, closedJobs: 0, lost: 0 },
       followOverdue: 0,
       followDue: 0,
+      offers: { sent: 0, waiting: 0 },
     });
     expect(s.total).toBe(0);
     expect(s.channels.map((c) => [c.count, c.share])).toEqual([[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]);
