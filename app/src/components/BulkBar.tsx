@@ -1,10 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import {
   BIG, bulkActs, confirmWords, createSel, followNote, followSplit, followedPicked, hintWord, localWord, ownerNote, ownerSplit, ownerSub, pickedCos, pickedRows, rowFits,
   selWord, tooManyWord, unfollowNote, unfollowedWord, type Row, type SelStore,
 } from '../lib/bulk';
 import { fmtN } from '../lib/format';
+import { OFFER_RESULT, OFFER_TEXT, offerNote } from '../lib/offer';
 import { Modal, DialogActions } from './Dialog';
 import { Notice } from './ui';
 import { SelField } from './Select';
@@ -23,7 +24,7 @@ export function useSel(store: SelStore = searchSel) {
   return useSyncExternalStore(store.sub, store.get, store.get);
 }
 
-type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'owner' | 'csv';
+type Act = 'follow' | 'unfollow' | 'tracker' | 'plan' | 'offer' | 'owner' | 'csv';
 
 /**
  * The bar over the search results (the owner's "เลือกทั้งหมด แล้วเลือกได้ว่าจะทำอะไร"). It is there whenever
@@ -62,6 +63,7 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, u
   const team = !!e.teamCfg;
   const [ask, setAsk] = useState<'follow' | 'unfollow' | null>(null);
   const [owner, setOwner] = useState(false);
+  const [offer, setOffer] = useState(false);
   const [menu, setMenu] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const clear = () => store.set({ key: store.get().key, ids: new Set() });
@@ -87,6 +89,7 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, u
     if (a === 'unfollow') return sure || fs.on > BIG ? setAsk('unfollow') : follow(false);
     if (a === 'tracker') return set({ sendIds: cos, sendStay: true });
     if (a === 'plan') return openSched({ ids: cos, stay: true });
+    if (a === 'offer') return setOffer(true);
     if (a === 'owner') return setOwner(true);
     // the same columns as ส่งออก CSV beside the search box, the picked rows only
     e.exportCsv(view, pickedRows(sel, rows));
@@ -96,6 +99,7 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, u
     ['unfollow', 'เลิกติดตาม', acts.unfollow],
     ['tracker', 'ส่งเข้า Sales Tracker', acts.tracker],
     ['plan', 'วางแผนติดต่อ', acts.plan],
+    ['offer', 'เสนอบริการ', acts.offer],
     ['owner', 'ตั้งผู้รับผิดชอบ', acts.owner],
     ['csv', 'ส่งออก CSV', acts.csv],
   ];
@@ -193,8 +197,47 @@ export function BulkBar({ view, rows, sel, n, store = searchSel, sure = false, u
           </DialogActions>
         </Modal>
       )}
+      {offer && <OfferDialog ids={cos} onClose={() => setOffer(false)} />}
       {owner && <OwnerDialog ids={cos} onClose={() => setOwner(false)} />}
     </>
+  );
+}
+
+/** เสนอบริการงานทวนสอบผ่านอีเมล for the picked companies (lib/offer.ts): what each one gets, said before it is
+ *  written. The companies are followed, so they show in แผนติดต่อ under the heading เสนอบริการ. */
+function OfferDialog({ ids, onClose }: { ids: number[]; onClose: () => void }) {
+  const { engine: e } = useApp();
+  useEngineVersion();
+  const { say } = useSalesActs();
+  const n = new Set(ids.map((id) => e.canonical(id))).size;
+  const send = () => {
+    const k = e.offerMany(ids);
+    onClose();
+    say(offerNote(k), { ms: 8000, acts: k ? [{ label: 'ดูในแผนติดต่อ', act: 'goPlan', primary: true }] : undefined });
+  };
+  const rows: [string, string][] = [
+    ['เข้าแผนติดต่อ', 'ติดตามไว้ และแสดงในหัวข้อ “เสนอบริการ”'],
+    ['ประเภทการติดต่อ', 'อีเมล'],
+    ['ผลการติดต่อ', OFFER_RESULT],
+    ['รายละเอียด', OFFER_TEXT],
+  ];
+  return (
+    <Modal title={OFFER_TEXT} onClose={onClose} width={460}>
+      <p style={{ margin: 0, lineHeight: 1.6 }}>{`${fmtN(n)} บริษัทที่เลือกจะถูกบันทึกดังนี้`}</p>
+      <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', gap: '8px 14px', fontSize: 14 }}>
+        {rows.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt style={{ color: 'var(--ink-2)' }}>{k}</dt>
+            <dd style={{ margin: 0, fontWeight: 500 }}>{v}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      <Notice kind="info">ระบบบันทึกการติดต่อให้เท่านั้น ยังไม่ได้ส่งอีเมลออกไปจริง</Notice>
+      <DialogActions>
+        <button type="button" className="quiet" onClick={onClose}>ยกเลิก</button>
+        <button type="button" className="btn pri" onClick={send}>{`เสนอบริการ ${fmtN(n)} บริษัท`}</button>
+      </DialogActions>
+    </Modal>
   );
 }
 

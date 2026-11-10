@@ -97,18 +97,18 @@ describe('what the account may do', () => {
   const can = (caps: CapId[]) => (c: CapId) => caps.includes(c);
   it('admin (or no accounts): everything; ติดตาม while some picked are not followed, เลิกติดตาม while some are', () => {
     const all = can(['edit.cust', 'edit.deal', 'view.sales', 'edit.task']);
-    expect(bulkActs(all, 0, 15)).toEqual({ follow: true, unfollow: false, tracker: true, plan: true, owner: true, csv: true, tooMany: false });
+    expect(bulkActs(all, 0, 15)).toEqual({ follow: true, unfollow: false, tracker: true, plan: true, offer: true, owner: true, csv: true, tooMany: false });
     expect(bulkActs(all, 3, 15)).toMatchObject({ follow: true, unfollow: true });
     expect(bulkActs(all, 15, 15)).toMatchObject({ follow: false, unfollow: true });
   });
   it('more than one change may take (the whole registry picked): the export only, and why', () => {
     const all = can(['edit.cust', 'edit.deal', 'view.sales', 'edit.task']);
     expect(bulkActs(all, 3, MAX_BULK)).toMatchObject({ follow: true, tracker: true, tooMany: false });
-    expect(bulkActs(all, 3, MAX_BULK + 1)).toEqual({ follow: false, unfollow: false, tracker: false, plan: false, owner: false, csv: true, tooMany: true });
+    expect(bulkActs(all, 3, MAX_BULK + 1)).toEqual({ follow: false, unfollow: false, tracker: false, plan: false, offer: false, owner: false, csv: true, tooMany: true });
     expect(tooManyWord(55645)).toBe('เลือกไว้ 55,645 บริษัท ทำรายการได้ครั้งละไม่เกิน 5,000 บริษัท กรองให้แคบลงก่อน (ส่งออก CSV ได้)');
   });
   it('a viewer: export only; Sales Tracker needs both ดีลและขั้นตอน and seeing the tracker', () => {
-    expect(bulkActs(can([]), 5, 9)).toEqual({ follow: false, unfollow: false, tracker: false, plan: false, owner: false, csv: true, tooMany: false });
+    expect(bulkActs(can([]), 5, 9)).toEqual({ follow: false, unfollow: false, tracker: false, plan: false, offer: false, owner: false, csv: true, tooMany: false });
     expect(bulkActs(can(['edit.deal']), 0, 9).tracker).toBe(false);
     expect(bulkActs(can(['edit.task']), 0, 9)).toMatchObject({ plan: true, follow: false, owner: false, tracker: false });
   });

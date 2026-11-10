@@ -82,7 +82,7 @@ export const LOG_TYPES: Record<string, [string, string]> = {
   call: ['โทร', '#1A3FE0'], email: ['อีเมล', '#1FB5C9'], meet: ['นัดพบ', '#C27A12'], follow: ['ติดตามผล', '#5B6FE0'],
   note: ['โน้ต', '#5E6680'], stage: ['สถานะการขาย', '#0B6E66'], owner: ['ผู้รับผิดชอบ', '#0E1F7A'],
 };
-export const LOG_RESULTS = ['ติดต่อได้', 'ไม่รับสาย', 'ขอข้อมูลเพิ่ม', 'นัดคุยต่อ', 'ส่งใบเสนอราคาแล้ว', 'ไม่สนใจ'];
+export const LOG_RESULTS = ['ติดต่อได้', 'ไม่รับสาย', 'ขอข้อมูลเพิ่ม', 'นัดคุยต่อ', 'ส่งใบเสนอราคาแล้ว', 'รอติดต่อกลับ', 'ไม่สนใจ'];
 
 /** Tracking feeds: [key, label, dot colour, description] */
 export const FEEDS: [FeedKey, string, string, string][] = [

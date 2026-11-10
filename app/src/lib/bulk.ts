@@ -93,10 +93,11 @@ export function pickedCos(sel: ReadonlySet<number>, rows: readonly Row[]) {
  *  sending is ดีลและขั้นตอน on a Sales Tracker the account sees, planning is นัดหมาย; CSV is everyone's.
  *  `cos`: how many companies are picked (over MAX_BULK: the export only); `followed`: how many of them the
  *  team follows (ติดตาม while some are not, เลิกติดตาม while some are). */
-export interface BulkActs { follow: boolean; unfollow: boolean; tracker: boolean; plan: boolean; owner: boolean; csv: true; /** more picked than one change may take (MAX_BULK) */ tooMany: boolean }
+export interface BulkActs { follow: boolean; unfollow: boolean; tracker: boolean; plan: boolean; offer: boolean; owner: boolean; csv: true; /** more picked than one change may take (MAX_BULK) */ tooMany: boolean }
+/** เสนอบริการ writes a contact entry on each company (lib/offer.ts), so it is a company change like ติดตาม. */
 export function bulkActs(can: (c: CapId) => boolean, followed: number, cos: number): BulkActs {
   const ok = cos <= MAX_BULK, cust = ok && can('edit.cust');
-  return { follow: cust && followed < cos, unfollow: cust && followed > 0, tracker: ok && can('edit.deal') && can('view.sales'), plan: ok && can('edit.task'), owner: cust, csv: true, tooMany: !ok };
+  return { follow: cust && followed < cos, unfollow: cust && followed > 0, tracker: ok && can('edit.deal') && can('view.sales'), plan: ok && can('edit.task'), offer: cust, owner: cust, csv: true, tooMany: !ok };
 }
 /** Which of the picked companies the team follows already (`watch`: the team's list). */
 export function followSplit(ids: readonly number[], watch: ReadonlySet<number>) {

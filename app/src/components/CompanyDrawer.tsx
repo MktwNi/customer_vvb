@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, STG, stageOf } from '../lib/constants';
+import { OFFER_RESULT, OFFER_TEXT, OFFER_TYPE, offerOf } from '../lib/offer';
 import { dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
 import type { Cert, Company, ContactForm, Detail, LogEntry, StageKey } from '../lib/types';
 import { ACT_TH, actsOf, dealMoney, fmtMoney, jobYearOf, lastContact, stepLabel, trackerStatus, type Deal, type DealAct } from '../lib/sales';
@@ -64,6 +65,15 @@ export function CompanyDrawer() {
     };
   }, [cid, idsKey]);
 
+  // a company whose latest contact is an offer opens the log form on it: e-mail and รอติดต่อกลับ, with the offer's
+  // text (lib/offer.ts). Saving writes another entry as usual.
+  const offer = c ? offerOf(e.crm.log[c.id]) : null;
+  const offerKey = offer ? offer.id || offer.at : '';
+  useEffect(() => {
+    if (!offerKey) return;
+    setLgType(OFFER_TYPE);
+    setLgRes(OFFER_RESULT);
+  }, [offerKey]);
   if (!c) return null;
   const close = () => set({ sel: null });
   const D = e.B.D, CD = e.B.CD, C = e.crm;
@@ -383,15 +393,16 @@ export function CompanyDrawer() {
               </div>
               <div style={{ ...box, gap: 12 }}>
                 <H>บันทึกการติดต่อ</H>
-                {!ro && <form onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {!ro && <form key={offerKey || 'log'} onSubmit={addLog} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <Select name="type" label="ประเภท" value={lgType} onChange={setLgType} options={[{ v: 'call', label: 'โทร' }, { v: 'email', label: 'อีเมล' }, { v: 'meet', label: 'นัดพบ' }, { v: 'note', label: 'โน้ต' }]} />
                     <Select name="result" label="ผลการติดต่อ" value={lgRes} onChange={setLgRes} placeholder="ผลการติดต่อ" options={[{ v: '', label: 'ผลการติดต่อ' }, ...LOG_RESULTS.map((v) => ({ v, label: v }))]} />
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <input name="text" aria-label="รายละเอียด" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" className="fld" style={{ flex: 1, minWidth: 0 }} />
+                    <input name="text" aria-label="รายละเอียด" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" defaultValue={offerKey ? OFFER_TEXT : undefined} className="fld" style={{ flex: 1, minWidth: 0 }} />
                     <button type="submit" className="btn pri">บันทึก</button>
                   </div>
+                  {offerKey && <span className="t-meta" style={{ fontSize: 12 }}>ค่าในฟอร์มตั้งไว้ตามการเสนอบริการ กดบันทึกจึงจะเพิ่มรายการซ้ำ</span>}
                 </form>}
                 {!hist.length && <span className="empty">ยังไม่มีประวัติการติดต่อ</span>}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>

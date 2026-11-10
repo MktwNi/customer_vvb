@@ -11,6 +11,7 @@ import { build, dataUrl, fixName, getDetail, loadBase, norm, parseXlsx, readXlsx
 import { IMPORT_TAG, applyCertPlan, countLog, heldFrom, importNameKey, planCertRows, sameRecord, sheetNoteOf, type CertAction, type CertImportRec, type CertLine, type CertFields, type CertLogEntry, type CertPlan, type ExportRow } from './registryXlsx';
 import { decideReview, makeReview, type ReviewRec } from './sheetReview';
 import { CONFIG, STG, TGT, tagsOf, CST } from './constants';
+import { OFFER_RESULT, OFFER_TEXT, OFFER_TYPE } from './offer';
 import { DAY, addDays, downloadBlob, dtTh, fmtN, gccCode, isoTh, nextWork, pad, todayISO, uid } from './format';
 import { kv, prefs, PREF, type KVStore } from './storage';
 import * as TGOSync from './tgoSync';
@@ -1609,6 +1610,27 @@ export class GccEngine {
     this.logAct(id, { type, result, text, ...(pid ? { pid } : {}) });
     if (type !== 'note' && this.stage(id) === 'none') this.setStage(id, result === 'ไม่สนใจ' ? 'lost' : 'contacted', true);
     else this.saveCrm();
+  }
+  /**
+   * เสนอบริการงานทวนสอบผ่านอีเมล to the picked companies (lib/offer.ts): each is followed, so it shows in แผนติดต่อ
+   * under its heading, and gets one e-mail entry waiting for a reply. Its plan stage stays as it is. Returns how
+   * many companies were written (a company picked twice counts once).
+   */
+  offerMany(ids: readonly number[]) {
+    if (!this.can('edit.cust')) {
+      this.deny();
+      return 0;
+    }
+    const done = new Set<number>();
+    for (const raw of ids) {
+      const id = this.canonical(raw);
+      if (done.has(id)) continue;
+      done.add(id);
+    }
+    this.setWatchMany([...done], true);
+    for (const id of done) this.logAct(id, { type: OFFER_TYPE, result: OFFER_RESULT, text: OFFER_TEXT });
+    if (done.size) this.saveCrm();
+    return done.size;
   }
   delLog(id: number | string, l: LogEntry) {
     // queued while the entry is still here: an "own" capability checks who wrote it (canWriteKey)
