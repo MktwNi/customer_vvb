@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useApp, useEngineVersion } from '../state';
 import { STG, TT, stageOf } from '../lib/constants';
-import { TH_M, addDays, daysBetween, dmTh, dow, fmtN, isoTh, telHref, todayISO } from '../lib/format';
+import { TH_M, addDays, daysBetween, dmTh, dow, fmtN, isoTh, localDay, telHref, todayISO } from '../lib/format';
+import { offerOf } from '../lib/offer';
 import { beYear, fmtMoney, jobServices, type Deal, type LineView } from '../lib/sales';
 import { shortName } from '../lib/salesUi';
 import { ccVars, custKey, dealKey } from '../lib/custColor';
 import { activeCust, cellDots, cellLabel, cellLines, chipName, monthCustomers, onlyCust } from '../lib/planCal';
 import { filterRows, jobTag, openJob, ownerChoices, planRows, planSrc, rowsOf, srcCounts, unplanned, type PlanRow, type PlanSrc } from '../lib/planList';
 import { NO_TYPES, SVC_TYPES, activeType, custTypes, dealTypes, filterTypes, mainType, monthTypes, onlyType, svcType, typeCounts, typeSel, typeVars, typesOf, type CustTypes, type SvcTypeId } from '../lib/svcType';
-import type { Company, StageKey, Task } from '../lib/types';
+import type { Company, LogEntry, StageKey, Task } from '../lib/types';
 import { PageHead, Segmented } from '../components/ui';
 import { FilterBar, type FVal } from '../components/FilterBar';
 import { SvcChips } from '../components/SvcChips';
@@ -148,7 +149,17 @@ export function Plan() {
   const unlinked = tg.filter((r) => !r.c).length;
   // the hints above the list point at it only when it has a company to press นัด on
   const pickHere = !ro && srcRows.some((r) => r.c);
-  const shown = tg.slice(0, ui.plLim || 60);
+  // เสนอบริการ: the companies whose latest contact is an offer still waiting for a reply (lib/offer.ts) head the list,
+  // under their own heading; the rest follow as before
+  const offers = new Map<string, LogEntry>();
+  tg.forEach((r) => {
+    const o = r.c ? offerOf(C.log[e.canonical(r.c.id)]) : null;
+    if (o) offers.set(r.key, o);
+  });
+  const offerN = tg.filter((r) => offers.has(r.key)).length;
+  const ordered = [...tg.filter((r) => offers.has(r.key)), ...tg.filter((r) => !offers.has(r.key))];
+  const shown = ordered.slice(0, ui.plLim || 60);
+  const offerShown = shown.filter((r) => offers.has(r.key)).length;
   const shownCos = shown.flatMap((r) => (r.c ? [r.c] : []));
   const pk = ui.picked || {};
   const pkIds = Object.keys(pk).map(Number);
@@ -513,16 +524,29 @@ export function Plan() {
           {pkIds.length > 0 && sees && e.can('edit.deal') && <button onClick={() => set({ sendIds: pkIds })} className="btn sm">ส่งเข้า Sales Tracker</button>}
         </div>}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {shown.map((r) => {
+          {shown.map((r, i) => {
             const c = r.c, j = r.jobs[0];
             const p = !!(c && pk[c.id]);
             const ot = r.task;
+            const off = offers.get(r.key);
             // what is late, in words (the order already puts it first; the deal panel's words for a job)
             const warn = ot && ot.date < today ? 'นัดเกินกำหนด' : r.idle != null ? `ไม่ได้ติดต่อ ${fmtN(r.idle)} วัน` : '';
             const meta = [c ? D.prov[c.prov] : j && j.deal.section ? 'หมวด ' + j.deal.section : '', r.owner].filter(Boolean).join(' · ');
             const openDeal = () => j && set({ deal: j.deal.id });
             return (
-              <div key={r.key} className="plan-row">
+              <Fragment key={r.key}>
+              {i === 0 && offerShown > 0 && (
+                <div className="pl-band offer">
+                  <h3>เสนอบริการ</h3>
+                  <span>{`${fmtN(offerN)} บริษัท · ส่งข้อเสนอทางอีเมลแล้ว รอติดต่อกลับ`}</span>
+                </div>
+              )}
+              {i === offerShown && offerShown > 0 && (
+                <div className="pl-band">
+                  <h3>รายชื่ออื่น</h3>
+                </div>
+              )}
+              <div className="plan-row">
                 {ro || !c ? <span /> : (
                   <button
                     onClick={() => {
@@ -547,6 +571,7 @@ export function Plan() {
                     {/* where it comes from: followed, and/or its tracker job's next step (opens the job) */}
                     <span className="pl-src">
                       {r.watch && <span className="chip">ติดตาม</span>}
+                      {off && <span className="pl-off">{`อีเมล · ส่งเมื่อ ${dmTh(localDay(off.at))}`}</span>}
                       {j && <button type="button" className="chip pl-tag hv" onClick={openDeal} title="เปิดงานใน Sales Tracker">{jobTag(r.jobs, (d) => jobServices(e.sales, d))}</button>}
                       {warn && <span className="pl-warn">{warn}</span>}
                       {meta && <span className="pl-meta">{meta}</span>}
@@ -571,6 +596,7 @@ export function Plan() {
                   )}
                 </span>
               </div>
+              </Fragment>
             );
           })}
           {!tg.length && srcRows.length > 0 && (

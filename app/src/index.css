@@ -814,6 +814,12 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .pl-pager{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;padding-top:4px}
 .pl-pg{min-width:32px;height:32px;padding:0 8px;border-radius:999px;border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
 .pl-pg.on{background:var(--brand);color:#fff;font-weight:500}
+/* the bands over the contact list: เสนอบริการ (its companies, first) and รายชื่ออื่น; a heading a size up from the names */
+.pl-band{display:flex;justify-content:space-between;align-items:baseline;gap:4px 10px;flex-wrap:wrap;padding:14px 4px 6px;margin-top:6px;border-top:1px solid var(--divider)}
+.pl-band h3{margin:0;font-size:var(--fs-section);font-weight:500;color:var(--ink)}
+.pl-band.offer h3{color:var(--link)}
+.pl-band>span{font-size:var(--fs-sec);color:var(--muted)}
+.pl-off{font-size:var(--fs-sec);color:var(--link)}
 /* the stage in the list: a cell picker that reads as plain text until the pointer is on it */
 .sel-btn.cell.pl-stage{font-size:var(--fs-sec);color:var(--ink-2);margin-left:0;max-width:100%}
 /* "รายชื่อที่ต้องติดต่อ" (lib/planList.ts): the name, then where it comes from as calm tags (ติดตาม, the tracker
