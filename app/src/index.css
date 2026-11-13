@@ -1246,27 +1246,31 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-owner-name.none{color:var(--muted)}
 /* ขั้นตอน · ถัดไป: "ถัดไป CALL2 โทรครั้งที่ 2" over the circles and their n/N */
 .sl-stw{display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:0}
-.sl-nx{cursor:pointer;display:inline-flex;align-items:baseline;gap:5px;height:24px;line-height:22px;max-width:100%;padding:0 10px;border-radius:var(--r-pill);border:1px solid var(--field);background-color:#fff;color:var(--ink-2);font:inherit;font-size:var(--fs-meta);white-space:nowrap;min-width:0}
-.sl-nx .nx-l{color:var(--muted);flex:none}
-.sl-nx b{font-weight:400;color:var(--ink);flex:none}
+/* the next step: its code on a tint chip (red when late, amber when due), then its name; no pill, no border */
+.sl-nx{cursor:pointer;display:inline-flex;align-items:center;gap:8px;max-width:100%;height:auto;padding:0;border:0;background:none;color:var(--ink);font:inherit;font-size:var(--fs-body);line-height:1.4;white-space:nowrap;min-width:0}
+.sl-nx b{font-size:var(--fs-meta);font-weight:500;letter-spacing:.02em;color:var(--link);background:var(--tint);border-radius:6px;padding:2px 7px;flex:none}
 .sl-nx em{font-style:normal;overflow:hidden;text-overflow:ellipsis;min-width:0}
-@media (hover:hover){button.sl-nx:hover{border-color:var(--tint-line)}}
-/* the only coloured pills: an installment that is late (bad), or due within 7 days / part paid (warn) */
-.sl-nx.late{background-color:var(--bad-bg);border-color:transparent;color:var(--bad);--hv:#FAD6CC}
-.sl-nx.due{background-color:var(--warn-bg);border-color:transparent;color:var(--warn);--hv:#FCE6BB}
-.sl-nx.late :is(b,.nx-l),.sl-nx.due :is(b,.nx-l){color:inherit}
+@media (hover:hover){button.sl-nx:hover em{text-decoration:underline;text-underline-offset:3px}}
+.sl-nx.late b{background:var(--bad-bg);color:var(--bad)}
+.sl-nx.due b{background:var(--warn-bg);color:var(--warn)}
 .sl-nx.txt,.sl-nx.ro{cursor:default;border:0;background:none;padding:0;height:auto;line-height:1.5}
 .sl-nx.txt{color:var(--muted)}
 .sl-nx.txt.ok{color:var(--ok)}
-.sl-trk{display:flex;align-items:center;gap:8px;width:100%}
-.sl-trk-n{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;flex:none}
-/* circles on a line (design §5.4): done = brand fill · YES / NO / waiting = their mark · next = a dashed
-   ring (late = red) · planned = a solid ring · future = a grey ring · CLOSED DEAL is a diamond. No glyph
-   inside: every state is a word in the track's label and the status column. */
-.sl-mt{--n:8;--bs:clamp(8px,calc(150px / var(--n) - 5px),12px);display:flex;align-items:center;flex:1;max-width:164px;height:18px}
-.sl-sg{flex:1;height:2px;min-width:2px;margin:0 -1px;background:var(--rail)}
-.sl-sg.on{background:var(--brand)}
-.sl-sg.dash{background:repeating-linear-gradient(90deg,var(--brand) 0 3px,transparent 3px 6px)}
+.sl-trk{display:flex;align-items:flex-end;gap:10px;width:100%}
+.sl-trk-n{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;flex:none;padding-bottom:1px}
+/* the steps as a thin line with each code under its part of it (no circles): reached = brand, the next step = a
+   tint (red when late), the rest = the rail */
+.sl-mt{--n:8;display:flex;flex-direction:column;gap:5px;flex:1;max-width:220px;min-width:0}
+.sl-rail{display:flex;gap:3px;height:6px}
+.sl-seg{flex:1;min-width:6px;height:6px;border-radius:999px;background:var(--rail)}
+.sl-seg.on{background:var(--brand)}
+.sl-seg.nx{background:var(--tint-line)}
+.sl-mt.late .sl-seg.nx{background:var(--bad)}
+.sl-names{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:3px}
+.sl-nm{font-size:var(--fs-meta);letter-spacing:.02em;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sl-nm.on{color:var(--ink-2)}
+.sl-nm.nx{color:var(--link);font-weight:500}
+.sl-mt.late .sl-nm.nx{color:var(--bad)}
 .sl-bd{--s:var(--bs,12px);position:relative;z-index:1;flex:none;display:inline-block;width:var(--s);height:var(--s);border-radius:50%;background:#fff;border:1.5px solid var(--mark-future);box-sizing:border-box}
 .sl-bd.d{background:var(--mark-done);border-color:var(--mark-done)}
 .sl-bd.y{background:var(--mark-yes);border-color:var(--mark-yes)}
@@ -1869,7 +1873,7 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 
 /* motion, high contrast, print */
 @media (prefers-reduced-motion:reduce){.sl-chev svg,.sl-caret svg,.sl-row>*,.sl-mc-tog svg,.sl-addbtn,.sl-owner,.sl-yn button,.sl-toast button,.sl-drop{transition:none}}
-@media (forced-colors:active){.sl-bd,.sl-sg,.sl-chev,.sl-flagb,.sl-pb i{forced-color-adjust:none}.sl-row.cur>*{outline:2px dashed Highlight;outline-offset:-2px}.sl-sec>:first-child{border-left:4px solid CanvasText}}
+@media (forced-colors:active){.sl-bd,.sl-chev,.sl-flagb,.sl-pb i{forced-color-adjust:none}.sl-row.cur>*{outline:2px dashed Highlight;outline-offset:-2px}.sl-sec>:first-child{border-left:4px solid CanvasText}}
 @media print{
   .sl-table thead th,.sl-sec>*,.sl-msec{position:static!important}
   .sl-card,.sl-mc,.dp-card{box-shadow:none}
