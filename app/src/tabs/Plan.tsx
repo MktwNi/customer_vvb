@@ -162,6 +162,15 @@ export function Plan() {
   const offerShown = shown.filter((r) => offers.has(r.key)).length;
   const shownCos = shown.flatMap((r) => (r.c ? [r.c] : []));
   const pk = ui.picked || {};
+  // เสนอบริการ: the offered companies of the list (all of them, not only the rows shown), for its own select-all
+  const offerIds = tg.flatMap((r) => (r.c && offers.has(r.key) ? [r.c.id] : []));
+  const offerAllOn = offerIds.length > 0 && offerIds.every((id) => pk[id]);
+  const pickOffers = () => {
+    const p = { ...pk };
+    if (offerAllOn) offerIds.forEach((id) => delete p[id]);
+    else offerIds.forEach((id) => (p[id] = 1));
+    set({ picked: p });
+  };
   const pkIds = Object.keys(pk).map(Number);
   const allOn = shownCos.length > 0 && shownCos.every((c) => pk[c.id]);
   const srcOpts = [
@@ -539,6 +548,11 @@ export function Plan() {
                 <div className="pl-band offer">
                   <h3>เสนอบริการ</h3>
                   <span>{`${fmtN(offerN)} บริษัท · ส่งข้อเสนอทางอีเมลแล้ว รอติดต่อกลับ`}</span>
+                  {!ro && offerIds.length > 0 && (
+                    <button onClick={pickOffers} className="lnk" style={{ fontSize: 13 }}>
+                      {offerAllOn ? 'ยกเลิกเลือกทั้งหมดในหัวข้อนี้' : `เลือกทั้งหมดในหัวข้อนี้ ${fmtN(offerIds.length)} ราย`}
+                    </button>
+                  )}
                 </div>
               )}
               {i === offerShown && offerShown > 0 && (
