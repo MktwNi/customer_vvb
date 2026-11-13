@@ -1148,9 +1148,12 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
    under the headings. */
 .sl-sgap>td{height:18px;padding:0!important;border:0!important;background:transparent!important}
 .sl-group:first-of-type .sl-sgap>td{height:10px}
-.sl-sec>*{position:sticky;top:calc(var(--sticky-top) + var(--sl-head-h,52px));z-index:5;height:48px;background:var(--band);background-clip:padding-box}
-.sl-sec>:first-child{border-radius:var(--r-band) 0 0 var(--r-band);box-shadow:inset 4px 0 0 var(--brand)}
-.sl-sec>:last-child{border-radius:0 var(--r-band) var(--r-band) 0}
+/* the หมวด band, compact: a 40px white bar with a hairline under it and a thin brand edge, so the rows under it read first */
+.sl-sec>*{position:sticky;top:calc(var(--sticky-top) + var(--sl-head-h,52px));z-index:5;height:40px;background:var(--card);background-clip:padding-box;border-bottom:1px solid var(--line)}
+.sl-sec>:first-child{border-radius:0;box-shadow:inset 3px 0 0 var(--brand)}
+.sl-sec>:last-child{border-radius:0}
+.sl-sec .sl-caret{width:22px;height:22px;margin-left:6px}
+.sl-sec .sl-s-n,.sl-msec-bar .sl-s-n{color:var(--muted)}
 .sl-s-in{display:flex;align-items:center;gap:10px;min-width:0}
 .sl-caret{cursor:pointer;flex:none;width:28px;height:28px;margin-left:8px;border-radius:50%;border:0;color:var(--ink-2);display:grid;place-items:center;padding:0}
 .sl-caret svg{transition:transform .15s}
@@ -1455,12 +1458,12 @@ button.sl-amt{cursor:pointer}
 .sl-mtools{display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-sec);color:var(--ink-2)}
 .sl-mgroup{display:flex;flex-direction:column;gap:10px}
 .sl-msec{position:sticky;top:var(--sticky-top);z-index:6;margin:0 calc(-1 * var(--main-px));padding:8px var(--main-px) 6px;background:var(--frame)}
-.sl-msec-bar{display:flex;align-items:center;gap:8px;min-height:48px;padding:6px 14px 6px 0;border-radius:var(--r-band);background:var(--band);box-shadow:inset 4px 0 0 var(--brand);min-width:0}
+.sl-msec-bar{display:flex;align-items:center;gap:8px;min-height:40px;padding:6px 14px 6px 0;border-radius:0;background:var(--card);border-bottom:1px solid var(--line);box-shadow:inset 3px 0 0 var(--brand);min-width:0}
 .sl-msec-bar .sl-caret{margin-left:8px}
 .sl-s-tx{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px}
 .sl-msec .sl-sec-name{flex:none;white-space:normal}
 .sl-s-tot{margin-left:auto;flex:none;font-size:var(--fs-sec);color:var(--ink-2);white-space:nowrap}
-.sl-s-tot b{font-size:var(--fs-body);color:var(--ink)}
+.sl-s-tot b{font-size:var(--fs-body);font-weight:500;color:var(--ink)}
 .sl-m-add{align-self:flex-start;font-size:var(--fs-sec)}
 @media (max-width:760px){html:has(.sl-msec){scroll-padding-top:calc(var(--sticky-top) + 66px)}}
 .sl-mc{background:#fff;border:1px solid var(--line);border-radius:var(--r-card);padding:14px 16px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--sh-card);min-width:0}
