@@ -1,4 +1,3 @@
-import { Fragment } from 'react';
 import { DEAL_STAGE, type StageState, type StepView } from '../lib/sales';
 
 /** A step's state in words: every circle says it in its track's label (colour is never the only sign). */
@@ -33,24 +32,29 @@ export const beadOf = (v: Pick<StepView, 'state' | 'outside'>): StageState => (v
 export const trackWords = (steps: Pick<StepView, 'id' | 'code' | 'th' | 'state' | 'rest'>[], next: string) =>
   steps.map((v) => `${v.rest ? `${v.code} ${v.th}` : v.code} ${v.id === next ? (v.state === 'done' ? 'ทำแล้ว มีนัด' : 'ถัดไป') : STATE_WORD[v.state]}`).join(' · ');
 
+/** The code a step shows under the track (the table's column is narrow: QUOTATION reads QUOTE; the words stay in full). */
+const SHORT_CODE: Record<string, string> = { QUOTATION: 'QUOTE' };
+
 /**
- * The counted steps' circles on a line in a row or a card, then "3/5" (dealSteps: an installment outside the
- * plan is not a circle). An image with its words as the label: never focusable (the steps are reached through
- * the next-step button and the child rows).
+ * The counted steps as a thin line in a row or a card, each step's code under its part of the line, then "3/5"
+ * (dealSteps: an installment outside the plan is not a step). Reached steps are brand, the next step is a tint
+ * (red when late), the rest the rail. An image with its words as the label: never focusable (the steps are reached
+ * through the next-step link and the child rows).
  */
 export function MiniTrack({ steps: all, next, done, late }: { steps: StepView[]; next: string; done: number; late?: boolean }) {
   const steps = all.filter((v) => v.counted);
   const reached = reachedOf(steps);
   const words = trackWords(steps, next);
+  const cls = (v: StepView, i: number) => (v.id === next ? ' nx' : i <= reached ? ' on' : '');
   return (
     <span className="sl-trk">
-      <span className="sl-mt" style={{ '--n': steps.length }} role="img" aria-label={`ทำแล้ว ${done} จาก ${steps.length} ขั้น: ${words}`} title={words}>
-        {steps.map((v, i) => (
-          <Fragment key={v.id}>
-            <Bead state={v.state} now={v.id === next} late={late} stage={v.id} />
-            {i < steps.length - 1 && <i className={'sl-sg' + (i < reached ? (steps[i + 1].state === 'planned' ? ' dash' : ' on') : '')} />}
-          </Fragment>
-        ))}
+      <span className={'sl-mt' + (late ? ' late' : '')} style={{ '--n': steps.length }} role="img" aria-label={`ทำแล้ว ${done} จาก ${steps.length} ขั้น: ${words}`} title={words}>
+        <span className="sl-rail" aria-hidden="true">
+          {steps.map((v, i) => <i key={v.id} className={'sl-seg' + cls(v, i)} />)}
+        </span>
+        <span className="sl-names" aria-hidden="true">
+          {steps.map((v, i) => <span key={v.id} className={'sl-nm' + cls(v, i)}>{SHORT_CODE[v.code] ?? v.code}</span>)}
+        </span>
       </span>
       <span className="sl-trk-n" aria-hidden="true">{done}/{steps.length}</span>
     </span>

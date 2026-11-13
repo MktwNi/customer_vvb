@@ -1257,7 +1257,6 @@ function NextPill({ d, card, v: v0 }: { d: Deal; card?: boolean; v?: NextStepVie
   if (v.kind === 'joint') return <span className="sl-nx txt">{v.hint}</span>;
   const inner = (
     <>
-      <span className="nx-l">ถัดไป</span>
       <b>{v.code}</b>
       {/* (the step's name, or what is owed on it: "ถัดไป PAY2 ค้าง 125,000") */}
       <em>{(v.kind === 'next' || v.kind === 'overdue') && v.hint === v.th ? thShort(v.th) : v.hint}</em>
