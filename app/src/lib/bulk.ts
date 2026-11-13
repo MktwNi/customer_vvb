@@ -223,7 +223,9 @@ export function confirmWords(act: 'follow' | 'unfollow', n: number, skip: number
     : { title: `เลิกติดตาม ${fmtN(n)} บริษัท?`, body: team ? 'บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม” ของทีม ทุกคนในทีมจะไม่เห็นในรายชื่อนี้อีก' : 'บริษัทที่เลือกจะออกจาก “บริษัทที่ติดตาม”', ok: `เลิกติดตาม ${fmtN(n)} บริษัท` };
 }
 /** The Sales Tracker dialog's warning for many rows: "จะเพิ่ม 250 แถวในตารางปี 2569". */
-export const trackerWarn = (n: number, year: string, team: boolean) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year}${team ? ' ของทั้งทีม' : ''} ตรวจหมวด ปี และบริการให้ถูกก่อนส่ง`;
+/** After a send to the Sales Tracker: the companies it took off the follow list (they are in การบริการ now). */
+export const movedWord = (n: number) => (n ? ` · เลิกติดตาม ${fmtN(n)} บริษัทที่ส่งเข้าแล้ว` : '');
+export const trackerWarn =(n: number, year: string, team: boolean) => `จะเพิ่ม ${fmtN(n)} แถวในตารางปี ${year}${team ? ' ของทั้งทีม' : ''} ตรวจหมวด ปี และบริการให้ถูกก่อนส่ง`;
 /** More rows than one send may add (TRACKER_MAX): what to do instead. */
 export const trackerCapWord = (n: number, team: boolean) =>
   `ส่งเข้า Sales Tracker ได้ครั้งละไม่เกิน ${fmtN(TRACKER_MAX)} บริษัท ตอนนี้จะเพิ่ม ${fmtN(n)} แถว ตารางที่ยาวมากจะเปิดช้า${team ? 'สำหรับทุกคนในทีม' : ''} ` +

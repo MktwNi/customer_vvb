@@ -8,7 +8,7 @@ import { ReadOnly } from './ReadOnly';
 import { SelField, type SelOpt } from './Select';
 import { customersOf, jobServices, jointRole, payerDeal, type Deal } from '../lib/sales';
 import { fmtN, todayISO } from '../lib/format';
-import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
+import { BIG, TRACKER_MAX, followedLeftWord, followedMoreWord, movedWord, trackerCapWord, trackerNote, trackerWarn } from '../lib/bulk';
 import { followRows } from '../lib/follow';
 import { cardYear } from '../lib/similarCard';
 import { useSalesActs } from './SalesToast';
@@ -313,7 +313,7 @@ export function SendToTracker() {
       ...(section === AUTO ? {} : { section }), year, pid: ui.sendPid, service: svc, force: chosen.filter((x) => x.force).map((x) => x.c.id),
     });
     // (a company skipped: its jobs have a service picked, said by name; nothing picked: that it has a job)
-    const note = trackerNote(r.added, r.skipped, year, r.clash);
+    const note = trackerNote(r.added, r.skipped, year, r.clash) + movedWord(r.unfollowed);
     if (ui.sendStay) {
       // from the search page's selection: stay there, say what was sent, link to the table; an account
       // that may delete deals can take the rows back (เลิกทำ, 10 minutes: engine.undoSent)

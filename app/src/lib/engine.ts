@@ -3096,16 +3096,31 @@ export class GccEngine {
   addDealsFromCompanies(ids: number[], opts: { section?: string; year?: string; pid?: string; service?: readonly string[]; force?: readonly number[] } = {}) {
     if (!this.can('edit.deal')) {
       this.deny();
-      return { added: 0, skipped: 0, ids: [] as string[], k: '', clash: [] as string[] };
+      return { added: 0, skipped: 0, ids: [] as string[], k: '', clash: [] as string[], unfollowed: 0 };
     }
-    const r = this.bulk(() => this.addDealsFrom(ids, opts));
-    // what เลิกทำ may take back: these rows as they were made
+    // one batch: the rows and the follows they take off are one change, one emit
+    const { r, gids, off } = this.bulk(() => {
+      const made = this.addDealsFrom(ids, opts);
+      // a company sent to the Sales Tracker is no longer followed: it has moved from ติดตาม to การบริการ. Only the
+      // companies that were followed are taken off, and only by an account that may change follows.
+      const g: Record<string, number> = {};
+      for (const id of made.ids) {
+        const gid = this.sales.deals[id]?.gid;
+        if (gid != null) g[id] = this.canonical(gid);
+      }
+      const sent = [...new Set(Object.values(g))];
+      const taken = this.can('edit.cust') ? sent.filter((id) => this.crm.watch.some((w) => this.canonical(w) === id)) : [];
+      if (taken.length) this.setWatchMany(taken, false);
+      return { r: made, gids: g, off: taken };
+    });
+    // what เลิกทำ may take back: these rows as they were made, and the follows this send took off
     const k = r.ids.length ? uid() : '';
-    this.lastSent = k ? { k, at: Date.now(), sig: Object.fromEntries(r.ids.map((id) => [id, dealSig(this.sales.deals[id])])) } : null;
-    return { ...r, k };
+    this.lastSent = k ? { k, at: Date.now(), sig: Object.fromEntries(r.ids.map((id) => [id, dealSig(this.sales.deals[id])])), gids, unfollowed: off } : null;
+    return { ...r, k, unfollowed: off.length };
   }
-  /** The rows the last send to the Sales Tracker added (`k` names that send, `sig` each row as it was made). */
-  lastSent: { k: string; at: number; sig: Record<string, string> } | null = null;
+  /** The rows the last send to the Sales Tracker added (`k` names that send, `sig` each row as it was made), the
+   *  company of each (`gids`) and the companies whose follow the send took off (`unfollowed`). */
+  lastSent: { k: string; at: number; sig: Record<string, string>; gids?: Record<string, number>; unfollowed?: number[] } | null = null;
   /**
    * "เลิกทำ" after a send (the search page's toast): the rows send `k` added are deleted for the whole team,
    * within UNDO_SEND_MS, by an account that may delete deals (the script asks del.rec for it). A row that
@@ -3120,6 +3135,8 @@ export class GccEngine {
       return { removed: 0, kept: 0 };
     }
     let removed = 0, kept = 0;
+    // the companies whose follow the send took off, and whose row is taken back: followed again
+    const back = new Set<number>();
     this.bulk(() =>
       Object.entries(L.sig).forEach(([id, sig]) => {
         const d = this.sales.deals[id];
@@ -3127,8 +3144,11 @@ export class GccEngine {
         if (dealSig(d) !== sig || this.dealHasWork(id) || this.linkedSince(id, L.at)) return void kept++;
         this.deleteDealNow(d, 'เลิกส่งเข้า Sales Tracker');
         removed++;
+        const g = L.gids?.[id];
+        if (g != null && L.unfollowed?.includes(g)) back.add(g);
       }),
     );
+    if (back.size && this.can('edit.cust')) this.setWatchMany([...back], true);
     this.lastSent = null;
     if (removed) this.saveSales();
     return { removed, kept };

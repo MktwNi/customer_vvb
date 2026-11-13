@@ -81,17 +81,18 @@ describe('the search page bar feeds บริษัทที่ติดตา�
     expect(e.getVersion()).toBe(v0 + 1);
     let p = planOf(e, 'sales');
     expect(p.rows.map((x) => x.c!.id).sort()).toEqual([a, b].sort());
-    // followed and in the tracker: one row with both tags
-    expect(p.rows.every((x) => x.watch && x.jobs.length === 1)).toBe(true);
-    expect(planOf(e).counts).toEqual({ all: 6, watch: 6, sales: 2 });
+    // sent: no longer followed, and the row keeps its open job
+    expect(p.rows.every((x) => !x.watch && x.jobs.length === 1)).toBe(true);
+    // the two sent are no longer followed: they are in การบริการ (the list keeps them as open jobs)
+    expect(planOf(e).counts).toEqual({ all: 6, watch: 4, sales: 2 });
     // no Services yet: still ยังไม่ระบุประเภท; a job's Services name its type
     expect(p.rows.every((x) => p.typesOfRow(x).join() === 'none')).toBe(true);
     e.updateDeal(r.ids[0], { service: ['CFO'] });
     p = planOf(e, 'sales');
     const ra = p.rows.find((x) => x.jobs[0].deal.id === r.ids[0])!;
     expect(p.typesOfRow(ra)).toEqual(['cfo']);
-    // บริษัทที่ติดตาม says they are in this year's tracker
-    expect(followRows(e, YEAR, TODAY).filter((x) => x.deal).map((x) => x.c.id).sort()).toEqual([a, b].sort());
+    // บริษัทที่ติดตาม no longer lists them: they moved to การบริการ
+    expect(followRows(e, YEAR, TODAY).some((x) => x.c.id === a || x.c.id === b)).toBe(false);
   });
 
   it('a company sent but not followed is in แผนติดต่อ, not in บริษัทที่ติดตาม', () => {
@@ -116,7 +117,8 @@ describe('the search page bar feeds บริษัทที่ติดตา�
 
   it('เลิกติดตาม many: off both lists at once (a tracker job keeps its row in แผนติดต่อ)', () => {
     const v0 = e.getVersion();
-    expect(e.setWatchMany(picked, false).changed).toBe(6);
+    // the two sent were taken off with their send: four are left to take off
+    expect(e.setWatchMany(picked, false).changed).toBe(4);
     expect(e.getVersion()).toBe(v0 + 1);
     expect(followRows(e, YEAR, TODAY)).toEqual([]);
     const p = planOf(e);
