@@ -1245,7 +1245,12 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-owner-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .sl-owner-name.none{color:var(--muted)}
 /* ขั้นตอน · ถัดไป: "ถัดไป CALL2 โทรครั้งที่ 2" over the circles and their n/N */
-.sl-stw{display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:0}
+.sl-stw{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px 10px;min-width:0}
+/* the next step and the count share the first line; the step line runs under both */
+.sl-stw .sl-trk{display:contents}
+.sl-stw .sl-nx{grid-column:1;grid-row:1}
+.sl-stw .sl-trk-n{grid-column:2;grid-row:1;justify-self:end}
+.sl-stw .sl-mt{grid-column:1/-1;grid-row:2;max-width:none}
 /* the next step: its code on a tint chip (red when late, amber when due), then its name; no pill, no border */
 .sl-nx{cursor:pointer;display:inline-flex;align-items:center;gap:8px;max-width:100%;height:auto;padding:0;border:0;background:none;color:var(--ink);font:inherit;font-size:var(--fs-body);line-height:1.4;white-space:nowrap;min-width:0}
 .sl-nx b{font-size:var(--fs-meta);font-weight:500;letter-spacing:.02em;color:var(--link);background:var(--tint);border-radius:6px;padding:2px 7px;flex:none}
@@ -1256,21 +1261,15 @@ input[type=file]::file-selector-button{cursor:pointer;height:34px;margin-right:1
 .sl-nx.txt,.sl-nx.ro{cursor:default;border:0;background:none;padding:0;height:auto;line-height:1.5}
 .sl-nx.txt{color:var(--muted)}
 .sl-nx.txt.ok{color:var(--ok)}
-.sl-trk{display:flex;align-items:flex-end;gap:10px;width:100%}
-.sl-trk-n{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;flex:none;padding-bottom:1px}
-/* the steps as a thin line with each code under its part of it (no circles): reached = brand, the next step = a
-   tint (red when late), the rest = the rail */
-.sl-mt{--n:8;display:flex;flex-direction:column;gap:5px;flex:1;max-width:220px;min-width:0}
-.sl-rail{display:flex;gap:3px;height:6px}
-.sl-seg{flex:1;min-width:6px;height:6px;border-radius:999px;background:var(--rail)}
+.sl-trk{display:flex;align-items:center;gap:10px;width:100%}
+.sl-trk-n{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap;flex:none}
+/* the steps as a thin line (no circles): reached = brand, the next step = a tint (red when late), the rest = the rail */
+.sl-mt{display:flex;flex:1;max-width:220px;min-width:0}
+.sl-rail{display:flex;flex:1;gap:3px;height:4px}
+.sl-seg{flex:1;min-width:6px;height:4px;border-radius:999px;background:var(--rail)}
 .sl-seg.on{background:var(--brand)}
 .sl-seg.nx{background:var(--tint-line)}
 .sl-mt.late .sl-seg.nx{background:var(--bad)}
-.sl-names{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:3px}
-.sl-nm{font-size:var(--fs-meta);letter-spacing:.02em;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.sl-nm.on{color:var(--ink-2)}
-.sl-nm.nx{color:var(--link);font-weight:500}
-.sl-mt.late .sl-nm.nx{color:var(--bad)}
 .sl-bd{--s:var(--bs,12px);position:relative;z-index:1;flex:none;display:inline-block;width:var(--s);height:var(--s);border-radius:50%;background:#fff;border:1.5px solid var(--mark-future);box-sizing:border-box}
 .sl-bd.d{background:var(--mark-done);border-color:var(--mark-done)}
 .sl-bd.y{background:var(--mark-yes);border-color:var(--mark-yes)}

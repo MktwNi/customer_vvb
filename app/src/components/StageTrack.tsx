@@ -32,14 +32,11 @@ export const beadOf = (v: Pick<StepView, 'state' | 'outside'>): StageState => (v
 export const trackWords = (steps: Pick<StepView, 'id' | 'code' | 'th' | 'state' | 'rest'>[], next: string) =>
   steps.map((v) => `${v.rest ? `${v.code} ${v.th}` : v.code} ${v.id === next ? (v.state === 'done' ? 'ทำแล้ว มีนัด' : 'ถัดไป') : STATE_WORD[v.state]}`).join(' · ');
 
-/** The code a step shows under the track (the table's column is narrow: QUOTATION reads QUOTE; the words stay in full). */
-const SHORT_CODE: Record<string, string> = { QUOTATION: 'QUOTE' };
-
 /**
- * The counted steps as a thin line in a row or a card, each step's code under its part of the line, then "3/5"
- * (dealSteps: an installment outside the plan is not a step). Reached steps are brand, the next step is a tint
- * (red when late), the rest the rail. An image with its words as the label: never focusable (the steps are reached
- * through the next-step link and the child rows).
+ * The counted steps as a thin line in a row or a card, then "3/5" (dealSteps: an installment outside the plan is not
+ * a step). Reached steps are brand, the next step is a tint (red when late), the rest the rail. The steps' names are
+ * in the tooltip and the label: the table's column is too narrow to print them. An image with its words as the label:
+ * never focusable (the steps are reached through the next-step link and the child rows).
  */
 export function MiniTrack({ steps: all, next, done, late }: { steps: StepView[]; next: string; done: number; late?: boolean }) {
   const steps = all.filter((v) => v.counted);
@@ -48,12 +45,9 @@ export function MiniTrack({ steps: all, next, done, late }: { steps: StepView[];
   const cls = (v: StepView, i: number) => (v.id === next ? ' nx' : i <= reached ? ' on' : '');
   return (
     <span className="sl-trk">
-      <span className={'sl-mt' + (late ? ' late' : '')} style={{ '--n': steps.length }} role="img" aria-label={`ทำแล้ว ${done} จาก ${steps.length} ขั้น: ${words}`} title={words}>
+      <span className={'sl-mt' + (late ? ' late' : '')} role="img" aria-label={`ทำแล้ว ${done} จาก ${steps.length} ขั้น: ${words}`} title={words}>
         <span className="sl-rail" aria-hidden="true">
           {steps.map((v, i) => <i key={v.id} className={'sl-seg' + cls(v, i)} />)}
-        </span>
-        <span className="sl-names" aria-hidden="true">
-          {steps.map((v, i) => <span key={v.id} className={'sl-nm' + cls(v, i)}>{SHORT_CODE[v.code] ?? v.code}</span>)}
         </span>
       </span>
       <span className="sl-trk-n" aria-hidden="true">{done}/{steps.length}</span>

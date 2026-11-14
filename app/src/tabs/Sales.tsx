@@ -59,7 +59,6 @@ export { Modal } from '../components/Dialog';
 
 type Engine = ReturnType<typeof useApp>['engine'];
 /** A step's Thai name in the tracker's rows (CLOSE says "ผลการขาย": its buttons say YES / NO). */
-const thShort = (th: string) => th.replace(/\s*\(YES \/ NO\)$/, '');
 /** Something recorded at a stored stage: its date or its note. */
 const isFilled = (x: DealStep) => !!(x.d || x.n.trim());
 const agoTh = (iso: string, today: string) => {
@@ -1249,6 +1248,8 @@ function Owner({ d }: { d: Deal }) {
 
 /** "ถัดไป FOLLOW ติดตามผล": opens the step's editor in its row; plain text for viewers. A won deal with a plan
  *  names its next installment (red when late, amber when due within 7 days or part paid). */
+const thShort = (th: string) => th.replace(/\s*\(YES \/ NO\)$/, '');
+
 function NextPill({ d, card, v: v0 }: { d: Deal; card?: boolean; v?: NextStepView }) {
   const tk = useTk();
   const v = v0 || nextStepView(tk.S, d, tk.today);
@@ -1258,8 +1259,8 @@ function NextPill({ d, card, v: v0 }: { d: Deal; card?: boolean; v?: NextStepVie
   const inner = (
     <>
       <b>{v.code}</b>
-      {/* (the step's name, or what is owed on it: "ถัดไป PAY2 ค้าง 125,000") */}
-      <em>{(v.kind === 'next' || v.kind === 'overdue') && v.hint === v.th ? thShort(v.th) : v.hint}</em>
+      {/* what is owed or late on it ("PAY2 ค้าง 125,000"); a step's own name is in its label, not on the line */}
+      {v.hint !== v.th && <em>{v.hint}</em>}
     </>
   );
   const tone = v.tone ? ' ' + v.tone : '';
