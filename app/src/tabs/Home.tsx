@@ -2,17 +2,22 @@ import { useApp, useEngineVersion } from '../state';
 import { NAV, pageOk } from '../components/Sidebar';
 import { Icon, type IconName } from '../components/icons';
 import { TT } from '../lib/constants';
-import { dmTh, fmtN, isoTh, todayISO } from '../lib/format';
+import { TH_M, addDays, dmTh, dow, fmtN, isoTh, todayISO } from '../lib/format';
 import type { Task } from '../lib/types';
 import { planDayLink } from '../lib/planCal';
 
-/** The Master Plan (CFO) site: plans of CFO verification cases, the same accounts (team-sync/README.md). */
-const MP_URL = 'https://mktwni.github.io/gcc-master-plan/';
+/**
+ * ระบบงานทวนสอบ GCC (owner, Nov 2569: "งานทวนสอบให้ลิงค์ไปที่ ระบบงาน VVB GCC ... แล้วล๊อคสิทธิไว้"): its own
+ * site (repo MktwNi/gcc-case-demo) with its own invited accounts, so the tile only opens the way for the
+ * accounts given mp.view here (the verification work); signing in there is still that system's own.
+ */
+const VVB_URL = 'https://mktwni.github.io/gcc-case-demo/app/';
 
 /** A system on หน้าแรก: open here, a link to its own site, not this account's, or not built yet. */
 type SysState = 'open' | 'link' | 'locked' | 'soon';
 interface Sys { key: 'sales' | 'consult' | 'verify' | 'event'; name: string; sub: string; icon: IconName; state: SysState }
 
+const WD = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const byTime = (a: Task, b: Task) => (a.time || '99').localeCompare(b.time || '99');
 const byWhen = (a: Task, b: Task) => a.date.localeCompare(b.date) || byTime(a, b);
 
@@ -20,7 +25,8 @@ const byWhen = (a: Task, b: Task) => a.date.localeCompare(b.date) || byTime(a, b
  * หน้าแรก (owner, Nov 2569: "หลัง Login ผมอยากให้ขึ้นมาเป็นหน้าแบบนี้", design 2A on the design canvas):
  * the systems of the company in one place — each opens only for the accounts allowed to use it — today's
  * appointments, every page this account may open and what waits for this account (the search is the top
- * bar's, on every page).
+ * bar's, on every page). The side column is this month's calendar over the next appointments (owner's pick
+ * A of three, "มันดูโล่งๆ" with one card there): it holds its place with no appointment at all.
  * On the UAT copy of the site only for now (lib/uat.ts); งานที่ปรึกษา and Event are designs, not built yet.
  */
 export function Home() {
@@ -38,15 +44,25 @@ export function Home() {
   const todays = tasks.filter((t) => t.date === today).sort(byTime);
   const done = todays.filter((t) => t.done).length;
   const next = todays.find((t) => !t.done);
-  const upcoming = tasks.filter((t) => !t.done && t.date >= today).sort(byWhen).slice(0, 4);
+  const upcoming = tasks.filter((t) => !t.done && t.date >= today).sort(byWhen).slice(0, 5);
   const who = (t: Task) => e.company(t.gid)?.name || t.title;
   const kind = (t: Task) => TT.find((x) => x[0] === t.type)?.[1] || '';
   const C = 2 * Math.PI * 30;
 
+  // this month, weeks from Sunday as on แผนติดต่อ (tabs/Plan.tsx): a dot on each day with an appointment
+  const month = today.slice(0, 7);
+  const [yy, mm] = month.split('-').map(Number);
+  const first = `${month}-01`;
+  const start = addDays(first, -dow(first));
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i)).filter((_, i) => i < 35 || addDays(start, 35).slice(0, 7) === month);
+  const perDay = new Map<string, number>();
+  tasks.forEach((t) => perDay.set(t.date, (perDay.get(t.date) || 0) + 1));
+  const monthN = tasks.filter((t) => t.date.slice(0, 7) === month).length;
+
   const systems: Sys[] = [
     { key: 'sales', name: 'ฐานลูกค้าและงานขาย', sub: 'ทะเบียนบริษัท Sales Tracker ผู้ติดต่อ และแผนติดต่อ', icon: 'sales', state: 'open' },
     { key: 'consult', name: 'งานที่ปรึกษา', sub: 'โครงการ แผนโครงการ และวางบิล', icon: 'briefcase', state: 'soon' },
-    { key: 'verify', name: 'งานทวนสอบ', sub: 'Master Plan (CFO) เปิดเว็บที่ใช้งานอยู่', icon: 'audit', state: e.can('mp.view') ? 'link' : 'locked' },
+    { key: 'verify', name: 'งานทวนสอบ', sub: 'ระบบงาน VVB GCC · เข้าด้วยบัญชีที่ได้รับเชิญ', icon: 'audit', state: e.can('mp.view') ? 'link' : 'locked' },
     { key: 'event', name: 'Event', sub: 'ปฏิทินงานและผู้เข้าร่วม', icon: 'ticket', state: 'soon' },
   ];
 
@@ -74,12 +90,12 @@ export function Home() {
                 <span className="hm-ic"><Icon name={x.state === 'locked' ? 'lock' : x.icon} /></span>
                 <b>{x.name}</b>
                 <span className="hm-sub">
-                  {x.state === 'soon' ? 'กำลังพัฒนา · ดูแบบได้บนแคนวาสออกแบบ' : x.state === 'locked' ? (canAsk ? 'ยังไม่มีสิทธิ์ · กดเพื่อขอสิทธิ์' : 'ยังไม่มีสิทธิ์ใช้ระบบนี้') : x.sub}
+                  {x.state === 'soon' ? 'กำลังพัฒนา' : x.state === 'locked' ? (canAsk ? 'ยังไม่มีสิทธิ์ · กดเพื่อขอสิทธิ์' : 'ยังไม่มีสิทธิ์ใช้ระบบนี้') : x.sub}
                 </span>
               </>
             );
             if (x.state === 'open') return <button key={x.key} type="button" className={'hm-tile ' + x.key} onClick={() => go('overview')}>{body}</button>;
-            if (x.state === 'link') return <a key={x.key} className={'hm-tile ' + x.key} href={MP_URL} target="_blank" rel="noopener">{body}</a>;
+            if (x.state === 'link') return <a key={x.key} className={'hm-tile ' + x.key} href={VVB_URL} target="_blank" rel="noopener">{body}</a>;
             if (x.state === 'locked' && canAsk) return <button key={x.key} type="button" className="hm-tile locked" onClick={ask}>{body}</button>;
             return <div key={x.key} className={'hm-tile ' + (x.state === 'locked' ? 'locked' : 'soon')}>{body}</div>;
           })}
@@ -133,6 +149,38 @@ export function Home() {
       </div>
 
       <aside className="hm-side">
+        {s && e.can('set.users') && (s.rq || 0) > 0 && (
+          <section className="card hm-card" aria-labelledby="hm-rq-t">
+            <h2 id="hm-rq-t">รอคุณอนุมัติ</h2>
+            <button type="button" className="hm-req" onClick={() => go('users', { usersSec: 'req' })}>
+              <b>คำขอสิทธิ์ {fmtN(s.rq || 0)} รายการ</b>
+              <span>เปิดผู้ใช้และสิทธิ์</span>
+            </button>
+          </section>
+        )}
+
+        {plan && (
+          <section className="card hm-card" aria-labelledby="hm-cal-t">
+            <div className="hm-sec">
+              <h2 id="hm-cal-t">{TH_M[mm - 1]} {yy + 543}</h2>
+              <span className="hm-note">{monthN ? `นัดเดือนนี้ ${fmtN(monthN)}` : 'เดือนนี้ยังไม่มีนัด'}</span>
+            </div>
+            <div className="hm-cal">
+              {WD.map((d) => <span key={d} className="hm-cal-h" aria-hidden="true">{d}</span>)}
+              {cells.map((d) => {
+                const n = perDay.get(d) || 0;
+                const cls = 'hm-cal-d' + (d.slice(0, 7) !== month ? ' out' : '') + (d === today ? ' today' : '');
+                return (
+                  <button key={d} type="button" className={cls} onClick={() => go('plan', planDayLink(d))} aria-label={isoTh(d) + (n ? ` นัด ${fmtN(n)} รายการ` : '')} aria-current={d === today ? 'date' : undefined}>
+                    {Number(d.slice(8))}
+                    {n > 0 && <i aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {plan && (
           <section className="card hm-card" aria-labelledby="hm-up-t">
             <div className="hm-sec">
@@ -152,16 +200,6 @@ export function Home() {
             ) : (
               <p className="hm-empty">ยังไม่มีนัดที่จะถึง</p>
             )}
-          </section>
-        )}
-
-        {s && e.can('set.users') && (s.rq || 0) > 0 && (
-          <section className="card hm-card" aria-labelledby="hm-rq-t">
-            <h2 id="hm-rq-t">รอคุณอนุมัติ</h2>
-            <button type="button" className="hm-req" onClick={() => go('users', { usersSec: 'req' })}>
-              <b>คำขอสิทธิ์ {fmtN(s.rq || 0)} รายการ</b>
-              <span>เปิดผู้ใช้และสิทธิ์</span>
-            </button>
           </section>
         )}
       </aside>

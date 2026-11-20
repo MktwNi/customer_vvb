@@ -66,6 +66,17 @@ button.hm-tile.locked .hm-sub{color:var(--link);font-weight:500}
 .hm-req b{font-weight:500}
 .hm-req span{font-size:var(--fs-sec)}
 
+/* this month on the side: a day opens แผนติดต่อ on that day, a dot = an appointment that day */
+.hm-cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}
+.hm-cal-h{font-size:var(--fs-meta);color:var(--muted);padding:2px 0 6px}
+.hm-cal-d{position:relative;height:36px;border:0;border-radius:10px;background:none;font:inherit;font-size:var(--fs-sec);color:var(--ink);cursor:pointer}
+.hm-cal-d:hover{background:var(--tint)}
+.hm-cal-d:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.hm-cal-d.out{color:var(--muted)}
+.hm-cal-d.today{background:var(--brand);color:#fff;font-weight:500}
+.hm-cal-d i{position:absolute;left:50%;bottom:4px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--brand)}
+.hm-cal-d.today i{background:#fff}
+
 @media (max-width:1100px){.hm{grid-template-columns:minmax(0,1fr)}}
 
 /* the UAT copy of the site: on every screen, the sign-in too; clicks pass through it */
