@@ -52,7 +52,7 @@ export const CAPS: CapDef[] = [
   { id: 'set.units', g: 'a', label: 'ตั้งค่าหน่วยงานและอัตราคอมมิชชั่น', desc: 'รายชื่อหน่วยงาน คนในหน่วยงาน และอัตรา %', needs: 'view.comm' },
   { id: 'set.dedup', g: 'a', label: 'ตรวจข้อมูลซ้ำ', desc: 'ตัดสินว่าบริษัทซ้ำกันหรือไม่' },
   { id: 'set.data', g: 'a', label: 'นำเข้าข้อมูลและไฟล์สำรอง', desc: 'นำเข้า Sales Tracker เดิม ไฟล์สำรองทีม (ส่งออก CSV ทำได้ทุกคนที่เห็นหน้านั้น)' },
-  { id: 'mp.view', g: 'a', label: 'ดู Master Plan (CFO)', desc: 'เปิดหน้า Master Plan เห็นแผนทวนสอบและ Gantt ของทุกเคส และเปิดการ์ดงานทวนสอบ (ระบบงาน VVB GCC) ในหน้าแรก' },
+  { id: 'mp.view', g: 'a', label: 'ดู Master Plan (CFO)', desc: 'เปิดหน้า Master Plan เห็นแผนทวนสอบและ Gantt ของทุกเคส' },
   { id: 'mp.edit', g: 'a', label: 'แก้ไข Master Plan (CFO)', desc: 'เพิ่ม แก้ไข และลบแผนทวนสอบในหน้า Master Plan', needs: 'mp.view' },
   { id: 'set.users', g: 'a', label: 'จัดการผู้ใช้และสิทธิ์', desc: 'บัญชี บทบาท และอนุมัติคำขอ · เฉพาะผู้ดูแลระบบ' },
 ];
