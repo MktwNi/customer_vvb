@@ -9,6 +9,7 @@ import { ScheduleModal } from './components/ScheduleModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Overview } from './tabs/Overview';
 import { Home } from './tabs/Home';
+import { Vvb } from './tabs/Vvb';
 import { Search } from './tabs/Search';
 import { Track } from './tabs/Track';
 import { Plan } from './tabs/Plan';
@@ -234,6 +235,7 @@ export default function App() {
               {!ready && ui.tab !== 'help' && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
                 {ready && allowed && ui.tab === 'home' && <Home />}
+                {ready && allowed && ui.tab === 'vvb' && <Vvb />}
                 {ready && (ui.tab === 'overview' || !allowed) && <Overview />}
                 {ready && allowed && ui.tab === 'exec' && <Summary />}
                 {ready && allowed && ui.tab === 'sales' && <Sales />}
