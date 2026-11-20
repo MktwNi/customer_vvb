@@ -34,6 +34,15 @@ jobs:
         continue-on-error: true
       # build copies project/data into the site (scripts/sync-data.mjs)
       - run: npm run build
+      # the UAT copy of the site at …/uat/ (app/src/lib/uat.ts): the same code built with VITE_UAT=1, so it keeps
+      # its own browser storage, shows a test badge and has หน้าแรก. Its team is the repository variable
+      # UAT_TEAM_URL (Settings > Secrets and variables > Actions > Variables): a separate team script and sheet
+      # for testing; while it is unset the copy uses no team (data stays in each browser). The real site's
+      # build above is unchanged.
+      - run: npx vite build --outDir dist-uat --emptyOutDir && mv dist-uat dist/uat
+        env:
+          VITE_UAT: '1'
+          VITE_TEAM_URL: ${{ vars.UAT_TEAM_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

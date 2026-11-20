@@ -148,6 +148,29 @@ const PATHS = {
       <path d="M12 11v5.5M12 7.5h.01" />
     </>
   ),
+  // หน้าแรก (tabs/Home.tsx) and its systems: a house; a briefcase (งานที่ปรึกษา); a clipboard with a tick
+  // (งานทวนสอบ); a ticket (Event)
+  home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
+  briefcase: (
+    <>
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <rect x="3" y="6" width="18" height="14" rx="1.5" />
+      <path d="M3 12h18" />
+    </>
+  ),
+  audit: (
+    <>
+      <rect x="9" y="3" width="6" height="3" rx="1" />
+      <path d="M9 4.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1h-3" />
+      <path d="m9 14 2 2 4-4" />
+    </>
+  ),
+  ticket: (
+    <>
+      <path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4z" />
+      <path d="M14 6v2M14 11v2M14 16v2" />
+    </>
+  ),
   // a building: the companies worked for (the Dashboard's ทำงานให้ card)
   company: (
     <>

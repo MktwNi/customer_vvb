@@ -34,6 +34,13 @@ import './expense-money.css';
 // many search results at once: the boxes, เลือกทั้งหมด and the bar over the list (components/BulkBar)
 import './bulk.css';
 import './recontact.css';
+// หน้าแรก (tabs/Home) and the UAT copy's badge
+import './home.css';
+import { UAT } from './lib/uat';
+import { UatBadge } from './components/UatBadge';
+
+// the UAT copy of the site says so in the browser tab too
+if (UAT) document.title = 'UAT · ' + document.title;
 
 const engine = new GccEngine();
 // started before the first render: a sign-in gate (or the home team's check) is there from the first
@@ -44,6 +51,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppProvider engine={engine}>
       <App />
+      {UAT && <UatBadge />}
     </AppProvider>
   </StrictMode>,
 );

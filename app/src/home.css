@@ -1,0 +1,72 @@
+/* หน้าแรก (tabs/Home.tsx, design 2A) and the UAT copy's badge (components/UatBadge.tsx, lib/uat.ts).
+   The systems keep one colour each, as on the design canvas: งานขาย the brand blue, งานที่ปรึกษา teal,
+   งานทวนสอบ burnt orange, Event violet (white text on each is >= 5.4:1). */
+.hm{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--sp-6);align-items:start}
+.hm-main{display:flex;flex-direction:column;gap:var(--sp-5);min-width:0}
+.hm-hello h1{margin:0;font-size:var(--fs-kpi);font-weight:500;line-height:var(--lh-head);color:var(--ink)}
+.hm-bar{display:block;width:56px;height:4px;border-radius:4px;background:var(--brand);margin:10px 0 12px}
+.hm-hello p{margin:0;font-size:var(--fs-card);color:var(--ink-2);line-height:var(--lh-row)}
+
+.hm-sys{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:var(--sp-4)}
+.hm-tile{position:relative;overflow:hidden;isolation:isolate;min-height:150px;box-sizing:border-box;border:0;border-radius:24px;padding:20px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;text-align:left;font:inherit;color:#fff;text-decoration:none;cursor:pointer;box-shadow:var(--sh-hero)}
+.hm-tile::after{content:'';position:absolute;right:-40px;top:-50px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.14);z-index:-1}
+.hm-tile.sales{background:var(--brand)}
+.hm-tile.consult{background:#0F766E;box-shadow:0 18px 34px -22px rgba(15,118,110,.8)}
+.hm-tile.verify{background:#B4461A;box-shadow:0 18px 34px -22px rgba(180,70,26,.8)}
+.hm-tile.event{background:#5B45C9;box-shadow:0 18px 34px -22px rgba(91,69,201,.8)}
+.hm-tile:hover{color:#fff;filter:brightness(1.06)}
+.hm-tile:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+/* the icon in the flow, the words pushed to the bottom: a long name grows up to the icon, never over it */
+.hm-ic{display:block;width:28px;height:28px;margin-bottom:auto;padding-bottom:12px}
+.hm-ic svg{width:28px;height:28px}
+.hm-tile b{font-size:var(--fs-section);font-weight:500;line-height:var(--lh-head)}
+.hm-sub{font-size:var(--fs-sec);line-height:var(--lh-row);color:rgba(255,255,255,.92)}
+.hm-tile.soon,.hm-tile.locked{background:var(--card);color:var(--ink);border:1.5px dashed var(--field);box-shadow:none;cursor:default}
+.hm-tile.soon::after,.hm-tile.locked::after{background:var(--tint)}
+.hm-tile.soon .hm-ic,.hm-tile.locked .hm-ic{color:var(--muted)}
+.hm-tile.soon .hm-sub,.hm-tile.locked .hm-sub{color:var(--ink-2)}
+button.hm-tile.locked{cursor:pointer}
+button.hm-tile.locked .hm-sub{color:var(--link);font-weight:500}
+.hm-tile.soon:hover,.hm-tile.locked:hover{color:var(--ink);filter:none}
+
+.hm-today{display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px;background:var(--hero);color:#fff;border-radius:24px;padding:20px 24px;box-shadow:var(--sh-hero)}
+.hm-ring{position:relative;width:72px;height:72px;flex:none}
+.hm-ring svg{width:72px;height:72px;display:block}
+.hm-ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:var(--fs-section);font-weight:500}
+.hm-tcol{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 200px}
+.hm-tcol b{font-size:var(--fs-section);font-weight:500;line-height:var(--lh-head)}
+.hm-tcol span{font-size:var(--fs-sec);color:var(--on-hero-2)}
+.hm-sep{align-self:stretch;border-left:1px dashed rgba(255,255,255,.5)}
+.btn.hm-white{background-color:#fff;border-color:#fff;color:var(--link);font-weight:500}
+
+.hm-pages-wrap{display:flex;flex-direction:column;gap:var(--sp-3)}
+.hm-sec{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.hm-sec h2,.hm-card h2{margin:0;font-size:var(--fs-section);font-weight:500;color:var(--ink)}
+.hm-note{font-size:var(--fs-sec);color:var(--muted)}
+.hm-pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(140px,100%),1fr));gap:14px}
+.hm-pg{min-height:124px;box-sizing:border-box;padding:16px;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-card);cursor:pointer}
+.hm-pg:hover{border-color:var(--tint-line)}
+.hm-pg-ic{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;background:var(--tint-2);color:var(--link);margin-bottom:8px}
+.hm-pg-ic svg{width:22px;height:22px}
+.hm-pg b{font-size:var(--fs-body);font-weight:500;line-height:var(--lh-row)}
+.hm-pg small{font-size:var(--fs-meta);color:var(--muted)}
+.hm-pg.locked{background:#F9FAFD;border:1.5px dashed var(--field);box-shadow:none;color:var(--ink-2)}
+.hm-pg.locked .hm-pg-ic{background:var(--neutral-bg);color:var(--muted)}
+.hm-pg.locked small{color:var(--link);font-weight:500}
+
+.hm-side{display:flex;flex-direction:column;gap:var(--sp-4);min-width:0}
+.hm-card{padding:20px;display:flex;flex-direction:column;gap:12px}
+.hm-ap{display:flex;gap:12px;align-items:flex-start;width:100%;padding:6px;margin:-6px 0;border:0;border-radius:14px;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.hm-ap:hover{background:var(--tint)}
+.hm-tm{flex:none;min-width:64px;height:38px;padding:0 8px;box-sizing:border-box;border-radius:12px;display:grid;place-items:center;background:var(--tint-2);color:var(--link);font-weight:500;font-size:var(--fs-sec)}
+.hm-ap-t{display:flex;flex-direction:column;min-width:0}
+.hm-ap-sub{font-size:var(--fs-meta);color:var(--muted)}
+.hm-empty{margin:0;font-size:var(--fs-body);color:var(--ink-2)}
+.hm-req{display:flex;flex-direction:column;gap:2px;width:100%;padding:12px 14px;border:0;border-radius:16px;background:var(--warn-bg);color:var(--warn);font:inherit;text-align:left;cursor:pointer}
+.hm-req b{font-weight:500}
+.hm-req span{font-size:var(--fs-sec)}
+
+@media (max-width:1100px){.hm{grid-template-columns:minmax(0,1fr)}}
+
+/* the UAT copy of the site: on every screen, the sign-in too; clicks pass through it */
+.uat-badge{position:fixed;right:12px;bottom:12px;z-index:2000;max-width:calc(100vw - 24px);box-sizing:border-box;padding:6px 14px;border:1px solid #EBC27A;border-radius:var(--r-pill);background:var(--warn-bg);color:var(--warn);font-size:var(--fs-meta);font-weight:500;line-height:1.5;box-shadow:var(--sh-pop);pointer-events:none}

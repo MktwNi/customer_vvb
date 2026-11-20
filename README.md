@@ -4,6 +4,7 @@
 สร้างจากแบบที่ออกแบบใน Claude Design
 
 **เว็บ:** https://mktwni.github.io/customer_vvb/
+**เว็บทดสอบ (UAT):** https://mktwni.github.io/customer_vvb/uat/ (ดูหัวข้อ [เว็บทดสอบ (UAT)](#เว็บทดสอบ-uat))
 
 > ⚠️ เว็บนี้เป็นสาธารณะ ใครมีลิงก์ก็เปิดดูข้อมูลบริษัท เบอร์โทร และอีเมลในเว็บได้
 
@@ -27,9 +28,21 @@
 | `app/` | ตัวเว็บ (React + Vite + TypeScript) — ดูวิธีรันและโครงสร้างโค้ดใน [`app/README.md`](app/README.md) |
 | `project/data/` | ไฟล์ข้อมูลที่เว็บใช้ (`gcc.json`, `gcc-certs.json`, `gcc-detail/`, `rounds.json`, …) |
 | `project/*.dc.html`, `project/*.js` | ไฟล์ต้นแบบจาก Claude Design (ใช้อ้างอิงหน้าตาและการทำงาน) |
-| `.github/workflows/deploy-pages.yml` | build และขึ้นเว็บบน GitHub Pages อัตโนมัติทุกครั้งที่ push เข้า `main` |
+| `.github/workflows/deploy-pages.yml` | build และขึ้นเว็บบน GitHub Pages อัตโนมัติทุกครั้งที่ push เข้า `main` ทั้งเว็บจริงและเว็บทดสอบ `/uat/` |
 
 ไฟล์ Excel ต้นฉบับ (`project/uploads/`) และบันทึกการคุยออกแบบ (`chats/`) ไม่ได้เก็บไว้ใน repo นี้
+
+## เว็บทดสอบ (UAT)
+
+ทุกครั้งที่ push เข้า `main` ระบบจะ build เว็บอีกชุดไว้ที่ `/uat/` ด้วย ให้ทีมลองของใหม่บนเว็บจริงก่อนเปิดใช้
+
+- เป็นโค้ดชุดเดียวกัน build ด้วย `VITE_UAT=1` (ดู `app/src/lib/uat.ts`) ของที่ยังทดสอบอยู่ เช่น **หน้าแรก** จะเปิดเฉพาะบน UAT
+- ข้อมูลที่เบราว์เซอร์เก็บของ UAT ใช้ชื่อแยก (ขึ้นต้นด้วย `uat:`) จึงไม่อ่าน ไม่ทับ และไม่ซิงก์ข้อมูลของเว็บจริงในเครื่องเดียวกัน
+- ทุกหน้ามีป้าย "เว็บทดสอบ (UAT)" มุมขวาล่าง และชื่อแท็บขึ้นต้นด้วย UAT
+- ทีมของ UAT ตั้งที่ repository variable `UAT_TEAM_URL` (Settings → Secrets and variables → Actions → Variables)
+  ใส่ลิงก์ Web app ของสคริปต์ทีมชุดทดสอบ ที่ผูกกับ Google Sheet แยกจากของจริง ตั้งตามขั้นตอนใน [`team-sync/README.md`](team-sync/README.md)
+  ถ้ายังไม่ตั้ง UAT จะไม่เชื่อมทีม ข้อมูลที่ลองบันทึกอยู่ในเบราว์เซอร์เครื่องนั้นเท่านั้น
+- ห้ามตั้ง `UAT_TEAM_URL` เป็นลิงก์สคริปต์ทีมจริง เพราะของที่ลองใน UAT จะเข้าไปอยู่ในข้อมูลจริงของทีม
 
 ## รันบนเครื่อง
 
