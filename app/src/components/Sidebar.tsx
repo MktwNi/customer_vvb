@@ -9,6 +9,7 @@ import { RoleChip, nameLetter } from './Login';
 import { menuKeys, usePopover } from './usePopover';
 import type { GccEngine } from '../lib/engine';
 import type { CapId } from '../lib/caps';
+import { UAT } from '../lib/uat';
 
 /** `cap`: shown only to an account holding it (lib/caps.ts); `accounts`: only in a team that signs in
  *  with accounts. The registry's pages (ภาพรวม ค้นหา ติดตาม แผนที่ หมายเหตุ) are public data: always there. */
@@ -20,6 +21,9 @@ export interface NavItem { key: Tab; label: string; icon: IconName; cap?: CapId;
  * title stands apart at the foot of the menu (the help center: not a page of data).
  */
 export const NAV: { title: string; items: NavItem[] }[] = [
+  // หน้าแรก: the systems this account may open, today's appointments and every page (tabs/Home.tsx) —
+  // on the UAT copy of the site only for now (lib/uat.ts)
+  ...(UAT ? [{ title: 'ระบบงาน GCC', items: [{ key: 'home', label: 'หน้าแรก', icon: 'home' } as NavItem] }] : []),
   {
     title: 'งานขาย',
     items: [
@@ -48,6 +52,7 @@ export const TABS: [Tab, string][] = NAV.flatMap((g) => g.items.map((i): [Tab, s
 const ITEM = new Map(NAV.flatMap((g) => g.items.map((i): [Tab, NavItem] => [i.key, i])));
 /** May this account open page `t`? (the menu shows it, App renders it, the help center links to it) */
 export function pageOk(e: Pick<GccEngine, 'can' | 'role'>, t: Tab) {
+  if (t === 'home') return UAT;
   const it = ITEM.get(t);
   if (!it) return true;
   if (it.accounts && e.role() == null) return false;

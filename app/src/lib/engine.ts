@@ -61,6 +61,7 @@ import { CYCLE_YEAR_BLOCK, cycleBlock, cycleFields, cycleIdOf, cycleLogIdOf, cyc
 import { jobServices, placeholderName, svcSig } from './sales';
 import { customIdOf, findCompanyByName } from './dealCompany';
 import { cardHides, reusedOnSubmit } from './similarCard';
+import { ns } from './uat';
 
 /** Each sheet (web-app URL) has its own queue, so switching sheets or a tab still on another sheet
  *  can never drop or mix up another sheet's unsent changes. */
@@ -115,7 +116,7 @@ class DocAway extends Error {
  *  time its quiet try came: the round goes on with the next file (sendQuiet's `still`). */
 class DocGone extends Error {}
 /** localStorage key another tab of this browser writes to have an upload of this tab give way (yieldFiles). */
-const FILE_YIELD = 'gcc-file-yield';
+const FILE_YIELD = ns('gcc-file-yield');
 const cap = <T extends string | undefined>(s: T): T => (s && s.length > TEXT_MAX ? (s.slice(0, TEXT_MAX) as T) : s);
 
 export interface RoundInfo { key: string; r?: Round; ideal?: string | null; lapse?: number }
@@ -4636,7 +4637,7 @@ export class GccEngine {
     }
     // one tab of this browser uploads at a time (they share the files); the others skip this round
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
-    const run = (locks ? locks.request('gcc-doc-upload', { ifAvailable: !wait }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)) : this.uploadDocsNow(cfg)).then(
+    const run = (locks ? locks.request(ns('gcc-doc-upload'), { ifAvailable: !wait }, (lock) => (lock ? this.uploadDocsNow(cfg) : undefined)) : this.uploadDocsNow(cfg)).then(
       () => {},
       () => {},
     );
@@ -4847,7 +4848,7 @@ export class GccEngine {
    * in localStorage (read at once by the sign-out dialog, shared by this browser's tabs); an entry goes once
    * the record names the uploaded file, or the bill is taken off, replaced or deleted.
    */
-  private billsHereKey = 'gcc-exp-bills-here';
+  private billsHereKey = ns('gcc-exp-bills-here');
   private billsHere(): Record<string, { deal: string; by: string }> {
     const v = prefs.get<unknown>(this.billsHereKey, null);
     if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
@@ -6009,7 +6010,7 @@ export class GccEngine {
    */
   private netTurn<T>(fn: () => Promise<T>): Promise<T> {
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
-    if (locks) return locks.request('gcc-team-sync', fn) as Promise<T>;
+    if (locks) return locks.request(ns('gcc-team-sync'), fn) as Promise<T>;
     const run = this.netQ.then(fn);
     this.netQ = run.catch(() => {});
     return run;
@@ -6864,7 +6865,7 @@ export class GccEngine {
     };
     const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
     try {
-      return await (locks ? locks.request('gcc-team-move', run) : run());
+      return await (locks ? locks.request(ns('gcc-team-move'), run) : run());
     } catch {
       return false;
     }

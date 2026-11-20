@@ -8,6 +8,7 @@ import { CompanyDrawer } from './components/CompanyDrawer';
 import { ScheduleModal } from './components/ScheduleModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Overview } from './tabs/Overview';
+import { Home } from './tabs/Home';
 import { Search } from './tabs/Search';
 import { Track } from './tabs/Track';
 import { Plan } from './tabs/Plan';
@@ -36,9 +37,10 @@ import { commitFocus } from './components/useDialog';
 import { isChkF } from './lib/payCheck';
 import { docById, parseGo } from './lib/notify';
 import { planDayLink } from './lib/planCal';
+import { ns } from './lib/uat';
 
 /** A link from an e-mail (#go=…) waiting to be opened: kept through signing in, in this tab only. */
-const GO_KEY = 'gcc-go';
+const GO_KEY = ns('gcc-go');
 const goRead = (): (ReturnType<typeof parseGo> & { t: number }) | null => {
   try {
     return JSON.parse(sessionStorage.getItem(GO_KEY) || 'null');
@@ -231,6 +233,7 @@ export default function App() {
             <main className="main page-in" key={ready || ui.tab === 'help' ? ui.tab : 'loading'}>
               {!ready && ui.tab !== 'help' && <Loading msg={e.loadMsg} />}
               <ErrorBoundary resetKey={ui.tab}>
+                {ready && allowed && ui.tab === 'home' && <Home />}
                 {ready && (ui.tab === 'overview' || !allowed) && <Overview />}
                 {ready && allowed && ui.tab === 'exec' && <Summary />}
                 {ready && allowed && ui.tab === 'sales' && <Sales />}

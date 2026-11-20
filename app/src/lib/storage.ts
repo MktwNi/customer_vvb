@@ -5,6 +5,8 @@
  * implementations below — callers only use `kv` and `prefs`.
  */
 
+import { ns } from './uat';
+
 export interface KVStore {
   get<T = unknown>(key: string): Promise<T | null>;
   set(key: string, value: unknown): Promise<void>;
@@ -13,8 +15,9 @@ export interface KVStore {
   update<T>(key: string, fn: (cur: T | null) => T): Promise<T>;
 }
 
-/** IndexedDB database/object-store names are kept identical to the prototype so existing browser data carries over. */
-function indexedDbStore(dbName = 'gcc-registry', store = 'kv'): KVStore {
+/** IndexedDB database/object-store names are kept identical to the prototype so existing browser data carries over
+ *  (the UAT copy of the site has its own database, lib/uat.ts). */
+function indexedDbStore(dbName = ns('gcc-registry'), store = 'kv'): KVStore {
   let p: Promise<IDBDatabase> | null = null;
   const db = () =>
     p ||
@@ -117,34 +120,34 @@ export const prefs = {
   },
 };
 
-/** localStorage keys (same as the prototype). */
+/** localStorage keys (same as the prototype; the UAT copy prefixes them, lib/uat.ts). */
 export const PREF = {
-  ui: 'gcc-ui',
-  me: 'gcc-me',
-  monitor: 'gcc-monitor',
-  sync: 'gcc-tgo-sync',
-  team: 'gcc-team-sync',
+  ui: ns('gcc-ui'),
+  me: ns('gcc-me'),
+  monitor: ns('gcc-monitor'),
+  sync: ns('gcc-tgo-sync'),
+  team: ns('gcc-team-sync'),
   /** Web-app link of the last connected team sheet (its unsent changes move to the next link). */
-  teamLast: 'gcc-team-last',
+  teamLast: ns('gcc-team-last'),
   /** 'rail' when the menu was folded to icons on a wide screen (default: docked open). */
-  nav: 'gcc-nav',
+  nav: ns('gcc-nav'),
   /** Contact persons from the Sales Tracker not to suggest again on this browser (ids): chosen "ไม่ต้อง". */
-  peopleHide: 'gcc-people-hide',
+  peopleHide: ns('gcc-people-hide'),
   /** … and those deleted (here or by a teammate). */
-  peopleGone: 'gcc-people-gone',
+  peopleGone: ns('gcc-people-gone'),
   /** Pairs of people said "ไม่ใช่คนเดียวกัน" on this browser (people.ts pairKey): not offered to merge again. */
-  peopleNotDup: 'gcc-people-notdup',
+  peopleNotDup: ns('gcc-people-notdup'),
   /** The account signed in on this browser (team accounts): {url, u, name, role, tok, exp, rm, mc}. */
-  session: 'gcc-team-session',
+  session: ns('gcc-team-session'),
   /** The last account that chose "จดจำฉัน" ({u, name}), offered on the login screen. */
-  lastUser: 'gcc-team-last-user',
+  lastUser: ns('gcc-team-last-user'),
   /** Set when a sign-out wiped this browser's team data: other tabs reload. */
-  wipe: 'gcc-team-wipe',
+  wipe: ns('gcc-team-wipe'),
   /** The team script's notification state as last heard ({url, on, since}), so the quotation check shows
    *  from the first frame; and the bell's scope chosen here while the script has no notifications. */
-  notify: 'gcc-notify-live',
-  bellScope: 'gcc-bell-scope',
+  notify: ns('gcc-notify-live'),
+  bellScope: ns('gcc-bell-scope'),
   /** What the team script said about the quotations this account attached or edited ({key: url|user, m:
    *  {docId: QtSent}}): the bell and the card say who was told, or why nobody was. */
-  qtSent: 'gcc-qt-sent',
+  qtSent: ns('gcc-qt-sent'),
 } as const;
