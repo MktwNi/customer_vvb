@@ -849,3 +849,27 @@ export function mergeListEdits(prev: SyncOp | undefined, e: ListEdit): ListEdit 
   const rm = prev.lst.rm.filter((x) => !e.add.includes(x)).concat(e.rm.filter((x) => !prev.lst!.add.includes(x)));
   return { add: [...new Set(add)], rm: [...new Set(rm)] };
 }
+
+/** What the team script takes (team-sync/Code.gs): a key of 500 characters at most, a value of MAX_CELL = 45000 as
+ *  JSON. The value here leaves room for what the script adds to it (by, at). */
+export const SHEET_KEY_MAX = 500;
+export const SHEET_VALUE_MAX = 44000;
+/** A change the sheet cannot hold: its key or its value is too long (the script answers it in `rejected`). */
+export const tooLongForSheet = (o: Pick<SyncOp, 'k' | 'v' | 'del'>) =>
+  o.k.length > SHEET_KEY_MAX || (!o.del && JSON.stringify(o.v ?? null).length > SHEET_VALUE_MAX);
+
+/**
+ * What to say when the sheet refused changes (the push loop): the ones too long by name (the first three, then how
+ * many more), and that each is on this device only until a teammate's change to it comes (a pull applies the team's
+ * value to a record no longer queued); the others refused, by count. '' when there are none.
+ */
+export function refusedWords(tooLong: string[], other: number): string {
+  const parts: string[] = [];
+  if (tooLong.length) {
+    const named = tooLong.slice(0, 3).join(', ') + (tooLong.length > 3 ? ` และอีก ${tooLong.length - 3} รายการ` : '');
+    parts.push(`ไม่ได้แชร์ ${named} เพราะยาวเกินกว่าที่ชีตของทีมเก็บได้ · ตอนนี้มีอยู่ในเครื่องนี้เท่านั้น ถ้ามีคนในทีมแก้รายการนี้ ข้อมูลของทีมจะมาแทน ให้ย่อให้สั้นลงแล้วบันทึกใหม่`);
+  }
+  if (other) parts.push(`ชีตของทีมไม่รับอีก ${other} รายการ จึงไม่ได้แชร์`);
+  return parts.join(' · ');
+}
+

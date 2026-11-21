@@ -22,8 +22,7 @@ import { contactChoices, dealContact, linkIndex, linkOrder, nameKey, personExtra
 import { aliasIndex, coKey, coRecOf, coRecsOn, cosOf, dupPairs, findExisting, intoKey, intoValue, mergePlan, pairKey, pcoValue, personKey, phoneKeys, reachPatch, suggestionHeads, toPCo, toPInto, type DupPair, type Found, type PCo, type PInto, type PersonAt, type PersonCo } from './people';
 import {
   CUSTOM_ID_MIN, LOCAL_ID_MIN, TeamSyncError, applyRow, codeError, isLocalId, call, errText, fetchTransport, hello, isLocalOnly, isTeamUrl, keyOf, legacyLogId, localRecords, mergeFields, mergeFieldLists, mergeListEdits, applyListEdit, withFields, noEffects, opId, rebaseOp, uniqueTaskIds, type ListEdit,
-  parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport,
-} from './teamSync';
+  parseMe, type Caps, type Cred, type Role, type Session, type SharedState, type SyncOp, type SyncRow, type TeamCfg, type TeamState, type Transport, refusedWords, tooLongForSheet } from './teamSync';
 import { derivePk, normUser, tempPassword } from './auth';
 import {
   BUILTIN, CAPS, can as capCan, canWriteKey as capWrite, capsOf, hasWrite, isBuiltin, keyRule, lateUnknown, parseAudit, parseGrants, parseReqs, parseRoles, sameName, roleWire,
@@ -72,6 +71,8 @@ const acctKey = (url: string) => 'teamAccts:' + url;
 const CODE_AGAIN = 'สคริปต์ของทีมกลับไปใช้รหัสทีม — ใส่รหัสทีมเพื่อซิงก์ต่อ';
 /** Longest free text (notes) shared through the sheet; one cell holds 50,000 characters. */
 const TEXT_MAX = 5000;
+/** A certificate sheet cell's note kept on the review queue record (setTgo from a sheet import). */
+const IMPORT_NOTE_MAX = 2000;
 /** Whether queued change `a` is at least as recent as `b` (same record). */
 const newer = (a: SyncOp, b: SyncOp) => (a.t || 0) >= (b.t || 0);
 /** One op per record, the newest. */
@@ -1269,7 +1270,8 @@ export class GccEngine {
         const it = sheetItem(n.f);
         // a web id another queue record holds is not this row's key (that record would be overwritten): number + organisation is
         const rid = it.id && this.tgo[it.id] ? 'h' + TGOSync.shortHash(TGOSync.key(it.cert, it.org)) : TGOSync.ridOf(it);
-        const note = (n.f.note ? n.f.note + ' · ' : '') + IMPORT_TAG + fileName + ' ' + isoTh(todayISO());
+        // (the cell's note cut short: a whole sheet cell, up to 32,767 characters, would not fit the team's record)
+        const note = (n.f.note ? n.f.note.slice(0, IMPORT_NOTE_MAX) + ' · ' : '') + IMPORT_TAG + fileName + ' ' + isoTh(todayISO());
         // the company the import chose stays on the record (gid): an accept attaches the certificate to it and makes no company
         this.setTgo(rid, { ...it, st: 'p', gid: n.gid, by, at, note }, { nx: true });
         rids.push(rid);
@@ -3473,7 +3475,8 @@ export class GccEngine {
     if (!this.can('set.lists')) return this.deny();
     // a stage name is part of its notes' record keys (dstep/<deal>/<stage>), so no "/" there; other
     // lists are plain values ("SET/mai")
-    const v = [...new Set(items.map((x) => (name === 'stages' ? x.trim().replace(/\//g, '-') : x.trim())).filter(Boolean))];
+    // an item is a short name: 60 characters for a stage (as a plan's installment), 200 for the rest
+    const v = [...new Set(items.map((x) => (name === 'stages' ? x.trim().replace(/\//g, '-').slice(0, 60) : x.trim().slice(0, 200))).filter(Boolean))];
     if (name === 'stages' && !v.length) return;
     const cur = this.sales.cfg[name];
     // queued as what changed, so two people adding at once both keep their item (rebaseOp)
@@ -6409,7 +6412,8 @@ export class GccEngine {
       if (this.pending.size) this.teamNote = `บัญชีดูอย่างเดียวส่งการแก้ไขไม่ได้ · รอส่ง ${fmtN(this.pending.size)} รายการ`;
       return;
     }
-    let rejected = 0;
+    // the changes the sheet refused: dropped from the queue (sent again they would be refused again), named after the round
+    const refused: SyncOp[] = [];
     while (this.pending.size && live()) {
       const batch = [...this.pending.values()].slice(0, 300);
       // remember the sheet's position when sending, to recognise a delivery whose reply is lost
@@ -6443,7 +6447,10 @@ export class GccEngine {
         this.persist('customCos', this.custom);
         this.rebuild();
       }
-      rejected += (r.rejected || []).filter((k) => !orphans.some((o) => o.k === k)).length;
+      (r.rejected || []).forEach((k) => {
+        const o = batch.find((x) => x.k === k);
+        if (o && !orphans.includes(o)) refused.push(o);
+      });
       // changes this account may not make (the script decides): dropped below with the batch, and the
       // team's value put back by the next round
       const den = r.denied || [];
@@ -6520,7 +6527,38 @@ export class GccEngine {
       cfg.seeded = true; // everything local was pushed from memory
       this.saveTeamCfg(cfg);
     }
-    if (rejected) throw new Error(`มี ${fmtN(rejected)} รายการยาวเกินกว่าที่ชีตเก็บได้ จึงไม่ได้แชร์ (เก็บไว้ในเครื่องนี้)`);
+    if (refused.length) {
+      // said in the sync error (until a round goes through) and kept in the team note (until hidden): which ones
+      const long = refused.filter(tooLongForSheet);
+      const msg = refusedWords(long.map((o) => this.recordLabel(o.k)), refused.length - long.length);
+      this.teamNote = msg;
+      throw new Error(msg);
+    }
+  }
+
+  /** A team record in words, for a message that names it (the push loop's refused changes): its company, job, person,
+   *  document or list; the key itself (cut short) when this browser does not know it. */
+  recordLabel(k: string): string {
+    const [kind, a = '', b = ''] = k.split('/');
+    const client = this.sales.deals[a]?.client;
+    const co = () => {
+      const n = Number(a);
+      return Number.isFinite(n) ? this.company(this.canonical(n))?.name || this.custom[a]?.name : undefined;
+    };
+    let w: string | undefined;
+    if (kind === 'deal' || kind === 'dlog' || kind === 'dshare' || kind === 'jqt') w = client && `งาน ${client}`;
+    else if (kind === 'dstep' || kind === 'dpay') w = client && `${b} ของงาน ${client}`;
+    else if (kind === 'ddoc') w = this.sales.docs[`${a}/${b}`]?.name || (client && `เอกสารของงาน ${client}`);
+    else if (kind === 'dact' || kind === 'dexp') w = client && `รายการของงาน ${client}`;
+    else if (kind === 'cust') w = this.custom[a]?.name;
+    else if (kind === 'person') w = this.people[a]?.name;
+    else if (kind === 'log') w = co() && `บันทึกการติดต่อ ${co()}`;
+    else if (kind === 'contact' || kind === 'stage' || kind === 'owner' || kind === 'watch') w = co();
+    else if (kind === 'tgo') w = this.tgo[a] && `ใบรับรอง ${this.tgo[a].cert} ${this.tgo[a].org}`;
+    else if (kind === 'sheetrev') w = this.sheetrev[a] && `แถวตรวจทะเบียน ${this.sheetrev[a].cert} ${this.sheetrev[a].org}`;
+    else if (kind === 'scfg') w = `รายการตั้งค่า ${a}`;
+    else if (kind === 'task') w = 'นัดหมาย';
+    return w || (k.length > 60 ? k.slice(0, 60) + '…' : k);
   }
 
   /** Apply pulled rows (oldest first) and refresh whatever they affect. `quiet`: records that only
