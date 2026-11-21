@@ -23,7 +23,9 @@ export interface NavItem { key: Tab; label: string; icon: IconName; cap?: CapId;
 export const NAV: { title: string; items: NavItem[] }[] = [
   // หน้าแรก: the systems this account may open, today's appointments and every page (tabs/Home.tsx) —
   // on the UAT copy of the site only for now (lib/uat.ts)
-  ...(UAT ? [{ title: 'ระบบงาน GCC', items: [{ key: 'home', label: 'หน้าแรก', icon: 'home' } as NavItem] }] : []),
+  ...(UAT
+    ? [{ title: 'ระบบงาน GCC', items: [{ key: 'home', label: 'หน้าแรก', icon: 'home' }, { key: 'consult', label: 'งานที่ปรึกษา', icon: 'briefcase' }] as NavItem[] }]
+    : []),
   {
     title: 'งานขาย',
     items: [
@@ -52,7 +54,7 @@ export const TABS: [Tab, string][] = NAV.flatMap((g) => g.items.map((i): [Tab, s
 const ITEM = new Map(NAV.flatMap((g) => g.items.map((i): [Tab, NavItem] => [i.key, i])));
 /** May this account open page `t`? (the menu shows it, App renders it, the help center links to it) */
 export function pageOk(e: Pick<GccEngine, 'can' | 'role'>, t: Tab) {
-  if (t === 'home') return UAT;
+  if (t === 'home' || t === 'consult') return UAT;
   const it = ITEM.get(t);
   if (!it) return true;
   if (it.accounts && e.role() == null) return false;

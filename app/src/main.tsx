@@ -36,6 +36,7 @@ import './bulk.css';
 import './recontact.css';
 // หน้าแรก (tabs/Home) and the UAT copy's badge
 import './home.css';
+import './consult.css';
 import { UAT } from './lib/uat';
 import { UatBadge } from './components/UatBadge';
 

@@ -1,4 +1,4 @@
-import { useApp, useEngineVersion } from '../state';
+import { useApp, useEngineVersion, type Tab } from '../state';
 import { NAV, pageOk } from '../components/Sidebar';
 import { Icon, type IconName } from '../components/icons';
 import { TT } from '../lib/constants';
@@ -16,7 +16,9 @@ const VVB_URL = 'https://mktwni.github.io/gcc-case-demo/app/';
 
 /** A system on หน้าแรก: open here, a link to its own site, not this account's, or not built yet. */
 type SysState = 'open' | 'link' | 'locked' | 'soon';
-interface Sys { key: 'sales' | 'consult' | 'verify' | 'event'; name: string; sub: string; icon: IconName; state: SysState }
+interface Sys { key: 'sales' | 'consult' | 'verify' | 'event'; name: string; sub: string; icon: IconName; state: SysState; to?: Tab }
+/** The systems' own pages in this site: the tiles stand for them, so they are not menu tiles too. */
+const SYS_TABS: Tab[] = ['home', 'consult'];
 
 const WD = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const byTime = (a: Task, b: Task) => (a.time || '99').localeCompare(b.time || '99');
@@ -61,16 +63,16 @@ export function Home() {
   const monthN = tasks.filter((t) => t.date.slice(0, 7) === month).length;
 
   const systems: Sys[] = [
-    { key: 'sales', name: 'ฐานลูกค้าและงานขาย', sub: 'ทะเบียนบริษัท Sales Tracker ผู้ติดต่อ และแผนติดต่อ', icon: 'sales', state: 'open' },
-    { key: 'consult', name: 'งานที่ปรึกษา', sub: 'โครงการ แผนโครงการ และวางบิล', icon: 'briefcase', state: 'soon' },
+    { key: 'sales', name: 'ฐานลูกค้าและงานขาย', sub: 'ทะเบียนบริษัท Sales Tracker ผู้ติดต่อ และแผนติดต่อ', icon: 'sales', state: 'open', to: 'overview' },
+    { key: 'consult', name: 'งานที่ปรึกษา', sub: 'โครงการ แผนโครงการ และวางบิล · ข้อมูลตัวอย่าง', icon: 'briefcase', state: 'open', to: 'consult' },
     { key: 'verify', name: 'งานทวนสอบ', sub: 'ระบบงาน VVB GCC · เข้าด้วยบัญชีที่ได้รับเชิญ', icon: 'audit', state: e.can('mp.view') ? 'link' : 'locked' },
     { key: 'event', name: 'Event', sub: 'ปฏิทินงานและผู้เข้าร่วม', icon: 'ticket', state: 'soon' },
   ];
 
   // every page of the menu: open, or (signed in, roles on the script) locked with a way to ask for it;
   // managing users is never offered to ask for
-  const pages = NAV.filter((g) => g.title && g.items.some((it) => it.key !== 'home')).flatMap((g) =>
-    g.items.filter((it) => it.key !== 'home').map((it) => ({ ...it, group: g.title, ok: pageOk(e, it.key) })),
+  const pages = NAV.filter((g) => g.title && g.items.some((it) => !SYS_TABS.includes(it.key))).flatMap((g) =>
+    g.items.filter((it) => !SYS_TABS.includes(it.key)).map((it) => ({ ...it, group: g.title, ok: pageOk(e, it.key) })),
   );
   const shown = pages.filter((p) => p.ok || (canAsk && !p.accounts && p.cap !== 'set.users'));
   const openN = pages.filter((p) => p.ok).length;
@@ -95,7 +97,10 @@ export function Home() {
                 </span>
               </>
             );
-            if (x.state === 'open') return <button key={x.key} type="button" className={'hm-tile ' + x.key} onClick={() => go('overview')}>{body}</button>;
+            if (x.state === 'open' && x.to) {
+              const to = x.to;
+              return <button key={x.key} type="button" className={'hm-tile ' + x.key} onClick={() => go(to)}>{body}</button>;
+            }
             if (x.state === 'link') return <a key={x.key} className={'hm-tile ' + x.key} href={VVB_URL} target="_blank" rel="noopener">{body}</a>;
             if (x.state === 'locked' && canAsk) return <button key={x.key} type="button" className="hm-tile locked" onClick={ask}>{body}</button>;
             return <div key={x.key} className={'hm-tile ' + (x.state === 'locked' ? 'locked' : 'soon')}>{body}</div>;
