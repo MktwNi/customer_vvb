@@ -39,9 +39,9 @@ jobs:
             live-src/app/package-lock.json
 
       # UAT (app/src/lib/uat.ts): built with VITE_UAT=1, so it keeps its own browser storage, shows a test badge
-      # with its version and has what is still being tried (หน้าแรก). Its team is the repository variable
-      # UAT_TEAM_URL (Settings > Secrets and variables > Actions > Variables): a separate team script and sheet
-      # for testing; while it is unset the copy uses no team (data stays in each browser).
+      # with its version and has what is still being tried (หน้าแรก). Its team is UAT_TEAM_URL in
+      # app/src/lib/constants.ts: a separate team script and sheet for testing; while it is '' the copy uses
+      # no team (data stays in each browser).
       - run: npm ci
         working-directory: uat-src/app
       # the tests still run and show their result, but a failure here does not block the site: on the runner,
@@ -54,7 +54,6 @@ jobs:
         working-directory: uat-src/app
         env:
           VITE_UAT: '1'
-          VITE_TEAM_URL: ${{ vars.UAT_TEAM_URL }}
           VITE_BUILD: ${{ github.sha }}
 
       # the real site: what was checked on UAT and promoted (its tests ran when it was on main)
