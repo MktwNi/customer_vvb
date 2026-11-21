@@ -9,7 +9,7 @@ import { beYear, type SalesFilter } from './lib/sales';
 import { withoutDate } from './lib/salesUi';
 import { UAT } from './lib/uat';
 
-export type Tab = 'home' | 'overview' | 'exec' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users' | 'help';
+export type Tab = 'home' | 'consult' | 'overview' | 'exec' | 'sales' | 'people' | 'search' | 'track' | 'plan' | 'map' | 'dedup' | 'update' | 'notes' | 'users' | 'help';
 export type DetailTab = 'info' | 'cfo' | 'src' | 'crm';
 /** `pid`: made from a person's page (the appointment is with them). `stay`: made from the search page's
  *  selection: saving stays on that page and says what was made (with a link to แผนติดต่อ). */
@@ -126,8 +126,8 @@ export interface ToastAct {
 export interface SalesToast { text: string; acts?: ToastAct[]; /** gone after this long; 0 = until acted on */ ms: number; /** a new message restarts its timer */ n: number }
 
 // 'users' is kept too: App shows the overview instead when this browser isn't signed in as an admin
-// 'home' (หน้าแรก, tabs/Home.tsx) is on the UAT copy only for now (lib/uat.ts)
-const TAB_KEYS: Tab[] = [...(UAT ? (['home'] as Tab[]) : []), 'overview', 'exec', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users', 'help'];
+// 'home' (หน้าแรก, tabs/Home.tsx) and 'consult' (งานที่ปรึกษา, tabs/Consult.tsx) are on the UAT copy only for now (lib/uat.ts)
+const TAB_KEYS: Tab[] = [...(UAT ? (['home', 'consult'] as Tab[]) : []), 'overview', 'exec', 'sales', 'people', 'search', 'track', 'plan', 'map', 'dedup', 'update', 'notes', 'users', 'help'];
 
 const initial = (): UIState => {
   const s = prefs.get<{ tab?: unknown; view?: unknown; plColor?: unknown } | null>(PREF.ui, {}) || {};
