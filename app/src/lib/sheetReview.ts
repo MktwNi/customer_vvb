@@ -54,11 +54,18 @@ export const reviewIdOf = (cert: string, org: string, gcc: string): string => 'r
 /** A review record for a row the import could not apply: its values as the sheet row gives them, the reason, the file and time. */
 export function makeReview(line: CertLine, reason: string, file: string, at: string, by: string): ReviewRec {
   const gcc = tidy(line.gcc ?? '');
+  // a sheet cell holds up to 32,767 characters and the record keeps the row twice (f and vals): each cell is cut to
+  // REVIEW_CELL_MAX, so a row with a long note or address still fits the team's record (team-sync/Code.gs MAX_CELL)
+  const vals = Object.fromEntries(Object.entries(line.vals ?? {}).map(([k, v]) => [k, cutCell(v)]));
+  const f = { ...line.f, note: cutCell(line.f.note), addr: cutCell(line.f.addr) };
   return {
-    id: reviewIdOf(line.f.cert, line.f.org, gcc), reason, cert: line.f.cert, org: line.f.org, gcc, f: line.f,
-    email: line.email ?? '', emailSt: line.emailSt ?? '', vals: { ...(line.vals ?? {}) }, file, at, by, st: 'p', co: null,
+    id: reviewIdOf(line.f.cert, line.f.org, gcc), reason, cert: line.f.cert, org: line.f.org, gcc, f,
+    email: line.email ?? '', emailSt: line.emailSt ?? '', vals, file, at, by, st: 'p', co: null,
   };
 }
+/** A sheet cell kept on a review record: its first REVIEW_CELL_MAX characters. */
+export const REVIEW_CELL_MAX = 2000;
+const cutCell = (s: string) => (typeof s === 'string' && s.length > REVIEW_CELL_MAX ? s.slice(0, REVIEW_CELL_MAX) : s);
 
 /** What a row finds when its record exists: 'already in review' (waiting) or 'declined before' (rejected), else undefined. */
 export const reviewDuplicate = (st: ReviewState | undefined): 'already in review' | 'declined before' | undefined =>
