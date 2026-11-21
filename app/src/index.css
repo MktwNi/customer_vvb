@@ -339,6 +339,7 @@ button.kpi{cursor:pointer}
 .ex-wk-c{display:grid;gap:var(--sp-1);justify-items:center;text-align:center;font-size:var(--fs-sec);min-width:0}
 .ex-wk-b{display:flex;align-items:flex-end;width:100%;height:96px}
 .ex-wk-b i{display:block;width:100%;max-width:56px;margin:0 auto;border-radius:6px 6px 2px 2px;background:var(--bar)}
+.ex-wk-c.future .t-meta{color:var(--muted)}
 .ex-stages{display:grid;gap:12px}
 .ex-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;font-size:var(--fs-body);color:var(--ink)}
 .ex-stage .ex-bar{grid-column:1/-1}

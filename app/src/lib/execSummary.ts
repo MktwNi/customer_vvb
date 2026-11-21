@@ -11,7 +11,7 @@
  * The only rules of its own are the period (execPeriod), the four buckets of the period, and the funnel's map of
  * the app's steps onto four stages.
  */
-import { inRange, monthStart, weekStart, type Range } from './dateRange';
+import { inRange, monthEnd, monthStart, weekStart, type Range } from './dateRange';
 import { addDays, daysBetween, localDay } from './format';
 import { LOG_TYPES } from './constants';
 import { OFFER_RESULT, OFFER_TYPE, offerOf } from './offer';
@@ -73,7 +73,27 @@ export interface ExecSrc extends FollowSrc {
 /** A count against the period before it. `pct` is null when that period had none. */
 export interface ExecChange { value: number; prev: number; delta: number; pct: number | null }
 export interface ExecChannelRow { key: ExecChannel; label: string; count: number; share: number }
-export interface ExecWeek { from: string; to: string; count: number }
+/**
+ * A bar of the chart "จำนวนการติดต่อราย…": a day of the week (Monday to Sunday), a Monday-to-Sunday week of the
+ * month (the first and last cut at the month's ends), or a month of the quarter. The bars cover the whole period,
+ * the days still to come too: `future` when the bar starts after today (nothing to count there yet).
+ */
+export interface ExecWeek { from: string; to: string; count: number; unit: 'day' | 'week' | 'month'; future: boolean }
+
+/** The bars of a period (owner, Nov 2569: "สรุปรายสัปดาห์ให้นับวันจันทร์ถึงอาทิตย์"). */
+export function execBuckets(P: Pick<ExecPeriod, 'kind' | 'from'>): Omit<ExecWeek, 'count' | 'future'>[] {
+  if (P.kind === 'week') return Array.from({ length: 7 }, (_, i) => ({ from: addDays(P.from, i), to: addDays(P.from, i), unit: 'day' as const }));
+  if (P.kind === 'quarter') return [0, 1, 2].map((i) => ({ from: monthStart(P.from, i), to: monthEnd(monthStart(P.from, i)), unit: 'month' as const }));
+  const end = monthEnd(P.from);
+  const out: Omit<ExecWeek, 'count' | 'future'>[] = [];
+  for (let a = P.from; a <= end; ) {
+    const sunday = addDays(weekStart(a), 6);
+    const b = sunday < end ? sunday : end;
+    out.push({ from: a, to: b, unit: 'week' });
+    a = addDays(b, 1);
+  }
+  return out;
+}
 export type ExecStageKey = 'contact' | 'quote' | 'follow' | 'won';
 export interface ExecStage { key: ExecStageKey; label: string; count: number }
 /** One contact. `deal`: the job it was logged on ('' for a company's or a person's own log). */
@@ -200,13 +220,8 @@ function summarize(src: ExecSrc, S: SalesState, P: ExecPeriod, today: string, ye
   const total = counts.reduce((n, c) => n + c.count, 0);
   const channels: ExecChannelRow[] = counts.map((c) => ({ ...c, share: total ? c.count / total : 0 }));
 
-  // four buckets that cover the period in order, each about a quarter of its days (the first may be empty for a short week)
-  const weeks: ExecWeek[] = [0, 1, 2, 3].map((i) => {
-    const a = Math.floor((i * P.days) / 4), b = Math.floor(((i + 1) * P.days) / 4) - 1;
-    if (b < a) return { from: '', to: '', count: 0 };
-    const r = { from: addDays(P.from, a), to: addDays(P.from, b) };
-    return { ...r, count: now.filter((e) => inRange(e.day, r)).length };
-  });
+  // the chart's bars: days, Monday-to-Sunday weeks or months of the period (execBuckets), counted up to today
+  const weeks: ExecWeek[] = execBuckets(P).map((r) => ({ ...r, count: now.filter((e) => inRange(e.day, r)).length, future: r.from > P.to }));
 
   // the funnel: the year's customers (no joint header), each step counted once per job that has it
   const pop = customersOf(S, filterDeals(S, { year }, today));

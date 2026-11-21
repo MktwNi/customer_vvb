@@ -44,11 +44,10 @@ jobs:
       # for testing; while it is unset the copy uses no team (data stays in each browser).
       - run: npm ci
         working-directory: uat-src/app
-      # the tests still run and show their result, but a failure here does not block the site: on the runner,
-      # vitest can exit 1 with a worker RPC timeout while every test passes, and that stopped the deploy twice
+      # a failing test stops the deploy: neither copy of the site changes. (The worker RPC timeout that once made
+      # this step be let through is fixed in app/src/test/yieldBetweenTests.ts.)
       - run: npm test
         working-directory: uat-src/app
-        continue-on-error: true
       # build copies project/data into the site (scripts/sync-data.mjs)
       - run: npm run build
         working-directory: uat-src/app

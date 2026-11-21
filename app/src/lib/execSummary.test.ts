@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { GccEngine } from './engine';
-import { execPeriod, execSummary } from './execSummary';
+import { execBuckets, execPeriod, execSummary } from './execSummary';
 import { followCounts, followRows } from './follow';
 import { lineText, closedLine, closedTabRows } from './workUi';
 import { emptySales, moneySum, newDeal, normSalesFilter, type ActType, type Deal, type DealAct, type SalesState } from './sales';
@@ -312,21 +312,51 @@ describe('recent contacts and the four buckets of the period', () => {
     expect(s.recent.some((r) => /[A-Z]/.test(r.result))).toBe(false);
   });
 
-  it('a month in four buckets that cover it in order, their counts adding to the contacts', () => {
+  it('a month in Monday-to-Sunday weeks, the first and last cut at its ends, the weeks to come empty', () => {
     const s = execSummary(e, 'month', TODAY);
-    expect(s.weeks.map((w) => [w.from, w.to, w.count])).toEqual([
-      ['2026-10-01', '2026-10-03', 1],
-      ['2026-10-04', '2026-10-07', 2],
-      ['2026-10-08', '2026-10-10', 0],
-      ['2026-10-11', '2026-10-14', 8],
+    expect(s.weeks.map((w) => [w.from, w.to, w.unit, w.future])).toEqual([
+      ['2026-10-01', '2026-10-04', 'week', false],
+      ['2026-10-05', '2026-10-11', 'week', false],
+      ['2026-10-12', '2026-10-18', 'week', false],
+      ['2026-10-19', '2026-10-25', 'week', true],
+      ['2026-10-26', '2026-10-31', 'week', true],
     ]);
+    expect(s.weeks.map((w) => w.count)).toEqual([1, 2, 8, 0, 0]);
     expect(s.weeks.reduce((n, w) => n + w.count, 0)).toBe(s.total);
   });
 
-  it('a week: the buckets split its three days, the first empty', () => {
+  it('a week in its seven days, Monday to Sunday, the days to come empty', () => {
     const s = execSummary(e, 'week', TODAY);
-    expect(s.weeks.map((w) => w.count)).toEqual([0, 1, 5, 2]);
-    expect(s.weeks[0]).toEqual({ from: '', to: '', count: 0 });
+    expect(s.weeks.map((w) => [w.from, w.count, w.future])).toEqual([
+      ['2026-10-12', 1, false],
+      ['2026-10-13', 5, false],
+      ['2026-10-14', 2, false],
+      ['2026-10-15', 0, true],
+      ['2026-10-16', 0, true],
+      ['2026-10-17', 0, true],
+      ['2026-10-18', 0, true],
+    ]);
+    expect(s.weeks.every((w) => w.unit === 'day' && w.from === w.to)).toBe(true);
+  });
+
+  it('a quarter in its three months, the months to come empty', () => {
+    const s = execSummary(e, 'quarter', TODAY);
+    expect(s.weeks.map((w) => [w.from, w.to, w.unit, w.future])).toEqual([
+      ['2026-10-01', '2026-10-31', 'month', false],
+      ['2026-11-01', '2026-11-30', 'month', true],
+      ['2026-12-01', '2026-12-31', 'month', true],
+    ]);
+    expect(s.weeks.map((w) => w.count)).toEqual([s.total, 0, 0]);
+  });
+
+  it('a month that starts on a Monday has full weeks until its last days', () => {
+    expect(execBuckets({ kind: 'month', from: '2026-06-01' }).map((w) => [w.from, w.to])).toEqual([
+      ['2026-06-01', '2026-06-07'],
+      ['2026-06-08', '2026-06-14'],
+      ['2026-06-15', '2026-06-21'],
+      ['2026-06-22', '2026-06-28'],
+      ['2026-06-29', '2026-06-30'],
+    ]);
   });
 });
 
@@ -343,7 +373,7 @@ describe('an empty engine gives zeros and empty lists', () => {
     });
     expect(s.total).toBe(0);
     expect(s.channels.map((c) => [c.count, c.share])).toEqual([[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]);
-    expect(s.weeks.map((w) => w.count)).toEqual([0, 0, 0, 0]);
+    expect(s.weeks.map((w) => w.count)).toEqual([0, 0, 0, 0, 0]);
     expect(s.funnel.map((x) => x.count)).toEqual([0, 0, 0, 0]);
     expect(s.recent).toEqual([]);
     expect(s.followUps).toEqual([]);
