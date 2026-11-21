@@ -13,6 +13,7 @@ import { GccEngine } from '../lib/engine';
 import { memoryStore } from '../lib/storage';
 import type { CapId } from '../lib/caps';
 import type { Dataset, RoundRaw } from '../lib/types';
+import { newDeal } from '../lib/sales';
 
 const DATA = join(__dirname, '..', '..', '..', 'project', 'data');
 const json = (f: string) => JSON.parse(readFileSync(join(DATA, f), 'utf8'));
@@ -115,3 +116,28 @@ describe('บริษัทที่ติดตาม: the contact line under 
     expect(rowB).not.toContain('ติดต่อแล้ว');
   });
 });
+
+describe('บริษัทที่ติดตาม: how far the job has gone, under its status (option B)', () => {
+  it('a company with a job this year shows the step line and "done/steps"; one without shows no line', () => {
+    const e = engine();
+    const [a, b] = e.B.companies.slice(0, 2);
+    e.crm.watch.push(a.id, b.id);
+    e.sales.deals.j1 = newDeal({ id: 'j1', client: a.name, gid: a.id, year: '2569', service: ['CFO'] }, 'คุณ ก', '2026-10-01T03:00:00.000Z');
+    e.sales.steps['j1/CONTACT'] = { d: '2026-10-02', n: '' };
+    e.sales.steps['j1/QUOTATION'] = { d: '2026-10-06', n: '' };
+    e.rebuild();
+    e.can = (c) => c.startsWith('view.');
+    const html = renderToStaticMarkup(
+      <AppProvider engine={e}>
+        <FollowList />
+      </AppProvider>,
+    );
+    const rowOf = (name: string) => html.split('class="fw-r').find((p) => p.includes(`class="co-name">${esc(name)}<`))!;
+    const rowA = rowOf(a.name), rowB = rowOf(b.name);
+    expect(rowA).toContain('class="fw-st"');
+    expect(rowA).toMatch(/class="sl-mt[^"]*" role="img" aria-label="ทำแล้ว 2 จาก \d+ ขั้น: CONTACT ทำแล้ว · QUOTATION ทำแล้ว · FOLLOW ถัดไป/);
+    expect(rowA).toMatch(/class="sl-trk-n" aria-hidden="true">2\/\d+</);
+    expect(rowB).not.toContain('sl-mt');
+  });
+});
+

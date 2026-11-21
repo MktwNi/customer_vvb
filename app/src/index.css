@@ -2516,3 +2516,12 @@ input.dp-name:focus-visible{outline:none;border-bottom-color:var(--brand);backgr
 .dp-oth{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:var(--fs-sec);color:var(--ink-2)}
 .dp-oth-j{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
 .dp-oth .lnk{font-size:var(--fs-sec)}
+
+/* ติดตาม: the job's status words, then its step line (TrackFollow FollowTrack) */
+.fw-st{display:flex;flex-direction:column;gap:6px;min-width:0;width:100%;max-width:260px}
+.fw-st .sl-trk{width:100%;max-width:240px}
+/* the contact log: a quotation sent can record the job's QUOTATION step too (CompanyDrawer) */
+.dr-qt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:14px;background:var(--tint);font-size:var(--fs-sec);color:var(--ink);line-height:var(--lh-row)}
+.dr-qt > span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dr-qt .t-sec{font-size:var(--fs-meta)}
+
