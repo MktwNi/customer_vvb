@@ -14,3 +14,10 @@ export const nsWith = (uat: boolean, name: string) => (uat ? 'uat:' + name : nam
 
 /** A storage or lock name for this copy of the site. */
 export const ns = (name: string) => nsWith(UAT, name);
+
+/**
+ * The version this copy was built from (VITE_BUILD = the commit, set by the deploy): the UAT badge shows its
+ * first 7 characters, the version the owner names when moving what was checked to the real site
+ * (.github/workflows/promote-live.yml). '' outside the deploy.
+ */
+export const BUILD = String(import.meta.env?.VITE_BUILD ?? '').trim().slice(0, 7);
