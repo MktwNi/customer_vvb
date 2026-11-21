@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySales, filterDeals, newDeal, planOf, salesStats, setMoneyHidden, type Deal, type PayLine, type SalesState } from './sales';
 import {
-  actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, trackerFields, winRateBySource, yearOptions,
+  actualSource, beYearInput, closeConfirm, closePrompt, closingView, diffText, lineMeta, lineStatusView, nextStepView, relText, shortName, stageFig, statusView, trackerFields, winRateBySource, yearOptions, quoteJobOf
 } from './salesUi';
 
 const deal = (p: Partial<Deal> = {}): Deal => newDeal({ id: p.id || 'd' + Math.random().toString(36).slice(2), client: 'บริษัท ก', year: '2569', ...p }, 'me', '2026-10-01T00:00:00.000Z');
@@ -294,3 +294,23 @@ describe('closing', () => {
     expect(closeConfirm(one({}).S, one({}).d, TODAY, 'ก')).toBe('ปิดงาน “ก” ตอนนี้? ยังไม่มีผลการขาย งานจะย้ายไปแท็บปิดงาน เปิดกลับได้');
   });
 });
+
+describe('the job a "ส่งใบเสนอราคาแล้ว" contact records QUOTATION on', () => {
+  const all = () => true;
+  it('the newest open job without a QUOTATION date, the deals given newest first', () => {
+    const a = deal({ id: 'a' }), b = deal({ id: 'b' });
+    expect(quoteJobOf(state([a, b]), [b, a], all)?.id).toBe('b');
+  });
+  it('skips a closed job and one whose QUOTATION is already recorded (a note alone is not a date)', () => {
+    const closed = deal({ id: 'c', jobStatus: 'closed' }), sent = deal({ id: 's' }), noted = deal({ id: 'n' });
+    const S = state([closed, sent, noted], { 's/QUOTATION': { d: '2026-10-05', n: '' }, 'n/QUOTATION': { d: '', n: 'รอเซ็น' } });
+    expect(quoteJobOf(S, [closed, sent, noted], all)?.id).toBe('n');
+  });
+  it('skips a job this account may not edit, and gives none when no job is left', () => {
+    const a = deal({ id: 'a' }), b = deal({ id: 'b' });
+    expect(quoteJobOf(state([a, b]), [a, b], (d) => d.id !== 'a')?.id).toBe('b');
+    expect(quoteJobOf(state([a]), [a], () => false)).toBeUndefined();
+    expect(quoteJobOf(state([]), [], all)).toBeUndefined();
+  });
+});
+

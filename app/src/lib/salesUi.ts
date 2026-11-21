@@ -509,3 +509,13 @@ export function closeConfirm(s: SalesState, d: Deal, today: string, name: string
   const why = left.length ? `ยังรับชำระไม่ครบ (${left.join(', ')})` : won && dupCounted(s, d).length ? 'ยังมียอดนับซ้ำ' : 'ยังไม่มีผลการขาย';
   return `ปิดงาน “${name}” ตอนนี้? ${why} งานจะย้ายไปแท็บปิดงาน เปิดกลับได้`;
 }
+
+/**
+ * The job a contact with the result "ส่งใบเสนอราคาแล้ว" can record its QUOTATION step on (owner, Nov 2569: the contact
+ * log offers it, ticked): the newest of `deals` (newest first) that is open, has no QUOTATION date yet and that this
+ * account may edit (`may`). None: the contact is saved alone.
+ */
+export function quoteJobOf(s: SalesState, deals: Deal[], may: (d: Deal) => boolean): Deal | undefined {
+  return deals.find((d) => d.jobStatus === 'open' && !stepOf(s, d.id, QUOTE_STAGE).d && may(d));
+}
+

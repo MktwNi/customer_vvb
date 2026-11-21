@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type R
 import { useApp, useEngineVersion, type DetailTab } from '../state';
 import { CST, LOG_RESULTS, STG, stageOf } from '../lib/constants';
 import { OFFER_RESULT, OFFER_TEXT, OFFER_TYPE, offerOf } from '../lib/offer';
-import { dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
+import { dmTh, dtTh, fmtN, gccCode, isoTh, localDay, money, telHref, todayISO, ymTh } from '../lib/format';
 import type { Cert, Company, ContactForm, Detail, LogEntry, StageKey } from '../lib/types';
-import { ACT_TH, actsOf, dealMoney, fmtMoney, jobYearOf, lastContact, stepLabel, trackerStatus, type Deal, type DealAct } from '../lib/sales';
-import { fcFig } from '../lib/salesUi';
+import { ACT_TH, actsOf, dealMoney, fmtMoney, jobYearOf, lastContact, stepLabel, stepOf, trackerStatus, type Deal, type DealAct } from '../lib/sales';
+import { QUOTE_STAGE } from '../lib/steps';
+import { TickBox } from './MonthCheck';
+import { fcFig, quoteJobOf } from '../lib/salesUi';
 import { dedupFilter } from '../tabs/Dedup';
 import { DoneBox, taskInfo } from '../tabs/Plan';
 import { srcWords } from './ui';
@@ -46,6 +48,8 @@ export function CompanyDrawer() {
   // the log form's type and result (back to โทร / none after each entry)
   const [lgType, setLgType] = useState('call');
   const [lgRes, setLgRes] = useState('');
+  // "ส่งใบเสนอราคาแล้ว" also records the job's QUOTATION step, unless untick (owner, Nov 2569: option A)
+  const [lgQt, setLgQt] = useState(true);
   const ref = useRef<HTMLElement>(null);
   // takes the keyboard (also when opened over the deal panel), gives focus back on close
   useDialog(ref, { focus: 'dialog', on: !!c });
@@ -97,6 +101,9 @@ export function CompanyDrawer() {
   const today = todayISO();
   const tasks = e.tasksOf(c.id).sort((a, b) => a.date.localeCompare(b.date));
   const contact = followContact(logs, deals, e.sales, today, tasks);
+  // the job a "ส่งใบเสนอราคาแล้ว" contact is about: the newest open one whose QUOTATION is not recorded yet, that
+  // this account may edit (none: the log is saved alone, as before)
+  const qtDeal = quoteJobOf(e.sales, deals, (d) => e.canDeal('edit.deal', d));
   // the contact history: this company's log and the contacts recorded on its deals (read from the
   // deals' records, never copied here), merged by date; a deal's says which deal
   const hist: { k: string; day: string; at: string; log?: LogEntry; act?: { a: DealAct; deal: Deal } }[] = [
@@ -195,9 +202,14 @@ export function CompanyDrawer() {
     const g = (k: string) => String(fd.get(k) || '').trim();
     if (!g('text') && !g('result')) return;
     e.addLog(c.id, g('type') || 'note', g('result'), g('text'));
+    if (qtDeal && lgQt && g('result') === QT_SENT) {
+      // the step keeps what is written there; only its date is set, the day the quotation went
+      e.setStep(qtDeal.id, QUOTE_STAGE, { d: today, n: stepOf(e.sales, qtDeal.id, QUOTE_STAGE).n });
+    }
     f.reset();
     setLgType('call');
     setLgRes('');
+    setLgQt(true);
   };
 
   return (
@@ -398,6 +410,15 @@ export function CompanyDrawer() {
                     <Select name="type" label="ประเภท" value={lgType} onChange={setLgType} options={[{ v: 'call', label: 'โทร' }, { v: 'email', label: 'อีเมล' }, { v: 'meet', label: 'นัดพบ' }, { v: 'note', label: 'โน้ต' }]} />
                     <Select name="result" label="ผลการติดต่อ" value={lgRes} onChange={setLgRes} placeholder="ผลการติดต่อ" options={[{ v: '', label: 'ผลการติดต่อ' }, ...LOG_RESULTS.map((v) => ({ v, label: v }))]} />
                   </div>
+                  {qtDeal && lgRes === QT_SENT && (
+                    <div className="dr-qt">
+                      <TickBox checkbox on={lgQt} label={`บันทึกขั้น QUOTATION ของงาน ${jobSvcWords(e.sales, qtDeal)} ปี ${qtDeal.year} ด้วย`} onClick={() => setLgQt(!lgQt)} />
+                      <span>
+                        บันทึกขั้น QUOTATION ของงาน {jobSvcWords(e.sales, qtDeal)} ปี {qtDeal.year} วันที่ {dmTh(today)} ด้วย
+                        <span className="t-sec">แนบไฟล์ใบเสนอราคาได้ที่ขั้นนั้นใน Sales Tracker</span>
+                      </span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input name="text" aria-label="รายละเอียด" placeholder="เช่น คุยกับฝ่ายจัดซื้อ ให้ส่งใบเสนอราคา" defaultValue={offerKey ? OFFER_TEXT : undefined} className="fld" style={{ flex: 1, minWidth: 0 }} />
                     <button type="submit" className="btn pri">บันทึก</button>
@@ -524,3 +545,8 @@ function SalesBox({ c }: { c: Company }) {
     </div>
   );
 }
+
+/** The contact result that says a quotation went out: it can record the job's QUOTATION step too (lib/constants LOG_RESULTS). */
+const QT_SENT = 'ส่งใบเสนอราคาแล้ว';
+/** A job's services in words for a sentence ("CFO, CFP"); "ที่ไม่ระบุบริการ" when it has none. */
+const jobSvcWords = (S: Parameters<typeof jobServices>[0], d: Deal) => jobServices(S, d).join(', ') || 'ที่ไม่ระบุบริการ';

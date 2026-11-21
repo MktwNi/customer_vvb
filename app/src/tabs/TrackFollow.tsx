@@ -6,7 +6,9 @@ import { TickBox } from '../components/MonthCheck';
 import { useSalesActs } from '../components/SalesToast';
 import { CST } from '../lib/constants';
 import { fmtN, isoTh, todayISO } from '../lib/format';
-import { beYear, jobServices, withActIndex } from '../lib/sales';
+import { beYear, dealSteps, jobServices, withActIndex, type Deal } from '../lib/sales';
+import { nextStepView } from '../lib/salesUi';
+import { MiniTrack } from '../components/StageTrack';
 import { JobSvc } from '../components/SvcChips';
 import { LOCAL_ONLY, NOT_IN_TRACKER, apptLine, apptWhen, followContact, followContactWords, followCounts, followFilter, followIdsOf, followMeta, followQOf, followRows, followSelKey, type FollowRow } from '../lib/follow';
 import { allPickWord, bulkPickable, clearedWord, followedBatch, followedSendTip, followedSendWord, pruneSel, selView, toggleAll, toggleKey } from '../lib/bulk';
@@ -266,9 +268,12 @@ export function FollowList() {
                       {/* (the job's services: a company may have several jobs this year, the open one first is said, then
                           how many more, as the plan page's "Sales Tracker 2 งาน") */}
                       {r.deal ? (
-                        <span>
-                          <JobSvc svc={jobServices(e.sales, r.deal)} none={r.jobs > 1} /> {r.status}
-                          {r.jobs > 1 && <span className="t-sec">{` · อีก ${fmtN(r.jobs - 1)} งาน`}</span>}
+                        <span className="fw-st">
+                          <span>
+                            <JobSvc svc={jobServices(e.sales, r.deal)} none={r.jobs > 1} /> {r.status}
+                            {r.jobs > 1 && <span className="t-sec">{` · อีก ${fmtN(r.jobs - 1)} งาน`}</span>}
+                          </span>
+                          <FollowTrack d={r.deal} />
                         </span>
                       ) : <span className="t-muted">{NOT_IN_TRACKER}</span>}
                       {!r.deal && canSend && <button onClick={() => set({ sendIds: [r.c.id] })} className="lnk fw-a">ส่งเข้า Sales Tracker</button>}
@@ -351,3 +356,16 @@ function When({ date, today }: { date: string; today: string }) {
   const w = apptWhen(date, today);
   return <span className={w.kind ? 't-' + w.kind + ' fw-when' : 't-meta'}>{w.text}</span>;
 }
+
+/**
+ * How far the job has gone, under its status words (owner, Nov 2569: option B of the ติดตาม status line): the
+ * Sales Tracker table's thin step line and "2/5" (components/StageTrack MiniTrack), red when the next step is late.
+ */
+function FollowTrack({ d }: { d: Deal }) {
+  const { engine: e } = useApp();
+  const today = todayISO();
+  const t = dealSteps(e.sales, d, today);
+  const late = nextStepView(e.sales, d, today, t).tone === 'late';
+  return <MiniTrack steps={t.steps} next={t.next?.id || ''} done={t.done} late={late} />;
+}
+
