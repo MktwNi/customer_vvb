@@ -1,8 +1,14 @@
 import type { CfoStatus, FeedKey, StageKey, TaskType } from './types';
+import { UAT } from './uat';
 
 /** Web-app link of the company's team script. Public by nature: it ends up in the built JavaScript
  *  anyway, and grants nothing without the team code or an account. */
 export const HOME_TEAM_URL = 'https://script.google.com/macros/s/AKfycbyIpL-1Ks0278Enl_-aNigwoqoTMhVr8Qa3YTZ1ocUg6E-nclehWAM9VF-0rk77wXQ_/exec';
+
+/** Web-app link of the UAT copy's own team script (team-sync/README.md, a separate Google Sheet for
+ *  testing): the UAT site opens on its sign-in. Never the real team's link: what is tried on UAT would
+ *  land in the team's real data (constants.test.ts checks). '' = UAT uses no team (each browser alone). */
+export const UAT_TEAM_URL: string = 'https://script.google.com/macros/s/AKfycbwIS4lg5romIZU58D1fQMhvrhOJxUAaurY20fWiSt1cFwTc4d9leHyuviAO7ciF2xC6pg/exec';
 
 /** UI defaults (the design's "Tweaks" panel). */
 export const CONFIG = {
@@ -11,9 +17,10 @@ export const CONFIG = {
   soonWindow: 90,
   /** Setup guide for the shared team sheet (team-sync/README.md). */
   teamGuideUrl: 'https://github.com/MktwNi/customer_vvb/blob/main/team-sync/README.md',
-  /** The team this site belongs to: it opens on that team's sign-in. VITE_TEAM_URL overrides it
-   *  ('' = none, a local simulator for browser checks); tests and `vite dev` have none unless set. */
-  teamUrl: String(import.meta.env?.VITE_TEAM_URL ?? (import.meta.env?.MODE === 'production' ? HOME_TEAM_URL : '')).trim(),
+  /** The team this site belongs to: it opens on that team's sign-in (the UAT copy: its own test team).
+   *  VITE_TEAM_URL overrides it ('' = none, a local simulator for browser checks); tests and `vite dev`
+   *  have none unless set. */
+  teamUrl: String(import.meta.env?.VITE_TEAM_URL ?? (import.meta.env?.MODE === 'production' ? (UAT ? UAT_TEAM_URL : HOME_TEAM_URL) : '')).trim(),
 };
 
 /** Source bit order: TGO=1, GI=2, กรอ.=4, SET=8 → [label, bg, fg] */
