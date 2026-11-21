@@ -1,4 +1,6 @@
-// ซิงก์ข้อมูล CFO จากเว็บไซต์ TGO + ตรวจสถานะหมดอายุ (รันบนเซิร์ฟเวอร์/ตั้งเวลา)
+// ซิงก์ข้อมูล CFO จากเว็บไซต์ TGO + ตรวจสถานะหมดอายุ ลง data/cfo.json ของต้นแบบเก่า (project/*.html) รันเองเมื่อต้องการ
+// เว็บแอปไม่ได้อ่าน cfo.json: รายชื่อ CFO ใหม่มาจากสคริปต์ อัปเดตรายชื่อ CFO อบก. (app/src/lib/tgoSync.ts)
+// ไฟล์ตั้งเวลารายวัน (project/.github/workflows/tgo-sync.yml) ลบออกแล้ว เพราะ GitHub ไม่เคยรันจากโฟลเดอร์นั้น
 // ใช้: npm i playwright && npx playwright install chromium && node tools/tgo-sync.mjs
 // ตัวแปร: FULL=1 (ไล่ทุกหน้า), MAX_PAGES=50, SOON_DAYS=90, DETAILS=1 (เปิดหน้ารายละเอียดรายการใหม่), WEBHOOK_URL (แจ้งเตือน LINE/Slack/Teams)
 import { chromium } from 'playwright';

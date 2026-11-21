@@ -1,5 +1,6 @@
-// Copies the datasets the app reads from ../project/data (the single source of truth,
-// also written by tools/tgo-sync.mjs) into public/data so Vite serves and bundles them.
+// Copies the datasets the app reads from ../project/data (the single source of truth) into public/data so
+// Vite serves and bundles them. New TGO certificates reach the app through the feed (src/lib/tgoSync.ts), not
+// these files; project/tools/tgo-sync.mjs writes only cfo.json, which the app does not read.
 import { cpSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

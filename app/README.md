@@ -14,8 +14,11 @@ npm run build      # static site in dist/ — deploy to any static host
 ```
 
 `npm run dev` / `build` first run `scripts/sync-data.mjs`, which copies the datasets from
-`../project/data` (single source of truth; also what `project/tools/tgo-sync.mjs` updates)
-into `public/data/` (git-ignored). The build uses relative paths, so `dist/` works from any
+`../project/data` (single source of truth) into `public/data/` (git-ignored). New TGO CFO
+certificates do not come through these files: the app reads them from the "อัปเดตรายชื่อ CFO อบก."
+feed (`src/lib/tgoSync.ts`, `FEED_URL`) and the team reviews them on อัปเดตข้อมูล.
+(`project/tools/tgo-sync.mjs` only refreshes `project/data/cfo.json` for the old prototypes; the app
+does not read that file, and it has no schedule.) The build uses relative paths, so `dist/` works from any
 sub-path (GitHub Pages, Netlify, Cloudflare Pages…). Like the prototype it must be served over
 HTTP — opening `index.html` from disk will not load the data.
 

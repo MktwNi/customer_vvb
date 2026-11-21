@@ -16,7 +16,8 @@ export const dedupFilter = (k: F) => (g: DupGroup) =>
 
 export function Dedup() {
   const { engine: e, ui, set, open, go } = useApp();
-  // deciding what is a duplicate changes every company list of the team: the admin's job
+  // deciding what is a duplicate changes every company list of the team: the accounts given set.dedup
+  // (ผู้ดูแลระบบ by default; any role can be given it on ผู้ใช้และสิทธิ์)
   const admin = e.can('set.dedup');
   useEngineVersion();
   const G = e.B.groups, D = e.B.D;
@@ -37,7 +38,7 @@ export function Dedup() {
         sub={<>รอตรวจ {fmtN(kp[0].n)} กลุ่ม · <button className="lnk" style={{ fontSize: 13 }} onClick={() => go('notes')}>วิธีเทียบดูที่หมายเหตุ</button></>}
       />
       <Segmented label="แสดง" value={ui.ddF} options={kp} onChange={(k) => set({ ddF: k, ddPage: 0 })} />
-      {!admin && <span className="note">การตัดสินข้อมูลซ้ำทำโดยผู้ดูแลระบบ</span>}
+      {!admin && <span className="note">ตัดสินข้อมูลซ้ำได้เฉพาะบัญชีที่มีสิทธิ์ ตรวจข้อมูลซ้ำ ขอสิทธิ์นี้ได้จากผู้ดูแลระบบ</span>}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {list.slice(page * PS, page * PS + PS).map((g) => {
           const canMerge = g.state === 'pending' || g.state === 'split';

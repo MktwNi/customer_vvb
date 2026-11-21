@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { execSummary, type ExecChange, type ExecFollowUp, type ExecPeriodKind, type ExecStage, type ExecSummary, type ExecWeek } from '../lib/execSummary';
-import { dmTh, fmtN, isoTh, money, todayISO } from '../lib/format';
+import { TH_M, dmTh, dow, fmtN, isoTh, money, todayISO } from '../lib/format';
 import { rangeTh } from '../lib/dateRange';
 import { Kpi, PageHead, SectionHead, Segmented, Status, type StatusKind } from '../components/ui';
 
@@ -24,10 +24,22 @@ export function changeWords(c: ExecChange, unit: string): string {
 /** A bar's width in per cent of the largest figure (0 when nothing is counted). */
 const share = (n: number, max: number) => (max > 0 ? `${(n / max) * 100}%` : '0%');
 /** One bucket of the period as a short range: "1–3 ต.ค." (a bucket that is not in the period has no range). */
-const bucketTh = (w: ExecWeek) => (!w.from ? '—' : w.from === w.to ? dmTh(w.from) : `${dmTh(w.from)}–${dmTh(w.to)}`);
+const WD = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+/** A bar's label: จ 17 (a day), 17–23 พ.ย. (a week; the month on both ends when it crosses one), พ.ย. (a month). */
+const bucketTh = (w: ExecWeek) => {
+  if (w.unit === 'day') return `${WD[dow(w.from)]} ${+w.from.slice(8)}`;
+  if (w.unit === 'month') return TH_M[+w.from.slice(5, 7) - 1];
+  if (w.from === w.to) return dmTh(w.from);
+  return w.from.slice(0, 7) === w.to.slice(0, 7) ? `${+w.from.slice(8)}–${dmTh(w.to)}` : `${dmTh(w.from)}–${dmTh(w.to)}`;
+};
+/** The chart's caption, by what one bar is. */
+const BUCKET_CAP: Record<ExecPeriodKind, string> = {
+  week: 'จำนวนการติดต่อรายวัน จันทร์ถึงอาทิตย์',
+  month: 'จำนวนการติดต่อรายสัปดาห์ นับจันทร์ถึงอาทิตย์',
+  quarter: 'จำนวนการติดต่อรายเดือน',
+};
 const STATUS: Record<string, StatusKind> = { bad: 'bad', warn: 'warn', '': 'neutral' };
 /** The period's name as the bucket caption reads it: "รายช่วงของเดือน". */
-const UNIT_TH: Record<ExecPeriodKind, string> = { week: 'สัปดาห์', month: 'เดือน', quarter: 'ไตรมาส' };
 
 /**
  * The page's data and its period buttons: the period is kept on the page (useState) and every figure is read from
@@ -117,11 +129,11 @@ export function SummaryPage({ s, kind, year, today, canMoney, onKind, onOpen, on
             </div>
           )}
           <div>
-            <p className="t-meta ex-cap">จำนวนการติดต่อรายช่วงของ{UNIT_TH[kind]}</p>
-            <div className="ex-wk">
+            <p className="t-meta ex-cap">{BUCKET_CAP[kind]}</p>
+            <div className="ex-wk" style={{ gridTemplateColumns: `repeat(${s.weeks.length}, minmax(0, 1fr))` }}>
               {s.weeks.map((w, i) => (
-                <div className="ex-wk-c" key={i}>
-                  <span className="num">{fmtN(w.count)}</span>
+                <div className={'ex-wk-c' + (w.future ? ' future' : '')} key={i}>
+                  <span className="num">{w.future ? '' : fmtN(w.count)}</span>
                   <span className="ex-wk-b" aria-hidden="true"><i style={{ height: share(w.count, wkMax) }} /></span>
                   <span className="t-meta">{bucketTh(w)}</span>
                 </div>
