@@ -7,11 +7,12 @@ import type { Task } from '../lib/types';
 import { planDayLink } from '../lib/planCal';
 
 /**
- * The Master Plan (CFO) site: plans of CFO verification cases, the same accounts (team-sync/README.md).
- * The verification system (ระบบงาน VVB GCC) stays apart from this site: owner, Nov 2569, "ไม่ต้องเอาไปรวม
- * ... แยกกันเลย", no link to it from here.
+ * ระบบงานทวนสอบ GCC (owner, Nov 2569: "งานทวนสอบให้ลิงค์ไปที่ ระบบงาน VVB GCC ... แล้วล๊อคสิทธิไว้"): its own
+ * site (repo MktwNi/gcc-case-demo) with its own invited accounts, so the tile only opens the way for the
+ * accounts given mp.view here (the verification work); signing in there is still that system's own.
+ * A link, not a page of this site: the two systems stay apart (owner, Nov 2569, "ไม่ต้องเอาไปรวม ... แยกกันเลย").
  */
-const MP_URL = 'https://mktwni.github.io/gcc-master-plan/';
+const VVB_URL = 'https://mktwni.github.io/gcc-case-demo/app/';
 
 /** A system on หน้าแรก: open here, a link to its own site, not this account's, or not built yet. */
 type SysState = 'open' | 'link' | 'locked' | 'soon';
@@ -62,7 +63,7 @@ export function Home() {
   const systems: Sys[] = [
     { key: 'sales', name: 'ฐานลูกค้าและงานขาย', sub: 'ทะเบียนบริษัท Sales Tracker ผู้ติดต่อ และแผนติดต่อ', icon: 'sales', state: 'open' },
     { key: 'consult', name: 'งานที่ปรึกษา', sub: 'โครงการ แผนโครงการ และวางบิล', icon: 'briefcase', state: 'soon' },
-    { key: 'verify', name: 'งานทวนสอบ', sub: 'Master Plan (CFO) เปิดเว็บที่ใช้งานอยู่', icon: 'audit', state: e.can('mp.view') ? 'link' : 'locked' },
+    { key: 'verify', name: 'งานทวนสอบ', sub: 'ระบบงาน VVB GCC · เข้าด้วยบัญชีที่ได้รับเชิญ', icon: 'audit', state: e.can('mp.view') ? 'link' : 'locked' },
     { key: 'event', name: 'Event', sub: 'ปฏิทินงานและผู้เข้าร่วม', icon: 'ticket', state: 'soon' },
   ];
 
@@ -95,7 +96,7 @@ export function Home() {
               </>
             );
             if (x.state === 'open') return <button key={x.key} type="button" className={'hm-tile ' + x.key} onClick={() => go('overview')}>{body}</button>;
-            if (x.state === 'link') return <a key={x.key} className={'hm-tile ' + x.key} href={MP_URL} target="_blank" rel="noopener">{body}</a>;
+            if (x.state === 'link') return <a key={x.key} className={'hm-tile ' + x.key} href={VVB_URL} target="_blank" rel="noopener">{body}</a>;
             if (x.state === 'locked' && canAsk) return <button key={x.key} type="button" className="hm-tile locked" onClick={ask}>{body}</button>;
             return <div key={x.key} className={'hm-tile ' + (x.state === 'locked' ? 'locked' : 'soon')}>{body}</div>;
           })}
