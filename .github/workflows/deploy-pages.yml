@@ -1,5 +1,10 @@
 name: Deploy GCC Registry to GitHub Pages
 
+# One Pages deployment holds two copies of the site (owner, Nov 2569: "แก้ไขอะไรต่างๆผ่าน UAT ก่อน ตรวจกันก่อน
+# แล้วค่อยเอาขึ้น"):
+# - …/uat/  the code on main: every merged PR shows here first, for the team to check
+# - the real site  the code on branch `live`, which moves only when the owner runs "ขึ้นเว็บจริง"
+#   (promote-live.yml); a merge to main rebuilds it from `live` unchanged
 on:
   push:
     branches: [main]
@@ -17,36 +22,52 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: uat-src
+      - uses: actions/checkout@v4
+        with:
+          ref: live
+          path: live-src
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            uat-src/app/package-lock.json
+            live-src/app/package-lock.json
+
+      # UAT (app/src/lib/uat.ts): built with VITE_UAT=1, so it keeps its own browser storage, shows a test badge
+      # with its version and has what is still being tried (หน้าแรก). Its team is the repository variable
+      # UAT_TEAM_URL (Settings > Secrets and variables > Actions > Variables): a separate team script and sheet
+      # for testing; while it is unset the copy uses no team (data stays in each browser).
       - run: npm ci
-      # the tests still run and show their result, but a failure here no longer blocks the site: on the runner, vitest
-      # can exit 1 with a worker RPC timeout while every test passes, and that stopped the deploy twice
+        working-directory: uat-src/app
+      # the tests still run and show their result, but a failure here does not block the site: on the runner,
+      # vitest can exit 1 with a worker RPC timeout while every test passes, and that stopped the deploy twice
       - run: npm test
+        working-directory: uat-src/app
         continue-on-error: true
       # build copies project/data into the site (scripts/sync-data.mjs)
       - run: npm run build
-      # the UAT copy of the site at …/uat/ (app/src/lib/uat.ts): the same code built with VITE_UAT=1, so it keeps
-      # its own browser storage, shows a test badge and has หน้าแรก. Its team is the repository variable
-      # UAT_TEAM_URL (Settings > Secrets and variables > Actions > Variables): a separate team script and sheet
-      # for testing; while it is unset the copy uses no team (data stays in each browser). The real site's
-      # build above is unchanged.
-      - run: npx vite build --outDir dist-uat --emptyOutDir && mv dist-uat dist/uat
+        working-directory: uat-src/app
         env:
           VITE_UAT: '1'
           VITE_TEAM_URL: ${{ vars.UAT_TEAM_URL }}
+          VITE_BUILD: ${{ github.sha }}
+
+      # the real site: what was checked on UAT and promoted (its tests ran when it was on main)
+      - run: npm ci
+        working-directory: live-src/app
+      - run: npm run build
+        working-directory: live-src/app
+
+      - run: mv uat-src/app/dist live-src/app/dist/uat
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: app/dist
+          path: live-src/app/dist
 
   deploy:
     needs: build

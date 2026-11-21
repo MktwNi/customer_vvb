@@ -1,0 +1,54 @@
+name: ขึ้นเว็บจริง (UAT ไปเว็บจริง)
+
+# The owner's button after checking UAT (Actions > ขึ้นเว็บจริง > Run workflow): moves branch `live` up to the
+# version checked on UAT (the 7 characters on the UAT badge; empty = the newest on main), then rebuilds the
+# site, so the real site becomes exactly what UAT showed. `live` only ever moves forward along main.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'รุ่นที่ตรวจบน UAT แล้ว (ตัวอักษร 7 ตัวบนป้าย UAT) เว้นว่าง = รุ่นล่าสุดที่ merge แล้ว'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: promote-live
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: ย้ายเว็บจริงไปรุ่นที่ตรวจแล้ว
+        env:
+          V: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          V="$(printf '%s' "$V" | tr -d '[:space:]' | tr 'A-F' 'a-f')"
+          if [ -n "$V" ] && ! printf '%s' "$V" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            echo "::error::รุ่นต้องเป็นตัวอักษร 7 ตัวจากป้าย UAT เช่น 59ce67e"; exit 1
+          fi
+          git fetch origin main live
+          if [ -n "$V" ]; then
+            target="$(git rev-parse --verify --quiet "$V^{commit}")" || { echo "::error::ไม่พบรุ่น $V"; exit 1; }
+          else
+            target="$(git rev-parse origin/main)"
+          fi
+          git merge-base --is-ancestor "$target" origin/main || { echo "::error::รุ่น $V ไม่ได้อยู่บน main"; exit 1; }
+          git merge-base --is-ancestor origin/live "$target" || { echo "::error::รุ่นนี้เก่ากว่าเว็บจริงตอนนี้"; exit 1; }
+          git push origin "$target:refs/heads/live"
+          short="$(git rev-parse --short=7 "$target")"
+          echo "เว็บจริงจะเป็นรุ่น $short หลัง build เสร็จ (ประมาณ 10 นาที)" >> "$GITHUB_STEP_SUMMARY"
+      # a push made with this workflow's token starts no workflow, so the deploy is started here
+      - name: build และขึ้นเว็บ
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref main
