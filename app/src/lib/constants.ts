@@ -8,7 +8,7 @@ export const HOME_TEAM_URL = 'https://script.google.com/macros/s/AKfycbyIpL-1Ks0
 /** Web-app link of the UAT copy's own team script (team-sync/README.md, a separate Google Sheet for
  *  testing): the UAT site opens on its sign-in. Never the real team's link: what is tried on UAT would
  *  land in the team's real data (constants.test.ts checks). '' = UAT uses no team (each browser alone). */
-export const UAT_TEAM_URL: string = '';
+export const UAT_TEAM_URL: string = 'https://script.google.com/macros/s/AKfycbwIS4lg5romIZU58D1fQMhvrhOJxUAaurY20fWiSt1cFwTc4d9leHyuviAO7ciF2xC6pg/exec';
 
 /** UI defaults (the design's "Tweaks" panel). */
 export const CONFIG = {
