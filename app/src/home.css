@@ -74,8 +74,20 @@ button.hm-tile.locked .hm-sub{color:var(--link);font-weight:500}
 .hm-cal-d:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .hm-cal-d.out{color:var(--muted)}
 .hm-cal-d.today{background:var(--brand);color:#fff;font-weight:500}
-.hm-cal-d i{position:absolute;left:50%;bottom:4px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--brand)}
-.hm-cal-d.today i{background:#fff}
+.hm-dots{position:absolute;left:0;right:0;bottom:4px;display:flex;justify-content:center;gap:3px}
+.hm-dots i,.hm-legend i{display:block;width:5px;height:5px;border-radius:50%;background:var(--brand)}
+.hm-dots i.tgo,.hm-legend i.tgo{background:var(--mark-wait)}
+.hm-cal-d.today .hm-dots i{background:#fff}
+.hm-cal-d.today .hm-dots i.tgo{background:var(--warn-bg)}
+.hm-cal-d.sel:not(.today){box-shadow:inset 0 0 0 2px var(--brand);font-weight:500}
+.hm-legend{display:flex;gap:16px;font-size:var(--fs-meta);color:var(--muted)}
+.hm-legend span{display:inline-flex;align-items:center;gap:6px}
+.hm-day{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.hm-day h3{margin:0;font-size:var(--fs-body);font-weight:500;color:var(--ink)}
+.hm-day > .lnk{align-self:flex-start}
+div.hm-ap{cursor:default}
+div.hm-ap:hover{background:none}
+.hm-ap.tgo .hm-tm{background:var(--warn-bg);color:var(--warn)}
 
 @media (max-width:1100px){.hm{grid-template-columns:minmax(0,1fr)}}
 

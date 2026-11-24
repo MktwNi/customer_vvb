@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useApp, useEngineVersion, type Tab } from '../state';
 import { NAV, pageOk } from '../components/Sidebar';
 import { Icon, type IconName } from '../components/icons';
@@ -5,6 +6,7 @@ import { TT } from '../lib/constants';
 import { TH_M, addDays, dmTh, dow, fmtN, isoTh, todayISO } from '../lib/format';
 import type { Task } from '../lib/types';
 import { planDayLink } from '../lib/planCal';
+import { dayItems, tgoDaySet } from '../lib/homeDay';
 
 /**
  * ระบบงานทวนสอบ GCC (owner, Nov 2569: "งานทวนสอบให้ลิงค์ไปที่ ระบบงาน VVB GCC ... แล้วล๊อคสิทธิไว้"): its own
@@ -29,7 +31,9 @@ const byWhen = (a: Task, b: Task) => a.date.localeCompare(b.date) || byTime(a, b
  * the systems of the company in one place — each opens only for the accounts allowed to use it — today's
  * appointments, every page this account may open and what waits for this account (the search is the top
  * bar's, on every page). The side column is this month's calendar over the next appointments (owner's pick
- * A of three, "มันดูโล่งๆ" with one card there): it holds its place with no appointment at all.
+ * A of three, "มันดูโล่งๆ" with one card there): it holds its place with no appointment at all. A day picked on
+ * the calendar (today at first) lists its appointments and TGO round dates under it, in the same card (owner's
+ * pick A of three, Nov 2569: "เมื่อกดแล้วอยากให้มีกำหนดการหรืออะไรให้ดูคร่าวๆ ด้านล่าง"); แผนติดต่อ is one more tap.
  * On the UAT copy of the site only for now (lib/uat.ts); งานที่ปรึกษา and Event are designs, not built yet.
  */
 export function Home() {
@@ -50,6 +54,8 @@ export function Home() {
   const upcoming = tasks.filter((t) => !t.done && t.date >= today).sort(byWhen).slice(0, 5);
   const who = (t: Task) => e.company(t.gid)?.name || t.title;
   const kind = (t: Task) => TT.find((x) => x[0] === t.type)?.[1] || '';
+  const [sel, setSel] = useState(today);
+  const selItems = dayItems(sel, tasks, e.R, who, kind);
   const C = 2 * Math.PI * 30;
 
   // this month, weeks from Sunday as on แผนติดต่อ (tabs/Plan.tsx): a dot on each day with an appointment
@@ -60,6 +66,7 @@ export function Home() {
   const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i)).filter((_, i) => i < 35 || addDays(start, 35).slice(0, 7) === month);
   const perDay = new Map<string, number>();
   tasks.forEach((t) => perDay.set(t.date, (perDay.get(t.date) || 0) + 1));
+  const tgoDays = tgoDaySet(e.R);
   const monthN = tasks.filter((t) => t.date.slice(0, 7) === month).length;
 
   const systems: Sys[] = [
@@ -175,14 +182,36 @@ export function Home() {
               {WD.map((d) => <span key={d} className="hm-cal-h" aria-hidden="true">{d}</span>)}
               {cells.map((d) => {
                 const n = perDay.get(d) || 0;
-                const cls = 'hm-cal-d' + (d.slice(0, 7) !== month ? ' out' : '') + (d === today ? ' today' : '');
+                const tgo = tgoDays.has(d);
+                const cls = 'hm-cal-d' + (d.slice(0, 7) !== month ? ' out' : '') + (d === today ? ' today' : '') + (d === sel ? ' sel' : '');
                 return (
-                  <button key={d} type="button" className={cls} onClick={() => go('plan', planDayLink(d))} aria-label={isoTh(d) + (n ? ` นัด ${fmtN(n)} รายการ` : '')} aria-current={d === today ? 'date' : undefined}>
+                  <button key={d} type="button" className={cls} onClick={() => setSel(d)} aria-pressed={d === sel} aria-label={isoTh(d) + (n ? ` นัด ${fmtN(n)} รายการ` : '') + (tgo ? ' มีกำหนดการ TGO' : '')} aria-current={d === today ? 'date' : undefined}>
                     {Number(d.slice(8))}
-                    {n > 0 && <i aria-hidden="true" />}
+                    {(n > 0 || tgo) && <span className="hm-dots" aria-hidden="true">{n > 0 && <i />}{tgo && <i className="tgo" />}</span>}
                   </button>
                 );
               })}
+            </div>
+            <div className="hm-legend" aria-hidden="true"><span><i />นัด</span><span><i className="tgo" />กำหนดการ TGO</span></div>
+            <div className="hm-day" aria-live="polite">
+              <div className="hm-sec">
+                <h3>{sel === today ? 'วันนี้ · ' : ''}{WD[dow(sel)]} {dmTh(sel)}</h3>
+                <span className="hm-note">{selItems.length ? `${fmtN(selItems.length)} รายการ` : 'ไม่มีกำหนดการ'}</span>
+              </div>
+              {selItems.map((x) => {
+                const body = (
+                  <>
+                    <span className="hm-tm">{x.tm}</span>
+                    <span className="hm-ap-t">
+                      <span className="co-name dense">{x.t}</span>
+                      <span className="hm-ap-sub">{x.sub}</span>
+                    </span>
+                  </>
+                );
+                // a TGO date has no page of its own here; an appointment opens its day on แผนติดต่อ
+                return x.tgo ? <div key={x.k} className="hm-ap tgo">{body}</div> : <button key={x.k} type="button" className="hm-ap" onClick={() => go('plan', planDayLink(sel))}>{body}</button>;
+              })}
+              <button type="button" className="lnk" onClick={() => go('plan', planDayLink(sel))}>{selItems.some((x) => !x.tgo) ? 'เปิดในแผนติดต่อ' : 'เพิ่มนัดในแผนติดต่อ'}</button>
             </div>
           </section>
         )}
